@@ -185,3 +185,4 @@ gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker
 
 - 问题反馈与讨论：请提交 Issue 到代码仓库
 - 欢迎贡献：提交 PR 前请先创建功能分支并遵循常规提交信息格式
+- 如感兴趣需要联络：tianyou_hubm@redbearai.com
