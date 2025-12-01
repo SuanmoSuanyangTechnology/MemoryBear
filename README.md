@@ -1,4 +1,4 @@
-# MemoryBear
+<img width="2294" height="1154" alt="image" src="https://github.com/user-attachments/assets/efba276f-2146-4bac-982e-4f22e5a5d007" /># MemoryBear
 
 ## 项目简介
 
@@ -42,13 +42,22 @@ MemoryBear作为模仿生物大脑认知过程的智能记忆管理系统，其�
 服务端API涵盖知识萃取、图谱操作、搜索查询、遗忘控制等全功能模块，支持JSON/XML多格式数据交互，响应延迟平均低于50ms，单实例可支撑1000QPS并发请求；管理端API则提供系统配置、权限管理、日志查询等运维功能，支持通过API实现批量知识导入导出、反思周期调整等操作。同时，系统自动生成Swagger API文档，包含接口参数说明、请求示例与返回格式定义，开发者可快速完成集成调试。该架构已适配企业级微服务体系，支持Docker容器化部署，可灵活对接CRM、OA、研发管理等各类业务系统。
 
 
-
 ## 架构总览
+<img width="2294" height="1154" alt="image" src="https://github.com/user-attachments/assets/3afd3b49-20ea-4847-b9ed-38b646a4ad89" />
 - 记忆萃取引擎（Extraction Engine）：预处理、去重、结构化提取
 - 记忆遗忘引擎（Forgetting Engine）：记忆强度模型与衰减策略
 - 记忆自我反思引擎（Reflection Engine）：评价与重写记忆
 - 检索服务：关键词、语义与混合检索
 - Agent 与 MCP：提供多工具协作的智能体能力
+
+## 实验室指标
+我们采用不同问题的数据集中，通过具备记忆功能的系统，进行性能对比。评估指标包括F1分数（F1）、BLEU-1（B1）以及LLM-as-a-Judge分数（J），数值越高表示表现越好，性能更高。
+MemoryBear 在 “单跳场景” 的精准度、结果匹配度与任务特异性表现上，均处于领先，“多跳”更强的信息连贯性与推理准确性，“开放泛化”对多样，无边界信息的处理质量与泛化能力更优，“时序”对时效性信息的匹配与处理表现更出色，四大任务的核心指标中，均优于 行业内的其他海外竞争对手Mem O、Zep、Lang Mem 等现有方法，整体性能更突出。
+<img width="2256" height="890" alt="image" src="https://github.com/user-attachments/assets/5ff86c1f-53ac-4816-976d-95b48a4a10c0" />
+Memory Bear 基于向量的知识记忆非图谱版本，成功在保持高准确性的同时，极大地优化了检索效率。该方法在总体准确性上的表现已明显高于现有最高全文检索方法（72.90 ± 0.19%）。更重要的是，它在关键的延迟指标（包括 Search Latency 和 Total Latency 的 p50/p95）上也保持了较低水平，充分体现出 “性能更优且延迟更高效” 的特点，解决了全文检索方法的高准确性伴随的高延迟瓶颈。
+<img width="2248" height="498" alt="image" src="https://github.com/user-attachments/assets/2759ea19-0b71-4082-8366-e8023e3b28fe" />
+Memory Bear 通过集成知识图谱架构，在需要复杂推理和关系感知的任务上进一步释放了潜力。虽然图谱的遍历和推理可能会引入轻微的检索开销，但该版本通过优化图检索策略和决策流，成功将延迟控制在高效范围。更关键的是，基于图谱的 Memory Bear 将总体准确性推至新的高度（75.00 ± 0.20%），在保持准确性的同时，整体指标显著优于其他所有方法，证明了“结构化记忆带来的性能决定性优势”。
+<img width="2238" height="342" alt="image" src="https://github.com/user-attachments/assets/c928e094-45a2-414b-831a-6990b711ed07" />
 
 ## 快速开始
 
