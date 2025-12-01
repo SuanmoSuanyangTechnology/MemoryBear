@@ -55,11 +55,12 @@ MemoryBear作为模仿生物大脑认知过程的智能记忆管理系统，其�
 
 ## MemoryBear架构总览
 <img width="2294" height="1154" alt="image" src="https://github.com/user-attachments/assets/3afd3b49-20ea-4847-b9ed-38b646a4ad89" />
-- 记忆萃取引擎（Extraction Engine）：预处理、去重、结构化提取
-- 记忆遗忘引擎（Forgetting Engine）：记忆强度模型与衰减策略
-- 记忆自我反思引擎（Reflection Engine）：评价与重写记忆
-- 检索服务：关键词、语义与混合检索
-- Agent 与 MCP：提供多工具协作的智能体能力
+</br>
+- 记忆萃取引擎（Extraction Engine）：预处理、去重、结构化提取</br>
+- 记忆遗忘引擎（Forgetting Engine）：记忆强度模型与衰减策略</br>
+- 记忆自我反思引擎（Reflection Engine）：评价与重写记忆</br>
+- 检索服务：关键词、语义与混合检索</br>
+- Agent 与 MCP：提供多工具协作的智能体能力</br>
 
 ## 实验室指标
 我们采用不同问题的数据集中，通过具备记忆功能的系统，进行性能对比。评估指标包括F1分数（F1）、BLEU-1（B1）以及LLM-as-a-Judge分数（J），数值越高表示表现越好，性能更高。
