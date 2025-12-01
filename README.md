@@ -1,4 +1,4 @@
-<img width="2294" height="1154" alt="image" src="https://github.com/user-attachments/assets/efba276f-2146-4bac-982e-4f22e5a5d007" /># MemoryBear
+MemoryBear 让AI拥有如同人类一样的记忆
 
 ## 项目简介
 
