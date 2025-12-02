@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>t-box-line</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-编排-操作状态-1" transform="translate(-48, -1071)" stroke="#212332">
+            <g id="变量设置" transform="translate(16, 922)">
+                <g id="t-box-line" transform="translate(32, 149)">
+                    <rect id="矩形" x="2" y="2" width="12" height="12" rx="3"></rect>
+                    <line x1="6" y1="5.99887957" x2="10" y2="5.99887957" id="路径-7" stroke-linecap="round" stroke-linejoin="round"></line>
+                    <line x1="8" y1="5.99897957" x2="8" y2="10.4995679" id="路径-8" stroke-linecap="round" stroke-linejoin="round"></line>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

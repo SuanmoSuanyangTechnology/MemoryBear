@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>应用管理</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linejoin="round">
+        <g id="记忆科学-菜单栏交互" transform="translate(-91, -864)" stroke="#212332">
+            <g id="编组" transform="translate(91, 758)">
+                <g id="应用管理" transform="translate(0, 106)">
+                    <g id="编组-5" transform="translate(2, 2.5)">
+                        <polygon id="多边形" points="6.01068475 1.20444033e-14 12 2.80366974 6.01068475 5.60733947 4.1955907e-13 2.80366974"></polygon>
+                        <polyline id="路径-5" stroke-linecap="round" points="0.0258099883 5.48232067 6.00006652 8.35777875 11.9879499 5.48232067"></polyline>
+                        <polyline id="路径-5" stroke-linecap="round" points="0.0258099883 8.12454192 6.00006652 11 11.9879499 8.12454192"></polyline>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

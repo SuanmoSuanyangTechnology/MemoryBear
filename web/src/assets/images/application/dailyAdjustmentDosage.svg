@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>调用量</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="应用管理--API" transform="translate(-834, -980)" stroke="#212332" stroke-width="1.5">
+            <g id="4" transform="translate(220, 896)">
+                <g id="调用量" transform="translate(614, 84)">
+                    <polyline id="路径" points="12 15.0339277 12 21.8396699 3 20 3 6 12 7.83966988 12 9.21373741"></polyline>
+                    <polyline id="路径" transform="translate(16.5, 10.3254) scale(-1, -1) translate(-16.5, -10.3254)" points="21 11.4395175 21 18.2452597 12 16.4055898 12 2.40558979 21 4.24525967 21 5.6193272"></polyline>
+                    <polyline id="路径-3" points="9.07979279 15.3751081 6.55479916 14.11631 17.1657338 9.96254262 14.5304328 8.80931969"></polyline>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

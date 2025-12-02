@@ -1,0 +1,29 @@
+.tabs {
+  height: 100%;
+}
+.tabs :global(.ant-tabs-nav) {
+  margin-bottom: 0;
+  padding: 0;
+}
+.tabs :global(.ant-tabs-tab) {
+  line-height: 20px;
+  padding-bottom: 18px;
+  padding-top: 10px;
+}
+.tabs :global(.ant-tabs-tab-active) {
+  font-weight: 500;
+}
+.tabs :global(.ant-tabs-tab+.ant-tabs-tab) {
+  margin-left: 78px;
+}
+.tabs:global(.ant-tabs-top>.ant-tabs-nav .ant-tabs-ink-bar),
+.tabs:global(.ant-tabs-top>div>.ant-tabs-nav .ant-tabs-ink-bar) {
+  height: 4px;
+}
+.tabs:global(.ant-tabs-top>.ant-tabs-nav::before),
+.tabs:global(.ant-tabs-top>div>.ant-tabs-nav::before) {
+  border-bottom: 0;
+}
+.tabs:global(.ant-tabs .ant-tabs-tab) {
+  color: #5B6167;
+}

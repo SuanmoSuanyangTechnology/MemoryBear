@@ -1,0 +1,32 @@
+.form {
+  margin: 0 24px 32px 24px !important;
+}
+.form :global(.ant-form-item-label) {
+  margin-left: 4px;
+}
+.form :global(.ant-form-item-extra) {
+  margin-top: 8px;
+  color: #999999;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+.form :global(.ant-form-item-explain-error) {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+.form :global(.ant-progress-steps-outer) {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.form :global(.ant-progress-steps-item) {
+  width: 100% !important;
+  border-radius: 5px;
+  background-color: #EFF1F6;
+}
+.form :global(.ant-progress .ant-progress-steps-item-active) {
+  background-color: #1677ff;
+}

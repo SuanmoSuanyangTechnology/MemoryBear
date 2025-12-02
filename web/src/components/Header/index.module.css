@@ -1,0 +1,20 @@
+.header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 46px 16px 21px;
+  height: 64px;
+  border-bottom: 1px solid #EAECEE;
+  color: #212332;
+  z-index: 0;
+  line-height: 32px;
+  font-size: 14px;
+}
+.title {
+  font-family: PingFangSC, PingFang SC;
+  font-weight: 500;
+  font-style: normal;
+}
+.header :global(.ant-breadcrumb) {
+  line-height: 31px;
+}

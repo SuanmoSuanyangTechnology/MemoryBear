@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>用户总数</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="红熊空间-记忆库-用户记忆" transform="translate(-492, -148)" stroke="#5B6167" stroke-width="1.5">
+            <g id="数据" transform="translate(256, 128)">
+                <g id="用户总数" transform="translate(236, 20)">
+                    <g id="编组-3" transform="translate(3, 3)">
+                        <ellipse id="椭圆形" cx="8.39996267" cy="4.34883721" rx="4.39998044" ry="4.34883721"></ellipse>
+                        <path d="M8.39996267,8.69767442 C3.76079139,8.69767442 0,12.4147522 0,17 L8.80777167,17" id="路径"></path>
+                        <line x1="17.6000018" y1="10.2790698" x2="17.6000018" y2="16.6046512" id="路径-2"></line>
+                        <line x1="12.7999431" y1="10.2790698" x2="12.7999431" y2="16.6046512" id="路径-2"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

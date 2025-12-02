@@ -1,0 +1,177 @@
+@import "tailwindcss" prefix(rb);
+@plugin "@tailwindcss/typography";
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  font-family: -apple-system, PingFangSC, 'PingFang SC', BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 全局样式适配 */
+body {
+  margin: 0;
+  /* min-width: 320px; */
+  min-height: 100vh;
+  max-height: 100vh;
+  /* background-color: var(--bg-color); */
+  /* color: var(--text-color); */
+  /* transition: background-color 0.3s, color 0.3s; */
+}
+
+#root {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+.ant-menu-light .ant-menu-item-selected,
+.ant-menu-light>.ant-menu .ant-menu-item-selected,
+.ant-menu-light:not(.ant-menu-horizontal) .ant-menu-item:not(.ant-menu-item-selected):hover,
+.ant-menu-light>.ant-menu:not(.ant-menu-horizontal) .ant-menu-item:not(.ant-menu-item-selected):hover {
+  box-shadow: 0px 2px 4px 0px rgba(0, 0, 0, 0.15);
+}
+.ant-menu-light .ant-menu-item-selected,
+.ant-menu-light>.ant-menu .ant-menu-item-selected {
+  font-weight: 500;
+}
+.ant-menu-inline-collapsed-tooltip .ant-tooltip-arrow {
+  display: none;
+}
+.ant-menu-inline-collapsed-tooltip.ant-tooltip .ant-tooltip-inner {
+  box-shadow: 0px 2px 4px 0px rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  padding: 8px 16px;
+  background: #FFFFFF;
+  color: #212332;
+}
+.ant-slider .ant-slider-handle::after {
+  background-color: #155EEF;
+  width: 12px;
+  height: 12px;
+}
+.ant-slider .ant-slider-handle::before {
+  width: 12px;
+  height: 12px;
+}
+.ant-table-container {
+  border: 1px solid #DFE4ED;
+  border-radius: 8px;
+  border-bottom: 0;
+}
+.ant-table-wrapper table {
+  border-radius: 8px;
+}
+.ant-table-row:last-child .ant-table-cell:first-child {
+  border-bottom-left-radius: 8px;
+}
+.ant-table-row:last-child .ant-table-cell:last-child {
+  border-bottom-right-radius: 8px;
+}
+.ant-table-cell::before {
+  display: none;
+}
+.ant-table-cell .ant-btn {
+  padding: 0;
+}
+.ant-table-cell.ant-btn-color-dangerous.ant-btn-variant-link {
+  color: #FF5D34;
+}
+.ant-table-wrapper .ant-table-thead>tr>th,
+.ant-table-wrapper .ant-table-thead>tr>td {
+  font-weight: 500;
+}
+.ant-table-wrapper .ant-table-pagination.ant-pagination {
+  margin: 24px 0 32px 0;
+}
+.ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+.ant-pagination .ant-pagination-next .ant-pagination-item-link,
+.ant-pagination .ant-pagination-item:not(.ant-pagination-item-active) {
+  border-color: #DFE4ED;
+  color: #5B6167;
+}
+
+.ant-select-dropdown .ant-select-item,
+.ant-pagination .ant-select-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled),
+.ant-pagination .ant-select-single .ant-select-selector,
+.ant-pagination,
+.ant-pagination .ant-pagination-item a,
+.ant-pagination .ant-pagination-jump-prev .ant-pagination-item-container .ant-pagination-item-ellipsis,
+.ant-pagination .ant-pagination-jump-next .ant-pagination-item-container .ant-pagination-item-ellipsis {
+  color: #5B6167;
+}
+.ant-pagination .ant-pagination-item.ant-pagination-item-active {
+  font-weight: 400;
+}
+
+.ant-modal .ant-modal-content {
+  padding: 24px;
+}
+.ant-modal .ant-modal-header {
+  margin-bottom: 24px;
+}
+.ant-modal .ant-modal-title {
+  line-height: 22px;
+}
+
+.ant-upload-wrapper .ant-upload-drag {
+  height: 270px;
+  background-color: #FBFCFF;
+  border: 1px solid #EBEBEB;
+}
+.ant-upload-wrapper.ant-upload-picture-card-wrapper .ant-upload.ant-upload-select,
+.ant-upload-wrapper.ant-upload-picture-circle-wrapper .ant-upload.ant-upload-select {
+  border-style: solid;
+  background-color: #FFFFFF;
+}
+
+.ant-upload-wrapper .ant-upload-list.ant-upload-list-picture .ant-upload-list-item,
+.ant-upload-wrapper .ant-upload-list.ant-upload-list-picture-card .ant-upload-list-item,
+.ant-upload-wrapper .ant-upload-list.ant-upload-list-picture-circle .ant-upload-list-item {
+  padding: 0;
+}
+.ant-upload-wrapper.ant-upload-picture-card-wrapper .ant-upload-list.ant-upload-list-picture-card .ant-upload-list-item::before,
+.ant-upload-wrapper.ant-upload-picture-circle-wrapper .ant-upload-list.ant-upload-list-picture-card .ant-upload-list-item::before,
+.ant-upload-wrapper.ant-upload-picture-card-wrapper .ant-upload-list.ant-upload-list-picture-circle .ant-upload-list-item::before,
+.ant-upload-wrapper.ant-upload-picture-circle-wrapper .ant-upload-list.ant-upload-list-picture-circle .ant-upload-list-item::before {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+}
+.ant-upload-wrapper.ant-upload-picture-card-wrapper .ant-upload-list.ant-upload-list-picture-card .ant-upload-list-item-container,
+.ant-upload-wrapper.ant-upload-picture-circle-wrapper .ant-upload-list.ant-upload-list-picture-card .ant-upload-list-item-container,
+.ant-upload-wrapper.ant-upload-picture-card-wrapper .ant-upload-list.ant-upload-list-picture-circle .ant-upload-list-item-container,
+.ant-upload-wrapper.ant-upload-picture-circle-wrapper .ant-upload-list.ant-upload-list-picture-circle .ant-upload-list-item-container {
+  width: 136px;
+  height: 136px;
+}
+.ant-upload-wrapper.ant-upload-picture-card-wrapper .ant-upload-list.ant-upload-list-picture-card .ant-upload-list-item-thumbnail,
+.ant-upload-wrapper.ant-upload-picture-circle-wrapper .ant-upload-list.ant-upload-list-picture-card .ant-upload-list-item-thumbnail,
+.ant-upload-wrapper.ant-upload-picture-card-wrapper .ant-upload-list.ant-upload-list-picture-circle .ant-upload-list-item-thumbnail,
+.ant-upload-wrapper.ant-upload-picture-circle-wrapper .ant-upload-list.ant-upload-list-picture-circle .ant-upload-list-item-thumbnail,
+.ant-upload-wrapper.ant-upload-picture-card-wrapper .ant-upload-list.ant-upload-list-picture-card .ant-upload-list-item-thumbnail img,
+.ant-upload-wrapper.ant-upload-picture-circle-wrapper .ant-upload-list.ant-upload-list-picture-card .ant-upload-list-item-thumbnail img,
+.ant-upload-wrapper.ant-upload-picture-card-wrapper .ant-upload-list.ant-upload-list-picture-circle .ant-upload-list-item-thumbnail img,
+.ant-upload-wrapper.ant-upload-picture-circle-wrapper .ant-upload-list.ant-upload-list-picture-circle .ant-upload-list-item-thumbnail img {
+  border-radius: 8px;
+}
+.ant-form-item .ant-form-item-explain,
+.ant-form-item .ant-form-item-extra {
+  font-size: 12px;
+  line-height: 16px;
+}
+.infinite-scroll-component {
+  overflow-x: hidden !important;
+}
+.ant-slider-horizontal .ant-slider-handle {
+  inset-block-start: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+.ant-breadcrumb a:hover {
+  background-color: transparent;
+}

@@ -1,0 +1,4 @@
+.textBg:hover,
+.textBg.active{
+    background-color: rgba(21, 94, 239, 0.08);
+}

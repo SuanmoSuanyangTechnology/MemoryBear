@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 13</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-编排-操作状态-1" transform="translate(-612, -630)">
+            <g id="知识库" transform="translate(16, 454)">
+                <g id="编组-14备份" transform="translate(16, 158)">
+                    <g id="编组-13" transform="translate(580, 18)">
+                        <rect id="矩形" fill="#EEF0F3" x="0" y="0" width="24" height="24" rx="6"></rect>
+                        <g id="编辑" transform="translate(4, 4)" stroke="#5B6167" stroke-linecap="round" stroke-linejoin="round">
+                            <g id="编组-10" transform="translate(2.8, 2.8)">
+                                <path d="M10.4,4.47335995 L10.4,8.4 C10.4,9.5045695 9.5045695,10.4 8.4,10.4 L2,10.4 C0.8954305,10.4 0,9.5045695 0,8.4 L-2.22044605e-16,2 C-2.22044605e-16,0.8954305 0.8954305,2.22044605e-16 2,0 L5.96294416,0 L5.96294416,0" id="路径"></path>
+                                <line x1="4.14075334" y1="6.29066973" x2="10.4" y2="1.16982777e-14" id="路径-2"></line>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

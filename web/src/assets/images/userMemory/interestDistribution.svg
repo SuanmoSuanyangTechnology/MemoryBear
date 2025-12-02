@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="20px" height="20px" viewBox="0 0 20 20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>兴趣爱好</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="红熊空间-记忆库-用户记忆-详情" transform="translate(-272, -837)" stroke="#212332" stroke-width="1.5">
+            <g id="个人信息" transform="translate(256, 80)">
+                <g id="兴趣分布" transform="translate(0, 740)">
+                    <g id="兴趣爱好" transform="translate(16, 17)">
+                        <circle id="椭圆形" cx="10" cy="10" r="7"></circle>
+                        <path d="M3.32048193,11.5580576 C7.00798777,9.91776851 11.5678271,9.4433959 17,10.1349398" id="路径-8"></path>
+                        <path d="M11.0093476,3 C10.3701842,7.39934021 10.7393574,11.9484968 12.1168675,16.6474699" id="路径-9"></path>
+                        <path d="M5.58226172,4.63277108 C7.59301205,5.92562284 10,10.692682 5.83204819,15.410555" id="路径-36"></path>
+                        <path d="M15.8684531,6.17108434 C13.7576424,7.20259363 12.3182708,10.692682 15.4315098,14.2758995" id="路径-37"></path>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

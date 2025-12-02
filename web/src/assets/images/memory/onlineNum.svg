@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>在线用户</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="红熊空间-记忆库-用户记忆" transform="translate(-788, -148)" stroke="#5B6167" stroke-width="1.5">
+            <g id="数据" transform="translate(256, 128)">
+                <g id="在线用户" transform="translate(532, 20)">
+                    <g id="编组-5" transform="translate(4, 3.5)">
+                        <circle id="椭圆形" cx="7" cy="4" r="4"></circle>
+                        <path d="M8.8598023,10.8805028 C8.16826246,10.6428135 7.42432831,10.5135135 6.64943586,10.5135135 C2.97705384,10.5135135 0,13.4176124 0,17 L8.8598023,17" id="路径" stroke-linecap="round" stroke-linejoin="round"></path>
+                        <polyline id="路径-3" stroke-linecap="round" stroke-linejoin="round" points="9.20296026 13.5984172 12.0576182 16.2898839 17 11.7200538"></polyline>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

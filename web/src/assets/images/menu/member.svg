@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>用户总数总计</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linejoin="round">
+        <g id="记忆科学-菜单栏交互" transform="translate(-162, -1024)" stroke="#5B6167">
+            <g id="编组" transform="translate(91, 758)">
+                <g id="用户总数总计" transform="translate(71, 266)">
+                    <g id="编组-9" transform="translate(1.3333, 3)">
+                        <circle id="椭圆形" stroke-linecap="round" cx="4.66666667" cy="2.66666667" r="2.66666667"></circle>
+                        <path d="M10,6 C11.1045695,6 12,5.1045695 12,4 C12,2.8954305 11.1045695,2 10,2 C9.76811305,2 9.54544335,2.03946376 9.33834068,2.11204149" id="路径" stroke-linecap="round"></path>
+                        <path d="M13.3333333,9.33333333 C13.3333333,7.49238417 11.8409492,6 10,6" id="路径" stroke-linecap="round"></path>
+                        <path d="M9.33333333,10 C9.33333333,7.42267117 7.2439955,5.33333333 4.66666667,5.33333333 C2.08933783,5.33333333 0,7.42267117 0,10 L9.33333333,10 Z" id="路径"></path>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

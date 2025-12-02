@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>下拉备份</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="红熊空间-记忆管理" transform="translate(-594, -270)" stroke="#212332" stroke-width="1.2">
+            <g id="1" transform="translate(256, 127)">
+                <g id="编组-7" transform="translate(16, 131)">
+                    <g id="下拉备份" transform="translate(330, 20) rotate(-90) translate(-330, -20)translate(322, 12)">
+                        <polyline id="路径" points="11 7 8 10 5 7"></polyline>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

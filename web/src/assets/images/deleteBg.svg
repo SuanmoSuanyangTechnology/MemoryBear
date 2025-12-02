@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 8</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-编排-操作状态-1" transform="translate(-648, -630)">
+            <g id="知识库" transform="translate(16, 454)">
+                <g id="编组-14备份" transform="translate(16, 158)">
+                    <g id="编组-8" transform="translate(616, 18)">
+                        <rect id="矩形" fill="#FBEEEC" x="0" y="0" width="24" height="24" rx="6"></rect>
+                        <g id="删除" transform="translate(4, 4)" stroke="#FF5D34" stroke-linecap="round" stroke-linejoin="round">
+                            <g id="编组-12" transform="translate(3.2, 2.4)">
+                                <line x1="-1.22219542e-18" y1="1.99830302" x2="9.6" y2="1.99830302" id="路径-3"></line>
+                                <path d="M0.8,2 L1.53019479,9.89212843 C1.57778741,10.4065214 2.00935196,10.8 2.52594192,10.8 L7.09449924,10.8 C7.61043827,10.8 8.04168346,10.4074826 8.09008848,9.89381926 L8.8,2.36039518 L8.8,2.36039518" id="路径-4"></path>
+                                <line x1="3.2" y1="8.39628766" x2="6.4" y2="8.39628766" id="路径-5"></line>
+                                <path d="M2.4,2 L2.4,1 C2.4,0.44771525 2.84771525,1.11022302e-16 3.4,0 L6.2,0 C6.75228475,0 7.2,0.44771525 7.2,1 L7.2,2 L7.2,2" id="路径"></path>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

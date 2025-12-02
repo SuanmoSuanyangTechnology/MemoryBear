@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="22px" height="22px" viewBox="0 0 22 22" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>发送-2</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="红熊空间-记忆对话-默认对话" transform="translate(-786, -727)">
+            <g id="聊天页面" transform="translate(258, 128)">
+                <g id="输入框" transform="translate(16, 512)">
+                    <g id="编组-7" transform="translate(471, 86)">
+                        <g id="发送-2" transform="translate(41, 1)">
+                            <circle id="椭圆形" fill="#F0F3F8" cx="11" cy="11" r="11"></circle>
+                            <g id="编组-50" transform="translate(7.5, 7)" stroke="#B9BDC4" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline id="路径" points="0 3.5 3.5 0 7 3.5"></polyline>
+                                <line x1="3.5" y1="0.347479368" x2="3.5" y2="8.84747937" id="路径-49"></line>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

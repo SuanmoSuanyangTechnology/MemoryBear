@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="20px" height="20px" viewBox="0 0 20 20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>我</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="红熊空间-记忆库-用户记忆-详情" transform="translate(-272, -458)" stroke="#212332" stroke-width="1.5">
+            <g id="个人信息" transform="translate(256, 80)">
+                <g id="关于我" transform="translate(0, 361)">
+                    <g id="我" transform="translate(16, 17)">
+                        <circle id="椭圆形" cx="10" cy="6" r="3"></circle>
+                        <path d="M10,17 C13.8659932,17 17,16.078564 17,14.5 C17,12.921436 13.8659932,12 10,12 C6.13400675,12 3,12.9530326 3,14.5 C3,16.0469674 6.13400675,17 10,17 Z" id="椭圆形"></path>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

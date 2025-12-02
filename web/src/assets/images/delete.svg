@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="20px" height="20px" viewBox="0 0 20 20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>删除</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="红熊空间-记忆管理" transform="translate(-598, -364)" stroke="#5B6167" stroke-width="1.1">
+            <g id="1" transform="translate(256, 127)">
+                <g id="删除" transform="translate(342, 237)">
+                    <g id="编组-12" transform="translate(4, 3)">
+                        <line x1="-1.52774427e-18" y1="2.49787878" x2="12" y2="2.49787878" id="路径-3"></line>
+                        <path d="M1,2.5 L1.93374299,12.5921284 C1.98133561,13.1065214 2.41290016,13.5 2.92949012,13.5 L9.09567289,13.5 C9.61161192,13.5 10.0428571,13.1074826 10.0912621,12.5938193 L11,2.95049398 L11,2.95049398" id="路径-4"></path>
+                        <line x1="4" y1="10.4953596" x2="8" y2="10.4953596" id="路径-5"></line>
+                        <path d="M3,2.5 L3,1 C3,0.44771525 3.44771525,1.11022302e-16 4,0 L8,0 C8.55228475,0 9,0.44771525 9,1 L9,2.5 L9,2.5" id="路径"></path>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
