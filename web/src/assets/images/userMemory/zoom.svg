@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="20px" height="20px" viewBox="0 0 20 20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>icon_缩放</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="红熊空间-记忆库-用户记忆-详情" transform="translate(-1222, -981)" stroke="#5B6167">
+            <g id="关系网络" transform="translate(648, 415)">
+                <g id="编组-18" transform="translate(0, 552)">
+                    <g id="icon_缩放" transform="translate(574, 14)">
+                        <g id="编组-17" transform="translate(4, 4)">
+                            <rect id="矩形" x="3.42857143" y="3.42857143" width="5.14285714" height="5.14285714" rx="1"></rect>
+                            <path d="M0,3.42857143 L0,1 C0,0.44771525 0.44771525,3.33066907e-16 1,2.22044605e-16 L3.42857143,0 L3.42857143,0" id="路径"></path>
+                            <path d="M8.57142857,3.42857143 L8.57142857,1 C8.57142857,0.44771525 9.01914382,5.55111512e-16 9.57142857,4.4408921e-16 L12,0 L12,0" id="路径" transform="translate(10.2857, 1.7143) scale(-1, 1) translate(-10.2857, -1.7143)"></path>
+                            <path d="M0,12 L0,9.57142857 C0,9.01914382 0.44771525,8.57142857 1,8.57142857 L3.42857143,8.57142857 L3.42857143,8.57142857" id="路径" transform="translate(1.7143, 10.2857) scale(1, -1) translate(-1.7143, -10.2857)"></path>
+                            <path d="M8.57142857,12 L8.57142857,9.57142857 C8.57142857,9.01914382 9.01914382,8.57142857 9.57142857,8.57142857 L12,8.57142857 L12,8.57142857" id="路径" transform="translate(10.2857, 10.2857) scale(-1, -1) translate(-10.2857, -10.2857)"></path>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

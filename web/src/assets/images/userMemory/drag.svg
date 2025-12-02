@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="20px" height="20px" viewBox="0 0 20 20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>拖拽</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="红熊空间-记忆库-用户记忆-详情" transform="translate(-979, -981)" stroke="#5B6167">
+            <g id="关系网络" transform="translate(648, 415)">
+                <g id="编组-18" transform="translate(0, 552)">
+                    <g id="拖拽" transform="translate(331, 14)">
+                        <g id="编组-6" transform="translate(3, 3)">
+                            <g id="编组-4" transform="translate(4.5, 0)">
+                                <line x1="-4.50000425" y1="7" x2="9.49999575" y2="7" id="路径-12" transform="translate(2.5, 7) rotate(90) translate(-2.5, -7)"></line>
+                                <polyline id="路径" points="0 2.5 2.5 0 5 2.5"></polyline>
+                                <polyline id="路径" transform="translate(2.5, 12.75) scale(1, -1) translate(-2.5, -12.75)" points="0 14 2.5 11.5 5 14"></polyline>
+                            </g>
+                            <g id="编组-4" transform="translate(7, 7) rotate(90) translate(-7, -7)translate(4.5, 0)">
+                                <line x1="-4.50000425" y1="7" x2="9.49999575" y2="7" id="路径-12" transform="translate(2.5, 7) rotate(90) translate(-2.5, -7)"></line>
+                                <polyline id="路径" points="0 2.5 2.5 0 5 2.5"></polyline>
+                                <polyline id="路径" transform="translate(2.5, 12.75) scale(1, -1) translate(-2.5, -12.75)" points="0 14 2.5 11.5 5 14"></polyline>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

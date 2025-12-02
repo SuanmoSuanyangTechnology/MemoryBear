@@ -1,0 +1,113 @@
+/* 去掉所有默认白色背景 */
+.customTree,
+.customTree *,
+.customTree .ant-tree,
+.customTree .ant-tree-list,
+.customTree .ant-tree-list-holder,
+.customTree .ant-tree-list-holder-inner,
+.customTree .ant-tree-list-holder-inner > div,
+.customTree .ant-tree-list-holder-inner > div > div {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+
+/* 节点内容区域 - 默认透明 */
+.customTree .ant-tree-node-content-wrapper {
+  background: transparent !important;
+  background-color: transparent !important;
+  height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 0 8px !important;
+  border-radius: 4px;
+  transition: background-color 0.2s ease !important;
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+
+.customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper:before,
+.customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper:hover:before {
+    background: #FFFFFF !important;
+}
+.customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper, 
+.customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper:hover{
+    color: #000 !important;
+}
+.customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-switcher,
+.customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-draggable-icon{
+    color: #000;
+}
+.customTree .ant-tree-switcher {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 24px !important;
+  height: 40px !important;
+  line-height: 40px !important;
+  flex-shrink: 0 !important;
+}
+.customTree .ant-tree-switcher::before{
+    background: transparent !important;
+    background-color: transparent !important;
+}
+
+/* Switcher 图标样式 - 收起状态（默认向右） */
+.customTree .ant-tree-switcher .ant-tree-switcher-icon,
+.customTree .ant-tree-switcher img {
+  transition: transform 0.3s ease !important;
+  transform: rotate(0deg) !important;
+}
+
+/* Switcher 图标样式 - 展开状态（向下旋转90度） */
+.customTree .ant-tree-switcher_open .ant-tree-switcher-icon,
+.customTree .ant-tree-switcher_open img,
+.customTree .ant-tree-switcher.ant-tree-switcher_open img {
+  transform: rotate(90deg) !important;
+}
+
+/* 如果使用 ant-tree-switcher_close 类 */
+.customTree .ant-tree-switcher_close .ant-tree-switcher-icon,
+.customTree .ant-tree-switcher_close img {
+  transform: rotate(0deg) !important;
+}
+
+.customTree .ant-tree-node-content-wrapper .ant-tree-iconEle {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 16px !important;
+  height: 16px !important;
+  margin-right: 4px !important;
+  line-height: 1 !important;
+  flex-shrink: 0 !important;
+}
+
+.customTree .ant-tree-node-content-wrapper .ant-tree-iconEle img {
+  width: 16px !important;
+  height: 16px !important;
+  display: block !important;
+  vertical-align: middle !important;
+}
+
+.customTree .ant-tree-title {
+  display: flex !important;
+  align-items: center !important;
+  flex: 1 !important;
+  height: 40px !important;
+  line-height: 40px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.customTree .ant-tree-child-tree {
+  margin: 0 !important;
+}
+
+.customTree .ant-tree-node-content-wrapper .ant-tree-iconEle + .ant-tree-title {
+  margin-left: 0 !important;
+}
+
+
+

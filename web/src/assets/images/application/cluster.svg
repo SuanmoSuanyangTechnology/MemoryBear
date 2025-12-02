@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="40px" height="40px" viewBox="0 0 40 40" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>集群</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="应用管理-编排-操作状态-弹窗" transform="translate(-1033, -1332)" stroke="#212332" stroke-width="2">
+            <g id="1备份" transform="translate(665, 942)">
+                <g id="编组-11" transform="translate(24, 370)">
+                    <g id="集群" transform="translate(344, 20)">
+                        <g id="编组-10" transform="translate(3.5, 5)">
+                            <rect id="矩形" x="4.5" y="0" width="24" height="10" rx="2"></rect>
+                            <path d="M3.5,23 L3.5,19 C3.5,17.8954305 4.3954305,17 5.5,17 L27.5,17 C28.6045695,17 29.5,17.8954305 29.5,19 L29.5,23 L29.5,23" id="路径"></path>
+                            <line x1="16.4974887" y1="10" x2="16.4974887" y2="23.0318096" id="路径-5"></line>
+                            <rect id="矩形" x="0" y="23" width="7" height="7" rx="1"></rect>
+                            <rect id="矩形" x="13" y="23" width="7" height="7" rx="1"></rect>
+                            <rect id="矩形" x="26" y="23" width="7" height="7" rx="1"></rect>
+                            <line x1="8.8736081" y1="5" x2="10.8736081" y2="5" id="路径-6"></line>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编辑</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="应用管理-编排-默认状态" transform="translate(-246, -24)" stroke="#212332">
+            <g id="编辑" transform="translate(246, 24)">
+                <g id="编组-10" transform="translate(2.8, 2.8)">
+                    <path d="M10.4,4.47335995 L10.4,8.4 C10.4,9.5045695 9.5045695,10.4 8.4,10.4 L2,10.4 C0.8954305,10.4 0,9.5045695 0,8.4 L-2.22044605e-16,2 C-2.22044605e-16,0.8954305 0.8954305,2.22044605e-16 2,0 L5.96294416,0 L5.96294416,0" id="路径"></path>
+                    <line x1="4.14075334" y1="6.29066973" x2="10.4" y2="1.16982777e-14" id="路径-2"></line>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

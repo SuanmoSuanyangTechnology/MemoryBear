@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>下拉备份</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="红熊空间-记忆管理-忆溯引擎" transform="translate(-878, -666)" fill="#5B6167" fill-rule="nonzero">
+            <g id="存储层模块" transform="translate(256, 648)">
+                <g id="编组-3" transform="translate(569, 16)">
+                    <g id="下拉备份" transform="translate(61, 10) scale(1, -1) translate(-61, -10)translate(53, 2)">
+                        <rect id="矩形" opacity="0" x="0" y="0" width="16" height="16"></rect>
+                        <path d="M8,9.4241206 C7.82311558,9.4241206 7.64824121,9.35778894 7.51356784,9.22311558 L5.14773869,6.85728643 C4.95075377,6.66231156 4.95075377,6.34271357 5.14773869,6.14773869 C5.34472362,5.95075377 5.66231156,5.95075377 5.85728643,6.14773869 L8,8.29045226 L10.1427136,6.14773869 C10.3396985,5.95075377 10.6572864,5.95075377 10.8522613,6.14773869 C11.0492462,6.34472362 11.0492462,6.66231156 10.8522613,6.85728643 L8.48643216,9.22311558 C8.35175879,9.35778894 8.17688442,9.4241206 8,9.4241206 Z" id="路径"></path>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

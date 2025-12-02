@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>互联网</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="红熊空间-记忆对话-交互-2" transform="translate(-928, -339)" stroke="#155EEF">
+            <g id="输入框" transform="translate(737, 180)">
+                <g id="2" transform="translate(183, 155)">
+                    <g id="互联网" transform="translate(8, 4)">
+                        <g id="编组-11" transform="translate(2.5, 2.5)">
+                            <circle id="椭圆形" cx="5.5" cy="5.5" r="5"></circle>
+                            <line x1="0.785714286" y1="3.53571429" x2="10.2142857" y2="3.53571429" id="路径-6"></line>
+                            <path d="M4.27288123,0.591487342 C3.82349401,1.74340425 3.53571429,3.51415883 3.53571429,5.5 C3.53571429,7.49845355 3.82716108,9.27907975 4.28146314,10.4303857 M6.66018951,10.572683 C7.14773377,9.4289068 7.46428571,7.58274887 7.46428571,5.5 C7.46428571,3.4620778 7.16121333,1.65067191 6.69143044,0.502140402" id="形状"></path>
+                            <line x1="0.772766423" y1="7.07142857" x2="10.2013379" y2="7.07142857" id="路径-6"></line>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

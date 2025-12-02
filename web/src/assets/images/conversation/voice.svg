@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 15</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="红熊空间-记忆对话-默认对话" transform="translate(-745, -726)" stroke="#212332">
+            <g id="聊天页面" transform="translate(258, 128)">
+                <g id="输入框" transform="translate(16, 512)">
+                    <g id="编组-7" transform="translate(471, 86)">
+                        <g id="语音" transform="translate(4, 4)">
+                            <g id="编组-8" transform="translate(4, 2.25)">
+                                <line x1="4" y1="9" x2="4" y2="11.0054105" id="路径-46"></line>
+                                <line x1="2" y1="11.0054105" x2="5.995474" y2="11.0054105" id="路径-48" stroke-linecap="round"></line>
+                                <rect id="矩形" x="2" y="0" width="4" height="7" rx="2"></rect>
+                                <path d="M8,4 L8,5 C8,7.209139 6.209139,9 4,9 C1.790861,9 0,7.209139 0,5 L0,4" id="路径" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

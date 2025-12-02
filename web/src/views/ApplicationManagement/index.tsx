@@ -1,0 +1,114 @@
+import React, { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Button, Row, Col, App } from 'antd';
+import clsx from 'clsx';
+import { DeleteOutlined } from '@ant-design/icons';
+import type { Application, ApplicationModalRef } from './types';
+import ApplicationModal from './components/ApplicationModal';
+import SearchInput from '@/components/SearchInput'
+import RbCard from '@/components/RbCard/Card'
+import { getApplicationListUrl, deleteApplication } from '@/api/application'
+import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
+import { formatDateTime } from '@/utils/format';
+
+const ApplicationManagement: React.FC = () => {
+  const { t } = useTranslation();
+  const { modal } = App.useApp();
+  const [query, setQuery] = useState({});
+  const applicationModalRef = useRef<ApplicationModalRef>(null);
+  const scrollListRef = useRef<PageScrollListRef>(null)
+
+  const refresh = () => {
+    scrollListRef.current?.refresh();
+  }
+  
+  const handleCreate = () => {
+    applicationModalRef.current?.handleOpen();
+  }
+  const handleEdit = (item: Application) => {
+    window.open(`/#/application/config/${item.id}`);
+  }
+  const handleDelete = (item: Application) => {
+    modal.confirm({
+      title: t('common.confirmDeleteDesc', { name: item.name }),
+      okText: t('common.delete'),
+      okType: 'danger',
+      onOk: () => {
+      deleteApplication(item.id)
+        .then(() => {
+          refresh();
+        })
+        .catch(() => {
+          console.error('Failed to delete application');
+        });
+      }
+    })
+  }
+  return (
+    <>
+      <Row gutter={16} className="rb:mb-[16px]">
+        <Col span={12}>
+          <SearchInput
+            placeholder={t('application.searchPlaceholder')}
+            onSearch={(value) => setQuery({ search: value })}
+            style={{width: '100%'}}
+          />
+        </Col>
+        <Col span={12} className="rb:text-right">
+          <Button type="primary" onClick={handleCreate}>
+            {t('application.createApplication')}
+          </Button>
+        </Col>
+      </Row>
+
+      <PageScrollList
+        ref={scrollListRef}
+        url={getApplicationListUrl}
+        query={query}
+        renderItem={(item: Application) => (
+          <RbCard 
+            title={item.name}
+            avatar={
+              <div className="rb:w-[48px] rb:h-[48px] rb:rounded-[8px] rb:mr-[13px] rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
+                {item.name[0]}
+              </div>
+            }
+          >
+            {['type', 'source', 'created_at'].map((key, index) => (
+              <div key={key} className={clsx("rb:flex rb:justify-between rb:gap-[20px] rb:font-regular rb:text-[14px]", {
+                'rb:mt-[12px]': index !== 0
+              })}>
+                <span className="rb:text-[#5B6167]">{t(`application.${key}`)}</span>
+                <span className={clsx({
+                  'rb:text-[#155EEF] rb:font-medium': key === 'type' && item[key] === 'agent',
+                  'rb:text-[#369F21] rb:font-medium': key === 'type' && item[key] === 'multi_agent',
+                })}>
+                  {key === 'source' && item.is_shared
+                    ? t('application.shared')
+                    : key === 'source' && !item.is_shared
+                    ? t('application.configuration')
+                    : key === 'created_at'
+                    ? formatDateTime(item[key as keyof Application], 'YYYY-MM-DD HH:mm:ss')
+                    : t(`application.${item[key as keyof Application]}`)
+                  }
+                </span>
+              </div>
+            ))}
+
+            <div className="rb:mt-[20px] rb:flex rb:justify-between rb:gap-[10px]">
+              <Button type="primary" ghost className="rb:w-[calc(100%-46px)]" onClick={() => handleEdit(item)}>{t('application.configuration')}</Button>
+              <Button icon={<DeleteOutlined />} onClick={() => handleDelete(item)}></Button>
+            </div>
+          </RbCard>
+        )}
+      />
+
+      <ApplicationModal
+        ref={applicationModalRef}
+        refresh={refresh}
+      />
+    </>
+  );
+};
+
+export default ApplicationManagement;

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>查询数据治理</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="应用管理--API" transform="translate(-508, -980)" stroke="#212332" stroke-width="1.5">
+            <g id="4" transform="translate(220, 896)">
+                <g id="查询数据治理" transform="translate(288, 84)">
+                    <g id="编组-13" transform="translate(3, 3.5)">
+                        <path d="M4.49475285,12.0591915 L2.205,12.0591915 C0.987212127,12.0591915 0,11.0719794 0,9.85419155 L-4.4408921e-16,2.205 C-4.4408921e-16,0.987212127 0.987212127,4.4408921e-16 2.205,4.4408921e-16 L15.795,0 C17.0127879,-1.33226763e-15 18,0.987212127 18,2.205 L18,5.49726393 L18,5.49726393" id="路径"></path>
+                        <ellipse id="椭圆形" cx="12.9375" cy="11.5110465" rx="3.9375" ry="3.83701549"></ellipse>
+                        <line x1="15.7709074" y1="14.2467681" x2="18" y2="16.4749386" id="路径-4"></line>
+                        <line x1="2.29448903" y1="16.4518549" x2="6.74538465" y2="16.4518549" id="路径-5"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

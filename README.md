@@ -1,4 +1,4 @@
-MemoryBear 让AI拥有如同人类一样的记忆
+# MemoryBear 让AI拥有如同人类一样的记忆
 
 ## 项目简介
 MemoryBear是红熊AI自主研发的新一代AI记忆系统，其核心突破在于跳出传统知识“静态存储”的局限，以生物大脑认知机制为原型，构建了具备“感知-提炼-关联-遗忘”全生命周期的智能知识处理体系。该系统致力于让机器摆脱“信息堆砌”的困境，实现对知识的深度理解与自主进化，成为人类认知协作的核心伙伴。
@@ -71,111 +71,6 @@ Memory Bear 基于向量的知识记忆非图谱版本，成功在保持高准�
 Memory Bear 通过集成知识图谱架构，在需要复杂推理和关系感知的任务上进一步释放了潜力。虽然图谱的遍历和推理可能会引入轻微的检索开销，但该版本通过优化图检索策略和决策流，成功将延迟控制在高效范围。更关键的是，基于图谱的 Memory Bear 将总体准确性推至新的高度（75.00 ± 0.20%），在保持准确性的同时，整体指标显著优于其他所有方法，证明了“结构化记忆带来的性能决定性优势”。
 <img width="2238" height="342" alt="image" src="https://github.com/user-attachments/assets/c928e094-45a2-414b-831a-6990b711ed07" />
 
-## 快速开始
-
-### 环境要求
-
-- Python 3.12
-- PostgreSQL 13+
-- Neo4j 4.4+
-- Redis 6.0+
-
-### 安装依赖
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-
-# 方式一：基于 pyproject 安装
-pip install .
-
-# 方式二：使用 requirements.txt
-pip install -r requirements.txt
-```
-
-### 配置环境变量
-
-创建 `.env` 文件（示例）：
-
-```env
-# Postgres
-DB_HOST=127.0.0.1
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=your-password
-DB_NAME=redbear-mem
-DB_AUTO_UPGRADE=false
-
-# Neo4j
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=your-password
-
-# Redis
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-REDIS_DB=1
-
-# LLM / API Keys（按需）
-OPENAI_API_KEY=your-openai-key
-DASHSCOPE_API_KEY=your-dashscope-key
-
-# 其他
-WEB_URL=http://localhost:3000
-LOG_LEVEL=INFO
-```
-
-### 初始化与启动
-
-```bash
-# 如需自动迁移数据库：设置 DB_AUTO_UPGRADE=true 或手动执行
-alembic upgrade head
-
-# 启动开发服务
-uvicorn app.main:app --reload --port 8000
-
-# 打开交互文档
-# http://localhost:8000/docs
-```
-
-## 项目结构
-
-```
-app/
-├── main.py                  # FastAPI 入口
-├── controllers/             # 控制器与路由
-├── core/                    # 核心：配置、异常、日志等
-│   └── memory/              # 记忆模块
-│       ├── storage_services/  # 萃取/遗忘/反思/检索
-│       ├── agent/             # Agent + MCP 服务
-│       ├── utils/             # 工具与提示词
-│       └── models/            # 领域模型
-└── rag/                     # RAG 能力与文档解析
-
-logs/                        # 日志与输出
-LICENSE                      # 许可协议（Apache-2.0）
-README.md                    # 项目说明
-```
-
-## API 与路由
-
-- 管理端：`/api`（JWT 认证）
-- 服务端：`/v1`（API Key 认证）
-- 根路由健康检查：`GET /` 返回运行状态
-- Swagger 文档：`/docs`
-
-
-## 部署建议
-
-- 使用 `gunicorn` + `uvicorn.workers.UvicornWorker` 作为生产入口
-- 配置 `LOG_LEVEL=WARNING` 并启用文件日志
-- 数据库与缓存请使用托管服务或独立实例
-
-示例：
-
-```bash
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker
-```
 
 ## 许可证
 
