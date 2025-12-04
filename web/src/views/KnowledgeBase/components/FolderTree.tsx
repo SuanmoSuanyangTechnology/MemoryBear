@@ -58,6 +58,7 @@ interface FolderTreeProps {
   style?: CSSProperties;
   refreshKey?: number;
   onRootLoad?: (nodes: TreeNodeData[] | null) => void;
+  onFolderPathChange?: (path: Array<{ id: string; name: string }>) => void;
 }
 
 const renderIcon = (icon?: string) => {
@@ -271,6 +272,7 @@ const FolderTree: FC<FolderTreeProps> = ({
   style,
   refreshKey = 0,
   onRootLoad,
+  onFolderPathChange,
 }) => {
   const [treeData, setTreeData] = useState<TreeNodeData[]>([]);
 
@@ -347,6 +349,42 @@ const FolderTree: FC<FolderTreeProps> = ({
     }
   };
 
+  // 查找节点路径的辅助函数
+  const findNodePath = (nodes: TreeNodeData[], targetKey: Key, currentPath: Array<{ id: string; name: string }> = []): Array<{ id: string; name: string }> | null => {
+    for (const node of nodes) {
+      const newPath = [...currentPath, { id: String(node.key), name: String(node.title) }];
+      
+      if (node.key === targetKey) {
+        return newPath;
+      }
+      
+      if (node.children) {
+        const found = findNodePath(node.children, targetKey, newPath);
+        if (found) {
+          return found;
+        }
+      }
+    }
+    return null;
+  };
+
+  // 处理选择事件，计算并传递路径
+  const handleSelect: TreeProps['onSelect'] = (selectedKeys, info) => {
+    if (selectedKeys.length > 0) {
+      const path = findNodePath(treeData, selectedKeys[0]);
+      if (path && onFolderPathChange) {
+        onFolderPathChange(path);
+      }
+    } else if (onFolderPathChange) {
+      onFolderPathChange([]);
+    }
+    
+    // 调用原始的 onSelect 回调
+    if (onSelect) {
+      onSelect(selectedKeys, info);
+    }
+  };
+
   const treeNodes = useMemo(() => transformTreeData(treeData), [treeData]);
 
   return (
@@ -354,7 +392,7 @@ const FolderTree: FC<FolderTreeProps> = ({
       multiple={multiple}
       className={className}
       style={style}
-      onSelect={onSelect}
+      onSelect={handleSelect}
       onExpand={onExpand}
       loadData={onLoadData}
       treeData={treeNodes}

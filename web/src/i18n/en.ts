@@ -403,6 +403,7 @@ export const en = {
       apiKeyName: 'API Key Name',
     },
     knowledgeBase: {
+      selectSpace: 'Please select a workspace.',
       preview:'Preview',
       pleaseUploadFileFirst: 'Please upload file first',
       shareSuccess: 'Share successfully',

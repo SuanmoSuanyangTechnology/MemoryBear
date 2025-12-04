@@ -1,0 +1,46 @@
+[
+  {
+    "element": "AuthLayout",
+    "children": [
+      { "path": "/user-management", "element": "UserManagement" },
+      { "path": "/model", "element": "ModelManagement" },
+      { "path": "/space", "element": "SpaceManagement" },
+      { "path": "/no-permission", "element": "NoPermission" }
+    ]
+  },
+  {
+    "element": "AuthSpaceLayout",
+    "children": [
+      { "path": "/", "element": "Home" },
+      { "path": "/user-memory", "element": "UserMemory" },
+      { "path": "/user-memory/:id", "element": "UserMemoryDetail" },
+      { "path": "/member", "element": "MemberManagement" },
+      { "path": "/memory", "element": "MemoryManagement" },
+      { "path": "/forgetting-engine/:id", "element": "ForgettingEngine" },
+      { "path": "/memory-extraction-engine/:id", "element": "MemoryExtractionEngine" },
+      { "path": "/application", "element": "ApplicationManagement" },
+      { "path": "/memory-conversation", "element": "MemoryConversation" },
+      { "path": "/knowledge-base", "element": "KnowledgeBase" },
+      { "path": "/knowledge-base/:knowledgeBaseId/private", "element": "Private" },
+      { "path": "/knowledge-base/:knowledgeBaseId/share", "element": "Share" },
+      { "path": "/knowledge-base/:knowledgeBaseId/create-dataset", "element": "CreateDataset" },
+      { "path": "/knowledge-base/:knowledgeBaseId/DocumentDetails", "element": "DocumentDetails" },
+      { "path": "/no-permission", "element": "NoPermission" },
+      { "path": "/*", "element": "NotFound" }
+    ]
+  },
+  {
+    "element": "BasicLayout",
+    "children": [
+      { "path": "/application/config/:id", "element": "ApplicationConfig" },
+      { "path": "/conversation/:token", "element": "Conversation" }
+    ]
+  },
+  {
+    "element": "LoginLayout",
+    "children": [
+      { "path": "/login", "element": "Login" },
+      { "path": "/invite-register/:token", "element": "InviteRegister" }
+    ]
+  }
+]

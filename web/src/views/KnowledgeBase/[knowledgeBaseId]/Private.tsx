@@ -11,10 +11,6 @@ import type { AnyObject } from 'antd/es/_util/type';
 import { MoreOutlined } from '@ant-design/icons';
 import folderIcon from '@/assets/images/knowledgeBase/folder.png';
 import textIcon from '@/assets/images/knowledgeBase/text.png';
-import imageIcon from '@/assets/images/knowledgeBase/image.png';
-import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
-import templateIcon from '@/assets/images/knowledgeBase/template.png';
-import backupIcon from '@/assets/images/knowledgeBase/backup.png';
 import editIcon from '@/assets/images/knowledgeBase/edit.png';
 import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase } from '../service';
 import type { 
@@ -35,6 +31,7 @@ import CreateDatasetModal from '../components/CreateDatasetModal';
 import CreateImageDataset from '../components/CreateImageDataset';
 import FolderTree, { type TreeNodeData } from '../components/FolderTree';
 import { formatDateTime } from '@/utils/format';
+import { useMenu } from '@/store/menu';
 import './Private.css'
 const { confirm } = Modal
 // 树节点数据类型
@@ -57,7 +54,6 @@ const Private: FC = () => {
     kb_id:knowledgeBaseId ?? '',
     parent_id:parentId ?? ''
   });
-  const [keywords, setKeywords] = useState<string>('');
   const [query, setQuery] = useState<Record<string, unknown>>({
     orderby: 'created_at',
     desc: true,
@@ -66,6 +62,8 @@ const Private: FC = () => {
   const shareModalRef = useRef<ShareModalRef>(null);
   const datasetModalRef = useRef<CreateDatasetModalRef>(null);
   const [folderTreeRefreshKey, setFolderTreeRefreshKey] = useState(0);
+  const { allBreadcrumbs, setCustomBreadcrumbs } = useMenu();
+  const [folderPath, setFolderPath] = useState<Array<{ id: string; name: string }>>([]);
   useEffect(() => {
     if (knowledgeBaseId) {
       let url = `/documents/${knowledgeBaseId}/${parentId}/documents`;
@@ -73,6 +71,13 @@ const Private: FC = () => {
       fetchKnowledgeBaseDetail(knowledgeBaseId);
     }
   }, [knowledgeBaseId]);
+
+  // 更新面包屑
+  useEffect(() => {
+    if (knowledgeBase) {
+      updateBreadcrumbs();
+    }
+  }, [knowledgeBase, folderPath]);
 
   // 监听 tableApi 变化，自动刷新表格数据
   useEffect(() => {
@@ -95,17 +100,82 @@ const Private: FC = () => {
     setLoading(true);
     try {
       const res = await getKnowledgeBaseDetail(id);
-      setKnowledgeBase(res.data || res);
+      // 将 KnowledgeBase 转换为 KnowledgeBaseListItem
+      const listItem = res as unknown as KnowledgeBaseListItem;
+      setKnowledgeBase(listItem);
     } finally {
       setLoading(false);
     }
   };
 
+  // 更新面包屑，包含知识库名称和文件夹路径
+  const updateBreadcrumbs = () => {
+    if (!knowledgeBase) return;
+    
+    const baseBreadcrumbs = allBreadcrumbs['space'] || [];
+    // 只保留知识库菜单项之前的面包屑
+    const knowledgeBaseMenuIndex = baseBreadcrumbs.findIndex(item => item.path === '/knowledge-base');
+    const filteredBaseBreadcrumbs = knowledgeBaseMenuIndex >= 0 
+      ? baseBreadcrumbs.slice(0, knowledgeBaseMenuIndex + 1)
+      : baseBreadcrumbs;
+    
+    const customBreadcrumbs = [
+      ...filteredBaseBreadcrumbs,
+      {
+        id: 0,
+        parent: 0,
+        code: null,
+        label: knowledgeBase.name,
+        i18nKey: null,
+        path: null,
+        enable: true,
+        display: true,
+        level: 0,
+        sort: 0,
+        icon: null,
+        iconActive: null,
+        menuDesc: null,
+        deleted: null,
+        updateTime: 0,
+        new_: null,
+        keepAlive: false,
+        master: null,
+        disposable: false,
+        appSystem: null,
+        subs: [],
+      },
+      ...folderPath.map((folder) => ({
+        id: 0,
+        parent: 0,
+        code: null,
+        label: folder.name,
+        i18nKey: null,
+        path: null,
+        enable: true,
+        display: true,
+        level: 0,
+        sort: 0,
+        icon: null,
+        iconActive: null,
+        menuDesc: null,
+        deleted: null,
+        updateTime: 0,
+        new_: null,
+        keepAlive: false,
+        master: null,
+        disposable: false,
+        appSystem: null,
+        subs: [],
+      })),
+    ];
+
+    setCustomBreadcrumbs(customBreadcrumbs, 'space');
+  };
+
   // 处理树节点选择
-  const onSelect = (selectedKeys: React.Key[], info: any) => {
+  const onSelect = (selectedKeys: React.Key[]) => {
     if (!selectedKeys.length) return;
     if (!folder) return;
-    const node = info.node as TreeNodeData;
     const f = {
       ...folder,
       parent_id: String(selectedKeys[0]),
@@ -114,17 +184,16 @@ const Private: FC = () => {
     setTableApi(url);
     setParentId(String(selectedKeys[0]))
     setFolder(f)
-    // 根据节点类型执行不同操作
-    if (node.type === 'folder') {
-      
-      // 文件夹：展开/收起
-    } else if (node.type === 'text' || node.type === 'image' || node.type === 'dataset') {
-      // 文件：打开详情
-    }
+  };
+
+  // 处理文件夹路径变化
+  const handleFolderPathChange = (path: Array<{ id: string; name: string }>) => {
+    setFolderPath(path);
   };
 
   // 处理树节点展开
-  const onExpand = (expandedKeys: React.Key[], info: any) => {
+  const onExpand = (_expandedKeys: React.Key[], _info: any) => {
+    // 展开节点时不需要特殊处理
   };
   // create / import list
   const createItems: MenuProps['items'] = [
@@ -190,10 +259,7 @@ const Private: FC = () => {
     // },
     
   ];
-  //
-  const handleCreate = (type: string) => {
-    console.log('create', type);
-  }
+  
   // 处理开关
   const onChange = (checked: boolean) => {
     updateKnowledgeBase(knowledgeBaseId || '', {
@@ -348,8 +414,7 @@ const Private: FC = () => {
       title: t('knowledgeBase.status'),
       dataIndex: 'progress',
       key: 'progress',
-      render: (value: string | number, record: AnyObject) => {
-       
+      render: (value: string | number) => {
         return (
           <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
             <span
@@ -445,6 +510,7 @@ const Private: FC = () => {
               knowledgeBaseId={knowledgeBaseId ?? ''}
               refreshKey={folderTreeRefreshKey}
               onRootLoad={handleRootTreeLoad}
+              onFolderPathChange={handleFolderPathChange}
             />
         </div>
       )}
