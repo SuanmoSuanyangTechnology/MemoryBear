@@ -140,7 +140,8 @@ const TableComponent = forwardRef<TableRef, TableComponentProps>(({
     
     const config: { x?: number | string | true; y?: number | string } = {};
     
-    if (scrollX !== undefined) {
+    // 只有在有数据时才应用横向滚动
+    if (scrollX !== undefined && data.length > 0) {
       config.x = scrollX;
     } else if (isScroll) {
       config.x = 'max-content';

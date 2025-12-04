@@ -7,8 +7,8 @@ This module provides utilities for detecting and processing multimodal inputs
 
 import logging
 from typing import List
-
-from app.core.memory.agent.multimodal.speech_model import Vico_recognition
+# TODO 后续更新
+# from app.core.memory.agent.multimodal.speech_model import Vico_recognition
 from app.core.memory.agent.utils.llm_tools import picture_model_requests
 
 logger = logging.getLogger(__name__)

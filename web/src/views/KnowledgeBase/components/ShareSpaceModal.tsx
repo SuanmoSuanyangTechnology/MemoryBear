@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2025-11-10 18:52:55
  * @LastEditors: yujiangping
- * @LastEditTime: 2025-11-25 17:46:36
+ * @LastEditTime: 2025-12-03 18:44:58
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Switch } from 'antd';
@@ -24,7 +24,7 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
   const [messageApi, contextHolder] = message.useMessage();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false)
-  const [curIndex, setCurIndex] = useState(9999);
+  const [curIndex, setCurIndex] = useState(-1);
   const [kbId, setKbId] = useState<string>('');
   const [spaceIds, setSpaceIds] = useState<string>('');
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase | null>(null);
@@ -32,7 +32,7 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
  
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
-    setCurIndex(9999);
+    setCurIndex(-1);
     setLoading(false)
     setVisible(false);
   };
@@ -53,8 +53,13 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
 
     // 获取所有 checked 为 true 的数据
     const checkedItems = spaceList.filter(item => item.is_active);
+    debugger
     // 获取当前选中的项（curIndex 对应的数据）
-    const selectedItem = curIndex !== 9999 ? spaceList[curIndex] : null;
+    const selectedItem = curIndex !== -1 ? spaceList[curIndex] : null;
+    if(!selectedItem){
+      messageApi.error(t('knowledgeBase.selectSpace'));
+      return;
+    }
     const payload = {
       source_kb_id: kbId ?? '',
       target_workspace_id: selectedItem?.id ?? '',

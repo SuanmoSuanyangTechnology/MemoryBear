@@ -145,6 +145,7 @@ const CreateDataset = () => {
       });
       return;
     }
+    debugger
 
     // 显示确认弹框
     confirm({
@@ -195,11 +196,12 @@ const CreateDataset = () => {
             title: t('common.deleteWarning'),
             content: t('common.deleteWarningContent', { content: record.name }),
           onOk: async () => {
-              // TODO: 实现删除逻辑
-              const response = await deleteDocument(record.id);
+              await deleteDocument(record.id);
               
-              // 删除成功，刷新列表
-              // messageApi.success(t('common.deleteSuccess'));
+              // 删除成功，从 rechunkFileIds 中移除该 id
+              setRechunkFileIds((prev) => prev.filter((id) => id !== record.id));
+              
+              // 刷新列表
               messageApi.success(t('common.deleteSuccess'));
               tableRef.current?.loadData();
             
@@ -560,15 +562,24 @@ const CreateDataset = () => {
       {current === 2 && (
         <Spin spinning={pollingLoading} tip={t('knowledgeBase.processingDocuments') || '正在处理文档...'}>
           <div className='rb:text-sm rb:text-gray-500 rb:mt-4 rb:h-[calc(100%-160px)] rb:overflow-y-auto'>
-            <Table
-              ref={tableRef}
-              apiUrl={`/documents/${knowledgeBaseId}/${parentId}/documents`}
-              apiParams={{
-                  document_ids: rechunkFileIds.join(','),
-              }}
-              columns={columns}
-              rowKey="id"
-            />
+            {rechunkFileIds.length > 0 ? (
+              <Table
+                ref={tableRef}
+                apiUrl={`/documents/${knowledgeBaseId}/${parentId}/documents`}
+                apiParams={{
+                    document_ids: rechunkFileIds.join(','),
+                }}
+                columns={columns}
+                rowKey="id"
+              />
+            ) : (
+              <Table
+                ref={tableRef}
+                columns={columns}
+                rowKey="id"
+                initialData={[]}
+              />
+            )}
           </div>
         </Spin>
       )}

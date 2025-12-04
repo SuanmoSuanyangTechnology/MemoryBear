@@ -35,6 +35,7 @@ export const zh = {
       userMemoryDetail: '用户记忆详情',
     },
     knowledgeBase: {
+      selectSpace: '请选择空间',
       preview:'预览',
       pleaseUploadFileFirst: '请先上传文件',
       shareSuccess: '分享成功',

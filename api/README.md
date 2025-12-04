@@ -60,6 +60,13 @@ LOG_LEVEL=INFO
 # 如需自动迁移数据库：设置 DB_AUTO_UPGRADE=true 或手动执行
 alembic upgrade head
 
+# 激活虚拟环境
+api\.venv\Scripts\activate
+
+# 目录切换到api下
+cd api
+
+
 # 启动开发服务
 uvicorn app.main:app --reload --port 8000
 
