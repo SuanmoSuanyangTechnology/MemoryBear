@@ -35,7 +35,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_app_shares_id'), 'app_shares', ['id'], unique=False)
-    op.drop_table('data_config')
+    op.execute('DROP TABLE IF EXISTS data_config')
     op.add_column('conversations', sa.Column('workspace_id', sa.UUID(), nullable=False, comment='工作空间ID'))
     op.create_foreign_key(None, 'conversations', 'workspaces', ['workspace_id'], ['id'])
     # ### end Alembic commands ###

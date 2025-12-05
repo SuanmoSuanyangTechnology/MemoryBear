@@ -184,5 +184,5 @@ def downgrade() -> None:
     op.drop_table('end_users')
     op.drop_index(op.f('ix_retrieval_info_id'), table_name='retrieval_info')
     op.drop_table('retrieval_info')
-    op.drop_table('data_config')
+    op.execute('DROP TABLE IF EXISTS data_config')
     # ### end Alembic commands ###
