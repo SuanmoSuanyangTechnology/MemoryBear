@@ -69,8 +69,9 @@ def upgrade():
     $$ LANGUAGE plpgsql;
     """)
     
-    # 创建 documents 表上的触发器
+    # 创建 documents 表上的触发器（如果不存在）
     op.execute("""
+    DROP TRIGGER IF EXISTS tr_documents_update_stats ON documents;
     CREATE TRIGGER tr_documents_update_stats
     AFTER INSERT OR UPDATE OR DELETE ON documents
     FOR EACH ROW
