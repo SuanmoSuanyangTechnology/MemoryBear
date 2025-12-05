@@ -13,7 +13,7 @@ class Settings:
     DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
     
     # Neo4j Configuration (记忆系统数据库)
-    NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://1.94.111.67:7687")
+    NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
     NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME", "neo4j")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "")
     

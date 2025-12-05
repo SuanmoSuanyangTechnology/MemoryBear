@@ -1,0 +1,6 @@
+# Allow all search engines to crawl the site
+User-agent: *
+Allow: /
+
+# Optional: Define a sitemap location
+# Sitemap: https://example.com/sitemap.xml

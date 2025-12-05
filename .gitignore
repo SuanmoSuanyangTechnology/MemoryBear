@@ -25,7 +25,7 @@ app/core/memory/src/utils/.DS_Store
 time.log
 celerybeat-schedule.db
 search_results.json
-*.txt
+
 migrations/versions
 tmp
 files
