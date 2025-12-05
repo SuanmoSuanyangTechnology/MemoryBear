@@ -210,7 +210,7 @@ SECRET_KEY=your-secret-key-here
 
 确认项目中`alembic.ini`文件的`sqlalchemy.url`配置指向你的空白 PostgreSQL 数据库，格式示例：
 
-```toml
+```
 sqlalchemy.url = postgresql://用户名:密码@数据库地址:端口/空白数据库名
 ```
 
