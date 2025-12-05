@@ -47,7 +47,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_messages_id'), 'messages', ['id'], unique=False)
-    op.drop_table('data_config')
+    op.execute('DROP TABLE IF EXISTS data_config')
     # ### end Alembic commands ###
 
 

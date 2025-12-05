@@ -24,12 +24,22 @@ def upgrade() -> None:
     # 先删除依赖的视图（如果存在）
     op.execute("DROP VIEW IF EXISTS data_config_sorted CASCADE")
     
-    op.alter_column('data_config', 'llm_id',
-               existing_type=sa.VARCHAR(),
-               comment='LLM模型配置ID',
-               existing_comment='临时',
-               existing_nullable=True)
-    op.drop_column('data_config', 'llm')
+    # 检查表和列是否存在再进行操作
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT FROM information_schema.columns 
+                      WHERE table_name = 'data_config' AND column_name = 'llm_id') THEN
+                ALTER TABLE data_config ALTER COLUMN llm_id SET DATA TYPE VARCHAR;
+                COMMENT ON COLUMN data_config.llm_id IS 'LLM模型配置ID';
+            END IF;
+            
+            IF EXISTS (SELECT FROM information_schema.columns 
+                      WHERE table_name = 'data_config' AND column_name = 'llm') THEN
+                ALTER TABLE data_config DROP COLUMN llm;
+            END IF;
+        END $$;
+    """)
     # ### end Alembic commands ###
 
 

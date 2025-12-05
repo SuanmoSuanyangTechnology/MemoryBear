@@ -1,5 +1,5 @@
 # MemoryBear 让AI拥有如同人类一样的记忆
-
+### [安装教程](#memorybear安装教程)
 ## 项目简介
 MemoryBear是红熊AI自主研发的新一代AI记忆系统，其核心突破在于跳出传统知识“静态存储”的局限，以生物大脑认知机制为原型，构建了具备“感知-提炼-关联-遗忘”全生命周期的智能知识处理体系。该系统致力于让机器摆脱“信息堆砌”的困境，实现对知识的深度理解与自主进化，成为人类认知协作的核心伙伴。
 
@@ -70,6 +70,240 @@ Memory Bear 基于向量的知识记忆非图谱版本，成功在保持高准�
 <img width="2248" height="498" alt="image" src="https://github.com/user-attachments/assets/2759ea19-0b71-4082-8366-e8023e3b28fe" />
 Memory Bear 通过集成知识图谱架构，在需要复杂推理和关系感知的任务上进一步释放了潜力。虽然图谱的遍历和推理可能会引入轻微的检索开销，但该版本通过优化图检索策略和决策流，成功将延迟控制在高效范围。更关键的是，基于图谱的 Memory Bear 将总体准确性推至新的高度（75.00 ± 0.20%），在保持准确性的同时，整体指标显著优于其他所有方法，证明了“结构化记忆带来的性能决定性优势”。
 <img width="2238" height="342" alt="image" src="https://github.com/user-attachments/assets/c928e094-45a2-414b-831a-6990b711ed07" />
+
+# MemoryBear安装教程
+## 一、前期准备
+
+### 1.环境要求
+
+* Node.js 20.19+ 或 22.12+  前端运行环境
+
+* Python 3.12  后端运行环境
+
+* PostgreSQL 13+ 主数据库
+
+* Neo4j 4.4+ 图数据库（存储知识图谱）
+
+* Redis 6.0+ 缓存和消息队列
+
+## 二、项目获取
+
+### 1.获取方式
+
+Git克隆（推荐）：
+
+```plain&#x20;text
+git clone https://github.com/SuanmoSuanyangTechnology/MemoryBear.git
+```
+
+### 2.目录说明
+
+<img width="5238" height="1626" alt="diagram" src="https://github.com/user-attachments/assets/416d6079-3f34-40c3-9bcf-8760d186741a" />
+
+
+## 三、安装步骤
+
+### 1.后端API服务启动
+
+#### 1.1 安装python依赖
+
+```python
+# 0.安装依赖管理工具uv
+pip install uv
+
+# 1.终端切换API目录
+cd api
+
+# 2.安装依赖
+uv sync 
+
+# 3.激活虚拟环境 (Windows)
+.venv\Scripts\Activate.ps1  （powershell，在api目录下）
+api\.venv\Scripts\activate （powershell，在根目录下）
+.venv\Scripts\activate.bat （cmd，在api目录下）
+
+```
+
+#### 1.2 安装必备基础服务（docker镜像）
+
+使用docker desktop安装所需的docker镜像
+
+* **docker desktop安装地址：**&#x68;ttps://www.docker.com/products/docker-desktop/
+
+* **PostgreSQL**
+
+  **拉取镜像**
+
+  search——select——pull
+
+  <img width="1280" height="731" alt="image-9" src="https://github.com/user-attachments/assets/0609eb5f-e259-4f24-8a7b-e354da6bae4d" />
+
+
+**创建容器**
+
+<img width="1280" height="731" alt="image-8" src="https://github.com/user-attachments/assets/d57b3206-1df1-42a4-80fd-e71f37201a25" />
+
+
+**服务启动成功**
+
+<img width="1280" height="731" alt="image" src="https://github.com/user-attachments/assets/76e04c54-7a36-46ec-a68e-241ad268e427" />
+
+
+* **Neo4j**
+
+**拉取镜像**，与PostgreSQL一样从docker desktop中拉取镜像
+
+**创建容器**，Neo4j 默认需要映射**2 个关键端口**（7474 对应 Browser，7687 对应 Bolt 协议），同时需设置初始密码
+
+<img width="1280" height="731" alt="image-1" src="https://github.com/user-attachments/assets/6bfb0c27-74e8-45f7-b381-189325d516bd" />
+
+
+**服务成功启动**
+
+<img width="1280" height="731" alt="image-2" src="https://github.com/user-attachments/assets/0d28b4fa-e8ed-4c05-8983-7a47f0a892d1" />
+
+
+* **Redis**
+
+同上
+
+#### 1.3 配置环境变量
+
+复制 env.example 为 .env 并填写配置
+
+```bash
+# Neo4j 图数据库 
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your-password
+# Neo4j Browser访问地址
+
+# PostgreSQL 数据库
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=your-password
+DB_NAME=redbear-mem
+
+# Database Migration Configuration
+# Set to true to automatically upgrade database schema on startup
+DB_AUTO_UPGRADE=true  # 首次启动设为true自动迁移数据库 在空白数据库创建表结构
+
+# Redis
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DB=1 
+
+# Celery (使用Redis作为broker)
+BROKER_URL=redis://127.0.0.1:6379/0
+RESULT_BACKEND=redis://127.0.0.1:6379/0
+
+# JWT密钥 (生成方式: openssl rand -hex 32)
+SECRET_KEY=your-secret-key-here
+```
+
+#### 1.4 PostgreSQL数据库建立
+
+通过项目中已有的 alembic 数据库迁移文件，为全新创建的空白 PostgreSQL 数据库创建对应的表结构。
+
+**（1）配置数据库连接**
+
+确认项目中`alembic.ini`文件的`sqlalchemy.url`配置指向你的空白 PostgreSQL 数据库，格式示例：
+
+```
+sqlalchemy.url = postgresql://用户名:密码@数据库地址:端口/空白数据库名
+```
+
+同时检查 migrations`/env.py`中`target_metadata`是否正确关联到 ORM 模型的`metadata`（确保迁移脚本和模型一致）
+
+**（2）执行迁移文件**
+
+在API目录执行以下命令，alembic 会自动识别空白数据库，并执行所有未应用的迁移脚本，创建完整表结构：
+
+```bash
+alembic upgrade head
+```
+
+<img width="1076" height="341" alt="image-3" src="https://github.com/user-attachments/assets/9edda79d-4637-46e3-bee3-2eec39975d59" />
+
+
+通过Navicat查看迁移创建的数据库表结构
+
+<img width="1280" height="680" alt="image-4" src="https://github.com/user-attachments/assets/aa5c1d98-bdc3-4d25-acb2-5c8cf6ecd3f5" />
+
+
+#### API服务启动
+
+```python
+uv run -m app.main
+```
+
+访问 API 文档：http://localhost:8000/docs
+
+<img width="1280" height="675" alt="image-5" src="https://github.com/user-attachments/assets/68fa62b4-2c4f-4cf0-896c-41d59aa7d712" />
+
+
+### 2.前端web应用启动
+
+#### 2.1安装依赖
+
+```python
+# 切换web目录下
+cd web
+
+# 下载依赖
+npm install
+```
+
+#### 2.2 修改API代理配置
+
+编辑 web/vite.config.ts，将代理目标改为后端地址
+
+```python
+proxy: {
+  '/api': {
+    target: 'http://127.0.0.1:8000',  // 改为后端地址，win用户127.0.0.1  mac用户0.0.0.0
+    changeOrigin: true,
+  },
+}
+
+```
+
+#### 2.3 启动服务
+
+```python
+# 启动web服务
+npm run dev
+
+```
+
+服务启动会输出可访问的前端界面
+
+<img width="935" height="311" alt="image-6" src="https://github.com/user-attachments/assets/cba1074a-440c-4866-8a94-7b6d1c911a93" />
+
+
+<img width="1280" height="652" alt="image-7" src="https://github.com/user-attachments/assets/a719dc0a-cbdd-4ba1-9b21-123d5eac32eb" />
+
+
+## 四、用户操作
+
+step1：项目获取
+
+step2：后端API服务启动
+
+step3：前端web应用启动
+
+step4： 终端输入 curl.exe -X POST http://127.0.0.1:8000/api/setup ，访问接口初始化数据库获得超级管理员账号
+
+step5：超级管理员&#x20;
+
+账号：admin@example.com
+
+密码：admin\_password
+
+step6：登陆前端页面
+
+
 
 
 ## 许可证

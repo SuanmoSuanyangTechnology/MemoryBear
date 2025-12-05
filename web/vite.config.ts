@@ -11,7 +11,7 @@ export default defineConfig({
     proxy: {
       // 主要API代理，支持 /api 和 /api/* 格式
       '/api': {
-        target: 'http://0.0.0.0:5173', // 后端服务地址
+        target: 'http://127.0.0.1:8000', // 后端服务地址
         changeOrigin: true,
 
         // 匹配所有以/api开头的请求，包括/api/token
