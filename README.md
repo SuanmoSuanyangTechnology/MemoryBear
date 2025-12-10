@@ -1,7 +1,5 @@
-<img width="2346" height="1310" alt="image" src="https://github.com/user-attachments/assets/bc73a64d-cd1e-4d22-be3e-04ce40423a20" />
-
-# MemoryBear.AI Equip AI with human-like memory capability
-### [Installation Guide]( #MemoryBear Installation Guide ) 
+# MemoryBear 让AI拥有如同人类一样的记忆
+### [安装教程](#memorybear安装教程)
 ## 项目简介
 MemoryBear是红熊AI自主研发的新一代AI记忆系统，其核心突破在于跳出传统知识“静态存储”的局限，以生物大脑认知机制为原型，构建了具备“感知-提炼-关联-遗忘”全生命周期的智能知识处理体系。该系统致力于让机器摆脱“信息堆砌”的困境，实现对知识的深度理解与自主进化，成为人类认知协作的核心伙伴。
 
@@ -73,7 +71,7 @@ Memory Bear 基于向量的知识记忆非图谱版本，成功在保持高准�
 Memory Bear 通过集成知识图谱架构，在需要复杂推理和关系感知的任务上进一步释放了潜力。虽然图谱的遍历和推理可能会引入轻微的检索开销，但该版本通过优化图检索策略和决策流，成功将延迟控制在高效范围。更关键的是，基于图谱的 Memory Bear 将总体准确性推至新的高度（75.00 ± 0.20%），在保持准确性的同时，整体指标显著优于其他所有方法，证明了“结构化记忆带来的性能决定性优势”。
 <img width="2238" height="342" alt="image" src="https://github.com/user-attachments/assets/c928e094-45a2-414b-831a-6990b711ed07" />
 
-# MemoryBear Installation Guide
+# MemoryBear安装教程
 ## 一、前期准备
 
 ### 1.环境要求
@@ -212,7 +210,7 @@ SECRET_KEY=your-secret-key-here
 
 确认项目中`alembic.ini`文件的`sqlalchemy.url`配置指向你的空白 PostgreSQL 数据库，格式示例：
 
-```
+```toml
 sqlalchemy.url = postgresql://用户名:密码@数据库地址:端口/空白数据库名
 ```
 
