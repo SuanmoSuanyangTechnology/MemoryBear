@@ -1,4 +1,5 @@
 <img width="2346" height="1310" alt="image" src="https://github.com/user-attachments/assets/bc73a64d-cd1e-4d22-be3e-04ce40423a20" />
+
 # MemoryBear.AI Equip AI with human-like memory capability
 ### [Installation Guide](#MemoryBear Installation Guide) 
 ## 项目简介
