@@ -1,0 +1,860 @@
+import os
+import re
+import time
+import json
+from typing import List
+import sys
+import uuid
+
+from pydantic import BaseModel, Field, RootModel
+
+from app.core.memory.agent.utils.redis_tool import RedisSessionStore, store
+from app.core.memory.utils.definitions import SELECTED_LLM_ID
+
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
+
+from jinja2 import Template, Environment, FileSystemLoader
+from mcp.server.fastmcp import FastMCP
+
+from app.core.logging_config import get_agent_logger, log_time, log_prompt_rendering
+from app.core.memory.agent.utils.verify_tool import VerifyTool
+from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_, deduplicate_entries, merge_to_key_value_pairs
+from app.core.memory.agent.utils.messages_tool import _to_openai_messages, read_template_file, Resolve_username, \
+    Problem_Extension_messages_deal, Retriev_messages_deal, Verify_messages_deal, Summary_messages_deal, \
+    Retrieve_Summary_messages_deal, Retrieve_verify_tool_messages_deal
+from app.core.memory.src.search import run_hybrid_search
+from app.core.memory.utils.text_utils import escape_lucene_query
+from app.core.memory.utils.llm_utils import get_llm_client
+from app.core.memory.agent.utils.write_tools import write
+from app.core.memory.agent.utils.write_to_database import write_to_database
+from threading import Lock
+from app.core.config import settings
+
+file_lock = Lock()
+mcp=FastMCP('data_flow',host=settings.SERVER_IP,port=8081)
+
+logger = get_agent_logger(__name__)
+
+
+async def status_typle(messages):
+    try:
+        file_path = PROJECT_ROOT_ + '/agent/utils/prompt/distinguish_types_prompt.jinja2'
+        template_content = await read_template_file(file_path)
+        template = Template(template_content)
+        system_prompt = template.render(user_query=messages)
+        log_prompt_rendering("status_typle", system_prompt)
+    except Exception as e:
+        logger.error(f"Template rendering failed for status_typle (distinguish_types_prompt.jinja2): {e}", exc_info=True)
+        return {
+            "type": "error",
+            "message": f"Prompt rendering failed: {str(e)}"
+        }
+
+    llm_client = get_llm_client(SELECTED_LLM_ID)
+
+    class DistinguishTypeResponse(BaseModel):
+        type: str
+
+    structured = await llm_client.response_structured(
+        messages=[{"role": "system", "content": system_prompt}],
+        response_model=DistinguishTypeResponse
+    )
+    return structured.model_dump()
+
+def extract_content_from_search_result(result: dict) -> str:
+    """
+    Extract only meaningful content from search results, dropping all metadata.
+
+    Extraction rules by node type:
+    - Statements: extract 'statement' field
+    - Entities: extract 'name' and 'fact_summary' fields
+    - Summaries: extract 'content' field
+    - Chunks: extract 'content' field
+
+    Args:
+        result: Search result dictionary
+
+    Returns:
+        Clean content string without metadata
+    """
+    if not isinstance(result, dict):
+        return str(result)
+
+    content_parts = []
+
+    # Statements: extract statement field
+    if 'statement' in result and result['statement']:
+        content_parts.append(result['statement'])
+
+    # Summaries/Chunks: extract content field
+    if 'content' in result and result['content']:
+        content_parts.append(result['content'])
+
+    # Entities: extract name and fact_summary
+    # if 'name' in result and result['name']:
+    #     content_parts.append(result['name'])
+    #     if result.get('fact_summary'):
+    #         content_parts.append(result['fact_summary'])
+
+    # Return concatenated content or empty string
+    return '\n'.join(content_parts) if content_parts else ""
+
+
+async def hybrid_search(
+        group_id: str,
+        question: str,
+        limit: int = 5,
+        search_type: str = "hybrid",
+        include: List[str] = None,
+        rerank_alpha: float = 0.4,
+        output_path: str = "search_results.json"
+    ):
+    """
+    Configurable hybrid search function.
+
+    Args:
+        group_id: Group identifier for filtering results
+        question: Search query text
+        limit: Maximum number of results to return (default: 5)
+        search_type: Type of search - "hybrid", "keyword", or "embedding" (default: "hybrid")
+        include: List of result types to include (default: ["statements", "chunks", "entities", "summaries"])
+        rerank_alpha: Weight for BM25 scores in reranking (default: 0.2)
+        output_path: Path to save search results (default: "search_results.json")
+
+    Returns:
+        Tuple of (answer_list, cleaned_query)
+    """
+    if include is None:
+        include = ["statements", "chunks", "entities", "summaries"]
+
+    # 清洗查询，移除包裹引号与换行，避免日志显示异常
+    q = str(question).strip()
+    if (q.startswith("'") and q.endswith("'")) or (
+        q.startswith('"') and q.endswith('"')
+    ):
+        q = q[1:-1]
+    q = q.replace('\r', ' ').replace('\n', ' ').strip()
+    # Lucene 转义，避免 fulltext 解析异常
+    q = escape_lucene_query(q)
+
+    answer = await run_hybrid_search(
+        query_text=q,
+        search_type=search_type,
+        group_id=group_id,
+        limit=limit,
+        include=include,
+        output_path=output_path,
+        rerank_alpha=rerank_alpha
+    )
+
+    # Extract results based on search type and include parameter
+    # Prioritize summaries as they contain synthesized contextual information
+    answer_list = []
+
+    # For hybrid search, use reranked_results
+    if search_type == "hybrid":
+        reranked_results = answer.get('reranked_results', {})
+
+        # retrieve_info = []
+        # Priority order: summaries first (most contextual), then statements, chunks, entities
+        priority_order = ['summaries', 'statements', 'chunks', 'entities']
+
+        for category in priority_order:
+            if category in include and category in reranked_results:
+                category_results = reranked_results[category]
+                if isinstance(category_results, list):
+                    answer_list.extend(category_results)
+        #         if category == 'statements':
+        #             data = [{
+        #                 'id':category_result.get('id', ''),
+        #                 'statement': category_result.get('statement', ''),
+        #                 "group_id": category_result.get('group_id', ''),
+        #                 "chunk_id": category_result.get('chunk_id', ''),
+        #                 "created_at": category_result.get('created_at', ''),
+        #                 "expired_at": category_result.get('expired_at', ''),
+        #                 "valid_at": category_result.get('valid_at', ''),
+        #                 "invalid_at": category_result.get('invalid_at', ''),
+        #                 "entity_ids": category_result.get('entity_ids', [])
+        #             } for category_result in category_results]
+        #             retrieve_info.extend(data)
+
+        # aaa = await write_to_database(host_id=group_id, data=retrieve_info)
+        # logger.info(f"检索信息写入数据库结果==>>:{aaa}")
+    else:
+        # For keyword or embedding search, results are directly in answer dict
+        # Apply same priority order
+        priority_order = ['summaries', 'statements', 'chunks', 'entities']
+
+        for category in priority_order:
+            if category in include and category in answer:
+                category_results = answer[category]
+                if isinstance(category_results, list):
+                    answer_list.extend(category_results)
+
+    # Extract clean content from all results
+    content_list = [extract_content_from_search_result(ans) for ans in answer_list]
+    # Filter out empty strings and join with newlines
+    clean_content = '\n'.join([c for c in content_list if c])
+
+    logger.info(f"检索接口搜索结果==>>:{clean_content[:200]}...")  # Log first 200 chars
+
+    # Return clean content string and cleaned query
+    return clean_content, q
+
+@mcp.tool()
+async def Data_type_differentiation( context: str) -> dict:
+    """
+    This tool is used to distinguish the type of data. Is it a read type or a write type
+    Args:
+        text(dict): Output whether to read or write based on the type field
+    Returns:dict: {'context':内容，'type': 'read'/'write'}
+    """
+    return {"context": context}
+
+@mcp.tool()
+async def Data_write(content: str,user_id: str,apply_id:str,group_id:str) -> dict:
+    """
+    This tool is used to write data from the database
+    Args:
+        content(str): Output the data database wirte status
+        user_id(str),
+        apply_id(str),
+        group_id(str),
+    Returns:dict:{"status": "success", "saved_to": file_path, "data": content}
+    """
+
+    os.makedirs("data_output", exist_ok=True)
+    file_path = os.path.join("data_output", "user_data.csv")
+
+    try:
+        await write(content,user_id,apply_id,group_id)
+        logger.info(f"写入成功！")
+    except Exception as e:
+        logger.error(f"写入失败: {e}")
+        return {"status": "error", "message": str(e)}
+
+    return {"status": "success", "saved_to": file_path, "data": content}
+
+@mcp.tool()
+async def Split_The_Problem(sentence: str, sessionid: str, messages_id: str,apply_id:str,group_id:str) -> dict:
+    """
+    Segment the dialogue or sentence
+    Args:
+        sentence (str): Original sentence
+        sessionid(str):id
+        messages_id(str):messages_ids
+        apply_id(str)
+        group_id(str)
+    """
+    start=time.time()
+    user_id=sessionid.split('_id_')[1]
+    history = store.find_user_apply_group(user_id,apply_id,group_id)
+    history = []
+
+    try:
+        file_path = PROJECT_ROOT_ + '/agent/utils/prompt/problem_breakdown_prompt.jinja2'
+        template_content = await read_template_file(file_path)
+        template = Template(template_content)
+        system_prompt = template.render(history=history, sentence=sentence)
+        log_prompt_rendering("split_the_problem", system_prompt)
+    except Exception as e:
+        logger.error(f"Template rendering failed for Split_The_Problem (problem_breakdown_prompt.jinja2): {e}", exc_info=True)
+        return {
+            "context": json.dumps([], ensure_ascii=False),
+            "original": sentence,
+            "error": f"Prompt rendering failed: {str(e)}"
+        }
+
+    llm_client = get_llm_client(SELECTED_LLM_ID)
+
+    class ProblemBreakdownItem(BaseModel):
+        id: str
+        question: str
+        type: str
+        reason: str | None = None
+
+    class ProblemBreakdownResponse(RootModel[List[ProblemBreakdownItem]]):
+        pass
+
+    structured = await llm_client.response_structured(
+        messages=[{"role": "system", "content": system_prompt}],
+        response_model=ProblemBreakdownResponse
+    )
+    # 将结构化数组转成 JSON 字符串以兼容后续解析逻辑
+    # Handle both RootModel and regular response formats
+    if structured is None:
+        # LLM returned None, use empty list as fallback
+        split_result = json.dumps([], ensure_ascii=False)
+    elif hasattr(structured, 'root') and structured.root is not None:
+        split_result = json.dumps([item.model_dump() for item in structured.root], ensure_ascii=False)
+    elif isinstance(structured, list):
+        # Fallback: treat structured itself as the list
+        split_result = json.dumps([item.model_dump() for item in structured], ensure_ascii=False)
+    else:
+        # Last resort: try to serialize structured directly
+        split_result = json.dumps([], ensure_ascii=False)
+    logger.info(f"问题拆分")
+
+    end=time.time()
+    try:
+        duration = end - start
+    except Exception:
+        duration = 0.0
+    log_time('问题拆分', duration)
+    logger.info(f"问题拆分结果==>>:{split_result}")
+    return {"context": split_result,"original":sentence}
+
+@mcp.tool()
+async  def Problem_Extension(context: dict,usermessages:str,apply_id:str,group_id:str)-> dict:
+    """
+    This tool is used to extend the problem
+    Args:
+        context(dict): Output a set of sub-questions that expand on the original question
+        usermessages(str):usermessages
+    """
+
+    start=time.time()
+    sessionid = Resolve_username(usermessages)
+    history = store.find_user_apply_group(sessionid,apply_id,group_id)
+    history = []
+    extent_quest, original = await Problem_Extension_messages_deal(context)
+
+    try:
+        file_path = PROJECT_ROOT_ + '/agent/utils/prompt/Problem_Extension_prompt.jinja2'
+        system_prompt=await read_template_file(file_path)
+        template = Template(system_prompt)
+
+        # Format extent_quest for template rendering
+        questions_formatted = []
+        for msg in extent_quest:
+            if msg.get("role") == "user":
+                questions_formatted.append(msg.get("content", ""))
+
+        final_prompt_extension = template.render(history=history, questions=questions_formatted)
+        log_prompt_rendering("problem_extension", final_prompt_extension)
+    except Exception as e:
+        logger.error(f"Template rendering failed for Problem_Extension (Problem_Extension_prompt.jinja2): {e}", exc_info=True)
+        return {
+            "context": {},
+            "original": original,
+            "error": f"Prompt rendering failed: {str(e)}"
+        }
+
+    llm_client = get_llm_client(SELECTED_LLM_ID)
+
+    # 结构化响应模型（与提示中要求的键一致）
+
+
+    class ExtendedQuestionItem(BaseModel):
+        original_question: str = Field(..., description="原始初步问题")
+        extended_question: str = Field(..., description="扩展后的问题")
+        type: str = Field(..., description="类型（事实检索 / 澄清 / 定义 / 比较 / 行动建议等）")
+        reason: str = Field(..., description="生成该扩展问题的理由")
+
+    # 顶层为数组的响应模型（RootModel-only）
+    class ProblemExtensionResponse(RootModel[List[ExtendedQuestionItem]]):
+        pass
+
+    # 使用结构化响应接口，避免非结构化 JSON 解析
+    response_content = await llm_client.response_structured(
+        messages=[{"role": "system", "content": final_prompt_extension}],
+        response_model=ProblemExtensionResponse
+    )
+
+    aggregated_dict = {}
+    for item in response_content.root:
+        key = getattr(item, "original_question", None) or (item.get("original_question") if isinstance(item, dict) else None)
+        value = getattr(item, "extended_question", None) or (item.get("extended_question") if isinstance(item, dict) else None)
+        if not key or not value:
+            continue
+        aggregated_dict.setdefault(key, []).append(value)
+    logger.info(f"问题扩展")
+    end=time.time()
+    try:
+        duration = end - start
+    except Exception:
+        duration = 0.0
+    log_time('问题扩展', duration)
+    logger.info(f"问题扩展==>>:{aggregated_dict}")
+    return {"context": aggregated_dict,'original':original}
+
+@mcp.tool()
+async def Retrieve(context, usermessages: str,apply_id:str,group_id:str) -> dict:
+    """
+    This tool is used to retrieve data from the database and context
+    Args:
+        context(dict): Output the data  retrieval
+        usermessages(str):usermessages
+        apply_id(str)
+        group_id(str)
+    """
+
+    start = time.time()
+    # group_id = RUNTIME_CONFIG['selections']['group_id']
+    databases_anser = []
+    # 允许 context 为 dict 或 str；当为 str（如“你好”）时走简化检索
+    if isinstance(context, dict):
+        all_items = []
+        content, original = await Retriev_messages_deal(context)
+        # content 形如 {original_question: [extended_questions...], ...}
+        # 某些情况下 values 可能是字符串而非列表，直接 extend 会被按字符分裂
+        for key, values in content.items():
+            if isinstance(values, list):
+                all_items.extend(values)
+            elif isinstance(values, str):
+                all_items.append(values)
+            elif values is not None:
+                # 兜底：将非空的非列表值转成字符串作为一个查询项
+                all_items.append(str(values))
+        for question in all_items:
+            try:
+                clean_content, question = await hybrid_search(group_id, question)
+                # hybrid_search already returns clean content string, no need to iterate
+                databases_anser.append({"Query_small": question, "Result_small": clean_content})
+            except Exception as e:
+                logger.error(f"Retrieve: hybrid_search 失败，回退空结果：{e}", exc_info=True)
+        databases_data = {"Query": original, 'Expansion_issue': databases_anser}
+        deduplicated_data = deduplicate_entries(databases_data['Expansion_issue'])
+        deduplicated_data_merged = merge_to_key_value_pairs(deduplicated_data, 'Query_small', 'Result_small')
+        keys, val = [], []
+        for item in deduplicated_data_merged:
+            for items_key, items_value in item.items():
+                keys.append(items_key)
+                val.append(items_value)
+        send_verify = []
+        for i, j in zip(keys, val):
+            send_verify.append({"Query_small": i, "Answer_Small": j})
+        dup_databases = {"Query": original, 'Expansion_issue': send_verify}
+    else:
+        # context 为纯文本时的回退流程
+        query = str(context).strip()
+
+        # Do one search with the query
+        try:
+            clean_content, query = await hybrid_search(group_id, query)
+            # Keep structure for Verify/Retrieve_Summary compatibility
+            dup_databases = {"Query": query, "Expansion_issue": [{"Query_small": query, "Answer_Small": clean_content}]}
+        except Exception as e:
+            logger.error(f"Retrieve: hybrid_search 失败，回退空结果：{e}", exc_info=True)
+            dup_databases = {"Query": query, "Expansion_issue": []}
+
+
+    end = time.time()
+    try:
+        duration = end - start
+    except Exception:
+        duration = 0.0
+    log_time('检索', duration)
+
+    logger.info(f"检索==>>:Query={dup_databases.get('Query', '')}, Expansion_issue count={len(dup_databases.get('Expansion_issue', []))}")
+
+    return {"context": dup_databases}
+
+@mcp.tool()
+async def Verify(context: dict,usermessages:str,apply_id:str,group_id:str) -> dict:
+    """
+    This tool is used to verify the data
+    Args:
+        verify_data(dict): Output the data verification
+        usermessages(str):usermessages
+        apply_id(str)
+        group_id(str)
+    """
+    query_list=[]
+    start=time.time()
+    # file_path = PROJECT_ROOT_ + '/agent/utils/prompt/split_verify_prompt.jinja2'
+    file_path = PROJECT_ROOT_ + '/agent/utils/prompt/split_verify_prompt.jinja2'
+    system_prompt = await read_template_file(file_path)
+    sessionid = Resolve_username(usermessages)
+    history = store.find_user_apply_group(sessionid,apply_id,group_id)
+
+    Query_small, Result_small, query=await Verify_messages_deal(context)
+    for query_small, anser in zip(Query_small, Result_small):
+        query_list.append({'Query_small': query_small, 'Answer_Small': anser})
+    messages = {"Query": query, "Expansion_issue": query_list}
+
+    # 调用验证的工作流（异步）
+    verify_tool = VerifyTool(system_prompt, messages)
+    verify_result = await verify_tool.verify()
+    # messages_deal = await Retrieve_verify_tool_messages_deal(verify_result, history, query)
+    # 解析 LLM 验证结果，兜底避免出现 500
+    try:
+        messages_deal = await Retrieve_verify_tool_messages_deal(verify_result, history, query)
+    except Exception as e:
+        logger.error(f"Retrieve_verify_tool_messages_deal 解析失败：{e}")
+        messages_deal = {
+            "data": {"query": query, "expansion_issue": []},
+            "split_result": "failed",
+            "reason": str(e),
+            "history": history,
+        }
+    end=time.time()
+    try:
+        duration = end - start
+    except Exception:
+        duration = 0.0
+    log_time('验证', duration)
+
+    logger.info(f"验证==>>:{messages_deal}")
+
+    return {"status": "success", "verified_data": messages_deal}
+
+@mcp.tool()
+async def Summary(context: str,usermessages:str,apply_id:str,group_id:str) -> dict:
+    """
+    This tool is used to summarize the data
+    Args:
+        context(str): Output the data summary
+        usermessages(str):usermessages
+        apply_id(str)
+        group_id(str)
+    """
+    try:
+        start=time.time()
+        sessionid = Resolve_username(usermessages)
+        answer_small, query=await Summary_messages_deal(context)
+        history = store.find_user_apply_group(sessionid,apply_id,group_id)
+        history = []
+
+        data = {
+            "query": query,
+            "history": history,
+            "retrieve_info": answer_small
+        }
+    except Exception as e:
+        logger.error(f"Summary: 初始化失败：{e}", exc_info=True)
+        return {
+            "status": "error",
+            "summary_result": "信息不足，无法回答"
+        }
+
+    try:
+        file_path = PROJECT_ROOT_ + '/agent/utils/prompt/summary_prompt.jinja2'
+        template_content = await read_template_file(file_path)
+        template = Template(template_content)
+        system_prompt = template.render(data=data, query=query)
+        log_prompt_rendering("summary", system_prompt)
+    except Exception as e:
+        logger.error(f"Template rendering failed for Summary (summary_prompt.jinja2): {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"Prompt rendering failed: {str(e)}"
+        }
+
+    llm_client = get_llm_client(SELECTED_LLM_ID)
+
+    class SummaryData(BaseModel):
+        query: str
+        history: List[str] = Field(default_factory=list)
+        retrieve_info: List[str] = Field(default_factory=list)
+
+    class SummaryResponse(BaseModel):
+        data: SummaryData
+        query_answer: str
+
+    structured = await llm_client.response_structured(
+        messages=[{"role": "system", "content": system_prompt}],
+        response_model=SummaryResponse
+    )
+    aimessages = structured.query_answer or ""
+    if '信息不足，无法回答' in str(aimessages):
+        aimessages = ''
+
+    try:
+        store.save_session(
+            userid=sessionid,
+            messages=query,
+            apply_id=apply_id,
+            group_id=group_id,
+            aimessages=aimessages
+        )
+        logger.info(f"sessionid: {aimessages} 写入成功")
+    except Exception as e:
+        logger.error(f"sessionid: {sessionid} 写入失败，错误信息：{str(e)}", exc_info=True)
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+    store.delete_duplicate_sessions()
+    if aimessages == '': aimessages = '信息不足，无法回答'
+    end=time.time()
+    try:
+        duration = end - start
+    except Exception:
+        duration = 0.0
+    log_time('总结', duration)
+    logger.info(f"验证之后的总结==>>:{aimessages}")
+    return {
+        "status": "success",
+        "summary_result": aimessages
+    }
+
+@mcp.tool()
+async def Retrieve_Summary(context: dict, usermessages: str,apply_id:str,group_id:str) -> dict:
+    """
+    Args:
+        context(dict): context data from Retrieve containing Query and Expansion_issue
+        usermessages(str): user messages identifier
+        apply_id(str)
+        group_id(str)
+    Returns: dict: summary result
+    """
+    print("Retrieve_Summary context:", context)
+    try:
+        start=time.time()
+        sessionid = Resolve_username(usermessages)
+
+        # Handle both 'content' and 'context' keys (LangGraph uses 'content')
+        if isinstance(context, dict):
+            if "content" in context:
+                inner = context["content"]
+                # If it's a JSON string, parse it
+                if isinstance(inner, str):
+                    import json
+
+                    # The content should be valid JSON, but might be escaped
+                    try:
+                        parsed = json.loads(inner)
+                        logger.info(f"Retrieve_Summary: successfully parsed JSON")
+                    except json.JSONDecodeError:
+                        # The string might have escaped characters like \\n instead of \n
+                        # Use encode/decode to unescape
+                        try:
+                            # Decode the string as if it were a Python string literal
+                            unescaped = inner.encode('utf-8').decode('unicode_escape')
+                            parsed = json.loads(unescaped)
+                            logger.info(f"Retrieve_Summary: parsed after unescaping")
+                        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                            logger.error(f"Retrieve_Summary: parsing failed even after unescape: {e}")
+                            context_dict = {"Query": "", "Expansion_issue": []}
+                            parsed = None
+
+                    if parsed:
+                        # Check if parsed has 'context' wrapper
+                        if isinstance(parsed, dict) and "context" in parsed:
+                            context_dict = parsed["context"]
+                        else:
+                            context_dict = parsed
+                elif isinstance(inner, dict):
+                    context_dict = inner
+                else:
+                    context_dict = {"Query": "", "Expansion_issue": []}
+            elif "context" in context:
+                context_dict = context["context"] if isinstance(context["context"], dict) else context
+            else:
+                context_dict = context
+        else:
+            context_dict = {"Query": "", "Expansion_issue": []}
+
+        query = context_dict.get("Query", "")
+        expansion_issue = context_dict.get("Expansion_issue", [])
+
+        # Extract retrieve_info from expansion_issue
+        retrieve_info = []
+        for item in expansion_issue:
+            # Check for both Answer_Small and Answer_Samll (typo) for backward compatibility
+            answer = None
+            if isinstance(item, dict):
+                if "Answer_Small" in item:
+                    answer = item["Answer_Small"]
+                elif "Answer_Samll" in item:
+                    answer = item["Answer_Samll"]
+
+                if answer is not None:
+                    # Handle both string and list formats
+                    if isinstance(answer, list):
+                        # Join list of characters/strings into a single string
+                        retrieve_info.append(''.join(str(x) for x in answer))
+                    elif isinstance(answer, str):
+                        retrieve_info.append(answer)
+                    else:
+                        retrieve_info.append(str(answer))
+
+        # Join all retrieve_info into a single string
+        retrieve_info_str = '\n\n'.join(retrieve_info) if retrieve_info else ""
+
+        history = store.find_user_apply_group(sessionid,apply_id,group_id)
+        history = []
+
+    except Exception as e:
+        logger.error(f"Retrieve_Summary: 初始化失败：{e}", exc_info=True)
+        return {
+            "status": "error",
+            "summary_result": "信息不足，无法回答"
+        }
+
+    try:
+        file_path = PROJECT_ROOT_ + '/agent/utils/prompt/Retrieve_Summary_prompt.jinja2'
+        template_content = await read_template_file(file_path)
+        template = Template(template_content)
+        system_prompt = template.render(query=query, history=history, retrieve_info=retrieve_info_str)
+        log_prompt_rendering("retrieve_summary", system_prompt)
+    except Exception as e:
+        logger.error(f"Template rendering failed for Retrieve_Summary (Retrieve_Summary_prompt.jinja2): {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"Prompt rendering failed: {str(e)}"
+        }
+
+    from pydantic import BaseModel, Field
+    class RetrieveSummaryData(BaseModel):
+        query_answer: str = Field(default="")
+    class RetrieveSummaryResponse(BaseModel):
+        data: RetrieveSummaryData
+
+    try:
+        llm_client = get_llm_client(SELECTED_LLM_ID)
+        structured = await llm_client.response_structured(
+            messages=[{"role": "system", "content": system_prompt}],
+            response_model=RetrieveSummaryResponse
+        )
+        # print(structured)
+        aimessages = structured.data.query_answer or ""
+        if '信息不足，无法回答' in str(aimessages):
+            aimessages=''
+        else:
+            aimessages=aimessages
+    except Exception as e:
+        logger.error(f"Retrieve_Summary: LLM调用失败：{e}", exc_info=True)
+        aimessages = ""
+
+    try:
+        store.save_session(
+            userid=sessionid,
+            messages=query,
+            apply_id=apply_id,
+            group_id=group_id,
+            aimessages=aimessages
+        )
+        logger.info(f"sessionid: {aimessages} 写入成功")
+    except Exception as e:
+        logger.error(f"sessionid: {sessionid} 写入失败，错误信息：{str(e)}", exc_info=True)
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+    store.delete_duplicate_sessions()
+    if aimessages=='':aimessages='信息不足，无法回答'
+    end=time.time()
+    try:
+        duration = end - start
+    except Exception:
+        duration = 0.0
+    log_time('检索总结', duration)
+
+    logger.info(f"检索之后的总结==>>:{aimessages}")
+    return {
+        "status": "success",
+        "summary_result": aimessages
+    }
+
+@mcp.tool()
+async def Input_Summary(context: str, usermessages: str, search_switch: str, apply_id: str, group_id: str) -> dict:
+    """
+
+       Args:
+           context(str): failure context
+           usermessages(str): user messages identifier
+           search_switch(str): search switch value for routing
+           apply_id(str)
+           group_id(str)
+       Returns: dict: failure status and message
+       """
+
+    # group_id = RUNTIME_CONFIG['selections']['group_id']
+    start=time.time()
+    sessionid = Resolve_username(usermessages) or ""
+    sessionid = sessionid.replace('call_id_', '')
+    history = store.find_user_apply_group(str(sessionid),str(apply_id),str(group_id))
+    history = []
+
+    # 检查Redis连接状态
+    try:
+        store.r.ping()
+        logger.info("Redis连接正常")
+    except Exception as e:
+        logger.error(f"Redis连接异常: {e}", exc_info=True)
+    file_path = PROJECT_ROOT_ + '/agent/utils/prompt/Retrieve_Summary_prompt.jinja2'
+    template_content = await read_template_file(file_path)
+
+    # 可靠地提取 sentence 字段内容并清理
+    try:
+        match = re.search(r"'sentence':\s*(.*?)\s*,\s*'sessionid'", context)
+        query = match.group(1) if match else context
+    except Exception:
+        query = context
+    # 去除可能的引号和空白
+    query = str(query).strip().strip("\"'")
+
+    # 安全调用检索，失败则回退为空检索
+    try:
+        logger.info(f"search_switch: {search_switch}")
+        if(search_switch == '2'):
+            retrieve_info, question = await hybrid_search(group_id, query, include=["summaries"])
+            logger.info(f"Input_Summary: 使用 summary 进行检索")
+        else:
+            retrieve_info, question = await hybrid_search(group_id, query)
+    except Exception as e:
+        logger.error(f"Input_Summary: hybrid_search 失败，回退空结果：{e}", exc_info=True)
+        retrieve_info, question = "", query
+
+    logger.debug(f"retrieve_info: {retrieve_info[:200] if retrieve_info else 'empty'}...")
+
+    template = Template(template_content)
+    system_prompt = template.render(query=query, history=history, retrieve_info=retrieve_info)
+    log_prompt_rendering("input_summary", system_prompt)
+
+    from pydantic import BaseModel, Field
+    class RetrieveSummaryData(BaseModel):
+        query_answer: str = Field(default="")
+    class RetrieveSummaryResponse(BaseModel):
+        data: RetrieveSummaryData
+
+    llm_client = get_llm_client(SELECTED_LLM_ID)
+    try:
+        structured = await llm_client.response_structured(
+            messages=[{"role": "system", "content": system_prompt}],
+            response_model=RetrieveSummaryResponse
+        )
+        aimessages = structured.data.query_answer or "信息不足，无法回答"
+    except Exception as e:
+        logger.error(f"Input_Summary: response_structured 失败，回退默认答案：{e}", exc_info=True)
+        aimessages = "信息不足，无法回答"
+    end=time.time()
+    logger.info(f"快速答案总结==>>:{aimessages}")
+    try:
+        duration = end - start
+    except Exception:
+        duration = 0.0
+    log_time('检索', duration)
+    return {
+        "query_answer": aimessages
+    }
+
+@mcp.tool()
+async def Summary_fails(context: str, usermessages: str,apply_id:str,group_id:str) -> dict:
+    """
+    This tool is used when the workflow fails to generate a summary
+    Args:
+        context(str): failure context
+        usermessages(str): user messages identifier
+        apply_id(str)
+        group_id(str)
+    Returns: dict: failure status and message
+    """
+    logger.debug(f"Summary_fails called with apply_id: {apply_id}, group_id: {group_id}")
+    usermessages = usermessages.split('_')[1:]
+    sessionid = '_'.join(usermessages[:-1])
+    store.delete_duplicate_sessions()
+    logger.info(f"没有相关数据")
+    return {
+        "query_answer": f"没有相关数据"
+    }
+
+
+if __name__ == "__main__":
+    # 初始化并运行 server
+    mcp.run(transport='sse')
