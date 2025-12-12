@@ -1,6 +1,7 @@
 # MemoryBear 让AI拥有如同人类一样的记忆
 ### [安装教程](#memorybear安装教程)
 ### <a href="./memorybear_EN .pdf" target="_blank">English Documentation</a>
+[memorybear_EN .pdf](https://github.com/user-attachments/files/24122199/memorybear_EN.pdf)
 ## 项目简介
 MemoryBear是红熊AI自主研发的新一代AI记忆系统，其核心突破在于跳出传统知识“静态存储”的局限，以生物大脑认知机制为原型，构建了具备“感知-提炼-关联-遗忘”全生命周期的智能知识处理体系。该系统致力于让机器摆脱“信息堆砌”的困境，实现对知识的深度理解与自主进化，成为人类认知协作的核心伙伴。
 
