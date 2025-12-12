@@ -1,13 +1,14 @@
-import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App } from 'antd';
+import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
+import { Form, Input, App, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { SpaceModalData, SpaceModalRef, Space } from '../types'
 import RbModal from '@/components/RbModal'
 import { createWorkspace } from '@/api/workspaces'
 import RadioGroupCard from '@/components/RadioGroupCard'
-import { getModelListUrl } from '@/api/models'
+import { getModelListUrl, getModelList } from '@/api/models'
 import CustomSelect from '@/components/CustomSelect'
+import type { Model } from '@/views/ModelManagement/types'
 
 const FormItem = Form.Item;
 
@@ -28,6 +29,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   const [form] = Form.useForm<SpaceModalData>();
   const [loading, setLoading] = useState(false)
   const [editVo, setEditVo] = useState<Space | null>(null)
+  const [modelList, setModelList] = useState<Model[]>([])
 
   const values = Form.useWatch([], form);
 
@@ -73,6 +75,21 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
       });
   }
 
+  useEffect(() => {
+    getModels()
+  }, [])
+  
+  const getModels = () => {
+    const requests = [getModelList({ type: 'llm', pagesize: 100, page: 1 }), getModelList({ type: 'chat', pagesize: 100, page: 1 })]
+    Promise.all(requests)
+      .then(responses => {
+        const [chatRes, modelRes] = responses as { items: Model[] }[]
+        const chatList = chatRes.items || []
+        const modelList = modelRes.items || []
+        setModelList([...chatList, ...modelList])
+      })
+  }
+
   // 暴露给父组件的方法
   useImperativeHandle(ref, () => ({
     handleOpen,
@@ -104,13 +121,13 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
           name="llm"
           rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
-          <CustomSelect
-            url={getModelListUrl}
-            params={{ type: 'llm', pagesize: 100 }}
-            valueKey="id"
-            labelKey="name"
-            hasAll={false}
-            style={{width: '100%'}}
+          <Select
+            placeholder={t('common.pleaseSelect')}
+            fieldNames={{
+              label: 'name',
+              value: 'id',
+            }}
+            options={modelList}
           />
         </Form.Item>
         <Form.Item 

@@ -486,17 +486,17 @@ class DraftRunService:
             # 添加网络搜索工具
             if web_search:
                 if agent_config.tools:
-                    web_search = agent_config.tools.get("web_search", {})
-                    web_search_enable = web_search.get("enable", False)
+                    web_search_config = agent_config.tools.get("web_search", {})
+                    web_search_enable = web_search_config.get("enabled", False)
 
                     if web_search_enable:
-                        logger.info("网络搜索已启用（流式）")
+                        logger.info("网络搜索已启用")
                         # 创建网络搜索工具
-                        search_tool = create_web_search_tool(web_search)
+                        search_tool = create_web_search_tool(web_search_config)
                         tools.append(search_tool)
 
                         logger.debug(
-                            "已添加网络搜索工具（流式）",
+                            "已添加网络搜索工具",
                             extra={
                                 "tool_count": len(tools)
                             }
@@ -509,7 +509,7 @@ class DraftRunService:
                 kb_ids = bool(knowledge_bases and knowledge_bases[0].get("kb_id"))
                 if kb_ids:
                     # 创建知识库检索工具
-                    kb_tool = create_knowledge_retrieval_tool(kb_config,kb_ids,user_id)
+                    kb_tool = create_knowledge_retrieval_tool(kb_config, kb_ids, user_id)
                     tools.append(kb_tool)
 
                     logger.debug(
@@ -519,10 +519,10 @@ class DraftRunService:
                             "tool_count": len(tools)
                         }
                     )
-
             # 添加长期记忆工具
             if memory:
                 if agent_config.memory and agent_config.memory.get("enabled"):
+
                     memory_config = agent_config.memory
                     if user_id:
                         # 创建长期记忆工具
@@ -536,6 +536,7 @@ class DraftRunService:
                                 "tool_count": len(tools)
                             }
                         )
+
 
             # 4. 创建 LangChain Agent
             agent = LangChainAgent(
@@ -1207,16 +1208,20 @@ class DraftRunService:
     ) -> AsyncGenerator[str, None]:
         """多模型对比试运行（流式返回）
 
-        支持并行或串行执行，通过 model_index 区分不同模型的事件
+        参考 run_compare 的实现，支持并行或串行执行
 
         Args:
             agent_config: Agent 配置
-            models: 模型配置列表
+            models: 模型配置列表，每项包含 model_config, parameters, label, model_config_id
             message: 用户消息
             workspace_id: 工作空间ID
             conversation_id: 会话ID
             user_id: 用户ID
             variables: 变量参数
+            storage_type: 存储类型
+            user_rag_memory_id: RAG 记忆 ID
+            web_search: 是否启用网络搜索
+            memory: 是否启用记忆
             parallel: 是否并行执行
             timeout: 超时时间（秒）
 
@@ -1228,10 +1233,6 @@ class DraftRunService:
             extra={"model_count": len(models), "parallel": parallel}
         )
 
-        # 确保有 conversation_id
-        if not conversation_id:
-            conversation_id = str(uuid.uuid4())
-
         # 发送开始事件
         yield self._format_sse_event("compare_start", {
             "conversation_id": conversation_id,
@@ -1242,184 +1243,189 @@ class DraftRunService:
 
         results = []
 
-        if parallel:
-            # 并行执行所有模型
-            import asyncio
+        async def run_single_model_stream(idx: int, model_info: Dict[str, Any], event_queue: asyncio.Queue):
+            """运行单个模型（流式）并将事件放入队列"""
+            model_label = model_info["label"]
+            model_config_id = str(model_info["model_config_id"])
+            # 使用模型自己的 conversation_id，如果没有则使用全局的
+            model_conversation_id = model_info.get("conversation_id") or conversation_id
 
-            # 创建事件队列用于收集所有模型的事件
-            event_queue = asyncio.Queue()
+            try:
+                # 发送模型开始事件
+                await event_queue.put(self._format_sse_event("model_start", {
+                    "model_index": idx,
+                    "model_config_id": model_config_id,
+                    "model_name": model_info["model_config"].name,
+                    "label": model_label,
+                    "conversation_id": model_conversation_id,
+                    "timestamp": time.time()
+                }))
 
-            async def run_single_model_stream(idx: int, model_info: Dict[str, Any]):
-                """运行单个模型并将事件放入队列"""
-                model_label = model_info["label"]
-                model_config_id = str(model_info["model_config_id"])
-                # 使用模型自己的 conversation_id，如果没有则使用全局的
-                model_conversation_id = model_info.get("conversation_id") or conversation_id
+                start_time = time.time()
+                full_content = ""
+                returned_conversation_id = model_conversation_id
+
+                # 临时修改参数
+                original_params = agent_config.model_parameters
+                agent_config.model_parameters = model_info["parameters"]
 
                 try:
-                    # 发送模型开始事件
-                    await event_queue.put(self._format_sse_event("model_start", {
-                        "model_index": idx,
-                        "model_config_id": model_config_id,
-                        "model_name": model_info["model_config"].name,
-                        "label": model_label,
-                        "conversation_id": model_conversation_id,
-                        "timestamp": time.time()
-                    }))
+                    # 流式调用单个模型
+                    async for event_str in self.run_stream(
+                        agent_config=agent_config,
+                        model_config=model_info["model_config"],
+                        message=message,
+                        workspace_id=workspace_id,
+                        conversation_id=model_conversation_id,
+                        user_id=user_id,
+                        variables=variables,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        web_search=web_search,
+                        memory=memory
+                    ):
+                        # 解析原始事件
+                        try:
+                            lines = event_str.strip().split('\n')
+                            event_type = None
+                            event_data = None
 
-                    start_time = time.time()
-                    full_content = ""
+                            for line in lines:
+                                if line.startswith('event: '):
+                                    event_type = line[7:].strip()
+                                elif line.startswith('data: '):
+                                    event_data = json.loads(line[6:])
 
-                    # 临时修改参数（并行任务中安全）
-                    original_params = agent_config.model_parameters
-                    agent_config.model_parameters = model_info["parameters"]
+                            # 从 start 事件中获取实际的 conversation_id
+                            if event_type == "start" and event_data:
+                                conv_id = event_data.get("conversation_id")
+                                if conv_id:
+                                    returned_conversation_id = conv_id
 
-                    try:
-                        # 流式调用单个模型
-                        async for event_str in self.run_stream(
-                            agent_config=agent_config,
-                            model_config=model_info["model_config"],
-                            message=message,
-                            workspace_id=workspace_id,
-                            conversation_id=model_conversation_id,
-                            user_id=user_id,
-                            variables=variables,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            web_search=web_search,
-                            memory=memory
-                        ):
-                            # 解析原始事件
-                            try:
-                                lines = event_str.strip().split('\n')
-                                event_type = None
-                                event_data = None
+                            # 累积消息内容
+                            if event_type == "message" and event_data:
+                                chunk = event_data.get("content", "")
+                                full_content += chunk
 
-                                for line in lines:
-                                    if line.startswith('event: '):
-                                        event_type = line[7:].strip()
-                                    elif line.startswith('data: '):
-                                        event_data = json.loads(line[6:])
+                                # 转发消息块事件（带模型标识）
+                                await event_queue.put(self._format_sse_event("model_message", {
+                                    "model_index": idx,
+                                    "model_config_id": model_config_id,
+                                    "label": model_label,
+                                    "conversation_id": returned_conversation_id,
+                                    "content": chunk
+                                }))
+                        except Exception as e:
+                            logger.warning(f"解析流式事件失败: {e}")
+                finally:
+                    # 恢复原始参数
+                    agent_config.model_parameters = original_params
 
-                                # 从 start 事件中获取 conversation_id
-                                if event_type == "start" and event_data:
-                                    returned_conv_id = event_data.get("conversation_id")
-                                    if returned_conv_id:
-                                        model_conversation_id = returned_conv_id
+                elapsed = time.time() - start_time
 
-                                if event_type == "message" and event_data:
-                                    chunk = event_data.get("content", "")
-                                    full_content += chunk
+                # 构建结果（参考 run_compare）
+                result = {
+                    "model_config_id": model_info["model_config_id"],
+                    "model_name": model_info["model_config"].name,
+                    "label": model_label,
+                    "conversation_id": returned_conversation_id,
+                    "parameters_used": model_info["parameters"],
+                    "message": full_content,
+                    "elapsed_time": elapsed,
+                    "error": None
+                }
 
-                                    # 转发消息块事件（带模型标识和 conversation_id）
-                                    await event_queue.put(self._format_sse_event("model_message", {
-                                        "model_index": idx,
-                                        "model_config_id": model_config_id,
-                                        "label": model_label,
-                                        "conversation_id": model_conversation_id,
-                                        "content": chunk
-                                    }))
-                            except Exception as e:
-                                logger.warning(f"解析流式事件失败: {e}")
-                    finally:
-                        # 恢复原始参数
-                        agent_config.model_parameters = original_params
+                # 发送模型完成事件
+                await event_queue.put(self._format_sse_event("model_end", {
+                    "model_index": idx,
+                    "model_config_id": model_config_id,
+                    "label": model_label,
+                    "conversation_id": returned_conversation_id,
+                    "elapsed_time": elapsed,
+                    "message_length": len(full_content),
+                    "timestamp": time.time()
+                }))
 
-                    elapsed = time.time() - start_time
+                return result
 
-                    # 模型完成
-                    result = {
-                        "model_config_id": model_info["model_config_id"],
-                        "model_name": model_info["model_config"].name,
-                        "label": model_label,
-                        "parameters_used": model_info["parameters"],
-                        "message": full_content,
-                        "elapsed_time": elapsed,
-                        "error": None
-                    }
+            except asyncio.TimeoutError:
+                logger.warning(f"模型运行超时: {model_label}")
+                result = {
+                    "model_config_id": model_info["model_config_id"],
+                    "model_name": model_info["model_config"].name,
+                    "label": model_label,
+                    "conversation_id": model_conversation_id,
+                    "parameters_used": model_info["parameters"],
+                    "elapsed_time": timeout,
+                    "error": f"执行超时（{timeout}秒）"
+                }
 
-                    # 发送模型完成事件
-                    await event_queue.put(self._format_sse_event("model_end", {
-                        "model_index": idx,
-                        "model_config_id": model_config_id,
-                        "label": model_label,
-                        "conversation_id": model_conversation_id,
-                        "elapsed_time": elapsed,
-                        "message_length": len(full_content),
-                        "timestamp": time.time()
-                    }))
+                await event_queue.put(self._format_sse_event("model_error", {
+                    "model_index": idx,
+                    "model_config_id": model_config_id,
+                    "label": model_label,
+                    "conversation_id": model_conversation_id,
+                    "error": result["error"],
+                    "timestamp": time.time()
+                }))
 
-                    return result
+                return result
 
-                except asyncio.TimeoutError:
-                    logger.warning(f"模型运行超时: {model_label}")
-                    result = {
-                        "model_config_id": model_info["model_config_id"],
-                        "model_name": model_info["model_config"].name,
-                        "label": model_label,
-                        "elapsed_time": timeout,
-                        "error": f"执行超时（{timeout}秒）"
-                    }
+            except Exception as e:
+                logger.error(f"模型运行失败: {model_label}, error: {e}")
+                result = {
+                    "model_config_id": model_info["model_config_id"],
+                    "model_name": model_info["model_config"].name,
+                    "label": model_label,
+                    "conversation_id": model_conversation_id,
+                    "parameters_used": model_info["parameters"],
+                    "elapsed_time": 0,
+                    "error": str(e)
+                }
 
-                    await event_queue.put(self._format_sse_event("model_error", {
-                        "model_index": idx,
-                        "model_config_id": model_config_id,
-                        "label": model_label,
-                        "conversation_id": model_conversation_id,
-                        "error": result["error"],
-                        "timestamp": time.time()
-                    }))
+                await event_queue.put(self._format_sse_event("model_error", {
+                    "model_index": idx,
+                    "model_config_id": model_config_id,
+                    "label": model_label,
+                    "conversation_id": model_conversation_id,
+                    "error": str(e),
+                    "timestamp": time.time()
+                }))
 
-                    return result
+                return result
 
-                except Exception as e:
-                    logger.error(f"模型运行失败: {model_label}, error: {e}")
-                    result = {
-                        "model_config_id": model_info["model_config_id"],
-                        "model_name": model_info["model_config"].name,
-                        "label": model_label,
-                        "elapsed_time": 0,
-                        "error": str(e)
-                    }
+        if parallel:
+            # 并行执行所有模型（参考 run_compare）
+            logger.debug(f"并行执行 {len(models)} 个模型（流式）")
 
-                    await event_queue.put(self._format_sse_event("model_error", {
-                        "model_index": idx,
-                        "model_config_id": model_config_id,
-                        "label": model_label,
-                        "conversation_id": model_conversation_id,
-                        "error": str(e),
-                        "timestamp": time.time()
-                    }))
-
-                    return result
+            # 创建事件队列
+            event_queue = asyncio.Queue()
 
             # 启动所有模型的并行任务
             tasks = [
-                asyncio.create_task(run_single_model_stream(idx, model_info))
+                asyncio.create_task(run_single_model_stream(idx, model_info, event_queue))
                 for idx, model_info in enumerate(models)
             ]
 
-            # 持续从队列中取出事件并发送
-            completed_count = 0
-            while completed_count < len(models):
+            # 持续从队列中取出事件并转发
+            completed_tasks = set()
+            while len(completed_tasks) < len(tasks):
                 try:
-                    # 等待事件或任务完成
+                    # 尝试从队列获取事件
                     event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
                     yield event
                 except asyncio.TimeoutError:
                     # 检查是否有任务完成
                     for task in tasks:
-                        if task.done() and task not in [t for t in tasks if hasattr(t, '_result_retrieved')]:
-                            result = await task
-                            results.append(result)
-                            task._result_retrieved = True
-                            completed_count += 1
+                        if task.done() and task not in completed_tasks:
+                            completed_tasks.add(task)
+                            try:
+                                result = await task
+                                if result:
+                                    results.append(result)
+                            except Exception as e:
+                                logger.error(f"获取任务结果失败: {e}")
                     continue
-
-            # 等待所有任务完成
-            all_results = await asyncio.gather(*tasks, return_exceptions=False)
-            results = [r for r in all_results if r not in results]
-            results.extend([r for r in all_results if r not in results])
 
             # 清空队列中剩余的事件
             while not event_queue.empty():
@@ -1430,155 +1436,58 @@ class DraftRunService:
                     break
 
         else:
-            # 串行执行每个模型
+            # 串行执行每个模型（参考 run_compare）
+            logger.debug(f"串行执行 {len(models)} 个模型（流式）")
+
             for idx, model_info in enumerate(models):
-                model_label = model_info["label"]
-                model_config_id = str(model_info["model_config_id"])
-                # 使用模型自己的 conversation_id，如果没有则使用全局的
-                model_conversation_id = model_info.get("conversation_id") or conversation_id
+                # 创建临时队列用于单个模型
+                event_queue = asyncio.Queue()
 
-                # 发送模型开始事件
-                yield self._format_sse_event("model_start", {
-                    "model_index": idx,
-                    "model_config_id": model_config_id,
-                    "model_name": model_info["model_config"].name,
-                    "label": model_label,
-                    "conversation_id": model_conversation_id,
-                    "timestamp": time.time()
-                })
+                # 运行单个模型
+                result = await run_single_model_stream(idx, model_info, event_queue)
+                if result:
+                    results.append(result)
 
-                try:
-                    start_time = time.time()
-                    full_content = ""
-
-                    # 临时修改参数
-                    original_params = agent_config.model_parameters
-                    agent_config.model_parameters = model_info["parameters"]
-
+                # 转发该模型的所有事件
+                while not event_queue.empty():
                     try:
-                        # 流式调用单个模型
-                        async for event_str in self.run_stream(
-                            agent_config=agent_config,
-                            model_config=model_info["model_config"],
-                            message=message,
-                            workspace_id=workspace_id,
-                            conversation_id=model_conversation_id,
-                            user_id=user_id,
-                            variables=variables,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            web_search=web_search,
-                            memory=memory
-                        ):
-                            # 解析原始事件
-                            try:
-                                # SSE 格式: "event: xxx\ndata: {...}\n\n"
-                                lines = event_str.strip().split('\n')
-                                event_type = None
-                                event_data = None
+                        event = event_queue.get_nowait()
+                        yield event
+                    except asyncio.QueueEmpty:
+                        break
 
-                                for line in lines:
-                                    if line.startswith('event: '):
-                                        event_type = line[7:].strip()
-                                    elif line.startswith('data: '):
-                                        event_data = json.loads(line[6:])
-
-                                if event_type == "message" and event_data:
-                                    # 累积内容
-                                    chunk = event_data.get("content", "")
-                                    full_content += chunk
-
-                                    # 转发消息块事件（带模型标识）
-                                    yield self._format_sse_event("model_message", {
-                                        "model_index": idx,
-                                        "model_config_id": model_config_id,
-                                        "label": model_label,
-                                        "content": chunk
-                                    })
-
-                            except Exception as e:
-                                logger.warning(f"解析流式事件失败: {e}")
-                    finally:
-                        # 恢复原始参数
-                        agent_config.model_parameters = original_params
-
-                    elapsed = time.time() - start_time
-
-                    # 模型完成
-                    result = {
-                        "model_config_id": model_info["model_config_id"],
-                        "model_name": model_info["model_config"].name,
-                        "label": model_label,
-                        "parameters_used": model_info["parameters"],
-                        "message": full_content,
-                        "elapsed_time": elapsed,
-                        "error": None
-                    }
-                    results.append(result)
-
-                    # 发送模型完成事件
-                    yield self._format_sse_event("model_end", {
-                        "model_index": idx,
-                        "model_config_id": model_config_id,
-                        "label": model_label,
-                        "elapsed_time": elapsed,
-                        "message_length": len(full_content),
-                        "timestamp": time.time()
-                    })
-
-                except asyncio.TimeoutError:
-                    logger.warning(f"模型运行超时: {model_label}")
-                    result = {
-                        "model_config_id": model_info["model_config_id"],
-                        "model_name": model_info["model_config"].name,
-                        "label": model_label,
-                        "elapsed_time": timeout,
-                        "error": f"执行超时（{timeout}秒）"
-                    }
-                    results.append(result)
-
-                    # 发送模型错误事件
-                    yield self._format_sse_event("model_error", {
-                        "model_index": idx,
-                        "model_config_id": model_config_id,
-                        "label": model_label,
-                        "error": result["error"],
-                        "timestamp": time.time()
-                    })
-
-                except Exception as e:
-                    logger.error(f"模型运行失败: {model_label}, error: {e}")
-                    result = {
-                        "model_config_id": model_info["model_config_id"],
-                        "model_name": model_info["model_config"].name,
-                        "label": model_label,
-                        "elapsed_time": 0,
-                        "error": str(e)
-                    }
-                    results.append(result)
-
-                    # 发送模型错误事件
-                    yield self._format_sse_event("model_error", {
-                        "model_index": idx,
-                        "model_config_id": model_config_id,
-                        "label": model_label,
-                        "error": str(e),
-                        "timestamp": time.time()
-                    })
-
-        # 统计分析
+        # 统计分析（参考 run_compare）
         successful = [r for r in results if not r.get("error")]
         failed = [r for r in results if r.get("error")]
 
         fastest = min(successful, key=lambda x: x["elapsed_time"]) if successful else None
+        cheapest = min(
+            successful,
+            key=lambda x: x.get("cost_estimate") or float("inf")
+        ) if successful else None
 
-        # 发送对比完成事件
+        # 构建结果摘要（包含完整的 message）
+        results_summary = []
+        for r in results:
+            results_summary.append({
+                "model_config_id": str(r["model_config_id"]),
+                "model_name": r["model_name"],
+                "label": r["label"],
+                "conversation_id": r.get("conversation_id"),
+                "message": r.get("message"),  # 包含完整消息
+                "elapsed_time": r.get("elapsed_time", 0),
+                "error": r.get("error")
+            })
+
+        # 发送对比完成事件（参考 run_compare 的返回格式）
         yield self._format_sse_event("compare_end", {
             "conversation_id": conversation_id,
+            "results": results_summary,  # 包含完整结果
             "total_elapsed_time": sum(r.get("elapsed_time", 0) for r in results),
             "successful_count": len(successful),
             "failed_count": len(failed),
             "fastest_model": fastest["label"] if fastest else None,
+            "cheapest_model": cheapest["label"] if cheapest else None,
             "timestamp": time.time()
         })
 
@@ -1586,7 +1495,8 @@ class DraftRunService:
             f"多模型对比流式完成",
             extra={
                 "successful": len(successful),
-                "failed": len(failed)
+                "failed": len(failed),
+                "total_time": sum(r.get("elapsed_time", 0) for r in results)
             }
         )
 
@@ -1603,7 +1513,7 @@ async def draft_run(
     top_k: int = 3
 ) -> Dict[str, Any]:
     """试运行 Agent（便捷函数）
-    
+
     Args:
         db: 数据库会话
         agent_config: Agent 配置
@@ -1613,7 +1523,7 @@ async def draft_run(
         kb_ids: 知识库ID列表
         similarity_threshold: 相似度阈值
         top_k: 检索返回的文档数量
-        
+
     Returns:
         Dict: 包含 AI 回复和元数据的字典
     """

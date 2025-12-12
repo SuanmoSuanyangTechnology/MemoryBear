@@ -191,6 +191,9 @@ async def update_memory(solved_data: List[Any], host_id: uuid.UUID) -> str:
                 logging.info(f"成功删除 {success_count} 条检索数据")
             except Exception as e:
                 logging.error(f"删除数据库中的检索数据失败: {e}")
+            finally:
+                db.close()
+        
 
 
 async def _append_json(label: str, data: Any) -> None:

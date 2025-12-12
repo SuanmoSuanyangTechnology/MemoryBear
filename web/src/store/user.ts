@@ -3,6 +3,7 @@ import { clearAuthData } from '@/utils/auth';
 import type { User } from '@/views/UserManagement/types'
 import { getUsers, refreshToken, logout } from '@/api/user'
 import { getWorkspaceStorageType } from '@/api/workspaces';
+import { cookieUtils } from '@/utils/request'
 
 export interface LoginInfo {
   access_token: string;
@@ -21,17 +22,18 @@ export interface UserState {
   logout: () => void;
   getStorageType: () => void;
 }
+
 export const useUser = create<UserState>((set, get) => ({
   user: localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user') || '{}') as User : {} as User,
   loginInfo: {} as LoginInfo,
   storageType: null,
   updateLoginInfo: (values: LoginInfo) => {
-    localStorage.setItem('token', values.access_token);
-    localStorage.setItem('refresh_token', values.refresh_token);
+    cookieUtils.set('authToken', values.access_token);
+    cookieUtils.set('refreshToken', values.refresh_token);
     set({ loginInfo: values });
   },
   getUserInfo: async (flag?: boolean) => {
-    if (!localStorage.getItem('token')) {
+    if (!cookieUtils.get('authToken')) {
       return
     }
     const localUser = JSON.parse(localStorage.getItem('user') || '{}') as User;
@@ -70,7 +72,7 @@ export const useUser = create<UserState>((set, get) => ({
     refreshToken()
       .then((res) => {
         const response = res as { refresh_token: string }
-        localStorage.setItem('token', response.refresh_token);
+        cookieUtils.set('authToken', response.refresh_token);
       })
       .catch((err) => {
         console.error('Failed to refresh token:', err)

@@ -1,9 +1,9 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { FolderFormData, KnowledgeBaseFormData, CreateFolderModalRef, CreateFolderModalRefProps } from '../types';
+import type { FolderFormData, KnowledgeBaseFormData, CreateFolderModalRef, CreateFolderModalRefProps } from '@/views/KnowledgeBase/types';
 import RbModal from '@/components/RbModal'
-import { createFolder, updateKnowledgeBase } from '../service';
+import { createFolder, updateKnowledgeBase } from '@/api/knowledgeBase';
 const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefProps>(({ 
   refreshTable
 }, ref) => {

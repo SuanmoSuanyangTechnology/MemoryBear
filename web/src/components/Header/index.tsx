@@ -66,10 +66,30 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     },
   ];
   const formatBreadcrumbNames = () => {
-    return breadcrumbs.map((menu, index) => ({
-      title: menu.i18nKey ? t(menu.i18nKey) : menu.label,
-      path: index === breadcrumbs.length - 1 ? undefined : menu.path
-    }))
+    return breadcrumbs.map((menu, index) => {
+      const item: any = {
+        title: menu.i18nKey ? t(menu.i18nKey) : menu.label,
+      };
+      
+      // 如果是最后一项，不设置 path
+      if (index === breadcrumbs.length - 1) {
+        return item;
+      }
+      
+      // 如果有自定义 onClick，使用 onClick 并设置 href 为 '#' 以显示手型光标
+      if ((menu as any).onClick) {
+        item.onClick = (e: React.MouseEvent) => {
+          e.preventDefault();
+          (menu as any).onClick(e);
+        };
+        item.href = '#';
+      } else if (menu.path && menu.path !== '#') {
+        // 只有当 path 不是 '#' 时才设置 path
+        item.path = menu.path;
+      }
+      
+      return item;
+    });
   }
   return (
     <Header className={styles.header}>

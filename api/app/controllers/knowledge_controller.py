@@ -91,6 +91,7 @@ async def get_knowledges(
         filters.append(knowledge_model.Knowledge.id.in_(kb_ids.split(',')))
     else:
         filters.append(knowledge_model.Knowledge.status != 2)
+    filters.append(knowledge_model.Knowledge.permission_id != knowledge_model.PermissionType.Memory)
     # 3. Execute paged query
     try:
         api_logger.debug(f"Start executing knowledge base paging query")

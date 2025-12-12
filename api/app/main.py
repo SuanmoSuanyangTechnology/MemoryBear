@@ -1,4 +1,5 @@
 import os
+import subprocess
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,12 +51,11 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """使用 FastAPI lifespan 替代 on_event 处理启动/关闭事件"""
     # 应用启动事件
-    
+
     # 检查是否需要自动升级数据库
     if settings.DB_AUTO_UPGRADE:
         logger.info("开始自动升级数据库...")
         try:
-            import subprocess
             result = subprocess.run(
                 ["alembic", "upgrade", "head"],
                 capture_output=True,
@@ -379,4 +379,4 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

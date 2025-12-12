@@ -363,12 +363,12 @@ class MultiAgentService:
         # if data.routing_rules is not None:
         #     config.routing_rules = [convert_uuids_to_str(rule.model_dump()) for rule in data.routing_rules] if data.routing_rules else None
         
-        if data.execution_config is None:
-            execution_config_data = {}
-        elif isinstance(data.execution_config, dict):
-            execution_config_data = convert_uuids_to_str(data.execution_config)
-        else:
-            execution_config_data = convert_uuids_to_str(data.execution_config.model_dump())
+        if data.execution_config is not None:
+            if isinstance(data.execution_config, dict):
+                execution_config_data = convert_uuids_to_str(data.execution_config)
+            else:
+                execution_config_data = convert_uuids_to_str(data.execution_config.model_dump())
+            config.execution_config = execution_config_data
 
         if data.aggregation_strategy is not None:
             config.aggregation_strategy = data.aggregation_strategy

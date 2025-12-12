@@ -9,7 +9,7 @@
 import { FileOutlined, FieldTimeOutlined, EditOutlined } from '@ant-design/icons';
 import { Skeleton } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { RecallTestData } from '../types';
+import type { RecallTestData } from '@/views/KnowledgeBase/types';
 import { NoData } from './noData';
 import { formatDateTime } from '@/utils/format';
 import InfiniteScroll from 'react-infinite-scroll-component';

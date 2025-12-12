@@ -144,13 +144,15 @@ def main():
         import asyncio
         tools_list = asyncio.run(mcp.list_tools())
         # logger.info(f"Registered {len(tools_list)} MCP tools: {[t.name for t in tools_list]}")
-        # logger.info(f"Starting MCP server on {settings.SERVER_IP}:8081 with SSE transport")
+        
+        # Get MCP port from environment (default: 8081)
+        mcp_port = int(os.getenv("MCP_PORT", "8081"))
+        # logger.info(f"Starting MCP server on {settings.SERVER_IP}:{mcp_port} with SSE transport")
         
         # Run the server with SSE transport for HTTP connections
-        # The server will be available at http://127.0.0.1:8081
         import uvicorn
         app = mcp.sse_app()
-        uvicorn.run(app, host=settings.SERVER_IP, port=8081, log_level="info")
+        uvicorn.run(app, host=settings.SERVER_IP, port=mcp_port, log_level="info")
         
     except Exception as e:
         logger.error(f"Failed to start MCP server: {e}", exc_info=True)

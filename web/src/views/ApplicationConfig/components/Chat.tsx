@@ -2,9 +2,9 @@ import { type FC, useRef, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
 import { Input, Form } from 'antd'
-import ChatIcon from '@/assets/images/application/chat.svg'
+import ChatIcon from '@/assets/images/application/chat.png'
 import ChatSendIcon from '@/assets/images/application/chatSend.svg'
-import DebuggingEmpty from '@/assets/images/application/debuggingEmpty.svg'
+import DebuggingEmpty from '@/assets/images/application/debuggingEmpty.png'
 import type { ChatItem, ChatData, Config } from '../types'
 import { runCompare, draftRun } from '@/api/application'
 import Empty from '@/components/Empty'
@@ -114,6 +114,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
                       if (index === targetIndex) {
                         return {
                           ...item,
+                          conversation_id: parsed.conversation_id,
                           list: item.list?.map((msg, msgIndex) => {
                             if (msgIndex === item.list!.length - 1 && msg.role === 'answer') {
                               return { ...msg, content: msg.content + parsed.content };
@@ -125,10 +126,6 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
                       return item;
                     }))
                   }
-                }
-                
-                if (parsed.conversation_id) {
-                  setConversationId(parsed.conversation_id);
                 }
               } else if (line.startsWith('data:') && (isCluster && currentEvent === 'message')) {
                 const jsonData = line.substring(5).trim();
@@ -174,10 +171,6 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
                       return item;
                     }))
                   }
-                }
-
-                if (parsed.conversation_id) {
-                  setConversationId(parsed.conversation_id);
                 }
               } else if (line.startsWith('data:') && (isCluster && currentEvent === 'model_end')) {
                 const jsonData = line.substring(5).trim();
@@ -247,6 +240,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       {chatList.length === 0
         ? <Empty 
           url={DebuggingEmpty} 
+          size={[300, 200]}
           title={t('application.debuggingEmpty')} 
           subTitle={t('application.debuggingEmptyDesc')} 
           className="rb:h-full"
@@ -278,7 +272,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
                 </div>
               }
               {!chat.list || chat.list.length === 0
-                ? <Empty url={ChatIcon} title={t('application.chatEmpty')} className="rb:h-full" />
+                ? <Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} className="rb:h-full" size={[240, 200]} />
                 : (
                   <div ref={el => scrollContainerRefs.current[index] = el} className={clsx(`rb:relative rb:overflow-y-auto rb:overflow-x-hidden`, {
                     'rb:h-[calc(100vh-186px)]': isCluster,

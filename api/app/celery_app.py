@@ -3,6 +3,7 @@ from datetime import timedelta
 from urllib.parse import quote
 from celery import Celery
 from app.core.config import settings
+from app.core.memory.utils.config.definitions import reload_configuration_from_database
 
 # 创建 Celery 应用实例
 # broker: 任务队列（使用 Redis DB 0）
@@ -12,6 +13,7 @@ celery_app = Celery(
     broker=f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.CELERY_BROKER}",
     backend=f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.CELERY_BACKEND}",
 )
+reload_configuration_from_database(config_id=os.getenv("config_id"), force_reload=True)
 
 # 配置使用本地队列，避免与远程 worker 冲突
 celery_app.conf.task_default_queue = 'localhost_test_wyl'

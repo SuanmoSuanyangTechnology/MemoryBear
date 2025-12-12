@@ -1,0 +1,38 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+logs/
+res/
+*.egg-info
+
+# Virtual environments
+.venv
+docs/
+examples/
+
+# Environment variables
+.env
+.kiro
+.vscode/settings.json
+.idea
+
+# Temporary outputs
+app/core/memory/agent/.DS_Store
+app/core/memory/src/utils/.DS_Store
+time.log
+celerybeat-schedule.db
+search_results.json
+*.txt
+*.json
+tmp
+files
+
+# Exclude dep files
+huggingface.co/
+nltk_data/
+tika-server*.jar*
+cl100k_base.tiktoken
+libssl*.deb

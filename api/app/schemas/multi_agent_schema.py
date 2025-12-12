@@ -30,6 +30,31 @@ class ExecutionConfig(BaseModel):
     parallel_limit: int = Field(default=3, ge=1, le=10, description="并行限制")
     retry_on_failure: bool = Field(default=True, description="失败时是否重试")
     max_retries: int = Field(default=3, ge=0, le=10, description="最大重试次数")
+    
+    # 新增：路由模式配置
+    routing_mode: str = Field(
+        default="master_agent",
+        pattern="^(master_agent|llm_router|rule_only)$",
+        description="路由模式：master_agent（Master Agent决策）| llm_router（旧LLM路由器）| rule_only（仅规则路由）"
+    )
+    enable_rule_fast_path: bool = Field(
+        default=True,
+        description="是否启用规则快速路径（性能优化，高置信度关键词直接返回）"
+    )
+    
+    # 新增：结果整合模式配置
+    result_merge_mode: str = Field(
+        default="smart",
+        pattern="^(smart|master)$",
+        description="结果整合模式：smart（规则去重，快速）| master（Master Agent 智能整合，连贯）"
+    )
+    
+    # 新增：子 Agent 执行模式配置
+    sub_agent_execution_mode: str = Field(
+        default="parallel",
+        pattern="^(parallel|sequential)$",
+        description="子 Agent 执行模式：parallel（并行执行，快速）| sequential（串行执行，节省资源）"
+    )
 
 
 # ==================== 多 Agent 配置 ====================

@@ -39,10 +39,12 @@ export interface CurveRecord {
 }
 
 export interface ConfigForm {
+  config_id?: string;
   statement_granularity?: string;
   include_dialogue_context?: boolean;
   max_context?: string;
   lambda_time: string | number;
   lambda_mem: string | number;
   offset: string | number;
+  [key: string]: any;
 }

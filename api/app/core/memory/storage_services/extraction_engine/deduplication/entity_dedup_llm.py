@@ -317,6 +317,7 @@ async def llm_dedup_entities(  # 保留对偶判断作为子流程，是为了�
             try:
                 result_list[idx] = await _judge_pair(llm_client, entity_nodes[i], entity_nodes[j], statement_entity_edges, entity_entity_edges)
             except Exception as e:
+                logger.error(f"Error judging pair ({i}, {j}): {e}", exc_info=True)
                 result_list[idx] = e
 
         # Limit concurrency using semaphore
@@ -508,8 +509,11 @@ async def llm_dedup_entities_iterative_blocks( # 迭代分块并发 LLM 去重
             async def _run_block_wrapper(idx: int, block: List[ExtractedEntityNode]):
                 try:
                     results[idx] = await _run_one_block(idx, block)
-                except Exception as e:
+                except BaseException as e:
+                    logger.error(f"Error in block {idx}: {e}", exc_info=True)
                     results[idx] = e
+                    if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                        raise
 
             for i in range(len(blocks)):
                 tg.start_soon(_run_block_wrapper, i, blocks[i])
@@ -607,6 +611,7 @@ async def llm_disambiguate_pairs_iterative(
             try:
                 judged[idx] = await _judge_pair_disamb(llm_client, entity_nodes[i], entity_nodes[j], statement_entity_edges, entity_entity_edges)
             except Exception as e:
+                logger.error(f"Error in disamb pair ({i}, {j}): {e}", exc_info=True)
                 judged[idx] = e
 
         # Limit concurrency using semaphore

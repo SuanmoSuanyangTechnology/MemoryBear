@@ -148,7 +148,7 @@ def create_workspace(
                     description=f"工作空间 {workspace.name} 的默认知识库",
                     avatar='',
                     type=KnowledgeType.General,
-                    permission_id=PermissionType.Private,
+                    permission_id=PermissionType.Memory,
                     embedding_id=uuid.UUID(getenv('KB_embedding_id')) if None else embedding,
                     reranker_id=uuid.UUID(getenv('KB_reranker_id')) if None else rerank,
                     llm_id=uuid.UUID(getenv('KB_llm_id')) if None else llm,
@@ -725,6 +725,34 @@ def get_workspace_storage_type(
 
     # 检查用户是否有权限访问该工作空间
     _check_workspace_member_permission(db, workspace_id, user)
+
+    # 查询工作空间
+    workspace = workspace_repository.get_workspace_by_id(db=db, workspace_id=workspace_id)
+    if not workspace:
+        business_logger.error(f"工作空间不存在: workspace_id={workspace_id}")
+        raise BusinessException(
+            code=BizCode.WORKSPACE_NOT_FOUND,
+            message="工作空间不存在"
+        )
+
+    business_logger.info(f"成功获取工作空间 {workspace_id} 的存储类型: {workspace.storage_type}")
+    return workspace.storage_type
+
+
+def get_workspace_storage_type_without_auth(
+        db: Session,
+        workspace_id: uuid.UUID,
+) -> Optional[str]:
+    """获取工作空间的存储类型（无需权限验证，用于公开分享等场景）
+
+    Args:
+        db: 数据库会话
+        workspace_id: 工作空间ID
+
+    Returns:
+        storage_type: 存储类型字符串，如果未设置则返回 None
+    """
+    business_logger.info(f"获取工作空间 {workspace_id} 的存储类型（无权限验证）")
 
     # 查询工作空间
     workspace = workspace_repository.get_workspace_by_id(db=db, workspace_id=workspace_id)

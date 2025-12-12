@@ -10,6 +10,7 @@ const Colors = ['#155EEF', '#4DA8FF', '#03BDFF', '#31E8FF', '#AD88FF', '#FFB048'
 const PieCard: FC = () => {
   const { id } = useParams()
   const chartRef = useRef<ReactEcharts>(null);
+  const resizeScheduledRef = useRef(false)
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<Array<Record<string, string | number>>>([])
 
@@ -29,6 +30,29 @@ const PieCard: FC = () => {
       setLoading(false)
     })
   }
+
+  
+  useEffect(() => {
+    const handleResize = () => {
+      if (chartRef.current && !resizeScheduledRef.current) {
+        resizeScheduledRef.current = true
+        requestAnimationFrame(() => {
+          chartRef.current?.getEchartsInstance().resize();
+          resizeScheduledRef.current = false
+        });
+      }
+    }
+    
+    const resizeObserver = new ResizeObserver(handleResize)
+    const chartElement = chartRef.current?.getEchartsInstance().getDom().parentElement
+    if (chartElement) {
+      resizeObserver.observe(chartElement)
+    }
+    
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [data])
 
   return (
     <>
@@ -108,17 +132,6 @@ const PieCard: FC = () => {
           style={{ height: '340px', width: '100%' }}
           notMerge={true}
           lazyUpdate={true}
-          onEvents={{
-            // 图表渲染完成后再次调整大小，确保宽度正确
-            // 使用 setTimeout 避免在主渲染过程中调用 resize
-            rendered: () => {
-              if (chartRef.current) {
-                setTimeout(() => {
-                  chartRef.current?.getEchartsInstance().resize();
-                }, 0);
-              }
-            }
-          }}
         />
       }
     </>
