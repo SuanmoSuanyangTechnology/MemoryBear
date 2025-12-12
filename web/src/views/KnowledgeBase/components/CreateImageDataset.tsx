@@ -2,11 +2,11 @@ import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Form, Input } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { UploadFile } from 'antd';
-import type { CreateImageModalRef, CreateImageMoealRefProps,UploadFileResponse } from '../types';
+import type { CreateImageModalRef, CreateImageMoealRefProps,UploadFileResponse } from '@/views/KnowledgeBase/types';
 import type { UploadRequestOption } from 'rc-upload/lib/interface';
 import RbModal from '@/components/RbModal';
 import UploadFiles from '@/components/Upload/UploadFiles';
-import { uploadFile } from '../service';
+import { uploadFile } from '@/api/knowledgeBase';
 
 interface ImageDatasetFormData {
   name: string;

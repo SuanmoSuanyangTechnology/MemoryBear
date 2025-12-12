@@ -24,7 +24,7 @@ import { saveAgentConfig } from '@/api/application'
 import Knowledge from './components/Knowledge'
 import VariableList from './components/VariableList'
 import { getApplicationConfig } from '@/api/application'
-import { getKnowledgeBaseList } from '@/views/KnowledgeBase/service'
+import { getKnowledgeBaseList } from '@/api/knowledgeBase'
 import { memoryConfigListUrl } from '@/api/memory'
 import CustomSelect from '@/components/CustomSelect'
 

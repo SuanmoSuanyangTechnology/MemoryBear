@@ -6,6 +6,7 @@ import type { UploadProps, UploadFile } from 'antd';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import CloudUploadOutlined from '@/assets/images/CloudUploadOutlined.png'
 import { useTranslation } from 'react-i18next';
+import { cookieUtils } from '@/utils/request'
 
 const { confirm } = Modal;
 const { Dragger } = Upload;
@@ -219,7 +220,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     fileList,
     beforeUpload,
     headers: {
-      authorization:  localStorage.getItem('token') || '',
+      authorization:  cookieUtils.get('authToken') || '',
     },
     onRemove: handleRemove,
     onChange: handleChange,

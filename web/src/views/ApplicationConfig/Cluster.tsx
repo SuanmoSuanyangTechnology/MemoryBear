@@ -44,12 +44,22 @@ const Cluster: FC<{application: SubAgentItem}> = ({application}) => {
         priority: 1,
       }))
     }
-    console.log('params', params)
-    form.validateFields().then(() => {
-      saveMultiAgentConfig(id as string, params).then(() => {
-        if (flag) {
-          message.success(t('common.saveSuccess'))
-        }
+
+    return new Promise((resolve, reject) => {
+      form.validateFields().then(() => {
+        saveMultiAgentConfig(id as string, params)
+          .then(() => {
+            if (flag) {
+              message.success(t('common.saveSuccess'))
+            }
+            resolve(true)
+          })
+          .catch(error => {
+            reject(error)
+          })
+      })
+      .catch(error => {
+        reject(error)
       })
     })
   }

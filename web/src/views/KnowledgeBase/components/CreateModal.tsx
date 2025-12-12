@@ -1,8 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import { Form, Input,  Select, Modal } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { KnowledgeBaseListItem, KnowledgeBaseFormData, CreateModalRef, CreateModalRefProps } from '../types';
-import { getModelTypeList, getModelList, createKnowledgeBase, updateKnowledgeBase } from '../service'
+import type { KnowledgeBaseListItem, KnowledgeBaseFormData, CreateModalRef, CreateModalRefProps } from '@/views/KnowledgeBase/types';
+import { getModelTypeList, getModelList, createKnowledgeBase, updateKnowledgeBase } from '@/api/knowledgeBase'
 import RbModal from '@/components/RbModal'
 const { TextArea } = Input;
 const { confirm } = Modal
@@ -15,7 +15,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const [modelTypeList, setModelTypeList] = useState<string[]>([]);
   const [modelOptionsByType, setModelOptionsByType] = useState<Record<string, { label: string; value: string }[]>>({});
   const [datasets, setDatasets] = useState<KnowledgeBaseListItem | null>(null);
-  const [currentType, setCurrentType] = useState<string>('General'); // 保存当前 type
+  const [currentType, setCurrentType] = useState<'General' | 'Web' | 'Third-party' | 'Folder'>('General');
   const [form] = Form.useForm<KnowledgeBaseFormData>();
   const [loading, setLoading] = useState(false)
 
@@ -102,7 +102,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const handleOpen = (record?: KnowledgeBaseListItem | null, type?: string) => {
     setDatasets(record || null);
     const nextType = type || currentType;
-    setCurrentType(nextType);
+    setCurrentType(nextType as any);
     setBaseFields(record || null, nextType);
     getTypeList(record || null);
     setVisible(true);

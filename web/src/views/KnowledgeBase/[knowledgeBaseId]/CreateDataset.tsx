@@ -4,11 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Table, { type TableRef } from '@/components/Table'
 import type { AnyObject } from 'antd/es/_util/type';
-import type { UploadFileResponse,KnowledgeBaseDocumentData } from '../types';
+import type { UploadFileResponse,KnowledgeBaseDocumentData } from '@/views/KnowledgeBase/types';
 import type { ColumnsType } from 'antd/es/table';
 import UploadFiles from '@/components/Upload/UploadFiles';
 import type { UploadRequestOption } from 'rc-upload/lib/interface';
-import { uploadFile, getDocumentList, previewDocumentChunk, parseDocument, updateDocument, deleteDocument } from '../service';
+import { uploadFile, getDocumentList, previewDocumentChunk, parseDocument, updateDocument, deleteDocument } from '@/api/knowledgeBase';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 import { NoData } from '../components/noData';
 import noDataIcon from '@/assets/images/knowledgeBase/noData.png';
@@ -227,7 +227,7 @@ const CreateDataset = () => {
         return (
           <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
             <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: value === 1 ? '#369F21' : '#FF8A4C' }}></span>
-            <span>{value === 1 ? 'Completed' : 'Processing'}</span>
+            <span>{value === 1 ? t('knowledgeBase.completed') : value === 0 ? t('knowledgeBase.pending') : t('knowledgeBase.processing')}</span>
           </span>
         );
       }

@@ -10,14 +10,14 @@ import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Switch } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { message } from 'antd';
-import type { ShareModalRef, ShareModalRefProps, KnowledgeBase} from '../types';
+import type { ShareModalRef, ShareModalRefProps, KnowledgeBase} from '@/views/KnowledgeBase/types';
 import RbModal from '@/components/RbModal'
 // import betchControlIcon from '@/assets/images/knowledgeBase/betch-control.png';
 import kbIcon from '@/assets/images/knowledgeBase/knowledge-management.png';
 // import robotIcon from '@/assets/images/knowledgeBase/robot.png';
-import { updateKnowledgeBase, getWorkspaceAuthorizationList } from '../service';
+import { updateKnowledgeBase, getWorkspaceAuthorizationList } from '@/api/knowledgeBase';
 import { NoData } from './noData';
-import type { ListQuery, ShareSpaceModalRef } from '../types';
+import type { ListQuery, ShareSpaceModalRef } from '@/views/KnowledgeBase/types';
 import { formatDateTime } from '@/utils/format';
 import ShareSpaceModal from './ShareSpaceModal'
 const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: onShare }, ref) => {
