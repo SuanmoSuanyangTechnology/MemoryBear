@@ -27,6 +27,7 @@ interface data {
 const service = axios.create({
   baseURL: '/api', // 与vite.config.ts中的代理配置对应
   // timeout: 10000, // 请求超时时间
+  withCredentials: false,
   headers: {
     'Content-Type': 'application/json'
   },
@@ -46,11 +47,12 @@ let requests: RequestQueueItem[] = [];
 service.interceptors.request.use(
   (config) => {
     if (!config.headers.Authorization) {
-      const token = localStorage.getItem('token');
+      const token = cookieUtils.get('authToken');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
     }
+    config.headers.Cookie = undefined
     return config;
   },
   (error) => {
@@ -63,7 +65,7 @@ service.interceptors.request.use(
 // 刷新token的函数
 const tokenRefresh = async (): Promise<string> => {
   try {
-    const refresh_token = localStorage.getItem('refresh_token');
+    const refresh_token = cookieUtils.get('refreshToken');
     if (window.location.hash.includes('#/invite-register')) {
       throw new Error(i18n.t('common.refreshTokenNotExist'));
     }
@@ -73,7 +75,7 @@ const tokenRefresh = async (): Promise<string> => {
     // 使用原生axios调用refresh接口，避免触发拦截器导致的循环调用
     const response: any = await refreshToken();
     const newToken = response.access_token;
-    localStorage.setItem('token', newToken);
+    cookieUtils.set('authToken', newToken);
     return newToken;
   } catch (error) {
     // 如果refresh接口也返回401，则退出登录
@@ -274,6 +276,7 @@ export const request = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      withCredentials: false,
       ...config
     });
   },
@@ -293,6 +296,40 @@ export const request = {
     });
   }
 };
+
+
+
+// 获取父级域名
+const getParentDomain = () => {
+  const hostname = window.location.hostname
+  const parts = hostname.split('.')
+  return parts.length > 2 ? `.${parts.slice(-2).join('.')}` : hostname
+}
+
+// Cookie操作工具
+export const cookieUtils = {
+  set: (name: string, value: string, domain = getParentDomain()) => {
+    document.cookie = `${name}=${value}; domain=${domain}; path=/; secure; samesite=strict`
+  },
+  get: (name: string) => {
+    const value = `; ${document.cookie}`
+    const parts = value.split(`; ${name}=`)
+    return parts.length === 2 ? parts.pop()?.split(';').shift() : null
+  },
+  remove: (name: string, domain = getParentDomain()) => {
+    document.cookie = `${name}=; domain=${domain}; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+  },
+  clear: (domain = getParentDomain()) => {
+    document.cookie.split(';').forEach(cookie => {
+      const eqPos = cookie.indexOf('=');
+      const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+      if (name) {
+        document.cookie = `${name}=; domain=${domain}; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+        document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+      }
+    });
+  },
+}
 
 
 export default service;

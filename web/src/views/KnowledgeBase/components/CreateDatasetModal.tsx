@@ -11,7 +11,7 @@ import type { RadioChangeEvent } from 'antd';
 import { Flex, Radio } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import type { CreateDatasetModalRef, CreateDatasetModalRefProps} from '../types';
+import type { CreateDatasetModalRef, CreateDatasetModalRefProps} from '@/views/KnowledgeBase/types';
 import RbModal from '@/components/RbModal'
 const style: React.CSSProperties = {
   display: 'flex',

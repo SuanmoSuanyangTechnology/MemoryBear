@@ -1,10 +1,11 @@
 import { message } from 'antd';
 import i18n from '@/i18n'
+import { cookieUtils } from './request'
 const API_PREFIX = '/api'
 
 export const handleSSE = async (url: string, data: any, onMessage?: (data: string) => void, config = {}) => {
   try {
-    const token = localStorage.getItem('token');
+    const token = cookieUtils.get('authToken');
     const response = await fetch(`${API_PREFIX}${url}`, {
       method: 'POST',
       headers: {
