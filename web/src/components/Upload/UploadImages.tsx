@@ -5,6 +5,7 @@ import type { GetProp, UploadFile, UploadProps } from 'antd';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
 import PlusIcon from '@/assets/images/plus.svg'
+import { cookieUtils } from '@/utils/request'
 
 const { confirm } = Modal;
 
@@ -166,7 +167,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     fileList,
     beforeUpload,
     headers: {
-      authorization:  localStorage.getItem('token') || '',
+      authorization:  cookieUtils.get('authToken') || '',
     },
     onPreview: handlePreview,
     onRemove: handleRemove,

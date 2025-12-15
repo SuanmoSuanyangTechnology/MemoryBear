@@ -23,6 +23,7 @@ const RelationshipNetwork:FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
   const chartRef = useRef<ReactEcharts>(null)
+  const resizeScheduledRef = useRef(false)
   const [nodes, setNodes] = useState<Node[]>([])
   const [links, setLinks] = useState<Edge[]>([])
   const [categories, setCategories] = useState<{ name: string }[]>([])
@@ -83,6 +84,28 @@ const RelationshipNetwork:FC = () => {
       setNodes(uniqueNodes)
     })
   }
+  
+  useEffect(() => {
+    const handleResize = () => {
+      if (chartRef.current && !resizeScheduledRef.current) {
+        resizeScheduledRef.current = true
+        requestAnimationFrame(() => {
+          chartRef.current?.getEchartsInstance().resize();
+          resizeScheduledRef.current = false
+        });
+      }
+    }
+    
+    const resizeObserver = new ResizeObserver(handleResize)
+    const chartElement = chartRef.current?.getEchartsInstance().getDom().parentElement
+    if (chartElement) {
+      resizeObserver.observe(chartElement)
+    }
+    
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [nodes])
   return (
     <>
       {/* 关系网络 */}
@@ -147,15 +170,6 @@ const RelationshipNetwork:FC = () => {
                 notMerge={false}
                 lazyUpdate={true}
                 onEvents={{
-                  // 图表渲染完成后再次调整大小，确保宽度正确
-                  // 使用 setTimeout 避免在主渲染过程中调用 resize
-                  rendered: () => {
-                    if (chartRef.current) {
-                      setTimeout(() => {
-                        chartRef.current?.getEchartsInstance().resize();
-                      }, 0);
-                    }
-                  },
                   // 节点点击事件处理
                   click: (params: { dataType: string; data: Node }) => {
                     if (params.dataType === 'node') {

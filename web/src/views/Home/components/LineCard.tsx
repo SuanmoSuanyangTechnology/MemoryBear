@@ -156,17 +156,6 @@ const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, classNa
           opts={{ renderer: 'canvas' }}
           notMerge={true}
           lazyUpdate={true}
-          onEvents={{
-            // 图表渲染完成后再次调整大小，确保宽度正确
-            // 使用 setTimeout 避免在主渲染过程中调用 resize
-            rendered: () => {
-              if (chartRef.current) {
-                setTimeout(() => {
-                  chartRef.current?.getEchartsInstance().resize();
-                }, 0);
-              }
-            }
-          }}
         />
       ) : <Empty size={120} className="rb:mt-[48px] rb:mb-[81px]" />}
     </Card>

@@ -8,7 +8,7 @@ import textIcon from '@/assets/images/knowledgeBase/text.png';
 import imageIcon from '@/assets/images/knowledgeBase/image.png';
 import datasetsIcon from '@/assets/images/knowledgeBase/datasets.png';
 import switcherIcon from '@/assets/images/knowledgeBase/switcher.png';
-import { getFolderList } from '../service';
+import { getFolderList } from '@/api/knowledgeBase';
 
 const { DirectoryTree } = Tree;
 
@@ -59,6 +59,7 @@ interface FolderTreeProps {
   refreshKey?: number;
   onRootLoad?: (nodes: TreeNodeData[] | null) => void;
   onFolderPathChange?: (path: Array<{ id: string; name: string }>) => void;
+  selectedKeys?: React.Key[];
 }
 
 const renderIcon = (icon?: string) => {
@@ -273,6 +274,7 @@ const FolderTree: FC<FolderTreeProps> = ({
   refreshKey = 0,
   onRootLoad,
   onFolderPathChange,
+  selectedKeys,
 }) => {
   const [treeData, setTreeData] = useState<TreeNodeData[]>([]);
 
@@ -396,6 +398,7 @@ const FolderTree: FC<FolderTreeProps> = ({
       onExpand={onExpand}
       loadData={onLoadData}
       treeData={treeNodes}
+      selectedKeys={selectedKeys}
     />
   );
 };
