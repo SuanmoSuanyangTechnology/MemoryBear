@@ -29,10 +29,10 @@ router = APIRouter(
 )
 
 
-@router.get("/{kb_id}/{parent_id}/documents", response_model=ApiResponse)
+@router.get("/{kb_id}/documents", response_model=ApiResponse)
 async def get_documents(
         kb_id: uuid.UUID,
-        parent_id: uuid.UUID,
+        parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id when type is Folder"),
         page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
         pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
         orderby: Optional[str] = Query(None, description="Sort fields, such as: created_at,updated_at"),

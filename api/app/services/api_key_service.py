@@ -13,7 +13,7 @@ from app.models.api_key_model import ApiKey
 from app.repositories.api_key_repository import ApiKeyRepository, ApiKeyLogRepository
 from app.schemas import api_key_schema
 from app.schemas.response_schema import PageData, PageMeta
-from app.core.api_key_utils import generate_api_key, hash_api_key, validate_resource_binding
+from app.core.api_key_utils import generate_api_key
 from app.core.exceptions import (
     BusinessException,
 )
@@ -33,21 +33,13 @@ class ApiKeyService:
             workspace_id: uuid.UUID,
             user_id: uuid.UUID,
             data: api_key_schema.ApiKeyCreate
-    ) -> Tuple[ApiKey, str]:
+    ) -> ApiKey:
         """
         创建 API Key
         Returns:
-            Tuple[ApiKey, str]: (API Key 对象, API Key 明文)
+            ApiKey: API Key 对象
         """
         try:
-            # 验证资源绑定
-            if data.resource_type or data.resource_id:
-                is_valid, error_msg = validate_resource_binding(
-                    data.resource_type, str(data.resource_id) if data.resource_id else None
-                )
-                if not is_valid:
-                    raise BusinessException(error_msg, BizCode.API_KEY_INVALID_RESOURCE)
-
             existing = db.scalar(
                 select(ApiKey).where(
                     ApiKey.workspace_id == workspace_id,
@@ -59,22 +51,20 @@ class ApiKeyService:
                 raise BusinessException(f"API Key 名称 '{data.name}' 已存在", BizCode.API_KEY_DUPLICATE_NAME)
 
             # 生成 API Key
-            api_key, key_hash, key_prefix = generate_api_key(data.type)
+            api_key = generate_api_key(data.type)
 
             # 创建数据
             api_key_data = {
                 "id": uuid.uuid4(),
                 "name": data.name,
                 "description": data.description,
-                "key_prefix": key_prefix,
-                "key_hash": key_hash,
+                "api_key": api_key,
                 "type": data.type,
                 "scopes": data.scopes,
                 "workspace_id": workspace_id,
                 "resource_id": data.resource_id,
-                "resource_type": data.resource_type,
-                "rate_limit": data.rate_limit or 10,
-                "daily_request_limit": data.daily_request_limit or 10000,
+                "rate_limit": data.rate_limit,
+                "daily_request_limit": data.daily_request_limit,
                 "quota_limit": data.quota_limit,
                 "expires_at": data.expires_at,
                 "created_by": user_id,
@@ -90,7 +80,7 @@ class ApiKeyService:
                 "type": data.type
             })
 
-            return api_key_obj, api_key
+            return api_key_obj
 
         except Exception as e:
             db.rollback()
@@ -147,6 +137,9 @@ class ApiKeyService:
         """更新 API Key配置"""
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
 
+        if not api_key:
+            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
+
         # 检查名称重复
         if data.name and data.name != api_key.name:
             existing = db.scalar(
@@ -177,6 +170,9 @@ class ApiKeyService:
         """删除 API Key"""
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
 
+        if not api_key:
+            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
+
         ApiKeyRepository.delete(db, api_key_id)
         db.commit()
 
@@ -188,27 +184,29 @@ class ApiKeyService:
             db: Session,
             api_key_id: uuid.UUID,
             workspace_id: uuid.UUID
-    ) -> Tuple[ApiKey, str]:
+    ) -> ApiKey:
         """重新生成 API Key"""
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
+
+        if not api_key:
+            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
 
         # 检查 API Key 是否激活
         if not api_key.is_active:
             raise BusinessException("无法重新生成已停用的 API Key", BizCode.API_KEY_INACTIVE)
 
         # 生成新的 API Key
-        new_api_key, key_hash, key_prefix = generate_api_key(api_key_schema.ApiKeyType(api_key.type))
+        new_api_key = generate_api_key(api_key.type)
 
         # 更新
         ApiKeyRepository.update(db, api_key_id, {
-            "key_hash": key_hash,
-            "key_prefix": key_prefix
+            "api_key": new_api_key
         })
         db.commit()
         db.refresh(api_key)
 
         logger.info("API Key 重新生成成功", extra={"api_key_id": str(api_key_id)})
-        return api_key, new_api_key
+        return api_key
 
     @staticmethod
     def get_stats(
@@ -218,6 +216,9 @@ class ApiKeyService:
     ) -> api_key_schema.ApiKeyStats:
         """获取使用统计"""
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
+
+        if not api_key:
+            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
 
         stats_data = ApiKeyRepository.get_stats(db, api_key_id)
         return api_key_schema.ApiKeyStats(**stats_data)
@@ -234,6 +235,9 @@ class ApiKeyService:
         """获取 API Key 使用日志"""
         # 验证 API Key 权限
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
+
+        if not api_key:
+            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
 
         items, total = ApiKeyLogRepository.list_by_api_key(
             db, api_key_id, filters, page, pagesize
@@ -330,7 +334,6 @@ class RateLimiterService:
                 "X-RateLimit-Reset": str(qps_info["reset"])
             }
 
-        # Check daily requests
         daily_ok, daily_info = await self.check_daily_requests(
             api_key.id,
             api_key.daily_request_limit
@@ -342,7 +345,6 @@ class RateLimiterService:
                 "X-RateLimit-Reset": str(daily_info["reset"])
             }
 
-        # All checks passed
         headers = {
             "X-RateLimit-Limit-QPS": str(qps_info["limit"]),
             "X-RateLimit-Remaining-QPS": str(qps_info["remaining"]),
@@ -363,13 +365,12 @@ class ApiKeyAuthService:
         验证API Key 有效性
 
         检查：
-        1. Key hash 是否存在
+        1. API Key 是否存在
         2. is_active 是否为true
         3. expires_at 是否未过期
         4. quota 是否未超限
         """
-        key_hash = hash_api_key(api_key)
-        api_key_obj = ApiKeyRepository.get_by_hash(db, key_hash)
+        api_key_obj = ApiKeyRepository.get_by_api_key(db, api_key)
 
         if not api_key_obj:
             return None
@@ -393,14 +394,7 @@ class ApiKeyAuthService:
     @staticmethod
     def check_resource(
             api_key: ApiKey,
-            resource_type: str,
             resource_id: uuid.UUID
     ) -> bool:
         """检查资源绑定"""
-        if not api_key.resource_id:
-            return True
-
-        return (
-                api_key.resource_type == resource_type and
-                api_key.resource_id == resource_id
-        )
+        return api_key.resource_id == resource_id

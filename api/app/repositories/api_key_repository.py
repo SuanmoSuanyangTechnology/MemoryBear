@@ -27,9 +27,9 @@ class ApiKeyRepository:
         return db.get(ApiKey, api_key_id)
 
     @staticmethod
-    def get_by_hash(db: Session, key_hash: str) -> Optional[ApiKey]:
-        """根据哈希值获取 API Key"""
-        stmt = select(ApiKey).where(ApiKey.key_hash == key_hash)
+    def get_by_api_key(db: Session, api_key: str) -> Optional[ApiKey]:
+        """根据 API Key 获取 API Key"""
+        stmt = select(ApiKey).where(ApiKey.api_key == api_key)
         return db.scalars(stmt).first()
 
     @staticmethod
@@ -63,11 +63,15 @@ class ApiKeyRepository:
     @staticmethod
     def update(db: Session, api_key_id: uuid.UUID, update_data: dict) -> ApiKey | None:
         """更新 API Key"""
+        allow_none_fields = {"description", "quota_limit", "expires_at"}
         api_key = db.get(ApiKey, api_key_id)
         if api_key:
             for key, value in update_data.items():
-                if value is not None:
+                if key in allow_none_fields:
                     setattr(api_key, key, value)
+                else:
+                    if value is not None:
+                        setattr(api_key, key, value)
             db.flush()
         return api_key
 

@@ -1,7 +1,6 @@
 """API Key 管理接口 - 基于 JWT 认证"""
 import uuid
 from typing import Optional
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -14,6 +13,7 @@ from app.core.response_utils import success
 from app.schemas import api_key_schema
 from app.schemas.response_schema import ApiResponse
 from app.services.api_key_service import ApiKeyService
+from app.core.api_key_utils import timestamp_to_datetime
 from app.core.logging_config import get_api_logger
 from app.core.exceptions import (
     BusinessException,
@@ -41,18 +41,14 @@ def create_api_key(
         workspace_id = current_user.current_workspace_id
 
         # 创建 API Key
-        api_key_obj, api_key = ApiKeyService.create_api_key(
+        api_key_obj = ApiKeyService.create_api_key(
             db,
             workspace_id=workspace_id,
             user_id=current_user.id,
             data=data
         )
 
-        # 返回包含明文 Key 的响应
-        response_data = api_key_schema.ApiKeyResponse(
-            **api_key_obj.__dict__,
-            api_key=api_key
-        )
+        response_data = api_key_schema.ApiKeyResponse.model_validate(api_key_obj)
 
         return success(data=response_data, msg="API Key 创建成功")
     except BusinessException:
@@ -223,13 +219,9 @@ def regenerate_api_key(
     """
     try:
         workspace_id = current_user.current_workspace_id
-        api_key_obj, api_key = ApiKeyService.regenerate_api_key(db, api_key_id, workspace_id)
+        api_key_obj = ApiKeyService.regenerate_api_key(db, api_key_id, workspace_id)
 
-        # 返回包含明文 Key 的响应
-        response_data = api_key_schema.ApiKeyResponse(
-            **api_key_obj.__dict__,
-            api_key=api_key
-        )
+        response_data = api_key_schema.ApiKeyResponse.model_validate(api_key_obj)
 
         logger.info("API Key 重新生成成功", extra={
             "api_key_id": str(api_key_id),
@@ -283,8 +275,8 @@ def get_api_key_stats(
 @cur_workspace_access_guard()
 def get_api_key_logs(
         api_key_id: uuid.UUID,
-        start_date: Optional[datetime] = Query(None, description="开始日期"),
-        end_date: Optional[datetime] = Query(None, description="结束日期"),
+        start_date: Optional[int] = Query(None, description="开始日期时间戳"),
+        end_date: Optional[int] = Query(None, description="结束日期时间戳"),
         status_code: Optional[int] = Query(None, description="HTTP状态码过滤"),
         endpoint: Optional[str] = Query(None, description="端点路径过滤"),
         page: int = Query(1, ge=1, description="页码"),
@@ -302,14 +294,17 @@ def get_api_key_logs(
     try:
         workspace_id = current_user.current_workspace_id
 
+        start_datetime = timestamp_to_datetime(start_date) if start_date else None
+        end_datetime = timestamp_to_datetime(end_date) if end_date else None
+
         # 验证日期范围
-        if start_date and end_date and start_date > end_date:
+        if start_datetime and end_datetime and start_datetime > end_datetime:
             logger.warning("开始日期晚于结束日期", extra={
                 "api_key_id": str(api_key_id),
                 "workspace_id": str(workspace_id),
                 "user_id": str(current_user.id),
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat()
+                "start_date": start_datetime.isoformat(),
+                "end_date": end_datetime.isoformat()
             })
             raise BusinessException("开始日期不能晚于结束日期", BizCode.INVALID_PARAMETER)
 
@@ -325,8 +320,8 @@ def get_api_key_logs(
 
         # 构建过滤条件
         filters = {
-            "start_date": start_date,
-            "end_date": end_date,
+            "start_date": start_datetime,
+            "end_date": end_datetime,
             "status_code": status_code,
             "endpoint": endpoint
         }

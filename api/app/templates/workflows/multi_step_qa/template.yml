@@ -1,0 +1,99 @@
+# 多步骤问答工作流
+# 演示节点输出参数的使用
+
+id: multi_step_qa_v1
+name: 多步骤问答工作流
+description: 先分析问题，再生成答案，展示节点间的数据传递
+category: advanced
+version: "1.0.0"
+author: RedBear Memory Team
+tags:
+  - 问答
+  - 多步骤
+  - LLM
+
+# 工作流配置
+nodes:
+  - id: start
+    type: start
+    name: 开始
+    position:
+      x: 100
+      y: 100
+
+  - id: analyze_question
+    type: llm
+    name: 分析问题
+    description: 分析用户问题的类型和意图
+    config:
+      model_id: gpt-3.5-turbo
+      temperature: 0.3
+      max_tokens: 500
+      messages:
+        - role: system
+          content: |
+            你是一个问题分析专家。请分析用户的问题，提取以下信息：
+            1. 问题类型（事实性、观点性、操作性等）
+            2. 问题领域（科技、历史、文化等）
+            3. 关键词
+        - role: user
+          content: "{{ sys.message }}"
+    position:
+      x: 300
+      y: 100
+
+  - id: generate_answer
+    type: llm
+    name: 生成答案
+    description: 根据问题分析结果生成详细答案
+    config:
+      model_id: gpt-3.5-turbo
+      temperature: 0.7
+      max_tokens: 1000
+      messages:
+        - role: system
+          content: |
+            你是一个专业的AI助手。根据问题分析结果，生成准确、详细的答案。
+            
+            问题分析结果：
+            {{ analyze_question.output }}
+        - role: user
+          content: "{{ sys.message }}"
+    position:
+      x: 500
+      y: 100
+
+  - id: end
+    type: end
+    name: 结束
+    config:
+      output: "{{ generate_answer.output }}"
+    position:
+      x: 700
+      y: 100
+
+edges:
+  - source: start
+    target: analyze_question
+    label: 开始分析
+
+  - source: analyze_question
+    target: generate_answer
+    label: 生成答案
+
+  - source: generate_answer
+    target: end
+    label: 完成
+
+# 变量定义
+variables:
+  - name: user_question
+    type: string
+    required: true
+    description: 用户的问题
+    default: ""
+
+# 执行配置
+execution_config:
+  max_execution_time: 120
+  max_iterations: 1

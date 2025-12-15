@@ -86,6 +86,14 @@ class App(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    
+    # 一对一：工作流配置（仅当 type=workflow 时有效）
+    workflow_config = relationship(
+        "WorkflowConfig",
+        back_populates="app",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     # 发布版本关联
     current_release = relationship("AppRelease", foreign_keys=[current_release_id])
