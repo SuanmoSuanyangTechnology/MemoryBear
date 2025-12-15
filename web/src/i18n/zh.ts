@@ -35,6 +35,7 @@ export const zh = {
       userMemoryDetail: '用户记忆详情',
     },
     knowledgeBase: {
+      home: '首页',
       selectSpace: '请选择空间',
       preview:'预览',
       pleaseUploadFileFirst: '请先上传文件',
@@ -1241,6 +1242,8 @@ export const zh = {
       startANewConversation: '开始新对话',
       normalReply: '正常回复',
       quickReply: '快速回复',
+      memoryConversationAnalysisEmpty: '当前没有可用的对话分析内容',
+      memoryConversationAnalysisEmptySubTitle: '输入用户ID后，单击“发送”查看对话记忆'
     },
     login: {
       title: '红熊记忆科学',
