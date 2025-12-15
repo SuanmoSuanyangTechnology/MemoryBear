@@ -1,5 +1,6 @@
 import { request } from '@/utils/request'
 import type { CreateModalData } from '@/views/UserManagement/types'
+import { cookieUtils } from '@/utils/request'
 
 // 用户信息
 export const getUsers = () => {
@@ -15,7 +16,7 @@ export const login = (data: { email: string; password: string; invite?: string; 
 // 刷新token
 export const refreshTokenUrl = '/refresh'
 export const refreshToken = () => {
-  return request.post(refreshTokenUrl, { refresh_token: localStorage.getItem('refresh_token') })
+  return request.post(refreshTokenUrl, { refresh_token: cookieUtils.get('refreshToken') })
 }
 // 重置密码
 export const changePassword = (data: { user_id: string; new_password: string }) => {

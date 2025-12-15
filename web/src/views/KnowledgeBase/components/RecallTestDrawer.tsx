@@ -2,7 +2,7 @@
 import { forwardRef, useImperativeHandle, useState, useRef, useLayoutEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import RbDrawer from '@/components/RbDrawer';
-import type { RecallTestDrawerRef } from '../types';
+import type { RecallTestDrawerRef } from '@/views/KnowledgeBase/types';
 import RecallTest from './RecallTest';
 
 const RecallTestDrawer = forwardRef<RecallTestDrawerRef>(({},ref) => {

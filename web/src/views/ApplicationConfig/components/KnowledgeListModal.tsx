@@ -5,7 +5,7 @@ import clsx from 'clsx'
 import type { KnowledgeModalRef, KnowledgeBase } from '../types'
 import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types'
 import RbModal from '@/components/RbModal'
-import { getKnowledgeBaseList } from '@/views/KnowledgeBase/service'
+import { getKnowledgeBaseList } from '@/api/knowledgeBase'
 import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';

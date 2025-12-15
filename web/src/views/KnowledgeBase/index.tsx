@@ -10,14 +10,16 @@ import folderIcon from '@/assets/images/knowledgeBase/folder.png';
 import generalIcon from '@/assets/images/knowledgeBase/datasets.png';
 import webIcon from '@/assets/images/knowledgeBase/general.png';
 import tpIcon from '@/assets/images/knowledgeBase/text.png';
-import type { KnowledgeBaseListItem, CreateModalRef, KnowledgeBaseListResponse, ListQuery } from './types'
+import type { KnowledgeBaseListItem, CreateModalRef, KnowledgeBaseListResponse, ListQuery } from '@/views/KnowledgeBase/types'
 import CreateModal from './components/CreateModal'
 import RbCard from '@/components/RbCard'
 import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
-import { getKnowledgeBaseList, getModelList, getModelTypeList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from './service'
+import { getKnowledgeBaseList, getModelList, getModelTypeList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
 const { confirm } = Modal;
 import InfiniteScroll from 'react-infinite-scroll-component';
+import { useMenu } from '@/store/menu';
+
 type ModelMenuInfo = {
   menu: NonNullable<MenuProps['items']>;
   summary: string[];
@@ -40,6 +42,10 @@ const KnowledgeBaseManagement: FC = () => {
   const modelListCache = useRef<Record<string, string>>({});
   const modalRef = useRef<CreateModalRef>(null)
   const [messageApi, contextHolder] = message.useMessage();
+  
+  // 使用 menu store 管理面包屑
+  const { allBreadcrumbs, setCustomBreadcrumbs } = useMenu();
+  const [folderPath, setFolderPath] = useState<Array<{ id: string; name: string }>>([]);
   
 
   // 生成下拉菜单项（根据当前 item）
@@ -105,7 +111,17 @@ const KnowledgeBaseManagement: FC = () => {
 
   // 处理创建
   const handleCreate = (type?: string) => {
-    modalRef?.current?.handleOpen(null, type)
+    // 如果在文件夹内，使用 folderPath 的最后一项作为 parent_id
+    // 这样更可靠，因为 folderPath 是直接管理的状态
+    const currentParentId = folderPath.length > 0 
+      ? folderPath[folderPath.length - 1].id 
+      : query.parent_id; // 降级使用 query.parent_id
+    
+    const record = currentParentId ? {
+      parent_id: currentParentId as string,
+    } as KnowledgeBaseListItem : null;
+    
+    modalRef?.current?.handleOpen(record, type)
   }
 
   // 动态生成 createItems
@@ -118,7 +134,7 @@ const KnowledgeBaseManagement: FC = () => {
         handleCreate(type);
       },
     }));
-  }, [knowledgeBaseTypes, t]);
+  }, [knowledgeBaseTypes, t, folderPath, query]);
   const typeToFieldKey = (type: string) => {
     const normalized = (type || '').toLowerCase();
     switch (normalized) {
@@ -176,7 +192,7 @@ const KnowledgeBaseManagement: FC = () => {
   const fetchKnowledgeBaseTypes = async () => {
     try {
       let types = await getKnowledgeBaseTypeList();
-      types = types.filter(type => (type === 'General' )); //|| type === 'Folder'
+      types = types.filter(type => (type === 'General' || type === 'Folder' )); //
       //暂时未实现 ，过滤掉未实现
       setKnowledgeBaseTypes(types);
     } catch (error) {
@@ -337,6 +353,25 @@ const KnowledgeBaseManagement: FC = () => {
   };
   // 处理跳转详情
   const handleToDetail = (knowledgeBase: KnowledgeBaseListItem) => {
+    // 如果是 Folder 类型，刷新当前页面，显示该文件夹下的知识库列表
+    if (knowledgeBase.type === 'Folder' || knowledgeBase.type === 'folder') {
+      // 添加到文件夹路径
+      const newFolderPath = [
+        ...folderPath,
+        {
+          id: knowledgeBase.id,
+          name: knowledgeBase.name,
+        },
+      ];
+      setFolderPath(newFolderPath);
+      
+      setQuery((prev) => ({
+        ...prev,
+        parent_id: knowledgeBase.id,
+      }));
+      return;
+    }
+    
     // 根据权限类型跳转到不同的详情页
     if (knowledgeBase.permission_id === 'Private' || knowledgeBase.permission_id === 'private') {
       navigate(`/knowledge-base/${knowledgeBase.id}/private`)
@@ -344,6 +379,83 @@ const KnowledgeBaseManagement: FC = () => {
       navigate(`/knowledge-base/${knowledgeBase.id}/share`)
     }
   }
+  // 更新面包屑的函数
+  const updateBreadcrumbs = () => {
+    const baseBreadcrumbs = allBreadcrumbs['space'] || [];
+    // 只保留知识库菜单项之前的面包屑
+    const knowledgeBaseMenuIndex = baseBreadcrumbs.findIndex(item => item.path === '/knowledge-base');
+    const filteredBaseBreadcrumbs = knowledgeBaseMenuIndex >= 0 
+      ? baseBreadcrumbs.slice(0, knowledgeBaseMenuIndex + 1)
+      : baseBreadcrumbs;
+    
+    // 给"知识库管理"添加点击事件，返回根目录
+    const breadcrumbsWithClick = filteredBaseBreadcrumbs.map((item) => {
+      if (item.path === '/knowledge-base') {
+        return {
+          ...item,
+          onClick: (e?: React.MouseEvent) => {
+            e?.preventDefault();
+            e?.stopPropagation();
+            // 返回根目录
+            setFolderPath([]);
+            setQuery((prev) => ({
+              ...prev,
+              parent_id: undefined,
+            }));
+            return false;
+          },
+        };
+      }
+      return item;
+    });
+    
+    const customBreadcrumbs = [
+      ...breadcrumbsWithClick,
+      ...folderPath.map((folder, index) => ({
+        id: 0,
+        parent: 0,
+        code: null,
+        label: folder.name,
+        i18nKey: null,
+        path: null,
+        enable: true,
+        display: true,
+        level: 0,
+        sort: 0,
+        icon: null,
+        iconActive: null,
+        menuDesc: null,
+        deleted: null,
+        updateTime: 0,
+        new_: null,
+        keepAlive: false,
+        master: null,
+        disposable: false,
+        appSystem: null,
+        subs: [],
+        onClick: (e?: React.MouseEvent) => {
+          e?.preventDefault();
+          e?.stopPropagation();
+          // 点击文件夹，回到该文件夹层级
+          const newFolderPath = folderPath.slice(0, index + 1);
+          setFolderPath(newFolderPath);
+          setQuery((prev) => ({
+            ...prev,
+            parent_id: folder.id,
+          }));
+          return false;
+        },
+      })),
+    ];
+
+    setCustomBreadcrumbs(customBreadcrumbs, 'space');
+  };
+
+  // 更新面包屑
+  useEffect(() => {
+    updateBreadcrumbs();
+  }, [folderPath]);
+
   useEffect(() => {
     fetchModelTypes();
     fetchKnowledgeBaseTypes();

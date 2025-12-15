@@ -12,7 +12,7 @@ import { MoreOutlined } from '@ant-design/icons';
 import folderIcon from '@/assets/images/knowledgeBase/folder.png';
 import textIcon from '@/assets/images/knowledgeBase/text.png';
 import editIcon from '@/assets/images/knowledgeBase/edit.png';
-import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase } from '../service';
+import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase } from '@/api/knowledgeBase';
 import type { 
   CreateModalRef, 
   KnowledgeBaseListItem, 
@@ -22,7 +22,7 @@ import type {
   ShareModalRef,
   CreateDatasetModalRef,FolderFormData, 
   KnowledgeBaseDocumentData 
-} from '../types';
+} from '@/views/KnowledgeBase/types';
 import RecallTestDrawer from '../components/RecallTestDrawer';
 import CreateFolderModal from '../components/CreateFolderModal';
 import CreateModal from '../components/CreateModal';
@@ -64,6 +64,7 @@ const Private: FC = () => {
   const [folderTreeRefreshKey, setFolderTreeRefreshKey] = useState(0);
   const { allBreadcrumbs, setCustomBreadcrumbs } = useMenu();
   const [folderPath, setFolderPath] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   useEffect(() => {
     if (knowledgeBaseId) {
       let url = `/documents/${knowledgeBaseId}/${parentId}/documents`;
@@ -143,8 +144,23 @@ const Private: FC = () => {
         disposable: false,
         appSystem: null,
         subs: [],
+        onClick: (e?: React.MouseEvent) => {
+          // 阻止默认行为和事件冒泡
+          e?.preventDefault();
+          e?.stopPropagation();
+          // 点击知识库名称，回到根目录
+          setParentId(knowledgeBaseId);
+          setFolder({
+            kb_id: knowledgeBaseId ?? '',
+            parent_id: knowledgeBaseId ?? ''
+          });
+          setTableApi(`/documents/${knowledgeBaseId}/${knowledgeBaseId}/documents`);
+          setFolderPath([]);
+          setSelectedKeys([knowledgeBaseId ?? '']);
+          return false;
+        },
       },
-      ...folderPath.map((folder) => ({
+      ...folderPath.map((folder, index) => ({
         id: 0,
         parent: 0,
         code: null,
@@ -166,6 +182,22 @@ const Private: FC = () => {
         disposable: false,
         appSystem: null,
         subs: [],
+        onClick: (e?: React.MouseEvent) => {
+          // 阻止默认行为和事件冒泡
+          e?.preventDefault();
+          e?.stopPropagation();
+          // 点击文件夹，回到该文件夹层级
+          setParentId(folder.id);
+          setFolder({
+            kb_id: knowledgeBaseId ?? '',
+            parent_id: folder.id
+          });
+          setTableApi(`/documents/${knowledgeBaseId}/${folder.id}/documents`);
+          // 更新文件夹路径，只保留到当前点击的文件夹
+          setFolderPath(folderPath.slice(0, index + 1));
+          setSelectedKeys([folder.id]);
+          return false;
+        },
       })),
     ];
 
@@ -173,17 +205,18 @@ const Private: FC = () => {
   };
 
   // 处理树节点选择
-  const onSelect = (selectedKeys: React.Key[]) => {
-    if (!selectedKeys.length) return;
+  const onSelect = (keys: React.Key[]) => {
+    if (!keys.length) return;
     if (!folder) return;
     const f = {
       ...folder,
-      parent_id: String(selectedKeys[0]),
+      parent_id: String(keys[0]),
     }
-    let url = `/documents/${knowledgeBaseId}/${String(selectedKeys[0])}/documents`;
+    let url = `/documents/${knowledgeBaseId}/${String(keys[0])}/documents`;
     setTableApi(url);
-    setParentId(String(selectedKeys[0]))
+    setParentId(String(keys[0]))
     setFolder(f)
+    setSelectedKeys(keys)
   };
 
   // 处理文件夹路径变化
@@ -511,6 +544,7 @@ const Private: FC = () => {
               refreshKey={folderTreeRefreshKey}
               onRootLoad={handleRootTreeLoad}
               onFolderPathChange={handleFolderPathChange}
+              selectedKeys={selectedKeys}
             />
         </div>
       )}

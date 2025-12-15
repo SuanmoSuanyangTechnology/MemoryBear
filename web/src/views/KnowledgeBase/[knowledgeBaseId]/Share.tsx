@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, type FC } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import type { KnowledgeBaseListItem, RecallTestDrawerRef } from '../types';
+import type { KnowledgeBaseListItem, RecallTestDrawerRef } from '@/views/KnowledgeBase/types';
 import RecallTest from '../components/RecallTest';
 import InfoPanel, { type InfoItem } from '../components/InfoPanel';
 import shareUserIcon from '@/assets/images/knowledgeBase/share-user.png';
@@ -13,8 +13,9 @@ import kbSizeIcon from '@/assets/images/knowledgeBase/kb-size.png';
 import kbModelIcon from '@/assets/images/knowledgeBase/kb-model.png';
 
 import kbHistoryIcon from '@/assets/images/knowledgeBase/kb-history.png';
-import { getKnowledgeBaseDetail } from '../service';
+import { getKnowledgeBaseDetail } from '@/api/knowledgeBase';
 import { formatDateTime } from '@/utils/format';
+import { useMenu } from '@/store/menu';
 
 const Share: FC = () => {
   const { t } = useTranslation();
@@ -24,6 +25,7 @@ const Share: FC = () => {
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBaseListItem | null>(null);
   const recallTestRef = useRef<RecallTestDrawerRef>(null);
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
+  const { allBreadcrumbs, setCustomBreadcrumbs } = useMenu();
   useEffect(() => {
     console.log('Share.tsx - useParams result:', params);
     console.log('Share.tsx - knowledgeBaseId:', knowledgeBaseId);
@@ -40,6 +42,13 @@ const Share: FC = () => {
       console.warn('Share.tsx - knowledgeBaseId is undefined or empty');
     }
   }, [knowledgeBaseId]);
+
+  // 更新面包屑
+  useEffect(() => {
+    if (knowledgeBase) {
+      updateBreadcrumbs();
+    }
+  }, [knowledgeBase]);
   const formatInfoItems = (data: KnowledgeBaseListItem): InfoItem[] => {
     const items: InfoItem[] = [
       { 
@@ -101,6 +110,47 @@ const Share: FC = () => {
       .finally(() => {
         setLoading(false);
       });
+  };
+
+  // 更新面包屑，包含知识库名称
+  const updateBreadcrumbs = () => {
+    if (!knowledgeBase) return;
+    
+    const baseBreadcrumbs = allBreadcrumbs['space'] || [];
+    // 只保留知识库菜单项之前的面包屑
+    const knowledgeBaseMenuIndex = baseBreadcrumbs.findIndex(item => item.path === '/knowledge-base');
+    const filteredBaseBreadcrumbs = knowledgeBaseMenuIndex >= 0 
+      ? baseBreadcrumbs.slice(0, knowledgeBaseMenuIndex + 1)
+      : baseBreadcrumbs;
+    
+    const customBreadcrumbs = [
+      ...filteredBaseBreadcrumbs,
+      {
+        id: 0,
+        parent: 0,
+        code: null,
+        label: knowledgeBase.name,
+        i18nKey: null,
+        path: null,
+        enable: true,
+        display: true,
+        level: 0,
+        sort: 0,
+        icon: null,
+        iconActive: null,
+        menuDesc: null,
+        deleted: null,
+        updateTime: 0,
+        new_: null,
+        keepAlive: false,
+        master: null,
+        disposable: false,
+        appSystem: null,
+        subs: [],
+      },
+    ];
+
+    setCustomBreadcrumbs(customBreadcrumbs, 'space');
   };
 
   // const handleBack = () => {
