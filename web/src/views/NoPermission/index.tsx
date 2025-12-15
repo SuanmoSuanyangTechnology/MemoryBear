@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import noPermission from '@/assets/images/empty/noPermission.svg';
+import noPermission from '@/assets/images/empty/noPermission.png';
 import Empty from '@/components/Empty';
 
 const NoPermission = () => {  

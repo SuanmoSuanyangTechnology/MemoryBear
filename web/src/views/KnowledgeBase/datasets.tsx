@@ -5,7 +5,7 @@ import { Button } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 
 import { request } from '@/utils/request';
-import type { KnowledgeBase } from './types';
+import type { KnowledgeBase } from '@/views/KnowledgeBase/types';
 
 const Datasets: FC = () => {
   const { t } = useTranslation();

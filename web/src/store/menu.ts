@@ -23,6 +23,7 @@ export interface MenuItem {
   disposable?: boolean;
   appSystem?: string | null;
   subs: MenuItem[] | null;
+  onClick?: (e?: React.MouseEvent) => void | boolean;
 }
 interface MenuState {
   collapsed: boolean;

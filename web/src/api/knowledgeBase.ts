@@ -1,4 +1,4 @@
-import { request } from "@/utils/request";
+import { request, cookieUtils } from "@/utils/request";
 import type { AxiosProgressEvent } from "axios";
 import type {
   ShareRequestParams,
@@ -15,7 +15,7 @@ import type {
   KnowledgeBaseDocumentData,
   KnowledgeBaseListResponse,
   KnowledgeBaseShareListResponse,
-} from "./types";
+} from "@/views/KnowledgeBase/types";
 
 const apiPrefix = '';
 
@@ -151,7 +151,7 @@ export const uploadFile = async (data: FormData, options?: UploadFileOptions) =>
 
 // 下载文件
 export const downloadFile = async (fileId: string, fileName?: string) => {
-  const token = localStorage.getItem('token');
+  const token = cookieUtils.get('authToken');
   const url = `${apiPrefix}/files/${fileId}`;
   
   try {

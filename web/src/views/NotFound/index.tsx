@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import notFoundImg from '@/assets/images/empty/404.svg';
+import notFoundImg from '@/assets/images/empty/404.png';
 import Empty from '@/components/Empty';
 
 const NotFound = () => {

@@ -2,10 +2,10 @@
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Form, Input,  Select, Button, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { RecallTestDrawerRef, RecallTestData, RecallTestParams } from '../types';
+import type { RecallTestDrawerRef, RecallTestData, RecallTestParams } from '@/views/KnowledgeBase/types';
 // import refreshIcon from '@/assets/images/knowledgeBase/refresh-blue.png';
 import RecallTestResult from './RecallTestResult';
-import { reChunks, getRetrievalModeType } from '../service';
+import { reChunks, getRetrievalModeType } from '@/api/knowledgeBase';
 import { hybrid } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
 const { TextArea } = Input;

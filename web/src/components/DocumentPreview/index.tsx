@@ -2,6 +2,7 @@ import { useState, useEffect, type FC } from 'react';
 import { Spin, Alert, Button } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import RbMarkdown from '../Markdown';
+import { cookieUtils } from '@/utils/request'
 
 type PreviewMode = 'office' | 'google';
 
@@ -156,7 +157,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       const response = await fetch(requestUrl, {
         credentials: 'include', // 包含认证信息
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
         },
       });
       
