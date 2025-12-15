@@ -65,6 +65,7 @@ class User(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
     @field_validator("last_login_at", mode="before")
+    @classmethod
     def _last_login_to_ms(cls, v):
         if v is None:
             return None

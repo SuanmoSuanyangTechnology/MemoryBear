@@ -13,10 +13,13 @@ from app.db import get_db
 from app.models.document_model import Document
 from app.models.knowledge_model import Knowledge
 from app.core.rag.llm.cv_model import QWenCV
+from app.core.rag.llm.chat_model import Base
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.rag.models.chunk import DocumentChunk
 from app.services.memory_agent_service import MemoryAgentService
 from app.core.config import settings
+from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
+from app.core.rag.prompts.generator import question_proposal
 
 # Import a unified Celery instance
 from app.celery_app import celery_app
@@ -66,7 +69,12 @@ def parse_document(file_path: str, document_id: uuid.UUID):
         def progress_callback(prog=None, msg=None):
             nonlocal progress_msg  # Declare the use of an external progress_msg variable
             progress_msg += f"{datetime.now().strftime('%H:%M:%S')} parse progress: {prog} msg: {msg}.\n"
-        # Prepare to configure vision_model information
+        # Prepare to configure chat_mdl、vision_model information
+        chat_model = Base(
+            key=db_knowledge.llm.api_keys[0].api_key,
+            model_name=db_knowledge.llm.api_keys[0].model_name,
+            base_url=db_knowledge.llm.api_keys[0].api_base
+        )
         vision_model = QWenCV(
             key=db_knowledge.image2text.api_keys[0].api_key,
             model_name=db_knowledge.image2text.api_keys[0].model_name,
@@ -116,7 +124,15 @@ def parse_document(file_path: str, document_id: uuid.UUID):
                     "sort_id": global_idx,
                     "status": 1,
                 }
-                chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
+                if db_document.parser_config.get("auto_questions", 0):
+                    topn = db_document.parser_config["auto_questions"]
+                    cached = get_llm_cache(chat_model.model_name, item["content_with_weight"], "question", {"topn": topn})
+                    if not cached:
+                        cached = question_proposal(chat_model, item["content_with_weight"], topn)
+                        set_llm_cache(chat_model.model_name, item["content_with_weight"], cached, "question", {"topn": topn})
+                    chunks.append(DocumentChunk(page_content=f"question: {cached} answer: {item['content_with_weight']}", metadata=metadata))
+                else:
+                    chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
 
             # Bulk segmented vector import
             vector_service.add_chunks(chunks)

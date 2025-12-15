@@ -167,7 +167,7 @@ async def Retrieve(
                     val.append(items_value)
             
             send_verify = []
-            for i, j in zip(keys, val):
+            for i, j in zip(keys, val, strict=False):
                 send_verify.append({
                     "Query_small": i,
                     "Answer_Small": j

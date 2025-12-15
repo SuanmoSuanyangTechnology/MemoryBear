@@ -148,7 +148,7 @@ def create_workspace(
                     description=f"工作空间 {workspace.name} 的默认知识库",
                     avatar='',
                     type=KnowledgeType.General,
-                    permission_id=PermissionType.Private,
+                    permission_id=PermissionType.Memory,
                     embedding_id=uuid.UUID(getenv('KB_embedding_id')) if None else embedding,
                     reranker_id=uuid.UUID(getenv('KB_reranker_id')) if None else rerank,
                     llm_id=uuid.UUID(getenv('KB_llm_id')) if None else llm,
@@ -459,7 +459,7 @@ def get_workspace_invites(
 
 def validate_invite_token(db: Session, token: str) -> InviteValidateResponse:
     """验证邀请令牌"""
-    business_logger.info(f"验证邀请令牌")
+    business_logger.info("验证邀请令牌")
     
     # 生成令牌哈希
     token_hash = hashlib.sha256(token.encode()).hexdigest()
@@ -469,7 +469,7 @@ def validate_invite_token(db: Session, token: str) -> InviteValidateResponse:
     invite = invite_repo.get_invite_by_token_hash(token_hash)
     
     if not invite:
-        business_logger.warning(f"邀请令牌无效")
+        business_logger.warning("邀请令牌无效")
         raise BusinessException("邀请令牌无效", BizCode.WORKSPACE_INVITE_NOT_FOUND)
     
     # 检查邀请状态和过期时间
@@ -511,7 +511,7 @@ def accept_workspace_invite(
         invite = invite_repo.get_invite_by_token_hash(token_hash)
         
         if not invite:
-            business_logger.warning(f"邀请令牌无效")
+            business_logger.warning("邀请令牌无效")
             raise BusinessException("邀请令牌无效", BizCode.WORKSPACE_INVITE_NOT_FOUND)
         
         # 检查邀请状态
@@ -522,7 +522,7 @@ def accept_workspace_invite(
         # 检查过期时间
         now = datetime.datetime.now()
         if invite.expires_at < now:
-            business_logger.warning(f"邀请已过期")
+            business_logger.warning("邀请已过期")
             # 标记为过期
             invite_repo.update_invite_status(invite.id, InviteStatus.expired)
             raise BusinessException("邀请已过期", BizCode.WORKSPACE_INVITE_EXPIRED)
@@ -547,7 +547,7 @@ def accept_workspace_invite(
         )
         
         if existing_member:
-            business_logger.info(f"用户已是工作空间成员，更新邀请状态")
+            business_logger.info("用户已是工作空间成员，更新邀请状态")
             invite_repo.update_invite_status(
                 invite.id, 
                 InviteStatus.accepted, 
@@ -725,6 +725,34 @@ def get_workspace_storage_type(
 
     # 检查用户是否有权限访问该工作空间
     _check_workspace_member_permission(db, workspace_id, user)
+
+    # 查询工作空间
+    workspace = workspace_repository.get_workspace_by_id(db=db, workspace_id=workspace_id)
+    if not workspace:
+        business_logger.error(f"工作空间不存在: workspace_id={workspace_id}")
+        raise BusinessException(
+            code=BizCode.WORKSPACE_NOT_FOUND,
+            message="工作空间不存在"
+        )
+
+    business_logger.info(f"成功获取工作空间 {workspace_id} 的存储类型: {workspace.storage_type}")
+    return workspace.storage_type
+
+
+def get_workspace_storage_type_without_auth(
+        db: Session,
+        workspace_id: uuid.UUID,
+) -> Optional[str]:
+    """获取工作空间的存储类型（无需权限验证，用于公开分享等场景）
+
+    Args:
+        db: 数据库会话
+        workspace_id: 工作空间ID
+
+    Returns:
+        storage_type: 存储类型字符串，如果未设置则返回 None
+    """
+    business_logger.info(f"获取工作空间 {workspace_id} 的存储类型（无权限验证）")
 
     # 查询工作空间
     workspace = workspace_repository.get_workspace_by_id(db=db, workspace_id=workspace_id)

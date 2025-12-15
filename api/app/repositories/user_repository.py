@@ -144,9 +144,10 @@ class UserRepository:
                 db_logger.debug(f"用户不存在: user_id={user_id}")
                 return False
             
-            self.db.delete(user)
+            # 逻辑删除用户
+            user.is_active = False
             self.db.flush()
-            db_logger.info(f"用户删除成功: {user.username}")
+            db_logger.info(f"用户删除成功（逻辑删除）: {user.username}")
             return True
         except Exception as e:
             db_logger.error(f"删除用户失败: user_id={user_id} - {str(e)}")

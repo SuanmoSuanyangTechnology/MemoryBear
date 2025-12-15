@@ -273,7 +273,7 @@ def reload_configuration_from_database(config_id: int | str, force_reload: bool 
             # 重新暴露常量
             _expose_runtime_constants(updated_cfg)
 
-            logger.info(f"[definitions] 配置重新加载成功，已暴露常量")
+            logger.info("[definitions] 配置重新加载成功，已暴露常量")
             logger.debug(f"[definitions] 配置详情: LLM_ID={updated_cfg.get('selections', {}).get('llm_id')}, "
                         f"EMBEDDING_ID={updated_cfg.get('selections', {}).get('embedding_id')}")
 

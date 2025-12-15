@@ -53,13 +53,13 @@ class ModelParameterMerger:
         
         # 应用模型配置参数
         if model_config_params:
-            for key in default_params.keys():
+            for key in default_params:
                 if key in model_config_params:
                     merged[key] = model_config_params[key]
         
         # 应用 Agent 配置参数（优先级最高）
         if agent_config_params:
-            for key in default_params.keys():
+            for key in default_params:
                 if key in agent_config_params and agent_config_params[key] is not None:
                     merged[key] = agent_config_params[key]
         
@@ -67,7 +67,7 @@ class ModelParameterMerger:
         merged = {k: v for k, v in merged.items() if v is not None}
         
         logger.debug(
-            f"参数合并完成",
+            "参数合并完成",
             extra={
                 "model_params": model_config_params,
                 "agent_params": agent_config_params,

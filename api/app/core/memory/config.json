@@ -1,0 +1,132 @@
+{
+  "llm_list": [
+    {
+      "llm_name": "qwen2.5-14b-instruct-awq",
+      "api_base": "http://175.27.131.196:9090/v1",
+      "api_key": "OPENAI_API_KEY"
+    },
+    {
+      "llm_name": "openai/qwen2.5-14b-instruct-awq",
+      "api_base": "http://175.27.131.196:9090/v1",
+      "api_key": "OPENAI_API_AGENT_KEY"
+    },
+    {
+      "llm_name": "openai/qwen2.5-14b",
+      "api_base": "http://43.137.4.24:9090/v1",
+      "api_key": "OPENAI_API_KEY"
+    },
+        {
+      "llm_name": "openai/qwen2.5-14b-instruct-awq",
+      "api_base": "http://175.27.131.196:9090/v1",
+      "api_key": "OPENAI_API_KEY"
+    },
+    {
+      "llm_name": "openai/qwen3-14b",
+      "api_base": "http://43.137.4.24:9090/v1",
+      "api_key": "OPENAI_API_KEY"
+    },
+    {
+      "llm_name": "openai/deepseek-r1-0528-qwen3-8b",
+      "api_base": "http://43.137.4.24:9090/v1",
+      "api_key": "OPENAI_API_KEY"
+    },
+    {
+      "llm_name": "openai/qwen3-235b-a22b-instruct-2507",
+      "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key": "DASHSCOPE_API_KEY"
+    }
+    ,
+    {
+      "llm_name": "openai/qwen-plus",
+      "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key": "DASHSCOPE_API_KEY"
+    },
+    {
+      "llm_name": "bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    },
+    {
+      "llm_name": "bedrock/global.anthropic.claude-sonnet-4-20250514-v1:0"
+    }
+  ],
+  "embedding_list": [
+    {
+      "embedding_name": "openai/nomic-embed-text:v1.5",
+      "api_base": "http://119.45.239.97:11434/v1",
+      "dimension": 768
+    },
+    {
+      "embedding_name": "openai/bge-m3",
+      "api_base": "http://43.137.4.24:9090/v1",
+      "dimension": 1024
+    }
+  ],
+  "neo4j": {
+    "uri": "bolt://1.94.111.67:7687",
+    "username": "neo4j"
+  },
+  "chunker_list": [
+    {
+      "chunker_strategy": "TokenChunker",
+      "embedding_model": "BAAI/bge-m3",
+      "chunk_size": 512,
+      "chunk_overlap": 56,
+      "tokenizer_or_token_counter": "character"
+    },
+    {
+      "chunker_strategy": "RecursiveChunker",
+      "embedding_model": "BAAI/bge-m3",
+      "chunk_size": 512,
+      "min_characters_per_chunk": 50
+    },
+    {
+      "chunker_strategy": "SemanticChunker",
+      "embedding_model": "BAAI/bge-m3",
+      "chunk_size": 1024,
+      "threshold": 0.8,
+      "min_sentences": 2,
+      "skip_window": 1,
+      "min_characters_per_chunk": 100
+    },
+    {
+      "chunker_strategy": "LateChunker",
+      "embedding_model": "all-MiniLM-L6-v2",
+      "chunk_size": 2048,
+      "min_characters_per_chunk": 24
+    },
+    {
+      "chunker_strategy": "NeuralChunker",
+      "embedding_model": "mirth/chonky_modernbert_base_1",
+      "min_characters_per_chunk": 24
+    },
+    {
+      "chunker_strategy": "LLMChunker",
+      "embedding_model": "BAAI/bge-m3",
+      "chunk_size": 1000,
+      "min_characters_per_chunk": 100
+    },
+    {
+      "chunker_strategy": "HybridChunker",
+      "embedding_model": "BAAI/bge-m3",
+      "chunk_size": 512,
+      "threshold": 0.8,
+      "min_characters_per_chunk": 100
+    },
+    {
+      "chunker_strategy": "SentenceChunker",
+      "embedding_model": "BAAI/bge-m3",
+      "chunk_size": 2048,
+      "chunk_overlap": 128,
+      "min_sentences_per_chunk": 1,
+      "min_characters_per_sentence": 12,
+      "delim": [".", "!", "?", "\n"],
+      "include_delim": "prev",
+      "tokenizer_or_token_counter": "character"
+    }
+  ],
+  "langfuse": {
+    "enabled": true
+  },
+  "agenta": {
+    "enabled": false
+  }
+}

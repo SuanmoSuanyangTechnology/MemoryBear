@@ -42,7 +42,7 @@ class ConversationService:
         self.db.refresh(conversation)
         
         logger.info(
-            f"创建会话成功",
+            "创建会话成功",
             extra={
                 "conversation_id": str(conversation.id),
                 "app_id": str(app_id),
@@ -201,7 +201,7 @@ class ConversationService:
         )
         
         logger.debug(
-            f"保存会话消息成功",
+            "保存会话消息成功",
             extra={
                 "conversation_id": str(conversation_id),
                 "user_message_length": len(user_message),
@@ -221,7 +221,7 @@ class ConversationService:
         self.db.commit()
         
         logger.info(
-            f"删除会话成功",
+            "删除会话成功",
             extra={
                 "conversation_id": str(conversation_id),
                 "workspace_id": str(workspace_id)

@@ -24,17 +24,17 @@ class ModelConfigService:
     """模型配置服务"""
 
     @staticmethod
-    def get_model_by_id(db: Session, model_id: uuid.UUID) -> ModelConfig:
+    def get_model_by_id(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> ModelConfig:
         """根据ID获取模型配置"""
-        model = ModelConfigRepository.get_by_id(db, model_id)
+        model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
         return model
 
     @staticmethod
-    def get_model_list(db: Session, query: ModelConfigQuery) -> PageData:
+    def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:
         """获取模型配置列表"""
-        models, total = ModelConfigRepository.get_list(db, query)
+        models, total = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
         pages = math.ceil(total / query.pagesize) if total > 0 else 0
         
         return PageData(
@@ -48,17 +48,17 @@ class ModelConfigService:
         )
 
     @staticmethod
-    def get_model_by_name(db: Session, name: str) -> ModelConfig:
+    def get_model_by_name(db: Session, name: str, tenant_id: uuid.UUID | None = None) -> ModelConfig:
         """根据名称获取模型配置"""
-        model = ModelConfigRepository.get_by_name(db, name)
+        model = ModelConfigRepository.get_by_name(db, name, tenant_id=tenant_id)
         if not model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
         return model
 
     @staticmethod
-    def search_models_by_name(db: Session, name: str, limit: int = 10) -> List[ModelConfig]:
+    def search_models_by_name(db: Session, name: str, tenant_id: uuid.UUID | None = None, limit: int = 10) -> List[ModelConfig]:
         """按名称模糊匹配获取模型配置列表"""
-        return ModelConfigRepository.search_by_name(db, name, limit)
+        return ModelConfigRepository.search_by_name(db, name, tenant_id=tenant_id, limit=limit)
 
     @staticmethod
     async def validate_model_config(
@@ -220,10 +220,10 @@ class ModelConfigService:
             }
 
     @staticmethod
-    async def create_model(db: Session, model_data: ModelConfigCreate) -> ModelConfig:
+    async def create_model(db: Session, model_data: ModelConfigCreate, tenant_id: uuid.UUID) -> ModelConfig:
         """创建模型配置"""
-        # 检查名称是否已存在
-        if ModelConfigRepository.get_by_name(db, model_data.name):
+        # 检查名称是否已存在（同租户内）
+        if ModelConfigRepository.get_by_name(db, model_data.name, tenant_id=tenant_id):
             raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
 
         # 验证配置
@@ -247,6 +247,8 @@ class ModelConfigService:
         # 事务处理
         api_key_data = model_data.api_keys
         model_config_data = model_data.dict(exclude={"api_keys", "skip_validation"})
+        # 添加租户ID
+        model_config_data["tenant_id"] = tenant_id
         
         model = ModelConfigRepository.create(db, model_config_data)
         db.flush()  # 获取生成的 ID
@@ -263,28 +265,28 @@ class ModelConfigService:
         return model
 
     @staticmethod
-    def update_model(db: Session, model_id: uuid.UUID, model_data: ModelConfigUpdate) -> ModelConfig:
+    def update_model(db: Session, model_id: uuid.UUID, model_data: ModelConfigUpdate, tenant_id: uuid.UUID | None = None) -> ModelConfig:
         """更新模型配置"""
-        existing_model = ModelConfigRepository.get_by_id(db, model_id)
+        existing_model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not existing_model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
         
         if model_data.name and model_data.name != existing_model.name:
-            if ModelConfigRepository.get_by_name(db, model_data.name):
+            if ModelConfigRepository.get_by_name(db, model_data.name, tenant_id=tenant_id):
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
         
-        model = ModelConfigRepository.update(db, model_id, model_data)
+        model = ModelConfigRepository.update(db, model_id, model_data, tenant_id=tenant_id)
         db.commit()
         db.refresh(model)
         return model
 
     @staticmethod
-    def delete_model(db: Session, model_id: uuid.UUID) -> bool:
+    def delete_model(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> bool:
         """删除模型配置"""
-        if not ModelConfigRepository.get_by_id(db, model_id):
+        if not ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id):
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
         
-        success = ModelConfigRepository.delete(db, model_id)
+        success = ModelConfigRepository.delete(db, model_id, tenant_id=tenant_id)
         db.commit()
         return success
 

@@ -58,7 +58,7 @@ class AppService:
         """
         if workspace_id is not None and app.workspace_id != workspace_id:
             logger.warning(
-                f"工作空间访问被拒",
+                "工作空间访问被拒",
                 extra={"app_id": str(app.id), "workspace_id": str(workspace_id)}
             )
             raise BusinessException("应用不在指定工作空间中", BizCode.WORKSPACE_NO_ACCESS)
@@ -103,7 +103,7 @@ class AppService:
         """
         if not self._check_app_accessible(app, workspace_id):
             logger.warning(
-                f"应用访问被拒",
+                "应用访问被拒",
                 extra={"app_id": str(app.id), "workspace_id": str(workspace_id)}
             )
             raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
@@ -122,7 +122,7 @@ class AppService:
         """
         app = self.db.get(App, app_id)
         if not app:
-            logger.warning(f"应用不存在", extra={"app_id": str(app_id)})
+            logger.warning("应用不存在", extra={"app_id": str(app_id)})
             raise ResourceNotFoundException("应用", str(app_id))
         return app
     
@@ -257,7 +257,7 @@ class AppService:
                 )
         
         logger.info(
-            f"多智能体配置检查通过",
+            "多智能体配置检查通过",
             extra={
                 "app_id": str(app_id),
                 "master_agent_id": str(multi_agent_config.master_agent_id),
@@ -295,7 +295,7 @@ class AppService:
             updated_at=now,
         )
         self.db.add(agent_cfg)
-        logger.debug(f"Agent 配置已创建", extra={"app_id": str(app_id)})
+        logger.debug("Agent 配置已创建", extra={"app_id": str(app_id)})
     
     def _create_multi_agent_config(
         self,
@@ -380,7 +380,7 @@ class AppService:
             updated_at=now,
         )
         self.db.add(multi_agent_cfg)
-        logger.debug(f"多 Agent 配置已创建", extra={"app_id": str(app_id), "mode": config.orchestration_mode})
+        logger.debug("多 Agent 配置已创建", extra={"app_id": str(app_id), "mode": config.orchestration_mode})
     
     def _get_next_version(self, app_id: uuid.UUID) -> int:
         """获取下一个版本号
@@ -474,7 +474,7 @@ class AppService:
             BusinessException: 当创建失败时
         """
         logger.info(
-            f"创建应用",
+            "创建应用",
             extra={"app_name": data.name, "type": data.type, "workspace_id": str(workspace_id)}
         )
         
@@ -511,12 +511,12 @@ class AppService:
             self.db.commit()
             self.db.refresh(app)
             
-            logger.info(f"应用创建成功", extra={"app_id": str(app.id), "app_name": app.name})
+            logger.info("应用创建成功", extra={"app_id": str(app.id), "app_name": app.name})
             return app
             
         except Exception as e:
             self.db.rollback()
-            logger.error(f"应用创建失败", extra={"app_name": data.name, "error": str(e)})
+            logger.error("应用创建失败", extra={"app_name": data.name, "error": str(e)})
             raise BusinessException(f"应用创建失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
     
     def update_app(
@@ -540,7 +540,7 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用不在指定工作空间时
         """
-        logger.info(f"更新应用", extra={"app_id": str(app_id)})
+        logger.info("更新应用", extra={"app_id": str(app_id)})
         
         app = self._get_app_or_404(app_id)
         self._validate_workspace_access(app, workspace_id)
@@ -556,9 +556,9 @@ class AppService:
             app.updated_at = datetime.datetime.now()
             self.db.commit()
             self.db.refresh(app)
-            logger.info(f"应用更新成功", extra={"app_id": str(app_id)})
+            logger.info("应用更新成功", extra={"app_id": str(app_id)})
         else:
-            logger.debug(f"应用无变更", extra={"app_id": str(app_id)})
+            logger.debug("应用无变更", extra={"app_id": str(app_id)})
         
         return app
     
@@ -578,17 +578,17 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用不在指定工作空间时
         """
-        logger.info(f"删除应用", extra={"app_id": str(app_id)})
+        logger.info("删除应用", extra={"app_id": str(app_id)})
         
         app = self._get_app_or_404(app_id)
         self._validate_workspace_access(app, workspace_id)
         
-        # 删除应用（级联删除相关数据）
-        self.db.delete(app)
+        # 逻辑删除应用
+        app.is_active = False
         self.db.commit()
         
         logger.info(
-            f"应用删除成功",
+            "应用删除成功",
             extra={
                 "app_id": str(app_id),
                 "app_name": app.name,
@@ -619,7 +619,7 @@ class AppService:
             ResourceNotFoundException: 当源应用不存在时
             BusinessException: 当复制失败时
         """
-        logger.info(f"复制应用", extra={"source_app_id": str(app_id)})
+        logger.info("复制应用", extra={"source_app_id": str(app_id)})
         
         try:
             # 获取源应用
@@ -682,7 +682,7 @@ class AppService:
             self.db.refresh(new_app)
             
             logger.info(
-                f"应用复制成功",
+                "应用复制成功",
                 extra={
                     "source_app_id": str(app_id),
                     "new_app_id": str(new_app.id),
@@ -695,7 +695,7 @@ class AppService:
         except Exception as e:
             self.db.rollback()
             logger.error(
-                f"应用复制失败",
+                "应用复制失败",
                 extra={"source_app_id": str(app_id), "error": str(e)}
             )
             raise BusinessException(f"应用复制失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
@@ -734,7 +734,7 @@ class AppService:
         from app.models import AppShare
         
         logger.debug(
-            f"查询应用列表",
+            "查询应用列表",
             extra={
                 "workspace_id": str(workspace_id),
                 "include_shared": include_shared,
@@ -745,6 +745,7 @@ class AppService:
         
         # 构建查询条件
         filters = []
+        filters.append(App.is_active == True)
         if type:
             filters.append(App.type == type)
         if visibility:
@@ -791,7 +792,7 @@ class AppService:
         items = list(self.db.scalars(stmt).all())
         
         logger.debug(
-            f"应用列表查询完成",
+            "应用列表查询完成",
             extra={"total": total, "returned": len(items), "include_shared": include_shared}
         )
         return items, int(total)
@@ -819,7 +820,7 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用类型不支持或不在指定工作空间时
         """
-        logger.info(f"更新 Agent 配置", extra={"app_id": str(app_id)})
+        logger.info("更新 Agent 配置", extra={"app_id": str(app_id)})
         
         app = self._get_app_or_404(app_id)
         
@@ -841,7 +842,7 @@ class AppService:
                 updated_at=now,
             )
             self.db.add(agent_cfg)
-            logger.debug(f"创建新的 Agent 配置", extra={"app_id": str(app_id)})
+            logger.debug("创建新的 Agent 配置", extra={"app_id": str(app_id)})
 
         # 转换为存储格式
         storage_data = AgentConfigConverter.to_storage_format(data)
@@ -867,7 +868,7 @@ class AppService:
         self.db.commit()
         self.db.refresh(agent_cfg)
         
-        logger.info(f"Agent 配置更新成功", extra={"app_id": str(app_id)})
+        logger.info("Agent 配置更新成功", extra={"app_id": str(app_id)})
         return agent_cfg
     
     def get_agent_config(
@@ -891,7 +892,7 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用类型不支持或不可访问时
         """
-        logger.debug(f"获取 Agent 配置", extra={"app_id": str(app_id)})
+        logger.debug("获取 Agent 配置", extra={"app_id": str(app_id)})
         
         app = self._get_app_or_404(app_id)
         
@@ -908,7 +909,7 @@ class AppService:
             return config
         
         # 返回默认配置模板（不保存到数据库）
-        logger.debug(f"配置不存在，返回默认模板", extra={"app_id": str(app_id)})
+        logger.debug("配置不存在，返回默认模板", extra={"app_id": str(app_id)})
         return self._create_default_agent_config(app_id)
     
     def _create_default_agent_config(self, app_id: uuid.UUID) -> AgentConfig:
@@ -981,7 +982,7 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用缺少配置或不在指定工作空间时
         """
-        logger.info(f"发布应用", extra={"app_id": str(app_id), "publisher_id": str(publisher_id)})
+        logger.info("发布应用", extra={"app_id": str(app_id), "publisher_id": str(publisher_id)})
         
         app = self._get_app_or_404(app_id)
         # 检查应用归属
@@ -1039,7 +1040,7 @@ class AppService:
             }
             
             logger.info(
-                f"多智能体应用发布配置准备完成",
+                "多智能体应用发布配置准备完成",
                 extra={
                     "app_id": str(app_id),
                     "master_agent_id": str(multi_agent_cfg.master_agent_id),
@@ -1083,7 +1084,7 @@ class AppService:
         self.db.refresh(release)
         
         logger.info(
-            f"应用发布成功",
+            "应用发布成功",
             extra={"app_id": str(app_id), "version": version, "release_id": str(release.id)}
         )
         return release
@@ -1107,7 +1108,7 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用不可访问时
         """
-        logger.debug(f"获取当前发布版本", extra={"app_id": str(app_id)})
+        logger.debug("获取当前发布版本", extra={"app_id": str(app_id)})
         
         app = self._get_app_or_404(app_id)
         # 只读操作，允许访问共享应用
@@ -1137,7 +1138,7 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用不可访问时
         """
-        logger.debug(f"列出发布版本", extra={"app_id": str(app_id)})
+        logger.debug("列出发布版本", extra={"app_id": str(app_id)})
         
         app = self._get_app_or_404(app_id)
         # 只读操作，允许访问共享应用
@@ -1171,7 +1172,7 @@ class AppService:
             ResourceNotFoundException: 当应用或版本不存在时
             BusinessException: 当应用不在指定工作空间时
         """
-        logger.info(f"回滚应用", extra={"app_id": str(app_id), "version": version})
+        logger.info("回滚应用", extra={"app_id": str(app_id), "version": version})
         
         app = self._get_app_or_404(app_id)
         self._validate_app_accessible(app, workspace_id)
@@ -1184,7 +1185,7 @@ class AppService:
         
         if not release:
             logger.warning(
-                f"发布版本不存在",
+                "发布版本不存在",
                 extra={"app_id": str(app_id), "version": version}
             )
             raise ResourceNotFoundException("发布版本", f"app_id={app_id}, version={version}")
@@ -1196,7 +1197,7 @@ class AppService:
         self.db.refresh(release)
         
         logger.info(
-            f"应用回滚成功",
+            "应用回滚成功",
             extra={"app_id": str(app_id), "version": version, "release_id": str(release.id)}
         )
         return release
@@ -1229,7 +1230,7 @@ class AppService:
         from app.models import AppShare, Workspace
         
         logger.info(
-            f"分享应用",
+            "分享应用",
             extra={
                 "app_id": str(app_id),
                 "target_workspaces": [str(wid) for wid in target_workspace_ids],
@@ -1268,7 +1269,7 @@ class AppService:
             
             if existing_share:
                 logger.debug(
-                    f"应用已分享到该工作空间，跳过",
+                    "应用已分享到该工作空间，跳过",
                     extra={"app_id": str(app_id), "target_workspace_id": str(target_ws_id)}
                 )
                 shares.append(existing_share)
@@ -1288,14 +1289,14 @@ class AppService:
             shares.append(share)
             
             logger.debug(
-                f"创建分享记录",
+                "创建分享记录",
                 extra={"app_id": str(app_id), "target_workspace_id": str(target_ws_id)}
             )
         
         self.db.commit()
         
         logger.info(
-            f"应用分享成功",
+            "应用分享成功",
             extra={
                 "app_id": str(app_id),
                 "shared_count": len(shares),
@@ -1326,7 +1327,7 @@ class AppService:
         from app.models import AppShare
         
         logger.info(
-            f"取消应用分享",
+            "取消应用分享",
             extra={
                 "app_id": str(app_id),
                 "target_workspace_id": str(target_workspace_id)
@@ -1346,7 +1347,7 @@ class AppService:
         
         if not share:
             logger.warning(
-                f"分享记录不存在",
+                "分享记录不存在",
                 extra={"app_id": str(app_id), "target_workspace_id": str(target_workspace_id)}
             )
             raise ResourceNotFoundException(
@@ -1359,7 +1360,7 @@ class AppService:
         self.db.commit()
         
         logger.info(
-            f"应用分享已取消",
+            "应用分享已取消",
             extra={"app_id": str(app_id), "target_workspace_id": str(target_workspace_id)}
         )
     
@@ -1384,7 +1385,7 @@ class AppService:
         """
         from app.models import AppShare
         
-        logger.debug(f"列出应用分享记录", extra={"app_id": str(app_id)})
+        logger.debug("列出应用分享记录", extra={"app_id": str(app_id)})
         
         # 验证应用
         app = self._get_app_or_404(app_id)
@@ -1398,7 +1399,7 @@ class AppService:
         shares = list(self.db.scalars(stmt).all())
         
         logger.debug(
-            f"应用分享记录查询完成",
+            "应用分享记录查询完成",
             extra={"app_id": str(app_id), "count": len(shares)}
         )
         
@@ -1435,7 +1436,7 @@ class AppService:
         """
         from app.services.draft_run_service import DraftRunService
         
-        logger.info(f"试运行 Agent", extra={"app_id": str(app_id), "user_message": message[:50]})
+        logger.info("试运行 Agent", extra={"app_id": str(app_id), "user_message": message[:50]})
         
         # 1. 验证应用
         app = self._get_app_or_404(app_id)
@@ -1464,7 +1465,7 @@ class AppService:
         
         # 4. 调用试运行服务
         logger.debug(
-            f"准备调用试运行服务",
+            "准备调用试运行服务",
             extra={
                 "app_id": str(app_id),
                 "model": model_config.name,
@@ -1485,7 +1486,7 @@ class AppService:
         )
         
         logger.debug(
-            f"试运行服务返回结果",
+            "试运行服务返回结果",
             extra={
                 "result_type": str(type(result)),
                 "result_keys": list(result.keys()) if isinstance(result, dict) else "not_dict",
@@ -1495,7 +1496,7 @@ class AppService:
         )
         
         logger.info(
-            f"试运行完成",
+            "试运行完成",
             extra={
                 "app_id": str(app_id),
                 "elapsed_time": result.get("elapsed_time"),
@@ -1534,7 +1535,7 @@ class AppService:
         """
         from app.services.draft_run_service import DraftRunService
         
-        logger.info(f"流式试运行 Agent", extra={"app_id": str(app_id), "user_message": message[:50]})
+        logger.info("流式试运行 Agent", extra={"app_id": str(app_id), "user_message": message[:50]})
         
         # 1. 验证应用
         app = self._get_app_or_404(app_id)
@@ -1609,7 +1610,7 @@ class AppService:
         from app.models import ModelConfig
         
         logger.info(
-            f"多模型对比试运行",
+            "多模型对比试运行",
             extra={
                 "app_id": str(app_id),
                 "model_count": len(models),
@@ -1666,7 +1667,7 @@ class AppService:
         )
         
         logger.info(
-            f"多模型对比完成",
+            "多模型对比完成",
             extra={
                 "app_id": str(app_id),
                 "successful": result["successful_count"],
@@ -1708,7 +1709,7 @@ class AppService:
         from app.models import ModelConfig
         
         logger.info(
-            f"多模型对比流式试运行",
+            "多模型对比流式试运行",
             extra={
                 "app_id": str(app_id),
                 "model_count": len(models)
@@ -1765,7 +1766,7 @@ class AppService:
             yield event
         
         logger.info(
-            f"多模型对比流式完成",
+            "多模型对比流式完成",
             extra={"app_id": str(app_id)}
         )
 

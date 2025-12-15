@@ -18,6 +18,10 @@ class EntityDedupDecision(BaseModel):
     This model represents the LLM's decision on whether two entities
     refer to the same real-world entity and should be merged.
 
+    Note: Aliases are extracted during the triplet extraction phase and automatically
+    merged during entity merging. LLM only needs to decide whether to merge and which
+    entity to keep as canonical.
+
     Attributes:
         same_entity: Whether the two entities refer to the same real-world entity
         confidence: Model confidence in the decision (0.0 to 1.0)
@@ -35,6 +39,10 @@ class EntityDisambDecision(BaseModel):
 
     This model represents the LLM's decision on whether two entities with
     the same name but different types should be merged or kept separate.
+
+    Note: Aliases are extracted during the triplet extraction phase and automatically
+    merged during entity merging. LLM only needs to decide whether to merge and which
+    entity to keep as canonical.
 
     Attributes:
         should_merge: Whether the two entities should be merged despite type difference

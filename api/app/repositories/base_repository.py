@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """基础仓储接口模块
 
 本模块定义了通用的仓储接口，适用于所有数据库类型（PostgreSQL、Neo4j等）。
@@ -14,7 +13,7 @@ from typing import Generic, TypeVar, List, Optional, Dict, Any
 T = TypeVar('T')
 
 
-class BaseRepository(ABC, Generic[T]):
+class BaseRepository[T](ABC):
     """基础仓储接口 - 适用于所有数据库类型
     
     这是一个抽象基类，定义了所有仓储必须实现的基本CRUD操作。

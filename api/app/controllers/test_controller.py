@@ -28,7 +28,7 @@ router = APIRouter(
 )
 
 
-@router.get(f"/llm/{{model_id}}", response_model=ApiResponse)
+@router.get("/llm/{model_id}", response_model=ApiResponse)
 def test_llm(
     model_id: uuid.UUID,
     db: Session = Depends(get_db)
@@ -62,7 +62,7 @@ Answer: Let's think step by step."""
         raise
 
 
-@router.get(f"/embedding/{{model_id}}", response_model=ApiResponse)
+@router.get("/embedding/{model_id}", response_model=ApiResponse)
 def test_embedding(
     model_id: uuid.UUID,
     db: Session = Depends(get_db)
@@ -96,7 +96,7 @@ def test_embedding(
     return success(msg="测试LLM成功")
        
 
-@router.get(f"/rerank/{{model_id}}", response_model=ApiResponse)
+@router.get("/rerank/{model_id}", response_model=ApiResponse)
 def test_rerank(
     model_id: uuid.UUID,
     db: Session = Depends(get_db)

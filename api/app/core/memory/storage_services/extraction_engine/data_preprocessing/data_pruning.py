@@ -81,7 +81,6 @@ class SemanticPruner:
             if re.search(p, text, flags=re.IGNORECASE):
                 return True
         return False
-
     def _importance_score(self, message: ConversationMessage) -> int:
         """为重要消息打分，用于在保留比例内优先保留更关键的内容。
 

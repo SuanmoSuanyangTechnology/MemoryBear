@@ -78,7 +78,7 @@ async def Verify(
         
         # Build query list for verification
         query_list = []
-        for query_small, anser in zip(Query_small, Result_small):
+        for query_small, anser in zip(Query_small, Result_small, strict=False):
             query_list.append({
                 'Query_small': query_small,
                 'Answer_Small': anser

@@ -15,13 +15,15 @@ import copy
 from app.core.rag.llm.cv_model import AzureGptV4, QWenCV
 from app.core.rag.common.file_utils import get_project_base_directory
 from app.core.rag.utils.file_utils import extract_embed_file, extract_links_from_pdf, extract_links_from_docx, extract_html
+from app.core.rag.utils.libre_office import convert_to_pdf, async_convert_to_pdf
 from app.core.rag.deepdoc.parser import DocxParser, ExcelParser, HtmlParser, JsonParser, MarkdownElementExtractor, MarkdownParser, PdfParser, TxtParser
 from app.core.rag.deepdoc.parser.figure_parser import VisionFigureParser,vision_figure_parser_docx_wrapper,vision_figure_parser_pdf_wrapper
 from app.core.rag.deepdoc.parser.pdf_parser import PlainParser, VisionParser
 from app.core.rag.deepdoc.parser.mineru_parser import MinerUParser
+from app.core.rag.app.textin_parser import TextLnParser
 from app.core.rag.nlp import concat_img, find_codec, naive_merge, naive_merge_with_images, naive_merge_docx, tokenize, rag_tokenizer, tokenize_chunks, tokenize_chunks_with_images, tokenize_table
 
-def by_deepdoc(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, vision_model=None, pdf_cls = None ,**kwargs):
+def by_deepdoc(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, vision_model=None, pdf_cls = None, **kwargs):
     callback = callback
     binary = binary
     pdf_parser = pdf_cls() if pdf_cls else Pdf()
@@ -39,7 +41,7 @@ def by_deepdoc(filename, binary=None, from_page=0, to_page=100000, lang="Chinese
     return sections, tables, pdf_parser
 
 
-def by_mineru(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, vision_model=None, pdf_cls = None ,**kwargs):
+def by_mineru(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, vision_model=None, pdf_cls = None, **kwargs):
     mineru_executable = os.environ.get("MINERU_EXECUTABLE", "mineru")
     mineru_api = os.environ.get("MINERU_APISERVER", "http://host.docker.internal:9987")
     pdf_parser = MinerUParser(mineru_path=mineru_executable, mineru_api=mineru_api)
@@ -59,23 +61,19 @@ def by_mineru(filename, binary=None, from_page=0, to_page=100000, lang="Chinese"
     return sections, tables, pdf_parser
 
 
-def by_textln(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, vision_model=None, pdf_cls = None ,**kwargs):
-    textln_app_id = os.environ.get("TEXTLN_APP_ID", "")
-    textln_secret_code = os.environ.get("TEXTLN_SECRET_CODE", "")
+def by_textln(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, vision_model=None, pdf_cls = None, **kwargs):
     textln_api = os.environ.get("TEXTLN_APISERVER", "https://api.textin.com/ai/service/v1/pdf_to_markdown")
-    pdf_parser = MinerUParser(mineru_path=textln_app_id, mineru_api=textln_api)
-
-    if not pdf_parser.check_installation():
-        callback(-1, "MinerU not found.")
-        return None, None, pdf_parser
+    app_id = os.environ.get("TEXTLN_APP_ID", "fa3f24380683ad53e6c620c0f0878a09")
+    secret_code = os.environ.get("TEXTLN_SECRET_CODE", "6130caac9aabc6eb26433758d7898f4a")
+    pdf_parser = TextLnParser(textln_api=textln_api, app_id=app_id, secret_code=secret_code)
 
     sections, tables = pdf_parser.parse_pdf(
         filepath=filename,
         binary=binary,
         callback=callback,
-        output_dir=os.environ.get("MINERU_OUTPUT_DIR", ""),
-        backend=os.environ.get("MINERU_BACKEND", "pipeline"),
-        delete_output=bool(int(os.environ.get("MINERU_DELETE_OUTPUT", 1))),
+        vision_model=vision_model,
+        lang=lang,
+        **kwargs
     )
     return sections, tables, pdf_parser
 
@@ -605,7 +603,7 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
         parser = PARSERS.get(name, by_plaintext)
         callback(0.1, "Start to parse.")
 
-        sections, tables, pdf_parser = parser(
+        sections, tables, pdf_parser= parser(
             filename=filename,
             binary=binary,
             from_page=from_page,
@@ -626,24 +624,30 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
         res = tokenize_table(tables, doc, is_english)
         callback(0.8, "Finish parsing.")
 
-    elif re.search(r"\.pptx?$", filename, re.IGNORECASE):
-        if not binary:
-            with open(filename, "rb") as f:
-                binary = f.read()
-        from app.core.rag.app.presentation import Ppt
-        ppt_parser = Ppt()
-        for pn, (txt, img) in enumerate(ppt_parser(
-                filename if not binary else binary, from_page, to_page, callback)):
-            d = copy.deepcopy(doc)
-            pn += from_page
-            d["image"] = img
-            d["doc_type_kwd"] = "image"
-            d["page_num_int"] = [pn + 1]
-            d["top_int"] = [0]
-            d["position_int"] = [(pn + 1, 0, img.size[0], 0, img.size[1])]
-            tokenize(d, txt, is_english)
-            res.append(d)
-        return res
+    elif re.search(r"\.(pptx|ppt?)$", filename, re.IGNORECASE):
+        # 方法1.Aspose.Slides是商业级库，其核心功能（如幻灯片创建、动画处理、格式转换等）需通过付费许可证使用。尽管它为符合条件的开源项目提供免费许可证（需申请），但商业闭源项目必须购买授权
+        # if not binary:
+        #     with open(filename, "rb") as f:
+        #         binary = f.read()
+        # from app.core.rag.app.presentation import Ppt
+        # ppt_parser = Ppt()
+        # for pn, (txt, img) in enumerate(ppt_parser(
+        #         filename if not binary else binary, from_page, to_page, callback)):
+        #     d = copy.deepcopy(doc)
+        #     pn += from_page
+        #     d["image"] = img
+        #     d["doc_type_kwd"] = "image"
+        #     d["page_num_int"] = [pn + 1]
+        #     d["top_int"] = [0]
+        #     d["position_int"] = [(pn + 1, 0, img.size[0], 0, img.size[1])]
+        #     tokenize(d, txt, is_english)
+        #     res.append(d)
+        # return res
+        # 方法2.提交任务-文件转换为pdf
+        future = async_convert_to_pdf(filename)
+        dest_pdf_path = future.result()
+        # 解析pdf
+        return chunk(dest_pdf_path, binary=None, lang=lang, callback=callback, vision_model=vision_model, **kwargs)
 
     elif re.search(r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$", filename, re.IGNORECASE):
         if not binary:
@@ -818,14 +822,14 @@ if __name__ == "__main__":
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/1.txt"
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/2.md"
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/3.md" # 带图url
-    file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/义务教育教科书·中国历史七年级上册 (2)_Compressed.md"
+    # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/义务教育教科书·中国历史七年级上册 (2)_Compressed.md"
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/4.doc"
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/5.json"
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/6.html"
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/7.xlsx"
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/8.pdf"
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/9.pptx"
-    # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/10.png"
+    file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/10.png"
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/11.mp4"
     # file_path = "/Users/sbtjfdn/Downloads/记忆科学/files/12.mp3"
     res = chunk(filename=file_path,
@@ -834,7 +838,8 @@ if __name__ == "__main__":
                 callback=progress_callback,
                 vision_model=vision_model,
                 parser_config={
-                    "layout_recognize": "DeepDOC",
+                    # "layout_recognize": "DeepDOC",
+                    "layout_recognize": "TextLn",
                     "chunk_token_num": 128,
                     "delimiter": "\n",
                     "analyze_hyperlink": True,

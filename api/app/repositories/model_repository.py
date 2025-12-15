@@ -18,14 +18,25 @@ class ModelConfigRepository:
     """模型配置Repository"""
 
     @staticmethod
-    def get_by_id(db: Session, model_id: uuid.UUID) -> Optional[ModelConfig]:
+    def get_by_id(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
         """根据ID获取模型配置"""
-        db_logger.debug(f"根据ID查询模型配置: model_id={model_id}")
+        db_logger.debug(f"根据ID查询模型配置: model_id={model_id}, tenant_id={tenant_id}")
         
         try:
-            model = db.query(ModelConfig).options(
+            query = db.query(ModelConfig).options(
                 joinedload(ModelConfig.api_keys)
-            ).filter(ModelConfig.id == model_id).first()
+            ).filter(ModelConfig.id == model_id)
+            
+            # 添加租户过滤
+            if tenant_id:
+                query = query.filter(
+                    or_(
+                        ModelConfig.tenant_id == tenant_id,
+                        ModelConfig.is_public == True
+                    )
+                )
+            
+            model = query.first()
             
             if model:
                 db_logger.debug(f"模型配置查询成功: {model.name} (ID: {model_id})")
@@ -37,12 +48,23 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def get_by_name(db: Session, name: str) -> Optional[ModelConfig]:
+    def get_by_name(db: Session, name: str, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
         """根据名称获取模型配置"""
-        db_logger.debug(f"根据名称查询模型配置: name={name}")
+        db_logger.debug(f"根据名称查询模型配置: name={name}, tenant_id={tenant_id}")
         
         try:
-            model = db.query(ModelConfig).filter(ModelConfig.name == name).first()
+            query = db.query(ModelConfig).filter(ModelConfig.name == name)
+            
+            # 添加租户过滤
+            if tenant_id:
+                query = query.filter(
+                    or_(
+                        ModelConfig.tenant_id == tenant_id,
+                        ModelConfig.is_public == True
+                    )
+                )
+            
+            model = query.first()
             if model:
                 db_logger.debug(f"模型配置查询成功: {model.name}")
             return model
@@ -51,24 +73,30 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def search_by_name(db: Session, name: str, limit: int = 10) -> List[ModelConfig]:
+    def search_by_name(db: Session, name: str, tenant_id: uuid.UUID | None = None, limit: int = 10) -> List[ModelConfig]:
         """按名称模糊匹配获取模型配置列表
         
         Args:
             name: 模型名称关键词（模糊匹配）
+            tenant_id: 租户ID
             limit: 返回数量上限
         Returns:
             模型配置列表
         """
-        db_logger.debug(f"按名称模糊查询模型配置: name~{name}, limit={limit}")
+        db_logger.debug(f"按名称模糊查询模型配置: name~{name}, tenant_id={tenant_id}, limit={limit}")
         try:
-            models = (
-                db.query(ModelConfig)
-                .filter(ModelConfig.name.ilike(f"%{name}%"))
-                .order_by(ModelConfig.name)
-                .limit(limit)
-                .all()
-            )
+            query = db.query(ModelConfig).filter(ModelConfig.name.ilike(f"%{name}%"))
+            
+            # 添加租户过滤
+            if tenant_id:
+                query = query.filter(
+                    or_(
+                        ModelConfig.tenant_id == tenant_id,
+                        ModelConfig.is_public == True
+                    )
+                )
+            
+            models = query.order_by(ModelConfig.name).limit(limit).all()
             db_logger.debug(f"模糊查询成功: 返回数量={len(models)}")
             return models
         except Exception as e:
@@ -76,13 +104,22 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def get_list(db: Session, query: ModelConfigQuery) -> Tuple[List[ModelConfig], int]:
+    def get_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> Tuple[List[ModelConfig], int]:
         """获取模型配置列表"""
-        db_logger.debug(f"查询模型配置列表: {query.dict()}")
+        db_logger.debug(f"查询模型配置列表: {query.dict()}, tenant_id={tenant_id}")
         
         try:
             # 构建查询条件
             filters = []
+            
+            # 添加租户过滤（查询本租户的模型或公开模型）
+            if tenant_id:
+                filters.append(
+                    or_(
+                        ModelConfig.tenant_id == tenant_id,
+                        ModelConfig.is_public == True
+                    )
+                )
             
             # 支持多个 type 值（使用 IN 查询）
             if query.type:
@@ -132,14 +169,23 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def get_by_type(db: Session, model_type: ModelType, is_active: bool = True) -> List[ModelConfig]:
+    def get_by_type(db: Session, model_type: ModelType, tenant_id: uuid.UUID | None = None, is_active: bool = True) -> List[ModelConfig]:
         """根据类型获取模型配置"""
-        db_logger.debug(f"根据类型查询模型配置: type={model_type}, is_active={is_active}")
+        db_logger.debug(f"根据类型查询模型配置: type={model_type}, tenant_id={tenant_id}, is_active={is_active}")
         
         try:
             query = db.query(ModelConfig).options(
                 joinedload(ModelConfig.api_keys)
             ).filter(ModelConfig.type == model_type)
+            
+            # 添加租户过滤
+            if tenant_id:
+                query = query.filter(
+                    or_(
+                        ModelConfig.tenant_id == tenant_id,
+                        ModelConfig.is_public == True
+                    )
+                )
             
             if is_active:
                 query = query.filter(ModelConfig.is_active == True)
@@ -170,14 +216,20 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def update(db: Session, model_id: uuid.UUID, model_data: ModelConfigUpdate) -> Optional[ModelConfig]:
+    def update(db: Session, model_id: uuid.UUID, model_data: ModelConfigUpdate, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
         """更新模型配置"""
-        db_logger.debug(f"更新模型配置: model_id={model_id}")
+        db_logger.debug(f"更新模型配置: model_id={model_id}, tenant_id={tenant_id}")
         
         try:
-            db_model = db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
+            query = db.query(ModelConfig).filter(ModelConfig.id == model_id)
+            
+            # 添加租户过滤（只能更新本租户的模型）
+            if tenant_id:
+                query = query.filter(ModelConfig.tenant_id == tenant_id)
+            
+            db_model = query.first()
             if not db_model:
-                db_logger.warning(f"模型配置不存在: model_id={model_id}")
+                db_logger.warning(f"模型配置不存在或无权限: model_id={model_id}")
                 return None
             
             # 更新字段
@@ -197,20 +249,27 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def delete(db: Session, model_id: uuid.UUID) -> bool:
+    def delete(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> bool:
         """删除模型配置"""
-        db_logger.debug(f"删除模型配置: model_id={model_id}")
+        db_logger.debug(f"删除模型配置: model_id={model_id}, tenant_id={tenant_id}")
         
         try:
-            db_model = db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
+            query = db.query(ModelConfig).filter(ModelConfig.id == model_id)
+            
+            # 添加租户过滤（只能删除本租户的模型）
+            if tenant_id:
+                query = query.filter(ModelConfig.tenant_id == tenant_id)
+            
+            db_model = query.first()
             if not db_model:
-                db_logger.warning(f"模型配置不存在: model_id={model_id}")
+                db_logger.warning(f"模型配置不存在或无权限: model_id={model_id}")
                 return False
             
-            db.delete(db_model)
+            # 逻辑删除模型配置
+            db_model.is_active = False
             db.commit()
             
-            db_logger.info(f"模型配置删除成功: model_id={model_id}")
+            db_logger.info(f"模型配置删除成功（逻辑删除）: model_id={model_id}")
             return True
             
         except Exception as e:
@@ -350,10 +409,11 @@ class ModelApiKeyRepository:
                 db_logger.warning(f"API Key不存在: api_key_id={api_key_id}")
                 return False
             
-            db.delete(db_api_key)
+            # 逻辑删除 API Key
+            db_api_key.is_active = False
             db.commit()
             
-            db_logger.info(f"API Key删除成功: api_key_id={api_key_id}")
+            db_logger.info(f"API Key删除成功（逻辑删除）: api_key_id={api_key_id}")
             return True
             
         except Exception as e:

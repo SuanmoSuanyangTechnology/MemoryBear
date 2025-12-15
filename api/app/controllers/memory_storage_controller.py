@@ -1,8 +1,11 @@
 from typing import Optional
 import os
 import uuid
-from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query, UploadFile
 
+
+from app.db import get_db
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
@@ -62,7 +65,7 @@ async def get_storage_info(
     Returns:
         Storage information
     """
-    api_logger.info(f"Storage info requested ")
+    api_logger.info("Storage info requested ")
     try:
         result = await memory_storage_service.get_storage_info()
         return success(data=result)
@@ -139,6 +142,7 @@ def reset_db_conn() -> bool:  # 重置 PostgreSQL 数据库连接
 def create_config(
     payload: ConfigParamsCreate,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
     
@@ -151,7 +155,7 @@ def create_config(
     try:
         # 将 workspace_id 注入到 payload 中（保持为 UUID 类型）
         payload.workspace_id = workspace_id
-        svc = DataConfigService(get_db_conn())
+        svc = DataConfigService(db)
         result = svc.create(payload)
         return success(data=result, msg="创建成功")
     except Exception as e:
@@ -163,6 +167,7 @@ def create_config(
 def delete_config(
     config_id: str,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
     
@@ -173,7 +178,7 @@ def delete_config(
     
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求删除配置: {config_id}")
     try:
-        svc = DataConfigService(get_db_conn())
+        svc = DataConfigService(db)
         result = svc.delete(ConfigParamsDelete(config_id=config_id))
         return success(data=result, msg="删除成功")
     except Exception as e:
@@ -184,6 +189,7 @@ def delete_config(
 def update_config(
     payload: ConfigUpdate,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
     
@@ -194,7 +200,7 @@ def update_config(
     
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新配置: {payload.config_id}")
     try:
-        svc = DataConfigService(get_db_conn())
+        svc = DataConfigService(db)
         result = svc.update(payload)
         return success(data=result, msg="更新成功")
     except Exception as e:
@@ -206,6 +212,7 @@ def update_config(
 def update_config_extracted(
     payload: ConfigUpdateExtracted,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
     
@@ -216,7 +223,7 @@ def update_config_extracted(
     
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新提取配置: {payload.config_id}")
     try:
-        svc = DataConfigService(get_db_conn())
+        svc = DataConfigService(db)
         result = svc.update_extracted(payload)
         return success(data=result, msg="更新成功")
     except Exception as e:
@@ -229,6 +236,7 @@ def update_config_extracted(
 def update_config_forget(
     payload: ConfigUpdateForget,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
     
@@ -239,7 +247,7 @@ def update_config_forget(
     
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新遗忘引擎配置: {payload.config_id}")
     try:
-        svc = DataConfigService(get_db_conn())
+        svc = DataConfigService(db)
         result = svc.update_forget(payload)
         return success(data=result, msg="更新成功")
     except Exception as e:
@@ -251,6 +259,7 @@ def update_config_forget(
 def read_config_extracted(
     config_id: str,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
     
@@ -261,7 +270,7 @@ def read_config_extracted(
     
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取提取配置: {config_id}")
     try:
-        svc = DataConfigService(get_db_conn())
+        svc = DataConfigService(db)
         result = svc.get_extracted(ConfigKey(config_id=config_id))
         return success(data=result, msg="查询成功")
     except Exception as e:
@@ -272,6 +281,7 @@ def read_config_extracted(
 def read_config_forget(
     config_id: str,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
     
@@ -282,7 +292,7 @@ def read_config_forget(
     
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取遗忘引擎配置: {config_id}")
     try:
-        svc = DataConfigService(get_db_conn())
+        svc = DataConfigService(db)
         result = svc.get_forget(ConfigKey(config_id=config_id))
         return success(data=result, msg="查询成功")
     except Exception as e:
@@ -292,6 +302,7 @@ def read_config_forget(
 @router.get("/read_all_config", response_model=ApiResponse) # 读取所有配置文件列表
 def read_all_config(
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
     
@@ -302,7 +313,7 @@ def read_all_config(
     
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取所有配置")
     try:
-        svc = DataConfigService(get_db_conn())
+        svc = DataConfigService(db)
         # 传递 workspace_id 进行过滤（保持为 UUID 类型）
         result = svc.get_all(workspace_id=workspace_id)
         return success(data=result, msg="查询成功")
@@ -315,6 +326,7 @@ def read_all_config(
 async def pilot_run(
     payload: ConfigPilotRun,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     ) -> dict:
     api_logger.info(f"Pilot run requested: config_id={payload.config_id}, dialogue_text_length={len(payload.dialogue_text)}")
     
@@ -330,7 +342,7 @@ async def pilot_run(
         return fail(BizCode.INTERNAL_ERROR, "配置加载异常", str(e))
     
     try:
-        svc = DataConfigService(get_db_conn())
+        svc = DataConfigService(db)
         result = await svc.pilot_run(payload)
         return success(data=result, msg="试运行完成")
     except ValueError as e:
@@ -475,13 +487,13 @@ async def search_for_entity_graph(
 
 @router.get("/analytics/hot_memory_tags", response_model=ApiResponse)
 async def get_hot_memory_tags_api(
-    end_user_id: Optional[str] = None,
     limit: int = 10,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     ) -> dict:
-    api_logger.info(f"Hot memory tags requested for end_user_id: {end_user_id}")
+    api_logger.info(f"Hot memory tags requested for current_user: {current_user.id}")
     try:
-        result = await analytics_hot_memory_tags(end_user_id, limit)
+        result = await analytics_hot_memory_tags(db, current_user, limit)
         return success(data=result, msg="查询成功")
     except Exception as e:
         api_logger.error(f"Hot memory tags failed: {str(e)}")

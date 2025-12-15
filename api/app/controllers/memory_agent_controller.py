@@ -54,7 +54,7 @@ def validate_config_id(config_id: int, db: Session) -> int:
         ValueError: If config_id is None, invalid, or doesn't exist in database
     """
     if config_id is None:
-        api_logger.info(f"config_id is required but was not provided")
+        api_logger.info("config_id is required but was not provided")
         config_id = os.getenv('config_id')
         if config_id is None:
             raise ValueError("config_id is required but was not provided")
@@ -257,7 +257,7 @@ async def write_server(
                 api_logger.warning(f"未找到名为 'USER_RAG_MERORY' 的知识库，workspace_id: {workspace_id}，将使用 neo4j 存储")
                 storage_type = 'neo4j'
         else:
-            api_logger.warning(f"workspace_id 为空，无法使用 rag 存储，将使用 neo4j 存储")
+            api_logger.warning("workspace_id 为空，无法使用 rag 存储，将使用 neo4j 存储")
             storage_type = 'neo4j'
     
     api_logger.info(f"Write service requested for group {user_input.group_id}, storage_type: {storage_type}, user_rag_memory_id: {user_rag_memory_id}")

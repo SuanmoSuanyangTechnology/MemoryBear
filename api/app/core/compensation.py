@@ -35,7 +35,7 @@ class CompensationHandler:
         for compensation in reversed(self._compensations):
             try:
                 compensation()
-                logger.debug(f"Compensation operation executed successfully")
+                logger.debug("Compensation operation executed successfully")
             except Exception as e:
                 logger.error(f"补偿操作失败: {e}", exc_info=True)
     

@@ -64,7 +64,7 @@ def create_initial_superuser(db: Session):
         raise BusinessException(
             f"初始超级用户创建失败: {str(e)}", 
             code=BizCode.DB_ERROR,
-            context={"username": username, "email": email},
+            context={"username": user_in.username, "email": user_in.email},
             cause=e
         )
 
@@ -423,7 +423,7 @@ def update_last_login_time(db: Session, user_id: uuid.UUID) -> User:
         business_logger.info(f"用户最后登录时间更新成功: {db_user.username} (ID: {user_id})")
         return db_user
         
-    except HTTPException:
+    except (BusinessException, PermissionDeniedException):
         raise
     except Exception as e:
         business_logger.error(f"更新用户最后登录时间失败: user_id={user_id} - {str(e)}")
@@ -438,19 +438,14 @@ async def change_password(db: Session, user_id: uuid.UUID, old_password: str, ne
     # 检查权限：只能修改自己的密码
     if current_user.id != user_id:
         business_logger.warning(f"用户尝试修改他人密码: current_user={current_user.id}, target_user={user_id}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="You can only change your own password"
-        )
+        raise PermissionDeniedException("You can only change your own password")
     
     try:
         # 获取用户
         db_user = user_repository.get_user_by_id(db=db, user_id=user_id)
         if not db_user:
             business_logger.warning(f"用户不存在: {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-            )
+            raise BusinessException("User not found", code=BizCode.USER_NOT_FOUND)
         
         # 验证旧密码
         if not verify_password(old_password, db_user.hashed_password):

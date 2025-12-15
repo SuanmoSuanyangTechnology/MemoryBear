@@ -5,6 +5,8 @@
 
 import asyncio
 import difflib
+import json
+import logging
 from typing import List, Tuple, Dict
 import anyio
 
@@ -12,6 +14,12 @@ from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.models.graph_models import ExtractedEntityNode, StatementEntityEdge, EntityEntityEdge
 from app.core.memory.models.dedup_models import EntityDedupDecision, EntityDisambDecision
 from app.core.memory.utils.prompt.prompt_utils import render_entity_dedup_prompt
+from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+    _merge_attribute,
+    _unify_entity_type
+)
+
+logger = logging.getLogger(__name__)
 
 
 # --- 类型同义归并与相似度 ---
@@ -55,13 +63,37 @@ def _simple_type_ok(t1: str | None, t2: str | None) -> bool:
     return c1 == c2
 
 
+def parse_llm_response_safe(response_text: str, response_model) -> EntityDedupDecision | EntityDisambDecision | None:
+    """安全解析LLM响应，带错误处理。
+    
+    Args:
+        response_text: LLM返回的JSON文本
+        response_model: 期望的响应模型类（EntityDedupDecision或EntityDisambDecision）
+    
+    Returns:
+        解析后的决策对象，如果解析失败则返回None
+    """
+    try:
+        data = json.loads(response_text)
+        
+        # 使用Pydantic模型验证和解析
+        return response_model(**data)
+        
+    except json.JSONDecodeError as e:
+        logger.warning(f"LLM response JSON parsing failed: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"LLM response parsing failed: {e}")
+        return None
+
+
 def _name_embed_sim(a: List[float] | None, b: List[float] | None) -> float: # 计算实体名称嵌入向量的余弦相似度
     a = a or []
     b = b or []
     if not a or not b or len(a) != len(b):
         return 0.0
     try:
-        dot = sum(x * y for x, y in zip(a, b))
+        dot = sum(x * y for x, y in zip(a, b, strict=False))
         na = (sum(x * x for x in a)) ** 0.5
         nb = (sum(y * y for y in b)) ** 0.5
         if na > 0 and nb > 0:
@@ -174,6 +206,7 @@ async def _judge_pair(
         entity_b=entity_b,
         context=ctx,
         json_schema=EntityDedupDecision.model_json_schema(),
+        disambiguation_mode=False,  # 去重模式
     )
 
     messages = [
@@ -290,6 +323,33 @@ async def llm_dedup_entities(  # 保留对偶判断作为子流程，是为了�
             # 规则2：类型必须兼容（调用_simple_type_ok判断）
             if not _simple_type_ok(getattr(a, "entity_type", None), getattr(b, "entity_type", None)):
                 continue
+            
+            # 规则2.5：过滤掉应该在模糊匹配阶段就被合并的实体对
+            # 如果名称相同且别名有交集，说明应该在模糊匹配阶段就被合并了
+            # 这些实体对不应该进入LLM阶段，避免重复处理
+            try:
+                name_a = (getattr(a, "name", "") or "").strip().lower()
+                name_b = (getattr(b, "name", "") or "").strip().lower()
+                same_name = (name_a == name_b) and name_a != ""
+                
+                if same_name:
+                    # 检查别名是否有交集
+                    names_a = {name_a}
+                    names_a |= {(alias or "").strip().lower() for alias in (getattr(a, "aliases", []) or [])}
+                    names_a.discard("")
+                    
+                    names_b = {name_b}
+                    names_b |= {(alias or "").strip().lower() for alias in (getattr(b, "aliases", []) or [])}
+                    names_b.discard("")
+                    
+                    has_alias_overlap = bool(names_a & names_b)
+                    
+                    # 如果名称相同且别名有交集，跳过（应该在模糊匹配阶段处理）
+                    if has_alias_overlap:
+                        continue
+            except Exception:
+                pass  # 如果检查失败，继续处理（保守策略）
+            
             # 规则3：名称相似度达标（文本/嵌入相似度取最大值）
             txt_sim = _name_text_sim(getattr(a, "name", ""), getattr(b, "name", ""))
             emb_sim = _name_embed_sim(getattr(a, "name_embedding", []), getattr(b, "name_embedding", []))
@@ -317,6 +377,7 @@ async def llm_dedup_entities(  # 保留对偶判断作为子流程，是为了�
             try:
                 result_list[idx] = await _judge_pair(llm_client, entity_nodes[i], entity_nodes[j], statement_entity_edges, entity_entity_edges)
             except Exception as e:
+                logger.error(f"Error judging pair ({i}, {j}): {e}", exc_info=True)
                 result_list[idx] = e
 
         # Limit concurrency using semaphore
@@ -349,7 +410,12 @@ async def llm_dedup_entities(  # 保留对偶判断作为子流程，是为了�
             canon_idx = decision.canonical_idx if decision.canonical_idx in (0, 1) else _choose_canonical(a, b)
             canon = a if canon_idx == 0 else b
             other = b if canon_idx == 0 else a
-            id_redirect_updates[getattr(other, "id")] = getattr(canon, "id")
+            
+            # 应用LLM合并决策：合并属性和统一类型
+            _merge_attribute(canon, other)
+            _unify_entity_type(canon, other, suggested_type=None)
+            
+            id_redirect_updates[other.id] = canon.id
             records.append(
                 f"[LLM合并] 规范实体 {canon.id} 名称 '{getattr(canon, 'name', '')}' <- 合并实体 {other.id} 名称 '{getattr(other, 'name', '')}' | conf={decision.confidence:.3f}, th={th:.3f}, co_ctx={ctx.get('co_occurrence')}"
             )
@@ -508,8 +574,11 @@ async def llm_dedup_entities_iterative_blocks( # 迭代分块并发 LLM 去重
             async def _run_block_wrapper(idx: int, block: List[ExtractedEntityNode]):
                 try:
                     results[idx] = await _run_one_block(idx, block)
-                except Exception as e:
+                except BaseException as e:
+                    logger.error(f"Error in block {idx}: {e}", exc_info=True)
                     results[idx] = e
+                    if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                        raise
 
             for i in range(len(blocks)):
                 tg.start_soon(_run_block_wrapper, i, blocks[i])
@@ -607,6 +676,7 @@ async def llm_disambiguate_pairs_iterative(
             try:
                 judged[idx] = await _judge_pair_disamb(llm_client, entity_nodes[i], entity_nodes[j], statement_entity_edges, entity_entity_edges)
             except Exception as e:
+                logger.error(f"Error in disamb pair ({i}, {j}): {e}", exc_info=True)
                 judged[idx] = e
 
         # Limit concurrency using semaphore
@@ -634,6 +704,11 @@ async def llm_disambiguate_pairs_iterative(
                 can_idx = 0 if decision.canonical_idx == 0 else 1
                 canonical = a if can_idx == 0 else b
                 losing = b if can_idx == 0 else a
+                
+                # 应用LLM合并决策：合并属性和统一类型
+                _merge_attribute(canonical, losing)
+                _unify_entity_type(canonical, losing, suggested_type=decision.suggested_type)
+                
                 merge_redirect[getattr(losing, "id", "")] = getattr(canonical, "id", "")
                 records.append(
                     f"[DISAMB合并] {getattr(losing,'id','')} -> {getattr(canonical,'id','')} | conf={decision.confidence:.2f} | reason={decision.reason} | suggested_type={decision.suggested_type or ''}"
@@ -663,6 +738,11 @@ async def llm_disambiguate_pairs_iterative(
                         sb = _strength_rank(getattr(b, "connect_strength", None))
                         canonical = a if sa >= sb else b
                         losing = b if sa >= sb else a
+                    
+                    # 应用LLM合并决策：合并属性和统一类型
+                    _merge_attribute(canonical, losing)
+                    _unify_entity_type(canonical, losing, suggested_type=decision.suggested_type)
+                    
                     merge_redirect[getattr(losing, "id", "")] = getattr(canonical, "id", "")
                     # 消歧合并审计
                     records.append(

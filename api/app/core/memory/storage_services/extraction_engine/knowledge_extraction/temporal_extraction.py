@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime
 from typing import Any, Optional
 from pydantic import BaseModel, Field
-from app.core.memory.src.llm_tools.openai_client import OpenAIClient
+from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.models.message_models import DialogData, Statement, TemporalValidityRange
 from app.core.memory.utils.prompt.prompt_utils import render_temporal_extraction_prompt
 from app.core.memory.utils.data.ontology import LABEL_DEFINITIONS, TemporalInfo
@@ -218,5 +218,5 @@ class TemporalExtractor:
                         f.write(f"    - Valid At: {statement.temporal_validity.valid_at}\n")
                         f.write(f"    - Invalid At: {statement.temporal_validity.invalid_at}\n")
                     else:
-                        f.write(f"    - Temporal Validity: Not Extracted\n")
+                        f.write("    - Temporal Validity: Not Extracted\n")
                 f.write("\n")

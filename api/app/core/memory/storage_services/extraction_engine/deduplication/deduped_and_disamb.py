@@ -14,6 +14,51 @@ import difflib # 提供字符串相似度计算工具
 import asyncio
 import importlib
 import re
+# 模块级类型统一工具函数
+def _unify_entity_type(canonical: ExtractedEntityNode, losing: ExtractedEntityNode, suggested_type: str = None) -> None:
+    """统一实体类型：基于LLM建议或启发式规则选择最合适的类型。
+    
+    Args:
+        canonical: 规范实体（保留的实体）
+        losing: 被合并的实体
+        suggested_type: LLM建议的统一类型（可选）
+    """
+    canonical_type = (getattr(canonical, "entity_type", "") or "").strip()
+    losing_type = (getattr(losing, "entity_type", "") or "").strip()
+    
+    if suggested_type and suggested_type.strip():
+        # 优先使用LLM建议的类型
+        canonical.entity_type = suggested_type.strip()
+    elif canonical_type.upper() == "UNKNOWN" and losing_type.upper() != "UNKNOWN":
+        # 如果canonical是UNKNOWN，使用losing的类型
+        canonical.entity_type = losing_type
+    elif canonical_type.upper() != "UNKNOWN" and losing_type.upper() == "UNKNOWN":
+        # 如果losing是UNKNOWN，保持canonical的类型（无需操作）
+        pass
+    elif canonical_type and losing_type and canonical_type != losing_type:
+        # 两个类型都不是UNKNOWN且不同，选择更具体的类型
+        # 启发式规则：
+        # 1. 更长的类型名通常更具体（如 HistoricalPeriod vs Organization）
+        # 2. 包含特定领域词汇的类型更具体（如 MilitaryCapability vs Concept）
+        
+        # 定义通用类型（优先级低）
+        generic_types = {"Concept", "Phenomenon", "Condition", "State", "Attribute", "Event"}
+        
+        canonical_is_generic = canonical_type in generic_types
+        losing_is_generic = losing_type in generic_types
+        
+        if canonical_is_generic and not losing_is_generic:
+            # canonical是通用类型，losing是具体类型，使用losing
+            canonical.entity_type = losing_type
+        elif not canonical_is_generic and losing_is_generic:
+            # losing是通用类型，canonical是具体类型，保持canonical（无需操作）
+            pass
+        elif len(losing_type) > len(canonical_type):
+            # 两者都是具体类型或都是通用类型，选择更长的（通常更具体）
+            canonical.entity_type = losing_type
+        # 否则保持canonical的类型
+
+
 # 模块级属性融合工具函数（统一行为）
 def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
     # 强弱连接合并
@@ -30,18 +75,52 @@ def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
         else:
             canonical.connect_strength = next(iter(pair))
 
-    # 别名合并（去重保序）
+    # 别名合并（去重保序，使用标准化工具）
     try:
+        canonical_name = (getattr(canonical, "name", "") or "").strip()
+        incoming_name = (getattr(ent, "name", "") or "").strip()
+        
+        # 收集所有需要合并的别名
+        all_aliases = []
+        
+        # 1. 添加canonical现有的别名
         existing = getattr(canonical, "aliases", []) or []
+        all_aliases.extend(existing)
+        
+        # 2. 添加incoming实体的名称（如果不同于canonical的名称）
+        if incoming_name and incoming_name != canonical_name:
+            all_aliases.append(incoming_name)
+        
+        # 3. 添加incoming实体的所有别名
         incoming = getattr(ent, "aliases", []) or []
-        seen = set()
-        merged_list: List[str] = []
-        for x in existing + incoming:
-            xn = (x or "").strip()
-            if xn and xn not in seen:
-                seen.add(xn)
-                merged_list.append(x)
-        canonical.aliases = merged_list
+        all_aliases.extend(incoming)
+        
+        # 4. 标准化并去重（优先使用alias_utils工具函数）
+        try:
+            from app.core.memory.utils.alias_utils import normalize_aliases
+            canonical.aliases = normalize_aliases(canonical_name, all_aliases)
+        except Exception:
+            # 如果导入失败，使用增强的去重逻辑
+            seen_normalized = set()
+            unique_aliases = []
+            
+            for alias in all_aliases:
+                if not alias:
+                    continue
+                
+                alias_stripped = str(alias).strip()
+                if not alias_stripped or alias_stripped == canonical_name:
+                    continue
+                
+                # 标准化：转小写用于去重判断
+                alias_normalized = alias_stripped.lower()
+                
+                if alias_normalized not in seen_normalized:
+                    seen_normalized.add(alias_normalized)
+                    unique_aliases.append(alias_stripped)
+            
+            # 排序并赋值
+            canonical.aliases = sorted(unique_aliases)
     except Exception:
         pass
 
@@ -132,25 +211,25 @@ def accurate_match(
         # 为避免跨业务组误并，明确以 group_id 为范围边界
         if key not in canonical_map:
             canonical_map[key] = ent
-            id_redirect[getattr(ent, "id")] = getattr(ent, "id")
+            id_redirect[ent.id] = ent.id
             continue
         canonical = canonical_map[key]
 
         # 执行精确属性与强弱合并，并建立重定向
         _merge_attribute(canonical, ent)
-        id_redirect[getattr(ent, "id")] = getattr(canonical, "id")
+        id_redirect[ent.id] = canonical.id
         # 记录精确匹配的合并项（使用规范化键，避免外层变量误用）
         try:
-            k = f"{getattr(canonical, 'group_id')}|{(getattr(canonical, 'name') or '').strip()}|{(getattr(canonical, 'entity_type') or '').strip()}"
+            k = f"{canonical.group_id}|{(canonical.name or '').strip()}|{(canonical.entity_type or '').strip()}"
             if k not in exact_merge_map:
                 exact_merge_map[k] = {
-                    "canonical_id": getattr(canonical, "id"),
-                    "group_id": getattr(canonical, "group_id"),
-                    "name": getattr(canonical, "name"),
-                    "entity_type": getattr(canonical, "entity_type"),
+                    "canonical_id": canonical.id,
+                    "group_id": canonical.group_id,
+                    "name": canonical.name,
+                    "entity_type": canonical.entity_type,
                     "merged_ids": set(),
                 }
-            exact_merge_map[k]["merged_ids"].add(getattr(ent, "id"))
+            exact_merge_map[k]["merged_ids"].add(ent.id)
         except Exception:
             pass
 
@@ -164,23 +243,33 @@ def fuzzy_match(
     config: DedupConfig | None = None,
 ) -> Tuple[List[ExtractedEntityNode], Dict[str, str], List[str]]:
     """
-    模糊匹配：在精确匹配之后，基于名称/类型相似度与上下文共现，进一步融合高相似实体。
+    模糊匹配：基于名称、别名、类型相似度进行实体去重合并。
+    
+    判断因素：
+    - 名称相似度（包含别名匹配）：70%权重
+    - 类型相似度：30%权重
+    
     返回: (updated_entities, updated_redirect, fuzzy_merge_records)
     """
     fuzzy_merge_records: List[str] = []
 
+    # ========== 第一层：基础工具函数 ==========
+    
     def _normalize_text(s: str) -> str:
+        """文本标准化：转小写、去除特殊字符、规范化空格"""
         try:
             return re.sub(r"\s+", " ", re.sub(r"[^\w\u4e00-\u9fff]+", " ", (s or "").lower())).strip()
         except Exception:
             return str(s).lower().strip()
 
     def _tokenize(s: str) -> List[str]:
+        """分词：提取中文字符和英文数字单词"""
         norm = _normalize_text(s)
         tokens = re.findall(r"[\u4e00-\u9fff]+|[a-z0-9]+", norm)
         return tokens
 
     def _jaccard(a_tokens: List[str], b_tokens: List[str]) -> float:
+        """Jaccard相似度：计算两个token集合的交集/并集"""
         try:
             set_a, set_b = set(a_tokens), set(b_tokens)
             if not set_a and not set_b:
@@ -192,10 +281,11 @@ def fuzzy_match(
             return 0.0
 
     def _cosine(a: List[float], b: List[float]) -> float:
+        """余弦相似度：计算两个向量的夹角余弦值"""
         try:
             if not a or not b or len(a) != len(b):
                 return 0.0
-            dot = sum(x * y for x, y in zip(a, b))
+            dot = sum(x * y for x, y in zip(a, b, strict=False))
             na = sum(x * x for x in a) ** 0.5
             nb = sum(y * y for y in b) ** 0.5
             if na == 0 or nb == 0:
@@ -204,44 +294,146 @@ def fuzzy_match(
         except Exception:
             return 0.0
 
-    def _name_similarity(e1: ExtractedEntityNode, e2: ExtractedEntityNode):
+    # ========== 第二层：中层工具函数 ==========
+    
+    def _has_exact_alias_match(e1: ExtractedEntityNode, e2: ExtractedEntityNode) -> bool:
+        """检测两个实体之间是否存在完全别名匹配（case-insensitive）
+        
+        检查以下情况：
+        - e1的主名称与e2的某个别名完全匹配
+        - e2的主名称与e1的某个别名完全匹配
+        - e1和e2的别名列表有交集
+        
+        Args:
+            e1: 第一个实体
+            e2: 第二个实体
+            
+        Returns:
+            bool: 存在完全匹配返回True
+        """
+        def _simple_normalize(s: str) -> str:
+            return (s or "").strip().lower()
+        
+        # 获取e1的所有名称（主名称 + 别名）
+        names1 = set()
+        name1 = _simple_normalize(getattr(e1, "name", "") or "")
+        if name1:
+            names1.add(name1)
+        
+        aliases1 = getattr(e1, "aliases", []) or []
+        for alias in aliases1:
+            normalized = _simple_normalize(alias)
+            if normalized:
+                names1.add(normalized)
+        
+        # 获取e2的所有名称（主名称 + 别名）
+        names2 = set()
+        name2 = _simple_normalize(getattr(e2, "name", "") or "")
+        if name2:
+            names2.add(name2)
+        
+        aliases2 = getattr(e2, "aliases", []) or []
+        for alias in aliases2:
+            normalized = _simple_normalize(alias)
+            if normalized:
+                names2.add(normalized)
+        
+        # 检查是否有交集
+        if names1 & names2:
+            return True
+        
+        return False
+    
+    # ========== 第三层：高层综合函数 ==========
+    
+    def _name_similarity_with_aliases(e1: ExtractedEntityNode, e2: ExtractedEntityNode):
+        """名称相似度综合评分系统
+        
+        综合考虑主名称和别名，计算两个实体的相似度。
+        
+        算法：
+        1. 计算主名称的向量相似度和Token Jaccard相似度
+        2. 计算所有别名的Token Jaccard相似度
+        3. 找出所有名称间的最佳匹配
+        4. 使用 _has_exact_alias_match 检测是否存在完全匹配
+        
+        评分权重：
+        - 有完全匹配：embedding(40%) + primary_jaccard(20%) + max_alias_sim(40%)
+        - 无完全匹配：embedding(60%) + primary_jaccard(20%) + max_alias_sim(20%)
+        
+        Args:
+            e1: 第一个实体
+            e2: 第二个实体
+            
+        Returns:
+            tuple: (综合相似度, 向量相似度, 主名称Jaccard, 别名Jaccard, 
+                   最佳别名匹配度, 是否完全匹配)
+        """
+        # 1. 主名称向量相似度
         emb_sim = _cosine(getattr(e1, "name_embedding", []) or [], getattr(e2, "name_embedding", []) or [])
+        
+        # 2. 主名称token相似度
+        
+        # 2. 主名称token相似度
         tokens1 = set(_tokenize(getattr(e1, "name", "") or ""))
         tokens2 = set(_tokenize(getattr(e2, "name", "") or ""))
+        j_primary = _jaccard(list(tokens1), list(tokens2))
+        
+        # 3. 获取所有别名
+        j_primary = _jaccard(list(tokens1), list(tokens2))
+        
+        # 3. 获取所有别名
         aliases1 = getattr(e1, "aliases", []) or []
         aliases2 = getattr(e2, "aliases", []) or []
+        
+        # 4. 计算所有别名的token集合（用于整体Jaccard）
+        
+        # 4. 计算所有别名的token集合（用于整体Jaccard）
         alias_tokens1 = set(tokens1)
         alias_tokens2 = set(tokens2)
         for a in aliases1:
             alias_tokens1 |= set(_tokenize(a))
         for a in aliases2:
             alias_tokens2 |= set(_tokenize(a))
-        j_primary = _jaccard(list(tokens1), list(tokens2))
         j_alias = _jaccard(list(alias_tokens1), list(alias_tokens2))
-        s_name = 0.6 * emb_sim + 0.2 * j_primary + 0.2 * j_alias
-        return s_name, emb_sim, j_primary, j_alias
-
-    def _desc_similarity(e1: ExtractedEntityNode, e2: ExtractedEntityNode):
-        """
-        计算实体描述的相似度（Jaccard + SequenceMatcher）
-        返回: (相似度得分, Jaccard 相似度(词重合), SequenceMatcher 相似度（序列相似）)
-        """
-        d1 = getattr(e1, "description", "") or ""
-        d2 = getattr(e2, "description", "") or ""
-        if not d1 and not d2:
-            return 0.0, 0.0, 0.0
-        t1 = _tokenize(d1)
-        t2 = _tokenize(d2)
-        j = _jaccard(t1, t2)
-        try:
-            seq = difflib.SequenceMatcher(None, _normalize_text(d1), _normalize_text(d2)).ratio()
-        except Exception:
-            seq = 0.0
-        # 平衡词重合与序列相似（更鲁棒）
-        s_desc = 0.5 * j + 0.5 * seq
-        return s_desc, j, seq
-
-    def _canonicalize_type(t: str) -> str: # 扩展类型同义归一
+        
+        # 5. 使用 _has_exact_alias_match 检测完全匹配
+        has_exact_match = _has_exact_alias_match(e1, e2)
+        
+        # 6. 计算最佳别名匹配度（所有名称两两比较）
+        all_names1 = [getattr(e1, "name", "") or "", *aliases1]
+        all_names2 = [getattr(e2, "name", "") or "", *aliases2]
+        
+        max_alias_sim = 0.0
+        
+        if has_exact_match:
+            max_alias_sim = 1.0
+        else:
+            for n1 in all_names1:
+                if not n1:
+                    continue
+                tokens_n1 = set(_tokenize(n1))
+                
+                for n2 in all_names2:
+                    if not n2:
+                        continue
+                    
+                    tokens_n2 = set(_tokenize(n2))
+                    sim = _jaccard(list(tokens_n1), list(tokens_n2))
+                    max_alias_sim = max(max_alias_sim, sim)
+        
+        # 7. 综合评分
+        if has_exact_match:
+            s_name = 0.4 * emb_sim + 0.2 * j_primary + 0.4 * max_alias_sim
+        else:
+            s_name = 0.6 * emb_sim + 0.2 * j_primary + 0.2 * max_alias_sim
+        
+        return s_name, emb_sim, j_primary, j_alias, max_alias_sim, has_exact_match
+    
+    # ========== 类型相似度工具函数 ==========
+    
+    def _canonicalize_type(t: str) -> str:
+        """类型标准化：将各种类型别名映射到规范类型"""
         t = (t or "").strip()
         if not t:
             return ""
@@ -279,6 +471,7 @@ def fuzzy_match(
         return t_up
 
     def _type_similarity(t1: str, t2: str) -> float:
+        """类型相似度：计算两个类型的相似度（基于规范化和相似度表）"""
         import difflib
         c1 = _canonicalize_type(t1)
         c2 = _canonicalize_type(t2)
@@ -313,87 +506,196 @@ def fuzzy_match(
         t2n = (t2 or "").strip().lower()
         seq_ratio = difflib.SequenceMatcher(None, t1n, t2n).ratio()
         return seq_ratio * 0.6
-    # 阈值与权重设定（从配置读取；若无配置则使用 DedupConfig 的默认值）
+    # 阈值与权重设定
     _defaults = DedupConfig()
+    
+    # 核心阈值
     T_NAME_STRICT = (config.fuzzy_name_threshold_strict if config is not None else _defaults.fuzzy_name_threshold_strict)
     T_TYPE_STRICT = (config.fuzzy_type_threshold_strict if config is not None else _defaults.fuzzy_type_threshold_strict)
     T_OVERALL = (config.fuzzy_overall_threshold if config is not None else _defaults.fuzzy_overall_threshold)
     UNKNOWN_NAME_T = (config.fuzzy_unknown_type_name_threshold if config is not None else _defaults.fuzzy_unknown_type_name_threshold)
     UNKNOWN_TYPE_T = (config.fuzzy_unknown_type_type_threshold if config is not None else _defaults.fuzzy_unknown_type_type_threshold)
-    W_NAME = (config.name_weight if config is not None else _defaults.name_weight)
-    W_DESC = (config.desc_weight if config is not None else _defaults.desc_weight)
-    W_TYPE = (config.type_weight if config is not None else _defaults.type_weight)
-    CTX_BONUS = (config.context_bonus if config is not None else _defaults.context_bonus) # 上下文共现加分
-    FALL_FLOOR = (config.llm_fallback_floor if config is not None else _defaults.llm_fallback_floor)
-    FALL_CEIL = (config.llm_fallback_ceiling if config is not None else _defaults.llm_fallback_ceiling)
+    
+    # 权重：名称70%，类型30%
+    W_NAME = 0.7
+    W_TYPE = 0.3
 
 
+    def _merge_entities_with_aliases(canonical: ExtractedEntityNode, losing: ExtractedEntityNode):
+        """ 模糊匹配中的实体合并。
+        
+        合并策略：
+        1. 保留canonical的主名称不变
+        2. 将losing的主名称添加为alias（如果不同）
+        3. 合并两个实体的所有aliases
+        4. 自动去重（case-insensitive）并排序
+        
+        Args:
+            canonical: 规范实体（保留）
+            losing: 被合并实体（删除）
+            
+        Note:
+            使用alias_utils.normalize_aliases进行标准化去重
+        """
+        # 获取规范实体的名称
+        canonical_name = (getattr(canonical, "name", "") or "").strip()
+        losing_name = (getattr(losing, "name", "") or "").strip()
+        
+        # 收集所有需要合并的别名
+        all_aliases = []
+        
+        # 1. 添加canonical现有的别名
+        current_aliases = getattr(canonical, "aliases", []) or []
+        all_aliases.extend(current_aliases)
+        
+        # 2. 添加losing实体的名称（如果不同于canonical的名称）
+        if losing_name and losing_name != canonical_name:
+            all_aliases.append(losing_name)
+        
+        # 3. 添加losing实体的所有别名
+        losing_aliases = getattr(losing, "aliases", []) or []
+        all_aliases.extend(losing_aliases)
+        
+        # 4. 标准化并去重（使用标准化后的字符串进行去重）
+        try:
+            from app.core.memory.utils.alias_utils import normalize_aliases
+            canonical.aliases = normalize_aliases(canonical_name, all_aliases)
+        except Exception:
+            # 如果导入失败，使用增强的去重逻辑
+            # 使用标准化后的字符串作为key进行去重
+            seen_normalized = set()
+            unique_aliases = []
+            
+            for alias in all_aliases:
+                if not alias:
+                    continue
+                
+                alias_stripped = str(alias).strip()
+                if not alias_stripped or alias_stripped == canonical_name:
+                    continue
+                
+                # 标准化：转小写用于去重判断
+                alias_normalized = alias_stripped.lower()
+                
+                if alias_normalized not in seen_normalized:
+                    seen_normalized.add(alias_normalized)
+                    unique_aliases.append(alias_stripped)
+            
+            # 排序并赋值
+            canonical.aliases = sorted(unique_aliases)
+    
+    # ========== 主循环：遍历所有实体对进行模糊匹配 ==========
     i = 0
     while i < len(deduped_entities):
         a = deduped_entities[i]
         j = i + 1
         while j < len(deduped_entities):
             b = deduped_entities[j]
+            
+            # 跳过不同业务组的实体
             if getattr(a, "group_id", None) != getattr(b, "group_id", None):
                 j += 1
                 continue
-            # 上下文共现
-            try:
-                sources_a = {e.source for e in statement_entity_edges if getattr(e, "target", None) == getattr(a, "id", None)}
-                sources_b = {e.source for e in statement_entity_edges if getattr(e, "target", None) == getattr(b, "id", None)}
-                co_ctx = bool(sources_a & sources_b)
-            except Exception:
-                co_ctx = False
-            s_name, emb_sim, j_primary, j_alias = _name_similarity(a, b)
-            s_desc, j_desc, seq_desc = _desc_similarity(a, b)
+            
+            # ========== 第一步：计算相似度分数 ==========
+            
+            # 1.1 名称+别名相似度（包含完全匹配检测）
+            s_name, emb_sim, j_primary, j_alias, max_alias_sim, has_exact_match = _name_similarity_with_aliases(a, b)
+            
+            # 1.2 类型相似度
             s_type = _type_similarity(getattr(a, "entity_type", None), getattr(b, "entity_type", None))
+            
+            # ========== 第二步：动态调整阈值 ==========
+            
+            # 2.1 检测是否存在UNKNOWN类型
             unknown_present = (
                 str(getattr(a, "entity_type", "")).upper() == "UNKNOWN"
                 or str(getattr(b, "entity_type", "")).upper() == "UNKNOWN"
             )
+            
+            # 2.2 根据类型设置名称阈值
             tn = UNKNOWN_NAME_T if unknown_present else T_NAME_STRICT
-            tn = min(tn, 0.88) if co_ctx else tn
+            
+            # 2.3 如果有完全别名匹配，降低名称相似度阈值
+            if has_exact_match:
+                tn = min(tn, 0.75)
+            
+            # 2.4 设置类型阈值和综合阈值
             type_threshold = UNKNOWN_TYPE_T if unknown_present else T_TYPE_STRICT
             tover = T_OVERALL
-            a_cs = (getattr(a, "connect_strength", "") or "").lower()
-            b_cs = (getattr(b, "connect_strength", "") or "").lower()
-            if a_cs in ("strong", "both") or b_cs in ("strong", "both"):
-                tover = 0.80
-            # 综合评分：名称、描述、类型加权 + 上下文加分
-            overall = W_NAME * s_name + W_DESC * s_desc + W_TYPE * s_type + (CTX_BONUS if co_ctx else 0.0)
+            
+            # ========== 第三步：计算综合评分 ==========
+            # 公式：overall = 名称权重(70%) × 名称相似度 + 类型权重(30%) × 类型相似度
+            overall = W_NAME * s_name + W_TYPE * s_type
+            
+            # ========== 第四步：特殊规则判断（别名完全匹配快速通道）==========
+            
+            # 4.1 检查主名称是否相同
+            name_a_normalized = (getattr(a, "name", "") or "").strip().lower()
+            name_b_normalized = (getattr(b, "name", "") or "").strip().lower()
+            same_name = (name_a_normalized == name_b_normalized) and name_a_normalized != ""
+            
+            # 4.2 别名匹配特殊规则（满足任一条件即可快速合并）
+            alias_match_merge = False
+            
+            # 规则1：别名完全匹配 + 类型相似度 ≥ 0.7
+            if has_exact_match and s_type >= 0.7:
+                alias_match_merge = True
+            
+            # 规则2：名称相同 + 别名匹配 + 类型相似度 ≥ 0.5
+            elif same_name and has_exact_match and s_type >= 0.5:
+                alias_match_merge = True
+            
+            # 规则3：名称相同 + 别名匹配 + 类型完全相同
+            elif same_name and has_exact_match and s_type >= 1.0:
+                alias_match_merge = True
 
-            if s_name >= tn and s_type >= type_threshold and overall >= tover:
+            # ========== 第五步：最终合并判断 ==========
+            # 满足以下任一条件即执行合并：
+            # 条件A（快速通道）：alias_match_merge = True
+            # 条件B（标准通道）：s_name ≥ tn AND s_type ≥ type_threshold AND overall ≥ tover
+            if alias_match_merge or (s_name >= tn and s_type >= type_threshold and overall >= tover):
+                # ========== 第六步：执行实体合并 ==========
+                
+                # 6.1 合并别名
+                _merge_entities_with_aliases(a, b)
+                
+                # 6.2 合并其他属性（描述、事实摘要、时间范围等）
                 _merge_attribute(a, b)
+                
+                # 6.3 记录合并日志
                 try:
+                    merge_reason = "[别名匹配]" if alias_match_merge else "[模糊]"
+                    merge_reason = "[别名匹配]" if alias_match_merge else "[模糊]"
                     fuzzy_merge_records.append(
-                        f"[模糊] 规范实体 {a.id} ({a.group_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.group_id}|{b.name}|{b.entity_type}) | s_name={s_name:.3f}, s_desc={s_desc:.3f}, s_type={s_type:.3f}, overall={overall:.3f}, ctx={co_ctx}"
+                        f"{merge_reason} 规范实体 {a.id} ({a.group_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.group_id}|{b.name}|{b.entity_type}) | "
+                        f"s_name={s_name:.3f}, s_type={s_type:.3f}, overall={overall:.3f}, exact_alias={has_exact_match}"
                     )
                 except Exception:
                     pass
-                # 用于处理合并实体后，Statement节点下方无挂载边的情况  后续考虑将其代码逻辑统一由关系去重消歧管理
-                # 建立 ID 重定向：将合并实体 b 的 ID 指向规范实体 a 的 ID
+                
+                # 6.4 建立 ID 重定向映射
                 try:
                     canonical_id = id_redirect.get(getattr(a, "id", None), getattr(a, "id", None))
                     losing_id = getattr(b, "id", None)
                     if losing_id and canonical_id:
+                        # 将被合并实体的ID指向规范实体
                         id_redirect[losing_id] = canonical_id
-                        # 扁平化可能的重定向链：凡是映射到 b.id 的，统一指向 a.id
+                        
+                        # 扁平化重定向链：确保所有指向losing_id的映射都指向canonical_id
                         for k, v in list(id_redirect.items()):
                             if v == losing_id:
                                 id_redirect[k] = canonical_id
                 except Exception:
                     pass
+                
+                # 6.5 从列表中移除被合并的实体
                 deduped_entities.pop(j)
-                continue
+                continue  # 不增加j，继续检查当前位置的下一个实体
+            
+            # ========== 未达到合并条件：检查下一对 ==========
             else:
-                try:
-                    if s_name >= tn and s_type >= type_threshold and (FALL_FLOOR <= overall < tover) and (overall <= FALL_CEIL):
-                        fuzzy_merge_records.append(
-                            f"[边界] {a.id}<->{b.id} ({a.group_id}|{a.name}|{a.entity_type} ~ {b.group_id}|{b.name}|{b.entity_type}) | s_name={s_name:.3f}, s_desc={s_desc:.3f}, s_type={s_type:.3f}, overall={overall:.3f}, ctx={co_ctx}"
-                        )
-                except Exception:
-                    pass
-                j += 1
+                j += 1  # 移动到下一个实体
         i += 1
 
     return deduped_entities, id_redirect, fuzzy_merge_records
@@ -428,24 +730,30 @@ async def LLM_decision(  # 决策中包含去重和消歧的功能
         pair_concurrency = (config.llm_pair_concurrency if config is not None else _defaults.llm_pair_concurrency)
         max_rounds = (config.llm_max_rounds if config is not None else _defaults.llm_max_rounds)
 
-        # 动态导入 llm 客户端（统一从 app.core.memory.utils.llm_utils 获取）
+        # 动态导入 llm 客户端（修正导入路径）
         try:
-            llm_utils_mod = importlib.import_module("app.core.memory.utils.llm_utils")
-            get_llm_client_fn = getattr(llm_utils_mod, "get_llm_client")
-        except Exception:
-            get_llm_client_fn = lambda: None
+            llm_utils_mod = importlib.import_module("app.core.memory.utils.llm.llm_utils")
+            get_llm_client_fn = llm_utils_mod.get_llm_client
+        except Exception as e:
+            llm_records.append(f"[LLM错误] 无法导入 llm_utils 模块: {e}")
+            return deduped_entities, id_redirect, llm_records
 
         try:
             llm_mod = importlib.import_module("app.core.memory.storage_services.extraction_engine.deduplication.entity_dedup_llm")
-            llm_fn = getattr(llm_mod, "llm_dedup_entities_iterative_blocks")
-        except Exception:
-            raise RuntimeError("LLM 模块加载失败：deduplication.entity_dedup_llm 缺少 llm_dedup_entities_iterative_blocks")
+            llm_fn = llm_mod.llm_dedup_entities_iterative_blocks
+        except Exception as e:
+            llm_records.append(f"[LLM错误] 无法导入 entity_dedup_llm 模块: {e}")
+            return deduped_entities, id_redirect, llm_records
 
-        # 获取 LLM 客户端，若环境未配置或抛错则回退为 None
+        # 获取 LLM 客户端
         try:
             llm_client = get_llm_client_fn()
-        except Exception:
-            llm_client = None
+            if llm_client is None:
+                llm_records.append("[LLM错误] LLM 客户端初始化失败：返回 None")
+                return deduped_entities, id_redirect, llm_records
+        except Exception as e:
+            llm_records.append(f"[LLM错误] 获取 LLM 客户端失败: {e}")
+            return deduped_entities, id_redirect, llm_records
 
         llm_redirect, llm_records = await llm_fn(
             entity_nodes=deduped_entities,
@@ -527,7 +835,13 @@ async def LLM_disamb_decision(
         from app.core.memory.utils.llm.llm_utils import get_llm_client
         from app.core.memory.storage_services.extraction_engine.deduplication.entity_dedup_llm import llm_disambiguate_pairs_iterative
         from app.core.memory.utils.config import definitions as config_defs
+        
+        # 获取 LLM 客户端并验证
         llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
+        if llm_client is None:
+            disamb_records.append("[DISAMB错误] LLM 客户端初始化失败：返回 None")
+            return deduped_entities, id_redirect, blocked_pairs, disamb_records
+        
         merge_redirect, block_list, disamb_records = await llm_disambiguate_pairs_iterative(
                 entity_nodes=deduped_entities,
                 statement_entity_edges=statement_entity_edges,
@@ -708,7 +1022,7 @@ def _write_dedup_fusion_report(
         aggregated_exact_lines: List[str] = []
         try:
             for k, info in (exact_merge_map or {}).items():
-                merged_ids = sorted(list(info.get("merged_ids", set())))
+                merged_ids = sorted(info.get("merged_ids", set()))
                 if merged_ids:
                     aggregated_exact_lines.append(
                         f"[精确] 键 {k} 规范实体 {info.get('canonical_id')} 名称 '{info.get('name')}' 类型 {info.get('entity_type')} <- 合并实体IDs {', '.join(merged_ids)}"

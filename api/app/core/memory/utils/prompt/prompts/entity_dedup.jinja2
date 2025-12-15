@@ -35,26 +35,78 @@
 
 ===判定指引===
 {% if disambiguation_mode %}
-- 这是“同名但类型不同”的消歧场景。请判断两者是否指向同一真实世界实体。
+- 这是"同名但类型不同"的消歧场景。请判断两者是否指向同一真实世界实体。
 - 综合名称文本/向量相似度、别名、描述、摘要与上下文关系（同源与关系陈述）进行判断。
+- **别名处理（高优先级）**: 
+  * 如果两个实体的别名列表中有交集，这是强烈的同一性信号
+  * 如果一个实体的名称出现在另一个实体的别名中，应视为高置信度匹配
+  * 如果一个实体的别名与另一个实体的名称完全匹配，应视为高置信度匹配
+  * 别名匹配的权重应高于单纯的名称文本相似度
 - 若无法充分确定，应保守处理：不合并，并建议阻断该对在其他模糊/启发式合并中出现（block_pair=true）。
-- 若需要合并（should_merge=true），请选择“规范实体”(canonical_idx)并在可能的情况下给出建议统一类型（suggested_type），建议类型需与上下文一致。
+- 若需要合并（should_merge=true），请选择"规范实体"(canonical_idx)并**必须**给出建议统一类型（suggested_type）。
+- **类型统一原则（重要）**：
+  * 优先选择更具体、更准确的类型（如 HistoricalPeriod 优于 Organization，MilitaryCapability 优于 Concept）
+  * 如果两个类型都很具体但不同，选择与实体核心语义最匹配的类型
+  * 通用类型（Concept、Phenomenon、Condition、State、Attribute、Event）优先级低于领域特定类型
+  * 建议类型必须与上下文和实体描述一致
 - 规范实体优先级：连接强度（strong/both）更高者；其余相同则保留描述/摘要更丰富者；再相同时保留实体A（canonical_idx=0）。
+- **注意**：别名（aliases）已在三元组提取阶段获取，合并时会自动整合，无需在此阶段提取。
 {% else %}
 - 若实体类型相同或任一为UNKNOWN/空，可放行作为候选；若类型明显冲突（如人 vs 物品），除非别名与描述高度一致，否则判定不同实体。
+- **别名匹配优先（最高优先级）**: 
+  * 如果实体A的名称与实体B的某个别名完全匹配，应视为高置信度匹配
+  * 如果实体B的名称与实体A的某个别名完全匹配，应视为高置信度匹配
+  * 如果实体A的任一别名与实体B的任一别名完全匹配，应视为高置信度匹配
+  * 别名完全匹配时，即使名称文本相似度较低，也应考虑合并
+  * 别名匹配的置信度应高于单纯的名称相似度匹配
 - 综合名称文本/向量相似度、别名、描述、摘要以及上下文关系判断是否为同一实体。
 - 当上下文同源或存在明确的关系陈述支持同一性（例如同一对象反复被提及或别名对应），可以适度降低判定阈值。
 - 保守决策：当无法充分确定，不要合并（same_entity=false）。
-- 若需要合并，选择“保留的规范实体”(canonical_idx)为更合适的一个：
+- 若需要合并，选择"保留的规范实体"(canonical_idx)为更合适的一个：
   - 优先保留连接强度更强(strong/both)者；其余相同则保留描述/摘要更丰富者；再相同时保留实体A（canonical_idx=0）。
+- **注意**：别名（aliases）已在三元组提取阶段获取，合并时会自动整合，无需在此阶段提取。
 {% endif %}
 
 **Output format**
+{% if disambiguation_mode %}
+返回JSON格式，必须包含以下字段：
+{
+  "should_merge": boolean,
+  "canonical_idx": 0 or 1,
+  "confidence": float (0.0-1.0),
+  "block_pair": boolean,
+  "suggested_type": "string or null",
+  "reason": "string"
+}
+
+**字段说明**:
+- should_merge: 是否应该合并这两个实体（true/false）
+- canonical_idx: 规范实体的索引，0表示实体A，1表示实体B
+- confidence: 决策的置信度，范围0.0-1.0
+- block_pair: 是否阻断该对在其他模糊/启发式合并中出现（true/false）
+- suggested_type: 建议的统一类型（字符串或null）
+- reason: 决策理由的简短说明
+{% else %}
+返回JSON格式，必须包含以下字段：
+{
+  "same_entity": boolean,
+  "canonical_idx": 0 or 1,
+  "confidence": float (0.0-1.0),
+  "reason": "string"
+}
+
+**字段说明**:
+- same_entity: 两个实体是否指向同一真实世界实体（true/false）
+- canonical_idx: 规范实体的索引，0表示实体A，1表示实体B
+- confidence: 决策的置信度，范围0.0-1.0
+- reason: 决策理由的简短说明
+{% endif %}
+
 **CRITICAL JSON FORMATTING REQUIREMENTS:**
 1. Use only standard ASCII double quotes (") for JSON structure - never use Chinese quotation marks ("") or other Unicode quotes
-2. If the extracted statement text contains quotation marks, escape them properly using backslashes (\")
-3. Ensure all JSON strings are properly closed and comma-separated
-4. Do not include line breaks within JSON string values
+2. Ensure all JSON strings are properly closed and comma-separated
+3. Do not include line breaks within JSON string values
+4. Test your JSON output mentally to ensure it can be parsed correctly
 
 The output language should always be the same as the input language.
 {{ json_schema }}

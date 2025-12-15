@@ -44,7 +44,7 @@ class VerifyTool:
     async def model_1(self, state: State) -> State:
         llm_client = get_llm_client(SELECTED_LLM_ID)
         response_content = await llm_client.chat(
-            messages=[{"role": "system", "content": self.system_prompt}] + _to_openai_messages(state["messages"])
+            messages=[{"role": "system", "content": self.system_prompt}, *_to_openai_messages(state["messages"])]
         )
         return {
             "agent1_response": response_content,

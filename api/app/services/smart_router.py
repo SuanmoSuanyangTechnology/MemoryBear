@@ -75,7 +75,7 @@ class SmartRouter:
             }
         """
         logger.info(
-            f"开始智能路由",
+            "开始智能路由",
             extra={
                 "message_length": len(message),
                 "conversation_id": conversation_id,
@@ -170,7 +170,7 @@ class SmartRouter:
         }
         
         logger.info(
-            f"路由完成",
+            "路由完成",
             extra={
                 "agent_id": agent_id,
                 "strategy": strategy,
@@ -421,6 +421,6 @@ class SmartRouter:
         
         # 否则使用第一个子 Agent
         if self.sub_agents:
-            return list(self.sub_agents.keys())[0]
+            return next(iter(self.sub_agents.keys()))
         
         return "default-agent"

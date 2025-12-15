@@ -3,7 +3,7 @@ import asyncio
 from typing import List, Dict
 
 from app.core.logging_config import get_memory_logger
-from app.core.memory.src.llm_tools.openai_client import OpenAIClient
+from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.prompt.prompt_utils import render_triplet_extraction_prompt
 from app.core.memory.utils.data.ontology import PREDICATE_DEFINITIONS, Predicate # 引入枚举 Predicate 白名单过滤
 from app.core.memory.models.triplet_models import TripletExtractionResponse

@@ -162,7 +162,7 @@ def register_user_with_invite(
         # 接受工作空间邀请（此时用户已成为工作空间成员，并且会 commit）
         invite_accept = InviteAcceptRequest(token=invite_token)
         workspace_service.accept_workspace_invite(db, invite_accept, user)
-        logger.info(f"用户接受邀请成功")
+        logger.info("用户接受邀请成功")
         
         # 重新查询用户对象以确保获取最新状态
         from app.repositories import user_repository
@@ -200,7 +200,7 @@ def bind_workspace_with_invite(
         # 接受工作空间邀请（此时用户已成为工作空间成员，并且会 commit）
         invite_accept = InviteAcceptRequest(token=invite_token)
         workspace_service.accept_workspace_invite(db, invite_accept, user)
-        logger.info(f"用户接受邀请成功")
+        logger.info("用户接受邀请成功")
         
         # 重新查询用户对象以确保获取最新状态
         from app.repositories import user_repository

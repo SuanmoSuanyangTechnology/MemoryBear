@@ -6,7 +6,7 @@ from .markdown_parser import MarkdownElementExtractor
 from .markdown_parser import RAGMarkdownParser as MarkdownParser
 from .pdf_parser import PlainParser
 from .pdf_parser import RAGPdfParser as PdfParser
-from .ppt_parser import RAGPptParser as PptParser
+# from .ppt_parser import RAGPptParser as PptParser
 from .txt_parser import RAGTxtParser as TxtParser
 
 __all__ = [
@@ -14,7 +14,7 @@ __all__ = [
     "PlainParser",
     "DocxParser",
     "ExcelParser",
-    "PptParser",
+    # "PptParser",
     "HtmlParser",
     "JsonParser",
     "MarkdownParser",

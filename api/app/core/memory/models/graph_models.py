@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, field_validator
 import re
 
 from app.core.memory.utils.data.ontology import TemporalInfo
+from app.core.memory.utils.alias_utils import validate_aliases
 
 
 def parse_historical_datetime(v):
@@ -260,27 +261,66 @@ class ChunkNode(Node):
 
 class ExtractedEntityNode(Node):
     """Node representing an extracted entity in the knowledge graph.
+    
+    This class represents entities extracted from dialogue statements. Each entity
+    has a primary name and can have multiple aliases (alternative names). The aliases
+    feature enables better entity deduplication and disambiguation by tracking all
+    known names for an entity.
 
     Attributes:
         entity_idx: Unique numeric identifier for the entity
         statement_id: ID of the statement this entity was extracted from
-        entity_type: Type/category of the entity
+        entity_type: Type/category of the entity (e.g., PERSON, ORGANIZATION, LOCATION)
         description: Textual description of the entity
-        aliases: Optional list of alternative names for the entity
+        aliases: List of alternative names for the entity. This field:
+                 - Stores all known alternative names in the SAME LANGUAGE as the entity name
+                 - Automatically filters out invalid values (None, empty strings)
+                 - Removes duplicates (case-insensitive) and names matching the primary name
+                 - Is used in fuzzy matching to improve entity deduplication
+                 - Is populated during triplet extraction and entity merging processes
+                 - Has a recommended maximum of 50 aliases per entity
+                 - CRITICAL: Aliases must be in the same language as the entity name (no translation)
         name_embedding: Optional embedding vector for the entity name
         fact_summary: Summary of facts about this entity
-        connect_strength: Classification of connection strength ('Strong' or 'Weak')
-        config_id: Configuration ID used to process this entity
+        connect_strength: Classification of connection strength ('Strong', 'Weak', or 'Both')
+        config_id: Configuration ID used to process this entity (integer or string)
     """
     entity_idx: int = Field(..., description="Unique identifier for the entity")
     statement_id: str = Field(..., description="Statement this entity was extracted from")
     entity_type: str = Field(..., description="Type of the entity")
     description: str = Field(..., description="Entity description")
-    aliases: Optional[List[str]] = Field(default_factory=list, description="Entity aliases")
+    aliases: List[str] = Field(
+        default_factory=list, 
+        description="Entity aliases - alternative names for this entity"
+    )
     name_embedding: Optional[List[float]] = Field(default_factory=list, description="Name embedding vector")
     fact_summary: str = Field(..., description="Summary of the fact about this entity")
     connect_strength: str = Field(..., description="Strong VS Weak about this entity")
     config_id: Optional[int | str] = Field(None, description="Configuration ID used to process this entity (integer or string)")
+    
+    @field_validator('aliases', mode='before')
+    @classmethod
+    def validate_aliases_field(cls, v): # 字段验证器 自动清理和验证 aliases 字段
+        """Validate and clean aliases field using utility function.
+        
+        This validator ensures that the aliases field is always a valid list of strings.
+        It filters out:
+        - None values
+        - Empty strings
+        - Non-string types (after converting to string)
+        - Duplicate values
+        
+        Args:
+            v: The raw aliases value (can be None, list, or other types)
+            
+        Returns:
+            A cleaned list of unique string aliases
+            
+        Example:
+            >>> # Input: [None, "", "alias1", "alias1", 123]
+            >>> # Output: ["alias1", "123"]
+        """
+        return validate_aliases(v)
 
 
 class MemorySummaryNode(Node):

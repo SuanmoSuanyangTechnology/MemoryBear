@@ -16,31 +16,13 @@ from app.core.memory.utils.config.config_utils import get_picture_config, get_vo
 from app.core.memory.utils.llm.llm_utils import get_llm_client
 from app.core.memory.utils.config.definitions import SELECTED_LLM_ID, SELECTED_LLM_PICTURE_NAME, SELECTED_LLM_VOICE_NAME
 from app.core.models.base import RedBearModelConfig
-from app.core.memory.src.llm_tools.openai_client import OpenAIClient
+from app.core.memory.llm_tools.openai_client import OpenAIClient
 
 PROJECT_ROOT_ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-#TODO: Refactor entire picture/voice
-# async  def LLM_model_request(context,data,query):
-#     '''
-#     Agent model request
-#     Args:
-#         context:Input request
-#         data: template parameters
-#         query:request content
-#     Returns:
-
-#     '''
-#     template = Template(context)
-#     system_prompt = template.render(**data)
-#     llm_client = get_llm_client(SELECTED_LLM_ID)
-#     result = await llm_client.chat(
-#         messages=[{"role": "system", "content": system_prompt}] + [{"role": "user", "content": query}]
-#     )
-#     return result
 
 async def picture_model_requests(image_url):
     '''
@@ -106,32 +88,8 @@ class COUNTState:
     def reset(self):
         """手动重置累加值"""
         self.total = 0
-        print(f"[COUNTState] 已重置为 0")
+        print("[COUNTState] 已重置为 0")
 
-
-
-# def embed(texts: list[str]) -> list[list[float]]:
-#     # 这里可以换成 LangChain Embeddings
-#     return [[float(len(t) % 5), float(len(t) % 3)] for t in texts]
-
-
-# def export_store_to_json(store, namespace):
-#     """Export the entire storage content to a JSON file"""
-#     # 搜索所有存储项
-#     all_items = store.search(namespace)
-
-#     # 整理数据
-#     export_data = {}
-#     for item in all_items:
-#         if hasattr(item, 'key') and hasattr(item, 'value'):
-#             export_data[item.key] = item.value
-
-#     # 保存到文件
-#     os.makedirs("memory_logs", exist_ok=True)
-#     with open("memory_logs/full_memory_export.json", "w", encoding="utf-8") as f:
-#         json.dump(export_data, f, ensure_ascii=False, indent=2)
-
-#     print(f"{len(export_data)} 条记忆到 JSON 文件")
 
 def merge_to_key_value_pairs(data, query_key, result_key):
     grouped = defaultdict(list)

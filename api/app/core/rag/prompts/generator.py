@@ -134,7 +134,7 @@ def question_proposal(chat_mdl, content, topn=3):
     rendered_prompt = template.render(content=content, topn=topn)
 
     msg = [{"role": "system", "content": rendered_prompt}, {"role": "user", "content": "Output: "}]
-    _, msg = message_fit_in(msg, chat_mdl.max_length)
+    _, msg = message_fit_in(msg, getattr(chat_mdl, 'max_length', 8096))
     kwd = chat_mdl.chat(rendered_prompt, msg[1:], {"temperature": 0.2})
     if isinstance(kwd, tuple):
         kwd = kwd[0]

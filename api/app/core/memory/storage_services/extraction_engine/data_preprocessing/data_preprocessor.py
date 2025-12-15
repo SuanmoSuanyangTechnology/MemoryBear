@@ -168,7 +168,7 @@ class DataPreprocessor:
                         except json.JSONDecodeError as line_error:
                             # 如果是单行巨大JSON数组，可能需要特殊处理
                             if line_num == 1 and len(lines) == 1:
-                                print(f"检测到单行大型JSON，尝试分块解析...")
+                                print("检测到单行大型JSON，尝试分块解析...")
                                 # 对于超大单行JSON，尝试使用json.JSONDecoder进行流式解析
                                 try:
                                     decoder = json.JSONDecoder()

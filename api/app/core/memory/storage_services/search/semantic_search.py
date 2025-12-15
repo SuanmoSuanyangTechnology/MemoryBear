@@ -10,7 +10,7 @@ from app.core.logging_config import get_memory_logger
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.storage_services.search.search_strategy import SearchStrategy, SearchResult
 from app.repositories.neo4j.graph_search import search_graph_by_embedding
-from app.core.memory.src.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.utils.config.config_utils import get_embedder_config
 from app.core.memory.utils.config import definitions as config_defs
 from app.core.models.base import RedBearModelConfig

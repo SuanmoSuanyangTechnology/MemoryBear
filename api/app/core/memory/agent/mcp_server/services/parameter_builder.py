@@ -66,80 +66,27 @@ class ParameterBuilder:
         base_args["user_rag_memory_id"] = user_rag_memory_id if user_rag_memory_id is not None else ""
         
         # Tool-specific argument construction
-        if tool_name == "Verify":
+        if tool_name in ["Verify","Summary", "Summary_fails",'Retrieve_Summary']:
             # Verify expects dict context
             return {
                 "context": content if isinstance(content, dict) else {},
                 **base_args
             }
-        
-        elif tool_name == "Retrieve":
-            # Retrieve expects dict context + search_switch
+
+        elif tool_name in ["Retrieve"]:
             return {
                 "context": content if isinstance(content, dict) else {},
                 "search_switch": search_switch,
                 **base_args
             }
-        
-        elif tool_name in ["Summary", "Summary_fails"]:
-            # Summary tools expect JSON string context
-            if isinstance(content, dict):
-                context_str = json.dumps(content, ensure_ascii=False)
-            elif isinstance(content, str):
-                context_str = content
-            else:
-                context_str = json.dumps({"data": content}, ensure_ascii=False)
-            
-            return {
-                "context": context_str,
-                **base_args
-            }
-        
-        elif tool_name == "Retrieve_Summary":
-            # Retrieve_Summary needs to unwrap nested context structures
-            # Handle both 'content' and 'context' keys
-            context_dict = content
-            
-            if isinstance(content, dict):
-                # Check for nested 'content' wrapper
-                if "content" in content:
-                    inner = content["content"]
-                    
-                    # If it's a JSON string, parse it
-                    if isinstance(inner, str):
-                        try:
-                            parsed = json.loads(inner)
-                            # Check if parsed has 'context' wrapper
-                            if isinstance(parsed, dict) and "context" in parsed:
-                                context_dict = parsed["context"]
-                            else:
-                                context_dict = parsed
-                        except json.JSONDecodeError:
-                            logger.warning(
-                                f"Failed to parse JSON content for {tool_name}: {inner[:100]}"
-                            )
-                            context_dict = {"Query": "", "Expansion_issue": []}
-                    elif isinstance(inner, dict):
-                        context_dict = inner
-                
-                # Check for 'context' wrapper
-                elif "context" in content:
-                    context_dict = content["context"] if isinstance(content["context"], dict) else content
-            
-            return {
-                "context": context_dict,
-                **base_args
-            }
-        
+
         elif tool_name == "Input_Summary":
-            # Input_Summary expects raw message string + search_switch
-            # Content should be the raw message string
             if isinstance(content, dict):
                 # Try to extract message from dict
                 message_str = content.get("sentence", str(content))
             else:
                 message_str = str(content)
-            
+
             return {
                 "context": message_str,
                 "search_switch": search_switch,

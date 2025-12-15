@@ -5,7 +5,8 @@ from PIL import Image
 
 from app.core.rag.nlp import tokenize, is_english
 from app.core.rag.nlp import rag_tokenizer
-from app.core.rag.deepdoc.parser import PdfParser, PptParser, PlainParser
+from app.core.rag.deepdoc.parser import PdfParser, PlainParser
+from app.core.rag.deepdoc.parser.ppt_parser import RAGPptParser as PptParser
 from PyPDF2 import PdfReader as pdf2_read
 from app.core.rag.app.naive import by_plaintext, PARSERS
 

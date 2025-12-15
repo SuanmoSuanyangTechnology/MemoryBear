@@ -15,7 +15,7 @@ from typing import Any, Dict, Tuple, List
 from app.core.memory.storage_services.search import run_hybrid_search
 # 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.src.llm_tools.openai_client import OpenAIClient
+from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.models.config_models import LLMConfig
 from dotenv import load_dotenv
 

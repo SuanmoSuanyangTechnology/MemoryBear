@@ -27,7 +27,7 @@ async def add_chunk_statement_edges(chunks: List[Chunk], connector: Neo4jConnect
         edges: List[dict] = []
         for chunk in chunks:
             for stmt in getattr(chunk, "statements", []) or []:
-                stable_edge_id = hashlib.sha1(f"{chunk.id}|{stmt.id}".encode("utf-8")).hexdigest()
+                stable_edge_id = hashlib.sha1(f"{chunk.id}|{stmt.id}".encode()).hexdigest()
                 edge = {
                     "id": stable_edge_id,
                     "source": chunk.id,

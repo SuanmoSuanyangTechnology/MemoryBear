@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 import uuid
 from enum import StrEnum
+from app.core.rag.models.chunk import QAChunk
+from typing import Union
 
 
 class RetrieveType(StrEnum):
@@ -9,12 +11,35 @@ class RetrieveType(StrEnum):
     SEMANTIC = "semantic"
     HYBRID = "hybrid"
 
+
 class ChunkCreate(BaseModel):
-    content: str
+    content: Union[str, QAChunk] = Field(
+        description="Content can be either a string or a QAChunk object"
+    )
+
+    @property
+    def chunk_content(self) -> str:
+        """
+        Get the actual content string regardless of input type
+        """
+        if isinstance(self.content, QAChunk):
+            return f"question: {self.content.question} answer: {self.content.answer}"
+        return self.content
 
 
 class ChunkUpdate(BaseModel):
-    content: str | None = Field(None)
+    content: Union[str, QAChunk] = Field(
+        description="Content can be either a string or a QAChunk object"
+    )
+
+    @property
+    def chunk_content(self) -> str:
+        """
+        Get the actual content string regardless of input type
+        """
+        if isinstance(self.content, QAChunk):
+            return f"question: {self.content.question} answer: {self.content.answer}"
+        return self.content
 
 
 class ChunkRetrieve(BaseModel):

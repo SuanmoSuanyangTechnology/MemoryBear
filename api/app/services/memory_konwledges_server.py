@@ -168,7 +168,7 @@ async def get_document_chunks(
 
     # 执行分页查询
     try:
-        api_logger.debug(f"开始执行文档块查询")
+        api_logger.debug("开始执行文档块查询")
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
         total, items = vector_service.search_by_segment(
             document_id=str(document_id),
@@ -516,67 +516,18 @@ async def write_rag(group_id, message, user_rag_memory_id):
                 db=db,
                 current_user=current_user
             )
-            await parse_document_by_id(document, db=db, current_user=current_user)
+            # 重新查询刚创建的文档ID
+            new_document_id = find_document_id_by_kb_and_filename(
+                db=db,
+                kb_id=user_rag_memory_id,
+                file_name=f"{group_id}.txt"
+            )
+
+            if new_document_id:
+                await parse_document_by_id(new_document_id, db=db, current_user=current_user)
+            else:
+                api_logger.error(f"创建文档后无法找到文档ID: group_id={group_id}")
             return result
     finally:
         # 确保数据库会话被关闭
         db.close()
-# 在异步环境中调用示例
-
-
-async def example_usage():
-
-    # 获取数据库会话
-    db_gen = get_db()
-    db = next(db_gen)
-
-    # 创建 CustomTextFileCreate 对象
-    title = '2f6ff1eb-50c7-4765-8e89-e4566be19122'
-    create_data = CustomTextFileCreate(
-        title=title,
-        content="莫扎特在巴黎经历母亲去世后返回萨尔茨堡，他随后创作的交响曲主题是否与格鲁克在维也纳推动的“改革歌剧”理念存在共通之处？贝多芬早年曾师从海顿，而海顿又受雇于埃斯特哈齐家族——这种师承体系如何影响了当时欧洲宫廷音乐的传承结构？斯卡拉歌剧院选择萨列里的歌剧作为开幕演出，是否与当时米兰政治环境和奥地利宫廷影响有关？"
-    )
-
-    # 创建用户对象
-    current_user = SimpleUser("6243c125-9420-402c-bbb5-d1977811ac96")
-
-    # 上传文件
-    result = await memory_konwledges_up(
-        kb_id="c71df60a-36a6-4759-a2ce-101e3087b401",
-        parent_id="c71df60a-36a6-4759-a2ce-101e3087b401",
-        create_data=create_data,
-        db=db,
-        current_user=current_user
-    )
-    print(result)
-    #找到document_id
-
-    # 使用刚创建的文档ID进行解析
-    document = find_document_id_by_kb_and_filename(db=db, kb_id="c71df60a-36a6-4759-a2ce-101e3087b401", file_name=f"{title}.txt")
-    print('====',document)
-    res___=await parse_document_by_id(document, db=db, current_user=current_user)
-    print(res___)
-
-    # result='e8cf9ace-d1a9-4af2-b0c4-3fc94f4f8042'
-    # document_id='d22e8173-50d0-4e10-a7de-aa638ef893bc'
-    #
-    # '''更新块'''
-    #
-    # new_content = "这是新的 chunk 内容，用来覆盖原来的内容"
-    # # 构造 ChunkUpdate 对象
-    # update_data = ChunkCreate(content=new_content)
-    # updated_chunk = await create_document_chunk(
-    #     kb_id= result,
-    #     document_id=document_id,
-    #     create_data= update_data,
-    #     db=db,
-    #     current_user=current_user
-    # )
-    # print(updated_chunk)
-    return '','',''
-
-
-
-if __name__ == "__main__":
-    # asyncio.run(example_usage())
-    asyncio.run(write_rag('1111','22222',"c71df60a-36a6-4759-a2ce-101e3087b401"))

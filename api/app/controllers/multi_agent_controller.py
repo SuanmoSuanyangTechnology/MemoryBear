@@ -158,7 +158,7 @@ async def run_multi_agent(
 
 @router.post(
     "/{app_id}/multi-agent/test-routing",
-    summary="测试智能路由"
+    summary="测试智能路由（支持 Master Agent 模式）"
 )
 async def test_routing(
     app_id: uuid.UUID = Path(..., description="应用 ID"),
@@ -166,19 +166,20 @@ async def test_routing(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """测试智能路由功能
+    """测试智能路由功能（重构版 - 支持 Master Agent）
     
     支持三种路由模式：
-    - keyword: 仅使用关键词路由
-    - llm: 使用 LLM 路由（需要提供 routing_model_id）
-    - hybrid: 混合路由（关键词 + LLM）
+    - master_agent: 使用 Master Agent 决策（推荐）
+    - llm_router: 使用旧 LLM 路由器（向后兼容）
+    - rule_only: 仅使用规则路由（最快）
     
     参数：
     - message: 测试消息
     - conversation_id: 会话 ID（可选）
-    - routing_model_id: 路由模型 ID（可选，用于 LLM 路由）
+    - routing_model_id: 路由模型 ID（可选）
     - use_llm: 是否启用 LLM（默认 False）
     - keyword_threshold: 关键词置信度阈值（默认 0.8）
+    - force_new: 是否强制重新路由（默认 False）
     """
     from app.services.conversation_state_manager import ConversationStateManager
     from app.services.llm_router import LLMRouter
@@ -276,7 +277,161 @@ async def test_routing(
 
 
 @router.post(
-    "/{app_id}/",
+    "/{app_id}/multi-agent/test-master-agent",
+    summary="测试 Master Agent 决策"
+)
+async def test_master_agent(
+    app_id: uuid.UUID = Path(..., description="应用 ID"),
+    request: multi_agent_schema.RoutingTestRequest = ...,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """测试 Master Agent 的路由决策能力
+    
+    这个接口专门用于测试新的 Master Agent 路由器，
+    可以看到 Master Agent 的完整决策过程。
+    
+    返回信息包括：
+    - 选中的 Agent
+    - 置信度
+    - 决策理由
+    - 是否需要协作
+    - 路由策略（master_agent / rule_fast_path / fallback）
+    """
+    from app.services.conversation_state_manager import ConversationStateManager
+    from app.services.master_agent_router import MasterAgentRouter
+    from app.models import ModelConfig
+    
+    # 1. 获取多 Agent 配置
+    service = MultiAgentService(db)
+    config = service.get_config(app_id)
+    
+    if not config:
+        return success(
+            data=None,
+            msg="应用未配置多 Agent，无法测试"
+        )
+    
+    # 2. 加载 Master Agent
+    from app.models import AppRelease, App
+    
+    master_release = db.get(AppRelease, config.master_agent_id)
+    if not master_release:
+        return success(
+            data=None,
+            msg=f"Master Agent 发布版本不存在: {config.master_agent_id}"
+        )
+    
+    # 获取应用信息
+    app = db.get(App, master_release.app_id)
+    if not app:
+        return success(
+            data=None,
+            msg=f"应用不存在: {master_release.app_id}"
+        )
+    
+    # 创建 Master Agent 代理对象
+    class AgentConfigProxy:
+        def __init__(self, release, app, config_data):
+            self.id = release.id
+            self.app_id = release.app_id
+            self.app = app
+            self.name = release.name
+            self.description = release.description
+            self.system_prompt = config_data.get("system_prompt")
+            self.default_model_config_id = release.default_model_config_id
+    
+    config_data = master_release.config or {}
+    master_agent_config = AgentConfigProxy(master_release, app, config_data)
+    
+    # 3. 获取 Master Agent 的模型配置
+    master_model_config = db.get(ModelConfig, master_agent_config.default_model_config_id)
+    if not master_model_config:
+        return success(
+            data=None,
+            msg=f"Master Agent 模型配置不存在: {master_agent_config.default_model_config_id}"
+        )
+    
+    # 4. 准备子 Agent 信息
+    sub_agents = {}
+    for sub_agent_info in config.sub_agents:
+        agent_id = sub_agent_info["agent_id"]
+        
+        # 加载子 Agent
+        sub_release = db.get(AppRelease, uuid.UUID(agent_id))
+        if sub_release:
+            sub_app = db.get(App, sub_release.app_id)
+            sub_config_data = sub_release.config or {}
+            sub_agent_config = AgentConfigProxy(sub_release, sub_app, sub_config_data)
+            
+            sub_agents[agent_id] = {
+                "config": sub_agent_config,
+                "info": sub_agent_info
+            }
+    
+    # 5. 初始化 Master Agent 路由器
+    state_manager = ConversationStateManager()
+    router = MasterAgentRouter(
+        db=db,
+        master_agent_config=master_agent_config,
+        master_model_config=master_model_config,
+        sub_agents=sub_agents,
+        state_manager=state_manager,
+        enable_rule_fast_path=True
+    )
+    
+    # 6. 执行路由决策
+    try:
+        decision = await router.route(
+            message=request.message,
+            conversation_id=str(request.conversation_id) if request.conversation_id else None,
+            variables=None
+        )
+        
+        # 7. 获取选中的 Agent 信息
+        agent_id = decision["selected_agent_id"]
+        agent_info = sub_agents.get(agent_id, {}).get("info", {})
+        
+        # 8. 构建响应
+        response_data = {
+            "message": request.message,
+            "master_agent": {
+                "name": master_agent_config.name,
+                "model": master_model_config.name
+            },
+            "decision": {
+                "selected_agent_id": agent_id,
+                "selected_agent_name": agent_info.get("name", "未知"),
+                "selected_agent_role": agent_info.get("role", ""),
+                "confidence": decision["confidence"],
+                "reasoning": decision.get("reasoning", ""),
+                "topic": decision.get("topic", ""),
+                "strategy": decision["strategy"],
+                "routing_method": decision.get("routing_method", ""),
+                "need_collaboration": decision.get("need_collaboration", False),
+                "collaboration_agents": decision.get("collaboration_agents", [])
+            },
+            "config_info": {
+                "total_sub_agents": len(sub_agents),
+                "enable_rule_fast_path": True
+            }
+        }
+        
+        return success(
+            data=response_data,
+            msg="Master Agent 决策测试成功"
+        )
+        
+    except Exception as e:
+        logger.error(f"Master Agent 决策测试失败: {str(e)}")
+        return success(
+            data=None,
+            msg=f"测试失败: {str(e)}"
+        )
+
+
+@router.post(
+    "/{app_id}/multi-agent/batch-test-routing",
     summary="批量测试智能路由"
 )
 async def batch_test_routing(

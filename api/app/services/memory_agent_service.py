@@ -29,8 +29,7 @@ from app.core.memory.agent.utils.mcp_tools import get_mcp_server_config
 from app.core.memory.agent.utils.type_classifier import status_typle
 from app.db import get_db
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-# TODO 后续更新
-# from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
+from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
 from app.core.memory.utils.llm.llm_utils import get_llm_client
 from app.schemas.memory_storage_schema import ApiResponse, ok, fail
 from app.models.knowledge_model import Knowledge, KnowledgeType
@@ -697,7 +696,7 @@ class MemoryAgentService:
                 logger.info(f"知识库类型统计成功 (workspace_id={current_workspace_id}): {result}")
             else:
                 # 没有提供 workspace_id，所有知识库类型返回 0
-                logger.info(f"未提供 workspace_id，知识库类型统计全部为 0")
+                logger.info("未提供 workspace_id，知识库类型统计全部为 0")
                     
         except Exception as e:
             logger.error(f"知识库类型统计失败: {e}")
@@ -720,7 +719,7 @@ class MemoryAgentService:
                 end_users = []
                 for app_id in app_ids:
                     end_user_orm_list = end_user_repository.get_end_users_by_app_id(db, app_id)
-                    end_users.extend([EndUserSchema.model_validate(h) for h in end_user_orm_list])
+                    end_users.extend(h for h in end_user_orm_list)
                 
                 # 统计所有宿主的 Chunk 总数
                 total_chunks = 0
@@ -742,7 +741,7 @@ class MemoryAgentService:
             else:
                 # 没有 workspace_id 时，返回 0
                 result["memory"] = 0
-                logger.info(f"未提供 workspace_id，memory 统计为 0")
+                logger.info("未提供 workspace_id，memory 统计为 0")
             
         except Exception as e:
             logger.error(f"Neo4j memory统计失败: {e}", exc_info=True)

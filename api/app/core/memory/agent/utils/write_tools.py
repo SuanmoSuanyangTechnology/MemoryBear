@@ -63,7 +63,7 @@ async def write(content: str, user_id: str, apply_id: str, group_id: str, ref_id
     # 获取 embedder 配置
     from app.core.models.base import RedBearModelConfig
     from app.core.memory.utils.config.config_utils import get_embedder_config
-    from app.core.memory.src.llm_tools.openai_embedder import OpenAIEmbedderClient
+    from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
     
     embedder_config_dict = get_embedder_config(config_defs.SELECTED_EMBEDDING_ID)
     embedder_config = RedBearModelConfig(**embedder_config_dict)

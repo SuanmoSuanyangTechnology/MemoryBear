@@ -78,7 +78,7 @@ async def get_documents(
 
     # 3. Execute paged query
     try:
-        api_logger.debug(f"Start executing document paging query")
+        api_logger.debug("Start executing document paging query")
         total, items = document_service.get_documents_paginated(
             db=db,
             filters=filters,

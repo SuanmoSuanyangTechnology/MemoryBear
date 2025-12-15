@@ -331,7 +331,7 @@ class LiteLLMConfig:
                 'modules': {}
             }
 
-            for mod in self.module_stats.keys():
+            for mod in self.module_stats:
                 result['modules'][mod] = {
                     'current_qps': self.module_stats[mod]['current_qps'],
                     'max_qps': self.module_stats[mod]['max_qps'],
@@ -394,7 +394,7 @@ class LiteLLMConfig:
             print(f"📊 {stats['message']}")
             return
 
-        print(f"\n📊 USAGE SUMMARY")
+        print("\n📊 USAGE SUMMARY")
         print(f"{'='*50}")
         print(f"⏱️  Duration: {stats['session_duration_minutes']:.1f} min")
         print(f"📈 Requests: {stats['total_requests']}")
@@ -404,7 +404,7 @@ class LiteLLMConfig:
 
         # Module statistics
         if stats.get('module_stats'):
-            print(f"\n📦 MODULES:")
+            print("\n📦 MODULES:")
             for module, mod_stats in stats['module_stats'].items():
                 print(f"  {module}: {mod_stats['requests']} req, Max QPS: {mod_stats['max_qps']}, Current: {mod_stats['current_qps']}")
 
@@ -479,7 +479,7 @@ def print_instant_qps(module: str = None):
     """Print instant QPS information"""
     qps_data = get_instant_qps(module)
 
-    print(f"\n⚡ INSTANT QPS MONITOR")
+    print("\n⚡ INSTANT QPS MONITOR")
     print(f"{'='*60}")
 
     if module:
@@ -490,14 +490,14 @@ def print_instant_qps(module: str = None):
     else:
         # Global stats
         global_data = qps_data.get('global', {})
-        print(f"🌍 GLOBAL:")
+        print("🌍 GLOBAL:")
         print(f"  Current QPS: {global_data.get('current_qps', 0)}")
         print(f"  Max QPS:     {global_data.get('max_qps', 0)}")
 
         # Module stats
         modules = qps_data.get('modules', {})
         if modules:
-            print(f"\n📦 MODULES:")
+            print("\n📦 MODULES:")
             for mod, data in modules.items():
                 print(f"  {mod}:")
                 print(f"    Current: {data['current_qps']} QPS")

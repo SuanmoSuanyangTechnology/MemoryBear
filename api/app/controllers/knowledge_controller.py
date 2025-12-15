@@ -74,8 +74,6 @@ async def get_knowledges(
     filters = [
         knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id
     ]
-    if parent_id:
-        filters.append(knowledge_model.Knowledge.parent_id == parent_id)
 
     # Keyword search (fuzzy matching of knowledge base name)
     if keywords:
@@ -91,9 +89,14 @@ async def get_knowledges(
         filters.append(knowledge_model.Knowledge.id.in_(kb_ids.split(',')))
     else:
         filters.append(knowledge_model.Knowledge.status != 2)
+        if parent_id:
+            filters.append(knowledge_model.Knowledge.parent_id == parent_id)
+        else:
+            filters.append(knowledge_model.Knowledge.parent_id == current_user.current_workspace_id)
+    filters.append(knowledge_model.Knowledge.permission_id != knowledge_model.PermissionType.Memory)
     # 3. Execute paged query
     try:
-        api_logger.debug(f"Start executing knowledge base paging query")
+        api_logger.debug("Start executing knowledge base paging query")
         total, items = knowledge_service.get_knowledges_paginated(
             db=db,
             filters=filters,

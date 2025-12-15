@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
 """数据配置Repository模块
 
-本模块提供data_config表的数据访问层，包括SQL查询构建和Neo4j Cypher查询。
-从 app.core.memory.src.data_config_api.sql_queries 迁移而来。
+本模块提供data_config表的数据访问层，使用SQLAlchemy ORM进行数据库操作。
+包括CRUD操作和Neo4j Cypher查询常量。
 
 Classes:
-    DataConfigRepository: 数据配置仓储类，提供CRUD操作和查询构建
+    DataConfigRepository: 数据配置仓储类，提供CRUD操作
 """
 
-from typing import Dict, Tuple, List
+from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
+import uuid
 
+from app.models.data_config_model import DataConfig
 from app.schemas.memory_storage_schema import (
     ConfigParamsCreate,
     ConfigParamsDelete,
@@ -24,15 +27,12 @@ from app.core.logging_config import get_db_logger
 # 获取数据库专用日志器
 db_logger = get_db_logger()
 
-# 表名常量
-TABLE_NAME = "data_config"
-
 
 class DataConfigRepository:
     """数据配置Repository
     
     提供data_config表的数据访问方法，包括：
-    - SQL查询构建（PostgreSQL）
+    - SQLAlchemy ORM 数据库操作
     - Neo4j Cypher查询常量
     """
     
@@ -136,273 +136,369 @@ class DataConfigRepository:
       } AS targetNode
     """
     
-    # ==================== SQL 查询构建方法 ====================
+    # ==================== SQLAlchemy ORM 数据库操作方法 ====================
     
     @staticmethod
-    def build_insert(params: ConfigParamsCreate) -> Tuple[str, Dict]:
-        """构建插入语句（PostgreSQL 命名参数）
+    def create(db: Session, params: ConfigParamsCreate) -> DataConfig:
+        """创建数据配置
         
         Args:
+            db: 数据库会话
             params: 配置参数创建模型
             
         Returns:
-            Tuple[str, Dict]: (SQL查询字符串, 参数字典)
+            DataConfig: 创建的配置对象
         """
-        db_logger.debug(f"构建插入语句: config_name={params.config_name}, workspace_id={params.workspace_id}")
+        db_logger.debug(f"创建数据配置: config_name={params.config_name}, workspace_id={params.workspace_id}")
         
-        columns = [
-            "config_name",
-            "config_desc",
-            "workspace_id",
-            "llm_id",
-            "embedding_id",
-            "rerank_id",
-            "created_at",
-        ]
-        placeholders = [
-            "%(config_name)s",
-            "%(config_desc)s",
-            "%(workspace_id)s::uuid",
-            "%(llm_id)s",
-            "%(embedding_id)s",
-            "%(rerank_id)s",
-            "timezone('Asia/Shanghai', now())",
-        ]
-        query = f"INSERT INTO {TABLE_NAME} (" + ",".join(columns) + ") VALUES (" + ",".join(placeholders) + ")"
-        # 将 UUID 转换为字符串
-        workspace_id_str = str(params.workspace_id) if params.workspace_id else None
-        params_dict = {
-            "config_name": params.config_name,
-            "config_desc": params.config_desc,
-            "workspace_id": workspace_id_str,
-            "llm_id": params.llm_id,
-            "embedding_id": params.embedding_id,
-            "rerank_id": params.rerank_id,
-        }
-        return query, params_dict
+        try:
+            db_config = DataConfig(
+                config_name=params.config_name,
+                config_desc=params.config_desc,
+                workspace_id=params.workspace_id,
+                llm_id=params.llm_id,
+                embedding_id=params.embedding_id,
+                rerank_id=params.rerank_id,
+            )
+            db.add(db_config)
+            db.flush()  # 获取自增ID但不提交事务
+            
+            db_logger.info(f"数据配置已添加到会话: {db_config.config_name} (ID: {db_config.config_id})")
+            return db_config
+            
+        except Exception as e:
+            db.rollback()
+            db_logger.error(f"创建数据配置失败: {params.config_name} - {str(e)}")
+            raise
     
     @staticmethod
-    def build_update(update: ConfigUpdate) -> Tuple[str, Dict]:
-        """构建基础配置更新语句（PostgreSQL 命名参数）
+    def update(db: Session, update: ConfigUpdate) -> Optional[DataConfig]:
+        """更新基础配置
         
         Args:
+            db: 数据库会话
             update: 配置更新模型
             
         Returns:
-            Tuple[str, Dict]: (SQL查询字符串, 参数字典)
+            Optional[DataConfig]: 更新后的配置对象，不存在则返回None
             
         Raises:
             ValueError: 没有字段需要更新时抛出
         """
-        db_logger.debug(f"构建更新语句: config_id={update.config_id}")
+        db_logger.debug(f"更新数据配置: config_id={update.config_id}")
         
-        key_where = "config_id = %(config_id)s"
-        set_fields: List[str] = []
-        params: Dict = {
-            "config_id": update.config_id,
-        }
-        
-        mapping = {
-            "config_name": "config_name",
-            "config_desc": "config_desc",
-        }
-        
-        for api_field, db_col in mapping.items():
-            value = getattr(update, api_field)
-            if value is not None:
-                set_fields.append(f"{db_col} = %({api_field})s")
-                params[api_field] = value
-        
-        set_fields.append("updated_at = timezone('Asia/Shanghai', now())")
-        if not set_fields:
-            raise ValueError("No fields to update")
-        query = f"UPDATE {TABLE_NAME} SET " + ", ".join(set_fields) + f" WHERE {key_where}"
-        return query, params
+        try:
+            db_config = db.query(DataConfig).filter(DataConfig.config_id == update.config_id).first()
+            if not db_config:
+                db_logger.warning(f"数据配置不存在: config_id={update.config_id}")
+                return None
+            
+            # 更新字段
+            has_update = False
+            if update.config_name is not None:
+                db_config.config_name = update.config_name
+                has_update = True
+            if update.config_desc is not None:
+                db_config.config_desc = update.config_desc
+                has_update = True
+            
+            if not has_update:
+                raise ValueError("No fields to update")
+            
+            db.commit()
+            db.refresh(db_config)
+            
+            db_logger.info(f"数据配置更新成功: {db_config.config_name} (ID: {update.config_id})")
+            return db_config
+            
+        except Exception as e:
+            db.rollback()
+            db_logger.error(f"更新数据配置失败: config_id={update.config_id} - {str(e)}")
+            raise
 
     
     @staticmethod
-    def build_update_extracted(update: ConfigUpdateExtracted) -> Tuple[str, Dict]:
-        """构建记忆萃取引擎配置更新语句（PostgreSQL 命名参数）
+    def update_extracted(db: Session, update: ConfigUpdateExtracted) -> Optional[DataConfig]:
+        """更新记忆萃取引擎配置
         
         Args:
+            db: 数据库会话
             update: 萃取配置更新模型
             
         Returns:
-            Tuple[str, Dict]: (SQL查询字符串, 参数字典)
+            Optional[DataConfig]: 更新后的配置对象，不存在则返回None
             
         Raises:
             ValueError: 没有字段需要更新时抛出
         """
-        db_logger.debug(f"构建萃取配置更新语句: config_id={update.config_id}")
+        db_logger.debug(f"更新萃取配置: config_id={update.config_id}")
         
-        key_where = "config_id = %(config_id)s"
-        set_fields: List[str] = []
-        params: Dict = {
-            "config_id": update.config_id,
-        }
-        
-        mapping = {
-            # 模型选择
-            "llm_id": "llm",
-            "embedding_id": "embedding",
-            "rerank_id": "rerank",
-            # 记忆萃取引擎
-            "enable_llm_dedup_blockwise": "enable_llm_dedup_blockwise",
-            "enable_llm_disambiguation": "enable_llm_disambiguation",
-            "deep_retrieval": "deep_retrieval",
-            "t_type_strict": "t_type_strict",
-            "t_name_strict": "t_name_strict",
-            "t_overall": "t_overall",
-            "state": "state",
-            "chunker_strategy": "chunker_strategy",
-            # 句子提取
-            "statement_granularity": "statement_granularity",
-            "include_dialogue_context": "include_dialogue_context",
-            "max_context": "max_context",
-            # 剪枝配置
-            "pruning_enabled": "pruning_enabled",
-            "pruning_scene": "pruning_scene",
-            "pruning_threshold": "pruning_threshold",
-            # 自我反思配置
-            "enable_self_reflexion": "enable_self_reflexion",
-            "iteration_period": "iteration_period",
-            "reflexion_range": "reflexion_range",
-            "baseline": "baseline",
-        }
-        
-        for api_field, db_col in mapping.items():
-            value = getattr(update, api_field)
-            if value is not None:
-                set_fields.append(f"{db_col} = %({api_field})s")
-                params[api_field] = value
-        
-        set_fields.append("updated_at = timezone('Asia/Shanghai', now())")
-        if not set_fields:
-            raise ValueError("No fields to update")
-        query = f"UPDATE {TABLE_NAME} SET " + ", ".join(set_fields) + f" WHERE {key_where}"
-        return query, params
+        try:
+            db_config = db.query(DataConfig).filter(DataConfig.config_id == update.config_id).first()
+            if not db_config:
+                db_logger.warning(f"数据配置不存在: config_id={update.config_id}")
+                return None
+            
+            # 更新字段映射
+            field_mapping = {
+                # 模型选择
+                "llm_id": "llm",
+                "embedding_id": "embedding_id",
+                "rerank_id": "rerank_id",
+                # 记忆萃取引擎
+                "enable_llm_dedup_blockwise": "enable_llm_dedup_blockwise",
+                "enable_llm_disambiguation": "enable_llm_disambiguation",
+                "deep_retrieval": "deep_retrieval",
+                "t_type_strict": "t_type_strict",
+                "t_name_strict": "t_name_strict",
+                "t_overall": "t_overall",
+                "state": "state",
+                "chunker_strategy": "chunker_strategy",
+                # 句子提取
+                "statement_granularity": "statement_granularity",
+                "include_dialogue_context": "include_dialogue_context",
+                "max_context": "max_context",
+                # 剪枝配置
+                "pruning_enabled": "pruning_enabled",
+                "pruning_scene": "pruning_scene",
+                "pruning_threshold": "pruning_threshold",
+                # 自我反思配置
+                "enable_self_reflexion": "enable_self_reflexion",
+                "iteration_period": "iteration_period",
+                "reflexion_range": "reflexion_range",
+                "baseline": "baseline",
+            }
+            
+            has_update = False
+            for api_field, db_field in field_mapping.items():
+                value = getattr(update, api_field, None)
+                if value is not None:
+                    setattr(db_config, db_field, value)
+                    has_update = True
+            
+            if not has_update:
+                raise ValueError("No fields to update")
+            
+            db.commit()
+            db.refresh(db_config)
+            
+            db_logger.info(f"萃取配置更新成功: config_id={update.config_id}")
+            return db_config
+            
+        except Exception as e:
+            db.rollback()
+            db_logger.error(f"更新萃取配置失败: config_id={update.config_id} - {str(e)}")
+            raise
     
     @staticmethod
-    def build_update_forget(update: ConfigUpdateForget) -> Tuple[str, Dict]:
-        """构建遗忘引擎配置更新语句（PostgreSQL 命名参数）
+    def update_forget(db: Session, update: ConfigUpdateForget) -> Optional[DataConfig]:
+        """更新遗忘引擎配置
         
         Args:
+            db: 数据库会话
             update: 遗忘配置更新模型
             
         Returns:
-            Tuple[str, Dict]: (SQL查询字符串, 参数字典)
+            Optional[DataConfig]: 更新后的配置对象，不存在则返回None
             
         Raises:
             ValueError: 没有字段需要更新时抛出
         """
-        db_logger.debug(f"构建遗忘配置更新语句: config_id={update.config_id}")
+        db_logger.debug(f"更新遗忘配置: config_id={update.config_id}")
         
-        key_where = "config_id = %(config_id)s"
-        set_fields: List[str] = []
-        params: Dict = {
-            "config_id": update.config_id,
-        }
-        
-        mapping = {
-            # 遗忘引擎
-            "lambda_time": "lambda_time",
-            "lambda_mem": "lambda_mem",
-            # 由于 PostgreSQL 中 OFFSET 是保留字，需使用双引号包裹列名
-            "offset": '"offset"',
-        }
-        
-        for api_field, db_col in mapping.items():
-            value = getattr(update, api_field)
-            if value is not None:
-                set_fields.append(f"{db_col} = %({api_field})s")
-                params[api_field] = value
-        
-        set_fields.append("updated_at = timezone('Asia/Shanghai', now())")
-        if not set_fields:
-            raise ValueError("No fields to update")
-        query = f"UPDATE {TABLE_NAME} SET " + ", ".join(set_fields) + f" WHERE {key_where}"
-        return query, params
+        try:
+            db_config = db.query(DataConfig).filter(DataConfig.config_id == update.config_id).first()
+            if not db_config:
+                db_logger.warning(f"数据配置不存在: config_id={update.config_id}")
+                return None
+            
+            # 更新字段
+            has_update = False
+            if update.lambda_time is not None:
+                db_config.lambda_time = update.lambda_time
+                has_update = True
+            if update.lambda_mem is not None:
+                db_config.lambda_mem = update.lambda_mem
+                has_update = True
+            if update.offset is not None:
+                db_config.offset = update.offset
+                has_update = True
+            
+            if not has_update:
+                raise ValueError("No fields to update")
+            
+            db.commit()
+            db.refresh(db_config)
+            
+            db_logger.info(f"遗忘配置更新成功: config_id={update.config_id}")
+            return db_config
+            
+        except Exception as e:
+            db.rollback()
+            db_logger.error(f"更新遗忘配置失败: config_id={update.config_id} - {str(e)}")
+            raise
     
     @staticmethod
-    def build_select_extracted(key: ConfigKey) -> Tuple[str, Dict]:
-        """构建萃取配置查询语句，通过主键查询某条配置（PostgreSQL 命名参数）
+    def get_extracted_config(db: Session, config_id: int) -> Optional[Dict]:
+        """获取萃取配置，通过主键查询某条配置
         
         Args:
-            key: 配置键模型
+            db: 数据库会话
+            config_id: 配置ID
             
         Returns:
-            Tuple[str, Dict]: (SQL查询字符串, 参数字典)
+            Optional[Dict]: 萃取配置字典，不存在则返回None
         """
-        db_logger.debug(f"构建萃取配置查询语句: config_id={key.config_id}")
-                    # f"SELECT statement_granularity, include_dialogue_context, max_context, "
+        db_logger.debug(f"查询萃取配置: config_id={config_id}")
+        
+        try:
+            db_config = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+            if not db_config:
+                db_logger.debug(f"萃取配置不存在: config_id={config_id}")
+                return None
+            
+            result = {
+                "llm_id": db_config.llm_id,
+                "embedding_id": db_config.embedding_id,
+                "rerank_id": db_config.rerank_id,
+                "enable_llm_dedup_blockwise": db_config.enable_llm_dedup_blockwise,
+                "enable_llm_disambiguation": db_config.enable_llm_disambiguation,
+                "deep_retrieval": db_config.deep_retrieval,
+                "t_type_strict": db_config.t_type_strict,
+                "t_name_strict": db_config.t_name_strict,
+                "t_overall": db_config.t_overall,
+                "chunker_strategy": db_config.chunker_strategy,
+                "statement_granularity": db_config.statement_granularity,
+                "include_dialogue_context": db_config.include_dialogue_context,
+                "max_context": db_config.max_context,
+                "pruning_enabled": db_config.pruning_enabled,
+                "pruning_scene": db_config.pruning_scene,
+                "pruning_threshold": db_config.pruning_threshold,
+                "enable_self_reflexion": db_config.enable_self_reflexion,
+                "iteration_period": db_config.iteration_period,
+                "reflexion_range": db_config.reflexion_range,
+                "baseline": db_config.baseline,
+            }
+            
+            db_logger.debug(f"萃取配置查询成功: config_id={config_id}")
+            return result
+            
+        except Exception as e:
+            db_logger.error(f"查询萃取配置失败: config_id={config_id} - {str(e)}")
+            raise
+    
+    @staticmethod
+    def get_forget_config(db: Session, config_id: int) -> Optional[Dict]:
+        """获取遗忘配置，通过主键查询某条配置
+        
+        Args:
+            db: 数据库会话
+            config_id: 配置ID
+            
+        Returns:
+            Optional[Dict]: 遗忘配置字典，不存在则返回None
+        """
+        db_logger.debug(f"查询遗忘配置: config_id={config_id}")
+        
+        try:
+            db_config = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+            if not db_config:
+                db_logger.debug(f"遗忘配置不存在: config_id={config_id}")
+                return None
+            
+            result = {
+                "lambda_time": db_config.lambda_time,
+                "lambda_mem": db_config.lambda_mem,
+                "offset": db_config.offset,
+            }
+            
+            db_logger.debug(f"遗忘配置查询成功: config_id={config_id}")
+            return result
+            
+        except Exception as e:
+            db_logger.error(f"查询遗忘配置失败: config_id={config_id} - {str(e)}")
+            raise
+    
+    @staticmethod
+    def get_by_id(db: Session, config_id: int) -> Optional[DataConfig]:
+        """根据ID获取数据配置
+        
+        Args:
+            db: 数据库会话
+            config_id: 配置ID
+            
+        Returns:
+            Optional[DataConfig]: 配置对象，不存在则返回None
+        """
+        db_logger.debug(f"根据ID查询数据配置: config_id={config_id}")
+        
+        try:
+            config = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+            
+            if config:
+                db_logger.debug(f"数据配置查询成功: {config.config_name} (ID: {config_id})")
+            else:
+                db_logger.debug(f"数据配置不存在: config_id={config_id}")
+            return config
+        except Exception as e:
+            db_logger.error(f"根据ID查询数据配置失败: config_id={config_id} - {str(e)}")
+            raise
+    
+    @staticmethod
+    def get_all(db: Session, workspace_id: Optional[uuid.UUID] = None) -> List[DataConfig]:
+        """获取所有配置参数
+        
+        Args:
+            db: 数据库会话
+            workspace_id: 工作空间ID，用于过滤查询结果
+        
+        Returns:
+            List[DataConfig]: 配置列表
+        """
+        db_logger.debug(f"查询所有配置: workspace_id={workspace_id}")
+        
+        try:
+            query = db.query(DataConfig)
+            
+            if workspace_id:
+                query = query.filter(DataConfig.workspace_id == workspace_id)
+            
+            configs = query.order_by(desc(DataConfig.updated_at)).all()
+            
+            db_logger.debug(f"配置列表查询成功: 数量={len(configs)}")
+            return configs
+            
+        except Exception as e:
+            db_logger.error(f"查询所有配置失败: workspace_id={workspace_id} - {str(e)}")
+            raise
+    
+    @staticmethod
+    def delete(db: Session, config_id: int) -> bool:
+        """删除数据配置
+        
+        Args:
+            db: 数据库会话
+            config_id: 配置ID
+            
+        Returns:
+            bool: 删除成功返回True，配置不存在返回False
+        """
+        db_logger.debug(f"删除数据配置: config_id={config_id}")
+        
+        try:
+            db_config = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+            if not db_config:
+                db_logger.warning(f"数据配置不存在: config_id={config_id}")
+                return False
+            
+            db.delete(db_config)
+            db.commit()
+            
+            db_logger.info(f"数据配置删除成功: config_id={config_id}")
+            return True
+            
+        except Exception as e:
+            db.rollback()
+            db_logger.error(f"删除数据配置失败: config_id={config_id} - {str(e)}")
+            raise
 
-        query = (
-            f"SELECT llm_id, embedding_id, rerank_id, "
-            f"enable_llm_dedup_blockwise, enable_llm_disambiguation, deep_retrieval, "
-            f"t_type_strict, t_name_strict, t_overall, chunker_strategy, "
-            f"statement_granularity, include_dialogue_context, max_context, "
-            f"pruning_enabled, pruning_scene, pruning_threshold, "
-            f"enable_self_reflexion, iteration_period, reflexion_range, baseline "
-            f"FROM {TABLE_NAME} WHERE config_id = %(config_id)s"
-        )
-        params = {"config_id": key.config_id}
-        return query, params
-    
-    @staticmethod
-    def build_select_forget(key: ConfigKey) -> Tuple[str, Dict]:
-        """构建遗忘配置查询语句，通过主键查询某条配置（PostgreSQL 命名参数）
-        
-        Args:
-            key: 配置键模型
-            
-        Returns:
-            Tuple[str, Dict]: (SQL查询字符串, 参数字典)
-        """
-        db_logger.debug(f"构建遗忘配置查询语句: config_id={key.config_id}")
-        
-        query = (
-            f"SELECT lambda_time, lambda_mem, \"offset\" "  # 用双引号包裹保留字别名
-            f"FROM {TABLE_NAME} WHERE config_id = %(config_id)s"
-        )
-        params = {"config_id": key.config_id}
-        return query, params
-    
-    @staticmethod
-    def build_select_all(workspace_id = None) -> Tuple[str, Dict]:
-        """构建查询所有配置参数的语句（PostgreSQL 命名参数）
-        
-        Args:
-            workspace_id: 工作空间ID（UUID或字符串），用于过滤查询结果
-        
-        Returns:
-            Tuple[str, Dict]: (SQL查询字符串, 参数字典)
-        """
-        db_logger.debug(f"构建查询所有配置语句: workspace_id={workspace_id}")
-        
-        if workspace_id:
-            # 将 UUID 转换为字符串以便在 SQL 中使用
-            workspace_id_str = str(workspace_id) if workspace_id else None
-            query = f"SELECT * FROM {TABLE_NAME} WHERE workspace_id = %(workspace_id)s::uuid ORDER BY updated_at DESC NULLS LAST"
-            params = {"workspace_id": workspace_id_str}
-        else:
-            query = f"SELECT * FROM {TABLE_NAME} ORDER BY updated_at DESC NULLS LAST"
-            params = {}
-        return query, params
-    
-    @staticmethod
-    def build_delete(key: ConfigParamsDelete) -> Tuple[str, Dict]:
-        """构建删除语句，通过配置ID删除（PostgreSQL 命名参数）
-        
-        Args:
-            key: 配置删除模型
-            
-        Returns:
-            Tuple[str, Dict]: (SQL查询字符串, 参数字典)
-        """
-        db_logger.debug(f"构建删除语句: config_id={key.config_id}")
-        
-        query = (
-            f"DELETE FROM {TABLE_NAME} WHERE config_id = %(config_id)s"
-        )
-        params = {"config_id": key.config_id}
-        return query, params

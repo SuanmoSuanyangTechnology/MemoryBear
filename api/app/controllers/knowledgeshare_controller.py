@@ -58,7 +58,7 @@ async def get_knowledgeshares(
 
     # 3. Execute paged query
     try:
-        api_logger.debug(f"Start executing knowledge base sharing and paging query")
+        api_logger.debug("Start executing knowledge base sharing and paging query")
         total, items = knowledgeshare_service.get_knowledgeshares_paginated(
             db=db,
             filters=filters,

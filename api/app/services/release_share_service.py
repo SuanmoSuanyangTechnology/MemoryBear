@@ -92,7 +92,7 @@ class ReleaseShareService:
         share = self.repo.create(share)
         
         logger.info(
-            f"创建分享配置",
+            "创建分享配置",
             extra={
                 "share_id": str(share.id),
                 "release_id": str(release.id),
@@ -130,7 +130,7 @@ class ReleaseShareService:
         share = self.repo.update(share)
         
         logger.info(
-            f"更新分享配置",
+            "更新分享配置",
             extra={
                 "share_id": str(share.id),
                 "release_id": str(share.release_id)
@@ -214,7 +214,7 @@ class ReleaseShareService:
         self.repo.delete(share)
         
         logger.info(
-            f"删除分享配置",
+            "删除分享配置",
             extra={
                 "share_id": str(share.id),
                 "release_id": str(release_id)
@@ -249,7 +249,7 @@ class ReleaseShareService:
         share = self.repo.update(share)
         
         logger.info(
-            f"重新生成分享 token",
+            "重新生成分享 token",
             extra={
                 "share_id": str(share.id),
                 "old_token": old_token,

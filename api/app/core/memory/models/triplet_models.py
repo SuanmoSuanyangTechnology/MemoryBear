@@ -24,6 +24,8 @@ class Entity(BaseModel):
         name_embedding: Optional embedding vector for the entity name
         type: Type/category of the entity (e.g., 'Person', 'Organization')
         description: Textual description of the entity
+        aliases: List of alternative names for the entity (e.g., abbreviations, full names, 
+                 different language expressions). Extracted during triplet extraction phase.
 
     Config:
         extra: Ignore extra fields from LLM output
@@ -35,6 +37,10 @@ class Entity(BaseModel):
     name_embedding: Optional[List[float]] = Field(None, description="Embedding vector for the entity name")
     type: str = Field(..., description="Type/category of the entity")
     description: str = Field(..., description="Description of the entity")
+    aliases: List[str] = Field(
+        default_factory=list,
+        description="Alternative names for this entity (abbreviations, full names, translations, etc.)"
+    )
 
 
 class Triplet(BaseModel):

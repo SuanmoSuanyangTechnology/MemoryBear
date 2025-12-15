@@ -34,6 +34,7 @@ class ParserType(enum.StrEnum):
 class PermissionType(enum.StrEnum):
     Private = "Private"
     Share = "Share"
+    Memory = "Memory"
 
 class Knowledge(Base):
     __tablename__ = "knowledges"
@@ -46,7 +47,7 @@ class Knowledge(Base):
     description = Column(String, comment="KB description")
     avatar = Column(String, comment="avatar url")
     type = Column(String, default="General", comment="Type:General|Web|Third-party|Folder")
-    permission_id = Column(String, default="Private", comment="permission ID:Private|Share")
+    permission_id = Column(String, default="Private", comment="permission ID:Private|Share|Memory")
     embedding_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True, comment="default embedding model ID")
     reranker_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True, comment="default reranker model ID")
     llm_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True, comment="default llm model ID")

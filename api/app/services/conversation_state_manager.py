@@ -74,7 +74,7 @@ class ConversationStateManager:
             state["same_agent_turns"] = 0
             
             logger.info(
-                f"Agent 切换",
+                "Agent 切换",
                 extra={
                     "conversation_id": conversation_id,
                     "from": state["current_agent_id"],

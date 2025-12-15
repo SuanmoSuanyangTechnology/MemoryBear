@@ -12,7 +12,18 @@ Extract entities and knowledge triplets from the given statement.
 ===Guidelines===
 
 **Entity Extraction:**
-- Extract entities with their types and context-independent descriptions
+- Extract entities with their types, context-independent descriptions, and aliases
+- **Aliases Extraction (Important):**
+  * **CRITICAL: Extract aliases ONLY in the SAME LANGUAGE as the input text**
+  * **DO NOT translate or add aliases in different languages**
+  * Include common alternative names in the same language (e.g., "北京" → aliases: ["北平", "京城"])
+  * Include abbreviations and full names in the same language (e.g., "联合国" → aliases: ["联合国组织"])
+  * Include nicknames and common variations in the same language (e.g., "纽约" → aliases: ["纽约市", "大苹果"])
+  * If no aliases exist in the same language, use empty array: []
+  * **Examples:**
+    - Chinese input "北京" → aliases: ["北平", "京城"] (NOT ["Beijing", "Peking"])
+    - English input "Beijing" → aliases: ["Peking"] (NOT ["北京", "北平"])
+    - Chinese input "苹果公司" → aliases: ["苹果"] (NOT ["Apple Inc.", "Apple"])
 - Exclude lengthy quotes, calendar dates, temporal ranges, and temporal expressions
 - For numeric values: extract as separate entities (instance_of: 'Numeric', name: units, numeric_value: value)
   Example: £30 → name: 'GBP', numeric_value: 30, instance_of: 'Numeric'
@@ -72,19 +83,22 @@ Output:
       "entity_idx": 0,
       "name": "I",
       "type": "Person",
-      "description": "The user"
+      "description": "The user",
+      "aliases": []
     },
     {
       "entity_idx": 1,
       "name": "Paris",
       "type": "Location",
-      "description": "Capital city of France"
+      "description": "Capital city of France",
+      "aliases": []
     },
     {
       "entity_idx": 2,
       "name": "Louvre",
       "type": "Location",
-      "description": "World-famous museum located in Paris"
+      "description": "World-famous museum located in Paris",
+      "aliases": ["Louvre Museum"]
     }
   ]
 }
@@ -115,19 +129,22 @@ Output:
       "entity_idx": 0,
       "name": "John Smith",
       "type": "Person",
-      "description": "Individual person name"
+      "description": "Individual person name",
+      "aliases": []
     },
     {
       "entity_idx": 1,
       "name": "Google",
       "type": "Organization",
-      "description": "American technology company"
+      "description": "American technology company",
+      "aliases": ["Google LLC", "Alphabet Inc."]
     },
     {
       "entity_idx": 2,
       "name": "AI product development",
       "type": "WorkRole",
-      "description": "Artificial intelligence product development work"
+      "description": "Artificial intelligence product development work",
+      "aliases": []
     }
   ]
 }
@@ -158,19 +175,22 @@ Output:
       "entity_idx": 0,
       "name": "我",
       "type": "Person",
-      "description": "用户本人"
+      "description": "用户本人",
+      "aliases": []
     },
     {
       "entity_idx": 1,
       "name": "巴黎",
       "type": "Location",
-      "description": "法国首都城市"
+      "description": "法国首都城市",
+      "aliases": []
     },
     {
       "entity_idx": 2,
       "name": "卢浮宫",
       "type": "Location",
-      "description": "位于巴黎的世界著名博物馆"
+      "description": "位于巴黎的世界著名博物馆",
+      "aliases": []
     }
   ]
 }
@@ -201,24 +221,27 @@ Output:
       "entity_idx": 0,
       "name": "张明",
       "type": "Person",
-      "description": "个人姓名"
+      "description": "个人姓名",
+      "aliases": []
     },
     {
       "entity_idx": 1,
       "name": "腾讯",
       "type": "Organization",
-      "description": "中国科技公司"
+      "description": "中国科技公司",
+      "aliases": ["腾讯控股", "腾讯公司"]
     },
     {
       "entity_idx": 2,
       "name": "AI产品开发",
       "type": "WorkRole",
-      "description": "人工智能产品研发工作"
+      "description": "人工智能产品研发工作",
+      "aliases": []
     }
   ]
 }
 
-**Example 5 (Entity Only):** "Tripod" or "三脚架"
+**Example 5 (Entity Only - English):** "Tripod"
 Output:
 {
   "triplets": [],
@@ -227,7 +250,23 @@ Output:
       "entity_idx": 0,
       "name": "Tripod",
       "type": "Equipment",
-      "description": "Photography equipment accessory"
+      "description": "Photography equipment accessory",
+      "aliases": ["Camera Tripod"]
+    }
+  ]
+}
+
+**Example 6 (Entity Only - Chinese):** "三脚架"
+Output:
+{
+  "triplets": [],
+  "entities": [
+    {
+      "entity_idx": 0,
+      "name": "三脚架",
+      "type": "Equipment",
+      "description": "摄影器材配件",
+      "aliases": ["相机三脚架"]
     }
   ]
 }

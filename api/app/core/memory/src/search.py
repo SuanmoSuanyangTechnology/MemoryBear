@@ -15,7 +15,7 @@ from app.repositories.neo4j.graph_search import (
     search_graph_by_temporal, search_graph_by_keyword_temporal,
     search_graph_by_chunk_id
 )
-from app.core.memory.src.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.models.config_models import TemporalSearchParams
 from app.core.memory.utils.config.config_utils import get_embedder_config, get_pipeline_config
 from app.core.memory.utils.data.time_utils import normalize_date_safe
@@ -564,7 +564,7 @@ async def run_hybrid_search(
     
     # Validate query is not empty after cleaning
     if not query_text or not query_text.strip():
-        logger.warning(f"Empty query after cleaning, returning empty results")
+        logger.warning("Empty query after cleaning, returning empty results")
         return {
             "keyword_search": {},
             "embedding_search": {},

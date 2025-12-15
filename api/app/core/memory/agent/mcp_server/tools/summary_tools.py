@@ -73,16 +73,16 @@ async def Summary(
         answer_small, query = await Summary_messages_deal(context)
 
         
-        # Get conversation history
+        start_time= time.time()
         history = await session_service.get_history(sessionid, apply_id, group_id)
-        # Override with empty list for now (as in original)
-        # Prepare data for template
+        end_time=time.time()
+        logger.info(f"Retrieve_Summary-REDIS搜索：{end_time - start_time}")
         data = {
             "query": query,
             "history": history,
             "retrieve_info": answer_small
         }
-        
+
     except Exception as e:
         logger.error(
             f"Summary: initialization failed: {e}",
@@ -92,7 +92,7 @@ async def Summary(
             "status": "error",
             "summary_result": "信息不足，无法回答"
         }
-    
+
     try:
         # Render template
         system_prompt = await template_service.render_template(
@@ -110,23 +110,23 @@ async def Summary(
             "status": "error",
             "message": f"Prompt rendering failed: {str(e)}"
         }
-    
+
     try:
         # Call LLM with structured response
         structured = await llm_client.response_structured(
             messages=[{"role": "system", "content": system_prompt}],
             response_model=SummaryResponse
         )
-        
+
         aimessages = structured.query_answer or ""
-            
+
     except Exception as e:
         logger.error(
             f"LLM call failed for Summary: {e}",
             exc_info=True
         )
         aimessages = ""
-    
+
     try:
         # Save session
         if aimessages != "":
@@ -147,16 +147,16 @@ async def Summary(
             "status": "error",
             "message": str(e)
         }
-    
+
     # Cleanup duplicate sessions
     await session_service.cleanup_duplicates()
-    
+
     # Use fallback if empty
     if aimessages == '':
         aimessages = '信息不足，无法回答'
-    
+
     logger.info(f"验证之后的总结==>>:{aimessages}")
-    
+
     # Log execution time
     end = time.time()
     try:
@@ -164,7 +164,7 @@ async def Summary(
     except Exception:
         duration = 0.0
     log_time('总结', duration)
-    
+
     return {
         "status": "success",
         "summary_result": aimessages,
@@ -185,7 +185,7 @@ async def Retrieve_Summary(
 ) -> dict:
     """
     Summarize data directly from retrieval results.
-    
+
     Args:
         ctx: FastMCP context for dependency injection
         context: Dictionary containing Query and Expansion_issue from Retrieve
@@ -194,23 +194,23 @@ async def Retrieve_Summary(
         group_id: Group identifier
         storage_type: Storage type for the workspace (optional)
         user_rag_memory_id: User RAG memory identifier (optional)
-        
+
     Returns:
         dict: Contains 'status' and 'summary_result'
     """
     start = time.time()
-    
+
     try:
         # Extract services from context
         template_service = get_context_resource(ctx, 'template_service')
         session_service = get_context_resource(ctx, 'session_service')
         llm_client = get_context_resource(ctx, 'llm_client')
-        
+
         # Resolve session ID
         sessionid = Resolve_username(usermessages)
 
 
-        
+
         # Handle both 'content' and 'context' keys (LangGraph uses 'content')
         if isinstance(context, dict):
             if "content" in context:
@@ -219,13 +219,13 @@ async def Retrieve_Summary(
                 if isinstance(inner, str):
                     try:
                         parsed = json.loads(inner)
-                        logger.info(f"Retrieve_Summary: successfully parsed JSON")
+                        logger.info("Retrieve_Summary: successfully parsed JSON")
                     except json.JSONDecodeError:
                         # Try unescaping first
                         try:
                             unescaped = inner.encode('utf-8').decode('unicode_escape')
                             parsed = json.loads(unescaped)
-                            logger.info(f"Retrieve_Summary: parsed after unescaping")
+                            logger.info("Retrieve_Summary: parsed after unescaping")
                         except (json.JSONDecodeError, UnicodeDecodeError) as e:
                             logger.error(
                                 f"Retrieve_Summary: parsing failed even after unescape: {e}"
@@ -249,10 +249,10 @@ async def Retrieve_Summary(
                 context_dict = context
         else:
             context_dict = {"Query": "", "Expansion_issue": []}
-        
+
         query = context_dict.get("Query", "")
         expansion_issue = context_dict.get("Expansion_issue", [])
-        
+
         # Extract retrieve_info from expansion_issue
         retrieve_info = []
         for item in expansion_issue:
@@ -263,7 +263,7 @@ async def Retrieve_Summary(
                     answer = item["Answer_Small"]
                 elif "Answer_Samll" in item:
                     answer = item["Answer_Samll"]
-                
+
                 if answer is not None:
                     # Handle both string and list formats
                     if isinstance(answer, list):
@@ -273,14 +273,15 @@ async def Retrieve_Summary(
                         retrieve_info.append(answer)
                     else:
                         retrieve_info.append(str(answer))
-        
+
         # Join all retrieve_info into a single string
         retrieve_info_str = '\n\n'.join(retrieve_info) if retrieve_info else ""
 
-        # Get conversation history
+        start_time=time.time()
         history = await session_service.get_history(sessionid, apply_id, group_id)
         # Override with empty list for now (as in original)
-        
+        end_time=time.time()
+        logger.info(f"Retrieve_Summary-REDIS搜索：{end_time - start_time}")
     except Exception as e:
         logger.error(
             f"Retrieve_Summary: initialization failed: {e}",
@@ -290,7 +291,7 @@ async def Retrieve_Summary(
             "status": "error",
             "summary_result": "信息不足，无法回答"
         }
-    
+
     try:
         # Render template
         system_prompt = await template_service.render_template(
@@ -309,14 +310,14 @@ async def Retrieve_Summary(
             "status": "error",
             "message": f"Prompt rendering failed: {str(e)}"
         }
-    
+
     try:
         # Call LLM with structured response
         structured = await llm_client.response_structured(
             messages=[{"role": "system", "content": system_prompt}],
             response_model=RetrieveSummaryResponse
         )
-        
+
         # Handle case where structured response might be None or incomplete
         if structured and hasattr(structured, 'data') and structured.data:
             aimessages = structured.data.query_answer or ""
@@ -324,7 +325,7 @@ async def Retrieve_Summary(
             logger.warning("Structured response is None or incomplete, using default message")
             aimessages = "信息不足，无法回答"
 
-        
+
         # Check for insufficient information response
         if '信息不足，无法回答' not  in str(aimessages) or str(aimessages)!="":
             # Save session
@@ -344,13 +345,13 @@ async def Retrieve_Summary(
         aimessages = ""
     # Cleanup duplicate sessions
     await session_service.cleanup_duplicates()
-    
+
     # Use fallback if empty
     if aimessages == '':
         aimessages = '信息不足，无法回答'
-    
+
     logger.info(f"检索之后的总结==>>:{aimessages}")
-    
+
     # Log execution time
     end = time.time()
     try:
@@ -358,7 +359,7 @@ async def Retrieve_Summary(
     except Exception:
         duration = 0.0
     log_time('检索总结', duration)
-    
+
     # Emit intermediate output for frontend
     return {
         "status": "success",
@@ -388,7 +389,7 @@ async def Input_Summary(
 ) -> dict:
     """
     Generate a quick summary for direct input without verification.
-    
+
     Args:
         ctx: FastMCP context for dependency injection
         context: String containing the input sentence
@@ -398,44 +399,46 @@ async def Input_Summary(
         group_id: Group identifier
         storage_type: Storage type for the workspace (e.g., 'rag', 'vector')
         user_rag_memory_id: User RAG memory identifier
-        
+
     Returns:
         dict: Contains 'query_answer' with the summary result
     """
     start = time.time()
     logger.info(f"Input_Summary: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
-    
+
     # Initialize variables to avoid UnboundLocalError
 
-    
+
     try:
         # Extract services from context
         template_service = get_context_resource(ctx, 'template_service')
         session_service = get_context_resource(ctx, 'session_service')
         llm_client = get_context_resource(ctx, 'llm_client')
         search_service = get_context_resource(ctx, 'search_service')
-        
+
         # Check if llm_client is None
         if llm_client is None:
             error_msg = "LLM client is not available. Please check server configuration and SELECTED_LLM_ID environment variable."
             logger.error(error_msg)
             return error_msg
-        
+
         # Resolve session ID
         sessionid = Resolve_username(usermessages) or ""
         sessionid = sessionid.replace('call_id_', '')
-        
-        # Get conversation history
+
+        start_time=time.time()
         history = await session_service.get_history(
             str(sessionid),
             str(apply_id),
             str(group_id)
         )
+        end_time=time.time()
+        logger.info(f"Input_Summary-REDIS搜索：{end_time - start_time}")
         # Override with empty list for now (as in original)
-        
+
         # Log the raw context for debugging
         logger.info(f"Input_Summary: Received context type={type(context)}, value={context[:200] if isinstance(context, str) else context}")
-        
+
         # Extract sentence from context
         # Context can be a string or might contain the sentence in various formats
         try:
@@ -457,23 +460,23 @@ async def Input_Summary(
         except Exception as e:
             logger.warning(f"Failed to extract query from context: {e}")
             query = context
-        
+
         # Clean query
         query = str(query).strip().strip("\"'")
-        
+
         logger.debug(f"Input_Summary: Extracted query='{query}' from context type={type(context)}")
-        
+
         # Execute search based on search_switch and storage_type
         try:
             logger.info(f"search_switch: {search_switch}, storage_type: {storage_type}")
-            
+
             # Prepare search parameters based on storage type
             search_params = {
                 "group_id": group_id,
                 "question": query,
                 "return_raw_results": True
             }
-            
+
             # Add storage-specific parameters
 
             '''检索'''
@@ -509,10 +512,10 @@ async def Input_Summary(
                         logger.info(f"知识库没有检索的内容{user_rag_memory_id}")
                 else:
                     retrieve_info, question, raw_results = await search_service.execute_hybrid_search(**search_params)
-                logger.info(f"Input_Summary: 使用 summary 进行检索")
+                logger.info("Input_Summary: 使用 summary 进行检索")
             else:
                 retrieve_info, question, raw_results = await search_service.execute_hybrid_search(**search_params)
-                
+
         except Exception as e:
             logger.error(
                 f"Input_Summary: hybrid_search failed, using empty results: {e}",
@@ -520,7 +523,7 @@ async def Input_Summary(
             )
             retrieve_info, question, raw_results = "", query, []
 
-        
+
         # Render template
         system_prompt = await template_service.render_template(
             template_name='Retrieve_Summary_prompt.jinja2',
@@ -529,7 +532,7 @@ async def Input_Summary(
             history=history,
             retrieve_info=retrieve_info
         )
-        
+
         # Call LLM with structured response
         try:
             structured = await llm_client.response_structured(
@@ -543,9 +546,9 @@ async def Input_Summary(
                 exc_info=True
             )
             aimessages = "信息不足，无法回答"
-        
+
         logger.info(f"快速答案总结==>>:{storage_type}--{user_rag_memory_id}--{aimessages}")
-        
+
         # Emit intermediate output for frontend
         return {
             "status": "success",
@@ -563,7 +566,7 @@ async def Input_Summary(
                 "user_rag_memory_id": user_rag_memory_id
             }
         }
-        
+
     except Exception as e:
         logger.error(
             f"Input_Summary failed: {e}",
@@ -576,7 +579,7 @@ async def Input_Summary(
             "user_rag_memory_id": user_rag_memory_id,
             "error": str(e)
         }
-        
+
     finally:
         # Log execution time
         end = time.time()
@@ -599,7 +602,7 @@ async def Summary_fails(
 ) -> dict:
     """
     Handle workflow failure when summary cannot be generated.
-    
+
     Args:
         ctx: FastMCP context for dependency injection
         context: Failure context string
@@ -608,22 +611,22 @@ async def Summary_fails(
         group_id: Group identifier
         storage_type: Storage type for the workspace (optional)
         user_rag_memory_id: User RAG memory identifier (optional)
-        
+
     Returns:
         dict: Contains 'query_answer' with failure message
     """
     try:
         # Extract services from context
         session_service = get_context_resource(ctx, 'session_service')
-        
+
         # Parse session ID from usermessages
         usermessages_parts = usermessages.split('_')[1:]
         sessionid = '_'.join(usermessages_parts[:-1])
-        
+
         # Cleanup duplicate sessions
         await session_service.cleanup_duplicates()
-        
-        logger.info(f"没有相关数据")
+
+        logger.info("没有相关数据")
         logger.debug(f"Summary_fails called with apply_id: {apply_id}, group_id: {group_id}")
         
         return {

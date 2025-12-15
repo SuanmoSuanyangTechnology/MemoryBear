@@ -179,13 +179,13 @@ if __name__ == "__main__":
     
     print("开始提取chunk标签...")
     tags = asyncio.run(extract_chunk_tags(test_chunks))
-    print(f"\n提取的标签：")
+    print("\n提取的标签：")
     for tag, freq in tags:
         print(f"- {tag} (频率: {freq})")
     
     print("\n" + "="*50)
     print("开始提取人物形象...")
     personas = asyncio.run(extract_chunk_persona(test_chunks))
-    print(f"\n提取的人物形象：")
+    print("\n提取的人物形象：")
     for persona in personas:
         print(f"- {persona}")

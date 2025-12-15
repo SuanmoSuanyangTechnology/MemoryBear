@@ -7,7 +7,7 @@
 import asyncio
 from typing import List, Dict, Any, Tuple
 from app.core.memory.models.message_models import DialogData
-from app.core.memory.src.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.utils.config.config_utils import get_embedder_config
 from app.core.models.base import RedBearModelConfig
 

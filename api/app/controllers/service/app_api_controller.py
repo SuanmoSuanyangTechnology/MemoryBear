@@ -6,7 +6,7 @@ from app.db import get_db
 from app.core.response_utils import success
 from app.core.logging_config import get_business_logger
 
-router = APIRouter(prefix="/v1/apps", tags=["V1 - App API"])
+router = APIRouter(prefix="/apps", tags=["V1 - App API"])
 logger = get_business_logger()
 
 

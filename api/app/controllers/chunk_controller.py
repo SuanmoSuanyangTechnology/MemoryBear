@@ -178,7 +178,7 @@ async def get_chunks(
 
     # 3. Execute paged query
     try:
-        api_logger.debug(f"Start executing document chunk query")
+        api_logger.debug("Start executing document chunk query")
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
         total, items = vector_service.search_by_segment(document_id=str(document_id), query=keywords, pagesize=pagesize, page=page, asc=True)
         api_logger.info(f"Document chunk query successful: total={total}, returned={len(items)} records")
@@ -213,7 +213,9 @@ async def create_chunk(
     """
     create chunk
     """
-    api_logger.info(f"Create chunk request: kb_id={kb_id}, document_id={document_id}, content={create_data.content}, username: {current_user.username}")
+    # Obtain the actual content
+    content = create_data.chunk_content
+    api_logger.info(f"Create chunk request: kb_id={kb_id}, document_id={document_id}, content={content}, username: {current_user.username}")
 
     # 1. Obtain knowledge base information
     db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
@@ -250,7 +252,7 @@ async def create_chunk(
         "sort_id": sort_id,
         "status": 1,
     }
-    chunk = DocumentChunk(page_content=create_data.content, metadata=metadata)
+    chunk = DocumentChunk(page_content=content, metadata=metadata)
     # 3. Segmented vector storage
     vector_service.add_chunks([chunk])
 
@@ -305,7 +307,9 @@ async def update_chunk(
     """
     Update document chunk content
     """
-    api_logger.info(f"Update document chunk content: kb_id={kb_id}, document_id={document_id}, doc_id={doc_id}, content={update_data.content}, username: {current_user.username}")
+    # Obtain the actual content
+    content = update_data.chunk_content
+    api_logger.info(f"Update document chunk content: kb_id={kb_id}, document_id={document_id}, doc_id={doc_id}, content={content}, username: {current_user.username}")
 
     db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
@@ -318,7 +322,7 @@ async def update_chunk(
     total, items = vector_service.get_by_segment(doc_id=doc_id)
     if total:
         chunk = items[0]
-        chunk.page_content = update_data.content
+        chunk.page_content = content
         vector_service.update_by_segment(chunk)
         return success(data=chunk, msg="The document chunk has been successfully updated")
     else:

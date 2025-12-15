@@ -91,12 +91,13 @@ class TenantRepository:
         return db_tenant
 
     def delete_tenant(self, tenant_id: uuid.UUID) -> bool:
-        """删除租户"""
+        """逻辑删除租户"""
         db_tenant = self.get_tenant_by_id(tenant_id)
         if not db_tenant:
             return False
         
-        self.db.delete(db_tenant)
+        # 逻辑删除租户
+        db_tenant.is_active = False
         return True
 
     def get_tenant_users(self, tenant_id: uuid.UUID, is_active: Optional[bool] = None) -> List[User]:

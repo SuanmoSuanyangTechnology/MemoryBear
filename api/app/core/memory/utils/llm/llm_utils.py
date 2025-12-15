@@ -1,7 +1,7 @@
 import os
 from pydantic import BaseModel
 
-from app.core.memory.src.llm_tools.openai_client import OpenAIClient
+from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.config.config_utils import get_model_config
 from app.core.memory.utils.config import definitions as config_defs
 from app.core.models.base import RedBearModelConfig

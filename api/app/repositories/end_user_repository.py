@@ -103,3 +103,39 @@ def get_end_user_by_id(db: Session, end_user_id: uuid.UUID) -> Optional[EndUser]
     repo = EndUserRepository(db)
     end_user = repo.get_end_user_by_id(end_user_id)
     return end_user
+
+def update_end_user_other_name(
+    db: Session, 
+    end_user_id: uuid.UUID,
+    other_name: str
+) -> int:
+    """
+    通过 end_user_id 更新 end_user 表中的 other_name 字段
+    
+    Args:
+        db: 数据库会话
+        end_user_id: 宿主ID
+        other_name: 要更新的用户名
+        
+    Returns:
+        int: 更新的记录数
+    """
+    try:
+        # 执行更新
+        updated_count = (
+            db.query(EndUser)
+            .filter(EndUser.id == end_user_id)
+            .update(
+                {EndUser.other_name: other_name},
+                synchronize_session=False
+            )
+        )
+        
+        db.commit()
+        db_logger.info(f"成功更新宿主 {end_user_id} 的 other_name 为: {other_name}")
+        return updated_count
+        
+    except Exception as e:
+        db.rollback()
+        db_logger.error(f"更新宿主 {end_user_id} 的 other_name 时出错: {str(e)}")
+        raise

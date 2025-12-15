@@ -210,7 +210,7 @@ class ProblemExtensionNode:
         last_message = messages[-1] if messages else ""
         logger.debug(f"ProblemExtensionNode {self.id} - 当前时间: {time.time()} - Message: {last_message}")
         if self.tool_name=='Input_Summary':
-            tool_call =re.findall(f"'id': '(.*?)'",str(last_message))[0]
+            tool_call =re.findall("'id': '(.*?)'",str(last_message))[0]
         else:tool_call = str(re.findall(r"tool_call_id=.*?'(.*?)'", str(last_message))[0]).replace('\\', '').split('_id')[1]
         # try:
         #     content = json.loads(last_message.content) if hasattr(last_message, 'content') else last_message

@@ -121,7 +121,7 @@ def delete_app(
     """
     workspace_id = current_user.current_workspace_id
     logger.info(
-        f"用户请求删除应用",
+        "用户请求删除应用",
         extra={
             "app_id": str(app_id),
             "user_id": str(current_user.id),
@@ -151,7 +151,7 @@ def copy_app(
     """
     workspace_id = current_user.current_workspace_id
     logger.info(
-        f"用户请求复制应用",
+        "用户请求复制应用",
         extra={
             "source_app_id": str(app_id),
             "user_id": str(current_user.id),
@@ -432,7 +432,7 @@ async def draft_run(
         
         # 非流式返回
         logger.debug(
-            f"开始非流式试运行",
+            "开始非流式试运行",
             extra={
                 "app_id": str(app_id),
                 "message_length": len(payload.message),
@@ -456,7 +456,7 @@ async def draft_run(
         )
         
         logger.debug(
-            f"试运行返回结果",
+            "试运行返回结果",
             extra={
                 "result_type": str(type(result)),
                 "result_keys": list(result.keys()) if isinstance(result, dict) else "not_dict"
@@ -466,11 +466,11 @@ async def draft_run(
         # 验证结果
         try:
             validated_result = app_schema.DraftRunResponse.model_validate(result)
-            logger.debug(f"结果验证成功")
+            logger.debug("结果验证成功")
             return success(data=validated_result)
         except Exception as e:
             logger.error(
-                f"结果验证失败",
+                "结果验证失败",
                 extra={
                     "error": str(e),
                     "error_type": str(type(e)),
@@ -496,7 +496,7 @@ async def draft_run(
         # 3. 流式返回
         if payload.stream:
             logger.debug(
-                f"开始多智能体流式试运行",
+                "开始多智能体流式试运行",
                 extra={
                     "app_id": str(app_id),
                     "message_length": len(payload.message),
@@ -530,7 +530,7 @@ async def draft_run(
         
         # 4. 非流式返回
         logger.debug(
-            f"开始多智能体非流式试运行",
+            "开始多智能体非流式试运行",
             extra={
                 "app_id": str(app_id),
                 "message_length": len(payload.message),
@@ -542,7 +542,7 @@ async def draft_run(
         result = await multiservice.run(app_id, multi_agent_request)
         
         logger.debug(
-            f"多智能体试运行返回结果",
+            "多智能体试运行返回结果",
             extra={
                 "result_type": str(type(result)),
                 "has_response": "response" in result if isinstance(result, dict) else False
@@ -599,7 +599,7 @@ async def draft_run_compare(
         if knowledge: user_rag_memory_id = str(knowledge.id)
     
     logger.info(
-        f"多模型对比试运行",
+        "多模型对比试运行",
         extra={
             "app_id": str(app_id),
             "model_count": len(payload.models),
@@ -705,7 +705,7 @@ async def draft_run_compare(
     )
     
     logger.info(
-        f"多模型对比完成",
+        "多模型对比完成",
         extra={
             "app_id": str(app_id),
             "successful": result["successful_count"],

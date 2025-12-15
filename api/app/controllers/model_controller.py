@@ -46,7 +46,8 @@ def get_model_list(
     search: Optional[str] = Query(None, description="搜索关键词"),
     page: int = Query(1, ge=1, description="页码"),
     pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     获取模型配置列表
@@ -55,7 +56,7 @@ def get_model_list(
     - 单个：?type=LLM
     - 多个：?type=LLM&type=EMBEDDING
     """
-    api_logger.info(f"获取模型配置列表请求: type={type}, provider={provider}, page={page}, pagesize={pagesize}")
+    api_logger.info(f"获取模型配置列表请求: type={type}, provider={provider}, page={page}, pagesize={pagesize}, tenant_id={current_user.tenant_id}")
     
     try:
         query = model_schema.ModelConfigQuery(
@@ -69,7 +70,7 @@ def get_model_list(
         )
         
         api_logger.debug(f"开始获取模型配置列表: {query.dict()}")
-        result_orm = ModelConfigService.get_model_list(db=db, query=query)
+        result_orm = ModelConfigService.get_model_list(db=db, query=query, tenant_id=current_user.tenant_id)
         result = PageData.model_validate(result_orm)
         api_logger.info(f"模型配置列表获取成功: 总数={result.page.total}, 当前页={len(result.items)}")
         return success(data=result, msg="模型配置列表获取成功")
@@ -81,16 +82,17 @@ def get_model_list(
 @router.get("/{model_id}", response_model=ApiResponse)
 def get_model_by_id(
     model_id: uuid.UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     根据ID获取模型配置
     """
-    api_logger.info(f"获取模型配置请求: model_id={model_id}")
+    api_logger.info(f"获取模型配置请求: model_id={model_id}, tenant_id={current_user.tenant_id}")
     
     try:
         api_logger.debug(f"开始获取模型配置: model_id={model_id}")
-        result_orm = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
+        result_orm = ModelConfigService.get_model_by_id(db=db, model_id=model_id, tenant_id=current_user.tenant_id)
         api_logger.info(f"模型配置获取成功: {result_orm.name}")
         
         # 将ORM对象转换为Pydantic模型
@@ -116,11 +118,11 @@ async def create_model(
     - 验证失败时会抛出异常，不会创建配置
     - 可通过 skip_validation=true 跳过验证
     """
-    api_logger.info(f"创建模型配置请求: {model_data.name}, 用户: {current_user.username}")
+    api_logger.info(f"创建模型配置请求: {model_data.name}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
     
     try:
         api_logger.debug(f"开始创建模型配置: {model_data.name}")
-        result_orm = await ModelConfigService.create_model(db=db, model_data=model_data)
+        result_orm = await ModelConfigService.create_model(db=db, model_data=model_data, tenant_id=current_user.tenant_id)
         api_logger.info(f"模型配置创建成功: {result_orm.name} (ID: {result_orm.id})")
         
         # 将ORM对象转换为Pydantic模型
@@ -142,11 +144,11 @@ def update_model(
     """
     更新模型配置
     """
-    api_logger.info(f"更新模型配置请求: model_id={model_id}, 用户: {current_user.username}")
+    api_logger.info(f"更新模型配置请求: model_id={model_id}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
     
     try:
         api_logger.debug(f"开始更新模型配置: model_id={model_id}")
-        result_orm = ModelConfigService.update_model(db=db, model_id=model_id, model_data=model_data)
+        result_orm = ModelConfigService.update_model(db=db, model_id=model_id, model_data=model_data, tenant_id=current_user.tenant_id)
         api_logger.info(f"模型配置更新成功: {result_orm.name} (ID: {model_id})")
         
         # 将ORM对象转换为Pydantic模型
@@ -167,11 +169,11 @@ def delete_model(
     """
     删除模型配置
     """
-    api_logger.info(f"删除模型配置请求: model_id={model_id}, 用户: {current_user.username}")
+    api_logger.info(f"删除模型配置请求: model_id={model_id}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
     
     try:
         api_logger.debug(f"开始删除模型配置: model_id={model_id}")
-        ModelConfigService.delete_model(db=db, model_id=model_id)
+        ModelConfigService.delete_model(db=db, model_id=model_id, tenant_id=current_user.tenant_id)
         api_logger.info(f"模型配置删除成功: model_id={model_id}")
         return success(msg="模型配置删除成功")
     except Exception as e:

@@ -85,7 +85,11 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.statement_id = CASE WHEN entity.statement_id IS NOT NULL AND entity.statement_id <> '' THEN entity.statement_id ELSE e.statement_id END,
     e.aliases = CASE
         WHEN entity.aliases IS NOT NULL AND size(entity.aliases) > 0
-        THEN CASE WHEN e.aliases IS NULL THEN entity.aliases ELSE e.aliases + entity.aliases END
+        THEN CASE 
+            WHEN e.aliases IS NULL THEN entity.aliases 
+            ELSE reduce(acc = [], alias IN (e.aliases + entity.aliases) | 
+                CASE WHEN alias IN acc THEN acc ELSE acc + alias END)
+        END
         ELSE e.aliases END,
     e.name_embedding = CASE
         WHEN entity.name_embedding IS NOT NULL AND size(entity.name_embedding) > 0 THEN entity.name_embedding
@@ -681,4 +685,64 @@ SET r.group_id = e.group_id,
     r.created_at = e.created_at,
     r.expired_at = e.expired_at
 RETURN elementId(r) AS uuid
+"""
+
+
+# Entity Merge Query
+MERGE_ENTITIES = """
+MATCH (canonical:ExtractedEntity {id: $canonical_id})
+MATCH (losing:ExtractedEntity {id: $losing_id})
+
+// 更新canonical实体的aliases
+SET canonical.aliases = $merged_aliases
+
+// 转移所有从losing出发的关系到canonical
+WITH canonical, losing
+OPTIONAL MATCH (losing)-[r]->(target)
+WHERE NOT (canonical)-[:RELATES_TO]->(target)
+FOREACH (rel IN CASE WHEN r IS NOT NULL THEN [r] ELSE [] END |
+    CREATE (canonical)-[:RELATES_TO {
+        id: rel.id,
+        relation_type: rel.relation_type,
+        relation_value: rel.relation_value,
+        statement: rel.statement,
+        source_statement_id: rel.source_statement_id,
+        valid_at: rel.valid_at,
+        invalid_at: rel.invalid_at,
+        group_id: rel.group_id,
+        user_id: rel.user_id,
+        apply_id: rel.apply_id,
+        run_id: rel.run_id,
+        created_at: rel.created_at,
+        expired_at: rel.expired_at
+    }]->(target)
+)
+
+// 转移所有指向losing的关系到canonical
+WITH canonical, losing
+OPTIONAL MATCH (source)-[r]->(losing)
+WHERE NOT (source)-[:RELATES_TO]->(canonical)
+FOREACH (rel IN CASE WHEN r IS NOT NULL THEN [r] ELSE [] END |
+    CREATE (source)-[:RELATES_TO {
+        id: rel.id,
+        relation_type: rel.relation_type,
+        relation_value: rel.relation_value,
+        statement: rel.statement,
+        source_statement_id: rel.source_statement_id,
+        valid_at: rel.valid_at,
+        invalid_at: rel.invalid_at,
+        group_id: rel.group_id,
+        user_id: rel.user_id,
+        apply_id: rel.apply_id,
+        run_id: rel.run_id,
+        created_at: rel.created_at,
+        expired_at: rel.expired_at
+    }]->(canonical)
+)
+
+// 删除losing实体及其所有关系
+WITH losing
+DETACH DELETE losing
+
+RETURN count(losing) as deleted
 """

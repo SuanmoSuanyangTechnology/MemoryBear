@@ -1,5 +1,8 @@
 """
-MemSci 记忆系统主入口 
+MemSci 记忆系统主入口 - 重构版本
+
+该模块是重构后的记忆系统主入口，使用新的模块化架构。
+旧版本入口（app/core/memory/src/main.py）已删除。
 
 主要功能：
 1. 协调整个知识提取流水线
@@ -319,7 +322,7 @@ async def main(dialogue_text: Optional[str] = None, is_pilot_run: bool = False):
     logger.info(f"Timing details saved to: {log_file}")
     
     print("\n" + "=" * 60)
-    print(f"✓ 流水线执行完成")
+    print("✓ 流水线执行完成")
     print(f"✓ 总耗时: {total_time:.2f} 秒")
     print(f"✓ 详细日志: {log_file}")
     print("=" * 60)

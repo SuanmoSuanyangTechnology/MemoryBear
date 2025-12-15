@@ -46,7 +46,7 @@ def get_model_config(model_id: str, db: Session | None = None) -> dict:
     with open("logs/model_config.log", "a", encoding="utf-8") as f:
         f.write(f"模型ID: {model_id}\n")
         f.write(f"模型配置信息:\n{model_config}\n")
-        f.write(f"=============================\n\n")
+        f.write("=============================\n\n")
     return model_config
 
 def get_embedder_config(embedding_id: str, db: Session | None = None) -> dict:
@@ -75,7 +75,7 @@ def get_embedder_config(embedding_id: str, db: Session | None = None) -> dict:
     with open("logs/embedder_config.log", "a", encoding="utf-8") as f:
         f.write(f"嵌入模型ID: {embedding_id}\n")
         f.write(f"嵌入模型配置信息:\n{model_config}\n")
-        f.write(f"=============================\n\n")
+        f.write("=============================\n\n")
     return model_config
 
 def get_neo4j_config() -> dict:

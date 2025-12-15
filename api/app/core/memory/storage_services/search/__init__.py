@@ -58,7 +58,7 @@ async def run_hybrid_search(
         dict: 搜索结果字典，格式与旧API兼容
     """
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-    from app.core.memory.src.llm_tools.openai_embedder import OpenAIEmbedderClient
+    from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
     from app.core.memory.utils.config.config_utils import get_embedder_config
     from app.core.memory.utils.config import definitions as config_defs
     from app.core.models.base import RedBearModelConfig

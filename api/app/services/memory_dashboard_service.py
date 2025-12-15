@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import uuid
 from fastapi import HTTPException
 
@@ -22,6 +22,30 @@ from app.core.logging_config import get_business_logger
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
+
+
+def get_current_workspace_type(
+    db: Session, 
+    workspace_id: uuid.UUID,
+    current_user: User
+) -> Optional[str]:
+    """获取当前工作空间类型"""
+    business_logger.info(f"获取工作空间类型: workspace_id={workspace_id}, 操作者: {current_user.username}")
+    
+    try:
+        from app.repositories.workspace_repository import get_workspace_by_id
+        
+        workspace = get_workspace_by_id(db, workspace_id)
+        if not workspace:
+            business_logger.warning(f"工作空间不存在: workspace_id={workspace_id}")
+            return None
+            
+        business_logger.info(f"成功获取工作空间类型: {workspace.storage_type}")
+        return workspace.storage_type
+        
+    except Exception as e:
+        business_logger.error(f"获取工作空间类型失败: workspace_id={workspace_id} - {str(e)}")
+        raise
 
 
 def get_workspace_end_users(
@@ -169,7 +193,7 @@ def get_workspace_memory_list(
             business_logger.warning(f"获取宿主列表失败: {str(e)}")
             result["hosts"] = []
         
-        business_logger.info(f"成功获取工作空间记忆列表")
+        business_logger.info("成功获取工作空间记忆列表")
         return result
         
     except HTTPException:
@@ -587,7 +611,7 @@ async def get_chunk_insight(
             "insight": insight
         }
         
-        business_logger.info(f"成功获取chunk洞察")
+        business_logger.info("成功获取chunk洞察")
         return result
         
     except Exception as e:

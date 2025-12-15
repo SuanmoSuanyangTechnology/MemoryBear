@@ -73,7 +73,7 @@ def get_workspaces(
     if not include_current and current_user.current_workspace_id:
         workspaces = [w for w in workspaces if w.id != current_user.current_workspace_id]
         api_logger.debug(
-            f"过滤掉当前工作空间",
+            "过滤掉当前工作空间",
             extra={"current_workspace_id": str(current_user.current_workspace_id)}
         )
     

@@ -37,6 +37,7 @@ class ModelConfig(Base):
     __tablename__ = "model_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True, comment="租户ID")
     name = Column(String, nullable=False, comment="模型显示名称")
     type = Column(String, nullable=False, index=True, comment="模型类型")
     description = Column(String, comment="模型描述")

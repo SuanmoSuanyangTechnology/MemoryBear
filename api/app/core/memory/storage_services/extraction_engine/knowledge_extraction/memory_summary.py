@@ -12,7 +12,7 @@ logger = get_memory_logger(__name__)
 from app.core.memory.models.graph_models import MemorySummaryNode
 from app.core.memory.models.base_response import RobustLLMResponse
 from app.core.models.base import RedBearModelConfig
-from app.core.memory.src.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.utils.config.config_utils import get_embedder_config
 from app.core.memory.utils.prompt.prompt_utils import render_memory_summary_prompt
 from uuid import uuid4

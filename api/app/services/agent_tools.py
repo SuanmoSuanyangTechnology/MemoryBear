@@ -80,7 +80,7 @@ def create_agent_discovery_tool(registry: AgentRegistry, workspace_id: uuid.UUID
                 result += "\n"
             
             logger.info(
-                f"Agent 发现成功",
+                "Agent 发现成功",
                 extra={
                     "query": query,
                     "domain": domain,
@@ -91,7 +91,7 @@ def create_agent_discovery_tool(registry: AgentRegistry, workspace_id: uuid.UUID
             return result
             
         except Exception as e:
-            logger.error(f"Agent 发现失败", extra={"error": str(e)})
+            logger.error("Agent 发现失败", extra={"error": str(e)})
             return f"发现 Agent 失败: {str(e)}"
     
     return discover_agents
@@ -138,7 +138,7 @@ def create_agent_invocation_tool(
         if workspace and workspace.storage_type:
             storage_type = workspace.storage_type
             logger.debug(
-                f"获取工作空间存储类型成功",
+                "获取工作空间存储类型成功",
                 extra={
                     "workspace_id": str(workspace_id),
                     "storage_type": storage_type
@@ -146,7 +146,7 @@ def create_agent_invocation_tool(
             )
     except Exception as e:
         logger.warning(
-            f"获取工作空间存储类型失败，使用默认值 neo4j",
+            "获取工作空间存储类型失败，使用默认值 neo4j",
             extra={"workspace_id": str(workspace_id), "error": str(e)}
         )
     
@@ -161,7 +161,7 @@ def create_agent_invocation_tool(
             if knowledge:
                 user_rag_memory_id = str(knowledge.id)
                 logger.debug(
-                    f"获取 RAG 知识库成功",
+                    "获取 RAG 知识库成功",
                     extra={
                         "workspace_id": str(workspace_id),
                         "knowledge_id": user_rag_memory_id
@@ -169,13 +169,13 @@ def create_agent_invocation_tool(
                 )
             else:
                 logger.warning(
-                    f"未找到名为 'USER_RAG_MEMORY' 的知识库，将使用 neo4j 存储",
+                    "未找到名为 'USER_RAG_MEMORY' 的知识库，将使用 neo4j 存储",
                     extra={"workspace_id": str(workspace_id)}
                 )
                 storage_type = 'neo4j'
         except Exception as e:
             logger.warning(
-                f"获取 RAG 知识库失败，将使用 neo4j 存储",
+                "获取 RAG 知识库失败，将使用 neo4j 存储",
                 extra={"workspace_id": str(workspace_id), "error": str(e)}
             )
             storage_type = 'neo4j'
@@ -226,12 +226,12 @@ def create_agent_invocation_tool(
             # 6. 获取 Agent 配置
             agent_config = db.get(AgentConfig, agent_uuid)
             if not agent_config:
-                return f"Agent 配置不存在"
+                return "Agent 配置不存在"
             
             # 7. 获取模型配置
             model_config = db.get(ModelConfig, agent_config.default_model_config_id)
             if not model_config:
-                return f"Agent 模型配置不存在"
+                return "Agent 模型配置不存在"
             
             # 8. 创建调用记录
             invocation = AgentInvocation(
@@ -249,7 +249,7 @@ def create_agent_invocation_tool(
             db.refresh(invocation)
             
             logger.info(
-                f"Agent 调用开始",
+                "Agent 调用开始",
                 extra={
                     "invocation_id": str(invocation.id),
                     "caller_agent_id": str(current_agent_id),
@@ -286,7 +286,7 @@ def create_agent_invocation_tool(
                 db.commit()
                 
                 logger.info(
-                    f"Agent 调用成功",
+                    "Agent 调用成功",
                     extra={
                         "invocation_id": str(invocation.id),
                         "caller_agent_id": str(current_agent_id),
@@ -306,7 +306,7 @@ def create_agent_invocation_tool(
                 db.commit()
                 
                 logger.error(
-                    f"Agent 调用失败",
+                    "Agent 调用失败",
                     extra={
                         "invocation_id": str(invocation.id),
                         "caller_agent_id": str(current_agent_id),
@@ -319,7 +319,7 @@ def create_agent_invocation_tool(
             
         except Exception as e:
             logger.error(
-                f"Agent 调用异常",
+                "Agent 调用异常",
                 extra={
                     "caller_agent_id": str(current_agent_id),
                     "callee_agent_id": agent_id,

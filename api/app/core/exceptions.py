@@ -84,3 +84,20 @@ class PermissionDeniedException(BusinessException):
     
     def __init__(self, message: str = "权限不足", **kwargs):
         super().__init__(message, BizCode.FORBIDDEN, **kwargs)
+
+
+class RateLimitException(BusinessException):
+    """限流异常"""
+    
+    def __init__(self, message: str, code: BizCode = None, rate_headers: dict = None, **kwargs):
+        # 如果没有指定错误码，默认使用通用限流错误码
+        if code is None:
+            code = BizCode.RATE_LIMITED
+        
+        # 将限流头信息添加到上下文中
+        context = kwargs.get("context", {})
+        if rate_headers:
+            context["rate_limit_headers"] = rate_headers
+        kwargs["context"] = context
+        
+        super().__init__(message, code, **kwargs)

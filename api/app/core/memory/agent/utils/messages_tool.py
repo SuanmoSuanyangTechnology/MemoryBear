@@ -191,9 +191,9 @@ async def VerifyTool_messages_deal(context):
     messages = str(context).replace('\\n', '').replace('\n', '').replace('\\', '')
     content_messages = messages.split('"context":')[1].replace('""', '"')
     messages = str(content_messages).split("name='Retrieve'")[0]
-    query = re.findall(f'"Query": "(.*?)"', messages)[0]
-    Query_small = re.findall(f'"Query_small": "(.*?)"', messages)
-    Result_small = re.findall(f'"Result_small": "(.*?)"', messages)
+    query = re.findall('"Query": "(.*?)"', messages)[0]
+    Query_small = re.findall('"Query_small": "(.*?)"', messages)
+    Result_small = re.findall('"Result_small": "(.*?)"', messages)
     return Query_small, Result_small, query
 
 

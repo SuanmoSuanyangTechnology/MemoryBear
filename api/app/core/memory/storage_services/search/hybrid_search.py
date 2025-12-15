@@ -13,7 +13,7 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.storage_services.search.search_strategy import SearchStrategy, SearchResult
 from app.core.memory.storage_services.search.keyword_search import KeywordSearchStrategy
 from app.core.memory.storage_services.search.semantic_search import SemanticSearchStrategy
-from app.core.memory.src.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.models.variate_config import ForgettingEngineConfig
 from app.core.memory.storage_services.forgetting_engine.forgetting_engine import ForgettingEngine
 

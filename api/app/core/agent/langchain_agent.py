@@ -15,6 +15,8 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, Base
 from langchain_core.tools import BaseTool
 from langchain.agents import create_agent
 
+from app.core.memory.agent.mcp_server.services import session_service
+from app.core.memory.agent.utils.redis_tool import store
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.models.models_model import ModelType
 from app.core.logging_config import get_business_logger
@@ -89,7 +91,7 @@ class LangChainAgent:
         )
 
         logger.info(
-            f"LangChain Agent 初始化完成",
+            "LangChain Agent 初始化完成",
             extra={
                 "model": model_name,
                 "provider": provider,
@@ -139,6 +141,42 @@ class LangChainAgent:
         messages.append(HumanMessage(content=user_content))
 
         return messages
+    async def term_memory_save(self,messages,end_user_end,aimessages):
+        '''短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j'''
+        end_user_end=f"Term_{end_user_end}"
+        print(messages)
+        print(aimessages)
+        session_id = store.save_session(
+                        userid=end_user_end,
+                        messages=messages,
+                        apply_id=end_user_end,
+                        group_id=end_user_end,
+                        aimessages=aimessages
+                    )
+        store.delete_duplicate_sessions()
+        # logger.info(f'Redis_Agent:{end_user_end};{session_id}')
+        return session_id
+    async def term_memory_redis_read(self,end_user_end):
+        end_user_end = f"Term_{end_user_end}"
+        history = store.find_user_apply_group(end_user_end, end_user_end, end_user_end)
+        # logger.info(f'Redis_Agent:{end_user_end};{history}')
+        messagss_list=[]
+        for messages in history:
+            query = messages.get("Query")
+            aimessages = messages.get("Answer")
+            messagss_list.append(f'用户:{query}。AI回复:{aimessages}')
+        return messagss_list
+
+
+    async def write(self,storage_type,end_user_id,message,user_rag_memory_id,actual_end_user_id,content,actual_config_id):
+        if storage_type == "rag":
+            await write_rag(end_user_id, message, user_rag_memory_id)
+            logger.info(f'RAG_Agent:{end_user_id};{user_rag_memory_id}')
+        else:
+            write_id = write_message_task.delay(actual_end_user_id, content, actual_config_id, storage_type,
+                                                user_rag_memory_id)
+            write_status = get_task_memory_write_result(str(write_id))
+            logger.info(f'Agent:{actual_end_user_id};{write_status}')
 
     async def chat(
             self,
@@ -149,6 +187,7 @@ class LangChainAgent:
             config_id: Optional[str] = None,  # 添加这个参数
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            memory_flag: Optional[bool] = True
     ) -> Dict[str, Any]:
         """执行对话
 
@@ -160,29 +199,29 @@ class LangChainAgent:
         Returns:
             Dict: 包含 content 和元数据的字典
         """
+        message_chat= message
         start_time = time.time()
-
+        if config_id == None:
+            actual_config_id = os.getenv("config_id")
+        else:
+            actual_config_id = config_id
+        actual_end_user_id = end_user_id if end_user_id is not None else "unknown"
         logger.info(f'写入类型{storage_type,str(end_user_id), message, str(user_rag_memory_id)}')
         print(f'写入类型{storage_type,str(end_user_id), message, str(user_rag_memory_id)}')
-        if storage_type == "rag":
-            await write_rag(end_user_id, message, user_rag_memory_id)
-            logger.info(f'RAG_Agent:{end_user_id};{user_rag_memory_id}')
-        else:
-            if config_id==None:
-                actual_config_id = os.getenv("config_id")
-            else:actual_config_id=config_id
-            actual_end_user_id = end_user_id if end_user_id is not None else "unknown"
-            write_id = write_message_task.delay(actual_end_user_id, message, actual_config_id,storage_type,user_rag_memory_id)
-            write_status = get_task_memory_write_result(str(write_id))
-            logger.info(f'Agent:{actual_end_user_id};{write_status}')
 
-
+        history_term_memory=await self.term_memory_redis_read(end_user_id)
+        if memory_flag:
+            if len(history_term_memory)>=4 and storage_type != "rag":
+                history_term_memory=';'.join(history_term_memory)
+                logger.info(f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
+                await self.write(storage_type,end_user_id,history_term_memory,user_rag_memory_id,actual_end_user_id,history_term_memory,actual_config_id)
+            await self.write(storage_type,end_user_id,message,user_rag_memory_id,actual_end_user_id,message,actual_config_id)
         try:
             # 准备消息列表
             messages = self._prepare_messages(message, history, context)
 
             logger.debug(
-                f"准备调用 LangChain Agent",
+                "准备调用 LangChain Agent",
                 extra={
                     "has_context": bool(context),
                     "has_history": bool(history),
@@ -203,15 +242,9 @@ class LangChainAgent:
                     break
 
             elapsed_time = time.time() - start_time
-
-            if storage_type == "rag":
-                await write_rag(end_user_id, message, user_rag_memory_id)
-                logger.info(f'RAG_Agent:{end_user_id};{user_rag_memory_id}')
-            else:
-                write_id = write_message_task.delay(actual_end_user_id, content, actual_config_id, storage_type,  user_rag_memory_id)
-                write_status = get_task_memory_write_result(str(write_id))
-                logger.info(f'Agent:{actual_end_user_id};{write_status}')
-
+            if memory_flag:
+                await self.write(storage_type,end_user_id,content,user_rag_memory_id,actual_end_user_id,content,actual_config_id)
+                await self.term_memory_save(message_chat,end_user_id,content)
             response = {
                 "content": content,
                 "model": self.model_name,
@@ -224,7 +257,7 @@ class LangChainAgent:
             }
 
             logger.debug(
-                f"Agent 调用完成",
+                "Agent 调用完成",
                 extra={
                     "elapsed_time": elapsed_time,
                     "content_length": len(response["content"])
@@ -234,7 +267,7 @@ class LangChainAgent:
             return response
 
         except Exception as e:
-            logger.error(f"Agent 调用失败", extra={"error": str(e)})
+            logger.error("Agent 调用失败", extra={"error": str(e)})
             raise
 
     async def chat_stream(
@@ -246,7 +279,7 @@ class LangChainAgent:
         config_id: Optional[str] = None,
         storage_type:Optional[str] = None,
         user_rag_memory_id:Optional[str] = None,
-
+        memory_flag: Optional[bool] = True
     ) -> AsyncGenerator[str, None]:
         """执行流式对话
 
@@ -259,28 +292,27 @@ class LangChainAgent:
             str: 消息内容块
         """
         logger.info("=" * 80)
-        logger.info(f" chat_stream 方法开始执行")
+        logger.info(" chat_stream 方法开始执行")
         logger.info(f"  Message: {message[:100]}")
         logger.info(f"  Has tools: {bool(self.tools)}")
         logger.info(f"  Tool count: {len(self.tools) if self.tools else 0}")
         logger.info("=" * 80)
-
-        start_time = time.time()
-        if storage_type == "rag":
-            await write_rag(end_user_id, message, user_rag_memory_id)
+        message_chat = message
+        if config_id == None:
+            actual_config_id = os.getenv("config_id")
         else:
-            if config_id==None:
-                actual_config_id = os.getenv("config_id")
-            else:actual_config_id=config_id
-            actual_end_user_id = end_user_id if end_user_id is not None else "unknown"
-            write_id = write_message_task.delay(actual_end_user_id, message, actual_config_id,storage_type,user_rag_memory_id)
+            actual_config_id = config_id
 
-        try:
-            write_status = get_task_memory_write_result(str(write_id))
-            logger.info(f'Agent:{actual_end_user_id};{write_status}')
-        except Exception as e:
-            logger.error(f"Agent 记忆用户输入出错", extra={"error": str(e)})  
+        history_term_memory = await self.term_memory_redis_read(end_user_id)
+        if memory_flag:
+            if len(history_term_memory) >= 4 and storage_type != "rag":
+                history_term_memory = ';'.join(history_term_memory)
+                logger.info(
+                    f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
+                await self.write(storage_type, end_user_id, history_term_memory, user_rag_memory_id, end_user_id,
+                                 history_term_memory, actual_config_id)
 
+            await self.write(storage_type, end_user_id, message, user_rag_memory_id, end_user_id, message, actual_config_id)
         try:
             # 准备消息列表
             messages = self._prepare_messages(message, history, context)
@@ -294,7 +326,7 @@ class LangChainAgent:
 
             # 统一使用 agent 的 astream_events 实现流式输出
             logger.debug("使用 Agent astream_events 实现流式输出")
-            
+            full_content=''
             try:
                 async for event in self.agent.astream_events(
                     {"messages": messages},
@@ -307,6 +339,7 @@ class LangChainAgent:
                     if kind == "on_chat_model_stream":
                         # LLM 流式输出
                         chunk = event.get("data", {}).get("chunk")
+                        full_content+=chunk.content
                         if chunk and hasattr(chunk, "content") and chunk.content:
                             yield chunk.content
                             yielded_content = True
@@ -316,6 +349,7 @@ class LangChainAgent:
                         chunk = event.get("data", {}).get("chunk")
                         if chunk:
                             if hasattr(chunk, "content") and chunk.content:
+                                full_content+=chunk.content
                                 yield chunk.content
                                 yielded_content = True
                             elif isinstance(chunk, str):
@@ -329,6 +363,9 @@ class LangChainAgent:
                         logger.debug(f"工具调用结束: {event.get('name')}")
                 
                 logger.debug(f"Agent 流式完成，共 {chunk_count} 个事件")
+                if memory_flag:
+                    await self.write(storage_type, end_user_id,full_content, user_rag_memory_id, end_user_id,full_content, actual_config_id)
+                    await self.term_memory_save(message_chat, end_user_id, full_content)
                 
             except Exception as e:
                 logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)
@@ -341,7 +378,7 @@ class LangChainAgent:
             raise
         finally:
             logger.info("=" * 80)
-            logger.info(f"chat_stream 方法执行结束")
+            logger.info("chat_stream 方法执行结束")
             logger.info("=" * 80)
 
 

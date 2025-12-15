@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Neo4j仓储基类模块
 
 本模块提供Neo4j仓储的基类实现，封装了通用的Neo4j节点操作。
@@ -57,9 +56,17 @@ class BaseNeo4jRepository(BaseRepository[T]):
         CREATE (n:{self.node_label} $props)
         RETURN n
         """
+        # 使用model_dump()获取所有字段，包括aliases
+        props = entity.model_dump()
+        
+        # 确保aliases字段存在且为列表（针对ExtractedEntity节点）
+        if hasattr(entity, 'aliases'):
+            if props.get('aliases') is None:
+                props['aliases'] = []
+        
         result = await self.connector.execute_query(
             query,
-            props=entity.model_dump()
+            props=props
         )
         return entity
     
@@ -97,10 +104,18 @@ class BaseNeo4jRepository(BaseRepository[T]):
         SET n += $props
         RETURN n
         """
+        # 使用model_dump()获取所有字段，包括aliases
+        props = entity.model_dump()
+        
+        # 确保aliases字段存在且为列表（针对ExtractedEntity节点）
+        if hasattr(entity, 'aliases'):
+            if props.get('aliases') is None:
+                props['aliases'] = []
+        
         await self.connector.execute_query(
             query,
             id=entity.id,
-            props=entity.model_dump()
+            props=props
         )
         return entity
     
@@ -142,7 +157,7 @@ class BaseNeo4jRepository(BaseRepository[T]):
             ... )
         """
         # 构建查询条件
-        where_clauses = [f"n.{key} = ${key}" for key in filters.keys()]
+        where_clauses = [f"n.{key} = ${key}" for key in filters]
         where_str = " AND ".join(where_clauses) if where_clauses else "1=1"
         
         query = f"""

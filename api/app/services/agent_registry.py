@@ -27,7 +27,7 @@ class AgentRegistry:
         self._cache[str(agent.id)] = agent_info
         
         logger.info(
-            f"Agent 注册成功",
+            "Agent 注册成功",
             extra={
                 "agent_id": str(agent.id),
                 "name": agent.app.name,
@@ -92,7 +92,7 @@ class AgentRegistry:
         agents = self.db.scalars(stmt).all()
         
         logger.debug(
-            f"Agent 发现",
+            "Agent 发现",
             extra={
                 "query": query,
                 "domain": domain,

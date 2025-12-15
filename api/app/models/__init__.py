@@ -15,7 +15,7 @@ from .end_user_model import EndUser
 from .appshare_model import AppShare
 from .release_share_model import ReleaseShare
 from .conversation_model import Conversation, Message
-from .api_key_model import ApiKey, ApiKeyLog, ApiKeyType
+from .api_key_model import ApiKey, ApiKeyLog, ApiKeyType, ResourceType
 from .data_config_model import DataConfig
 from .multi_agent_model import MultiAgentConfig, AgentInvocation
 
@@ -46,6 +46,7 @@ __all__ = [
     "ApiKey",
     "ApiKeyLog",
     "ApiKeyType",
+    "ResourceType",
     "DataConfig",
     "MultiAgentConfig",
     "AgentInvocation"

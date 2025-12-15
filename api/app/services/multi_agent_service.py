@@ -116,7 +116,7 @@ class MultiAgentService:
         self.db.refresh(config)
         
         logger.info(
-            f"创建多 Agent 配置成功",
+            "创建多 Agent 配置成功",
             extra={
                 "config_id": str(config.id),
                 "app_id": str(app_id),
@@ -320,7 +320,7 @@ class MultiAgentService:
             self.db.refresh(config)
             
             logger.info(
-                f"创建多 Agent 配置成功",
+                "创建多 Agent 配置成功",
                 extra={
                     "config_id": str(config.id),
                     "app_id": str(app_id),
@@ -363,12 +363,12 @@ class MultiAgentService:
         # if data.routing_rules is not None:
         #     config.routing_rules = [convert_uuids_to_str(rule.model_dump()) for rule in data.routing_rules] if data.routing_rules else None
         
-        if data.execution_config is None:
-            execution_config_data = {}
-        elif isinstance(data.execution_config, dict):
-            execution_config_data = convert_uuids_to_str(data.execution_config)
-        else:
-            execution_config_data = convert_uuids_to_str(data.execution_config.model_dump())
+        if data.execution_config is not None:
+            if isinstance(data.execution_config, dict):
+                execution_config_data = convert_uuids_to_str(data.execution_config)
+            else:
+                execution_config_data = convert_uuids_to_str(data.execution_config.model_dump())
+            config.execution_config = execution_config_data
 
         if data.aggregation_strategy is not None:
             config.aggregation_strategy = data.aggregation_strategy
@@ -380,7 +380,7 @@ class MultiAgentService:
         self.db.refresh(config)
         
         logger.info(
-            f"更新多 Agent 配置成功",
+            "更新多 Agent 配置成功",
             extra={
                 "config_id": str(config.id),
                 "app_id": str(app_id)
@@ -399,11 +399,12 @@ class MultiAgentService:
         if not config:
             raise ResourceNotFoundException("多 Agent 配置", str(app_id))
         
-        self.db.delete(config)
+        # 逻辑删除多 Agent 配置
+        config.is_active = False
         self.db.commit()
         
         logger.info(
-            f"删除多 Agent 配置成功",
+            "删除多 Agent 配置成功",
             extra={
                 "config_id": str(config.id),
                 "app_id": str(app_id)
@@ -542,7 +543,7 @@ class MultiAgentService:
         self.db.refresh(config)
         
         logger.info(
-            f"添加子 Agent 成功",
+            "添加子 Agent 成功",
             extra={
                 "config_id": str(config.id),
                 "agent_id": str(agent_id),
@@ -586,7 +587,7 @@ class MultiAgentService:
         self.db.refresh(config)
         
         logger.info(
-            f"移除子 Agent 成功",
+            "移除子 Agent 成功",
             extra={
                 "config_id": str(config.id),
                 "agent_id": str(agent_id)

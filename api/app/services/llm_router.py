@@ -88,7 +88,7 @@ class LLMRouter:
             路由结果
         """
         logger.info(
-            f"开始 LLM 智能路由",
+            "开始 LLM 智能路由",
             extra={
                 "message_length": len(message),
                 "conversation_id": conversation_id,
@@ -177,7 +177,7 @@ class LLMRouter:
         }
         
         logger.info(
-            f"路由完成",
+            "路由完成",
             extra={
                 "agent_id": agent_id,
                 "strategy": strategy,
@@ -393,7 +393,7 @@ class LLMRouter:
             
             # 打印供应商信息
             logger.info(
-                f"LLM 路由使用模型",
+                "LLM 路由使用模型",
                 extra={
                     "provider": api_key_config.provider,
                     "model_name": api_key_config.model_name,
@@ -680,6 +680,6 @@ class LLMRouter:
             return self.routing_rules[0].get("target_agent_id")
         
         if self.sub_agents:
-            return list(self.sub_agents.keys())[0]
+            return next(iter(self.sub_agents.keys()))
         
         return "default-agent"

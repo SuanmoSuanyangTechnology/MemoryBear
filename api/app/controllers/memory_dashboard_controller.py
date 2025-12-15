@@ -2,11 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
-
+from app.repositories.end_user_repository import update_end_user_other_name
+import uuid
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
+from app.schemas.memory_agent_schema import End_User_Information
 from app.schemas.response_schema import ApiResponse
 from app.schemas.app_schema import App as AppSchema
 
@@ -41,6 +43,56 @@ def get_workspace_total_end_users(
     api_logger.info(f"成功获取最新用户总数: total_num={total_end_users.get('total_num', 0)}")
     return success(data=total_end_users, msg="用户数量获取成功")
 
+@router.post("/update/end_users", response_model=ApiResponse)
+async def update_workspace_end_users(
+    user_input: End_User_Information,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    更新工作空间的宿主信息
+    """
+    username = user_input.end_user_name  # 要更新的用户名
+    end_user_input_id = user_input.id  # 宿主ID
+    workspace_id = current_user.current_workspace_id
+    
+    api_logger.info(f"用户 {current_user.username} 请求更新工作空间 {workspace_id} 的宿主信息")
+    api_logger.info(f"更新参数: username={username}, end_user_id={end_user_input_id}")
+
+    try:
+        # 导入更新函数
+        from app.repositories.end_user_repository import update_end_user_other_name
+        import uuid
+        
+        # 转换 end_user_id 为 UUID 类型
+        end_user_uuid = uuid.UUID(end_user_input_id)
+        
+        # 直接更新数据库中的 other_name 字段
+        updated_count = update_end_user_other_name(
+            db=db,
+            end_user_id=end_user_uuid,
+            other_name=username
+        )
+        
+        api_logger.info(f"成功更新宿主 {end_user_input_id} 的 other_name 为: {username}")
+
+        return success(
+            data={
+                "updated_count": updated_count,
+                "end_user_id": end_user_input_id,
+                "updated_other_name": username
+            },
+            msg=f"成功更新 {updated_count} 个宿主的信息"
+        )
+        
+    except Exception as e:
+        api_logger.error(f"更新宿主信息失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"更新宿主信息失败: {str(e)}"
+        )
+
+
 
 @router.get("/end_users", response_model=ApiResponse)
 async def get_workspace_end_users(
@@ -53,6 +105,8 @@ async def get_workspace_end_users(
     返回格式与原 memory_list 接口中的 end_users 字段相同
     """
     workspace_id = current_user.current_workspace_id
+    # 获取当前空间类型
+    current_workspace_type = memory_dashboard_service.get_current_workspace_type(db, workspace_id, current_user)
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表")
     end_users = memory_dashboard_service.get_workspace_end_users(
         db=db,
@@ -61,14 +115,21 @@ async def get_workspace_end_users(
     )
     result = []
     for end_user in end_users:
-        # EndUser 是 Pydantic 模型，直接访问属性而不是使用 .get()
-        memory_num = await memory_storage_service.search_all(str(end_user.id))
+        memory_num = {}
+        if current_workspace_type == "neo4j":
+            # EndUser 是 Pydantic 模型，直接访问属性而不是使用 .get()
+            memory_num = await memory_storage_service.search_all(str(end_user.id))
+        elif current_workspace_type == "rag":
+            memory_num = {
+                "total":memory_dashboard_service.get_current_user_total_chunk(str(end_user.id), db, current_user)
+            }
         result.append(
             {
                 'end_user':end_user,
                 'memory_num':memory_num
             }
         )
+        
     api_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
     return success(data=result, msg="宿主列表获取成功")
 
@@ -203,7 +264,7 @@ def get_workspace_memory_list(
         current_user=current_user,
         limit=limit
     )
-    api_logger.info(f"成功获取记忆列表")
+    api_logger.info("成功获取记忆列表")
     return success(data=memory_list, msg="记忆列表获取成功")
 
 
@@ -354,7 +415,7 @@ async def get_chunk_insight(
         current_user=current_user
     )
     
-    api_logger.info(f"成功获取chunk洞察")
+    api_logger.info("成功获取chunk洞察")
     return success(data=data, msg="chunk洞察获取成功")
 
 
@@ -469,7 +530,7 @@ async def dashboard_data(
                 api_logger.warning(f"获取API调用增量失败: {str(e)}")
             
             result["neo4j_data"] = neo4j_data
-            api_logger.info(f"成功获取neo4j_data")
+            api_logger.info("成功获取neo4j_data")
         
         # 如果 storage_type 为 'rag'，获取 rag_data
         elif storage_type == 'rag':
@@ -503,9 +564,9 @@ async def dashboard_data(
                 api_logger.warning(f"获取RAG相关数据失败: {str(e)}")
             
             result["rag_data"] = rag_data
-            api_logger.info(f"成功获取rag_data")
+            api_logger.info("成功获取rag_data")
         
-        api_logger.info(f"成功获取dashboard整合数据")
+        api_logger.info("成功获取dashboard整合数据")
         return success(data=result, msg="Dashboard数据获取成功")
         
     except Exception as e:

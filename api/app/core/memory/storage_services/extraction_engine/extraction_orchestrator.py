@@ -36,8 +36,8 @@ from app.core.memory.models.variate_config import (
     ExtractionPipelineConfig,
     StatementExtractionConfig,
 )
-from app.core.memory.src.llm_tools.openai_client import LLMClient
-from app.core.memory.src.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.memory.llm_tools.openai_client import LLMClient
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 # 导入各个提取模块
@@ -349,7 +349,7 @@ class ExtractionOrchestrator:
         if all_responses:
             try:
                 self.triplet_extractor.save_triplets(all_responses)
-                logger.info(f"三元组数据已保存到文件")
+                logger.info("三元组数据已保存到文件")
             except Exception as e:
                 logger.error(f"保存三元组到文件失败: {e}", exc_info=True)
 
@@ -842,6 +842,7 @@ class ExtractionOrchestrator:
                                     description=getattr(entity, 'description', ''),  # 添加必需的 description 字段
                                     fact_summary=getattr(entity, 'fact_summary', ''),  # 添加必需的 fact_summary 字段
                                     connect_strength=entity_connect_strength if entity_connect_strength is not None else 'Strong',  # 添加必需的 connect_strength 字段
+                                    aliases=getattr(entity, 'aliases', []) or [],  # 传递从三元组提取阶段获取的aliases
                                     name_embedding=getattr(entity, 'name_embedding', None),
                                     group_id=dialog_data.group_id,
                                     user_id=dialog_data.user_id,

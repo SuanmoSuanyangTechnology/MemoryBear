@@ -7,8 +7,8 @@ This module provides utilities for detecting and processing multimodal inputs
 
 import logging
 from typing import List
-# TODO 后续更新
-# from app.core.memory.agent.multimodal.speech_model import Vico_recognition
+
+from app.core.memory.agent.multimodal.speech_model import Vico_recognition
 from app.core.memory.agent.utils.llm_tools import picture_model_requests
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,7 @@ class MultimodalProcessor:
         
         except Exception as e:
             logger.error(f"[MultimodalProcessor] Error processing multimodal input: {e}", exc_info=True)
-            logger.info(f"[MultimodalProcessor] Falling back to original content")
+            logger.info("[MultimodalProcessor] Falling back to original content")
             return content
         
         # Return original content if not multimodal

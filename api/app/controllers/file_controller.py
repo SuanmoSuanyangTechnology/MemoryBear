@@ -66,7 +66,7 @@ async def get_files(
 
     # 3. Execute paged query
     try:
-        api_logger.debug(f"Start executing file paging query")
+        api_logger.debug("Start executing file paging query")
         total, items = file_service.get_files_paginated(
             db=db,
             filters=filters,

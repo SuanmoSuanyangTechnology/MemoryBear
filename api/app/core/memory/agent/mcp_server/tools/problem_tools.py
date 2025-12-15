@@ -116,7 +116,7 @@ async def Split_The_Problem(
             )
             split_result = json.dumps([], ensure_ascii=False)
         
-        logger.info(f"问题拆分")
+        logger.info("问题拆分")
         logger.info(f"问题拆分结果==>>:{split_result}")
         
         # Emit intermediate output for frontend
@@ -250,7 +250,7 @@ async def Problem_Extension(
             )
             aggregated_dict = {}
         
-        logger.info(f"问题扩展")
+        logger.info("问题扩展")
         logger.info(f"问题扩展==>>:{aggregated_dict}")
         
         # Emit intermediate output for frontend
