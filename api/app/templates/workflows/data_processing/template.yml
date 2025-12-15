@@ -1,0 +1,131 @@
+# 数据处理工作流模板
+id: data_processing_v1
+name: 数据处理工作流
+description: 数据提取、转换和分析的完整流程
+category: data_processing
+version: "1.0.0"
+author: RedBear Memory Team
+tags:
+  - 数据处理
+  - ETL
+  - 分析
+  - Transform
+
+# 工作流配置
+nodes:
+  - id: start
+    type: start
+    name: 开始
+    position:
+      x: 100
+      y: 200
+
+  - id: extract_data
+    type: transform
+    name: 数据提取
+    config:
+      expression: |
+        {
+          "raw_text": var['input_text'],
+          "length": len(var['input_text']),
+          "timestamp": sys['execution_id']
+        }
+    position:
+      x: 300
+      y: 200
+
+  - id: analyze_data
+    type: llm
+    name: 数据分析
+    config:
+      prompt: |
+        请分析以下数据：
+        
+        原始文本：{{ node.extract_data.raw_text }}
+        文本长度：{{ node.extract_data.length }}
+        
+        请提供：
+        1. 主题分类
+        2. 情感分析
+        3. 关键信息提取
+        
+        以 JSON 格式返回结果。
+      model: gpt-3.5-turbo
+      temperature: 0.3
+      max_tokens: 500
+    position:
+      x: 500
+      y: 200
+
+  - id: transform_result
+    type: transform
+    name: 结果转换
+    config:
+      expression: |
+        {
+          "original_length": node['extract_data']['length'],
+          "analysis": node['analyze_data']['output'],
+          "processed_at": sys['execution_id'],
+          "status": "completed"
+        }
+    position:
+      x: 700
+      y: 200
+
+  - id: end
+    type: end
+    name: 结束
+    position:
+      x: 900
+      y: 200
+
+edges:
+  - source: start
+    target: extract_data
+    label: 开始提取
+
+  - source: extract_data
+    target: analyze_data
+    label: 开始分析
+
+  - source: analyze_data
+    target: transform_result
+    label: 转换结果
+
+  - source: transform_result
+    target: end
+    label: 完成
+
+# 变量定义
+variables:
+  - name: input_text
+    type: string
+    required: true
+    description: 待处理的文本数据
+    default: ""
+
+# 执行配置
+execution_config:
+  max_execution_time: 180
+  max_iterations: 5
+
+# 触发器
+triggers: []
+
+# 使用示例
+examples:
+  - name: 文本分析
+    description: 分析一段文本
+    input:
+      input_text: "今天天气真好，心情也很愉快。我们公司推出了新产品，市场反响热烈。"
+    expected_output:
+      original_length: 35
+      analysis: "主题：天气和产品，情感：积极"
+      status: "completed"
+
+  - name: 长文本处理
+    description: 处理较长的文本
+    input:
+      input_text: "这是一段很长的文本..." 
+    expected_output:
+      status: "completed"

@@ -1,10 +1,12 @@
 import asyncio
+import time
 import uuid
 from functools import wraps
 from typing import Optional, List
 from datetime import datetime
 
 from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core.api_key_utils import add_rate_limit_headers
@@ -22,21 +24,17 @@ logger = get_api_logger()
 
 
 def require_api_key(
-        scopes: Optional[List[str]] = None,
-        resource_type: Optional[str] = None
+        scopes: Optional[List[str]] = None
 ):
     """
     API Key 鉴权装饰器
 
     Args:
-        scopes: 所需的权限范围列表["app:all",
-                                "rag:search", "rag:upload", "rag:delete",
-                                "memory:read", "memory:write", "memory:delete", "memory:search"]
-        resource_type: 所需的资源类型("Agent", "Cluster", "Workflow", "Knowledge", "Memory_Engine")
+        scopes: 所需的权限范围列表[“app”, "rag", "memory"]
 
     Usage:
         @router.get("/app/{resource_id}/chat")
-        @require_api_key(scopes=["app:all"], resource_type="Agent")
+        @require_api_key(scopes=["app"])
         def chat_with_app(
             resource_id: uuid.UUID,
             api_key_auth: ApiKeyAuth = Depends(),
@@ -113,31 +111,25 @@ def require_api_key(
                         context={"required_scopes": scopes, "missing_scopes": missing_scopes}
                     )
 
-            if resource_type:
-                resource_id = kwargs.get("resource_id")
-                if resource_id and not ApiKeyAuthService.check_resource(
-                        api_key_obj,
-                        resource_type,
-                        resource_id
-                ):
-                    logger.warning("API Key 资源访问被拒绝", extra={
-                        "api_key_id": str(api_key_obj.id),
-                        "required_resource_type": resource_type,
+            resource_id = kwargs.get("resource_id")
+            if resource_id and not ApiKeyAuthService.check_resource(
+                    api_key_obj,
+                    resource_id
+            ):
+                logger.warning("API Key 资源访问被拒绝", extra={
+                    "api_key_id": str(api_key_obj.id),
+                    "required_resource_id": str(resource_id),
+                    "bound_resource_id": str(api_key_obj.resource_id) if api_key_obj.resource_id else None,
+                    "endpoint": str(request.url)
+                })
+                return BusinessException(
+                    "API Key 未授权访问该资源",
+                    BizCode.API_KEY_INVALID_RESOURCE,
+                    context={
                         "required_resource_id": str(resource_id),
-                        "bound_resource_type": api_key_obj.resource_type,
-                        "bound_resource_id": str(api_key_obj.resource_id) if api_key_obj.resource_id else None,
-                        "endpoint": str(request.url)
-                    })
-                    return BusinessException(
-                        "API Key 未授权访问该资源",
-                        BizCode.API_KEY_INVALID_RESOURCE,
-                        context={
-                            "required_resource_type": resource_type,
-                            "required_resource_id": str(resource_id),
-                            "bound_resource_type": api_key_obj.resource_type,
-                            "bound_resource_id": str(api_key_obj.resource_id) if api_key_obj.resource_id else None
-                        }
-                    )
+                        "bound_resource_id": str(api_key_obj.resource_id)
+                    }
+                )
 
             kwargs["api_key_auth"] = ApiKeyAuth(
                 api_key_id=api_key_obj.id,
@@ -145,14 +137,17 @@ def require_api_key(
                 type=api_key_obj.type,
                 scopes=api_key_obj.scopes,
                 resource_id=api_key_obj.resource_id,
-                resource_type=api_key_obj.resource_type
             )
-
+            start_time = time.perf_counter()
             response = await func(*args, **kwargs)
+            end_time = time.perf_counter()
+            response_time = (end_time - start_time) * 1000
+            if not isinstance(response, Response):
+                response = JSONResponse(content=response)
             response = add_rate_limit_headers(response, rate_headers)
 
             asyncio.create_task(log_api_key_usage(
-                db, api_key_obj.id, request, response
+                db, api_key_obj.id, request, response, response_time
             ))
             return response
 
@@ -204,7 +199,8 @@ async def log_api_key_usage(
         db: Session,
         api_key_id: uuid.UUID,
         request: Request,
-        response: Response
+        response: Response,
+        response_time: float
 ):
     """记录 API Key 使用日志"""
     try:
@@ -216,8 +212,8 @@ async def log_api_key_usage(
             "ip_address": request.client.host if request.client else None,
             "user_agent": request.headers.get("User-Agent"),
             "status_code": response.status_code if hasattr(response, "status_code") else None,
-            "response_time": None,  # 需要在 middleware 中计算
-            "tokens_used": None,  # 需要从响应中提取
+            "response_time": round(response_time),
+            "tokens_used": None,
             "created_at": datetime.now()
         }
 
