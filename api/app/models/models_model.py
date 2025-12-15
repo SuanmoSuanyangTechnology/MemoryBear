@@ -61,7 +61,7 @@ class ModelConfig(Base):
     
     # 时间戳
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="更新时间")
+    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="更新时间") 
     
     # 关联关系
     api_keys = relationship("ModelApiKey", back_populates="model_config", cascade="all, delete-orphan")

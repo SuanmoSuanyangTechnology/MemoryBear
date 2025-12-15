@@ -39,6 +39,7 @@ async def dedup_layers_and_merge_and_return(
     List[StatementChunkEdge],
     List[StatementEntityEdge],
     List[EntityEntityEdge],
+    dict,  # 新增：返回去重详情
 ]:
     """
     执行两层实体去重与融合：
@@ -62,7 +63,7 @@ async def dedup_layers_and_merge_and_return(
             break
 
     # 第一层去重消歧
-    dedup_entity_nodes, dedup_statement_entity_edges, dedup_entity_entity_edges = await deduplicate_entities_and_edges(
+    dedup_entity_nodes, dedup_statement_entity_edges, dedup_entity_entity_edges, dedup_details = await deduplicate_entities_and_edges(
         entity_nodes,
         statement_entity_edges,
         entity_entity_edges,
@@ -103,4 +104,5 @@ async def dedup_layers_and_merge_and_return(
         statement_chunk_edges,
         fused_statement_entity_edges,
         fused_entity_entity_edges,
+        dedup_details,  # 返回去重详情
     )

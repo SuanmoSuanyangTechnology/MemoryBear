@@ -12,13 +12,14 @@
 5. 提供错误处理和日志记录
 6. 支持试运行模式（不写入数据库）
 
-作者：Memory Refactoring Team
+作者：
 日期：2025-11-21
 """
 
 import asyncio
 import logging
-from typing import List, Dict, Any, Tuple, Optional
+import os
+from typing import List, Dict, Any, Tuple, Optional, Callable, Awaitable
 from datetime import datetime
 
 from app.core.memory.models.message_models import DialogData
@@ -94,6 +95,7 @@ class ExtractionOrchestrator:
         embedder_client: OpenAIEmbedderClient,
         connector: Neo4jConnector,
         config: Optional[ExtractionPipelineConfig] = None,
+        progress_callback: Optional[Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]] = None,
     ):
         """
         初始化流水线编排器
@@ -103,12 +105,21 @@ class ExtractionOrchestrator:
             embedder_client: 嵌入模型客户端
             connector: Neo4j 连接器
             config: 流水线配置，如果为 None 则使用默认配置
+            progress_callback: 进度回调函数
+                - 接受 (stage: str, message: str, data: Optional[Dict[str, Any]]) 并返回 Awaitable[None]
+                - 在管线关键点调用以报告进度和结果数据
         """
         self.llm_client = llm_client
         self.embedder_client = embedder_client
         self.connector = connector
         self.config = config or ExtractionPipelineConfig()
         self.is_pilot_run = False  # 默认非试运行模式
+        self.progress_callback = progress_callback  # 保存进度回调函数
+        
+        # 保存去重消歧的详细记录（内存中的数据结构）
+        self.dedup_merge_records: List[Dict[str, Any]] = []  # 实体合并记录
+        self.dedup_disamb_records: List[Dict[str, Any]] = []  # 实体消歧记录
+        self.id_redirect_map: Dict[str, str] = {}  # ID重定向映射
 
         # 初始化各个提取器
         self.statement_extractor = StatementExtractor(
@@ -160,6 +171,13 @@ class ExtractionOrchestrator:
             # 步骤 1: 陈述句提取
             logger.info("步骤 1/6: 陈述句提取（全局分块级并行）")
             dialog_data_list = await self._extract_statements(dialog_data_list)
+            
+            # 收集陈述句内容和统计数量
+            all_statements_list = []
+            for dialog in dialog_data_list:
+                for chunk in dialog.chunks:
+                    all_statements_list.extend(chunk.statements)
+            total_statements = len(all_statements_list)
 
             # 步骤 2: 并行执行三元组提取、时间信息提取和基础嵌入生成
             logger.info("步骤 2/6: 并行执行三元组提取、时间信息提取和嵌入生成")
@@ -170,10 +188,89 @@ class ExtractionOrchestrator:
                 chunk_embedding_maps,
                 dialog_embeddings,
             ) = await self._parallel_extract_and_embed(dialog_data_list)
+            
+            # 收集实体和三元组内容，并统计数量
+            all_entities_list = []
+            all_triplets_list = []
+            for triplet_map in triplet_maps:
+                for triplet_info in triplet_map.values():
+                    if triplet_info:
+                        all_entities_list.extend(triplet_info.entities)
+                        all_triplets_list.extend(triplet_info.triplets)
+            
+            total_entities = len(all_entities_list)
+            total_triplets = len(all_triplets_list)
+            total_temporal = sum(len(temporal_map) for temporal_map in temporal_maps)
 
             # 步骤 3: 生成实体嵌入（依赖三元组提取结果）
             logger.info("步骤 3/6: 生成实体嵌入")
             triplet_maps = await self._generate_entity_embeddings(triplet_maps)
+
+            # 进度回调：按三个阶段分别输出知识抽取结果
+            if self.progress_callback:
+                # 第一阶段：陈述句提取结果
+                for i, stmt in enumerate(all_statements_list[:10]):  # 只输出前10个陈述句
+                    stmt_result = {
+                        "extraction_type": "statement",
+                        "statement_index": i + 1,
+                        "statement": stmt.statement,
+                        "statement_id": stmt.id
+                    }
+                    await self.progress_callback("knowledge_extraction_result", "陈述句提取完成", stmt_result)
+                
+                # 第二阶段：三元组提取结果
+                for i, triplet in enumerate(all_triplets_list[:10]):  # 只输出前10个三元组
+                    triplet_result = {
+                        "extraction_type": "triplet",
+                        "triplet_index": i + 1,
+                        "subject": triplet.subject_name,
+                        "predicate": triplet.predicate,
+                        "object": triplet.object_name
+                    }
+                    await self.progress_callback("knowledge_extraction_result", "三元组提取完成", triplet_result)
+                
+                # 第三阶段：时间提取结果
+                if total_temporal > 0:
+                    # 收集时间信息
+                    temporal_results = []
+                    for dialog in dialog_data_list:
+                        for chunk in dialog.chunks:
+                            for statement in chunk.statements:
+                                if hasattr(statement, 'temporal_validity') and statement.temporal_validity:
+                                    temporal_results.append({
+                                        "statement_id": statement.id,
+                                        "statement": statement.statement,
+                                        "valid_at": statement.temporal_validity.valid_at,
+                                        "invalid_at": statement.temporal_validity.invalid_at
+                                    })
+                    
+                    # 输出时间提取结果
+                    for i, temporal_result in enumerate(temporal_results[:5]):  # 只输出前5个时间提取结果
+                        time_result = {
+                            "extraction_type": "temporal",
+                            "temporal_index": i + 1,
+                            "statement": temporal_result["statement"],
+                            "valid_at": temporal_result["valid_at"],
+                            "invalid_at": temporal_result["invalid_at"]
+                        }
+                        await self.progress_callback("knowledge_extraction_result", "时间提取完成", time_result)
+                else:
+                    # 如果没有时间信息，也发送一个时间提取完成的消息
+                    time_result = {
+                        "extraction_type": "temporal",
+                        "temporal_index": 0,
+                        "message": "未发现时间信息"
+                    }
+                    await self.progress_callback("knowledge_extraction_result", "时间提取完成", time_result)
+                
+                # 进度回调：知识抽取完成，传递知识抽取的统计信息
+                extraction_stats = {
+                    "statements_count": total_statements,
+                    "entities_count": total_entities,
+                    "triplets_count": total_triplets,
+                    "temporal_ranges_count": total_temporal,
+                }
+                await self.progress_callback("knowledge_extraction_complete", "知识抽取完成", extraction_stats)
 
             # 步骤 4: 将提取的数据赋值到语句
             logger.info("步骤 4/6: 数据赋值")
@@ -217,6 +314,8 @@ class ExtractionOrchestrator:
                 entity_entity_edges,
                 dialog_data_list,
             )
+
+
 
             logger.info(f"知识提取流水线运行完成（{mode_str}）")
             return result
@@ -732,6 +831,10 @@ class ExtractionOrchestrator:
             包含所有节点和边的元组
         """
         logger.info("开始创建节点和边")
+        
+        # 进度回调：正在创建节点和边
+        if self.progress_callback:
+            await self.progress_callback("creating_nodes_edges", "正在创建节点和边...")
 
         dialogue_nodes = []
         chunk_nodes = []
@@ -904,6 +1007,23 @@ class ExtractionOrchestrator:
             f"陈述句-实体边: {len(statement_entity_edges)}, "
             f"实体-实体边: {len(entity_entity_edges)}"
         )
+        
+        # 进度回调：只输出关系创建结果
+        if self.progress_callback:
+            # 输出关系创建结果
+            await self._output_relationship_creation_results(entity_entity_edges, entity_nodes)
+            
+            # 进度回调：创建节点和边完成，传递结果统计
+            nodes_edges_stats = {
+                "dialogue_nodes_count": len(dialogue_nodes),
+                "chunk_nodes_count": len(chunk_nodes),
+                "statement_nodes_count": len(statement_nodes),
+                "entity_nodes_count": len(entity_nodes),
+                "statement_chunk_edges_count": len(statement_chunk_edges),
+                "statement_entity_edges_count": len(statement_entity_edges),
+                "entity_entity_edges_count": len(entity_entity_edges),
+            }
+            await self.progress_callback("creating_nodes_edges_complete", "创建节点和边完成", nodes_edges_stats)
 
         return (
             dialogue_nodes,
@@ -950,6 +1070,11 @@ class ExtractionOrchestrator:
             - 第三个元组：去重后的 (实体节点列表, 陈述句-实体边列表, 实体-实体边列表)
         """
         logger.info("开始两阶段实体去重和消歧")
+        
+        # 进度回调：正在去重消歧
+        if self.progress_callback:
+            await self.progress_callback("deduplication", "正在去重消歧...")
+        
         logger.info(
             f"去重前: {len(entity_nodes)} 个实体节点, "
             f"{len(statement_entity_edges)} 条陈述句-实体边, "
@@ -963,7 +1088,7 @@ class ExtractionOrchestrator:
                 # 只执行第一层去重
                 from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import deduplicate_entities_and_edges
                 
-                dedup_entity_nodes, dedup_statement_entity_edges, dedup_entity_entity_edges = await deduplicate_entities_and_edges(
+                dedup_entity_nodes, dedup_statement_entity_edges, dedup_entity_entity_edges, dedup_details = await deduplicate_entities_and_edges(
                     entity_nodes,
                     statement_entity_edges,
                     entity_entity_edges,
@@ -971,6 +1096,9 @@ class ExtractionOrchestrator:
                     report_append=False,
                     dedup_config=self.config.deduplication,
                 )
+                
+                # 保存去重消歧的详细记录到实例变量
+                self._save_dedup_details(dedup_details, entity_nodes, dedup_entity_nodes)
                 
                 result_tuple = (
                     dialogue_nodes,
@@ -1009,7 +1137,11 @@ class ExtractionOrchestrator:
                     _,
                     final_statement_entity_edges,
                     final_entity_entity_edges,
+                    dedup_details,
                 ) = result_tuple
+                
+                # 保存去重消歧的详细记录到实例变量
+                self._save_dedup_details(dedup_details, entity_nodes, final_entity_nodes)
 
             logger.info(
                 f"去重后: {len(final_entity_nodes)} 个实体节点, "
@@ -1021,6 +1153,46 @@ class ExtractionOrchestrator:
                 f"陈述句-实体边减少 {len(statement_entity_edges) - len(final_statement_entity_edges)}, "
                 f"实体-实体边减少 {len(entity_entity_edges) - len(final_entity_entity_edges)}"
             )
+            
+            # 进度回调：输出去重消歧的具体结果
+            if self.progress_callback:
+                # 分析实体合并情况
+                merge_info = await self._analyze_entity_merges(entity_nodes, final_entity_nodes)
+                
+                # 输出去重合并的实体示例
+                for i, merge_detail in enumerate(merge_info[:5]):  # 输出前5个去重结果
+                    dedup_result = {
+                        "result_type": "entity_merge",
+                        "merged_entity_name": merge_detail["main_entity_name"],
+                        "merged_count": merge_detail["merged_count"],
+                        "message": f"{merge_detail['main_entity_name']}合并{merge_detail['merged_count']}个：相似实体已合并"
+                    }
+                    await self.progress_callback("dedup_disambiguation_result", "实体去重完成", dedup_result)
+                
+                # 分析实体消歧情况
+                disamb_info = await self._analyze_entity_disambiguation(entity_nodes, final_entity_nodes)
+                
+                # 输出实体消歧的结果
+                for i, disamb_detail in enumerate(disamb_info[:5]):  # 输出前5个消歧结果
+                    disamb_result = {
+                        "result_type": "entity_disambiguation",
+                        "disambiguated_entity_name": disamb_detail["entity_name"],
+                        "disambiguation_type": disamb_detail["disamb_type"],
+                        "confidence": disamb_detail.get("confidence", "unknown"),
+                        "reason": disamb_detail.get("reason", ""),
+                        "message": f"{disamb_detail['entity_name']}消歧完成：{disamb_detail['disamb_type']}"
+                    }
+                    await self.progress_callback("dedup_disambiguation_result", "实体消歧完成", disamb_result)
+                
+
+                
+                # 进度回调：去重消歧完成，传递去重和消歧的具体效果
+                await self._send_dedup_progress_callback(
+                    len(entity_nodes), len(final_entity_nodes),
+                    len(statement_entity_edges), len(final_statement_entity_edges),
+                    len(entity_entity_edges), len(final_entity_entity_edges)
+                )
+ 
 
             # 写入提取结果汇总（试运行和正式模式都需要生成）
             try:
@@ -1040,6 +1212,378 @@ class ExtractionOrchestrator:
         except Exception as e:
             logger.error(f"两阶段去重失败: {e}", exc_info=True)
             raise
+
+    def _save_dedup_details(
+        self,
+        dedup_details: Dict[str, Any],
+        original_entities: List[ExtractedEntityNode],
+        final_entities: List[ExtractedEntityNode]
+    ):
+        """
+        保存去重消歧的详细记录到实例变量（基于内存数据结构）
+        
+        Args:
+            dedup_details: 去重函数返回的详细记录
+            original_entities: 去重前的实体列表
+            final_entities: 去重后的实体列表
+        """
+        try:
+            # 保存ID重定向映射
+            self.id_redirect_map = dedup_details.get("id_redirect", {})
+            
+            # 处理精确匹配的合并记录
+            exact_merge_map = dedup_details.get("exact_merge_map", {})
+            for key, info in exact_merge_map.items():
+                merged_ids = info.get("merged_ids", set())
+                if merged_ids:
+                    self.dedup_merge_records.append({
+                        "type": "精确匹配",
+                        "canonical_id": info.get("canonical_id"),
+                        "entity_name": info.get("name"),
+                        "entity_type": info.get("entity_type"),
+                        "merged_count": len(merged_ids),
+                        "merged_ids": list(merged_ids)
+                    })
+            
+            # 处理模糊匹配的合并记录
+            fuzzy_merge_records = dedup_details.get("fuzzy_merge_records", [])
+            for record in fuzzy_merge_records:
+                # 解析模糊匹配记录字符串
+                # 格式: "[模糊] 规范实体 id (group|name|type) <- 合并实体 id (group|name|type) | s_name=0.xxx, ..."
+                try:
+                    import re
+                    match = re.search(r"规范实体 (\S+) \(([^|]+)\|([^|]+)\|([^)]+)\) <- 合并实体 (\S+)", record)
+                    if match:
+                        self.dedup_merge_records.append({
+                            "type": "模糊匹配",
+                            "canonical_id": match.group(1),
+                            "entity_name": match.group(3),
+                            "entity_type": match.group(4),
+                            "merged_count": 1,
+                            "merged_ids": [match.group(5)]
+                        })
+                except Exception as e:
+                    logger.debug(f"解析模糊匹配记录失败: {record}, 错误: {e}")
+            
+            # 处理LLM去重的合并记录
+            llm_decision_records = dedup_details.get("llm_decision_records", [])
+            for record in llm_decision_records:
+                if "[LLM去重]" in str(record):
+                    try:
+                        import re
+                        # 格式: "[LLM去重] 同名类型相似 name1（type1）|name2（type2） | conf=0.xx | reason=..."
+                        match = re.search(r"同名类型相似 ([^（]+)（([^）]+)）\|([^（]+)（([^）]+)）", record)
+                        if match:
+                            self.dedup_merge_records.append({
+                                "type": "LLM去重",
+                                "entity_name": match.group(1),
+                                "entity_type": f"{match.group(2)}|{match.group(4)}",
+                                "merged_count": 1,
+                                "merged_ids": []
+                            })
+                    except Exception as e:
+                        logger.debug(f"解析LLM去重记录失败: {record}, 错误: {e}")
+            
+            # 处理消歧记录
+            disamb_records = dedup_details.get("disamb_records", [])
+            for record in disamb_records:
+                if "[DISAMB阻断]" in str(record):
+                    try:
+                        import re
+                        # 格式: "[DISAMB阻断] name1（type1）|name2（type2） | conf=0.xx | reason=..."
+                        content = str(record).replace("[DISAMB阻断]", "").strip()
+                        match = re.search(r"([^（]+)（([^）]+)）\|([^（]+)（([^）]+)）", content)
+                        if match:
+                            entity1_name = match.group(1).strip()
+                            entity1_type = match.group(2)
+                            entity2_name = match.group(3).strip()
+                            entity2_type = match.group(4)
+                            
+                            # 提取置信度和原因
+                            conf_match = re.search(r"conf=([0-9.]+)", str(record))
+                            confidence = conf_match.group(1) if conf_match else "unknown"
+                            
+                            reason_match = re.search(r"reason=([^|]+)", str(record))
+                            reason = reason_match.group(1).strip() if reason_match else ""
+                            
+                            self.dedup_disamb_records.append({
+                                "entity_name": entity1_name,
+                                "disamb_type": f"消歧阻断：{entity1_type} vs {entity2_type}",
+                                "confidence": confidence,
+                                "reason": reason[:100] + "..." if len(reason) > 100 else reason
+                            })
+                    except Exception as e:
+                        logger.debug(f"解析消歧记录失败: {record}, 错误: {e}")
+            
+            logger.info(f"保存去重消歧记录：{len(self.dedup_merge_records)} 个合并记录，{len(self.dedup_disamb_records)} 个消歧记录")
+            
+        except Exception as e:
+            logger.error(f"保存去重消歧详情失败: {e}", exc_info=True)
+
+    async def _analyze_entity_merges(
+        self,
+        original_entities: List[ExtractedEntityNode],
+        final_entities: List[ExtractedEntityNode]
+    ) -> List[Dict[str, Any]]:
+        """
+        分析实体合并情况，直接使用内存中的合并记录（不再解析日志文件）
+        
+        Args:
+            original_entities: 去重前的实体列表
+            final_entities: 去重后的实体列表
+            
+        Returns:
+            合并详情列表，每个元素包含主实体名称和合并数量
+        """
+        try:
+            # 直接使用保存的合并记录
+            if self.dedup_merge_records:
+                # 按合并数量排序，返回前几个
+                sorted_records = sorted(
+                    self.dedup_merge_records,
+                    key=lambda x: x.get("merged_count", 0),
+                    reverse=True
+                )
+                
+                merge_info = []
+                for record in sorted_records:
+                    merge_info.append({
+                        "main_entity_name": record.get("entity_name", "未知实体"),
+                        "merged_count": record.get("merged_count", 1)
+                    })
+                
+                return merge_info
+            
+            # 如果没有保存的记录，返回空列表
+            logger.info("未找到实体合并记录")
+            return []
+            
+        except Exception as e:
+            logger.error(f"分析实体合并情况失败: {e}", exc_info=True)
+            return []
+
+    async def _analyze_entity_disambiguation(
+        self,
+        original_entities: List[ExtractedEntityNode],
+        final_entities: List[ExtractedEntityNode]
+    ) -> List[Dict[str, Any]]:
+        """
+        分析实体消歧情况，直接使用内存中的消歧记录（不再解析日志文件）
+        
+        Args:
+            original_entities: 去重前的实体列表
+            final_entities: 去重后的实体列表
+            
+        Returns:
+            消歧详情列表，每个元素包含实体名称和消歧类型
+        """
+        try:
+            # 直接使用保存的消歧记录
+            if self.dedup_disamb_records:
+                return self.dedup_disamb_records
+            
+            # 如果没有保存的记录，返回空列表
+            logger.info("未找到实体消歧记录")
+            return []
+            
+        except Exception as e:
+            logger.error(f"分析实体消歧情况失败: {e}", exc_info=True)
+            return []
+
+    def _get_entity_type_display_name(self, entity_type: str) -> str:
+        """
+        获取实体类型的中文显示名称
+        
+        Args:
+            entity_type: 英文实体类型
+            
+        Returns:
+            中文显示名称
+        """
+        type_mapping = {
+            "Person": "人物实体节点",
+            "Organization": "组织实体节点", 
+            "ORG": "组织实体节点",
+            "Location": "地点实体节点",
+            "LOC": "地点实体节点",
+            "Event": "事件实体节点",
+            "Concept": "概念实体节点",
+            "Time": "时间实体节点",
+            "Position": "职位实体节点",
+            "WorkRole": "职业实体节点",
+            "System": "系统实体节点",
+            "Policy": "政策实体节点",
+            "HistoricalPeriod": "历史时期实体节点",
+            "HistoricalState": "历史国家实体节点",
+            "HistoricalEvent": "历史事件实体节点",
+            "EconomicFactor": "经济因素实体节点",
+            "Condition": "条件实体节点",
+            "Numeric": "数值实体节点"
+        }
+        return type_mapping.get(entity_type, f"{entity_type}实体节点")
+
+    async def _output_relationship_creation_results(
+        self, 
+        entity_entity_edges: List[EntityEntityEdge], 
+        entity_nodes: List[ExtractedEntityNode]
+    ):
+        """
+        输出关系创建结果
+        
+        Args:
+            entity_entity_edges: 实体-实体边列表
+            entity_nodes: 实体节点列表
+        """
+        try:
+            # 创建实体ID到名称的映射
+            entity_id_to_name = {node.id: node.name for node in entity_nodes}
+            
+            # 输出关系创建结果
+            for i, edge in enumerate(entity_entity_edges[:10]):  # 只输出前10个关系
+                source_name = entity_id_to_name.get(edge.source, f"Entity_{edge.source}")
+                target_name = entity_id_to_name.get(edge.target, f"Entity_{edge.target}")
+                relation_type = edge.relation_type
+                
+                relationship_result = {
+                    "result_type": "relationship_creation",
+                    "relationship_index": i + 1,
+                    "source_entity": source_name,
+                    "relation_type": relation_type,
+                    "target_entity": target_name,
+                    "relationship_text": f"{source_name} -[{relation_type}]-> {target_name}"
+                }
+                
+                await self.progress_callback("creating_nodes_edges_result", "关系创建", relationship_result)
+                
+        except Exception as e:
+            logger.error(f"输出关系创建结果失败: {e}", exc_info=True)
+
+    async def _send_dedup_progress_callback(
+        self,
+        original_entities: int,
+        final_entities: int,
+        original_stmt_edges: int,
+        final_stmt_edges: int,
+        original_ent_edges: int,
+        final_ent_edges: int,
+    ):
+        """
+        发送去重消歧完成的进度回调，传递具体的去重和消歧效果
+        
+        Args:
+            original_entities: 去重前实体数量
+            final_entities: 去重后实体数量
+            original_stmt_edges: 去重前陈述句-实体边数量
+            final_stmt_edges: 去重后陈述句-实体边数量
+            original_ent_edges: 去重前实体-实体边数量
+            final_ent_edges: 去重后实体-实体边数量
+        """
+        try:
+            # 解析去重消歧报告文件，获取具体的去重和消歧效果
+            dedup_details = await self._parse_dedup_report()
+            
+            # 计算去重效果统计
+            entities_reduced = original_entities - final_entities
+            stmt_edges_reduced = original_stmt_edges - final_stmt_edges
+            ent_edges_reduced = original_ent_edges - final_ent_edges
+            
+            # 构建进度回调数据
+            dedup_stats = {
+                "entities": {
+                    "original_count": original_entities,
+                    "final_count": final_entities,
+                    "reduced_count": entities_reduced,
+                    "reduction_rate": round(entities_reduced / original_entities * 100, 1) if original_entities > 0 else 0,
+                },
+                "statement_entity_edges": {
+                    "original_count": original_stmt_edges,
+                    "final_count": final_stmt_edges,
+                    "reduced_count": stmt_edges_reduced,
+                },
+                "entity_entity_edges": {
+                    "original_count": original_ent_edges,
+                    "final_count": final_ent_edges,
+                    "reduced_count": ent_edges_reduced,
+                },
+                "dedup_examples": dedup_details.get("dedup_examples", []),
+                "disamb_examples": dedup_details.get("disamb_examples", []),
+                "summary": {
+                    "total_merges": dedup_details.get("total_merges", 0),
+                    "total_disambiguations": dedup_details.get("total_disambiguations", 0),
+                }
+            }
+            
+            await self.progress_callback("dedup_disambiguation_complete", "去重消歧完成", dedup_stats)
+            
+        except Exception as e:
+            logger.error(f"发送去重消歧进度回调失败: {e}", exc_info=True)
+            # 即使解析失败，也发送基本的统计信息
+            try:
+                basic_stats = {
+                    "entities": {
+                        "original_count": original_entities,
+                        "final_count": final_entities,
+                        "reduced_count": original_entities - final_entities,
+                    },
+                    "summary": f"实体去重合并{original_entities - final_entities}个"
+                }
+                await self.progress_callback("dedup_disambiguation_complete", "去重消歧完成", basic_stats)
+            except Exception as e2:
+                logger.error(f"发送基本去重统计失败: {e2}", exc_info=True)
+
+    async def _parse_dedup_report(self) -> Dict[str, Any]:
+        """
+        获取去重消歧报告，直接使用内存中的记录（不再解析日志文件）
+        
+        Returns:
+            包含去重和消歧详细信息的字典
+        """
+        try:
+            # 直接使用保存的记录构建报告
+            dedup_examples = []
+            disamb_examples = []
+            total_merges = 0
+            total_disambiguations = 0
+            
+            # 处理合并记录
+            for record in self.dedup_merge_records:
+                merge_count = record.get("merged_count", 0)
+                total_merges += merge_count
+                
+                dedup_examples.append({
+                    "type": record.get("type", "未知"),
+                    "entity_name": record.get("entity_name", "未知实体"),
+                    "entity_type": record.get("entity_type", "未知类型"),
+                    "merge_count": merge_count,
+                    "description": f"{record.get('entity_name', '未知实体')}实体去重合并{merge_count}个"
+                })
+            
+            # 处理消歧记录
+            for record in self.dedup_disamb_records:
+                total_disambiguations += 1
+                
+                # 从消歧类型中提取实体类型信息
+                disamb_type = record.get("disamb_type", "")
+                entity_name = record.get("entity_name", "未知实体")
+                
+                disamb_examples.append({
+                    "entity1_name": entity_name,
+                    "entity1_type": disamb_type.split("vs")[0].replace("消歧阻断：", "").strip() if "vs" in disamb_type else "未知",
+                    "entity2_name": entity_name,
+                    "entity2_type": disamb_type.split("vs")[1].strip() if "vs" in disamb_type else "未知",
+                    "description": f"{entity_name}，消歧区分成功"
+                })
+            
+            return {
+                "dedup_examples": dedup_examples[:5],  # 只返回前5个示例
+                "disamb_examples": disamb_examples[:5],  # 只返回前5个示例
+                "total_merges": total_merges,
+                "total_disambiguations": total_disambiguations,
+            }
+            
+        except Exception as e:
+            logger.error(f"获取去重报告失败: {e}", exc_info=True)
+            return {"dedup_examples": [], "disamb_examples": [], "total_merges": 0, "total_disambiguations": 0}
 
 
 # ============================================================================

@@ -13,7 +13,7 @@ from app.db import Base
 class ApiKeyType(StrEnum):
     """API Key 类型"""
     AGENT = "agent"  # 智能体
-    CLUSTER = "cluster"  # 集群
+    CLUSTER = "multi_agent"  # 集群
     WORKFLOW = "workflow"  # 工作流
     SERVICE = "service"  # 服务
 

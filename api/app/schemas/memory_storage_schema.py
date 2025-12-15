@@ -46,6 +46,7 @@ class ConflictResultSchema(BaseModel):
     conflict_memory: Optional[BaseDataSchema] = Field(None, description="The conflict memory data.")
 
     @model_validator(mode="before")
+    @classmethod
     def _normalize_data(cls, v):
         if isinstance(v, dict):
             d = v.get("data")
@@ -60,6 +61,7 @@ class ConflictSchema(BaseModel):
     conflict_memory: Optional[BaseDataSchema] = Field(None, description="The conflict memory data.")
 
     @model_validator(mode="before")
+    @classmethod
     def _normalize_data(cls, v):
         if isinstance(v, dict):
             d = v.get("data")
@@ -88,6 +90,7 @@ class ReflexionResultSchema(BaseModel):
     resolved: Optional[ResolvedSchema] = Field(None, description="The resolved memory data.")
 
     @model_validator(mode="before")
+    @classmethod
     def _normalize_resolved(cls, v):
         if isinstance(v, dict):
             conflict = v.get("conflict")
@@ -311,7 +314,7 @@ class ApiResponse(BaseModel):  # 通用API响应模型
 
 
 def _now_ms() -> int:
-    return int(round(time.time() * 1000))
+    return round(time.time() * 1000)
 
 
 def ok(msg: str = "OK", data: Optional[Any] = None, time: Optional[int] = None) -> ApiResponse:
