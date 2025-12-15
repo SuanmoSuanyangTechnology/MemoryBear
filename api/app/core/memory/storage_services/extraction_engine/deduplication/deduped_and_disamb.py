@@ -2,7 +2,7 @@
 去重功能函数
 """
 from app.core.memory.models.variate_config import DedupConfig
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any
 from app.core.memory.models.graph_models import(
     StatementEntityEdge,
     EntityEntityEdge,
@@ -895,7 +895,12 @@ async def deduplicate_entities_and_edges(
     report_append: bool = False,
     report_stage_notes: List[str] | None = None,
     dedup_config: DedupConfig | None = None,
-) -> Tuple[List[ExtractedEntityNode], List[StatementEntityEdge], List[EntityEntityEdge]]:
+) -> Tuple[
+    List[ExtractedEntityNode], 
+    List[StatementEntityEdge], 
+    List[EntityEntityEdge],
+    Dict[str, Any]  # 新增：返回详细的去重消歧记录
+]:
     """
     主流程：依次执行精确匹配、模糊匹配与（可选）LLM 决策融合，随后对边做重定向与去重。之后再处理边，是关系去重和消歧
     返回：去重后的实体、语句→实体边、实体↔实体边。
@@ -981,8 +986,18 @@ async def deduplicate_entities_and_edges(
         append=report_append,
         stage_notes=report_stage_notes,
     )
+    
+    # 构建详细的去重消歧记录（用于内存访问，避免解析日志文件）
+    dedup_details = {
+        "exact_merge_map": exact_merge_map,
+        "fuzzy_merge_records": fuzzy_merge_records,
+        "llm_decision_records": local_llm_records,
+        "disamb_records": disamb_records,
+        "id_redirect": id_redirect,
+        "blocked_pairs": blocked_pairs,
+    }
 
-    return deduped_entities, list(stmt_ent_map.values()), list(ent_ent_map.values())
+    return deduped_entities, list(stmt_ent_map.values()), list(ent_ent_map.values()), dedup_details
 
 # 独立模块：去重融合报告写入（与实体/边的计算解耦）
 def _write_dedup_fusion_report(

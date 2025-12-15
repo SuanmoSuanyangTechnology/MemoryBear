@@ -1,8 +1,9 @@
-from typing import Optional
+from typing import Optional, Union
 import os
 import uuid
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, Query, UploadFile
+from fastapi import APIRouter, Depends, UploadFile
+from fastapi.responses import StreamingResponse
 
 
 from app.db import get_db
@@ -322,36 +323,24 @@ def read_all_config(
         return fail(BizCode.INTERNAL_ERROR, "查询所有配置失败", str(e))
 
 
-@router.post("/pilot_run", response_model=ApiResponse) # 试运行：触发执行主管线，使用 POST 更为合理
+@router.post("/pilot_run", response_model=None)
 async def pilot_run(
     payload: ConfigPilotRun,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
+) -> StreamingResponse:
     api_logger.info(f"Pilot run requested: config_id={payload.config_id}, dialogue_text_length={len(payload.dialogue_text)}")
     
-    # 先尝试从数据库加载配置
-    try:
-        config_loaded = reload_configuration_from_database(str(payload.config_id))
-        if not config_loaded:
-            api_logger.error(f"Failed to load configuration for config_id: {payload.config_id}")
-            return fail(BizCode.INTERNAL_ERROR, "配置加载失败", f"无法加载 config_id={payload.config_id} 的配置")
-        api_logger.info(f"Configuration loaded successfully for config_id: {payload.config_id}")
-    except Exception as e:
-        api_logger.error(f"Exception while loading configuration: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "配置加载异常", str(e))
-    
-    try:
-        svc = DataConfigService(db)
-        result = await svc.pilot_run(payload)
-        return success(data=result, msg="试运行完成")
-    except ValueError as e:
-        # 捕获参数验证错误
-        api_logger.error(f"Pilot run parameter validation failed: {str(e)}")
-        return fail(BizCode.INVALID_PARAMETER, "参数验证失败", str(e))
-    except Exception as e:
-        api_logger.error(f"Pilot run failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "试运行失败", str(e))
+    svc = DataConfigService(db)
+    return StreamingResponse(
+        svc.pilot_run_stream(payload),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 """
 以下为搜索与分析接口，直接挂载到同一 router，统一响应为 ApiResponse。

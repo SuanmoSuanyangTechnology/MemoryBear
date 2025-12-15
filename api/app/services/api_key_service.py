@@ -43,12 +43,13 @@ class ApiKeyService:
             existing = db.scalar(
                 select(ApiKey).where(
                     ApiKey.workspace_id == workspace_id,
+                    ApiKey.resource_id == data.resource_id,
                     ApiKey.name == data.name,
                     ApiKey.is_active
                 )
             )
             if existing:
-                raise BusinessException(f"API Key 名称 '{data.name}' 已存在", BizCode.API_KEY_DUPLICATE_NAME)
+                raise BusinessException(f"API Key 名称 {data.name} 已存在", BizCode.API_KEY_DUPLICATE_NAME)
 
             # 生成 API Key
             api_key = generate_api_key(data.type)
@@ -137,21 +138,19 @@ class ApiKeyService:
         """更新 API Key配置"""
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
 
-        if not api_key:
-            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
-
         # 检查名称重复
         if data.name and data.name != api_key.name:
             existing = db.scalar(
                 select(ApiKey).where(
                     ApiKey.workspace_id == workspace_id,
+                    ApiKey.resource_id == data.resource_id,
                     ApiKey.name == data.name,
                     ApiKey.is_active,
                     ApiKey.id != api_key_id
                 )
             )
             if existing:
-                raise BusinessException(f"API Key 名称 '{data.name}' 已存在", BizCode.API_KEY_DUPLICATE_NAME)
+                raise BusinessException(f"API Key 名称 {data.name} 已存在", BizCode.API_KEY_DUPLICATE_NAME)
 
         update_data = data.model_dump(exclude_unset=True)
         ApiKeyRepository.update(db, api_key_id, update_data)
@@ -170,9 +169,6 @@ class ApiKeyService:
         """删除 API Key"""
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
 
-        if not api_key:
-            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
-
         ApiKeyRepository.delete(db, api_key_id)
         db.commit()
 
@@ -187,9 +183,6 @@ class ApiKeyService:
     ) -> ApiKey:
         """重新生成 API Key"""
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
-
-        if not api_key:
-            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
 
         # 检查 API Key 是否激活
         if not api_key.is_active:
@@ -217,9 +210,6 @@ class ApiKeyService:
         """获取使用统计"""
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
 
-        if not api_key:
-            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
-
         stats_data = ApiKeyRepository.get_stats(db, api_key_id)
         return api_key_schema.ApiKeyStats(**stats_data)
 
@@ -235,9 +225,6 @@ class ApiKeyService:
         """获取 API Key 使用日志"""
         # 验证 API Key 权限
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
-
-        if not api_key:
-            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
 
         items, total = ApiKeyLogRepository.list_by_api_key(
             db, api_key_id, filters, page, pagesize

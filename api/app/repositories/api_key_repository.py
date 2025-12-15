@@ -126,6 +126,7 @@ class ApiKeyRepository:
             "quota_used": api_key.quota_used,
             "quota_limit": api_key.quota_limit,
             "last_used_at": api_key.last_used_at,
+            "rate_limit": api_key.rate_limit,
             "avg_response_time": float(avg_response_time) if avg_response_time else None
         }
 
