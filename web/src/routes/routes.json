@@ -25,6 +25,7 @@
       { "path": "/knowledge-base/:knowledgeBaseId/share", "element": "Share" },
       { "path": "/knowledge-base/:knowledgeBaseId/create-dataset", "element": "CreateDataset" },
       { "path": "/knowledge-base/:knowledgeBaseId/DocumentDetails", "element": "DocumentDetails" },
+      { "path": "/api-key", "element": "ApiKeyManagement" },
       { "path": "/no-permission", "element": "NoPermission" },
       { "path": "/*", "element": "NotFound" }
     ]

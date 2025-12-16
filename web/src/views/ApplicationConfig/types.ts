@@ -188,3 +188,9 @@ export interface SubAgentItem {
 export interface SubAgentModalRef {
   handleOpen: (agent?: SubAgentItem) => void;
 }
+export interface ApiKeyModalRef {
+  handleOpen: () => void;
+}
+export interface ApiKeyConfigModalRef {
+  handleOpen: (apiKey: ApiKey) => void;
+}

@@ -243,6 +243,21 @@
       "icon": null,
       "iconActive": null,
       "subs": null
+    },
+    {
+      "id": 11,
+      "parent": 0,
+      "code": "apiKey",
+      "label": "API KEY管理",
+      "i18nKey": "menu.apiKeyManagement",
+      "path": "/api-key",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "icon": null,
+      "iconActive": null,
+      "subs": null
     }
   ]
 }
