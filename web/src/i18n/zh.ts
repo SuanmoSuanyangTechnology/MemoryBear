@@ -310,7 +310,7 @@ export const zh = {
       promptConfiguration: '提示词配置',
       configurationDesc: '定义Agent的角色、能力和行为准则',
       aiPrompt: 'AI提示词',
-      promptPlaceholder: '你是一个专业的AI助手，你的职责是..',
+      promptPlaceholder: '你是一个专业的AI助手，你的职责是帮助用户解决问题。',
       knowledgeBaseAssociation: '知识库关联',
       associatedKnowledgeBase: '关联知识库',
       addKnowledgeBase: '添加知识库',
@@ -894,6 +894,17 @@ export const zh = {
 
       saveConfig: '保存配置',
       apiKeyName: 'API密钥名称',
+
+      llm: 'LLM',
+      chat: 'Chat',
+      embedding: 'Embedding',
+      rerank: 'Rerank',
+      openai: "Openai",
+      dashscope: "Dashscope",
+      ollama: "Ollama",
+      xinference: "Xinference",
+      gpustack: "Gpustack",
+      bedrock: "Bedrock"
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',
@@ -1002,8 +1013,6 @@ export const zh = {
       inviteToMember: '邀请成员',
       member: '成员',
       memberDesc: '只能使用应用，不能创建应用',
-      admin: '管理员',
-      adminDesc: '可以创建应用和管理团队设置',
       sendInvitation: '发送邀请',
       manager: '管理员',
       managerDesc: '可以创建应用和管理团队设置',
