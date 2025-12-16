@@ -6,7 +6,6 @@ import { useNavigationBreadcrumbs } from '@/hooks/useNavigationBreadcrumbs';
 import AppHeader from '@/components/Header';
 import Sider from '@/components/SiderMenu'
 import { useUser } from '@/store/user';
-import { cookieUtils } from '@/utils/request';
 
 
 const { Content } = Layout;
@@ -19,12 +18,7 @@ const AuthLayout: FC = () => {
   // 自动更新面包屑导航
   useNavigationBreadcrumbs('manage');
   useEffect(() => {
-    const authToken = cookieUtils.get('authToken')
-    if (!authToken && !window.location.hash.includes('#/login')) {
-      window.location.href = `/#/login`;
-    } else {
-      getUserInfo()
-    }
+    getUserInfo()
   }, []);
 
   return (

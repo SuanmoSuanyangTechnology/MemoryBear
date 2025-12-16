@@ -2,9 +2,9 @@ import { type FC, useRef, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
 import { Input, Form } from 'antd'
-import ChatIcon from '@/assets/images/application/chat.png'
+import ChatIcon from '@/assets/images/application/chat.svg'
 import ChatSendIcon from '@/assets/images/application/chatSend.svg'
-import DebuggingEmpty from '@/assets/images/application/debuggingEmpty.png'
+import DebuggingEmpty from '@/assets/images/application/debuggingEmpty.svg'
 import type { ChatItem, ChatData, Config } from '../types'
 import { runCompare, draftRun } from '@/api/application'
 import Empty from '@/components/Empty'
@@ -240,7 +240,6 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       {chatList.length === 0
         ? <Empty 
           url={DebuggingEmpty} 
-          size={[300, 200]}
           title={t('application.debuggingEmpty')} 
           subTitle={t('application.debuggingEmptyDesc')} 
           className="rb:h-full"
@@ -272,7 +271,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
                 </div>
               }
               {!chat.list || chat.list.length === 0
-                ? <Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} className="rb:h-full" size={[240, 200]} />
+                ? <Empty url={ChatIcon} title={t('application.chatEmpty')} className="rb:h-full" />
                 : (
                   <div ref={el => scrollContainerRefs.current[index] = el} className={clsx(`rb:relative rb:overflow-y-auto rb:overflow-x-hidden`, {
                     'rb:h-[calc(100vh-186px)]': isCluster,
