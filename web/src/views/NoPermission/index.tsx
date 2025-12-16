@@ -8,6 +8,7 @@ const NoPermission = () => {
   return (
     <Empty
       url={noPermission}
+      size={[240, 240]}
       title={t('empty.noPermission')}
       subTitle={t('empty.noPermissionDesc')}
       className="rb:h-[calc(100vh-84px)]"

@@ -9,7 +9,7 @@ interface ApiResponse<T> {
   items?: T[];
 }
 
-interface CustomSelectProps {
+interface CustomSelectProps extends Omit<SelectProps, 'filterOption'> {
   url: string;
   params?: Record<string, unknown>;
   valueKey?: string;
