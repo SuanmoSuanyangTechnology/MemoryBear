@@ -199,7 +199,7 @@ const Cluster: FC<{application: SubAgentItem}> = ({application}) => {
             chatList={chatList}
             updateChatList={setChatList}
             handleSave={handleSave}
-            source="cluster"
+            source="multi_agent"
           />
         </RbCard>
       </Col>

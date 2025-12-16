@@ -21,7 +21,7 @@ export const en = {
       userMemory: 'User Memory',
       memberManagement: 'Member Management',
       memorySummary: 'Memory Summary',
-      memoryConversation: 'Memory Verification',
+      memoryConversation: 'Memory Validation',
       memorySummaryHandlers: 'Memory Summary Handlers',
       createMemorySummary: 'Create Memory Summary',
       memoryManagement: 'Memory Management',
@@ -1054,7 +1054,6 @@ export const en = {
 
       exampleMemoryExtractionResults: 'Example memory extraction results',
       exampleMemoryExtractionResultsSubTitle: '(from a technology conference)',
-      warning: 'When you modify the configuration items on the left, the extraction conclusion will be updated in real-time here',
 
       extractTheNumberOfEntities: 'Extract the number of entities',
       extractTheNumberOfEntitiesDesc: 'Merge after deduplication: {{num}} (exact: {{exact}}, fuzzy: {{fuzzy}}, LLM: {{llm}})',
@@ -1145,7 +1144,29 @@ Memory Bear: Qin succeeded for several reasons: Shang Yang’s reforms were thor
 
 Student: Then switching to Tang history: after the An Lushan Rebellion, the central government began reforms, so why did regional warlordism (the fanzhen problem) actually get worse?
 Memory Bear: After the rebellion, regional warlordism intensified for several reasons: military governors (jiedushi) held the power to recruit troops, control local finances, and command military forces, effectively becoming regional warlords; the central government’s finances declined due to the breakdown of the equal-field system and the collapse of the tax-labor system, making it increasingly unable to support the army, which pushed military forces to rely on the jiedushi; the recruitment-based military system made soldiers loyal to individual commanders rather than the state; eunuchs controlled the imperial guards, the civil bureaucracy lost influence, and the central government’s ability to balance regional power weakened.
-`
+`,
+
+      warning: 'When you modify the configuration items on the left, click [Debug], and the extraction conclusions will be updated in real time here',
+      processing: 'Configuration updated, re-extracting sample memory...',
+      success: 'Memory extraction completed!',
+      overallProgress: 'Overall Progress',
+      text_preprocessing: 'Text Preprocessing',
+      fragment: 'Fragment',
+      knowledge_extraction: 'Knowledge Extraction',
+      creating_nodes_edges: 'Creating Entity Relationships',
+      deduplication: 'Deduplication and Disambiguation',
+      status: {
+        pending: 'Pending',
+        processing: 'Processing',
+        completed: 'Completed',
+        failed: 'Failed'
+      },
+      time: 'Time: ',
+      
+      text_preprocessing_desc: 'Text split into {{count}} semantic fragments',
+      knowledge_extraction_desc: 'Knowledge extraction completed, identified {{entities}} entities, {{statements}} statements, {{temporal_ranges_count}} temporal extractions, {{triplets}} triplets',
+      creating_nodes_edges_desc: 'Entity relationship creation completed, {{num}} relationships in total',
+      deduplication_desc: 'Deduplication and disambiguation completed, {{count}} unique entities in total'
     },
     memoryConversation: {
       searchPlaceholder: 'Input user ID...',

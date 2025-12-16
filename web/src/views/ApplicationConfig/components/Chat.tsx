@@ -265,6 +265,11 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
             const { conversation_id, content, message_length } = item.data as { conversation_id: string, content: string, message_length: number };
 
             switch(item.event) {
+              case 'start':
+                if (conversation_id && conversationId !== conversation_id) {
+                  setConversationId(conversation_id);
+                }
+                break
               case 'message':
                 updateClusterAssistantMessage(content)
                 if (conversation_id && conversationId !== conversation_id) {

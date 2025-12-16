@@ -1127,7 +1127,6 @@ export const zh = {
 
       exampleMemoryExtractionResults: '示例记忆提取结果',
       exampleMemoryExtractionResultsSubTitle: '（来自技术会议）',
-      warning: '当您修改左侧的配置项时，提取结论将在此处实时更新',
 
       extractTheNumberOfEntities: '提取实体数量',
       extractTheNumberOfEntitiesDesc: '去重后合并：{{num}}（精确：{{exact}}，模糊：{{fuzzy}}，LLM：{{llm}}）',
@@ -1217,7 +1216,29 @@ export const zh = {
 记忆熊：秦国统一的原因包括：商鞅变法彻底，建立法律、户籍和军功爵制度，提升国家组织能力；旧贵族势力弱，中央集权程度高；关中地理优越，资源丰富且易守难攻；从孝公到秦始皇政策连续性强。
 
 学生：那我换到唐朝史：安史之乱后，中央已开始整顿，为何藩镇割据反而加剧？
-记忆熊：安史之乱后藩镇割据加剧的原因包括：节度使掌握募兵权、财政调度权与军事指挥权，形成地方军阀；中央财政因均田制瓦解和租庸调失效而衰退，难以支撑军队，导致地方军事力量依附节度使；募兵制使士兵效忠个人而非国家；宦官掌控禁军，文官集团失势，中央制衡能力削弱。`
+记忆熊：安史之乱后藩镇割据加剧的原因包括：节度使掌握募兵权、财政调度权与军事指挥权，形成地方军阀；中央财政因均田制瓦解和租庸调失效而衰退，难以支撑军队，导致地方军事力量依附节度使；募兵制使士兵效忠个人而非国家；宦官掌控禁军，文官集团失势，中央制衡能力削弱。`,
+      
+      warning: '当您修改左侧的配置项后，点击【调试】，提取结论将在此处实时更新',
+      processing: '配置已更新，正在重新萃取示例记忆...',
+      success: '记忆萃取完成！',
+      overallProgress: '整体进度',
+      text_preprocessing: '文本预处理',
+      fragment: '片段',
+      knowledge_extraction: '知识抽取',
+      creating_nodes_edges: '创建实体关系',
+      deduplication: '去重消歧',
+      status: {
+        pending: '等待中',
+        processing: '处理中',
+        completed: '已完成',
+        failed: '失败'
+      },
+      time: '耗时: ',
+      
+      text_preprocessing_desc: '文本切分为{{count}}个语义片段',
+      knowledge_extraction_desc: '知识抽取完成，共识别{{entities}}个实体,{{statements}}个句子, {{temporal_ranges_count}}个时间提取, {{triplets}}个三元组',
+      creating_nodes_edges_desc: '实体关系创建完成，共{{num}}条关系',
+      deduplication_desc: '去重消歧完成，最终{{count}}个唯一实体'
     },
     memoryConversation: {
       searchPlaceholder: '输入用户ID...',
