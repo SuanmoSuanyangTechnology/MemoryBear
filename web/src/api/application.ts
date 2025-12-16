@@ -1,7 +1,8 @@
 import { request } from '@/utils/request'
 import type { Application } from '@/views/ApplicationManagement/types'
 import type { Config } from '@/views/ApplicationConfig/types'
-import { handleSSE } from '@/utils/stream'
+import { handleSSE, type SSEMessage } from '@/utils/stream'
+import type { QueryParams } from '@/views/Conversation/types'
 
 // 应用列表
 export const getApplicationListUrl = '/apps'
@@ -37,10 +38,10 @@ export const saveMultiAgentConfig = (app_id: string, values: Config) => {
   return request.put(`/apps/${app_id}/multi-agent`, values)
 }
 // 模型比对试运行
-export const runCompare = (app_id: string, values: Record<string, unknown>, onMessage?: (data: string) => void) => {
+export const runCompare = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void) => {
   return handleSSE(`/apps/${app_id}/draft/run/compare`, values, onMessage)
 }
-export const draftRun = (app_id: string, values: Record<string, unknown>, onMessage?: (data: string) => void) => {
+export const draftRun = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void) => {
   return handleSSE(`/apps/${app_id}/draft/run`, values, onMessage)
 }
 // 删除应用
@@ -76,18 +77,7 @@ export const getConversationHistory = (share_token: string, data: { page: number
   })
 }
 // 发送体验对话
-export const sendConversation = (share_token: string, values: {
-  message: string;
-  web_search: boolean;
-  memory: boolean;
-  stream: boolean;
-  conversation_id: string | null;
-}, onMessage, shareToken: string) => {
-  // return request.post(`/public/share/chat`, values, {
-  //   headers: {
-  //     'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
-  //   }
-  // })
+export const sendConversation = (values: QueryParams, onMessage: (data: SSEMessage[]) => void, shareToken: string) => {
   return handleSSE(`/public/share/chat`, values, onMessage, {
     headers: {
       'Authorization': `Bearer ${shareToken}`
