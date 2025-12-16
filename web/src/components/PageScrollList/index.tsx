@@ -29,7 +29,7 @@ interface PageScrollListProps {
 
 const PageScrollList = forwardRef<PageScrollListRef, PageScrollListProps>(({
   renderItem, 
-  query = {}, 
+  query, 
   url,
   column = 4,
   className = '',
@@ -51,11 +51,11 @@ const PageScrollList = forwardRef<PageScrollListRef, PageScrollListProps>(({
     request.get(url, {
       page: page,
       pagesize: PAGE_SIZE,
-      ...query,
+      ...(query||{}),
     })
       .then((res) => {
         const response = res as ApiResponse;
-        const results = Array.isArray(response.items) ? response.items : Array.isArray(response.hosts) ? response.hosts : Array.isArray(response) ? response : [];
+        const results = Array.isArray(response.items) ? response.items : Array.isArray(response) ? response : [];
         if (flag) {
           setData(results);
         } else {
