@@ -110,6 +110,11 @@ export const zh = {
       noDataSets: '暂无数据集，点击下方按钮或拖拽文件创建。',
       createEmptyDataSet: '+ 空白数据集',
       createImageDataSet: '+ 图片数据集',
+      createContent: '创建内容',
+      title: '标题',
+      content: '内容',
+      pleaseEnterTitle: '请输入标题',
+      pleaseEnterContent: '请输入内容',
       dragFilesHere: '拖拽文件到此处上传',
       downloadOriginal: '下载原始内容',
       createImport: '新建/导入',
@@ -117,6 +122,7 @@ export const zh = {
       imageDataSet: '图片数据集',
       blankDataset: '空白数据集',
       emptyDataSet: '空白数据集',
+      customTextDataset: '自定义文本数据集',
       text: '文本',
       search: '搜索',
       image: '图片',
@@ -1242,8 +1248,6 @@ export const zh = {
       startANewConversation: '开始新对话',
       normalReply: '正常回复',
       quickReply: '快速回复',
-      memoryConversationAnalysisEmpty: '当前没有可用的对话分析内容',
-      memoryConversationAnalysisEmptySubTitle: '输入用户ID后，单击“发送”查看对话记忆'
     },
     login: {
       title: '红熊记忆科学',

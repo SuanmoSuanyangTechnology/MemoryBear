@@ -24,3 +24,9 @@ dist-ssr
 *.sw?
 
 package-lock.json
+
+# 文档和截图（不上传到仓库）
+操作说明.md
+记忆熊系统功能使用说明.md
+截图清单.md
+images/

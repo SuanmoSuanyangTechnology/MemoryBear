@@ -4,7 +4,7 @@ import { Col, Row, App, Skeleton, Space, Select } from 'antd'
 import clsx from 'clsx'
 
 import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpty.svg'
-import AnalysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.png'
+import AnalysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.svg'
 import Card from './components/Card'
 import Chat from './components/Chat'
 import { readService, getUserMemoryList } from '@/api/memory'
@@ -139,9 +139,6 @@ const MemoryConversation: FC = () => {
               <Empty 
                 url={AnalysisEmptyIcon}
                 className="rb:h-full"
-                title={t('memoryConversation.memoryConversationAnalysisEmpty')}
-                subTitle={t('memoryConversation.memoryConversationAnalysisEmptySubTitle')}
-                size={[270, 170]}
               />
             : <Space size={12} direction="vertical" style={{width: '100%'}}>
                 {logs.map((log, logIndex) => (

@@ -1,3 +1,11 @@
+/*
+ * @Description: 
+ * @Version: 0.0.1
+ * @Author: yujiangping
+ * @Date: 2025-12-03 15:40:49
+ * @LastEditors: yujiangping
+ * @LastEditTime: 2025-12-12 14:09:00
+ */
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
@@ -11,7 +19,10 @@ export default defineConfig({
     proxy: {
       // 主要API代理，支持 /api 和 /api/* 格式
       '/api': {
-        target: 'http://0.0.0.0:5173', // 后端服务地址
+        // target: 'http://0.0.0.0:5173', // 后端服务地址
+        // target: 'http://119.45.181.55:8000',
+        target: 'https://devmemorybear.redbearai.com/', // 开发服务器
+        // target: 'https://memorybear.redbearai.com', // 测试服务器
         changeOrigin: true,
 
         // 匹配所有以/api开头的请求，包括/api/token
