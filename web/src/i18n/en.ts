@@ -33,6 +33,7 @@ export const en = {
       knowledgeCreateDataset: 'Create Dataset',
       knowledgeDocumentDetails: 'Document Details',
       userMemoryDetail: 'UserMemory Detail',
+      apiKeyManagement: 'API KEY Management',
     },
     dashboard: {
       totalMemoryCapacity: 'Total Memory Capacity',
@@ -117,7 +118,7 @@ export const en = {
       triplet_count_desc: 'Build {{entities_count}} entity nodes and {{relations_count}} relation connections',
       temporal_count: 'Time extraction',
       temporal_count_desc: 'Record {{count}} time series information',
-      
+
       dialogue: 'Dialogue',
       chunk: 'Chunk',
       statement: 'Statement',
@@ -735,7 +736,7 @@ export const en = {
       workflowDesc: 'To be opened, please stay tuned',
       editApplication: 'Edit Application Info',
 
-      
+
       currentModel: 'Current Model',
       modelConfig: 'Model Config',
       parameterConfig: 'Parameter Config',
@@ -929,7 +930,7 @@ export const en = {
       similarity_threshold: 'Semantic similarity threshold',
       similarity_threshold_desc: 'Only return results with semantic similarity higher than this threshold',
       similarity_threshold_desc1: 'The minimum similarity threshold for semantic retrieval',
-      
+
       vector_similarity_weight: 'Vector Similarity Weight',
       vector_similarity_weight_desc: 'Only return results with BM25 scores above this threshold',
       vector_similarity_weight_desc1: 'The minimum BM25 score threshold for word segmentation retrieval',
@@ -947,7 +948,7 @@ export const en = {
       versionNameTip: 'Version number format: v[major version number].[next version number].[revision number] (e.g. v1.3.0)',
       agentName: 'Agent Name',
       roleType: 'Role Type',
-      
+
       coordinator: 'Coordinator',
       analyzer: 'Analyzer',
       executor: 'Executor',
@@ -957,8 +958,28 @@ export const en = {
       capabilities: 'Capabilities',
       subAgent: 'Sub Agent',
       maxChatCount: 'Add up to 4 models',
-      addApiKey: 'Add API Key',
-      ReplyException: 'Reply exception'  
+      ReplyException: 'Reply exception',
+
+      endpointConfigurationSubTitle: 'Configure API access address and supported HTTP methods',
+      apiKeys: 'API Keys Management',
+      apiKeySubTitle: 'Manage API keys, view usage and traffic statistics for each key',
+      addApiKey: 'Add New API Key',
+      apiKeyName: 'Key Name',
+      apiKeyNamePlaceholder: 'e.g.: Production, Testing, Development',
+      apiKeyDescPlaceholder: 'Describe the purpose of this Key',
+      apiKeyTotal: 'Total Keys',
+      apiKeyRequestTotal: 'Total Requests',
+      qps: 'Average QPS',
+      qpsLimit: 'QPS Limit',
+      qpsLimitTip: '(Requests per second)',
+      apiLimitConfig: 'Rate Limiting Configuration',
+      qpsLimitDesc: 'Limit the maximum number of requests this Key can make per second',
+      dailyUsageLimit: 'Daily Usage Limit',
+      dailyUsageLimitDesc: 'Limit the maximum total number of requests this Key can make per day',
+      dailyUsageLimitUnit: 'times/day',
+      apiKeyDeleteContent: 'Once deleted, it cannot be recovered, and applications using this Key will not be able to access the API',
+      currentValue: 'Current Value',
+      qpsLimitUnit: 'times/second',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -1057,7 +1078,7 @@ export const en = {
 
       extractTheNumberOfEntities: 'Extract the number of entities',
       extractTheNumberOfEntitiesDesc: 'Merge after deduplication: {{num}} (exact: {{exact}}, fuzzy: {{fuzzy}}, LLM: {{llm}})',
-      
+
       numberOfEntityDisambiguation: 'Number of entity disambiguation',
       numberOfEntityDisambiguationDesc: 'Total {{num}} times (blocking: {{block_count}})',
 
@@ -1162,7 +1183,6 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         failed: 'Failed'
       },
       time: 'Time: ',
-      
       text_preprocessing_desc: 'Text split into {{count}} semantic fragments',
       knowledge_extraction_desc: 'Knowledge extraction completed, identified {{entities}} entities, {{statements}} statements, {{temporal_ranges_count}} temporal extractions, {{triplets}} triplets',
       creating_nodes_edges_desc: 'Entity relationship creation completed, {{num}} relationships in total',
@@ -1250,6 +1270,31 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       tableEmpty: 'There are currently no data',
       loadingEmpty: 'The content is loading…',
       loadingEmptyDesc: 'Your content is on its way by rocket! It will soon land on your screen'
-    }
+    },
+    apiKey: {
+      name: 'Project Name',
+      createApiKey: 'Create API Key',
+      updateApiKey: 'Edit API Key',
+      id: 'ID',
+      created_at: 'Created At',
+      description: 'Description',
+      memoryEngine: 'Memory Engine',
+      knowledgeBase: 'Knowledge Base',
+      advancedSettings: 'Advanced Settings',
+      expires_at: 'Expiration At',
+      apiKey: 'API Key',
+      status: 'Status',
+      createdAt: 'Created At',
+      expiresAt: 'Expires At',
+      requestsPerMinute: 'Requests/Minute',
+      viewDetail: 'View Details',
+      disable: 'Disable',
+      enable: 'Enable',
+      baseInfo: 'Basic Information',
+      permissionInfo: 'Permission Information',
+      is_expired: 'Status',
+      active: 'Active',
+      inactive: 'Expired'
+    },
   },
 };

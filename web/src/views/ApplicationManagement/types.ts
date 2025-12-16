@@ -7,7 +7,7 @@ export interface Application {
   description?: string;
   icon?: string;
   icon_type?: string;
-  type: string;
+  type: 'agent' | 'multi_agent' | 'workflow';
   visibility: string;
   status: string;
   tags: string[];

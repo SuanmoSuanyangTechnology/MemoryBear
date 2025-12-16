@@ -28,16 +28,18 @@ export const zh = {
       spaceManagement: '空间管理',
       memoryExtractionEngine: '记忆提取引擎',
       forgettingEngine: '遗忘引擎',
+      apiKeyManagement: 'API KEY管理',
       knowledgePrivate: '详情',
       knowledgeShare: '详情',
       knowledgeCreateDataset: '新建数据集',
       knowledgeDocumentDetails: '详情',
       userMemoryDetail: '用户记忆详情',
+      toolManagement: '工具管理',
     },
     knowledgeBase: {
       home: '首页',
       selectSpace: '请选择空间',
-      preview:'预览',
+      preview: '预览',
       pleaseUploadFileFirst: '请先上传文件',
       shareSuccess: '分享成功',
       shareFailed: '分享失败',
@@ -288,7 +290,7 @@ export const zh = {
       number: '数字',
       checkbox: '复选框',
       apiVariable: 'API变量',
-      
+
       displayName: '显示名称',
       maxLength: '最大长度',
       required: '必填',
@@ -467,7 +469,7 @@ export const zh = {
       similarity_threshold: '语义相似度阈值',
       similarity_threshold_desc: '仅返回语义相似度高于此阈值的结果',
       similarity_threshold_desc1: '语义检索的最小相似度阈值',
-      
+
       vector_similarity_weight: '向量相似度权重',
       vector_similarity_weight_desc: '仅返回BM25分数高于此阈值的结果',
       vector_similarity_weight_desc1: '分词检索的最小BM25分数阈值',
@@ -481,6 +483,27 @@ export const zh = {
       chooseKnowledge: '选择知识库',
       active: '活跃',
       inactive: '不活跃',
+
+      endpointConfigurationSubTitle: '配置 API 访问地址和支持的 HTTP 方法',
+      apiKeys: 'API Keys 管理',
+      apiKeySubTitle: '管理 API 密钥，查看每个密钥的使用情况和流量统计',
+      addApiKey: '添加新 API Key',
+      apiKeyName: 'Key 名称',
+      apiKeyNamePlaceholder: '例如：生产环境、测试环境、开发环境',
+      apiKeyDescPlaceholder: '描述这个 Key 的用途',
+      apiKeyTotal: '总 Keys',
+      apiKeyRequestTotal: '总请求数',
+      qps: '平均 QPS',
+      qpsLimit: 'QPS 限制',
+      qpsLimitTip: '（每秒请求数）',
+      apiLimitConfig: '限流配置',
+      qpsLimitDesc: '限制此 Key 每秒最多可以发起的请求数',
+      dailyUsageLimit: '日调用量限制',
+      dailyUsageLimitDesc: '限制此 Key 每天最多可以发起的请求总数',
+      dailyUsageLimitUnit: '次/天',
+      apiKeyDeleteContent: '删除后将无法恢复，使用此Key的应用将无法访问 API',
+      currentValue: '当前值',
+      qpsLimitUnit: '次/秒',
     },
     // 角色管理相关翻译
     role: {
@@ -618,7 +641,7 @@ export const zh = {
       triplet_count_desc: '构建{{entities_count}}个实体节点和{{relations_count}}个关系连接',
       temporal_count: '时间提取',
       temporal_count_desc: '记录{{count}}条时间序列信息',
-      
+
       dialogue: '对话',
       chunk: '分块',
       statement: '语句',
@@ -1027,7 +1050,7 @@ export const zh = {
 
       minimumRetention: '时间遗忘率 (λ_time)',
       minimumRetentionDesc: '控制记忆随时间的遗忘速度，值越高时间越短',
-      forgettingRate: '记忆遗忘率 (λ_mem)',      
+      forgettingRate: '记忆遗忘率 (λ_mem)',
       forgettingRateDesc: '控制记忆遗忘的速度，值越高遗忘越快',
       offset: '最小保留度 (offset)',
       offsetDesc: '控制记忆保留的最小保留阈值   遗忘这地方改个文字描述',
@@ -1130,7 +1153,7 @@ export const zh = {
 
       extractTheNumberOfEntities: '提取实体数量',
       extractTheNumberOfEntitiesDesc: '去重后合并：{{num}}（精确：{{exact}}，模糊：{{fuzzy}}，LLM：{{llm}}）',
-      
+
       numberOfEntityDisambiguation: '实体消歧数量',
       numberOfEntityDisambiguationDesc: '总计{{num}}次（阻止：{{block_count}}）',
 
@@ -1217,7 +1240,6 @@ export const zh = {
 
 学生：那我换到唐朝史：安史之乱后，中央已开始整顿，为何藩镇割据反而加剧？
 记忆熊：安史之乱后藩镇割据加剧的原因包括：节度使掌握募兵权、财政调度权与军事指挥权，形成地方军阀；中央财政因均田制瓦解和租庸调失效而衰退，难以支撑军队，导致地方军事力量依附节度使；募兵制使士兵效忠个人而非国家；宦官掌控禁军，文官集团失势，中央制衡能力削弱。`,
-      
       warning: '当您修改左侧的配置项后，点击【调试】，提取结论将在此处实时更新',
       processing: '配置已更新，正在重新萃取示例记忆...',
       success: '记忆萃取完成！',
@@ -1234,7 +1256,6 @@ export const zh = {
         failed: '失败'
       },
       time: '耗时: ',
-      
       text_preprocessing_desc: '文本切分为{{count}}个语义片段',
       knowledge_extraction_desc: '知识抽取完成，共识别{{entities}}个实体,{{statements}}个句子, {{temporal_ranges_count}}个时间提取, {{triplets}}个三元组',
       creating_nodes_edges_desc: '实体关系创建完成，共{{num}}条关系',
@@ -1357,6 +1378,31 @@ export const zh = {
       title: '页面未找到',
       description: '请求的页面不存在。',
       backToHome: '返回首页'
-    }
+    },
+    apiKey: {
+      name: '项目名称',
+      createApiKey: '创建API Key',
+      updateApiKey: '编辑API Key',
+      id: 'ID',
+      created_at: '创建时间',
+      description: '描述',
+      memoryEngine: '记忆引擎',
+      knowledgeBase: '知识库',
+      advancedSettings: '高级设置',
+      expires_at: '过期时间',
+      apiKey: 'API Key',
+      status: '状态',
+      createdAt: '创建时间',
+      expiresAt: '过期时间',
+      requestsPerMinute: '次/分钟',
+      viewDetail: '查看详情',
+      disable: '禁用',
+      enable: '启用',
+      baseInfo: '基础信息',
+      permissionInfo: '授权信息',
+      is_expired: '状态',
+      active: '活跃',
+      inactive: '过期'
+    },
   },
 }
