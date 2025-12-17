@@ -1,4 +1,6 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
 import { Form, Input } from 'antd';
 import { useTranslation } from 'react-i18next';
 import RbModal from '@/components/RbModal';
@@ -12,6 +14,7 @@ interface ContentFormData {
 const CreateContentModal = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>(
   ({ refreshTable }, ref) => {
     const { t } = useTranslation();
+    const navigate = useNavigate();
     const [visible, setVisible] = useState(false);
     const [form] = Form.useForm<ContentFormData>();
     const [loading, setLoading] = useState(false);
@@ -45,13 +48,11 @@ const CreateContentModal = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
           parent_id: parentId,
         };
 
-        // 模拟API调用
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await createDocumentAndUpload(values, params)
-        if (refreshTable) {
-          await refreshTable();
-        }
 
+        const response = await createDocumentAndUpload(values, params)
+        if(response){
+          handleChunking(response.kb_id,parentId,response.id)
+        }
         handleClose();
       } catch (err) {
         console.error('创建内容失败:', err);
@@ -59,7 +60,19 @@ const CreateContentModal = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
         setLoading(false);
       }
     };
-
+    const handleChunking = (kb_id: string, parent_id: string, file_id: string) => {
+      if (!kb_id) return;
+      const targetFileId = file_id
+      navigate(`/knowledge-base/${kb_id}/create-dataset`, {
+        state: {
+          source: 'local',
+          knowledgeBaseId: kb_id,
+          parentId: parent_id ?? kb_id,
+          startStep: 'parameterSettings',
+          fileId: targetFileId,
+        },
+      });
+    }
     useImperativeHandle(ref, () => ({
       handleOpen,
     }));
