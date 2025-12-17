@@ -167,7 +167,7 @@ class PromptOptimizerSessionHistory(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, comment="Tenant ID")
     # app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=False, comment="Application ID")
-    session_id = Column(UUID(as_uuid=True), nullable=False, comment="Session ID")
+    session_id = Column(UUID(as_uuid=True), ForeignKey("prompt_opt_session_list.id"),nullable=False, comment="Session ID")
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, comment="User ID")
     role = Column(String, nullable=False, comment="Message Role")
     content = Column(Text, nullable=False, comment="Message Content")
