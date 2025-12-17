@@ -1,10 +1,9 @@
 import os
 import subprocess
-from dotenv import load_dotenv
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.config import settings
-from contextlib import asynccontextmanager
 from fastapi.responses import JSONResponse
 from app.core.response_utils import fail
 from app.core.logging_config import LoggingConfig, get_logger
@@ -38,9 +37,13 @@ router = APIRouter(prefix="/memory", tags=["Memory"])
 
 # 管理端 API (JWT 认证)
 from app.controllers import manager_router
-
 # 服务端 API (API Key 认证)
 from app.controllers.service import service_router
+from app.core.config import settings
+from app.core.error_codes import BizCode, HTTP_MAPPING
+from app.core.exceptions import BusinessException
+from app.core.logging_config import LoggingConfig, get_logger
+from app.core.response_utils import fail
 
 # Initialize logging system
 LoggingConfig.setup_logging()
@@ -414,5 +417,4 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)

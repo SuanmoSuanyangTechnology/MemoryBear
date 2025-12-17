@@ -2,7 +2,7 @@
 import datetime
 import uuid
 
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, ForeignKey, Text, Enum
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from enum import StrEnum
@@ -12,18 +12,10 @@ from app.db import Base
 
 class ApiKeyType(StrEnum):
     """API Key 类型"""
-    APP = "app"  # 应用 API Key
-    RAG = "rag"  # RAG API Key
-    MEMORY = "memory"  # Memory API Key
-
-
-class ResourceType(StrEnum):
-    """资源类型枚举"""
-    AGENT = "Agent"  # 智能体
-    CLUSTER = "Cluster"  # 集群
-    WORKFLOW = "Workflow"  # 工作流
-    KNOWLEDGE = "Knowledge"  # 知识库
-    MEMORY_ENGINE = "Memory_Engine"  # 记忆引擎
+    AGENT = "agent"  # 智能体
+    CLUSTER = "multi_agent"  # 集群
+    WORKFLOW = "workflow"  # 工作流
+    SERVICE = "service"  # 服务
 
 
 class ApiKey(Base):
@@ -35,18 +27,16 @@ class ApiKey(Base):
     # 基本信息
     name = Column(String(255), nullable=False, comment="API Key 名称")
     description = Column(Text, comment="描述")
-    key_prefix = Column(String(20), nullable=False, comment="Key 前缀")
-    key_hash = Column(String(255), nullable=False, unique=True, index=True, comment="Key 哈希值")
+    api_key = Column(String(255), nullable=False, unique=True, index=True, comment="API Key 明文")
 
     # 类型和权限
     type = Column(String(50), nullable=False, index=True, comment="API Key 类型")
-    scopes = Column(JSONB, nullable=False, default=list, comment="权限范围列表")
+    scopes = Column(JSONB, default=list, comment="权限范围列表")
 
     # 关联资源
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False,
                           index=True, comment="所属工作空间")
     resource_id = Column(UUID(as_uuid=True), index=True, comment="关联资源ID")
-    resource_type = Column(String(50), comment="资源类型")
 
     # 限制和配额
     rate_limit = Column(Integer, default=10, comment="QPS限制（请求/秒）")

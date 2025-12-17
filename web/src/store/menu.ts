@@ -32,7 +32,7 @@ interface MenuState {
   allBreadcrumbs: Record<'space' | 'manage' | string, MenuItem[]>;
   loadMenus: (source: 'space' | 'manage') => void;
   updateBreadcrumbs: (keyPath: string[], source: 'space' | 'manage') => void;
-  setCustomBreadcrumbs: (breadcrumbs: MenuItem[], source: 'space' | 'manage') => void;
+  setCustomBreadcrumbs: (breadcrumbs: MenuItem[], source: string) => void;
 }
 
 const initBreadcrumbs = localStorage.getItem('breadcrumbs') || '[]'

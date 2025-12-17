@@ -21,7 +21,7 @@ os.environ["LANGCHAIN_TRACING"] = "false"
 import asyncio
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Callable, Awaitable
 from dotenv import load_dotenv
 
 # 导入重构后的模块
@@ -50,7 +50,11 @@ logger = get_memory_logger(__name__)
 
 
 
-async def main(dialogue_text: Optional[str] = None, is_pilot_run: bool = False):
+async def main(
+    dialogue_text: Optional[str] = None, 
+    is_pilot_run: bool = False,
+    progress_callback: Optional[Callable[[str, str, Optional[dict]], Awaitable[None]]] = None
+):
     """
     记忆系统主流程 - 重构版本
 
@@ -61,6 +65,12 @@ async def main(dialogue_text: Optional[str] = None, is_pilot_run: bool = False):
         is_pilot_run: 是否为试运行模式
             - True: 试运行模式，不保存到 Neo4j
             - False: 正常运行模式，保存到 Neo4j
+        progress_callback: 可选的进度回调函数
+            - 类型: Callable[[str, str, Optional[dict]], Awaitable[None]]
+            - 参数1 (stage): 当前处理阶段标识符
+            - 参数2 (message): 人类可读的进度消息
+            - 参数3 (data): 可选的附加数据字典，包含详细的进度信息或结果
+            - 在管线关键点调用以报告进度和结果数据
 
     工作流程：
         1. 初始化客户端和配置
@@ -141,6 +151,10 @@ async def main(dialogue_text: Optional[str] = None, is_pilot_run: bool = False):
                 metadata={"source": "pilot_run", "input_type": "frontend_text"}
             )
             
+            # 进度回调：开始预处理文本
+            if progress_callback:
+                await progress_callback("text_preprocessing", "开始预处理文本...")
+            
             # 对前端传入的对话进行分块处理
             chunked_dialogs = await get_chunked_dialogs_from_preprocessed(
                 data=[dialog],
@@ -148,6 +162,27 @@ async def main(dialogue_text: Optional[str] = None, is_pilot_run: bool = False):
                 llm_client=llm_client,
             )
             logger.info(f"Processed frontend dialogue text: {len(messages)} messages")
+            
+            # 进度回调：输出每个分块的结果
+            if progress_callback:
+                for dialog in chunked_dialogs:
+                    for i, chunk in enumerate(dialog.chunks):
+                        chunk_result = {
+                            "chunk_index": i + 1,
+                            "content": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
+                            "full_length": len(chunk.content),
+                            "dialog_id": dialog.id,
+                            "chunker_strategy": config_defs.SELECTED_CHUNKER_STRATEGY
+                        }
+                        await progress_callback("text_preprocessing_result", f"分块 {i + 1} 处理完成", chunk_result)
+                
+                # 进度回调：预处理文本完成
+                preprocessing_summary = {
+                    "total_chunks": sum(len(dialog.chunks) for dialog in chunked_dialogs),
+                    "total_dialogs": len(chunked_dialogs),
+                    "chunker_strategy": config_defs.SELECTED_CHUNKER_STRATEGY
+                }
+                await progress_callback("text_preprocessing_complete", "预处理文本完成", preprocessing_summary)
         else:
             # 正常运行模式：从 testdata.json 文件加载
             logger.warning("[MAIN] ✗ Falling back to testdata.json (dialogue_text not provided or empty)")
@@ -158,6 +193,10 @@ async def main(dialogue_text: Optional[str] = None, is_pilot_run: bool = False):
             
             if not os.path.exists(test_data_path):
                 raise FileNotFoundError(f"Test data file not found: {test_data_path}")
+            
+            # 进度回调：开始预处理文本
+            if progress_callback:
+                await progress_callback("text_preprocessing", "开始预处理文本...")
             
             chunked_dialogs = await get_chunked_dialogs_with_preprocessing(
                 chunker_strategy=config_defs.SELECTED_CHUNKER_STRATEGY,
@@ -170,6 +209,27 @@ async def main(dialogue_text: Optional[str] = None, is_pilot_run: bool = False):
                 skip_cleaning=True,
             )
             logger.info(f"Loaded {len(chunked_dialogs)} dialogues from testdata.json")
+            
+            # 进度回调：输出每个分块的结果
+            if progress_callback:
+                for dialog in chunked_dialogs:
+                    for i, chunk in enumerate(dialog.chunks):
+                        chunk_result = {
+                            "chunk_index": i + 1,
+                            "content": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
+                            "full_length": len(chunk.content),
+                            "dialog_id": dialog.id,
+                            "chunker_strategy": config_defs.SELECTED_CHUNKER_STRATEGY
+                        }
+                        await progress_callback("text_preprocessing_result", f"分块 {i + 1} 处理完成", chunk_result)
+                
+                # 进度回调：预处理文本完成
+                preprocessing_summary = {
+                    "total_chunks": sum(len(dialog.chunks) for dialog in chunked_dialogs),
+                    "total_dialogs": len(chunked_dialogs),
+                    "chunker_strategy": config_defs.SELECTED_CHUNKER_STRATEGY
+                }
+                await progress_callback("text_preprocessing_complete", "预处理文本完成", preprocessing_summary)
         
         log_time("Data Loading & Chunking", time.time() - step_start, log_file)
 
@@ -188,6 +248,7 @@ async def main(dialogue_text: Optional[str] = None, is_pilot_run: bool = False):
             embedder_client=embedder_client,
             connector=neo4j_connector,
             config=config,
+            progress_callback=progress_callback,  # 传递进度回调
         )
         
         log_time("Orchestrator Initialization", time.time() - step_start, log_file)
@@ -195,6 +256,11 @@ async def main(dialogue_text: Optional[str] = None, is_pilot_run: bool = False):
         # 步骤 4: 执行知识提取流水线
         logger.info("Running extraction pipeline...")
         step_start = time.time()
+        
+        
+        # 进度回调：正在知识抽取
+        if progress_callback:
+            await progress_callback("knowledge_extraction", "正在知识抽取...")
         
         extraction_result = await orchestrator.run(
             dialog_data_list=chunked_dialogs,
@@ -216,6 +282,11 @@ async def main(dialogue_text: Optional[str] = None, is_pilot_run: bool = False):
         ) = extraction_result
         
         log_time("Extraction Pipeline", time.time() - step_start, log_file)
+        
+        # 进度回调：生成结果
+        if progress_callback:
+            await progress_callback("generating_results", "正在生成结果...")
+        
 
         # 步骤 5: 保存结果或输出结果
         if is_pilot_run:

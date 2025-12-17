@@ -1,11 +1,11 @@
 """API Key Schema"""
 import datetime
 import uuid
-from pydantic import BaseModel, Field, ConfigDict
-from pydantic.v1 import validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, field_serializer, computed_field
 from typing import Optional, List
 
-from app.models.api_key_model import ApiKeyType, ResourceType
+from app.models.api_key_model import ApiKeyType
+from app.core.api_key_utils import timestamp_to_datetime, datetime_to_timestamp
 
 
 class ApiKeyCreate(BaseModel):
@@ -15,20 +15,34 @@ class ApiKeyCreate(BaseModel):
     type: ApiKeyType = Field(..., description="API Key 类型")
     scopes: List[str] = Field(default_factory=list, description="权限范围列表")
     resource_id: Optional[uuid.UUID] = Field(None, description="关联资源ID")
-    resource_type: Optional[ResourceType] = Field(None, description="资源类型")
     rate_limit: Optional[int] = Field(10, ge=1, le=1000, description="QPS限制（请求/秒）")
     daily_request_limit: Optional[int] = Field(10000, description="日请求限制", ge=1)
     quota_limit: Optional[int] = Field(None, description="配额限制（总请求数）", ge=1)
     expires_at: Optional[datetime.datetime] = Field(None, description="过期时间")
 
-    @validator('scopes')
+    @computed_field
+    @property
+    def is_expired(self) -> bool:
+        """检查API Key是否已过期"""
+        if not self.expires_at:
+            return False
+        return datetime.datetime.now() > self.expires_at
+
+    @field_validator('expires_at', mode='before')
+    @classmethod
+    def parse_expires_at(cls, v):
+        """将时间戳转换为datetime"""
+        if isinstance(v, (int, float)):
+            return timestamp_to_datetime(v)
+        return v
+
+    @field_validator('scopes')
+    @classmethod
     def validate_scopes(cls, v):
         """验证权限范围格式"""
-        valid_scopes = [
-            "app:all",
-            "rag:search", "rag:upload", "rag:delete",
-            "memory:read", "memory:write", "memory:delete", "memory:search"
-        ]
+        if v is None:
+            return []
+        valid_scopes = ["app", "rag", "memory"]
         for scope in v:
             if scope not in valid_scopes:
                 raise ValueError(f"无效范围: {scope}")
@@ -46,14 +60,29 @@ class ApiKeyUpdate(BaseModel):
     is_active: Optional[bool] = Field(None, description="是否激活")
     expires_at: Optional[datetime.datetime] = Field(None, description="过期时间")
 
-    @validator('scopes')
+    @computed_field
+    @property
+    def is_expired(self) -> bool:
+        """检查API Key是否已过期"""
+        if not self.expires_at:
+            return False
+        return datetime.datetime.now() > self.expires_at
+
+    @field_validator('expires_at', mode='before')
+    @classmethod
+    def parse_expires_at(cls, v):
+        """将时间戳转换为datetime"""
+        if isinstance(v, (int, float)):
+            return timestamp_to_datetime(v)
+        return v
+
+    @field_validator('scopes')
+    @classmethod
     def validate_scopes(cls, v):
         """验证权限范围格式"""
-        valid_scopes = {
-            'app:all',
-            'rag:search', 'rag:upload', 'rag:delete',
-            'memory:read', 'memory:write', 'memory:delete', 'memory:search'
-        }
+        if v is None:
+            return v
+        valid_scopes = ["app", "rag", "memory"]
         for scope in v:
             if scope not in valid_scopes:
                 raise ValueError(f"无效范围: {scope}")
@@ -67,17 +96,30 @@ class ApiKeyResponse(BaseModel):
     id: uuid.UUID
     name: str
     description: Optional[str]
-    api_key: str = Field(..., description="API Key 明文（仅创建时返回）")
-    key_prefix: str
+    api_key: str
     type: str
     scopes: List[str]
     resource_id: Optional[uuid.UUID]
-    resource_type: Optional[str]
     rate_limit: int
     daily_request_limit: int
     quota_limit: Optional[int]
+    is_active: bool
     expires_at: Optional[datetime.datetime]
     created_at: datetime.datetime
+
+    @computed_field
+    @property
+    def is_expired(self) -> bool:
+        """检查API Key是否已过期"""
+        if not self.expires_at:
+            return False
+        return datetime.datetime.now() > self.expires_at
+
+    @field_serializer('expires_at', 'created_at')
+    @classmethod
+    def serialize_datetime(cls, v: Optional[datetime.datetime]) -> Optional[int]:
+        """将datetime转换为时间戳"""
+        return datetime_to_timestamp(v)
 
 
 class ApiKey(BaseModel):
@@ -87,11 +129,10 @@ class ApiKey(BaseModel):
     id: uuid.UUID
     name: str
     description: Optional[str]
-    key_prefix: str
+    api_key: str
     type: str
     scopes: List[str]
     resource_id: Optional[uuid.UUID]
-    resource_type: Optional[str]
     rate_limit: int
     daily_request_limit: int
     quota_limit: Optional[int]
@@ -105,6 +146,20 @@ class ApiKey(BaseModel):
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
+    @computed_field
+    @property
+    def is_expired(self) -> bool:
+        """检查API Key是否已过期"""
+        if not self.expires_at:
+            return False
+        return datetime.datetime.now() > self.expires_at
+
+    @field_serializer('expires_at', 'last_used_at', 'created_at', 'updated_at')
+    @classmethod
+    def serialize_datetime(cls, v: Optional[datetime.datetime]) -> Optional[int]:
+        """将datetime转换为时间戳"""
+        return datetime_to_timestamp(v)
+
 
 class ApiKeyStats(BaseModel):
     """API Key 使用统计"""
@@ -114,6 +169,12 @@ class ApiKeyStats(BaseModel):
     quota_limit: Optional[int] = Field(None, description="配额限制")
     last_used_at: Optional[datetime.datetime] = Field(None, description="最后使用时间")
     avg_response_time: Optional[float] = Field(None, description="平均响应时间（毫秒）")
+
+    @field_serializer('last_used_at')
+    @classmethod
+    def serialize_datetime(cls, v: Optional[datetime.datetime]) -> Optional[int]:
+        """将datetime转换为时间戳"""
+        return datetime_to_timestamp(v)
 
 
 class ApiKeyQuery(BaseModel):
@@ -132,7 +193,6 @@ class ApiKeyAuth(BaseModel):
     type: str
     scopes: List[str]
     resource_id: Optional[uuid.UUID]
-    resource_type: Optional[str]
 
 
 class ApiKeyLog(BaseModel):
@@ -157,3 +217,9 @@ class ApiKeyLog(BaseModel):
     
     # 时间信息
     created_at: datetime.datetime
+
+    @field_serializer('created_at')
+    @classmethod
+    def serialize_datetime(cls, v: datetime.datetime) -> int:
+        """将datetime转换为时间戳"""
+        return datetime_to_timestamp(v)

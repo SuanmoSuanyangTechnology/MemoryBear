@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Form, Input } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { UploadFile } from 'antd';
-import type { CreateImageModalRef, CreateImageMoealRefProps,UploadFileResponse } from '@/views/KnowledgeBase/types';
+import type { CreateSetModalRef, CreateSetMoealRefProps, UploadFileResponse } from '@/views/KnowledgeBase/types';
 import type { UploadRequestOption } from 'rc-upload/lib/interface';
 import RbModal from '@/components/RbModal';
 import UploadFiles from '@/components/Upload/UploadFiles';
@@ -13,7 +13,7 @@ interface ImageDatasetFormData {
   images: UploadFile[];
 }
 
-const CreateImageDataset = forwardRef<CreateImageModalRef, CreateImageMoealRefProps>(
+const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>(
   ({ refreshTable }, ref) => {
     const { t } = useTranslation();
     const [visible, setVisible] = useState(false);

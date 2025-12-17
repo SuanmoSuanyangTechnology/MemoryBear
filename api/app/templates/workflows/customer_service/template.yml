@@ -1,0 +1,219 @@
+# 智能客服工作流模板
+id: customer_service_v1
+name: 智能客服工作流
+description: 智能客服场景，包含意图识别、知识库查询和回复生成
+category: customer_service
+version: "1.0.0"
+author: RedBear Memory Team
+tags:
+  - 客服
+  - 意图识别
+  - 知识库
+  - 多步骤
+
+# 工作流配置
+nodes:
+  - id: start
+    type: start
+    name: 开始
+    position:
+      x: 100
+      y: 200
+
+  - id: intent_recognition
+    type: llm
+    name: 意图识别
+    config:
+      prompt: |
+        分析用户的问题，识别意图类型。
+        
+        用户问题：{{ var.user_message }}
+        
+        请从以下类型中选择一个：
+        - product_inquiry: 产品咨询
+        - technical_support: 技术支持
+        - complaint: 投诉建议
+        - other: 其他
+        
+        只返回类型名称，不要其他内容。
+      model: gpt-3.5-turbo
+      temperature: 0.3
+      max_tokens: 50
+    position:
+      x: 300
+      y: 200
+
+  - id: intent_router
+    type: condition
+    name: 意图路由
+    position:
+      x: 500
+      y: 200
+
+  - id: product_handler
+    type: llm
+    name: 产品咨询处理
+    config:
+      prompt: |
+        用户咨询产品相关问题。
+        
+        问题：{{ var.user_message }}
+        意图：{{ node.intent_recognition.output }}
+        
+        请提供专业、友好的产品咨询回复。
+      model: gpt-3.5-turbo
+      temperature: 0.7
+      max_tokens: 500
+    position:
+      x: 700
+      y: 100
+
+  - id: support_handler
+    type: llm
+    name: 技术支持处理
+    config:
+      prompt: |
+        用户需要技术支持。
+        
+        问题：{{ var.user_message }}
+        意图：{{ node.intent_recognition.output }}
+        
+        请提供详细的技术支持方案。
+      model: gpt-3.5-turbo
+      temperature: 0.5
+      max_tokens: 800
+    position:
+      x: 700
+      y: 200
+
+  - id: complaint_handler
+    type: llm
+    name: 投诉处理
+    config:
+      prompt: |
+        用户提出投诉或建议。
+        
+        问题：{{ var.user_message }}
+        意图：{{ node.intent_recognition.output }}
+        
+        请以同理心回应，并提供解决方案。
+      model: gpt-3.5-turbo
+      temperature: 0.8
+      max_tokens: 600
+    position:
+      x: 700
+      y: 300
+
+  - id: general_handler
+    type: llm
+    name: 通用处理
+    config:
+      prompt: |
+        用户的问题类型：其他
+        
+        问题：{{ var.user_message }}
+        
+        请提供友好的回复。
+      model: gpt-3.5-turbo
+      temperature: 0.7
+      max_tokens: 400
+    position:
+      x: 700
+      y: 400
+
+  - id: end
+    type: end
+    name: 结束
+    position:
+      x: 900
+      y: 200
+
+edges:
+  - source: start
+    target: intent_recognition
+    label: 开始分析
+
+  - source: intent_recognition
+    target: intent_router
+    label: 识别完成
+
+  - source: intent_router
+    target: product_handler
+    condition: "'product_inquiry' in node['intent_recognition']['output']"
+    label: 产品咨询
+
+  - source: intent_router
+    target: support_handler
+    condition: "'technical_support' in node['intent_recognition']['output']"
+    label: 技术支持
+
+  - source: intent_router
+    target: complaint_handler
+    condition: "'complaint' in node['intent_recognition']['output']"
+    label: 投诉建议
+
+  - source: intent_router
+    target: general_handler
+    condition: "True"  # 默认路径
+    label: 其他
+
+  - source: product_handler
+    target: end
+    label: 完成
+
+  - source: support_handler
+    target: end
+    label: 完成
+
+  - source: complaint_handler
+    target: end
+    label: 完成
+
+  - source: general_handler
+    target: end
+    label: 完成
+
+# 变量定义
+variables:
+  - name: user_message
+    type: string
+    required: true
+    description: 用户的消息
+    default: ""
+
+  - name: user_name
+    type: string
+    required: false
+    description: 用户姓名（可选）
+    default: "客户"
+
+# 执行配置
+execution_config:
+  max_execution_time: 120
+  max_iterations: 10
+
+# 触发器
+triggers: []
+
+# 使用示例
+examples:
+  - name: 产品咨询
+    description: 用户咨询产品功能
+    input:
+      user_message: "你们的产品支持多语言吗？"
+      user_name: "张三"
+    expected_output: "产品功能介绍"
+
+  - name: 技术支持
+    description: 用户遇到技术问题
+    input:
+      user_message: "我无法登录系统，一直显示密码错误"
+      user_name: "李四"
+    expected_output: "技术支持方案"
+
+  - name: 投诉处理
+    description: 用户提出投诉
+    input:
+      user_message: "你们的服务态度太差了，我要投诉"
+      user_name: "王五"
+    expected_output: "同理心回应和解决方案"
