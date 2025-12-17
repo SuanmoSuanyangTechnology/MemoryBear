@@ -1,22 +1,26 @@
 import uuid
-from typing import Optional
-from fastapi import APIRouter, Depends
+from typing import Optional, Annotated
+
+from fastapi import APIRouter, Depends, Path
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.core.response_utils import success
+from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
+from app.core.response_utils import success
+from app.db import get_db
+from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.models import User
+from app.models.app_model import AppType, App
 from app.repositories import knowledge_repository
 from app.schemas import app_schema
 from app.schemas.response_schema import PageData, PageMeta
+from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services import app_service, workspace_service
-from app.services.app_service import AppService
 from app.services.agent_config_helper import enrich_agent_config
-from app.dependencies import get_current_user, cur_workspace_access_guard, workspace_access_guard
-from fastapi.responses import StreamingResponse
-from app.models.app_model import AppType
-from app.core.error_codes import BizCode
+from app.services.app_service import AppService
+from app.schemas.workflow_schema import WorkflowConfig as WorkflowConfigSchema
+from app.services.workflow_service import WorkflowService, get_workflow_service
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -48,7 +52,7 @@ def list_apps(
     current_user=Depends(get_current_user),
 ):
     """列出应用
-    
+
     - 默认包含本工作空间的应用和分享给本工作空间的应用
     - 设置 include_shared=false 可以只查看本工作空间的应用
     """
@@ -63,8 +67,8 @@ def list_apps(
         include_shared=include_shared,
         page=page,
         pagesize=pagesize,
-    ) 
-    
+    )
+
     # 使用 AppService 的转换方法来设置 is_shared 字段
     service = app_service.AppService(db)
     items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
@@ -79,14 +83,14 @@ def get_app(
     current_user=Depends(get_current_user),
 ):
     """获取应用详细信息
-    
+
     - 支持获取本工作空间的应用
     - 支持获取分享给本工作空间的应用
     """
     workspace_id = current_user.current_workspace_id
     service = app_service.AppService(db)
     app = service.get_app(app_id, workspace_id)
-    
+
     # 转换为 Schema 并设置 is_shared 字段
     app_schema_obj = service._convert_to_schema(app, workspace_id)
     return success(data=app_schema_obj)
@@ -113,7 +117,7 @@ def delete_app(
     current_user=Depends(get_current_user),
 ):
     """删除应用
-    
+
     会级联删除：
     - Agent 配置
     - 发布版本
@@ -128,9 +132,9 @@ def delete_app(
             "workspace_id": str(workspace_id)
         }
     )
-    
+
     app_service.delete_app(db, app_id=app_id, workspace_id=workspace_id)
-    
+
     return success(msg="应用删除成功")
 
 
@@ -143,7 +147,7 @@ def copy_app(
     current_user=Depends(get_current_user),
 ):
     """复制应用（包括基础信息和配置）
-    
+
     - 复制应用的基础信息（名称、描述、图标等）
     - 复制 Agent 配置（如果是 agent 类型）
     - 新应用默认为草稿状态
@@ -159,7 +163,7 @@ def copy_app(
             "new_name": new_name
         }
     )
-    
+
     service = AppService(db)
     new_app = service.copy_app(
         app_id=app_id,
@@ -167,7 +171,7 @@ def copy_app(
         workspace_id=workspace_id,
         new_name=new_name
     )
-    
+
     return success(data=app_schema.App.model_validate(new_app), msg="应用复制成功")
 
 
@@ -209,9 +213,9 @@ def publish_app(
 ):
     workspace_id = current_user.current_workspace_id
     release = app_service.publish(
-        db, 
-        app_id=app_id, 
-        publisher_id=current_user.id, 
+        db,
+        app_id=app_id,
+        publisher_id=current_user.id,
         workspace_id=workspace_id,
         version_name = payload.version_name,
         release_notes=payload.release_notes
@@ -268,13 +272,13 @@ def share_app(
     current_user=Depends(get_current_user),
 ):
     """分享应用到其他工作空间
-    
+
     - 只能分享自己工作空间的应用
     - 不能分享到自己的工作空间
     - 同一个应用不能重复分享到同一个工作空间
     """
     workspace_id = current_user.current_workspace_id
-    
+
     service = app_service.AppService(db)
     shares = service.share_app(
         app_id=app_id,
@@ -282,7 +286,7 @@ def share_app(
         user_id=current_user.id,
         workspace_id=workspace_id
     )
-    
+
     data = [app_schema.AppShare.model_validate(s) for s in shares]
     return success(data=data, msg=f"应用已分享到 {len(shares)} 个工作空间")
 
@@ -296,18 +300,18 @@ def unshare_app(
     current_user=Depends(get_current_user),
 ):
     """取消应用分享
-    
+
     - 只能取消自己工作空间应用的分享
     """
     workspace_id = current_user.current_workspace_id
-    
+
     service = app_service.AppService(db)
     service.unshare_app(
         app_id=app_id,
         target_workspace_id=target_workspace_id,
         workspace_id=workspace_id
     )
-    
+
     return success(msg="应用分享已取消")
 
 
@@ -319,17 +323,17 @@ def list_app_shares(
     current_user=Depends(get_current_user),
 ):
     """列出应用的所有分享记录
-    
+
     - 只能查看自己工作空间应用的分享记录
     """
     workspace_id = current_user.current_workspace_id
-    
+
     service = app_service.AppService(db)
     shares = service.list_app_shares(
         app_id=app_id,
         workspace_id=workspace_id
     )
-    
+
     data = [app_schema.AppShare.model_validate(s) for s in shares]
     return success(data=data)
 
@@ -340,10 +344,11 @@ async def draft_run(
     payload: app_schema.DraftRunRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
+    workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None
 ):
     """
     试运行 Agent，使用当前的草稿配置（未发布的配置）
-    
+
     - 不需要发布应用即可测试
     - 使用当前的 AgentConfig 配置
     - 支持流式和非流式返回
@@ -367,33 +372,44 @@ async def draft_run(
         )
         if knowledge: user_rag_memory_id = str(knowledge.id)
 
-    
+
     # 提前验证和准备（在流式响应开始前完成）
     from app.services.app_service import AppService
     from app.services.multi_agent_service import MultiAgentService
     from app.models import AgentConfig, ModelConfig
     from sqlalchemy import select
     from app.core.exceptions import BusinessException
-    
-    
+    from app.services.draft_run_service import DraftRunService
+
     service = AppService(db)
-    
+    draft_service = DraftRunService(db)
+
     # 1. 验证应用
     app = service._get_app_or_404(app_id)
-    if app.type != AppType.AGENT and app.type != AppType.MULTI_AGENT:
-        raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
-    
+    if app.type != AppType.AGENT and app.type != AppType.MULTI_AGENT and app.type != AppType.WORKFLOW:
+        raise BusinessException("只有 Agent , Workflow 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
+
     # 只读操作，允许访问共享应用
     service._validate_app_accessible(app, workspace_id)
+
+    # 处理会话ID（创建或验证）
+    conversation_id = await draft_service._ensure_conversation(
+                conversation_id=payload.conversation_id,
+                app_id=app_id,
+                workspace_id=workspace_id,
+                user_id=payload.user_id
+            )
+    payload.conversation_id = conversation_id
+
     if app.type == AppType.AGENT:
         service._check_agent_config(app_id)
-        
+
         # 2. 获取 Agent 配置
         stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
         agent_cfg = db.scalars(stmt).first()
         if not agent_cfg:
             raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
-        
+
         # 3. 获取模型配置
         model_config = None
         if agent_cfg.default_model_config_id:
@@ -401,12 +417,12 @@ async def draft_run(
             if not model_config:
                 from app.core.exceptions import ResourceNotFoundException
                 raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
-        
+
         # 流式返回
         if payload.stream:
             async def event_generator():
-                from app.services.draft_run_service import DraftRunService
-                draft_service = DraftRunService(db)
+                
+               
                 async for event in draft_service.run_stream(
                     agent_config=agent_cfg,
                     model_config=model_config,
@@ -419,7 +435,7 @@ async def draft_run(
                      user_rag_memory_id=user_rag_memory_id
                 ):
                     yield event
-            
+
             return StreamingResponse(
                 event_generator(),
                 media_type="text/event-stream",
@@ -429,7 +445,7 @@ async def draft_run(
                     "X-Accel-Buffering": "no"
                 }
             )
-        
+
         # 非流式返回
         logger.debug(
             "开始非流式试运行",
@@ -440,7 +456,7 @@ async def draft_run(
                 "has_variables": bool(payload.variables)
             }
         )
-        
+
         from app.services.draft_run_service import DraftRunService
         draft_service = DraftRunService(db)
         result = await draft_service.run(
@@ -454,7 +470,7 @@ async def draft_run(
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id
         )
-        
+
         logger.debug(
             "试运行返回结果",
             extra={
@@ -462,7 +478,7 @@ async def draft_run(
                 "result_keys": list(result.keys()) if isinstance(result, dict) else "not_dict"
             }
         )
-        
+
         # 验证结果
         try:
             validated_result = app_schema.DraftRunResponse.model_validate(result)
@@ -481,10 +497,10 @@ async def draft_run(
     elif app.type == AppType.MULTI_AGENT:
         # 1. 检查多智能体配置完整性
         service._check_multi_agent_config(app_id)
-        
+
         # 2. 构建多智能体运行请求
         from app.schemas.multi_agent_schema import MultiAgentRunRequest
-        
+
         multi_agent_request = MultiAgentRunRequest(
             message=payload.message,
             conversation_id=payload.conversation_id,
@@ -492,7 +508,7 @@ async def draft_run(
             variables=payload.variables or {},
             use_llm_routing=True  # 默认启用 LLM 路由
         )
-        
+
         # 3. 流式返回
         if payload.stream:
             logger.debug(
@@ -503,11 +519,11 @@ async def draft_run(
                     "has_conversation_id": bool(payload.conversation_id)
                 }
             )
-            
+
             async def event_generator():
                 """多智能体流式事件生成器"""
                 multiservice = MultiAgentService(db)
-                
+
                 # 调用多智能体服务的流式方法
                 async for event in multiservice.run_stream(
                     app_id=app_id,
@@ -517,7 +533,7 @@ async def draft_run(
 
                 ):
                     yield event
-            
+
             return StreamingResponse(
                 event_generator(),
                 media_type="text/event-stream",
@@ -527,7 +543,7 @@ async def draft_run(
                     "X-Accel-Buffering": "no"
                 }
             )
-        
+
         # 4. 非流式返回
         logger.debug(
             "开始多智能体非流式试运行",
@@ -537,10 +553,10 @@ async def draft_run(
                 "has_conversation_id": bool(payload.conversation_id)
             }
         )
-        
+
         multiservice = MultiAgentService(db)
         result = await multiservice.run(app_id, multi_agent_request)
-        
+
         logger.debug(
             "多智能体试运行返回结果",
             extra={
@@ -548,12 +564,71 @@ async def draft_run(
                 "has_response": "response" in result if isinstance(result, dict) else False
             }
         )
-        
+
         return success(
             data=result,
             msg="多 Agent 任务执行成功"
         )
-    
+    elif app.type == AppType.WORKFLOW: #工作流
+        config = workflow_service.check_config(app_id)
+        # 3. 流式返回
+        if payload.stream:
+            logger.debug(
+                "开始多智能体流式试运行",
+                extra={
+                    "app_id": str(app_id),
+                    "message_length": len(payload.message),
+                    "has_conversation_id": bool(payload.conversation_id)
+                }
+            )
+
+            async def event_generator():
+                """多智能体流式事件生成器"""
+                multiservice = MultiAgentService(db)
+
+                # 调用多智能体服务的流式方法
+                async for event in multiservice.run_stream(
+                        app_id=app_id,
+                        request=multi_agent_request,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id
+
+                ):
+                    yield event
+
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+
+        # 4. 非流式返回
+        logger.debug(
+            "开始非流式试运行",
+            extra={
+                "app_id": str(app_id),
+                "message_length": len(payload.message),
+                "has_conversation_id": bool(payload.conversation_id)
+            }
+        )
+
+        result = await workflow_service.run(app_id, payload,config)
+        
+        logger.debug(
+            "工作流试运行返回结果",
+            extra={
+                "result_type": str(type(result)),
+                "has_response": "response" in result if isinstance(result, dict) else False
+            }
+        )
+        return success(
+            data=result,
+            msg="工作流任务执行成功"
+        )
 
 
 
@@ -567,21 +642,21 @@ async def draft_run_compare(
 ):
     """
     多模型对比试运行
-    
+
     - 支持对比 1-5 个模型
     - 可以是不同的模型，也可以是同一模型的不同参数配置
     - 通过 model_parameters 覆盖默认参数
     - 支持并行或串行执行（非流式）
     - 支持流式返回（串行执行）
     - 返回每个模型的运行结果和性能对比
-    
+
     使用场景：
     1. 对比不同模型的效果（GPT-4 vs Claude vs Gemini）
     2. 调优模型参数（不同 temperature 的效果对比）
     3. 性能和成本分析
     """
     workspace_id = current_user.current_workspace_id
-    
+
     # 获取 storage_type，如果为 None 则使用默认值
     storage_type = workspace_service.get_workspace_storage_type(
         db=db,
@@ -597,7 +672,7 @@ async def draft_run_compare(
             workspace_id=workspace_id
         )
         if knowledge: user_rag_memory_id = str(knowledge.id)
-    
+
     logger.info(
         "多模型对比试运行",
         extra={
@@ -607,13 +682,13 @@ async def draft_run_compare(
             "stream": payload.stream
         }
     )
-    
+
     # 提前验证和准备（在流式响应开始前完成）
     from app.services.app_service import AppService
     from app.models import ModelConfig
-    
+
     service = AppService(db)
-    
+
     # 1. 验证应用和权限
     app = service._get_app_or_404(app_id)
     if app.type != "agent":
@@ -621,7 +696,7 @@ async def draft_run_compare(
         from app.core.error_codes import BizCode
         raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
     service._validate_app_accessible(app, workspace_id)
-    
+
     # 2. 获取 Agent 配置
     from sqlalchemy import select
     from app.models import AgentConfig
@@ -631,7 +706,7 @@ async def draft_run_compare(
         from app.core.exceptions import BusinessException
         from app.core.error_codes import BizCode
         raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
-    
+
     # 3. 验证所有模型配置
     model_configs = []
     for model_item in payload.models:
@@ -639,12 +714,12 @@ async def draft_run_compare(
         if not model_config:
             from app.core.exceptions import ResourceNotFoundException
             raise ResourceNotFoundException("模型配置", str(model_item.model_config_id))
-        
+
         merged_parameters = {
             **(agent_cfg.model_parameters or {}),
             **(model_item.model_parameters or {})
         }
-        
+
         model_configs.append({
             "model_config": model_config,
             "parameters": merged_parameters,
@@ -652,7 +727,7 @@ async def draft_run_compare(
             "model_config_id": model_item.model_config_id,
             "conversation_id": model_item.conversation_id  # 传递每个模型的 conversation_id
         })
-    
+
     # 流式返回
     if payload.stream:
         async def event_generator():
@@ -674,7 +749,7 @@ async def draft_run_compare(
                 timeout=payload.timeout or 60
             ):
                 yield event
-        
+
         return StreamingResponse(
             event_generator(),
             media_type="text/event-stream",
@@ -684,7 +759,7 @@ async def draft_run_compare(
                 "X-Accel-Buffering": "no"
             }
         )
-    
+
     # 非流式返回
     from app.services.draft_run_service import DraftRunService
     draft_service = DraftRunService(db)
@@ -703,7 +778,7 @@ async def draft_run_compare(
         parallel=payload.parallel,
         timeout=payload.timeout or 60
     )
-    
+
     logger.info(
         "多模型对比完成",
         extra={
@@ -712,5 +787,36 @@ async def draft_run_compare(
             "failed": result["failed_count"]
         }
     )
-    
+
     return success(data=app_schema.DraftRunCompareResponse(**result))
+
+
+@router.get("/{app_id}/workflow")
+@cur_workspace_access_guard()
+async def get_workflow_config(
+        app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)]
+
+):
+    """获取工作流配置
+
+    获取应用的工作流配置详情。
+    """
+    workspace_id = current_user.current_workspace_id
+    cfg = app_service.get_workflow_config(db=db, app_id=app_id, workspace_id=workspace_id)
+    # 配置总是存在（不存在时返回默认模板）
+    return success(data=WorkflowConfigSchema.model_validate(cfg))
+
+@router.put("/{app_id}/workflow", summary="更新 Workflow 配置")
+@cur_workspace_access_guard()
+async def update_workflow_config(
+    app_id: uuid.UUID,
+    payload: WorkflowConfigUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    workspace_id = current_user.current_workspace_id
+    cfg = app_service.update_workflow_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
+    return success(data=WorkflowConfigSchema.model_validate(cfg))
+

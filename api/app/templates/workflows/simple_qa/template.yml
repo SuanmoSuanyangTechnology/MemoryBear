@@ -1,0 +1,100 @@
+# 简单问答工作流模板
+id: simple_qa_v1
+name: 简单问答工作流
+description: 最基础的问答工作流，适合快速开始
+category: basic
+version: "1.0.0"
+author: RedBear Memory Team
+tags:
+  - 问答
+  - 基础
+  - LLM
+
+# 工作流配置
+nodes:
+  - id: start
+    type: start
+    name: 开始
+    position:
+      x: 100
+      y: 100
+
+  - id: llm_qa
+    type: llm
+    name: LLM 问答
+    config:
+      # 使用 LangChain 标准的消息格式
+      messages:
+        - role: system
+          content: |
+            你是一个专业、友好且乐于助人的 AI 助手。
+            
+            你的职责：
+            - 准确理解用户的问题并提供有价值的回答
+            - 保持回答的专业性和准确性
+            - 如果不确定答案，诚实地告知用户
+            - 使用清晰、易懂的语言进行交流
+            
+            回答风格：
+            - 简洁明了，直击要点
+            - 必要时提供详细解释和示例
+            - 使用友好、礼貌的语气
+            - 适当使用格式化（如列表、段落）提高可读性
+        
+        - role: user
+          content: "{{ sys.message }}"
+      
+      model_id: gpt-3.5-turbo
+      temperature: 0.7
+      max_tokens: 1000
+    position:
+      x: 300
+      y: 100
+
+  - id: end
+    type: end
+    name: 结束
+    config:
+      output: "{{ llm_qa.output }}"
+    position:
+      x: 500
+      y: 100
+
+edges:
+  - source: start
+    target: llm_qa
+    label: 开始处理
+
+  - source: llm_qa
+    target: end
+    label: 完成
+
+# 变量定义
+variables:
+  - name: user_question
+    type: string
+    required: true
+    description: 用户的问题
+    default: ""
+
+# 执行配置
+execution_config:
+  max_execution_time: 60
+  max_iterations: 1
+
+# 触发器（可选）
+triggers: []
+
+# 使用示例
+examples:
+  - name: 基础问答
+    description: 询问一个简单的问题
+    input:
+      user_question: "什么是人工智能？"
+    expected_output: "关于人工智能的解释"
+
+  - name: 技术咨询
+    description: 询问技术问题
+    input:
+      user_question: "如何学习 Python 编程？"
+    expected_output: "Python 学习建议"

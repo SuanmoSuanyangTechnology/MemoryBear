@@ -8,15 +8,14 @@ import type { UploadFileResponse,KnowledgeBaseDocumentData } from '@/views/Knowl
 import type { ColumnsType } from 'antd/es/table';
 import UploadFiles from '@/components/Upload/UploadFiles';
 import type { UploadRequestOption } from 'rc-upload/lib/interface';
-import { uploadFile, getDocumentList, previewDocumentChunk, parseDocument, updateDocument, deleteDocument } from '@/api/knowledgeBase';
+import { uploadFile, getDocumentList, parseDocument, updateDocument, deleteDocument } from '@/api/knowledgeBase';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
-import { NoData } from '../components/noData';
-import noDataIcon from '@/assets/images/knowledgeBase/noData.png';
+
 import SliderInput from '@/components/SliderInput';
 import DelimiterSelector from '../components/DelimiterSelector';
 const { confirm } = Modal
 const { TextArea } = Input;
-import styles from '../index.module.css';
+
   const style: React.CSSProperties = {
     display: 'flex',
     gap: 16,
@@ -71,12 +70,11 @@ const CreateDataset = () => {
   const initialFileIds = locationState.fileIds ?? (locationState.fileId ? [locationState.fileId] : []);
   const [current, setCurrent] = useState<number>(stepIndexMap[initialStepKey]);
   const tableRef = useRef<TableRef>(null);
+
+
   const [data, setData] = useState<KnowledgeBaseDocumentData[]>([]);
-  const [chunkData, setChunkData] = useState<any[]>([]);
-  const [total, setTotal] = useState<number>(0);
   const [rechunkFileIds, setRechunkFileIds] = useState<string[]>(initialFileIds);
-  const [curSelectedFileId, setCurSelectedFileId] = useState<number>(-1);
-  const [previewLoading, setPreviewLoading] = useState<boolean>(false);
+
   const [pollingLoading, setPollingLoading] = useState<boolean>(false);
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [delimiter, setDelimiter] = useState<string | undefined>(undefined);
@@ -121,6 +119,7 @@ const CreateDataset = () => {
                       layout_recognize:'DeepDOC',
                       delimiter: delimiter,
                       chunk_token_num: blockSize,
+                      auto_question: processingMethod === 'directBlock' ? 0 : 1,
                   }
                 }
                 updateDocument(id, params)
@@ -145,7 +144,7 @@ const CreateDataset = () => {
       });
       return;
     }
-    debugger
+  
 
     // 显示确认弹框
     confirm({
@@ -168,7 +167,7 @@ const CreateDataset = () => {
   const startProcessing = (autoReturnToList: boolean) => {
     // 触发文档解析
     rechunkFileIds.map((id) => {
-      parseDocument(id);
+      parseDocument(id, {});
     });
 
     // 开启 loading
@@ -276,21 +275,7 @@ const CreateDataset = () => {
         onError?.(error as Error);
       });
   };
-  // 点击文件 预览分块
-  const handlePreview = async(item: KnowledgeBaseDocumentData, index: number) => {
-    setCurSelectedFileId(index);
-    setPreviewLoading(true);
-    try{
-        const res = await previewDocumentChunk(knowledgeBaseId ?? '', item.id ?? '');
-        setChunkData(res.items || []);
-        setTotal(res.page.total || 0);
-        console.log('res', res);
-    }catch(error) {
-        console.log('error', error);
-    } finally {
-        setPreviewLoading(false);
-    }
-  }
+
 
   // 轮询检查文档处理状态
   // autoReturn: 是否在所有文档完成时自动返回列表页
@@ -346,6 +331,8 @@ const CreateDataset = () => {
         state: {
           refresh: true,
           timestamp: Date.now(), // 添加时间戳确保每次都是新的 state
+          // 保持返回到原来的文档文件夹位置
+          navigateToDocumentFolder: parentId !== knowledgeBaseId ? parentId : undefined,
         },
       });
     } else {
@@ -565,8 +552,8 @@ const CreateDataset = () => {
             {rechunkFileIds.length > 0 ? (
               <Table
                 ref={tableRef}
-                apiUrl={`/documents/${knowledgeBaseId}/${parentId}/documents`}
-                apiParams={{
+                apiUrl={`/documents/${knowledgeBaseId}/documents`}
+                apiParams={{                    
                     document_ids: rechunkFileIds.join(','),
                 }}
                 columns={columns}

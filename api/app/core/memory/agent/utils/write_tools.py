@@ -106,6 +106,8 @@ async def write(content: str, user_id: str, apply_id: str, group_id: str, ref_id
         all_statement_chunk_edges,
         all_statement_entity_edges,
         all_entity_entity_edges,
+        all_dedup_details,
+
     ) = await orchestrator.run(chunked_dialogs, is_pilot_run=False)
     
     log_time("Extraction Pipeline", time.time() - step_start, log_file)

@@ -15,9 +15,11 @@ from .end_user_model import EndUser
 from .appshare_model import AppShare
 from .release_share_model import ReleaseShare
 from .conversation_model import Conversation, Message
-from .api_key_model import ApiKey, ApiKeyLog, ApiKeyType, ResourceType
+from .api_key_model import ApiKey, ApiKeyLog, ApiKeyType
 from .data_config_model import DataConfig
 from .multi_agent_model import MultiAgentConfig, AgentInvocation
+from .workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
+from .retrieval_info import RetrievalInfo
 
 __all__ = [
     "Tenants",
@@ -46,8 +48,11 @@ __all__ = [
     "ApiKey",
     "ApiKeyLog",
     "ApiKeyType",
-    "ResourceType",
     "DataConfig",
     "MultiAgentConfig",
-    "AgentInvocation"
+    "AgentInvocation",
+    "WorkflowConfig",
+    "WorkflowExecution",
+    "WorkflowNodeExecution",
+    "RetrievalInfo"
 ]

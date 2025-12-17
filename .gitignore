@@ -20,7 +20,8 @@ examples/
 .idea
 
 # Temporary outputs
-**/.DS_Store
+app/core/memory/agent/.DS_Store
+app/core/memory/src/utils/.DS_Store
 time.log
 celerybeat-schedule.db
 search_results.json
