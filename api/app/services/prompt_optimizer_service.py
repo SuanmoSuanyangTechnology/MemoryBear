@@ -73,7 +73,6 @@ class PromptOptimizerService:
             self,
             tenant_id: uuid.UUID,
             config_id: uuid.UUID,
-            model_id: uuid.UUID,
             system_prompt: str,
     ) -> PromptOptimizerModelConfig:
         """
@@ -86,7 +85,6 @@ class PromptOptimizerService:
         Args:
             tenant_id (uuid.UUID): The unique identifier of the tenant.
             config_id (uuid.UUID): The unique identifier of the configuration to create or update.
-            model_id (uuid.UUID): The unique identifier of the model associated with this configuration.
             system_prompt (str): The system prompt content used for prompt optimization.
 
         Returns:

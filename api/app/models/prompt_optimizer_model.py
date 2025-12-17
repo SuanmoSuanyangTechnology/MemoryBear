@@ -86,12 +86,10 @@ class PromptOptimizerSession(Base):
 
     Columns:
         id (UUID):
-            Primary key. Internal unique identifier for the session record.
+            Public-facing session identifier used to group conversation history.
         tenant_id (UUID):
             Foreign key referencing `tenants.id`.
             Identifies the tenant under which the session is created.
-        session_id (UUID):
-            Public-facing session identifier used to group conversation history.
         user_id (UUID):
             Foreign key referencing `users.id`.
             Identifies the user who initiated the session.
@@ -105,10 +103,9 @@ class PromptOptimizerSession(Base):
     """
     __tablename__ = "prompt_opt_session_list"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True, comment="Session ID")
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, comment="Tenant ID")
     # app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=False, comment="Application ID")
-    session_id = Column(UUID(as_uuid=True), nullable=False, comment="Session ID")
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, comment="User ID")
 
     created_at = Column(DateTime, default=datetime.datetime.now, comment="Creation Time", index=True)

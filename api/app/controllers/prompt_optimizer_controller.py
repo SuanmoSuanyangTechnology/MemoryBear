@@ -163,7 +163,7 @@ def set_system_prompt(
 
     model_config = PromptOptimizerService(db).create_update_model_config(
         current_user.tenant_id,
-        data.id, data.model_id,
+        data.id,
         data.system_prompt
     )
     return success(data=model_config.id)

@@ -141,7 +141,6 @@ class PromptOptimizerSessionRepository:
             session = PromptOptimizerSession(
                 tenant_id=tenant_id,
                 user_id=user_id,
-                session_id=uuid.uuid4(),
             )
             self.db.add(session)
             self.db.commit()
@@ -172,8 +171,17 @@ class PromptOptimizerSessionRepository:
                         f"user_id={user_id}, session_id={session_id}")
 
         try:
+            # First get the internal session ID from the session list table
+            session = self.db.query(PromptOptimizerSession).filter(
+                PromptOptimizerSession.id == session_id,
+                PromptOptimizerSession.user_id == user_id
+            ).first()
+            
+            if not session:
+                return []
+            
             history = self.db.query(PromptOptimizerSessionHistory).filter(
-                PromptOptimizerSessionHistory.session_id == session_id,
+                PromptOptimizerSessionHistory.session_id == session.id,
                 PromptOptimizerSessionHistory.user_id == user_id
             ).order_by(PromptOptimizerSessionHistory.created_at.asc()).all()
             return history
@@ -195,9 +203,20 @@ class PromptOptimizerSessionRepository:
         This method is a placeholder for future implementation.
         """
         try:
+            # Get the session to ensure it exists and belongs to the user
+            session = self.db.query(PromptOptimizerSession).filter(
+                PromptOptimizerSession.id == session_id,
+                PromptOptimizerSession.user_id == user_id,
+                PromptOptimizerSession.tenant_id == tenant_id
+            ).first()
+            
+            if not session:
+                db_logger.error(f"Session {session_id} not found for user {user_id}")
+                raise ValueError(f"Session {session_id} not found for user {user_id}")
+            
             message = PromptOptimizerSessionHistory(
                 tenant_id=tenant_id,
-                session_id=session_id,
+                session_id=session.id,
                 user_id=user_id,
                 role=role.value,
                 content=content,
