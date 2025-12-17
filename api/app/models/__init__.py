@@ -20,6 +20,7 @@ from .data_config_model import DataConfig
 from .multi_agent_model import MultiAgentConfig, AgentInvocation
 from .workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
 from .retrieval_info import RetrievalInfo
+from .prompt_optimizer_model import PromptOptimizerModelConfig, PromptOptimizerSession, PromptOptimizerSessionHistory
 
 __all__ = [
     "Tenants",
@@ -54,5 +55,8 @@ __all__ = [
     "WorkflowConfig",
     "WorkflowExecution",
     "WorkflowNodeExecution",
-    "RetrievalInfo"
+    "RetrievalInfo",
+    "PromptOptimizerModelConfig",
+    "PromptOptimizerSession",
+    "PromptOptimizerSessionHistory"
 ]
