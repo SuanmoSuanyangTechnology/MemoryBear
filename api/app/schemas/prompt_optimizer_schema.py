@@ -54,7 +54,7 @@ class OptimizePromptResult(BaseModel):
 class CreateSessionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
-    session_id: UUID = Field(
+    id: UUID = Field(
         ...,
         description="Session ID"
     )
