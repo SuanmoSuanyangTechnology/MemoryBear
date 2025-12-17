@@ -605,6 +605,7 @@ const Private: FC = () => {
   }
 
   const handleRefreshTable = () => {
+    debugger
     // 刷新表格数据
     tableRef.current?.loadData();
   }

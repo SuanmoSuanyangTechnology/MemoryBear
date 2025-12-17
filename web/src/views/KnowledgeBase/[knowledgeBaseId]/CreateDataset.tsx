@@ -552,8 +552,8 @@ const CreateDataset = () => {
             {rechunkFileIds.length > 0 ? (
               <Table
                 ref={tableRef}
-                apiUrl={`/documents/${knowledgeBaseId}/${parentId}/documents`}
-                apiParams={{
+                apiUrl={`/documents/${knowledgeBaseId}/documents`}
+                apiParams={{                    
                     document_ids: rechunkFileIds.join(','),
                 }}
                 columns={columns}
