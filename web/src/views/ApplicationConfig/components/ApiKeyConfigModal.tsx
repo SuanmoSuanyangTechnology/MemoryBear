@@ -18,13 +18,14 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
   const [form] = Form.useForm<ApiKey>();
   const [loading, setLoading] = useState(false)
   const values = Form.useWatch<ApiKey>([], form)
-  const [editVo, setEditVo] = useState<ApiKey>({} as ApiKey)
+  const [editVo, setEditVo] = useState<ApiKey | null>(null)
 
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
-    setVisible(false);
     form.resetFields();
     setLoading(false)
+    setEditVo(null)
+    setVisible(false);
   };
 
   const handleOpen = (apiKey: ApiKey) => {
@@ -37,6 +38,7 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
   };
   // 封装保存方法，添加提交逻辑
   const handleSave = () => {
+    if (!editVo?.id) return
     form.validateFields()
       .then((values) => {
         updateApiKey(editVo.id, {
@@ -88,7 +90,7 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
                 step={1}
               />
             </Form.Item>
-            <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:mt-[-26px]">
+            <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
               1
               <span>{t('application.currentValue')}: {values?.rate_limit}{t('application.qpsLimitUnit')}</span>
             </div>
@@ -113,7 +115,7 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
                 step={100}
               />
             </Form.Item>
-            <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:mt-[-26px]">
+            <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
               100
               <span>{t('application.currentValue')}: {values?.daily_request_limit}{t('application.dailyUsageLimitUnit')}</span>
             </div>
