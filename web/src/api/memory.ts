@@ -9,6 +9,7 @@ import type {
   ConfigForm as ExtractionConfigForm
 } from '@/views/MemoryExtractionEngine/types'
 import type { TestParams } from '@/views/MemoryConversation'
+import { handleSSE, type SSEMessage } from '@/utils/stream'
 
 // 记忆对话
 export const readService = (query: TestParams) => {
@@ -132,8 +133,8 @@ export const updateMemoryExtractionConfig = (values: ExtractionConfigForm) => {
   return request.post('/memory-storage/update_config_extracted', values)
 }
 // 记忆萃取引擎-试运行
-export const pilotRunMemoryExtractionConfig = (values: { config_id: number | string; dialogue_text: string }) => {
-  return request.post('/memory-storage/pilot_run', values)
+export const pilotRunMemoryExtractionConfig = (values: { config_id: number | string; dialogue_text: string; }, onMessage?: (data: SSEMessage[]) => void) => {
+  return handleSSE('/memory-storage/pilot_run', values, onMessage)
 }
 /*************** end 记忆管理 相关接口 ******************************/
 

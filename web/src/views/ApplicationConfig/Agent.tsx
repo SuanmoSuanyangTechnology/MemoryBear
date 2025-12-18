@@ -239,6 +239,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         return [
           ...(prev || []).map(item => ({
             ...item,
+            conversation_id: undefined,
             list: []
           })),
           newChatItem

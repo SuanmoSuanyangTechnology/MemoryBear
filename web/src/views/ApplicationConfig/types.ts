@@ -1,4 +1,5 @@
 import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types'
+import type { ChatItem } from '@/components/Chat/types'
 
 export interface ModelConfig {
   label?: string;
@@ -139,11 +140,6 @@ export interface ApiExtensionModalData {
 export interface ApiExtensionModalRef {
   handleOpen: () => void;
 }
-export interface ChatItem { 
-  role: 'answer' | 'question'; 
-  content?: string; 
-  time: number; 
-}
 export interface ChatData {
   label?: string;
   model_config_id?: string;
@@ -191,4 +187,10 @@ export interface SubAgentItem {
 }
 export interface SubAgentModalRef {
   handleOpen: (agent?: SubAgentItem) => void;
+}
+export interface ApiKeyModalRef {
+  handleOpen: () => void;
+}
+export interface ApiKeyConfigModalRef {
+  handleOpen: (apiKey: ApiKey) => void;
 }

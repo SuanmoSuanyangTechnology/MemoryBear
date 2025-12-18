@@ -1,4 +1,4 @@
-import React, { type FC, useEffect, useState, useRef } from 'react'
+import React, { type FC, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Col } from 'antd'
@@ -29,13 +29,9 @@ const RelationshipNetwork:FC = () => {
   const [categories, setCategories] = useState<{ name: string }[]>([])
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
 
-  useEffect(() => {
-    if (!id) return
-    getEdgeData()
-  }, [id])
 
   // 关系网络
-  const getEdgeData = () => {
+  const getEdgeData = useCallback(() => {
     if (!id) return
     setSelectedNode(null)
     getMemorySearchEdges(id).then((res) => {
@@ -45,20 +41,20 @@ const RelationshipNetwork:FC = () => {
       const categories: { name: string }[] = []
       
       list.forEach(item => {
-        if (item.edge) {
+        if (item.edge && item.edge.target_id && item.edge.source_id) {
           links.push({
             ...item.edge,
-            target: item.edge?.target_id,
-            source: item.edge?.source_id,
+            target: item.edge.target_id,
+            source: item.edge.source_id,
           })
         }
         if (item.sourceNode) {
           nodes.push(item.sourceNode)
-          categories.push({name: item.sourceNode.entity_type})
+          categories.push({name: item.sourceNode.entity_type || 'Unknown'})
         }
         if (item.targetNode) {
           nodes.push(item.targetNode)
-          categories.push({name: item.targetNode.entity_type})
+          categories.push({name: item.targetNode.entity_type || 'Unknown'})
         }
       })
       
@@ -76,14 +72,58 @@ const RelationshipNetwork:FC = () => {
       setLinks(uniqueLinks)
       setCategories(uniqueCategories)
 
+      // Calculate node frequency based on appearance in links
+      const nodeFrequency = new Map<string, number>()
+      
+      // Count each node's appearance in links (both as source and target)
+      uniqueLinks.forEach(link => {
+        // Increment source node frequency (only if source exists and is a string)
+        if (typeof link.source === 'string') {
+          nodeFrequency.set(link.source, (nodeFrequency.get(link.source) || 0) + 1)
+        }
+        // Increment target node frequency (only if target exists and is a string)  
+        if (typeof link.target === 'string') {
+          nodeFrequency.set(link.target, (nodeFrequency.get(link.target) || 0) + 1)
+        }
+      })
+
+      // Set minimum frequency to 1 for nodes not in any links
+      uniqueNodes.forEach(node => {
+        if (node.id && typeof node.id === 'string') {
+          if (!nodeFrequency.has(node.id)) {
+            nodeFrequency.set(node.id, 1)
+          }
+        }
+      })
+
       uniqueNodes.map(item => {
-        const index = uniqueCategories.findIndex((n) => n.name === item.entity_type)
+        const index = uniqueCategories.findIndex((n) => n.name === (item.entity_type || 'Unknown'))
         item.category = index
-        item.symbolSize = index < 10 ? 5 : index <100 ? 8 : 10
+        
+        // Get frequency for the node, ensuring id is a string
+        const frequency = (item.id && typeof item.id === 'string') ? (nodeFrequency.get(item.id) || 1) : 1
+        
+        // Set symbolSize based on frequency
+        // Adjust these thresholds based on expected frequency ranges
+        if (frequency <= 1) {
+          item.symbolSize = 5
+        } else if (frequency <= 10) {
+          item.symbolSize = 10
+        } else if (frequency <= 15) {
+          item.symbolSize = 15
+        } else if (frequency <= 20) {
+          item.symbolSize = 25
+        } else {
+          item.symbolSize = 35
+        }
       })
       setNodes(uniqueNodes)
     })
-  }
+  }, [id])
+  useEffect(() => {
+    if (!id) return
+    getEdgeData()
+  }, [id])
   
   useEffect(() => {
     const handleResize = () => {
@@ -95,7 +135,7 @@ const RelationshipNetwork:FC = () => {
         });
       }
     }
-    
+
     const resizeObserver = new ResizeObserver(handleResize)
     const chartElement = chartRef.current?.getEchartsInstance().getDom().parentElement
     if (chartElement) {
@@ -106,6 +146,8 @@ const RelationshipNetwork:FC = () => {
       resizeObserver.disconnect()
     }
   }, [nodes])
+
+  console.log('nodes', nodes)
   return (
     <>
       {/* 关系网络 */}
@@ -175,12 +217,10 @@ const RelationshipNetwork:FC = () => {
                     if (params.dataType === 'node') {
                       // 处理节点点击事件
                       console.log('Node clicked:', params.data);
-                      setSelectedNode(params.data)
-                      if (selectedNode?.id === params.data.id) {
-                        setSelectedNode(null)
-                      } else {
-                        setSelectedNode(params.data)
-                      }
+                      // 使用函数式更新避免状态依赖问题
+                      setSelectedNode(prevSelected => 
+                        prevSelected?.id === params.data.id ? null : params.data
+                      )
                     }
                   }
                 }}
