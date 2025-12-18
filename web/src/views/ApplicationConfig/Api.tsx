@@ -1,6 +1,6 @@
 import { type FC, useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Space, App, Statistic, Row, Col, Divider } from 'antd';
+import { Button, Space, App, Statistic, Row, Col } from 'antd';
 import copy from 'copy-to-clipboard'
 
 import Card from './components/Card';
@@ -10,7 +10,7 @@ import type { ApiKey } from '@/views/ApiKeyManagement/types'
 import ApiKeyModal from './components/ApiKeyModal';
 import ApiKeyConfigModal from './components/ApiKeyConfigModal';
 import Tag from '@/components/Tag'
-import { getApiKeyList, getApiKeyStats } from '@/api/apiKey';
+import { getApiKeyList, getApiKeyStats, deleteApiKey } from '@/api/apiKey';
 import { maskApiKeys } from '@/utils/apiKeyReplacer'
 
 const Api: FC<{ application: Application | null }> = ({ application }) => {
@@ -44,7 +44,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
     }).then(res => {
       const response = res as { items: ApiKey[] }
       const list = response.items ?? []
-      getAllStats(list)
+      getAllStats([...list])
     })
   }
   const getAllStats = (list: ApiKey[]) => {
@@ -78,7 +78,11 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
         okText: t('common.delete'),
         okType: 'danger',
         onOk: () => {
-          
+          deleteApiKey(vo.id)
+            .then(() => {
+              getApiList();
+              message.success(t('common.deleteSuccess'))
+            })
         }
       })
   }
