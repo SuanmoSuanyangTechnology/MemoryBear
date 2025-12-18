@@ -6,22 +6,31 @@
 // biome-ignore lint: disable
 export {}
 declare global {
+  const Activity: typeof import('react').Activity
+  const Fragment: typeof import('react').Fragment
   const Link: typeof import('react-router-dom').Link
   const NavLink: typeof import('react-router-dom').NavLink
   const Navigate: typeof import('react-router-dom').Navigate
   const Outlet: typeof import('react-router-dom').Outlet
   const Route: typeof import('react-router-dom').Route
   const Routes: typeof import('react-router-dom').Routes
+  const Suspense: typeof import('react').Suspense
+  const cache: typeof import('react').cache
+  const cacheSignal: typeof import('react').cacheSignal
+  const createContext: typeof import('react').createContext
   const createRef: typeof import('react').createRef
   const forwardRef: typeof import('react').forwardRef
   const lazy: typeof import('react').lazy
   const memo: typeof import('react').memo
   const startTransition: typeof import('react').startTransition
+  const use: typeof import('react').use
+  const useActionState: typeof import('react').useActionState
   const useCallback: typeof import('react').useCallback
   const useContext: typeof import('react').useContext
   const useDebugValue: typeof import('react').useDebugValue
   const useDeferredValue: typeof import('react').useDeferredValue
   const useEffect: typeof import('react').useEffect
+  const useEffectEvent: typeof import('react').useEffectEvent
   const useHref: typeof import('react-router-dom').useHref
   const useId: typeof import('react').useId
   const useImperativeHandle: typeof import('react').useImperativeHandle
@@ -33,6 +42,7 @@ declare global {
   const useMemo: typeof import('react').useMemo
   const useNavigate: typeof import('react-router-dom').useNavigate
   const useNavigationType: typeof import('react-router-dom').useNavigationType
+  const useOptimistic: typeof import('react').useOptimistic
   const useOutlet: typeof import('react-router-dom').useOutlet
   const useOutletContext: typeof import('react-router-dom').useOutletContext
   const useParams: typeof import('react-router-dom').useParams
