@@ -1,4 +1,5 @@
 import { type FC, useState, useRef, useEffect } from 'react';
+import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { Button, Space, App, Statistic, Row, Col } from 'antd';
 import copy from 'copy-to-clipboard'
@@ -99,9 +100,12 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
           <div className="rb:p-[20px_20px_24px_20px] rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
             <Space size={8}>
               {['GET', 'POST', 'PUT', 'DELETE'].map((method) => (
-                <Button key={method} type={activeMethods.includes(method) ? 'primary' : 'default'}>
+                <div key={method} className={clsx("rb:w-20 rb:h-7 rb:leading-7 rb:text-center rb:rounded-md rb:text-regular", {
+                  'rb:bg-[#155EEF] rb:text-white': activeMethods.includes(method),
+                  'rb:bg-white': !activeMethods.includes(method),
+                })}>
                   {method}
-                </Button>
+                </div>
               ))}
             </Space>
 
