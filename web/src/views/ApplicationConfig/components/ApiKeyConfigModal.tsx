@@ -46,7 +46,9 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
           ...values
         })
         handleClose()
-        refresh()
+        setTimeout(() => {
+          refresh()
+        }, 50)
       })
   }
 

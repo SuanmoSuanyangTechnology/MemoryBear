@@ -172,9 +172,6 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
                   <Statistic valueStyle={{ fontSize: '18px' }} title={t('application.apiKeyRequestTotal')} value={item.total_requests} />
                 </Col>
                 <Col span={8}>
-                  <Statistic valueStyle={{ fontSize: '18px' }} title={t('application.qps')} value={item.quota_used} />
-                </Col>
-                <Col span={8}>
                   <Statistic valueStyle={{ fontSize: '18px' }} title={t('application.qpsLimit')} value={item.rate_limit} />
                 </Col>
               </Row>
