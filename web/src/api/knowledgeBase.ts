@@ -200,7 +200,7 @@ export const deleteFile = async (id: string) => {
 
 // 获取文档列表
 export const getDocumentList = async (query: PathQuery) => {
-  const response = await request.get(`${apiPrefix}/documents/${query.kb_id}/${query.parent_id}/documents`, query);
+  const response = await request.get(`${apiPrefix}/documents/${query.kb_id}/documents`, query);
   return response as KnowledgeBaseDocumentData[];
 };
 // 文档详情
@@ -213,6 +213,11 @@ export const createDocument = async (data: KnowledgeBaseDocumentData) => {
   const response = await request.post(`${apiPrefix}/documents/document`, data);
   return response as KnowledgeBaseDocumentData;
 };
+// 自定义文档上传并创建
+export const createDocumentAndUpload = async ( data: any, params: PathQuery) => {
+  const response = await request.post(`${apiPrefix}/files/customtext`, data, { params } );
+  return response as any;
+};
 // 更新文档
 export const updateDocument = async (id: string, data: KnowledgeBaseDocumentData) => {
   const response = await request.put(`${apiPrefix}/documents/${id}`, data);
@@ -223,9 +228,9 @@ export const deleteDocument = async (id: string) => {
   const response = await request.delete(`${apiPrefix}/documents/${id}`);
   return response;
 };
-// 文档解析
-export const parseDocument = async (id: string) => {
-  const response = await request.post(`${apiPrefix}/documents/${id}/chunks`);
+// 文档解析 / 分块
+export const parseDocument = async (id: string, data: any) => {
+  const response = await request.post(`${apiPrefix}/documents/${id}/chunks`, data);
   return response as any;
 };
 // 文档分块预览

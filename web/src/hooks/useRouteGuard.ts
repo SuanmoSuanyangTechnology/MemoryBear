@@ -11,8 +11,10 @@ export const checkAuthStatus = (): boolean => {
 
 // 递归检查路由是否存在于菜单数据中
 export const checkRoutePermission = (menus: MenuItem[], currentPath: string): boolean => {
-  // 首页默认有权限
-  if (currentPath === '/' || currentPath.includes('knowledge-detail')) return true;
+  // 首页和知识库相关页面默认有权限
+  if (currentPath === '/' || currentPath.includes('knowledge-detail') || currentPath.includes('knowledge-base')) {
+    return true;
+  }
   
   for (const menu of menus) {
     // 检查当前菜单的path是否匹配
@@ -26,6 +28,7 @@ export const checkRoutePermission = (menus: MenuItem[], currentPath: string): bo
       }
     }
   }
+  
   return false;
 };
 
@@ -52,7 +55,7 @@ export const useRouteGuard = (source: 'space' | 'manage') => {
       const hasPermission = checkRoutePermission(menus, location.pathname);
       if (!hasPermission) {
         // 无权限访问该路由，重定向到无权限页面
-        // navigate('/not-found', { replace: true });
+        // navigate('/no-permission', { replace: true });
       }
     }
   }, [navigate, location.pathname, location.search, location.hash, menus]);
