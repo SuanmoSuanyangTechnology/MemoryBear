@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 import datetime
-from typing import Any, Annotated
+from typing import Any, Annotated, AsyncGenerator
 
 from sqlalchemy.orm import Session
 from fastapi import Depends
@@ -81,7 +81,7 @@ class WorkflowService:
             if not is_valid:
                 logger.warning(f"工作流配置验证失败: {errors}")
                 raise BusinessException(
-                    error_code=BizCode.INVALID_PARAMETER,
+                    code=BizCode.INVALID_PARAMETER,
                     message=f"工作流配置无效: {'; '.join(errors)}"
                 )
 
@@ -140,7 +140,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
@@ -166,7 +166,7 @@ class WorkflowService:
             if not is_valid:
                 logger.warning(f"工作流配置验证失败: {errors}")
                 raise BusinessException(
-                    error_code=BizCode.INVALID_PARAMETER,
+                    code=BizCode.INVALID_PARAMETER,
                     message=f"工作流配置无效: {'; '.join(errors)}"
                 )
 
@@ -245,7 +245,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
@@ -359,7 +359,7 @@ class WorkflowService:
         execution = self.get_execution(execution_id)
         if not execution:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"执行记录不存在: execution_id={execution_id}"
             )
 
@@ -640,7 +640,7 @@ class WorkflowService:
         triggered_by: uuid.UUID,
         conversation_id: uuid.UUID | None = None,
         stream: bool = False
-    ):
+    ) -> AsyncGenerator | dict:
         """运行工作流
 
         Args:
@@ -660,7 +660,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
@@ -687,7 +687,7 @@ class WorkflowService:
         app = self.db.query(App).filter(App.id == app_id).first()
         if not app:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"应用不存在: app_id={app_id}"
             )
 
@@ -750,7 +750,7 @@ class WorkflowService:
                 error_message=str(e)
             )
             raise BusinessException(
-                error_code=BizCode.INTERNAL_ERROR,
+                code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
             )
 
