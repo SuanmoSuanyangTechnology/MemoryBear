@@ -1,13 +1,9 @@
 from fastapi import APIRouter, Depends, status, Query
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Optional
 import uuid
 
 
-from app.core.models import RedBearLLM
-from app.core.models.base import RedBearModelConfig
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.models_model import ModelProvider, ModelType
@@ -39,7 +35,7 @@ def get_model_providers():
 
 @router.get("", response_model=ApiResponse)
 def get_model_list(
-    type: Optional[List[model_schema.ModelType]] = Query(None, description="模型类型筛选（支持多个，如 ?type=LLM&type=EMBEDDING）"),
+    type: Optional[str] = Query(None, description="模型类型筛选（支持多个，如 ?type=LLM 或 ?type=LLM,EMBEDDING）"),
     provider: Optional[model_schema.ModelProvider] = Query(None, description="提供商筛选(基于API Key)"),
     is_active: Optional[bool] = Query(None, description="激活状态筛选"),
     is_public: Optional[bool] = Query(None, description="公开状态筛选"),
@@ -54,13 +50,21 @@ def get_model_list(
     
     支持多个 type 参数：
     - 单个：?type=LLM
-    - 多个：?type=LLM&type=EMBEDDING
+    - 多个（逗号分隔）：?type=LLM,EMBEDDING
+    - 多个（重复参数）：?type=LLM&type=EMBEDDING
     """
     api_logger.info(f"获取模型配置列表请求: type={type}, provider={provider}, page={page}, pagesize={pagesize}, tenant_id={current_user.tenant_id}")
     
     try:
+        # 解析 type 参数（支持逗号分隔）
+        type_list = None
+        if type:
+            type_values = [t.strip() for t in type.split(',')]
+            type_list = [model_schema.ModelType(t.lower()) for t in type_values if t]
+        
+        api_logger.error(f"获取模型type_list: {type_list}")
         query = model_schema.ModelConfigQuery(
-            type=type,
+            type=type_list,
             provider=provider,
             is_active=is_active,
             is_public=is_public,

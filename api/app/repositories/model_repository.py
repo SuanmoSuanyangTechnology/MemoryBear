@@ -3,9 +3,9 @@ from sqlalchemy import and_, or_, func, desc
 from typing import List, Optional, Dict, Any, Tuple
 import uuid
 
-from app.models.models_model import ModelConfig, ModelApiKey, ModelType, ModelProvider
+from app.models.models_model import ModelConfig, ModelApiKey, ModelType
 from app.schemas.model_schema import (
-    ModelConfigCreate, ModelConfigUpdate, ModelApiKeyCreate, ModelApiKeyUpdate,
+    ModelConfigUpdate, ModelApiKeyCreate, ModelApiKeyUpdate,
     ModelConfigQuery
 )
 from app.core.logging_config import get_db_logger
@@ -32,7 +32,7 @@ class ModelConfigRepository:
                 query = query.filter(
                     or_(
                         ModelConfig.tenant_id == tenant_id,
-                        ModelConfig.is_public == True
+                        ModelConfig.is_public
                     )
                 )
             
@@ -60,7 +60,7 @@ class ModelConfigRepository:
                 query = query.filter(
                     or_(
                         ModelConfig.tenant_id == tenant_id,
-                        ModelConfig.is_public == True
+                        ModelConfig.is_public
                     )
                 )
             
@@ -92,7 +92,7 @@ class ModelConfigRepository:
                 query = query.filter(
                     or_(
                         ModelConfig.tenant_id == tenant_id,
-                        ModelConfig.is_public == True
+                        ModelConfig.is_public
                     )
                 )
             
@@ -117,13 +117,21 @@ class ModelConfigRepository:
                 filters.append(
                     or_(
                         ModelConfig.tenant_id == tenant_id,
-                        ModelConfig.is_public == True
+                        ModelConfig.is_public
                     )
                 )
             
             # 支持多个 type 值（使用 IN 查询）
+            # 兼容 chat 和 llm 类型：如果查询包含其中一个，则同时匹配两者
             if query.type:
-                filters.append(ModelConfig.type.in_(query.type))
+                type_values = list(query.type)
+                # 如果包含 chat 或 llm，则同时包含两者
+                if ModelType.CHAT in type_values or ModelType.LLM in type_values:
+                    if ModelType.CHAT not in type_values:
+                        type_values.append(ModelType.CHAT)
+                    if ModelType.LLM not in type_values:
+                        type_values.append(ModelType.LLM)
+                filters.append(ModelConfig.type.in_(type_values))
             
             if query.is_active is not None:
                 filters.append(ModelConfig.is_active == query.is_active)
@@ -183,12 +191,12 @@ class ModelConfigRepository:
                 query = query.filter(
                     or_(
                         ModelConfig.tenant_id == tenant_id,
-                        ModelConfig.is_public == True
+                        ModelConfig.is_public
                     )
                 )
             
             if is_active:
-                query = query.filter(ModelConfig.is_active == True)
+                query = query.filter(ModelConfig.is_active)
             
             models = query.order_by(ModelConfig.name).all()
             db_logger.debug(f"根据类型查询模型配置成功: 数量={len(models)}")
@@ -285,7 +293,7 @@ class ModelConfigRepository:
         try:
             # 总数统计
             total_models = db.query(ModelConfig).count()
-            active_models = db.query(ModelConfig).filter(ModelConfig.is_active == True).count()
+            active_models = db.query(ModelConfig).filter(ModelConfig.is_active).count()
             
             # 按类型统计
             llm_count = db.query(ModelConfig).filter(ModelConfig.type == ModelType.LLM).count()
@@ -344,7 +352,7 @@ class ModelApiKeyRepository:
             query = db.query(ModelApiKey).filter(ModelApiKey.model_config_id == model_config_id)
             
             if is_active:
-                query = query.filter(ModelApiKey.is_active == True)
+                query = query.filter(ModelApiKey.is_active)
             
             api_keys = query.order_by(ModelApiKey.priority, ModelApiKey.created_at).all()
             db_logger.debug(f"API Key列表查询成功: 数量={len(api_keys)}")
