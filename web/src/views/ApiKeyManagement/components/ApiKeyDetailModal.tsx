@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Switch, Button } from 'antd';
+import { Switch, Button, Tooltip } from 'antd';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import type { ApiKey, ApiKeyModalRef } from '../types';
@@ -51,8 +51,8 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
             { key === 'created_at'
               ? formatDateTime(data[key], 'YYYY-MM-DD HH:mm:ss')
               : key === 'is_expired'
-                ? <Tag>{data[key] ? t('apiKey.inactive') : t('apiKey.active')}</Tag>
-                : String(data[key as keyof ApiKey])
+                ? <Tag color={data[key] ? 'error' : 'processing'}>{data[key] ? t('apiKey.inactive') : t('apiKey.active')}</Tag>
+                : <Tooltip title={String(data[key as keyof ApiKey])}>{String(data[key as keyof ApiKey])}</Tooltip>
             }
           </span>
         </div>
@@ -91,7 +91,7 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
         <div className="rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px] rb:mt-3">
           <span className="rb:text-[#5B6167]">{t(`apiKey.expires_at`)}</span>
           <span>
-            {data.expires_at ? formatDateTime(data.expires_at as number, 'yyyy-MM-DD') : '-'}
+            {data.expires_at ? formatDateTime(data.expires_at as number, 'YYYY-MM-DD HH:mm:ss') : '-'}
           </span>
           </div>
       </>}

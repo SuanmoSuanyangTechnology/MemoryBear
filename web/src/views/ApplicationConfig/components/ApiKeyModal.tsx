@@ -45,6 +45,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, ApiKeyModalProps>(({
           ...values,
           type: application.type,
           resource_id: application.id,
+          scopes: ['app']
         })
         .then(() => {
           handleClose()
