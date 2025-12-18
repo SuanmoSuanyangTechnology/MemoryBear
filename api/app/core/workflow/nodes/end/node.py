@@ -5,7 +5,6 @@ End 节点实现
 """
 
 import logging
-from typing import Any
 
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 

@@ -10,10 +10,8 @@ from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.models import RedBearLLM, RedBearModelConfig
-from app.models import ModelConfig
-from app.db import get_db, get_db_context
-from app.models.models_model import ModelApiKey
-from app.services.model_service import ModelConfigService, ModelApiKeyService
+from app.db import get_db_context
+from app.services.model_service import ModelConfigService
         
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
