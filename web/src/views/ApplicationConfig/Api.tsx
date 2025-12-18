@@ -15,7 +15,7 @@ import { maskApiKeys } from '@/utils/apiKeyReplacer'
 
 const Api: FC<{ application: Application | null }> = ({ application }) => {
   const { t } = useTranslation();
-  const [activeMethods, setActiveMethod] = useState(['GET']);
+  const activeMethods = ['GET'];
   const { message, modal } = App.useApp()
   const copyContent = window.location.origin + '/v1/chat'
   const apiKeyModalRef = useRef<ApiKeyModalRef>(null);
@@ -86,7 +86,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
   // 计算total_requests总数
   const totalRequests = apiKeyList.reduce((total, item) => total + item.total_requests, 0);
   return (
-    <div className="rb:w-[1000px] rb:mt-5 rb:pb-5 rb:mx-auto">
+    <div className="rb:w-250 rb:mt-5 rb:pb-5 rb:mx-auto">
       <Space size={20} direction="vertical" style={{width: '100%'}}>
         <Card 
           title={t('application.endpointConfiguration')}
@@ -95,7 +95,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
           <div className="rb:p-[20px_20px_24px_20px] rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
             <Space size={8}>
               {['GET', 'POST', 'PUT', 'DELETE'].map((method) => (
-                <Button key={method} type={activeMethods.includes(method) ? 'primary' : 'default'} onClick={() => setActiveMethod(prev => activeMethods.includes(method) ? prev.filter(m => m !== method) : [...prev, method])}>
+                <Button key={method} type={activeMethods.includes(method) ? 'primary' : 'default'}>
                   {method}
                 </Button>
               ))}
