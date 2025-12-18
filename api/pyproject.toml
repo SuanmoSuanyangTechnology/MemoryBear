@@ -126,6 +126,7 @@ dependencies = [
     "pytest-asyncio>=1.3.0",
     "uvicorn>=0.34.0",
     "celery>=5.5.2",
+    "simpleeval>=1.0.3",
 ]
 
 [tool.pytest.ini_options]
