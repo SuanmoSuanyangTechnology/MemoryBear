@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.error_codes import BizCode
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
+from app.models import ApiKeyType
 from app.models.user_model import User
 from app.core.response_utils import success
 from app.schemas import api_key_schema
@@ -39,6 +40,8 @@ def create_api_key(
     """
     try:
         workspace_id = current_user.current_workspace_id
+        if data.type == ApiKeyType.SERVICE.value and not data.resource_id:
+            data.resource_id = workspace_id
 
         # 创建 API Key
         api_key_obj = ApiKeyService.create_api_key(
