@@ -72,12 +72,12 @@ const ApiKeyManagement: React.FC = () => {
               <div key={key} className={clsx("rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px]", {
                 'rb:mt-3': index !== 0
               })}>
-                <span className="rb:text-[#5B6167]">{t(`apiKey.${key}`)}</span>
-                <span>
+                <span className="rb:text-[#5B6167] rb:w-20">{t(`apiKey.${key}`)}</span>
+                <span className="rb:flex-1 rb:text-left rb:py-px rb:rounded rb:font-medium">
                   { key === 'created_at'
                     ? formatDateTime(apiKeyItem[key], 'YYYY-MM-DD HH:mm:ss')
                     : key === 'is_expired'
-                    ? <Tag>{apiKeyItem[key] ? t('apiKey.inactive') : t('apiKey.active')}</Tag>
+                      ? <Tag color={apiKeyItem[key] ? 'error' : 'processing'}>{apiKeyItem[key] ? t('apiKey.inactive') : t('apiKey.active')}</Tag>
                     : String(apiKeyItem[key as keyof ApiKey])
                   }
                 </span>
