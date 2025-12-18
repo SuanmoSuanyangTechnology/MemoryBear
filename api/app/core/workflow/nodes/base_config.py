@@ -50,6 +50,11 @@ class VariableDefinition(BaseModel):
         description="变量描述"
     )
     
+    max_length: int = Field(
+        default=200,
+        description="只对字符串类型生效"
+    )
+    
     class Config:
         json_schema_extra = {
             "examples": [
