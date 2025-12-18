@@ -257,7 +257,7 @@ class RateLimiterService:
         key = f"rate_limit:qps:{api_key_id}"
         async with self.redis.pipeline() as pipe:
             pipe.incr(key)
-            pipe.expire(key, 1)  # 1 秒过期
+            pipe.expire(key, 1, nx=True)  # 1 秒过期
             results = await pipe.execute()
 
         current = results[0]
