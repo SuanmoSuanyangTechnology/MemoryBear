@@ -421,8 +421,8 @@ async def draft_run(
         # 流式返回
         if payload.stream:
             async def event_generator():
-                
-               
+
+
                 async for event in draft_service.run_stream(
                     agent_config=agent_cfg,
                     model_config=model_config,
@@ -574,7 +574,7 @@ async def draft_run(
         # 3. 流式返回
         if payload.stream:
             logger.debug(
-                "开始多智能体流式试运行",
+                "开始工作流流式试运行",
                 extra={
                     "app_id": str(app_id),
                     "message_length": len(payload.message),
@@ -583,16 +583,13 @@ async def draft_run(
             )
 
             async def event_generator():
-                """多智能体流式事件生成器"""
-                multiservice = MultiAgentService(db)
+                """工作流事件生成器"""
 
                 # 调用多智能体服务的流式方法
-                async for event in multiservice.run_stream(
+                async for event in workflow_service.run_stream(
                         app_id=app_id,
-                        request=multi_agent_request,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
-
+                        payload=payload,
+                        config=config
                 ):
                     yield event
 
@@ -617,7 +614,7 @@ async def draft_run(
         )
 
         result = await workflow_service.run(app_id, payload,config)
-        
+
         logger.debug(
             "工作流试运行返回结果",
             extra={
