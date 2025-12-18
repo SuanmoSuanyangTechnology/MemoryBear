@@ -8,9 +8,7 @@ import Api from './Api'
 import ReleasePage from './ReleasePage'
 import Cluster from './Cluster'
 import { getApplication } from '@/api/application'
-import { randomString } from '@/utils/common'
 
-const apiKeyList = [`app-${randomString(24, false)}`]
 const ApplicationConfig: React.FC = () => {
   const { id } = useParams();
   const agentRef = useRef<AgentRef>(null)
@@ -52,7 +50,7 @@ const ApplicationConfig: React.FC = () => {
       />
       {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} />}
       {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster application={application as Application} />}
-      {activeTab === 'api' && <Api apiKeyList={apiKeyList} />}
+      {activeTab === 'api' && <Api application={application} />}
       {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
     </>
   );
