@@ -5,18 +5,28 @@
 """
 
 import logging
-from typing import Any
+from typing import Any, Union
 
+from app.core.workflow.nodes.agent import AgentNode
 from app.core.workflow.nodes.base_node import BaseNode
-from app.core.workflow.nodes.enums import NodeType, WorkflowNode
+from app.core.workflow.nodes.end import EndNode
+from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.nodes.if_else import IfElseNode
 from app.core.workflow.nodes.llm import LLMNode
-from app.core.workflow.nodes.agent import AgentNode
-from app.core.workflow.nodes.transform import TransformNode
 from app.core.workflow.nodes.start import StartNode
-from app.core.workflow.nodes.end import EndNode
+from app.core.workflow.nodes.transform import TransformNode
 
 logger = logging.getLogger(__name__)
+
+WorkflowNode = Union[
+    BaseNode,
+    StartNode,
+    EndNode,
+    LLMNode,
+    IfElseNode,
+    AgentNode,
+    TransformNode,
+]
 
 
 class NodeFactory:
@@ -54,9 +64,9 @@ class NodeFactory:
 
     @classmethod
     def create_node(
-        cls,
-        node_config: dict[str, Any],
-        workflow_config: dict[str, Any]
+            cls,
+            node_config: dict[str, Any],
+            workflow_config: dict[str, Any]
     ) -> WorkflowNode | None:
         """创建节点实例
 

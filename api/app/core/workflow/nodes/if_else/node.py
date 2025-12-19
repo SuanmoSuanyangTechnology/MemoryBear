@@ -1,11 +1,10 @@
 import logging
 from typing import Any
 
-from simpleeval import NameNotDefined, InvalidExpression
-
 from app.core.workflow.nodes import BaseNode, WorkflowState
+from app.core.workflow.nodes.enums import ComparisonOperator
 from app.core.workflow.nodes.if_else import IfElseNodeConfig
-from app.core.workflow.nodes.if_else.config import LogicOperator, ConditionDetail, ComparisonOperator
+from app.core.workflow.nodes.if_else.config import ConditionDetail
 
 logger = logging.getLogger(__name__)
 
