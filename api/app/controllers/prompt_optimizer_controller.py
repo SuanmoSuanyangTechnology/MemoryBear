@@ -117,7 +117,7 @@ async def get_prompt_opt(
         session_id=session_id,
         user_id=current_user.id,
         current_prompt=data.current_prompt,
-        message=data.message
+        user_require=data.message
     )
     service.create_message(
         tenant_id=current_user.tenant_id,
@@ -135,36 +135,4 @@ async def get_prompt_opt(
     result_schema = OptimizePromptResponse.model_validate(result)
     return success(data=result_schema)
 
-
-@router.put(
-    "/model",
-    summary="Create or update prompt model config",
-    response_model=ApiResponse
-)
-def set_system_prompt(
-        data: PromptOptModelSet = ...,
-        db: Session = Depends(get_db),
-        current_user=Depends(get_current_user),
-):
-    """
-    Create or update a system prompt model configuration for the tenant.
-
-    Args:
-        data (PromptOptModelSet): Model configuration data including model ID,
-                                   system prompt, and optional configuration ID
-        db (Session): Database session
-        current_user: Current user information
-
-    Returns:
-        UUID: The ID of the created or updated model configuration.
-    """
-    if data.id is None:
-        data.id = uuid.uuid4()
-
-    model_config = PromptOptimizerService(db).create_update_model_config(
-        current_user.tenant_id,
-        data.id,
-        data.system_prompt
-    )
-    return success(data=model_config.id)
 

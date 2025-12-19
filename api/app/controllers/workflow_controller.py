@@ -473,7 +473,7 @@ async def run_workflow(
             async def event_generator():
                 """生成 SSE 事件"""
                 try:
-                    async for event in service.run_workflow(
+                    async for event in await service.run_workflow(
                         app_id=app_id,
                         input_data=input_data,
                         triggered_by=current_user.id,

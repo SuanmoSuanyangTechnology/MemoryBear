@@ -27,49 +27,6 @@ class RoleType(StrEnum):
     ASSISTANT = "assistant"
 
 
-class PromptOptimizerModelConfig(Base):
-    """
-    Prompt Optimization Model Configuration.
-
-    This table stores system-level prompt configurations for each tenant.
-    The configuration defines the base system prompt used during prompt
-    optimization sessions and serves as a foundational instruction set
-    for the optimization process.
-
-    Each tenant may have one or more model configurations depending on
-    business requirements.
-
-    Table Name:
-        prompt_model_config
-
-    Columns:
-        id (UUID):
-            Primary key. Unique identifier for the prompt model configuration.
-        tenant_id (UUID):
-            Foreign key referencing `tenants.id`.
-            Identifies the tenant that owns this configuration.
-        system_prompt (Text):
-            The system-level prompt used to guide prompt optimization logic.
-        created_at (DateTime):
-            Timestamp indicating when the configuration was created.
-        updated_at (DateTime):
-            Timestamp indicating the last update time of the configuration.
-
-    Usage:
-        - Loaded when initializing a prompt optimization session
-        - Acts as the root system instruction for all subsequent prompts
-    """
-    __tablename__ = "prompt_model_config"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, comment="Tenant ID")
-    # model_id = Column(UUID(as_uuid=True), nullable=False, comment="Model ID")
-    system_prompt = Column(Text, nullable=False, comment="System Prompt")
-
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="Creation Time")
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="Update Time")
-
-
 class PromptOptimizerSession(Base):
     """
     Prompt Optimization Session Registry.
