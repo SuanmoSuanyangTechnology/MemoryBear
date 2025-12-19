@@ -76,36 +76,7 @@ const SelfReflectionEngine: React.FC = () => {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false)
   const [runLoading, setRunLoading] = useState(false)
-  const [result, setResult] = useState<Result | null>({
-    "baseline": "TIME",
-    "source_data": "我是 2023 年春天去北京工作的，后来基本一直都在北京上班，也没怎么换过城市。不过后来公司调整，2024 年上半年我被调到上海待了差不多半年，那段时间每天都是在上海办公室打卡。当时入职资料用的还是我之前的身份信息，身份证号是 11010119950308123X，银行卡是 6222023847595898，这些一直没变。对了，其实我 从 2023 年开始就一直在北京生活，从来没有长期离开过北京，上海那段更多算是远程配合",
-    "quality_assessments": [
-      {
-        "score": 75,
-        "summary": "数据整体质量良好，实体关系清晰且时间戳完整。但存在少量语义冲突：关于用户是否长期在北京存在矛盾（调往上海半年 vs 从未长期离开）。部分描述如'基本一直'、'认为是远程'等表述模糊，影响精确性。无格式错误或空值问题。"
-      }
-    ],
-    "memory_verifies": [
-      {
-        "has_privacy": true,
-        "privacy_types": [
-          "身份证信息",
-          "银行信息"
-        ],
-        "summary": "检测到2类隐私信息：1个身份证号码（11010119950308123X）和1个银行卡号（6222023847595898），共2条记录包含敏感信息"
-      }
-    ],
-    "reflexion_data": [
-      {
-        "reason": "检测到时间冲突：用户从2023年开始一直在北京生活（statement_id: e612a44da4db483993c350df7c97a1a1）且从未长期离开（statement_id: b3c787a2e33c49f7981accabbbb4538a），但另一条记录显示其在2024年上半年被调往上海近半年（statement_id: 64cde4230cb24a4da726e7db9e7aa616），存在时间重叠与事实矛盾。同时用户主观认为该段时间为远程配合（statement_id: 150af89d2c154e6eb41ff1a91e37f962），进一步加剧语义冲突。",
-        "solution": "保留‘被调往上海’这一客观行为记录的有效性，因有打卡记录支持；将‘从未长期离开北京’设为失效。对于‘基本一直在北京上班’等模糊描述，结合上下文更新描述以体现阶段性变动。所有隐私信息按规则脱敏。"
-      },
-      {
-        "reason": "检测到两类隐私信息：身份证号码和银行卡号，均属于需脱敏处理的敏感数据。",
-        "solution": "对身份证号和银行卡号进行数字类隐私信息脱敏处理，保留前三位和后四位，中间用*代替。"
-      }
-    ]
-  })
+  const [result, setResult] = useState<Result | null>(null)
 
   const values = Form.useWatch([], form);
 
