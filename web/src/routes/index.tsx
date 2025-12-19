@@ -10,19 +10,19 @@ import routesConfig from './routes.json';
 // 递归收集所有路由中的element
 function collectElements(routes: RouteConfig[]): Set<string> {
   const elements = new Set<string>();
-  
+
   function traverse(routeList: RouteConfig[]) {
     routeList.forEach(route => {
       // 添加当前路由的element
       elements.add(route.element);
-      
+
       // 递归处理子路由
       if (route.children && route.children.length > 0) {
         traverse(route.children);
       }
     });
   }
-  
+
   traverse(routes);
   return elements;
 }
@@ -55,10 +55,13 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   ModelManagement: lazy(() => import('@/views/ModelManagement')),
   SpaceManagement: lazy(() => import('@/views/SpaceManagement')),
   ApiKeyManagement: lazy(() => import('@/views/ApiKeyManagement')),
+  ToolManagement: lazy(() => import('@/views/ToolManagement')),
+  EmotionEngine: lazy(() => import('@/views/EmotionEngine')),
+  EmotionDetail: lazy(() => import('@/views/UserMemoryDetail/pages/EmotionDetail')),
   Login: lazy(() => import('@/views/Login')),
   InviteRegister: lazy(() => import('@/views/InviteRegister')),
   NoPermission: lazy(() => import('@/views/NoPermission')),
-  NotFound: lazy(() => import('@/views/NotFound')),
+  NotFound: lazy(() => import('@/views/NotFound'))
 };
 
 // 检查并报告缺失的组件
@@ -88,12 +91,12 @@ const generateRoutes = (routes: RouteConfig[]): ReactNode => {
     // 获取组件
     const componentKey = route.element as keyof typeof componentMap;
     const Component = componentMap[componentKey];
-    
+
     if (!Component) {
       console.error(`Component ${route.element} not found in componentMap`);
       return null;
     }
-    
+
     // 如果有子路由
     if (route.children) {
       return (
@@ -102,12 +105,12 @@ const generateRoutes = (routes: RouteConfig[]): ReactNode => {
         </Route>
       );
     }
-    
+
     // 如果有path属性，则为普通路由
     if (route.path) {
       return <Route key={index} path={route.path} element={<Component />} />;
     }
-    
+
     return null;
   });
 };
