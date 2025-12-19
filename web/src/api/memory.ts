@@ -11,6 +11,9 @@ import type {
 import type {
   ConfigForm as EmotionConfig
 } from '@/views/EmotionEngine/types'
+import type {
+  ConfigForm as SelfReflectionEngineConfig
+} from '@/views/SelfReflectionEngine/types'
 import type { TestParams } from '@/views/MemoryConversation'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 
@@ -163,6 +166,18 @@ export const getMemoryEmotionConfig = (config_id: number | string) => {
 // 情绪引擎-更新配置
 export const updateMemoryEmotionConfig = (values: EmotionConfig) => {
   return request.post('/memory/emotion/updated_config', values)
+}
+// 反思引擎-获取配置
+export const getMemoryReflectionConfig = (config_id: number | string) => {
+  return request.get('/memory/reflection/configs', { config_id: config_id })
+}
+// 反思引擎-更新配置
+export const updateMemoryReflectionConfig = (values: SelfReflectionEngineConfig) => {
+  return request.post('/memory/reflection/save', values)
+}
+// 反思引擎-试运行
+export const pilotRunMemoryReflectionConfig = (values: { config_id: number | string; dialogue_text: string; }) => {
+  return request.get('/memory/reflection/run', values)
 }
 
 /*************** end 记忆管理 相关接口 ******************************/
