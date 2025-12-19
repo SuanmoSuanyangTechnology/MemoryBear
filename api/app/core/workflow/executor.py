@@ -13,8 +13,9 @@ from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 
-from app.core.workflow.nodes import WorkflowState, NodeFactory
 from app.core.workflow.expression_evaluator import evaluate_condition
+from app.core.workflow.nodes import WorkflowState, NodeFactory
+from app.core.workflow.nodes.enums import NodeType
 from app.core.tools.registry import ToolRegistry
 from app.core.tools.executor import ToolExecutor
 from app.core.tools.langchain_adapter import LangchainAdapter
@@ -30,11 +31,11 @@ class WorkflowExecutor:
     """
 
     def __init__(
-        self,
-        workflow_config: dict[str, Any],
-        execution_id: str,
-        workspace_id: str,
-        user_id: str
+            self,
+            workflow_config: dict[str, Any],
+            execution_id: str,
+            workspace_id: str,
+            user_id: str
     ):
         """初始化执行器
 
@@ -95,8 +96,6 @@ class WorkflowExecutor:
             "error_node": None
         }
 
-
-
     def build_graph(self) -> CompiledStateGraph:
         """构建 LangGraph
 
@@ -117,19 +116,36 @@ class WorkflowExecutor:
             node_id = node.get("id")
 
             # 记录 start 和 end 节点 ID
-            if node_type == "start":
+            if node_type == NodeType.START:
                 start_node_id = node_id
-            elif node_type == "end":
+            elif node_type == NodeType.END:
                 end_node_ids.append(node_id)
 
             # 创建节点实例（现在 start 和 end 也会被创建）
             node_instance = NodeFactory.create_node(node, self.workflow_config)
+
+            if node_type in [NodeType.IF_ELSE]:
+                # Build ordered boolean expression strings for each branch.
+                # These expressions will be attached to outgoing edges as
+                # LangGraph conditional routing rules.
+                expressions = node_instance.build_conditional_edge_expressions()
+
+                # Collect all outgoing edges from the current node.
+                # The order of edges must match the order of generated expressions.
+                related_edge = [edge for edge in self.edges if edge.get("source") == node_id]
+
+                # Attach each condition expression to the corresponding edge
+                # based on branch priority
+                for idx in range(len(expressions)):
+                    related_edge[idx]['condition'] = f"node.{node_id}.output == '{related_edge[idx]['label']}'"
+
             if node_instance:
                 # 包装节点的 run 方法
                 # 使用函数工厂避免闭包问题
                 def make_node_func(inst):
                     async def node_func(state: WorkflowState):
                         return await inst.run(state)
+
                     return node_func
 
                 workflow.add_node(node_id, make_node_func(node_instance))
@@ -170,14 +186,14 @@ class WorkflowExecutor:
                 def router(state: WorkflowState, cond=condition, tgt=target):
                     """条件路由函数"""
                     if evaluate_condition(
-                        cond,
-                        state.get("variables", {}),
-                        state.get("node_outputs", {}),
-                        {
-                            "execution_id": state.get("execution_id"),
-                            "workspace_id": state.get("workspace_id"),
-                            "user_id": state.get("user_id")
-                        }
+                            cond,
+                            state.get("variables", {}),
+                            state.get("node_outputs", {}),
+                            {
+                                "execution_id": state.get("execution_id"),
+                                "workspace_id": state.get("workspace_id"),
+                                "user_id": state.get("user_id")
+                            }
                     ):
                         return tgt
                     return END  # 条件不满足，结束
@@ -201,8 +217,8 @@ class WorkflowExecutor:
         return graph
 
     async def execute(
-        self,
-        input_data: dict[str, Any]
+            self,
+            input_data: dict[str, Any]
     ) -> dict[str, Any]:
         """执行工作流（非流式）
 
@@ -276,8 +292,8 @@ class WorkflowExecutor:
             }
 
     async def execute_stream(
-        self,
-        input_data: dict[str, Any]
+            self,
+            input_data: dict[str, Any]
     ):
         """执行工作流（流式）
 
@@ -330,7 +346,6 @@ class WorkflowExecutor:
                 "elapsed_time": elapsed_time,
                 "token_usage": None
             }
-
 
     def _extract_final_output(self, node_outputs: dict[str, Any]) -> str | None:
         """从节点输出中提取最终输出
@@ -391,11 +406,11 @@ class WorkflowExecutor:
 
 
 async def execute_workflow(
-    workflow_config: dict[str, Any],
-    input_data: dict[str, Any],
-    execution_id: str,
-    workspace_id: str,
-    user_id: str
+        workflow_config: dict[str, Any],
+        input_data: dict[str, Any],
+        execution_id: str,
+        workspace_id: str,
+        user_id: str
 ) -> dict[str, Any]:
     """执行工作流（便捷函数）
 
@@ -419,11 +434,11 @@ async def execute_workflow(
 
 
 async def execute_workflow_stream(
-    workflow_config: dict[str, Any],
-    input_data: dict[str, Any],
-    execution_id: str,
-    workspace_id: str,
-    user_id: str
+        workflow_config: dict[str, Any],
+        input_data: dict[str, Any],
+        execution_id: str,
+        workspace_id: str,
+        user_id: str
 ):
     """执行工作流（流式，便捷函数）
 
