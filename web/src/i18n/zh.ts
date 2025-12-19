@@ -36,7 +36,8 @@ export const zh = {
       userMemoryDetail: '用户记忆详情',
       toolManagement: '工具管理',
       emotionEngine: '情感引擎',
-      emotionDetail: '情绪记忆'
+      emotionDetail: '情绪记忆',
+      selfReflectionEngine: '反思引擎',
     },
     knowledgeBase: {
       home: '首页',
@@ -997,7 +998,7 @@ export const zh = {
       inactive: '不活跃',
       configurationName: '配置名称',
       emotionEngine: '情感引擎',
-      selfReflexionEngine: '反思引擎'
+      reflectionEngine: '反思引擎'
     },
     member: {
       username: '用户名',
@@ -1191,7 +1192,7 @@ export const zh = {
       intelligentSemanticPruningSceneDesc: '选择智能语义修剪场景（education、online_service、outbound）。',
       intelligentSemanticPruningThreshold: '智能语义修剪阈值',
       intelligentSemanticPruningThresholdDesc: '设置智能语义修剪阈值（0-0.9）。',
-      selfReflexionEngine: '自我反思引擎',
+      reflectionEngine: '自我反思引擎',
       selfReflexionEngineSubTitle: '通过反思和精炼，将情节记忆转化为更深层的语义记忆。',
       enableSelfReflexion: '启用自我反思',
       iterationPeriod: '迭代周期',
@@ -1720,6 +1721,58 @@ export const zh = {
       stability: '稳定性',
       resilience: '恢复力',
       suggestions: '个性化建议',
+    },
+    reflectionEngine: {
+      reflectionEngineConfig: '反思引擎配置',
+      reflection_enabled: '启用反思引擎',
+      reflection_enabled_desc: '将情节记忆转化为语义记忆，形成长期认知',
+      reflection_model_id: '反思模型',
+      reflection_model_id_desc: '不同模型在准确度和速度上有所差异',
+      reflection_period_in_hours: '迭代周期',
+      reflection_period_in_hours_desc: '决定系统多久进行一次记忆反思和提炼',
+      reflexion_range: '反思范围',
+      partial: '部分反思 (仅新增记忆)',
+      all: '全部反思 (所有历史记忆)',
+      reflexion_range_desc: '',
+      baseline: '反思基线',
+      baseline_desc: '',
+      TIME: '基于时间(时序关系)',
+      FACT: '基于事实(知识点)',
+      HYBRID: '事实+时间(综合维度)',
+      quality_assessment: '启用质量评估',
+      quality_assessment_desc: '自动评估记忆的准确性、完整性和时效性',
+      memory_verify: '启用记忆审核',
+      memory_verify_desc: '检测敏感信息并过滤违规内容',
+      oneHour: '每1个小时',
+      threeHours: '每3个小时',
+      sixHours: '每6个小时',
+      twelveHours: '每12个小时',
+      daily: '每天',
+      run: '运行调试',
+      example: '原始数据',
+      exampleText: '我妹妹是2025年出生的，哦不对，我记错了，她其实是2024年出生的。对了，我的身份证号码是33252218293749845X。',
+      runTitle: '反思试运行',
+      status: '状态',
+      message: '消息',
+
+      conflictDetection: '冲突检测',
+      reason: '冲突原因',
+      solution: '解决方案',
+      
+      qualityAssessment: '质量评估',
+      qualityAssessmentObj: {
+        score: '质量评分',
+        summary: '评估摘要',
+      },
+
+      privacyAudit: '隐私审核',
+      privacyAuditObj: {
+        true: '是',
+        false: '否',
+        has_privacy: '包含隐私信息',
+        privacy_types: '隐私类型',
+        summary: '审核摘要',
+      }
     }
   },
 }

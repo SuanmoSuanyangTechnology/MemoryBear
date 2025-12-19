@@ -209,6 +209,19 @@
           "level": 1,
           "sort": 0,
           "subs": null
+        },
+        {
+          "id": 72,
+          "parent": 7,
+          "code": "selfReflectionEngine",
+          "label": "反思引擎",
+          "i18nKey": "menu.selfReflectionEngine",
+          "path": "/reflection-engine/:id",
+          "enable": true,
+          "display": false,
+          "level": 1,
+          "sort": 0,
+          "subs": null
         }
       ]
     },
