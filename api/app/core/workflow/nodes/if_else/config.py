@@ -9,7 +9,7 @@ class LogicOperator(StrEnum):
     OR = "or"
 
 
-class ComparisonOpeartor(StrEnum):
+class ComparisonOperator(StrEnum):
     EMPTY = "empty"
     NOT_EMPTY = "not_empty"
     CONTAINS = "contains"
@@ -25,7 +25,7 @@ class ComparisonOpeartor(StrEnum):
 
 
 class ConditionDetail(BaseModel):
-    comparison_operator: ComparisonOpeartor = Field(
+    comparison_operator: ComparisonOperator = Field(
         ...,
         description="Comparison operator used to evaluate the condition"
     )

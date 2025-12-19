@@ -5,7 +5,7 @@ from simpleeval import NameNotDefined, InvalidExpression
 
 from app.core.workflow.nodes import BaseNode, WorkflowState
 from app.core.workflow.nodes.if_else import IfElseNodeConfig
-from app.core.workflow.nodes.if_else.config import LogicOperator, ConditionDetail, ComparisonOpeartor
+from app.core.workflow.nodes.if_else.config import LogicOperator, ConditionDetail, ComparisonOperator
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class ConditionExpressionBuilder:
     that can be evaluated later in a workflow context.
     """
 
-    def __init__(self, left: str, operator: ComparisonOpeartor, right: str):
+    def __init__(self, left: str, operator: ComparisonOperator, right: str):
         self.left = left
         self.operator = operator
         self.right = right
@@ -62,29 +62,29 @@ class ConditionExpressionBuilder:
 
     def build(self):
         match self.operator:
-            case ComparisonOpeartor.EMPTY:
+            case ComparisonOperator.EMPTY:
                 return self._empty()
-            case ComparisonOpeartor.NOT_EMPTY:
+            case ComparisonOperator.NOT_EMPTY:
                 return self._not_empty()
-            case ComparisonOpeartor.CONTAINS:
+            case ComparisonOperator.CONTAINS:
                 return self._contains()
-            case ComparisonOpeartor.NOT_CONTAINS:
+            case ComparisonOperator.NOT_CONTAINS:
                 return self._not_contains()
-            case ComparisonOpeartor.START_WITH:
+            case ComparisonOperator.START_WITH:
                 return self._startwith()
-            case ComparisonOpeartor.END_WITH:
+            case ComparisonOperator.END_WITH:
                 return self._endwith()
-            case ComparisonOpeartor.EQ:
+            case ComparisonOperator.EQ:
                 return self._eq()
-            case ComparisonOpeartor.NE:
+            case ComparisonOperator.NE:
                 return self._ne()
-            case ComparisonOpeartor.LT:
+            case ComparisonOperator.LT:
                 return self._lt()
-            case ComparisonOpeartor.LE:
+            case ComparisonOperator.LE:
                 return self._le()
-            case ComparisonOpeartor.GT:
+            case ComparisonOperator.GT:
                 return self._gt()
-            case ComparisonOpeartor.GE:
+            case ComparisonOperator.GE:
                 return self._ge()
             case _:
                 raise ValueError(f"Invalid condition: {self.operator}")
