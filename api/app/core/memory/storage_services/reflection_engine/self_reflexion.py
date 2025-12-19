@@ -19,6 +19,7 @@ import uuid
 
 from pydantic import BaseModel
 
+from app.core.response_utils import success
 from app.repositories.neo4j.cypher_queries import neo4j_query_part, neo4j_statement_part, neo4j_query_all,  neo4j_statement_all
 from app.repositories.neo4j.neo4j_update import neo4j_data
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -314,8 +315,8 @@ class ReflectionEngine:
                 for result in item['results']:
                     reflexion_data.append(result['reflexion'])
         result_data['reflexion_data'] = reflexion_data
-        execution_time = time.time() - start_time
-        return {"status": "SUCCESS", "message": "反思试运行", "data": result_data, "time": execution_time}
+        return result_data
+
 
     async def extract_fields_from_json(self):
         """从example.json中提取source_data和databasets字段"""

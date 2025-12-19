@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -6,17 +7,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.core.logging_config import get_api_logger
+from app.core.response_utils import success
 from app.core.memory.storage_services.reflection_engine.self_reflexion import ReflectionConfig, ReflectionEngine
 from app.dependencies import get_current_user
 from app.db import get_db
 from app.models.user_model import User
 from app.repositories.data_config_repository import DataConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-
 from app.services.memory_reflection_service import WorkspaceAppService, MemoryReflectionService
-
 from app.schemas.memory_reflection_schemas import Memory_Reflection
 from app.services.model_service import ModelConfigService
+
 load_dotenv()
 api_logger = get_api_logger()
 
@@ -80,13 +81,8 @@ async def save_reflection_config(
             )
         
         api_logger.info(f"成功保存反思配置到数据库，config_id: {config_id}")
-        
-        # 返回结果
-        return {
-            "status": "成功",
-            "message": "反思配置已保存",
-            "config_id": config_id,
-            "database_record": {
+
+        reflection_result={
                 "config_id": result.config_id,
                 "enable_self_reflexion": result.enable_self_reflexion,
                 "iteration_period": result.iteration_period,
@@ -95,9 +91,11 @@ async def save_reflection_config(
                 "reflection_model_id": result.reflection_model_id,
                 "memory_verify": result.memory_verify,
                 "quality_assessment": result.quality_assessment,
-                "user_id": result.user_id
-            }
-        }
+                "user_id": result.user_id}
+
+        return success(data=reflection_result, msg="反思配置成功")
+        
+
         
     except ValueError as ve:
         api_logger.error(f"参数错误: {str(ve)}")
@@ -156,13 +154,7 @@ async def start_workspace_reflection(
                         "reflection_result": reflection_result
                     })
 
-        return {
-            "status": "完成",
-            "message": f"成功处理 {len(reflection_results)} 个反思任务",
-            "workspace_id": str(workspace_id),
-            "reflection_count": len(reflection_results),
-            "reflection_results": reflection_results
-        }
+        return success(data=reflection_results, msg="反思配置成功")
 
     except Exception as e:
         api_logger.error(f"启动workspace反思失败: {str(e)}")
@@ -179,7 +171,6 @@ async def start_reflection_configs(
         db: Session = Depends(get_db),
 ) -> dict:
     """通过config_id查询data_config表中的反思配置信息"""
-    
     try:
         api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
         
@@ -196,8 +187,8 @@ async def start_reflection_configs(
         # 构建返回数据
         reflection_config = {
             "config_id": result.config_id,
-            "enable_self_reflexion": result.enable_self_reflexion,
-            "iteration_period": result.iteration_period,
+            "reflection_enabled": result.enable_self_reflexion,
+            "reflection_period_in_hours": result.iteration_period,
             "reflexion_range": result.reflexion_range,
             "baseline": result.baseline,
             "reflection_model_id": result.reflection_model_id,
@@ -205,15 +196,10 @@ async def start_reflection_configs(
             "quality_assessment": result.quality_assessment,
             "user_id": result.user_id
         }
-        
         api_logger.info(f"成功查询反思配置，config_id: {config_id}")
+        return success(data=reflection_config, msg="反思配置查询成功")
         
-        return {
-            "status": "成功",
-            "message": "反思配置查询成功",
-            "data": reflection_config
-        }
-        
+
     except HTTPException:
         # 重新抛出HTTP异常
         raise
@@ -276,4 +262,8 @@ async def reflection_run(
     )
 
     result=await (engine.reflection_run())
-    return result
+    return success(data=result, msg="反思试运行")
+
+
+
+
