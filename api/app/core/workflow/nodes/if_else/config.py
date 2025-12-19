@@ -1,27 +1,8 @@
 """Condition Configuration"""
 from pydantic import Field, BaseModel, field_validator
-from enum import StrEnum
+
 from app.core.workflow.nodes.base_config import BaseNodeConfig
-
-
-class LogicOperator(StrEnum):
-    AND = "and"
-    OR = "or"
-
-
-class ComparisonOperator(StrEnum):
-    EMPTY = "empty"
-    NOT_EMPTY = "not_empty"
-    CONTAINS = "contains"
-    NOT_CONTAINS = "not_contains"
-    START_WITH = "startwith"
-    END_WITH = "endwith"
-    EQ = "eq"
-    NE = "ne"
-    LT = "lt"
-    LE = "le"
-    GT = "gt"
-    GE = "ge"
+from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator
 
 
 class ConditionDetail(BaseModel):
@@ -77,7 +58,7 @@ class IfElseNodeConfig(BaseNodeConfig):
                         {
                             "logical_operator": "and",
                             "conditions": [
-                                {
+                                [
                                     {
                                         "left": "node.userinput.message",
                                         "comparison_operator": "eq",
@@ -88,14 +69,14 @@ class IfElseNodeConfig(BaseNodeConfig):
                                         "comparison_operator": "eq",
                                         "right": "True"
                                     }
-                                }
+                                ]
                             ]
                         },
                         # CASE1 / ELIF Branch
                         {
                             "logical_operator": "or",
                             "conditions": [
-                                {
+                                [
                                     {
                                         "left": "node.userinput.test",
                                         "comparison_operator": "eq",
@@ -106,7 +87,7 @@ class IfElseNodeConfig(BaseNodeConfig):
                                         "comparison_operator": "contains",
                                         "right": "'123'"
                                     }
-                                }
+                                ]
                             ]
                         }
                         # CASE3 / ELSE Branch
