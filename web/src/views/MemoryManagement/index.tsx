@@ -69,6 +69,10 @@ const MemoryManagement: React.FC = () => {
         break
       case 'emotionEngine':
         navigate(`/emotion-engine/${id}`)
+        break;
+      case 'reflectionEngine':
+        navigate(`/reflection-engine/${id}`)
+        break;
     }
   }
 
@@ -95,7 +99,7 @@ const MemoryManagement: React.FC = () => {
                 </Tooltip>
 
                 <div className="rb:grid rb:grid-cols-2 rb:gap-4 rb:mt-3">
-                  {['memoryExtractionEngine', 'forgottenEngine', 'emotionEngine', 'selfReflexionEngine'].map((key) => (
+                  {['memoryExtractionEngine', 'forgottenEngine', 'emotionEngine', 'reflectionEngine'].map((key) => (
                     <div key={key} className="rb:group rb:cursor-pointer rb:bg-[#F0F3F8] rb:h-10 rb:rounded-md rb:flex rb:items-center rb:justify-between rb:p-[0_8px_0_12px] rb:mt-3 rb:text-[#5B6167] rb:font-medium"
                       onClick={() => handleClick(item.config_id, key)}
                     >

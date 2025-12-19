@@ -36,7 +36,8 @@ export const en = {
       apiKeyManagement: 'API KEY Management',
       toolManagement: 'Tool Management',
       emotionEngine: 'Emotion Engine',
-      emotionDetail: 'Emotion Memory'
+      emotionDetail: 'Emotion Memory',
+      selfReflectionEngine: 'Self Reflection Engine',
     },
     dashboard: {
       totalMemoryCapacity: 'Total Memory Capacity',
@@ -648,7 +649,7 @@ export const en = {
       inactive: 'Inactive',
       configurationName: 'Configuration Name',
       emotionEngine: 'Emotion Engine',
-      selfReflexionEngine: 'Self-Reflection Engine'
+      reflectionEngine: 'Self-Reflection Engine'
     },
     member: {
       username: 'Username',
@@ -1117,7 +1118,7 @@ export const en = {
       intelligentSemanticPruningSceneDesc: 'Select intelligent semantic pruning scene (education, online_service, outbound).',
       intelligentSemanticPruningThreshold: 'Intelligent Semantic Pruning Threshold',
       intelligentSemanticPruningThresholdDesc: 'Set intelligent semantic pruning threshold (0-0.9).',
-      selfReflexionEngine: 'Self-Reflexion Engine',
+      reflectionEngine: 'Self-Reflexion Engine',
       selfReflexionEngineSubTitle: 'Through reflection and refinement, transform episodic memory into deeper semantic memory.',
       enableSelfReflexion: 'Enable self-reflexion',
       iterationPeriod: 'Iteration Period',
@@ -1631,6 +1632,58 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       stability: 'Stability',
       resilience: 'Resilience',
       suggestions: 'Personalized Suggestions',
+    },
+    reflectionEngine: {
+      reflectionEngineConfig: 'Reflection Engine Configuration',
+      reflection_enabled: 'Enable Reflection Engine',
+      reflection_enabled_desc: 'Transform episodic memory into semantic memory, forming long-term cognition',
+      reflection_model_id: 'Reflection Model',
+      reflection_model_id_desc: 'Different models vary in accuracy and speed',
+      reflection_period_in_hours: 'Iteration Period',
+      reflection_period_in_hours_desc: 'Determines how often the system performs memory reflection and refinement',
+      reflexion_range: 'Reflection Range',
+      partial: 'Partial Reflection (New memories only)',
+      all: 'Full Reflection (All historical memories)',
+      reflexion_range_desc: '',
+      baseline: 'Reflection Baseline',
+      baseline_desc: '',
+      TIME: 'Time-based (Temporal relationships)',
+      FACT: 'Fact-based (Knowledge points)',
+      HYBRID: 'Fact + Time (Comprehensive dimension)',
+      quality_assessment: 'Enable Quality Assessment',
+      quality_assessment_desc: 'Automatically evaluate memory accuracy, completeness and timeliness',
+      memory_verify: 'Enable Memory Verification',
+      memory_verify_desc: 'Detect sensitive information and filter inappropriate content',
+      oneHour: 'Every 1 hour',
+      threeHours: 'Every 3 hours',
+      sixHours: 'Every 6 hours',
+      twelveHours: 'Every 12 hours',
+      daily: 'Daily',
+      run: 'Run Debug',
+      example: 'Raw Data',
+      exampleText: 'My sister was born in 2025, oh wait, I remembered wrong, she was actually born in 2024. By the way, my ID number is 33252218293749845X.',
+      runTitle: 'Reflection Test Run',
+      status: 'Status',
+      message: 'Message',
+
+      conflictDetection: 'Conflict Detection',
+      reason: 'Conflict Reason',
+      solution: 'Solution',
+
+      qualityAssessment: 'Quality Assessment',
+      qualityAssessmentObj: {
+        score: 'Quality Score',
+        summary: 'Assessment Summary',
+      },
+
+      privacyAudit: 'Privacy Audit',
+      privacyAuditObj: {
+        true: 'Yes',
+        false: 'No',
+        has_privacy: 'Contains Privacy Information',
+        privacy_types: 'Privacy Types',
+        summary: 'Audit Summary',
+      }
     }
   },
 };

@@ -5,7 +5,6 @@
       { "path": "/user-management", "element": "UserManagement" },
       { "path": "/model", "element": "ModelManagement" },
       { "path": "/space", "element": "SpaceManagement" },
-      { "path": "/tool", "element": "ToolManagement" },
       { "path": "/no-permission", "element": "NoPermission" }
     ]
   },
@@ -27,8 +26,8 @@
       { "path": "/knowledge-base/:knowledgeBaseId/create-dataset", "element": "CreateDataset" },
       { "path": "/knowledge-base/:knowledgeBaseId/DocumentDetails", "element": "DocumentDetails" },
       { "path": "/api-key", "element": "ApiKeyManagement" },
-      { "path": "/tool", "element": "ToolManagement" },
       { "path": "/emotion-engine/:id", "element": "EmotionEngine" },
+      { "path": "/reflection-engine/:id", "element": "SelfReflectionEngine" },
       { "path": "/user-memory/emotion/:id", "element": "EmotionDetail" },
       { "path": "/no-permission", "element": "NoPermission" },
       { "path": "/*", "element": "NotFound" }

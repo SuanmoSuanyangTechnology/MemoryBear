@@ -19,7 +19,7 @@ const configList = [
     key: 'emotion_model_id',
     type: 'customSelect',
     url: getModelListUrl,
-    params: { type: 'chat', page: 1, pagesize: 100 }, // chat,llm
+    params: { type: 'chat,llm', page: 1, pagesize: 100 }, // chat,llm
   },
   {
     key: 'emotion_min_intensity',
@@ -40,7 +40,7 @@ const configList = [
   },
 ]
 
-const ForgettingEngine: React.FC = () => {
+const EmotionEngine: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams();
   const [configData, setConfigData] = useState<ConfigForm>({} as ConfigForm);
@@ -249,4 +249,4 @@ const ForgettingEngine: React.FC = () => {
   );
 };
 
-export default ForgettingEngine;
+export default EmotionEngine;
