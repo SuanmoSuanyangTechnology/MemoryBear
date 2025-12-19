@@ -1,13 +1,8 @@
 import json
-import os
 import uuid
-from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
-from app.db import get_db
-from app.models.retrieval_info import RetrievalInfo
-from app.schemas.memory_storage_schema import BaseDataSchema
-
 import logging
+
+from typing import List, Dict, Any
 logger = logging.getLogger(__name__)
 
 async def _load_(data: List[Any]) -> List[Dict]:
@@ -60,27 +55,46 @@ async def _load_(data: List[Any]) -> List[Dict]:
     return results
 
 
-async def get_data(host_id: uuid.UUID) -> List[Dict]:
+async def get_data(result):
     """
     从数据库中获取数据
     """
-    # 从数据库会话中获取会话
-    db: Session = next(get_db())
-    try:
-        data = db.query(RetrievalInfo.retrieve_info).filter(RetrievalInfo.host_id == host_id).all()
+    neo4j_databasets=[]
+    for item in result:
+        filtered_item = {}
+        for key, value in item.items():
+            if 'name_embedding' not in key.lower():
+                if key == 'relationship' and value is not None:
+                    # 只保留relationship的指定字段
+                    rel_filtered = {}
+                    if hasattr(value, 'get'):
+                        rel_filtered['run_id'] = value.get('run_id')
+                        rel_filtered['statement'] = value.get('statement')
+                        rel_filtered['statement_id'] = value.get('statement_id')
+                        rel_filtered['expired_at'] = value.get('expired_at')
+                        rel_filtered['created_at'] = value.get('created_at')
+                    filtered_item[key] = rel_filtered
+                elif key == 'entity2' and value is not None:
+                    # 过滤entity2的name_embedding字段
+                    entity2_filtered = {}
+                    if hasattr(value, 'items'):
+                        for e_key, e_value in value.items():
+                            if 'name_embedding' not in e_key.lower():
+                                entity2_filtered[e_key] = e_value
+                    filtered_item[key] = entity2_filtered
+                else:
+                    filtered_item[key] = value
 
-        # print(f"data:\n{data}")
-        # 解析，提取为字典的列表
-        results = await _load_(data)
-        return results
-    except Exception as e:
-        logger.error(f"failed to get data from database, host_id: {host_id}, error: {e}")
-        raise e
-    finally:
-        try:
-            db.close()
-        except Exception:
-            pass
+        # 直接将字典添加到列表中
+        neo4j_databasets.append(filtered_item)
+    return neo4j_databasets
+async def get_data_statement( result):
+    neo4j_databasets=[]
+    for i in result:
+        neo4j_databasets.append(i)
+    return neo4j_databasets
+
+
 
 
 if __name__ == "__main__":

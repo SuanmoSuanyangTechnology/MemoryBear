@@ -14,6 +14,7 @@ class EndUser(Base):
     other_id = Column(String, nullable=True)  # Store original user_id
     other_name = Column(String, default="", nullable=False)
     other_address = Column(String, default="", nullable=False)
+    reflection_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.now)
     updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
 

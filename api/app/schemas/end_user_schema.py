@@ -13,5 +13,6 @@ class EndUser(BaseModel):
     other_id: Optional[str] = Field(description="第三方ID", default=None)
     other_name: Optional[str] = Field(description="其他名称", default="")
     other_address: Optional[str] = Field(description="其他地址", default="")
+    reflection_time: Optional[datetime.datetime] = Field(description="反思时间", default_factory=datetime.datetime.now)
     created_at: datetime.datetime = Field(description="创建时间", default_factory=datetime.datetime.now)
     updated_at: datetime.datetime = Field(description="更新时间", default_factory=datetime.datetime.now)

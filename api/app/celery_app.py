@@ -83,17 +83,18 @@ celery_app.autodiscover_tasks(['app'])
 reflection_schedule = timedelta(seconds=settings.REFLECTION_INTERVAL_SECONDS)
 health_schedule = timedelta(seconds=settings.HEALTH_CHECK_SECONDS)
 memory_increment_schedule = timedelta(hours=settings.MEMORY_INCREMENT_INTERVAL_HOURS)
-
+workspace_reflection_schedule = timedelta(seconds=30)  # 每30秒运行一次settings.REFLECTION_INTERVAL_TIME
 # 构建定时任务配置
 beat_schedule_config = {
-    "run-reflection-engine": {
-        "task": "app.core.memory.agent.reflection.timer",
-        "schedule": reflection_schedule,
-        "args": (),
-    },
-    "check-read-service": {
-        "task": "app.core.memory.agent.health.check_read_service",
-        "schedule": health_schedule,
+
+    # "check-read-service": {
+    #     "task": "app.core.memory.agent.health.check_read_service",
+    #     "schedule": health_schedule,
+    #     "args": (),
+    # },
+    "run-workspace-reflection": {
+        "task": "app.tasks.workspace_reflection_task",
+        "schedule": workspace_reflection_schedule,
         "args": (),
     },
 }
