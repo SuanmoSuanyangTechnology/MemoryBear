@@ -8,17 +8,20 @@
 4. 反思结果应用 - 更新记忆库
 """
 
-import os
 import json
 import logging
 import asyncio
+import os
+import time
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 from enum import Enum
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from app.repositories.neo4j.cypher_queries import neo4j_query_part, neo4j_statement_part, neo4j_query_all,  neo4j_statement_all
+from app.repositories.neo4j.neo4j_update import neo4j_data
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 # 配置日志
 _root_logger = logging.getLogger()
@@ -33,14 +36,14 @@ else:
 
 class ReflectionRange(str, Enum):
     """反思范围枚举"""
-    RETRIEVAL = "retrieval"  # 从检索结果中反思
-    DATABASE = "database"    # 从整个数据库中反思
+    PARTIAL = "partial"  # 从检索结果中反思
+    ALL = "all"  # 从整个数据库中反思
 
 
 class ReflectionBaseline(str, Enum):
     """反思基线枚举"""
-    TIME = "TIME"      # 基于时间的反思
-    FACT = "FACT"      # 基于事实的反思
+    TIME = "TIME"  # 基于时间的反思
+    FACT = "FACT"  # 基于事实的反思
     HYBRID = "HYBRID"  # 混合反思
 
 
@@ -48,9 +51,16 @@ class ReflectionConfig(BaseModel):
     """反思引擎配置"""
     enabled: bool = False
     iteration_period: str = "3"  # 反思周期
-    reflexion_range: ReflectionRange = ReflectionRange.RETRIEVAL
+    reflexion_range: ReflectionRange = ReflectionRange.PARTIAL
     baseline: ReflectionBaseline = ReflectionBaseline.TIME
-    concurrency: int = Field(default=5, description="并发数量")
+    model_id: Optional[str] = None  # 模型ID
+    end_user_id: Optional[str] = None
+    output_example: Optional[str] = None  # 输出示例
+
+    # 评估相关字段
+    memory_verify: bool = True  # 记忆验证
+    quality_assessment: bool = True  # 质量评估
+    violation_handling_strategy: str = "warn"  # 违规处理策略
 
     class Config:
         use_enum_values = True
@@ -75,16 +85,16 @@ class ReflectionEngine:
     """
 
     def __init__(
-        self,
-        config: ReflectionConfig,
-        neo4j_connector: Optional[Any] = None,
-        llm_client: Optional[Any] = None,
-        get_data_func: Optional[Any] = None,
-        render_evaluate_prompt_func: Optional[Any] = None,
-        render_reflexion_prompt_func: Optional[Any] = None,
-        conflict_schema: Optional[Any] = None,
-        reflexion_schema: Optional[Any] = None,
-        update_query: Optional[str] = None
+            self,
+            config: ReflectionConfig,
+            neo4j_connector: Optional[Any] = None,
+            llm_client: Optional[Any] = None,
+            get_data_func: Optional[Any] = None,
+            render_evaluate_prompt_func: Optional[Any] = None,
+            render_reflexion_prompt_func: Optional[Any] = None,
+            conflict_schema: Optional[Any] = None,
+            reflexion_schema: Optional[Any] = None,
+            update_query: Optional[str] = None
     ):
         """
         初始化反思引擎
@@ -109,7 +119,7 @@ class ReflectionEngine:
         self.conflict_schema = conflict_schema
         self.reflexion_schema = reflexion_schema
         self.update_query = update_query
-        self._semaphore = asyncio.Semaphore(config.concurrency)
+        self._semaphore = asyncio.Semaphore(5)  # 默认并发数为5
 
         # 延迟导入以避免循环依赖
         self._lazy_init_done = False
@@ -127,10 +137,20 @@ class ReflectionEngine:
             from app.core.memory.utils.llm.llm_utils import get_llm_client
             from app.core.memory.utils.config import definitions as config_defs
             self.llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
+        elif isinstance(self.llm_client, str):
+            # 如果 llm_client 是字符串（model_id），则用它初始化客户端
+            from app.core.memory.utils.llm.llm_utils import get_llm_client
+            model_id = self.llm_client
+            self.llm_client = get_llm_client(model_id)
 
         if self.get_data_func is None:
             from app.core.memory.utils.config.get_data import get_data
             self.get_data_func = get_data
+
+        # 导入get_data_statement函数
+        if not hasattr(self, 'get_data_statement'):
+            from app.core.memory.utils.config.get_data import get_data_statement
+            self.get_data_statement = get_data_statement
 
         if self.render_evaluate_prompt_func is None:
             from app.core.memory.utils.prompt.template_render import render_evaluate_prompt
@@ -154,13 +174,11 @@ class ReflectionEngine:
 
         self._lazy_init_done = True
 
-    async def execute_reflection(self, host_id: uuid.UUID) -> ReflectionResult:
+    async def execute_reflection(self, host_id) -> ReflectionResult:
         """
         执行完整的反思流程
-
         Args:
             host_id: 主机ID
-
         Returns:
             ReflectionResult: 反思结果
         """
@@ -176,9 +194,10 @@ class ReflectionEngine:
         start_time = asyncio.get_event_loop().time()
         logging.info("====== 自我反思流程开始 ======")
 
+        print(self.config.baseline, self.config.memory_verify, self.config.quality_assessment)
         try:
             # 1. 获取反思数据
-            reflexion_data = await self._get_reflexion_data(host_id)
+            reflexion_data, statement_databasets = await self._get_reflexion_data(host_id)
             if not reflexion_data:
                 return ReflectionResult(
                     success=True,
@@ -187,22 +206,21 @@ class ReflectionEngine:
                 )
 
             # 2. 检测冲突（基于事实的反思）
-            conflict_data = await self._detect_conflicts(reflexion_data)
-            if not conflict_data:
-                return ReflectionResult(
-                    success=True,
-                    message="无冲突，无需反思",
-                    execution_time=asyncio.get_event_loop().time() - start_time
-                )
+            conflict_data = await self._detect_conflicts(reflexion_data, statement_databasets)
+            print(100 * '-')
+            print(conflict_data)
+            print(100 * '-')
 
-            conflicts_found = len(conflict_data)
-            logging.info(f"发现 {conflicts_found} 个冲突")
+            # 检查是否真的有冲突
+            has_conflict = conflict_data[0].get('conflict', False)
+            conflicts_found = len(conflict_data[0]['data']) if has_conflict else 0
+            logging.info(f"冲突状态: {has_conflict}, 发现 {conflicts_found} 个冲突")
 
             # 记录冲突数据
             await self._log_data("conflict", conflict_data)
 
             # 3. 解决冲突
-            solved_data = await self._resolve_conflicts(conflict_data)
+            solved_data = await self._resolve_conflicts(conflict_data, statement_databasets)
             if not solved_data:
                 return ReflectionResult(
                     success=False,
@@ -210,6 +228,9 @@ class ReflectionEngine:
                     conflicts_found=conflicts_found,
                     execution_time=asyncio.get_event_loop().time() - start_time
                 )
+            print(100 * '*')
+            print(solved_data)
+            print(100 * '*')
 
             conflicts_resolved = len(solved_data)
             logging.info(f"解决了 {conflicts_resolved} 个冲突")
@@ -230,7 +251,8 @@ class ReflectionEngine:
                 conflicts_found=conflicts_found,
                 conflicts_resolved=conflicts_resolved,
                 memories_updated=memories_updated,
-                execution_time=execution_time
+                execution_time=execution_time,
+
             )
 
         except Exception as e:
@@ -240,6 +262,79 @@ class ReflectionEngine:
                 message=f"反思流程执行失败: {str(e)}",
                 execution_time=asyncio.get_event_loop().time() - start_time
             )
+
+    async def reflection_run(self):
+        self._lazy_init()
+        start_time = time.time()
+
+        asyncio.get_event_loop().time()
+        logging.info("====== 自我反思流程开始 ======")
+
+        result_data = {}
+
+        source_data, databasets = await self.extract_fields_from_json()
+        result_data['baseline'] = self.config.baseline
+        result_data[
+            'source_data'] = "我是 2023 年春天去北京工作的，后来基本一直都在北京上班，也没怎么换过城市。不过后来公司调整，2024 年上半年我被调到上海待了差不多半年，那段时间每天都是在上海办公室打卡。当时入职资料用的还是我之前的身份信息，身份证号是 11010119950308123X，银行卡是 6222023847595898，这些一直没变。对了，其实我 从 2023 年开始就一直在北京生活，从来没有长期离开过北京，上海那段更多算是远程配合"
+
+        # 2. 检测冲突（基于事实的反思）
+        conflict_data = await self._detect_conflicts(databasets, source_data)
+        # 遍历数据提取字段
+        quality_assessments = []
+        memory_verifies = []
+        for item in conflict_data:
+            print(item)
+            quality_assessments.append(item['quality_assessment'])
+            memory_verifies.append(item['memory_verify'])
+        result_data['quality_assessments'] = quality_assessments
+        result_data['memory_verifies'] = memory_verifies
+
+        # 检查是否真的有冲突
+        has_conflict = conflict_data[0].get('conflict', False)
+        conflicts_found = len(conflict_data[0]['data']) if has_conflict else 0
+        logging.info(f"冲突状态: {has_conflict}, 发现 {conflicts_found} 个冲突")
+
+        # 记录冲突数据
+        await self._log_data("conflict", conflict_data)
+
+        # 3. 解决冲突
+        solved_data = await self._resolve_conflicts(conflict_data, source_data)
+        if not solved_data:
+            return ReflectionResult(
+                success=False,
+                message="反思失败，未解决冲突",
+                conflicts_found=conflicts_found,
+                execution_time=asyncio.get_event_loop().time() - start_time
+            )
+        reflexion_data = []
+
+        # 遍历数据提取reflexion字段
+        for item in solved_data:
+            if 'results' in item:
+                for result in item['results']:
+                    reflexion_data.append(result['reflexion'])
+        result_data['reflexion_data'] = reflexion_data
+        execution_time = time.time() - start_time
+        return {"status": "SUCCESS", "message": "反思试运行", "data": result_data, "time": execution_time}
+
+    async def extract_fields_from_json(self):
+        """从example.json中提取source_data和databasets字段"""
+
+        prompt_dir = os.path.join(os.path.dirname(__file__), "example")
+        try:
+            # 读取JSON文件
+            with open(prompt_dir + '/example.json', 'r', encoding='utf-8') as f:
+                data = json.loads(f.read())
+
+            # 提取memory_verify下的字段
+            memory_verify = data.get("memory_verify", {})
+            source_data = memory_verify.get("source_data", [])
+            databasets = memory_verify.get("databasets", [])
+
+            return source_data, databasets
+
+        except Exception as e:
+            return [], []
 
     async def _get_reflexion_data(self, host_id: uuid.UUID) -> List[Any]:
         """
@@ -253,17 +348,28 @@ class ReflectionEngine:
         Returns:
             List[Any]: 反思数据列表
         """
-        if self.config.reflexion_range == ReflectionRange.RETRIEVAL:
-            # 从检索结果中获取数据
-            return await self.get_data_func(host_id)
-        elif self.config.reflexion_range == ReflectionRange.DATABASE:
-            # 从整个数据库中获取数据（待实现）
-            logging.warning("从数据库获取反思数据功能尚未实现")
-            return []
-        else:
-            raise ValueError(f"未知的反思范围: {self.config.reflexion_range}")
 
-    async def _detect_conflicts(self, data: List[Any]) -> List[Any]:
+
+
+        if self.config.reflexion_range == ReflectionRange.PARTIAL:
+            neo4j_query = neo4j_query_part.format(host_id)
+            neo4j_statement = neo4j_statement_part.format(host_id)
+        elif self.config.reflexion_range == ReflectionRange.ALL:
+            neo4j_query = neo4j_query_all.format(host_id)
+            neo4j_statement = neo4j_statement_all.format(host_id)
+        try:
+            result = await self.neo4j_connector.execute_query(neo4j_query)
+            result_statement = await self.neo4j_connector.execute_query(neo4j_statement)
+            neo4j_databasets = await  self.get_data_func(result)
+            neo4j_state = await  self.get_data_statement(result_statement)
+            return neo4j_databasets, neo4j_state
+
+
+        except Exception as e:
+            logging.error(f"Neo4j查询失败: {e}")
+            return [], []
+
+    async def _detect_conflicts(self, data: List[Any], statement_databasets: List[Any]) -> List[Any]:
         """
         检测冲突（基于事实的反思）
 
@@ -278,14 +384,28 @@ class ReflectionEngine:
         if not data:
             return []
 
+        # 数据预处理：如果数据量太少，直接返回无冲突
+        if len(data) < 2:
+            logging.info("数据量不足，无需检测冲突")
+            return []
+
+        # 使用转换后的数据
+        print("转换后的数据:", data[:2] if len(data) > 2 else data)  # 只打印前2条避免日志过长
+        memory_verify = self.config.memory_verify
+
         logging.info("====== 冲突检测开始 ======")
         start_time = asyncio.get_event_loop().time()
+        quality_assessment = self.config.quality_assessment
 
         try:
             # 渲染冲突检测提示词
             rendered_prompt = await self.render_evaluate_prompt_func(
                 data,
-                self.conflict_schema
+                self.conflict_schema,
+                self.config.baseline,
+                memory_verify,
+                quality_assessment,
+                statement_databasets
             )
 
             messages = [{"role": "user", "content": rendered_prompt}]
@@ -316,7 +436,7 @@ class ReflectionEngine:
             logging.error(f"冲突检测失败: {e}", exc_info=True)
             return []
 
-    async def _resolve_conflicts(self, conflicts: List[Any]) -> List[Any]:
+    async def _resolve_conflicts(self, conflicts: List[Any], statement_databasets: List[Any]) -> List[Any]:
         """
         解决冲突
 
@@ -332,6 +452,8 @@ class ReflectionEngine:
             return []
 
         logging.info("====== 冲突解决开始 ======")
+        baseline = self.config.baseline
+        memory_verify = self.config.memory_verify
 
         # 并行处理每个冲突
         async def _resolve_one(conflict: Any) -> Optional[Dict[str, Any]]:
@@ -341,7 +463,10 @@ class ReflectionEngine:
                     # 渲染反思提示词
                     rendered_prompt = await self.render_reflexion_prompt_func(
                         [conflict],
-                        self.reflexion_schema
+                        self.reflexion_schema,
+                        baseline,
+                        memory_verify,
+                        statement_databasets
                     )
 
                     messages = [{"role": "user", "content": rendered_prompt}]
@@ -381,8 +506,8 @@ class ReflectionEngine:
         return solved
 
     async def _apply_reflection_results(
-        self,
-        solved_data: List[Dict[str, Any]]
+            self,
+            solved_data: List[Dict[str, Any]]
     ) -> int:
         """
         应用反思结果（更新记忆库）
@@ -395,57 +520,7 @@ class ReflectionEngine:
         Returns:
             int: 成功更新的记忆数量
         """
-        if not solved_data:
-            logging.warning("无解决方案数据，跳过更新")
-            return 0
-
-        logging.info("====== 记忆更新开始 ======")
-
-        success_count = 0
-
-        async def _update_one(item: Dict[str, Any]) -> bool:
-            """更新单条记忆"""
-            async with self._semaphore:
-                try:
-                    if not isinstance(item, dict):
-                        return False
-
-                    # 提取更新参数
-                    resolved = item.get("resolved", {})
-                    resolved_mem = resolved.get("resolved_memory", {})
-                    group_id = resolved_mem.get("group_id")
-                    memory_id = resolved_mem.get("id")
-                    new_invalid_at = resolved_mem.get("invalid_at")
-
-                    if not all([group_id, memory_id, new_invalid_at]):
-                        logging.warning(f"记忆更新参数缺失，跳过此项: {item}")
-                        return False
-
-                    # 执行更新
-                    await self.neo4j_connector.execute_query(
-                        self.update_query,
-                        group_id=group_id,
-                        id=memory_id,
-                        new_invalid_at=new_invalid_at,
-                    )
-
-                    return True
-
-                except Exception as e:
-                    logging.error(f"更新单条记忆失败: {e}")
-                    return False
-
-        # 并发执行所有更新任务
-        tasks = [
-            _update_one(item)
-            for item in solved_data
-            if isinstance(item, dict)
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
-        success_count = sum(1 for r in results if r)
-
-        logging.info(f"成功更新 {success_count}/{len(solved_data)} 条记忆")
-
+        success_count = await neo4j_data(solved_data)
         return success_count
 
     async def _log_data(self, label: str, data: Any) -> None:
@@ -456,6 +531,7 @@ class ReflectionEngine:
             label: 数据标签
             data: 要记录的数据
         """
+
         def _write():
             try:
                 with open("reflexion_data.json", "a", encoding="utf-8") as f:
@@ -470,9 +546,9 @@ class ReflectionEngine:
 
     # 基于时间的反思方法
     async def time_based_reflection(
-        self,
-        host_id: uuid.UUID,
-        time_period: Optional[str] = None
+            self,
+            host_id: uuid.UUID,
+            time_period: Optional[str] = None
     ) -> ReflectionResult:
         """
         基于时间的反思
@@ -494,8 +570,8 @@ class ReflectionEngine:
 
     # 基于事实的反思方法
     async def fact_based_reflection(
-        self,
-        host_id: uuid.UUID
+            self,
+            host_id: uuid.UUID
     ) -> ReflectionResult:
         """
         基于事实的反思
@@ -515,8 +591,8 @@ class ReflectionEngine:
 
     # 综合反思方法
     async def comprehensive_reflection(
-        self,
-        host_id: uuid.UUID
+            self,
+            host_id: uuid.UUID
     ) -> ReflectionResult:
         """
         综合反思
@@ -553,33 +629,3 @@ class ReflectionEngine:
         else:
             raise ValueError(f"未知的反思基线: {self.config.baseline}")
 
-
-# 便捷函数：创建默认配置的反思引擎
-def create_reflection_engine(
-    enabled: bool = False,
-    iteration_period: str = "3",
-    reflexion_range: str = "retrieval",
-    baseline: str = "TIME",
-    concurrency: int = 5
-) -> ReflectionEngine:
-    """
-    创建反思引擎实例
-
-    Args:
-        enabled: 是否启用反思
-        iteration_period: 反思周期
-        reflexion_range: 反思范围
-        baseline: 反思基线
-        concurrency: 并发数量
-
-    Returns:
-        ReflectionEngine: 反思引擎实例
-    """
-    config = ReflectionConfig(
-        enabled=enabled,
-        iteration_period=iteration_period,
-        reflexion_range=reflexion_range,
-        baseline=baseline,
-        concurrency=concurrency
-    )
-    return ReflectionEngine(config)

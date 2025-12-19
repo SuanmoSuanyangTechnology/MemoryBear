@@ -746,3 +746,57 @@ DETACH DELETE losing
 
 RETURN count(losing) as deleted
 """
+
+neo4j_statement_part = '''
+MATCH (n:Statement)
+WHERE n.group_id = "{}" 
+  AND datetime(n.created_at) >= datetime() - duration('P3D')
+RETURN 
+  n.statement as statement_name,
+  n.id as statement_id,
+   n.created_at as   statement_created_at
+
+'''
+neo4j_statement_all = '''
+MATCH (n:Statement)
+WHERE n.group_id = "{}" 
+RETURN 
+  n.statement as statement_name,
+  n.id as statement_id
+
+'''
+neo4j_query_part = """
+            MATCH (n)-[r]-(m:ExtractedEntity)
+            WHERE n.group_id = "{}" 
+            AND datetime(n.created_at) >= datetime() - duration('P3D')
+            WITH DISTINCT m
+            OPTIONAL MATCH (m)-[rel]-(other:ExtractedEntity)
+            RETURN 
+            m.name as entity1_name,
+            m.description as description,
+            m.statement_id as statement_id,
+            m.created_at as created_at,
+            m.expired_at as expired_at,
+            CASE WHEN rel IS NULL THEN "NO_RELATIONSHIP" ELSE type(rel) END as relationship_type,
+            rel as relationship,
+            CASE WHEN other IS NULL THEN "ISOLATED_NODE" ELSE other.name END as entity2_name,
+            other as entity2
+                          """
+neo4j_query_all = """
+                MATCH (n)-[r]-(m:ExtractedEntity)
+                WHERE n.group_id = "{}" 
+                WITH DISTINCT m
+                OPTIONAL MATCH (m)-[rel]-(other:ExtractedEntity)
+                RETURN 
+                m.name as entity1_name,
+                m.description as description,
+                m.statement_id as statement_id,
+                m.created_at as created_at,
+                m.expired_at as expired_at,
+                CASE WHEN rel IS NULL THEN "NO_RELATIONSHIP" ELSE type(rel) END as relationship_type,
+                rel as relationship,
+                CASE WHEN other IS NULL THEN "ISOLATED_NODE" ELSE other.name END as entity2_name,
+                other as entity2
+                          """
+
+
