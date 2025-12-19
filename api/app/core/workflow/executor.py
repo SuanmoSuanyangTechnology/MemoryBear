@@ -120,18 +120,20 @@ class WorkflowExecutor:
             node_instance = NodeFactory.create_node(node, self.workflow_config)
 
             if node_type in [NodeType.IF_ELSE]:
-                # Build ordered boolean expression strings for each branch.
-                # These expressions will be attached to outgoing edges as
-                # LangGraph conditional routing rules.
                 expressions = node_instance.build_conditional_edge_expressions()
 
-                # Collect all outgoing edges from the current node.
-                # The order of edges must match the order of generated expressions.
+                # Number of branches, usually matches the number of conditional expressions
+                branch_number = len(expressions)
+
+                # Find all edges whose source is the current node
                 related_edge = [edge for edge in self.edges if edge.get("source") == node_id]
 
-                # Attach each condition expression to the corresponding edge
-                # based on branch priority
-                for idx in range(len(expressions)):
+                # Iterate over each branch
+                for idx in range(branch_number):
+                    # Generate a condition expression for each edge
+                    # Used later to determine which branch to take based on the node's output
+                    # Assumes node output `node.<node_id>.output` matches the edge's label
+                    # For example, if node.123.output == 'CASE1', take the branch labeled 'CASE1'
                     related_edge[idx]['condition'] = f"node.{node_id}.output == '{related_edge[idx]['label']}'"
 
             if node_instance:
