@@ -13,6 +13,7 @@ from app.core.workflow.nodes.end.config import EndNodeConfig
 from app.core.workflow.nodes.llm.config import LLMNodeConfig, MessageConfig
 from app.core.workflow.nodes.agent.config import AgentNodeConfig
 from app.core.workflow.nodes.transform.config import TransformNodeConfig
+from app.core.workflow.nodes.if_else.config import IfElseNodeConfig
 
 __all__ = [
     # 基础类
@@ -26,4 +27,5 @@ __all__ = [
     "MessageConfig",
     "AgentNodeConfig",
     "TransformNodeConfig",
+    "IfElseNodeConfig",
 ]
