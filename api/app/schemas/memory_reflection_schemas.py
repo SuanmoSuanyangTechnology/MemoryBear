@@ -8,11 +8,9 @@ class OptimizationStrategy(str, Enum):
     SPEED_FIRST = "speed_first"
     ACCURACY_FIRST = "accuracy_first"
     BALANCED = "balanced"
-
-
 class Memory_Reflection(BaseModel):
     config_id: Optional[int] = None
-    reflectionenabled: bool
+    reflection_enabled: bool
     reflection_period_in_hours: str
     reflexion_range: str
     baseline: str
