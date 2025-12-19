@@ -143,7 +143,7 @@ class ApiKeyService:
             existing = db.scalar(
                 select(ApiKey).where(
                     ApiKey.workspace_id == workspace_id,
-                    ApiKey.resource_id == data.resource_id,
+                    ApiKey.resource_id == api_key.resource_id,
                     ApiKey.name == data.name,
                     ApiKey.is_active,
                     ApiKey.id != api_key_id
