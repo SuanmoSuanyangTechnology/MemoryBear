@@ -73,49 +73,43 @@ class IfElseNodeConfig(BaseNodeConfig):
             "examples": [
                 {
                     "cases": [
-                        # if/CASE1
+                        # CASE1 / IF Branch
                         {
                             "logical_operator": "and",
                             "conditions": [
                                 {
-                                    "left": "sys.message",
-                                    "comparison_operator": "eq",
-                                    "right": "'test'"
+                                    {
+                                        "left": "node.userinput.message",
+                                        "comparison_operator": "eq",
+                                        "right": "'123'"
+                                    },
+                                    {
+                                        "left": "node.userinput.test",
+                                        "comparison_operator": "eq",
+                                        "right": "True"
+                                    }
                                 }
                             ]
                         },
-                    ]
-                },
-                {
-                    "case_number": 3,
-                    "cases": [
-                        # if/CASE1
+                        # CASE1 / ELIF Branch
                         {
-                            "logic": "or",
+                            "logical_operator": "or",
                             "conditions": [
                                 {
-                                    "left": "sys.message",
-                                    "comparison_operator": "eq",
-                                    "right": "'test'"
+                                    {
+                                        "left": "node.userinput.test",
+                                        "comparison_operator": "eq",
+                                        "right": "False"
+                                    },
+                                    {
+                                        "left": "node.userinput.message",
+                                        "comparison_operator": "contains",
+                                        "right": "'123'"
+                                    }
                                 }
                             ]
-                        },
-                        # elif/CASE2
-                        {
-                            "logic": "and",
-                            "conditions": [
-                                {
-                                    "left": "sys.message",
-                                    "comparison_operator": "eq",
-                                    "right": "'test'"
-                                },
-                                {
-                                    "left": "sys.message",
-                                    "comparison_operator": "contains",
-                                    "right": "'test'"
-                                }
-                            ]
-                        },
+                        }
+                        # CASE3 / ELSE Branch
                     ]
                 }
             ]
