@@ -27,6 +27,19 @@
       "subs": []
     },
     {
+      "id": 4,
+      "parent": 0,
+      "code": "tool",
+      "label": "工具管理",
+      "i18nKey": "menu.toolManagement",
+      "path": "/tool",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 1,
+      "subs": []
+    },
+    {
       "id": 3,
       "parent": 0,
       "code": "user",
@@ -183,6 +196,32 @@
           "level": 1,
           "sort": 0,
           "subs": null
+        },
+        {
+          "id": 72,
+          "parent": 7,
+          "code": "emotionEngine",
+          "label": "情感引擎",
+          "i18nKey": "menu.emotionEngine",
+          "path": "/emotion-engine/:id",
+          "enable": true,
+          "display": false,
+          "level": 1,
+          "sort": 0,
+          "subs": null
+        },
+        {
+          "id": 72,
+          "parent": 7,
+          "code": "selfReflectionEngine",
+          "label": "反思引擎",
+          "i18nKey": "menu.selfReflectionEngine",
+          "path": "/reflection-engine/:id",
+          "enable": true,
+          "display": false,
+          "level": 1,
+          "sort": 0,
+          "subs": null
         }
       ]
     },
@@ -210,7 +249,21 @@
           "display": false,
           "level": 2,
           "sort": 0,
-          "subs": null
+          "subs": [
+            {
+              "id": 81,
+              "parent": 8,
+              "code": "emotionDetail",
+              "label": "记忆详情",
+              "i18nKey": "menu.emotionDetail",
+              "path": "/user-memory/emotion/:id",
+              "enable": true,
+              "display": false,
+              "level": 2,
+              "sort": 0,
+              "subs": null
+            }
+          ]
         }
       ]
     },

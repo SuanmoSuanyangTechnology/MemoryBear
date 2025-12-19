@@ -18,6 +18,11 @@ import RelationshipNetwork from './components/RelationshipNetwork'
 import MemoryInsight from './components/MemoryInsight'
 import Empty from '@/components/Empty'
 
+import WordCloud from './components/WordCloud'
+import EmotionTags from './components/EmotionTags'
+import Health from './components/Health'
+import Suggestions from './components/Suggestions'
+
 const tagColors = ['21, 94, 239', '156, 111, 255', '255, 93, 52', '54, 159, 33']
 
 interface TitleProps {
@@ -102,77 +107,85 @@ const Neo4j: FC = () => {
 
   const name = loading.detail ? '' : data?.name && data?.name !== '' ? data.name : id
   return (
-    <Row gutter={[16, 16]} className="rb:pb-[24px]">
+    <Row gutter={[16, 16]} className="rb:pb-6">
       <Col span={8}>
-        <RbCard>
-          <div className="rb:flex rb:items-center">
-            <div className="rb:flex-[0_0_auto] rb:w-[80px] rb:h-[80px] rb:text-center rb:font-semibold rb:text-[28px] rb:leading-[80px] rb:rounded-[8px] rb:text-[#FBFDFF] rb:bg-[#155EEF]">{name?.[0]}</div>
-            <div className="rb:text-[24px] rb:font-semibold rb:leading-[32px] rb:ml-[16px]">
-              {name}<br/>
-              <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-[16px] rb:mt-[8px]">{data?.tags?.join(' | ')}</div>
-            </div>
-          </div>
 
-          <div className="rb:flex rb:gap-[8px] rb:mb-[8px] rb:flex-wrap rb:mt-[25px]">
-            {data?.hot_tags?.map((tag, tagIndex) => (
-              <span key={tag} className="rb:rounded-[11px] rb:p-[0_8px] rb:leading-[22px] rb:border"
-                style={{
-                  backgroundColor: `rgba(${tagColors[tagIndex % tagColors.length]}, 0.08)`,
-                  borderColor: `rgba(${tagColors[tagIndex % tagColors.length]}, 0.3)`,
-                  color: `rgba(${tagColors[tagIndex % tagColors.length]}, 1)`,
-                }}
-              >
-                {tag.name}({tag.frequency})
-              </span>
-            ))}
-          </div>
+        <Row gutter={[16, 16]}>
+          <Col span={24}>
+            <RbCard>
+              <div className="rb:flex rb:items-center">
+                <div className="rb:flex-[0_0_auto] rb:w-[80px] rb:h-[80px] rb:text-center rb:font-semibold rb:text-[28px] rb:leading-[80px] rb:rounded-[8px] rb:text-[#FBFDFF] rb:bg-[#155EEF]">{name?.[0]}</div>
+                <div className="rb:text-[24px] rb:font-semibold rb:leading-[32px] rb:ml-[16px]">
+                  {name}<br/>
+                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-[16px] rb:mt-[8px]">{data?.tags?.join(' | ')}</div>
+                </div>
+              </div>
 
-          {/* 记忆总量 */}
-          <div className="rb:font-regular rb:text-[12px] rb:text-[#5B6167] rb:leading-[16px] rb:mb-[25px]">
-            {t('userMemory.totalNumOfMemories')}
-            <div className="rb:font-extrabold rb:text-[24px] rb:text-[#212332] rb:leading-[30px] rb:mt-[8px]">{memory || 0}</div>
-          </div>
+              <div className="rb:flex rb:gap-[8px] rb:mb-[8px] rb:flex-wrap rb:mt-[25px]">
+                {data?.hot_tags?.map((tag, tagIndex) => (
+                  <span key={tag} className="rb:rounded-[11px] rb:p-[0_8px] rb:leading-[22px] rb:border"
+                    style={{
+                      backgroundColor: `rgba(${tagColors[tagIndex % tagColors.length]}, 0.08)`,
+                      borderColor: `rgba(${tagColors[tagIndex % tagColors.length]}, 0.3)`,
+                      color: `rgba(${tagColors[tagIndex % tagColors.length]}, 1)`,
+                    }}
+                  >
+                    {tag.name}({tag.frequency})
+                  </span>
+                ))}
+              </div>
 
-          {/* 关于我 */}
-          <>
-            <Title
-              type="aboutUs"
-              title={t('userMemory.aboutMe')}
-              icon={aboutUs}
-              t={t}
-              expanded={expanded.includes('aboutUs')}
-              onClick={handleTitleClick}
-            />
-            {expanded.includes('aboutUs') && (
+              {/* 记忆总量 */}
+              <div className="rb:font-regular rb:text-[12px] rb:text-[#5B6167] rb:leading-[16px] rb:mb-[25px]">
+                {t('userMemory.totalNumOfMemories')}
+                <div className="rb:font-extrabold rb:text-[24px] rb:text-[#212332] rb:leading-[30px] rb:mt-[8px]">{memory || 0}</div>
+              </div>
+
+              {/* 关于我 */}
               <>
-                {loading.summary
-                  ? <Skeleton className="rb:mt-[16px]" />
-                  : summary 
-                  ? <div className="rb:font-regular rb:leading-[22px] rb:pt-[16px]">
-                    {summary || '-'}
-                  </div>
-                  : <Empty size={88} className="rb:mt-[48px] rb:mb-[81px]" />
-                }
+                <Title
+                  type="aboutUs"
+                  title={t('userMemory.aboutMe')}
+                  icon={aboutUs}
+                  t={t}
+                  expanded={expanded.includes('aboutUs')}
+                  onClick={handleTitleClick}
+                />
+                {expanded.includes('aboutUs') && (
+                  <>
+                    {loading.summary
+                      ? <Skeleton className="rb:mt-[16px]" />
+                      : summary 
+                      ? <div className="rb:font-regular rb:leading-[22px] rb:pt-[16px]">
+                        {summary || '-'}
+                      </div>
+                      : <Empty size={88} className="rb:mt-[48px] rb:mb-[81px]" />
+                    }
+                  </>
+                )}
               </>
-            )}
-          </>
 
-          {/* 兴趣分布 */}
-          <>
-            <Title
-              type="interestDistribution"
-              title={t('userMemory.interestDistribution')}
-              icon={interestDistribution}
-              t={t}
-              expanded={expanded.includes('interestDistribution')}
-              onClick={handleTitleClick}
-            />
+              {/* 兴趣分布 */}
+              <>
+                <Title
+                  type="interestDistribution"
+                  title={t('userMemory.interestDistribution')}
+                  icon={interestDistribution}
+                  t={t}
+                  expanded={expanded.includes('interestDistribution')}
+                  onClick={handleTitleClick}
+                />
 
-            {expanded.includes('interestDistribution') && (
-              <PieCard />
-            )}
-          </>
-        </RbCard>
+                {expanded.includes('interestDistribution') && (
+                  <PieCard />
+                )}
+              </>
+            </RbCard>
+          </Col>
+          <Col span={24}>
+            <EmotionTags />
+          </Col>
+        </Row>
       </Col>
       <Col span={16}>
         <Row gutter={[16, 16]}>
@@ -182,6 +195,15 @@ const Neo4j: FC = () => {
           </Col>
           {/* 关系网络 + 记忆详情 */}
           <RelationshipNetwork />
+          <Col span={12}>
+            <WordCloud />
+          </Col>
+          <Col span={12}>
+            <Health />
+          </Col>
+          <Col span={24}>
+            <Suggestions />
+          </Col>
         </Row>
       </Col>
     </Row>

@@ -152,7 +152,7 @@ export const configList: ConfigVo[] = [
       },
       // 自我反思引擎
       // {
-      //   title: 'selfReflexionEngine',
+      //   title: 'reflectionEngine',
       //   list: [
       //     // 是否启用反思引擎
       //     {
