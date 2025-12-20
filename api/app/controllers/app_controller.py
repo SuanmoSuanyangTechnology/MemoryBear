@@ -583,15 +583,27 @@ async def draft_run(
             )
 
             async def event_generator():
-                """工作流事件生成器"""
-
-                # 调用多智能体服务的流式方法
+                """工作流事件生成器
+                
+                将事件转换为标准 SSE 格式：
+                event: <event_type>
+                data: <json_data>
+                """
+                import json
+                
+                # 调用工作流服务的流式方法
                 async for event in workflow_service.run_stream(
                         app_id=app_id,
                         payload=payload,
                         config=config
                 ):
-                    yield event
+                    # 提取事件类型和数据
+                    event_type = event.get("event", "message")
+                    event_data = event.get("data", {})
+                    
+                    # 转换为标准 SSE 格式（字符串）
+                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                    yield sse_message
 
             return StreamingResponse(
                 event_generator(),
