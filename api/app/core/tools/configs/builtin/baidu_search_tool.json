@@ -1,0 +1,14 @@
+{
+  "name": "baidu_search_tool",
+  "description": "百度搜索工具 - 网络搜索：提供网页搜索、新闻搜索、图片搜索功能",
+  "tool_type": "builtin",
+  "tool_class": "BaiduSearchTool",
+  "version": "1.0.0",
+  "enabled": true,
+  "parameters": {
+    "api_key": "",
+    "secret_key": "",
+    "search_type": "web"
+  },
+  "tags": ["search", "web", "baidu", "builtin"]
+}

@@ -32,6 +32,8 @@ from . import (
     emotion_controller,
     emotion_config_controller,
     prompt_optimizer_controller,
+    tool_controller,
+    tool_execution_controller,
 )
 
 # 创建管理端 API 路由器
@@ -66,4 +68,7 @@ manager_router.include_router(emotion_controller.router)
 manager_router.include_router(emotion_config_controller.router)
 manager_router.include_router(prompt_optimizer_controller.router)
 manager_router.include_router(memory_reflection_controller.router)
+manager_router.include_router(tool_controller.router)
+manager_router.include_router(tool_execution_controller.router)
+
 __all__ = ["manager_router"]
