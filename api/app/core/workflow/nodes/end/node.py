@@ -178,9 +178,24 @@ class EndNode(BaseNode):
                 break
         
         if upstream_ref_index is None:
-            # 没有引用直接上游节点，正常输出（渲染完整模板）
+            # 没有引用直接上游节点，输出完整模板内容
             output = self._render_template(output_template, state)
-            logger.info(f"节点 {self.node_id} 没有引用直接上游节点，输出完整内容")
+            logger.info(f"节点 {self.node_id} 没有引用直接上游节点，输出完整内容: '{output[:50]}...'")
+            
+            # 通过 writer 发送完整内容（作为一个 message chunk）
+            from langgraph.config import get_stream_writer
+            writer = get_stream_writer()
+            writer({
+                "type": "message",  # End 节点的输出使用 message 类型
+                "node_id": self.node_id,
+                "chunk": output,
+                "full_content": output,
+                "chunk_index": 1,
+                "is_suffix": False
+            })
+            logger.info(f"节点 {self.node_id} 已通过 writer 发送完整内容")
+            
+            # yield 完成标记
             yield {"__final__": True, "result": output}
             return
         
