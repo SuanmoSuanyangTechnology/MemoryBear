@@ -236,6 +236,7 @@ class EndNode(BaseNode):
             from langgraph.config import get_stream_writer
             writer = get_stream_writer()
             writer({
+                "type": "message",  # End 节点的输出使用 message 类型
                 "node_id": self.node_id,
                 "chunk": suffix,
                 "full_content": full_output,  # full_content 是完整的渲染结果（前缀+LLM+后缀）

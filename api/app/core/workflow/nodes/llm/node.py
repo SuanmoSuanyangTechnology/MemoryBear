@@ -234,8 +234,9 @@ class LLMNode(BaseNode):
                 rendered_prefix = self._render_template(end_prefix, state)
                 logger.info(f"节点 {self.node_id} 提前发送 End 节点前缀: '{rendered_prefix[:50]}...'")
                 
-                # 提前发送 End 节点的前缀
+                # 提前发送 End 节点的前缀（使用 "message" 类型）
                 writer({
+                    "type": "message",  # End 相关的内容都是 message 类型
                     "node_id": "end",  # 标记为 end 节点的输出
                     "chunk": rendered_prefix,
                     "full_content": rendered_prefix,
