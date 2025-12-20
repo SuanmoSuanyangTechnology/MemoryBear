@@ -13,6 +13,11 @@ from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.repositories import workspace_repository, knowledge_repository
+from app.core.tools.registry import ToolRegistry
+from app.core.tools.executor import ToolExecutor
+from app.core.tools.langchain_adapter import LangchainAdapter
+TOOL_MANAGEMENT_AVAILABLE = True
+
 
 logger = get_business_logger()
 
@@ -329,3 +334,216 @@ def create_agent_invocation_tool(
             return f"调用 Agent 失败: {str(e)}"
     
     return invoke_agent
+
+def get_available_tools_for_agent(
+    db: Session,
+    workspace_id: uuid.UUID,
+    agent_id: Optional[uuid.UUID] = None
+) -> List[Dict[str, Any]]:
+    """获取Agent可用的工具列表
+    
+    Args:
+        db: 数据库会话
+        workspace_id: 工作空间ID
+        agent_id: Agent ID（可选）
+        
+    Returns:
+        可用工具列表
+    """
+    if not TOOL_MANAGEMENT_AVAILABLE:
+        logger.warning("工具管理系统不可用")
+        return []
+    
+    try:
+        # 创建工具注册表
+        registry = ToolRegistry(db)
+        
+        # 获取工具列表
+        tools = registry.list_tools(workspace_id=workspace_id)
+        
+        # 转换为Agent可用的格式
+        available_tools = []
+        for tool_info in tools:
+            if tool_info.status.value == "active":
+                available_tools.append({
+                    "id": tool_info.id,
+                    "name": tool_info.name,
+                    "description": tool_info.description,
+                    "type": tool_info.tool_type.value,
+                    "version": tool_info.version,
+                    "tags": tool_info.tags,
+                    "parameters": [
+                        {
+                            "name": param.name,
+                            "type": param.type.value,
+                            "description": param.description,
+                            "required": param.required,
+                            "default": param.default
+                        }
+                        for param in tool_info.parameters
+                    ]
+                })
+        
+        logger.info(f"为Agent获取到 {len(available_tools)} 个可用工具")
+        return available_tools
+        
+    except Exception as e:
+        logger.error(f"获取Agent可用工具失败: {e}")
+        return []
+
+
+def create_langchain_tools_for_agent(
+    db: Session,
+    workspace_id: uuid.UUID,
+    agent_id: Optional[uuid.UUID] = None
+) -> List[Any]:
+    """为Agent创建Langchain兼容的工具列表
+    
+    Args:
+        db: 数据库会话
+        workspace_id: 工作空间ID
+        agent_id: Agent ID（可选）
+        
+    Returns:
+        Langchain工具列表
+    """
+    if not TOOL_MANAGEMENT_AVAILABLE:
+        logger.warning("工具管理系统不可用")
+        return []
+    
+    try:
+        # 创建工具注册表
+        registry = ToolRegistry(db)
+        
+        # 注册内置工具类
+        from app.core.tools.builtin import (
+            DateTimeTool, JsonTool, BaiduSearchTool, MinerUTool, TextInTool
+        )
+        registry.register_tool_class(DateTimeTool)
+        registry.register_tool_class(JsonTool)
+        registry.register_tool_class(BaiduSearchTool)
+        registry.register_tool_class(MinerUTool)
+        registry.register_tool_class(TextInTool)
+        
+        # 获取活跃的工具
+        tools = registry.list_tools(workspace_id=workspace_id)
+        active_tools = [tool for tool in tools if tool.status.value == "active"]
+        
+        # 转换为Langchain工具
+        langchain_tools = []
+        for tool_info in active_tools:
+            try:
+                tool_instance = registry.get_tool(tool_info.id)
+                if tool_instance:
+                    langchain_tool = LangchainAdapter.convert_tool(tool_instance)
+                    langchain_tools.append(langchain_tool)
+            except Exception as e:
+                logger.error(f"转换工具失败: {tool_info.name}, 错误: {e}")
+        
+        logger.info(f"为Agent创建了 {len(langchain_tools)} 个Langchain工具")
+        return langchain_tools
+        
+    except Exception as e:
+        logger.error(f"创建Agent Langchain工具失败: {e}")
+        return []
+
+
+class ToolExecutionInput(BaseModel):
+    """工具执行输入参数"""
+    tool_id: str = Field(..., description="工具ID")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="工具参数")
+    timeout: Optional[float] = Field(None, description="超时时间（秒）")
+
+
+def create_tool_execution_tool(
+    db: Session,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID
+):
+    """创建工具执行工具
+    
+    Args:
+        db: 数据库会话
+        workspace_id: 工作空间ID
+        user_id: 用户ID
+        
+    Returns:
+        工具执行工具
+    """
+    if not TOOL_MANAGEMENT_AVAILABLE:
+        logger.warning("工具管理系统不可用")
+        return None
+    
+    @tool(args_schema=ToolExecutionInput)
+    async def execute_tool(
+        tool_id: str,
+        parameters: Dict[str, Any] = None,
+        timeout: Optional[float] = None
+    ) -> str:
+        """执行指定的工具。当需要使用系统中的工具来完成特定任务时使用。
+        
+        Args:
+            tool_id: 工具ID（通过工具列表获取）
+            parameters: 工具参数（根据工具要求提供）
+            timeout: 超时时间（秒，可选）
+            
+        Returns:
+            工具执行结果
+        """
+        try:
+            # 创建工具执行器
+            registry = ToolRegistry(db)
+            executor = ToolExecutor(db, registry)
+            
+            # 执行工具
+            result = await executor.execute_tool(
+                tool_id=tool_id,
+                parameters=parameters or {},
+                user_id=user_id,
+                workspace_id=workspace_id,
+                timeout=timeout
+            )
+            
+            if result.success:
+                # 格式化成功结果
+                if isinstance(result.data, str):
+                    return result.data
+                else:
+                    import json
+                    return json.dumps(result.data, ensure_ascii=False, indent=2)
+            else:
+                return f"工具执行失败: {result.error}"
+                
+        except Exception as e:
+            logger.error(f"工具执行异常: {tool_id}, 错误: {e}")
+            return f"工具执行异常: {str(e)}"
+    
+    return execute_tool
+
+
+def get_tool_management_tools(
+    db: Session,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID
+) -> List[Any]:
+    """获取工具管理相关的工具
+    
+    Args:
+        db: 数据库会话
+        workspace_id: 工作空间ID
+        user_id: 用户ID
+        
+    Returns:
+        工具管理工具列表
+    """
+    if not TOOL_MANAGEMENT_AVAILABLE:
+        return []
+    
+    tools = []
+    
+    # 添加工具执行工具
+    execution_tool = create_tool_execution_tool(db, workspace_id, user_id)
+    if execution_tool:
+        tools.append(execution_tool)
+    
+    return tools

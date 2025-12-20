@@ -1,0 +1,60 @@
+{
+  "datetime": {
+    "name": "时间工具",
+    "description": "获取当前时间、日期计算",
+    "tool_class": "DateTimeTool",
+    "category": "utility",
+    "requires_config": false,
+    "version": "1.0.0",
+    "enabled": true,
+    "parameters": {}
+  },
+  "json_converter": {
+    "name": "JSON转换工具",
+    "description": "JSON数据格式化和转换",
+    "tool_class": "JsonTool",
+    "category": "utility",
+    "requires_config": false,
+    "version": "1.0.0",
+    "enabled": true,
+    "parameters": {}
+  },
+  "baidu_search": {
+    "name": "百度搜索",
+    "description": "百度网页搜索服务",
+    "tool_class": "BaiduSearchTool",
+    "category": "search",
+    "requires_config": true,
+    "version": "1.0.0",
+    "enabled": true,
+    "parameters": {
+      "api_key": {"type": "string", "description": "百度搜索API密钥", "sensitive": true, "required": true}
+    }
+  },
+  "mineru": {
+    "name": "MinerU",
+    "description": "PDF文档解析工具",
+    "tool_class": "MinerUTool",
+    "category": "document",
+    "requires_config": true,
+    "version": "1.0.0",
+    "enabled": true,
+    "parameters": {
+      "api_key": {"type": "string", "description": "MinerU API密钥", "sensitive": true, "required": true},
+      "base_url": {"type": "string", "description": "API地址", "default": "https://api.mineru.com"}
+    }
+  },
+  "textin": {
+    "name": "TextIn",
+    "description": "OCR文字识别服务",
+    "tool_class": "TextInTool",
+    "category": "ocr",
+    "requires_config": true,
+    "version": "1.0.0",
+    "enabled": true,
+    "parameters": {
+      "api_key": {"type": "string", "description": "TextIn API密钥", "sensitive": true, "required": true},
+      "api_secret": {"type": "string", "description": "TextIn API密钥", "sensitive": true, "required": true}
+    }
+  }
+}

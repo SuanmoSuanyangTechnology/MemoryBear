@@ -21,3 +21,6 @@ class Tenants(Base):
     
     # Relationship to workspaces owned by the tenant
     owned_workspaces = relationship("Workspace", back_populates="tenant")
+    
+    # Relationship to tool configs owned by the tenant
+    tool_configs = relationship("ToolConfig", back_populates="tenant")

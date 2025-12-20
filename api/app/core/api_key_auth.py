@@ -37,9 +37,10 @@ def require_api_key(
         @require_api_key(scopes=["app"])
         def chat_with_app(
             resource_id: uuid.UUID,
-            api_key_auth: ApiKeyAuth = Depends(),
+            request: Request,
+            api_key_auth: ApiKeyAuth = None,
             db: Session = Depends(get_db),
-            message: str
+            message: str = Query(..., description="聊天消息内容")
         ):
             # api_key_auth 包含验证后的API Key 信息
             pass
