@@ -64,7 +64,14 @@ class DataConfig(Base):
     lambda_time = Column("lambda_time", Float, default=0.5, comment="最低保持度，0-1 小数")
     lambda_mem = Column("lambda_mem", Float, default=0.5, comment="遗忘率，0-1 小数")
     offset = Column("offset", Float, default=0.0, comment="偏移度，0-1 小数")
-
+    
+    # 情绪引擎配置
+    emotion_enabled = Column(Boolean, default=True, comment="是否启用情绪提取")
+    emotion_model_id = Column(String, nullable=True, comment="情绪分析专用模型ID")
+    emotion_extract_keywords = Column(Boolean, default=True, comment="是否提取情绪关键词")
+    emotion_min_intensity = Column(Float, default=0.1, comment="最小情绪强度阈值")
+    emotion_enable_subject = Column(Boolean, default=True, comment="是否启用主体分类")
+    
     # 时间戳
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
     updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="更新时间")

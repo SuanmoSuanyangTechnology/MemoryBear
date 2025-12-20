@@ -28,7 +28,6 @@
 """
 import os
 import json
-import socket
 from typing import Optional, Dict, Any, Literal
 
 NetworkMode = Literal['internal', 'external']
@@ -105,7 +104,6 @@ def _make_pgsql_conn() -> Optional[object]:
 
     try:
         import psycopg2  # type: ignore
-        from psycopg2.extras import RealDictCursor  # type: ignore
 
         port = int(port_str) if port_str else 5432
         conn = psycopg2.connect(
@@ -193,7 +191,7 @@ def _fetch_db_config_by_config_id(config_id: int | str) -> Optional[Dict[str, An
         # config_id 在数据库中是 Integer 类型，需要转换
         try:
             config_id_int = int(config_id)
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError):
             try:
                 pass
             except Exception:
@@ -207,7 +205,7 @@ def _fetch_db_config_by_config_id(config_id: int | str) -> Optional[Dict[str, An
             "       statement_granularity, include_dialogue_context, max_context, "
             "       \"offset\" AS offset, lambda_time, lambda_mem, "
             "       pruning_enabled, pruning_scene, pruning_threshold, "
-            "       llm_id, embedding_id "
+            "       llm_id, embedding_id, rerank_id "
             "FROM data_config WHERE config_id = %s LIMIT 1"
         )
         cur.execute(sql, (config_id_int,))
@@ -222,7 +220,7 @@ def _fetch_db_config_by_config_id(config_id: int | str) -> Optional[Dict[str, An
             pass
         
         return row if row else None
-    except Exception as e:
+    except Exception:
         pass
         return None
     finally:
@@ -325,7 +323,7 @@ def _apply_overrides_from_db_row(
             _set_if_present(selections, tk, db_row, tk, str)
         
         # 特殊处理 UUID 字段，确保转换为字符串格式
-        for uuid_field in ("llm_id", "embedding_id"):
+        for uuid_field in ("llm_id", "embedding_id", "rerank_id"):
             if uuid_field in db_row and db_row.get(uuid_field) is not None:
                 try:
                     value = db_row.get(uuid_field)
@@ -370,7 +368,7 @@ def _apply_overrides_from_db_row(
             pass
 
         return runtime_cfg
-    except Exception as e:
+    except Exception:
         pass
         return runtime_cfg
 
@@ -460,7 +458,7 @@ def apply_runtime_overrides_with_config_id(
         
         updated_cfg = _apply_overrides_from_db_row(runtime_cfg, db_row, selected_cid, "config_id")
         return updated_cfg, True
-    except Exception as e:
+    except Exception:
         pass
         return runtime_cfg, False
 
@@ -570,7 +568,7 @@ def load_unified_config(
         try:
             with open(runtime_config_path, "r", encoding="utf-8") as f:
                 runtime_cfg = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
+        except (FileNotFoundError, json.JSONDecodeError):
             runtime_cfg = {"selections": {}}
         
         # 步骤 2: 尝试从 dbrun.json 读取 config_id 并应用数据库配置（最高优先级）
@@ -603,7 +601,7 @@ def load_unified_config(
                         pass
         return runtime_cfg
         
-    except Exception as e:
+    except Exception:
         return {"selections": {}}
 
 

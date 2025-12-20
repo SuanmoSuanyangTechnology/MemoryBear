@@ -238,3 +238,81 @@ async def render_memory_summary_prompt(
         'json_schema': 'MemorySummaryResponse.schema'
     })
     return rendered_prompt
+
+async def render_emotion_extraction_prompt(
+    statement: str,
+    extract_keywords: bool,
+    enable_subject: bool
+) -> str:
+    """
+    Renders the emotion extraction prompt using the extract_emotion.jinja2 template.
+
+    Args:
+        statement: The statement to analyze
+        extract_keywords: Whether to extract emotion keywords
+        enable_subject: Whether to enable subject classification
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("extract_emotion.jinja2")
+    rendered_prompt = template.render(
+        statement=statement,
+        extract_keywords=extract_keywords,
+        enable_subject=enable_subject
+    )
+    
+    # 记录渲染结果到提示日志
+    log_prompt_rendering('emotion extraction', rendered_prompt)
+    # 可选：记录模板渲染信息
+    log_template_rendering('extract_emotion.jinja2', {
+        'statement': 'str',
+        'extract_keywords': extract_keywords,
+        'enable_subject': enable_subject
+    })
+    
+    return rendered_prompt
+
+async def render_emotion_suggestions_prompt(
+    health_data: dict,
+    patterns: dict,
+    user_profile: dict
+) -> str:
+    """
+    Renders the emotion suggestions generation prompt using the generate_emotion_suggestions.jinja2 template.
+
+    Args:
+        health_data: 情绪健康数据
+        patterns: 情绪模式分析结果
+        user_profile: 用户画像数据
+
+    Returns:
+        Rendered prompt content as string
+    """
+    import json
+    
+    # 预处理 emotion_distribution 为 JSON 字符串
+    emotion_distribution_json = json.dumps(
+        health_data.get('emotion_distribution', {}), 
+        ensure_ascii=False, 
+        indent=2
+    )
+    
+    template = prompt_env.get_template("generate_emotion_suggestions.jinja2")
+    rendered_prompt = template.render(
+        health_data=health_data,
+        patterns=patterns,
+        user_profile=user_profile,
+        emotion_distribution_json=emotion_distribution_json
+    )
+    
+    # 记录渲染结果到提示日志
+    log_prompt_rendering('emotion suggestions', rendered_prompt)
+    # 可选：记录模板渲染信息
+    log_template_rendering('generate_emotion_suggestions.jinja2', {
+        'health_score': health_data.get('health_score'),
+        'health_level': health_data.get('level'),
+        'user_interests': user_profile.get('interests', [])
+    })
+    
+    return rendered_prompt
