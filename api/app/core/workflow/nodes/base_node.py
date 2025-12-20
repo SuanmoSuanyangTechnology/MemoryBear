@@ -240,6 +240,14 @@ class BaseNode(ABC):
             # End nodes CAN send chunks (for suffix), but only after LLM content
             is_end_node = self.node_type == "end"
             
+            # Check if this node is adjacent to End node (for message type)
+            is_adjacent_to_end = getattr(self, '_is_adjacent_to_end', False)
+            
+            # Determine chunk type: "message" for End and adjacent nodes, "node_chunk" for others
+            chunk_type = "message" if (is_end_node or is_adjacent_to_end) else "node_chunk"
+            
+            logger.debug(f"节点 {self.node_id} chunk 类型: {chunk_type} (is_end={is_end_node}, adjacent={is_adjacent_to_end})")
+            
             # Accumulate complete result (for final wrapping)
             chunks = []
             final_result = None
@@ -267,6 +275,7 @@ class BaseNode(ABC):
                     
                     # 1. Send via stream writer (for real-time client updates)
                     writer({
+                        "type": chunk_type,  # "message" or "node_chunk"
                         "node_id": self.node_id,
                         "chunk": item,
                         "full_content": full_content,
@@ -294,6 +303,7 @@ class BaseNode(ABC):
                     
                     # Send chunks for all nodes
                     writer({
+                        "type": chunk_type,  # "message" or "node_chunk"
                         "node_id": self.node_id,
                         "chunk": chunk_str,
                         "full_content": full_content,
