@@ -9,18 +9,15 @@ LangChain Agent 封装
 """
 import os
 import time
-import asyncio
 from typing import Dict, Any, List, Optional, AsyncGenerator, Sequence
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
 from langchain_core.tools import BaseTool
 from langchain.agents import create_agent
 
-from app.core.memory.agent.mcp_server.services import session_service
 from app.core.memory.agent.utils.redis_tool import store
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.models.models_model import ModelType
 from app.core.logging_config import get_business_logger
-from app.services.memory_agent_service import MemoryAgentService
 from app.services.memory_konwledges_server import write_rag
 from app.services.task_service import get_task_memory_write_result
 from app.tasks import write_message_task

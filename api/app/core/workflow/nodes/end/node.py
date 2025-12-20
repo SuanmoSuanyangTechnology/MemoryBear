@@ -30,11 +30,11 @@ class EndNode(BaseNode):
         
         # 获取配置的输出模板
         output_template = self.config.get("output")
-        pool = self.get_variable_pool(state)
+        # pool = self.get_variable_pool(state)
        
-        print("="*20)
-        print( pool.get("start.test"))
-        print("="*20)
+        # print("="*20)
+        # print( pool.get("start.test"))
+        # print("="*20)
         # 如果配置了输出模板，使用模板渲染；否则使用默认输出
         if output_template:
             output = self._render_template(output_template, state)
