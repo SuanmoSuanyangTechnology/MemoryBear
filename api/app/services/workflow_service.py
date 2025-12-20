@@ -1,29 +1,27 @@
 """
 工作流服务层
 """
+import datetime
 import json
 import logging
 import uuid
-import datetime
 from typing import Any, Annotated
 
-from sqlalchemy.orm import Session
 from fastapi import Depends
+from sqlalchemy.orm import Session
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
+from app.core.workflow.validator import validate_workflow_config
+from app.db import get_db
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
-    WorkflowNodeExecutionRepository,
-    get_workflow_config_repository,
-    get_workflow_execution_repository,
-    get_workflow_node_execution_repository
+    WorkflowNodeExecutionRepository
 )
-from app.core.workflow.validator import validate_workflow_config
-from app.core.exceptions import BusinessException
-from app.core.error_codes import BizCode
-from app.db import get_db
 from app.schemas import DraftRunRequest
+from app.utils.sse_utils import format_sse_message
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +79,7 @@ class WorkflowService:
             if not is_valid:
                 logger.warning(f"工作流配置验证失败: {errors}")
                 raise BusinessException(
-                    error_code=BizCode.INVALID_PARAMETER,
+                    code=BizCode.INVALID_PARAMETER,
                     message=f"工作流配置无效: {'; '.join(errors)}"
                 )
 
@@ -140,7 +138,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
@@ -166,7 +164,7 @@ class WorkflowService:
             if not is_valid:
                 logger.warning(f"工作流配置验证失败: {errors}")
                 raise BusinessException(
-                    error_code=BizCode.INVALID_PARAMETER,
+                    code=BizCode.INVALID_PARAMETER,
                     message=f"工作流配置无效: {'; '.join(errors)}"
                 )
 
@@ -195,8 +193,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             return False
-
-        self.config_repo.delete(config.id)
+        config.is_active = False
         logger.info(f"删除工作流配置成功: app_id={app_id}, config_id={config.id}")
         return True
 
@@ -245,7 +242,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
@@ -359,7 +356,7 @@ class WorkflowService:
         execution = self.get_execution(execution_id)
         if not execution:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"执行记录不存在: execution_id={execution_id}"
             )
 
@@ -474,11 +471,9 @@ class WorkflowService:
         }
 
         # 4. 获取工作空间 ID（从 app 获取）
-        from app.models import App
-
 
         # 5. 执行工作流
-        from app.core.workflow.executor import execute_workflow, execute_workflow_stream
+        from app.core.workflow.executor import execute_workflow
 
         try:
             # 更新状态为运行中
@@ -595,17 +590,18 @@ class WorkflowService:
         }
 
         # 4. 获取工作空间 ID（从 app 获取）
-        from app.models import App
 
         # 5. 流式执行工作流
-        from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 
         try:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
 
             # 发送开始事件
-            yield f"data: {json.dumps({'type': 'workflow_start', 'execution_id': execution.execution_id})}\n\n"
+            yield format_sse_message("workflow_start", {
+                            "execution_id": execution.execution_id,
+                            "conversation_id_uuid": str(conversation_id_uuid),
+                        })
 
             # 调用流式执行
             async for event in self._run_workflow_stream(
@@ -621,7 +617,10 @@ class WorkflowService:
                 yield f"data: {json.dumps(cleaned_event)}\n\n"
 
             # 发送完成事件
-            yield f"data: {json.dumps({'type': 'workflow_end', 'execution_id': execution.execution_id})}\n\n"
+            yield format_sse_message("workflow_end", {
+                "execution_id": execution.execution_id,
+                "conversation_id_uuid": str(conversation_id_uuid),
+            })
 
         except Exception as e:
             logger.error(f"工作流流式执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
@@ -660,7 +659,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
@@ -687,12 +686,12 @@ class WorkflowService:
         app = self.db.query(App).filter(App.id == app_id).first()
         if not app:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"应用不存在: app_id={app_id}"
             )
 
         # 5. 执行工作流
-        from app.core.workflow.executor import execute_workflow, execute_workflow_stream
+        from app.core.workflow.executor import execute_workflow
 
         try:
             # 更新状态为运行中
@@ -750,7 +749,7 @@ class WorkflowService:
                 error_message=str(e)
             )
             raise BusinessException(
-                error_code=BizCode.INTERNAL_ERROR,
+                code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
             )
 
@@ -820,26 +819,26 @@ class WorkflowService:
                 yield event
 
                 # 收集输出数据
-                if event.get("type") == "node_complete":
-                    node_data = event.get("data", {})
-                    node_outputs = node_data.get("node_outputs", {})
-                    output_data.update(node_outputs)
-
-                # 处理完成事件
-                if event.get("type") == "workflow_complete":
-                    self.update_execution_status(
-                        execution_id,
-                        "completed",
-                        output_data=output_data
-                    )
-
-                # 处理错误事件
-                if event.get("type") == "workflow_error":
-                    self.update_execution_status(
-                        execution_id,
-                        "failed",
-                        error_message=event.get("error")
-                    )
+                # if event.get("type") == "node_complete":
+                #     node_data = event.get("data", {})
+                #     node_outputs = node_data.get("node_outputs", {})
+                #     output_data.update(node_outputs)
+                #
+                # # 处理完成事件
+                # if event.get("type") == "workflow_complete":
+                #     self.update_execution_status(
+                #         execution_id,
+                #         "completed",
+                #         output_data=output_data
+                #     )
+                #
+                # # 处理错误事件
+                # if event.get("type") == "workflow_error":
+                #     self.update_execution_status(
+                #         execution_id,
+                #         "failed",
+                #         error_message=event.get("error")
+                #     )
 
         except Exception as e:
             logger.error(f"工作流流式执行失败: execution_id={execution_id}, error={e}", exc_info=True)

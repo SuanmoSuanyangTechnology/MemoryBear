@@ -63,7 +63,7 @@ class LLMNode(BaseNode):
     - ai/assistant: AI 消息（AIMessage）
     """
     
-    def _prepare_llm(self, state: WorkflowState) -> tuple[RedBearLLM, list | str]:
+    def _prepare_llm(self, state: WorkflowState,stream:bool = False) -> tuple[RedBearLLM, list | str]:
         """准备 LLM 实例（公共逻辑）
         
         Args:
@@ -125,16 +125,19 @@ class LLMNode(BaseNode):
             model_type = config.type
         
         # 4. 创建 LLM 实例（使用已提取的数据）
+        print("="*50)
+        print("stream",stream)
+        print("="*50)
         llm = RedBearLLM(
             RedBearModelConfig(
                 model_name=model_name,
                 provider=provider,            
                 api_key=api_key,
-                base_url=api_base
+                base_url=api_base,
+                extra_params={"streaming": stream}
             ), 
             type=model_type
         )
-        
         return llm, prompt_or_messages
     
     async def execute(self, state: WorkflowState) -> AIMessage:
@@ -146,13 +149,12 @@ class LLMNode(BaseNode):
         Returns:
             LLM 响应消息
         """
-        llm, prompt_or_messages = self._prepare_llm(state)
+        llm, prompt_or_messages = self._prepare_llm(state,True)
         
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（非流式）")
         
         # 调用 LLM（支持字符串或消息列表）
         response = await llm.ainvoke(prompt_or_messages)
-        
         # 提取内容
         if hasattr(response, 'content'):
             content = response.content
@@ -199,47 +201,47 @@ class LLMNode(BaseNode):
                 }
         return None
     
-    async def execute_stream(self, state: WorkflowState):
-        """流式执行 LLM 调用
+    # async def execute_stream(self, state: WorkflowState):
+    #     """流式执行 LLM 调用
         
-        Args:
-            state: 工作流状态
+    #     Args:
+    #         state: 工作流状态
         
-        Yields:
-            文本片段（chunk）或完成标记
-        """
-        llm, prompt_or_messages = self._prepare_llm(state)
+    #     Yields:
+    #         文本片段（chunk）或完成标记
+    #     """
+    #     llm, prompt_or_messages = self._prepare_llm(state,True)
         
-        logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式）")
+    #     logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式）")
         
-        # 累积完整响应
-        full_response = ""
-        last_chunk = None
+    #     # 累积完整响应
+    #     full_response = ""
+    #     last_chunk = None
         
-        # 调用 LLM（流式，支持字符串或消息列表）
-        async for chunk in llm.astream(prompt_or_messages):
-            # 提取内容
-            if hasattr(chunk, 'content'):
-                content = chunk.content
-            else:
-                content = str(chunk)
+    #     # 调用 LLM（流式，支持字符串或消息列表）
+    #     async for chunk in llm.astream(prompt_or_messages):
+    #         # 提取内容
+    #         if hasattr(chunk, 'content'):
+    #             content = chunk.content
+    #         else:
+    #             content = str(chunk)
             
-            full_response += content
-            last_chunk = chunk
-            
-            # 流式返回每个文本片段
-            yield content
+    #         full_response += content
+    #         last_chunk = chunk
+    #         logger.info(f"节点 {self.node_id} LLM : {content}")
+    #         # 流式返回每个文本片段
+    #         yield content
         
-        logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}")
+    #     logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}")
         
-        # 构建完整的 AIMessage（包含元数据）
-        if isinstance(last_chunk, AIMessage):
-            final_message = AIMessage(
-                content=full_response,
-                response_metadata=last_chunk.response_metadata if hasattr(last_chunk, 'response_metadata') else {}
-            )
-        else:
-            final_message = AIMessage(content=full_response)
+    #     # 构建完整的 AIMessage（包含元数据）
+    #     if isinstance(last_chunk, AIMessage):
+    #         final_message = AIMessage(
+    #             content=full_response,
+    #             response_metadata=last_chunk.response_metadata if hasattr(last_chunk, 'response_metadata') else {}
+    #         )
+    #     else:
+    #         final_message = AIMessage(content=full_response)
         
-        # yield 完成标记
-        yield {"__final__": True, "result": final_message}
+    #     # yield 完成标记
+    #     yield {"__final__": True, "result": final_message}

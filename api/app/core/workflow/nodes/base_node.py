@@ -209,11 +209,15 @@ class BaseNode(ABC):
         3. 将业务数据包装成标准输出格式
         4. 错误处理
         
+        注意：在流式模式下，我们需要：
+        - yield 中间的 chunk 事件（用于实时显示）
+        - 最后 yield 一个包含 state 更新的字典（LangGraph 会合并到 state）
+        
         Args:
             state: 工作流状态
         
         Yields:
-            标准化的流式事件
+            标准化的流式事件和最终的 state 更新
         """
         import time
         
@@ -263,27 +267,39 @@ class BaseNode(ABC):
             
             elapsed_time = time.time() - start_time
             
+            # 提取处理后的输出（调用子类的 _extract_output）
+            extracted_output = self._extract_output(final_result)
+            
             # 包装最终结果
             final_output = self._wrap_output(final_result, elapsed_time, state)
-            yield {
-                "type": "complete",
-                **final_output
+            
+            # 将提取后的输出存储到运行时变量中（供后续节点快速访问）
+            if isinstance(extracted_output, dict):
+                runtime_var = extracted_output
+            else:
+                runtime_var = {"output": extracted_output}
+            
+            # 构建完整的 state 更新（包含 node_outputs 和 runtime_vars）
+            state_update = {
+                **final_output,
+                "runtime_vars": {
+                    self.node_id: runtime_var
+                }
             }
+            
+            # 最后 yield 纯粹的 state 更新（LangGraph 会合并到 state 中）
+            yield state_update
                 
         except TimeoutError:
             elapsed_time = time.time() - start_time
             logger.error(f"节点 {self.node_id} 执行超时（{timeout}秒）")
-            yield {
-                "type": "error",
-                **self._wrap_error(f"节点执行超时（{timeout}秒）", elapsed_time, state)
-            }
+            error_output = self._wrap_error(f"节点执行超时（{timeout}秒）", elapsed_time, state)
+            yield error_output
         except Exception as e:
             elapsed_time = time.time() - start_time
             logger.error(f"节点 {self.node_id} 执行失败: {e}", exc_info=True)
-            yield {
-                "type": "error",
-                **self._wrap_error(str(e), elapsed_time, state)
-            }
+            error_output = self._wrap_error(str(e), elapsed_time, state)
+            yield error_output
     
     def _wrap_output(
         self, 

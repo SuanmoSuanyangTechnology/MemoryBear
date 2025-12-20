@@ -92,7 +92,7 @@ class WorkflowExecutor:
 
 
 
-    def build_graph(self) -> CompiledStateGraph:
+    def build_graph(self,stream=False) -> CompiledStateGraph:
         """构建 LangGraph
 
         Returns:
@@ -122,12 +122,19 @@ class WorkflowExecutor:
             if node_instance:
                 # 包装节点的 run 方法
                 # 使用函数工厂避免闭包问题
-                def make_node_func(inst):
-                    async def node_func(state: WorkflowState):
+                if stream:
+                    # 流式模式：创建 async generator 函数
+                    # LangGraph 会收集所有 yield 的值，最后一个 yield 的字典会被合并到 state
+                    async def node_func(state: WorkflowState, inst=node_instance):
+                        async for item in inst.run_stream(state):
+                            yield item
+                    workflow.add_node(node_id, node_func)
+                else:
+                    # 非流式模式：创建 async function
+                    async def node_func(state: WorkflowState, inst=node_instance):
                         return await inst.run(state)
-                    return node_func
+                    workflow.add_node(node_id, node_func)
 
-                workflow.add_node(node_id, make_node_func(node_instance))
                 logger.debug(f"添加节点: {node_id} (type={node_type})")
 
         # 3. 添加边
@@ -276,12 +283,13 @@ class WorkflowExecutor:
     ):
         """执行工作流（流式）
 
-        手动执行节点以支持细粒度的流式输出：
-        - workflow_start: 工作流开始
-        - node_start: 节点开始执行
-        - node_chunk: LLM 节点的流式输出片段（逐 token）
-        - node_complete: 节点执行完成
-        - workflow_complete: 工作流完成
+        使用 stream_mode="updates" 来获取每个节点的 state 更新。
+        节点的 generator 会 yield 多个值：
+        - 中间的 chunk 事件（带 type="chunk"）
+        - 最后的 state 更新（纯字典，包含 node_outputs 等）
+
+        LangGraph 会将所有 yield 的值收集起来，并将它们合并到 state 中。
+        我们需要过滤出 chunk 事件并转发，同时确保 state 更新被正确处理。
 
         Args:
             input_data: 输入数据
@@ -289,27 +297,47 @@ class WorkflowExecutor:
         Yields:
             流式事件
         """
-        #
         logger.info(f"开始执行工作流: execution_id={self.execution_id}")
 
         # 记录开始时间
         start_time = datetime.datetime.now()
 
         # 1. 构建图
-        graph = self.build_graph()
+        graph = self.build_graph(True)
 
         # 2. 初始化状态（自动注入系统变量）
         initial_state = self._prepare_initial_state(input_data)
 
         # 3. 执行工作流
         try:
-            async for chunk in graph.astream(
+            async for mode, event in graph.astream(
                     initial_state,
-                    # subgraphs=True,  
-                    stream_mode="updates",
+                    stream_mode=["updates","messages"],
             ):
-                # print(chunk)
-                yield chunk
+                # print("刚才跑的节点:", event[0])
+                # # 通过图结构就能算出“接下来是谁”
+                # print("接下来可能跑:", graph.get_next(event[0]))
+                # print("="*50)
+                # # print("mode",mode)
+                # print("event",event)
+                # print("="*50)
+                # event 是一个字典，key 是节点 ID，value 是 state 更新或 chunk
+                for node_id, update in event.items():
+                    print("="*50)
+                    print("node_id",node_id)
+                    print("update",update)
+
+                    print("="*50)
+                    if isinstance(update, dict) and update.get("type") == "chunk":
+                        # 这是流式 chunk，转发给客户端
+                        yield {
+                            "type": "node_chunk",
+                            "node_id": update.get("node_id"),
+                            "chunk": update.get("content")
+                        }
+                    # 其他情况（state 更新）会被 LangGraph 自动合并到 state，不需要我们处理
+                print(event)
+                yield event
 
         except Exception as e:
             # 计算耗时（即使失败也记录）
