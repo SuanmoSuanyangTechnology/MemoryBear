@@ -38,14 +38,53 @@ async def make_write_graph(user_id, tools, apply_id, group_id, config_id=None):
         messages = state["messages"]
         last_message = messages[-1]
 
-        result = await data_type_tool.ainvoke({
-            "context": last_message[1] if isinstance(last_message, tuple) else last_message.content
-        })
-        result=json.loads( result)
+        # 调用 Data_type_differentiation 工具
+        try:
+            raw_result = await data_type_tool.ainvoke({
+                "context": last_message[1] if isinstance(last_message, tuple) else last_message.content
+            })
+            
+            # MCP工具返回的是列表格式，需要提取内容
+            logger.debug(f"Data_type_differentiation raw result type: {type(raw_result)}, value: {raw_result}")
+            
+            # 处理不同的返回格式
+            if isinstance(raw_result, list) and len(raw_result) > 0:
+                # MCP工具返回格式: [{"type": "text", "text": "..."}]
+                result_text = raw_result[0].get("text", "{}") if isinstance(raw_result[0], dict) else str(raw_result[0])
+            elif isinstance(raw_result, str):
+                result_text = raw_result
+            else:
+                result_text = str(raw_result)
+            
+            # 解析JSON字符串
+            try:
+                result = json.loads(result_text)
+            except json.JSONDecodeError as je:
+                logger.error(f"Failed to parse result as JSON: {result_text}, error: {je}")
+                return {"messages": [AIMessage(content=json.dumps({
+                    "status": "error",
+                    "message": f"Invalid JSON response from Data_type_differentiation: {str(je)}"
+                }))]}
+            
+            # 检查是否有错误
+            if isinstance(result, dict) and result.get("type") == "error":
+                error_msg = result.get("message", "Unknown error in Data_type_differentiation")
+                logger.error(f"Data_type_differentiation 返回错误: {error_msg}")
+                return {"messages": [AIMessage(content=json.dumps({
+                    "status": "error",
+                    "message": error_msg
+                }))]}
+                
+        except Exception as e:
+            logger.error(f"调用 Data_type_differentiation 失败: {e}", exc_info=True)
+            return {"messages": [AIMessage(content=json.dumps({
+                "status": "error",
+                "message": f"Data type differentiation failed: {str(e)}"
+            }))]}
 
         # 调用 Data_write，传递 config_id
         write_params = {
-            "content": result["context"],
+            "content": result.get("context", last_message.content if hasattr(last_message, 'content') else str(last_message)),
             "apply_id": apply_id,
             "group_id": group_id,
             "user_id": user_id
@@ -56,14 +95,22 @@ async def make_write_graph(user_id, tools, apply_id, group_id, config_id=None):
             write_params["config_id"] = config_id
             logger.debug(f"传递 config_id 到 Data_write: {config_id}")
         
-        write_result = await data_write_tool.ainvoke(write_params)
+        try:
+            write_result = await data_write_tool.ainvoke(write_params)
 
-        if isinstance(write_result, dict):
-            content = write_result.get("data", str(write_result))
-        else:
-            content = str(write_result)
-        logger.info("写入内容: %s", content)
-        return {"messages": [AIMessage(content=content)]}
+            if isinstance(write_result, dict):
+                content = write_result.get("data", str(write_result))
+            else:
+                content = str(write_result)
+            logger.info("写入内容: %s", content)
+            return {"messages": [AIMessage(content=content)]}
+            
+        except Exception as e:
+            logger.error(f"调用 Data_write 失败: {e}", exc_info=True)
+            return {"messages": [AIMessage(content=json.dumps({
+                "status": "error",
+                "message": f"Data write failed: {str(e)}"
+            }))]}
 
     workflow = StateGraph(WriteState)
     workflow.add_node("content_input", call_model)

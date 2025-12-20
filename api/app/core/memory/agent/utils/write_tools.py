@@ -39,6 +39,17 @@ async def write(content: str, user_id: str, apply_id: str, group_id: str, ref_id
         ref_id: 参考ID，默认为 "wyl20251027"
         config_id: 配置ID，用于标记数据处理配置
     """
+    # 如果提供了config_id，重新加载配置
+    if config_id:
+        from app.core.memory.utils.config.definitions import reload_configuration_from_database
+        logger.info(f"Reloading configuration for config_id: {config_id}")
+        config_loaded = reload_configuration_from_database(config_id)
+        if not config_loaded:
+            error_msg = f"Failed to load configuration for config_id: {config_id}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        logger.info(f"Configuration reloaded successfully for config_id: {config_id}")
+    
     logger.info("=== MemSci Knowledge Extraction Pipeline ===")
     logger.info(f"Using model: {config_defs.SELECTED_LLM_NAME}")
     logger.info(f"Using LLM ID: {config_defs.SELECTED_LLM_ID}")

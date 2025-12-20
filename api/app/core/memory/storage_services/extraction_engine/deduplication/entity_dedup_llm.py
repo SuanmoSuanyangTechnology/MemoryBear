@@ -480,7 +480,6 @@ async def llm_dedup_entities_iterative_blocks( # 迭代分块并发 LLM 去重
     - global_redirect: dict losing_id -> canonical_id accumulated across rounds
     - records: textual logs including per-round/per-block summaries and per-pair decisions
     """
-    import asyncio
     import random
     # 初始化全局日志和全局ID映射（存储所有轮次的结果）
     records: List[str] = []
