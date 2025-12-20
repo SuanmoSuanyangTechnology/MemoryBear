@@ -1,29 +1,28 @@
 """
 工作流服务层
 """
+import datetime
 import json
 import logging
 import uuid
 import datetime
 from typing import Any, Annotated, AsyncGenerator
 
-from sqlalchemy.orm import Session
 from fastapi import Depends
+from sqlalchemy.orm import Session
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
+from app.core.workflow.validator import validate_workflow_config
+from app.db import get_db
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
-    WorkflowNodeExecutionRepository,
-    get_workflow_config_repository,
-    get_workflow_execution_repository,
-    get_workflow_node_execution_repository
+    WorkflowNodeExecutionRepository
 )
-from app.core.workflow.validator import validate_workflow_config
-from app.core.exceptions import BusinessException
-from app.core.error_codes import BizCode
-from app.db import get_db
 from app.schemas import DraftRunRequest
+from app.utils.sse_utils import format_sse_message
 
 logger = logging.getLogger(__name__)
 
@@ -195,8 +194,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             return False
-
-        self.config_repo.delete(config.id)
+        config.is_active = False
         logger.info(f"删除工作流配置成功: app_id={app_id}, config_id={config.id}")
         return True
 
@@ -474,11 +472,9 @@ class WorkflowService:
         }
 
         # 4. 获取工作空间 ID（从 app 获取）
-        from app.models import App
-
 
         # 5. 执行工作流
-        from app.core.workflow.executor import execute_workflow, execute_workflow_stream
+        from app.core.workflow.executor import execute_workflow
 
         try:
             # 更新状态为运行中
@@ -595,19 +591,14 @@ class WorkflowService:
         }
 
         # 4. 获取工作空间 ID（从 app 获取）
-        from app.models import App
 
         # 5. 流式执行工作流
-        from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 
         try:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
 
-            # 发送开始事件
-            yield f"data: {json.dumps({'type': 'workflow_start', 'execution_id': execution.execution_id})}\n\n"
-
-            # 调用流式执行
+            # 调用流式执行（executor 会发送 workflow_start 和 workflow_end 事件）
             async for event in self._run_workflow_stream(
                 workflow_config=workflow_config_dict,
                 input_data=input_data,
@@ -615,13 +606,8 @@ class WorkflowService:
                 workspace_id="",
                 user_id=payload.user_id
             ):
-                # 清理事件数据，移除不可序列化的对象
-                cleaned_event = self._clean_event_for_json(event)
-                # 转换为 SSE 格式
-                yield f"data: {json.dumps(cleaned_event)}\n\n"
-
-            # 发送完成事件
-            yield f"data: {json.dumps({'type': 'workflow_end', 'execution_id': execution.execution_id})}\n\n"
+                # 直接转发 executor 的事件（已经是正确的格式）
+                yield event
 
         except Exception as e:
             logger.error(f"工作流流式执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
@@ -631,7 +617,13 @@ class WorkflowService:
                 error_message=str(e)
             )
             # 发送错误事件
-            yield f"data: {json.dumps({'type': 'error', 'execution_id': execution.execution_id, 'error': str(e)})}\n\n"
+            yield {
+                "event": "error",
+                "data": {
+                    "execution_id": execution.execution_id,
+                    "error": str(e)
+                }
+            }
 
     async def run_workflow(
         self,
@@ -692,7 +684,7 @@ class WorkflowService:
             )
 
         # 5. 执行工作流
-        from app.core.workflow.executor import execute_workflow, execute_workflow_stream
+        from app.core.workflow.executor import execute_workflow
 
         try:
             # 更新状态为运行中
@@ -802,13 +794,11 @@ class WorkflowService:
             user_id: 用户 ID
 
         Yields:
-            流式事件
+            流式事件（格式：{"event": "<type>", "data": {...}}）
         """
         from app.core.workflow.executor import execute_workflow_stream
 
         try:
-            output_data = {}
-
             async for event in execute_workflow_stream(
                 workflow_config=workflow_config,
                 input_data=input_data,
@@ -816,30 +806,8 @@ class WorkflowService:
                 workspace_id=workspace_id,
                 user_id=user_id
             ):
-                # 转发事件
+                # 直接转发事件（executor 已经返回正确格式）
                 yield event
-
-                # 收集输出数据
-                if event.get("type") == "node_complete":
-                    node_data = event.get("data", {})
-                    node_outputs = node_data.get("node_outputs", {})
-                    output_data.update(node_outputs)
-
-                # 处理完成事件
-                if event.get("type") == "workflow_complete":
-                    self.update_execution_status(
-                        execution_id,
-                        "completed",
-                        output_data=output_data
-                    )
-
-                # 处理错误事件
-                if event.get("type") == "workflow_error":
-                    self.update_execution_status(
-                        execution_id,
-                        "failed",
-                        error_message=event.get("error")
-                    )
 
         except Exception as e:
             logger.error(f"工作流流式执行失败: execution_id={execution_id}, error={e}", exc_info=True)
@@ -849,9 +817,11 @@ class WorkflowService:
                 error_message=str(e)
             )
             yield {
-                "type": "workflow_error",
-                "execution_id": execution_id,
-                "error": str(e)
+                "event": "error",
+                "data": {
+                    "execution_id": execution_id,
+                    "error": str(e)
+                }
             }
 
 

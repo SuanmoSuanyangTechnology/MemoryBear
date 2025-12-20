@@ -63,7 +63,7 @@ class LLMNode(BaseNode):
     - ai/assistant: AI 消息（AIMessage）
     """
     
-    def _prepare_llm(self, state: WorkflowState) -> tuple[RedBearLLM, list | str]:
+    def _prepare_llm(self, state: WorkflowState,stream:bool = False) -> tuple[RedBearLLM, list | str]:
         """准备 LLM 实例（公共逻辑）
         
         Args:
@@ -125,15 +125,21 @@ class LLMNode(BaseNode):
             model_type = config.type
         
         # 4. 创建 LLM 实例（使用已提取的数据）
+        # 注意：对于流式输出，需要在模型初始化时设置 streaming=True
+        extra_params = {"streaming": stream} if stream else {}
+        
         llm = RedBearLLM(
             RedBearModelConfig(
                 model_name=model_name,
                 provider=provider,            
                 api_key=api_key,
-                base_url=api_base
+                base_url=api_base,
+                extra_params=extra_params
             ), 
             type=model_type
         )
+        
+        logger.debug(f"创建 LLM 实例: provider={provider}, model={model_name}, streaming={stream}")
         
         return llm, prompt_or_messages
     
@@ -146,13 +152,12 @@ class LLMNode(BaseNode):
         Returns:
             LLM 响应消息
         """
-        llm, prompt_or_messages = self._prepare_llm(state)
+        llm, prompt_or_messages = self._prepare_llm(state,True)
         
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（非流式）")
         
         # 调用 LLM（支持字符串或消息列表）
         response = await llm.ainvoke(prompt_or_messages)
-        
         # 提取内容
         if hasattr(response, 'content'):
             content = response.content
@@ -208,13 +213,43 @@ class LLMNode(BaseNode):
         Yields:
             文本片段（chunk）或完成标记
         """
-        llm, prompt_or_messages = self._prepare_llm(state)
+        from langgraph.config import get_stream_writer
+        
+        llm, prompt_or_messages = self._prepare_llm(state, True)
         
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式）")
+        logger.debug(f"LLM 配置: streaming={getattr(llm._model, 'streaming', 'unknown')}")
+        
+        # 检查是否有注入的 End 节点前缀配置
+        writer = get_stream_writer()
+        end_prefix = getattr(self, '_end_node_prefix', None)
+        
+        logger.info(f"[LLM前缀] 节点 {self.node_id} 检查前缀配置: {end_prefix is not None}")
+        if end_prefix:
+            logger.info(f"[LLM前缀] 前缀内容: '{end_prefix}'")
+        
+        if end_prefix:
+            # 渲染前缀（可能包含其他变量）
+            try:
+                rendered_prefix = self._render_template(end_prefix, state)
+                logger.info(f"节点 {self.node_id} 提前发送 End 节点前缀: '{rendered_prefix[:50]}...'")
+                
+                # 提前发送 End 节点的前缀（使用 "message" 类型）
+                writer({
+                    "type": "message",  # End 相关的内容都是 message 类型
+                    "node_id": "end",  # 标记为 end 节点的输出
+                    "chunk": rendered_prefix,
+                    "full_content": rendered_prefix,
+                    "chunk_index": 0,
+                    "is_prefix": True  # 标记这是前缀
+                })
+            except Exception as e:
+                logger.warning(f"渲染/发送 End 节点前缀失败: {e}")
         
         # 累积完整响应
         full_response = ""
         last_chunk = None
+        chunk_count = 0
         
         # 调用 LLM（流式，支持字符串或消息列表）
         async for chunk in llm.astream(prompt_or_messages):
@@ -224,13 +259,16 @@ class LLMNode(BaseNode):
             else:
                 content = str(chunk)
             
-            full_response += content
-            last_chunk = chunk
-            
-            # 流式返回每个文本片段
-            yield content
+            # 只有当内容不为空时才处理
+            if content:
+                full_response += content
+                last_chunk = chunk
+                chunk_count += 1
+                
+                # 流式返回每个文本片段
+                yield content
         
-        logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}")
+        logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}, 总 chunks: {chunk_count}")
         
         # 构建完整的 AIMessage（包含元数据）
         if isinstance(last_chunk, AIMessage):

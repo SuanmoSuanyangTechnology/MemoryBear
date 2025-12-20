@@ -94,16 +94,90 @@ class WorkflowExecutor:
             "workspace_id": self.workspace_id,
             "user_id": self.user_id,
             "error": None,
-            "error_node": None
+            "error_node": None,
+            "streaming_buffer": {}  # 流式缓冲区
         }
 
-    def build_graph(self) -> CompiledStateGraph:
+
+
+    def _analyze_end_node_prefixes(self) -> tuple[dict[str, str], set[str]]:
+        """分析 End 节点的前缀配置
+        
+        检查每个 End 节点的模板，找到直接上游节点的引用，
+        提取该引用之前的前缀部分。
+        
+        Returns:
+            元组：({上游节点ID: End节点前缀}, {与End相邻且被引用的节点ID集合})
+        """
+        import re
+        
+        prefixes = {}
+        adjacent_and_referenced = set()  # 记录与 End 节点相邻且被引用的节点
+        
+        # 找到所有 End 节点
+        end_nodes = [node for node in self.nodes if node.get("type") == "end"]
+        logger.info(f"[前缀分析] 找到 {len(end_nodes)} 个 End 节点")
+        
+        for end_node in end_nodes:
+            end_node_id = end_node.get("id")
+            output_template = end_node.get("config", {}).get("output")
+            
+            logger.info(f"[前缀分析] End 节点 {end_node_id} 模板: {output_template}")
+            
+            if not output_template:
+                continue
+            
+            # 找到所有直接连接到 End 节点的上游节点
+            direct_upstream_nodes = []
+            for edge in self.edges:
+                if edge.get("target") == end_node_id:
+                    source_node_id = edge.get("source")
+                    direct_upstream_nodes.append(source_node_id)
+            
+            logger.info(f"[前缀分析] End 节点的直接上游节点: {direct_upstream_nodes}")
+            
+            # 查找模板中引用了哪些节点
+            # 匹配 {{node_id.xxx}} 或 {{ node_id.xxx }} 格式（支持空格）
+            pattern = r'\{\{\s*([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+\s*\}\}'
+            matches = list(re.finditer(pattern, output_template))
+            
+            logger.info(f"[前缀分析] 模板中找到 {len(matches)} 个节点引用")
+            
+            # 找到第一个直接上游节点的引用
+            for match in matches:
+                referenced_node_id = match.group(1)
+                logger.info(f"[前缀分析] 检查引用: {referenced_node_id}")
+                
+                if referenced_node_id in direct_upstream_nodes:
+                    # 这是直接上游节点的引用，提取前缀
+                    prefix = output_template[:match.start()]
+                    
+                    logger.info(f"[前缀分析] ✅ 找到直接上游节点 {referenced_node_id} 的引用，前缀: '{prefix}'")
+                    
+                    # 标记这个节点为"相邻且被引用"
+                    adjacent_and_referenced.add(referenced_node_id)
+                    
+                    if prefix:
+                        prefixes[referenced_node_id] = prefix
+                        logger.info(f"✅ [前缀分析] 为节点 {referenced_node_id} 配置前缀: '{prefix[:50]}...'")
+                    
+                    # 只处理第一个直接上游节点的引用
+                    break
+        
+        logger.info(f"[前缀分析] 最终配置: {prefixes}")
+        logger.info(f"[前缀分析] 与 End 相邻且被引用的节点: {adjacent_and_referenced}")
+        return prefixes, adjacent_and_referenced
+
+    def build_graph(self,stream=False) -> CompiledStateGraph:
         """构建 LangGraph
 
         Returns:
             编译后的状态图
         """
         logger.info(f"开始构建工作流图: execution_id={self.execution_id}")
+        
+        # 分析 End 节点的前缀配置和相邻且被引用的节点
+        end_prefixes, adjacent_and_referenced = self._analyze_end_node_prefixes() if stream else ({}, set())
 
         # 1. 创建状态图
         workflow = StateGraph(WorkflowState)
@@ -143,16 +217,39 @@ class WorkflowExecutor:
                     related_edge[idx]['condition'] = f"node.{node_id}.output == '{related_edge[idx]['label']}'"
 
             if node_instance:
+                # 如果是流式模式，且节点有 End 前缀配置，注入配置
+                if stream and node_id in end_prefixes:
+                    # 将 End 前缀配置注入到节点实例
+                    node_instance._end_node_prefix = end_prefixes[node_id]
+                    logger.info(f"为节点 {node_id} 注入 End 前缀配置")
+                
+                # 如果是流式模式，标记节点是否与 End 相邻且被引用
+                if stream:
+                    node_instance._is_adjacent_to_end = node_id in adjacent_and_referenced
+                    if node_id in adjacent_and_referenced:
+                        logger.info(f"节点 {node_id} 标记为与 End 相邻且被引用")
+                
                 # 包装节点的 run 方法
                 # 使用函数工厂避免闭包问题
-                def make_node_func(inst):
-                    async def node_func(state: WorkflowState):
-                        return await inst.run(state)
+                if stream:
+                    # 流式模式：创建 async generator 函数
+                    # LangGraph 会收集所有 yield 的值，最后一个 yield 的字典会被合并到 state
+                    def make_stream_func(inst):
+                        async def node_func(state: WorkflowState):
+                            # logger.debug(f"流式执行节点: {inst.node_id}, 支持流式: {inst.supports_streaming()}")
+                            async for item in inst.run_stream(state):
+                                yield item
+                        return node_func
+                    workflow.add_node(node_id, make_stream_func(node_instance))
+                else:
+                    # 非流式模式：创建 async function
+                    def make_func(inst):
+                        async def node_func(state: WorkflowState):
+                            return await inst.run(state)
+                        return node_func
+                    workflow.add_node(node_id, make_func(node_instance))
 
-                    return node_func
-
-                workflow.add_node(node_id, make_node_func(node_instance))
-                logger.debug(f"添加节点: {node_id} (type={node_type})")
+                logger.debug(f"添加节点: {node_id} (type={node_type}, stream={stream})")
 
         # 3. 添加边
         # 从 START 连接到 start 节点
@@ -300,40 +397,143 @@ class WorkflowExecutor:
     ):
         """执行工作流（流式）
 
-        手动执行节点以支持细粒度的流式输出：
-        - workflow_start: 工作流开始
-        - node_start: 节点开始执行
-        - node_chunk: LLM 节点的流式输出片段（逐 token）
-        - node_complete: 节点执行完成
-        - workflow_complete: 工作流完成
+        使用多个 stream_mode 来获取：
+        1. "updates" - 节点的 state 更新和流式 chunk
+        2. "debug" - 节点执行的详细信息（开始/完成时间）
+        3. "custom" - 自定义流式数据（chunks）
 
         Args:
             input_data: 输入数据
 
         Yields:
-            流式事件
+            流式事件，格式：
+            {
+                "event": "workflow_start" | "workflow_end" | "node_start" | "node_end" | "node_chunk" | "message",
+                "data": {...}
+            }
         """
-        #
-        logger.info(f"开始执行工作流: execution_id={self.execution_id}")
+        logger.info(f"开始执行工作流（流式）: execution_id={self.execution_id}")
 
         # 记录开始时间
         start_time = datetime.datetime.now()
+        
+        # 发送 workflow_start 事件
+        yield {
+            "event": "workflow_start",
+            "data": {
+                "execution_id": self.execution_id,
+                "workspace_id": self.workspace_id,
+                "timestamp": start_time.isoformat()
+            }
+        }
 
         # 1. 构建图
-        graph = self.build_graph()
+        graph = self.build_graph(True)
 
         # 2. 初始化状态（自动注入系统变量）
         initial_state = self._prepare_initial_state(input_data)
 
-        # 3. 执行工作流
+        # 3. Execute workflow
         try:
-            async for chunk in graph.astream(
+            chunk_count = 0
+            final_state = None
+            
+            async for event in graph.astream(
                     initial_state,
-                    # subgraphs=True,
-                    stream_mode="updates",
+                    stream_mode=["updates", "debug", "custom"],  # Use updates + debug + custom mode
             ):
-                # print(chunk)
-                yield chunk
+                # event should be a tuple: (mode, data)
+                # But let's handle both cases
+                if isinstance(event, tuple) and len(event) == 2:
+                    mode, data = event
+                else:
+                    # Unexpected format, log and skip
+                    logger.warning(f"[STREAM] Unexpected event format: {type(event)}, value: {event}")
+                    continue
+
+                if mode == "custom":
+                    # Handle custom streaming events (chunks from nodes via stream writer)
+                    chunk_count += 1
+                    event_type = data.get("type", "node_chunk")  # "message" or "node_chunk"
+                    logger.info(f"[CUSTOM] ✅ 收到 {event_type} #{chunk_count} from {data.get('node_id')}")
+                    
+                    yield {
+                        "event": event_type,  # "message" or "node_chunk"
+                        "data": {
+                            "node_id": data.get("node_id"),
+                            "chunk": data.get("chunk"),
+                            "full_content": data.get("full_content"),
+                            "chunk_index": data.get("chunk_index"),
+                            "is_prefix": data.get("is_prefix"),
+                            "is_suffix": data.get("is_suffix")
+                        }
+                    }
+                
+                elif mode == "debug":
+                    # Handle debug information (node execution status)
+                    event_type = data.get("type")
+                    payload = data.get("payload", {})
+                    node_name = payload.get("name")
+
+                    if event_type == "task":
+                        # Node starts execution
+                        inputv = payload.get("input", {})
+                        variables = inputv.get("variables", {})
+                        variables_sys = variables.get("sys", {})
+                        conversation_id = variables_sys.get("conversation_id")
+                        execution_id = variables_sys.get("execution_id")
+                        logger.info(f"[DEBUG] Node starts execution: {node_name}")
+                        
+                        yield {
+                            "event": "node_start",
+                            "data": {
+                                "node_id": node_name,
+                                "conversation_id": conversation_id,
+                                "execution_id": execution_id,
+                                "timestamp": data.get("timestamp")
+                            }
+                        }
+                    elif event_type == "task_result":
+                        # Node execution completed
+                        result = payload.get("result", {})
+                        inputv = result.get("input", {})
+                        variables = inputv.get("variables", {})
+                        variables_sys = variables.get("sys", {})
+                        conversation_id = variables_sys.get("conversation_id")
+                        execution_id = variables_sys.get("execution_id")
+                        logger.info(f"[DEBUG] Node execution completed: {node_name}")
+                        
+                        yield {
+                            "event": "node_end",
+                            "data": {
+                                "node_id": node_name,
+                                "conversation_id": conversation_id,
+                                "execution_id": execution_id,
+                                "timestamp": data.get("timestamp")
+                            }
+                        }
+
+                elif mode == "updates":
+                    # Handle state updates - store final state
+                    logger.debug(f"[UPDATES] 收到 state 更新 from {list(data.keys())}")
+                    final_state = data
+            
+            # 计算耗时
+            end_time = datetime.datetime.now()
+            elapsed_time = (end_time - start_time).total_seconds()
+            
+            logger.info(f"Workflow execution completed (streaming), total chunks: {chunk_count}, elapsed: {elapsed_time:.2f}s")
+            
+            # 发送 workflow_end 事件
+            yield {
+                "event": "workflow_end",
+                "data": {
+                    "execution_id": self.execution_id,
+                    "status": "completed",
+                    "elapsed_time": elapsed_time,
+                    "timestamp": end_time.isoformat()
+                }
+            }
 
         except Exception as e:
             # 计算耗时（即使失败也记录）
@@ -341,13 +541,17 @@ class WorkflowExecutor:
             elapsed_time = (end_time - start_time).total_seconds()
 
             logger.error(f"工作流执行失败: execution_id={self.execution_id}, error={e}", exc_info=True)
+            
+            # 发送 workflow_end 事件（失败）
             yield {
-                "status": "failed",
-                "error": str(e),
-                "output": None,
-                "node_outputs": {},
-                "elapsed_time": elapsed_time,
-                "token_usage": None
+                "event": "workflow_end",
+                "data": {
+                    "execution_id": self.execution_id,
+                    "status": "failed",
+                    "error": str(e),
+                    "elapsed_time": elapsed_time,
+                    "timestamp": end_time.isoformat()
+                }
             }
 
     def _extract_final_output(self, node_outputs: dict[str, Any]) -> str | None:

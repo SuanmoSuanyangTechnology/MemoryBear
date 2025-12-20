@@ -471,7 +471,20 @@ async def run_workflow(
             import json
 
             async def event_generator():
-                """生成 SSE 事件"""
+                """生成 SSE 事件
+                
+                SSE 格式：
+                event: <event_type>
+                data: <json_data>
+                
+                支持的事件类型：
+                - workflow_start: 工作流开始
+                - workflow_end: 工作流结束
+                - node_start: 节点开始执行
+                - node_end: 节点执行完成
+                - node_chunk: 中间节点的流式输出
+                - message: 最终消息的流式输出（End 节点及其相邻节点）
+                """
                 try:
                     async for event in await service.run_workflow(
                         app_id=app_id,
@@ -480,19 +493,30 @@ async def run_workflow(
                         conversation_id=uuid.UUID(request.conversation_id) if request.conversation_id else None,
                         stream=True
                     ):
-                        # 转换为 SSE 格式
-                        yield f"data: {json.dumps(event)}\n\n"
+                        # 提取事件类型和数据
+                        event_type = event.get("event", "message")
+                        event_data = event.get("data", {})
+                        
+                        # 转换为标准 SSE 格式（字符串）
+                        # event: <type>
+                        # data: <json>
+                        sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                        yield sse_message
+                        
                 except Exception as e:
                     logger.error(f"流式执行异常: {e}", exc_info=True)
-                    error_event = {
-                        "type": "error",
-                        "error": str(e)
-                    }
-                    yield f"data: {json.dumps(error_event)}\n\n"
+                    # 发送错误事件
+                    sse_error = f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                    yield sse_error
 
             return StreamingResponse(
                 event_generator(),
-                media_type="text/event-stream"
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"  # 禁用 nginx 缓冲
+                }
             )
         else:
             # 非流式执行
