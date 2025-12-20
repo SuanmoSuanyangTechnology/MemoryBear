@@ -125,19 +125,22 @@ class LLMNode(BaseNode):
             model_type = config.type
         
         # 4. 创建 LLM 实例（使用已提取的数据）
-        print("="*50)
-        print("stream",stream)
-        print("="*50)
+        # 注意：对于流式输出，需要在模型初始化时设置 streaming=True
+        extra_params = {"streaming": stream} if stream else {}
+        
         llm = RedBearLLM(
             RedBearModelConfig(
                 model_name=model_name,
                 provider=provider,            
                 api_key=api_key,
                 base_url=api_base,
-                extra_params={"streaming": stream}
+                extra_params=extra_params
             ), 
             type=model_type
         )
+        
+        logger.debug(f"创建 LLM 实例: provider={provider}, model={model_name}, streaming={stream}")
+        
         return llm, prompt_or_messages
     
     async def execute(self, state: WorkflowState) -> AIMessage:
@@ -201,47 +204,54 @@ class LLMNode(BaseNode):
                 }
         return None
     
-    # async def execute_stream(self, state: WorkflowState):
-    #     """流式执行 LLM 调用
+    async def execute_stream(self, state: WorkflowState):
+        """流式执行 LLM 调用
         
-    #     Args:
-    #         state: 工作流状态
+        Args:
+            state: 工作流状态
         
-    #     Yields:
-    #         文本片段（chunk）或完成标记
-    #     """
-    #     llm, prompt_or_messages = self._prepare_llm(state,True)
+        Yields:
+            文本片段（chunk）或完成标记
+        """
+        llm, prompt_or_messages = self._prepare_llm(state, True)
         
-    #     logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式）")
+        logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式）")
+        logger.debug(f"LLM 配置: streaming={getattr(llm._model, 'streaming', 'unknown')}")
         
-    #     # 累积完整响应
-    #     full_response = ""
-    #     last_chunk = None
+        # 累积完整响应
+        full_response = ""
+        last_chunk = None
+        chunk_count = 0
         
-    #     # 调用 LLM（流式，支持字符串或消息列表）
-    #     async for chunk in llm.astream(prompt_or_messages):
-    #         # 提取内容
-    #         if hasattr(chunk, 'content'):
-    #             content = chunk.content
-    #         else:
-    #             content = str(chunk)
+        # 调用 LLM（流式，支持字符串或消息列表）
+        # 注意：astream 方法本身就是流式的，不需要额外配置
+        async for chunk in llm.astream(prompt_or_messages):
+            # 提取内容
+            if hasattr(chunk, 'content'):
+                content = chunk.content
+            else:
+                content = str(chunk)
             
-    #         full_response += content
-    #         last_chunk = chunk
-    #         logger.info(f"节点 {self.node_id} LLM : {content}")
-    #         # 流式返回每个文本片段
-    #         yield content
+            # 只有当内容不为空时才处理
+            if content:
+                full_response += content
+                last_chunk = chunk
+                chunk_count += 1
+                
+                # logger.debug(f"节点 {self.node_id} LLM chunk #{chunk_count}: {content[:50]}...")
+                # 流式返回每个文本片段
+                yield content #AIMessage(content=content)
         
-    #     logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}")
+        logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}, 总 chunks: {chunk_count}")
         
-    #     # 构建完整的 AIMessage（包含元数据）
-    #     if isinstance(last_chunk, AIMessage):
-    #         final_message = AIMessage(
-    #             content=full_response,
-    #             response_metadata=last_chunk.response_metadata if hasattr(last_chunk, 'response_metadata') else {}
-    #         )
-    #     else:
-    #         final_message = AIMessage(content=full_response)
+        # 构建完整的 AIMessage（包含元数据）
+        if isinstance(last_chunk, AIMessage):
+            final_message = AIMessage(
+                content=full_response,
+                response_metadata=last_chunk.response_metadata if hasattr(last_chunk, 'response_metadata') else {}
+            )
+        else:
+            final_message = AIMessage(content=full_response)
         
-    #     # yield 完成标记
-    #     yield {"__final__": True, "result": final_message}
+        # yield 完成标记
+        yield {"__final__": True, "result": final_message}

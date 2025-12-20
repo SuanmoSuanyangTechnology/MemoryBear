@@ -30,11 +30,7 @@ class EndNode(BaseNode):
         
         # 获取配置的输出模板
         output_template = self.config.get("output")
-        # pool = self.get_variable_pool(state)
-       
-        # print("="*20)
-        # print( pool.get("start.test"))
-        # print("="*20)
+        
         # 如果配置了输出模板，使用模板渲染；否则使用默认输出
         if output_template:
             output = self._render_template(output_template, state)
@@ -46,7 +42,45 @@ class EndNode(BaseNode):
         total_nodes = len(node_outputs)
         
         logger.info(f"节点 {self.node_id} (End) 执行完成，共执行 {total_nodes} 个节点")
-        print("="*20)
-        print(output)
-        print("="*20)
+        
         return output
+    
+    async def execute_stream(self, state: WorkflowState):
+        """流式执行 end 节点业务逻辑
+        
+        当 end 节点前面是 LLM 节点时，流式输出其内容。
+        
+        Args:
+            state: 工作流状态
+        
+        Yields:
+            文本片段（chunk）或完成标记
+        """
+        logger.info(f"节点 {self.node_id} (End) 开始执行（流式）")
+        
+        # 获取配置的输出模板
+        output_template = self.config.get("output")
+        
+        # 如果配置了输出模板，使用模板渲染
+        if output_template:
+            output = self._render_template(output_template, state)
+            
+            # 检查输出中是否包含节点引用（如 {{llm_node.output}}）
+            # 如果包含，则逐字符流式输出
+            if output:
+                # 逐字符流式输出
+                for char in output:
+                    yield char
+        else:
+            output = "工作流已完成"
+            for char in output:
+                yield char
+        
+        # 统计信息（用于日志）
+        node_outputs = state.get("node_outputs", {})
+        total_nodes = len(node_outputs)
+        
+        logger.info(f"节点 {self.node_id} (End) 执行完成（流式），共执行 {total_nodes} 个节点")
+        
+        # yield 完成标记
+        yield {"__final__": True, "result": output}

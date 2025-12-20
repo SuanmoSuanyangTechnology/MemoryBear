@@ -245,6 +245,9 @@ class BaseNode(ABC):
                         final_result = item["result"]
                     elif isinstance(item, str):
                         # 字符串是 chunk
+                        # print("="*50)
+                        # print(item)
+                        # print("-"*50)
                         chunks.append(item)
                         yield {
                             "type": "chunk",

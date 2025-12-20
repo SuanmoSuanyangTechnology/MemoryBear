@@ -125,17 +125,22 @@ class WorkflowExecutor:
                 if stream:
                     # 流式模式：创建 async generator 函数
                     # LangGraph 会收集所有 yield 的值，最后一个 yield 的字典会被合并到 state
-                    async def node_func(state: WorkflowState, inst=node_instance):
-                        async for item in inst.run_stream(state):
-                            yield item
-                    workflow.add_node(node_id, node_func)
+                    def make_stream_func(inst):
+                        async def node_func(state: WorkflowState):
+                            # logger.debug(f"流式执行节点: {inst.node_id}, 支持流式: {inst.supports_streaming()}")
+                            async for item in inst.run_stream(state):
+                                yield item
+                        return node_func
+                    workflow.add_node(node_id, make_stream_func(node_instance))
                 else:
                     # 非流式模式：创建 async function
-                    async def node_func(state: WorkflowState, inst=node_instance):
-                        return await inst.run(state)
-                    workflow.add_node(node_id, node_func)
+                    def make_func(inst):
+                        async def node_func(state: WorkflowState):
+                            return await inst.run(state)
+                        return node_func
+                    workflow.add_node(node_id, make_func(node_instance))
 
-                logger.debug(f"添加节点: {node_id} (type={node_type})")
+                logger.debug(f"添加节点: {node_id} (type={node_type}, stream={stream})")
 
         # 3. 添加边
         # 从 START 连接到 start 节点
@@ -283,13 +288,9 @@ class WorkflowExecutor:
     ):
         """执行工作流（流式）
 
-        使用 stream_mode="updates" 来获取每个节点的 state 更新。
-        节点的 generator 会 yield 多个值：
-        - 中间的 chunk 事件（带 type="chunk"）
-        - 最后的 state 更新（纯字典，包含 node_outputs 等）
-
-        LangGraph 会将所有 yield 的值收集起来，并将它们合并到 state 中。
-        我们需要过滤出 chunk 事件并转发，同时确保 state 更新被正确处理。
+        使用多个 stream_mode 来获取：
+        1. "updates" - 节点的 state 更新和流式 chunk
+        2. "debug" - 节点执行的详细信息（开始/完成时间）
 
         Args:
             input_data: 输入数据
@@ -297,7 +298,7 @@ class WorkflowExecutor:
         Yields:
             流式事件
         """
-        logger.info(f"开始执行工作流: execution_id={self.execution_id}")
+        logger.info(f"开始执行工作流（流式）: execution_id={self.execution_id}")
 
         # 记录开始时间
         start_time = datetime.datetime.now()
@@ -310,34 +311,73 @@ class WorkflowExecutor:
 
         # 3. 执行工作流
         try:
-            async for mode, event in graph.astream(
+            chunk_count = 0
+            async for event in graph.astream(
                     initial_state,
-                    stream_mode=["updates","messages"],
+                    stream_mode=["updates", "debug"],
             ):
-                # print("刚才跑的节点:", event[0])
-                # # 通过图结构就能算出“接下来是谁”
-                # print("接下来可能跑:", graph.get_next(event[0]))
-                # print("="*50)
-                # # print("mode",mode)
-                # print("event",event)
-                # print("="*50)
-                # event 是一个字典，key 是节点 ID，value 是 state 更新或 chunk
-                for node_id, update in event.items():
-                    print("="*50)
-                    print("node_id",node_id)
-                    print("update",update)
+                mode, data = event
 
-                    print("="*50)
-                    if isinstance(update, dict) and update.get("type") == "chunk":
-                        # 这是流式 chunk，转发给客户端
+                if mode == "debug":
+                    # 处理调试信息（节点执行状态）
+                    event_type = data.get("type")
+                    payload = data.get("payload", {})
+                    node_name = payload.get("name")
+
+                    if event_type == "task":
+                        # 节点开始执行
+                        inputv = payload.get("input", {})
+                        variables = inputv.get("variables", {})
+                        variables_sys = variables.get("sys", {})
+                        conversation_id = variables_sys.get("conversation_id")
+                        execution_id = variables_sys.get("execution_id")
+                        logger.info(f"[DEBUG] 节点开始执行: {node_name}")
                         yield {
-                            "type": "node_chunk",
-                            "node_id": update.get("node_id"),
-                            "chunk": update.get("content")
+                            "type": "node_start",
+                            "node_id": node_name,
+                            "conversation_id": conversation_id,
+                            "execution_id": execution_id,
+                            "timestamp": data.get("timestamp")
                         }
-                    # 其他情况（state 更新）会被 LangGraph 自动合并到 state，不需要我们处理
-                print(event)
-                yield event
+                    elif event_type == "task_result":
+                        # 节点执行完成
+                        result = payload.get("result", {})
+                        inputv = result.get("input", {})
+                        variables = inputv.get("variables", {})
+                        variables_sys = variables.get("sys", {})
+                        conversation_id = variables_sys.get("conversation_id")
+                        execution_id = variables_sys.get("execution_id")
+                        logger.info(f"[DEBUG] 节点执行完成: {node_name}")
+                        yield {
+                            "type": "node_end",
+                            "node_id": node_name,
+                            "conversation_id": conversation_id,
+                            "execution_id": execution_id,
+                            "timestamp": data.get("timestamp")
+                        }
+
+                elif mode == "updates":
+                    # 处理 state 更新
+                    # data 是一个字典，key 是节点 ID，value 是 state 更新或 chunk
+                    print("="*50)
+                    print(data)
+                    print("-"*50)
+                    for node_id, update in data.items():
+                        if isinstance(update, dict) and update.get("type") == "chunk":
+                            # 这是流式 chunk，转发给客户端
+                            chunk_count += 1
+                            logger.debug(f"[UPDATE] 收到 chunk #{chunk_count} from {node_id}: {update.get('content')[:50]}...")
+                            yield {
+                                "type": "node_chunk",
+                                "node_id": update.get("node_id"),
+                                "chunk": update.get("content"),
+                                "full_content": update.get("full_content")
+                            }
+                        else:
+                            logger.debug(f"[UPDATE] 收到 state 更新 from {node_id}")
+                        # 其他情况（state 更新）会被 LangGraph 自动合并到 state
+            
+            logger.info(f"工作流执行完成（流式），总 chunks: {chunk_count}")
 
         except Exception as e:
             # 计算耗时（即使失败也记录）
