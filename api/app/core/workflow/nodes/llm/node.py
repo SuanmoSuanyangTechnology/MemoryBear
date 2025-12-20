@@ -213,10 +213,37 @@ class LLMNode(BaseNode):
         Yields:
             文本片段（chunk）或完成标记
         """
+        from langgraph.config import get_stream_writer
+        
         llm, prompt_or_messages = self._prepare_llm(state, True)
         
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式）")
         logger.debug(f"LLM 配置: streaming={getattr(llm._model, 'streaming', 'unknown')}")
+        
+        # 检查是否有注入的 End 节点前缀配置
+        writer = get_stream_writer()
+        end_prefix = getattr(self, '_end_node_prefix', None)
+        
+        logger.info(f"[LLM前缀] 节点 {self.node_id} 检查前缀配置: {end_prefix is not None}")
+        if end_prefix:
+            logger.info(f"[LLM前缀] 前缀内容: '{end_prefix}'")
+        
+        if end_prefix:
+            # 渲染前缀（可能包含其他变量）
+            try:
+                rendered_prefix = self._render_template(end_prefix, state)
+                logger.info(f"节点 {self.node_id} 提前发送 End 节点前缀: '{rendered_prefix[:50]}...'")
+                
+                # 提前发送 End 节点的前缀
+                writer({
+                    "node_id": "end",  # 标记为 end 节点的输出
+                    "chunk": rendered_prefix,
+                    "full_content": rendered_prefix,
+                    "chunk_index": 0,
+                    "is_prefix": True  # 标记这是前缀
+                })
+            except Exception as e:
+                logger.warning(f"渲染/发送 End 节点前缀失败: {e}")
         
         # 累积完整响应
         full_response = ""
@@ -224,7 +251,6 @@ class LLMNode(BaseNode):
         chunk_count = 0
         
         # 调用 LLM（流式，支持字符串或消息列表）
-        # 注意：astream 方法本身就是流式的，不需要额外配置
         async for chunk in llm.astream(prompt_or_messages):
             # 提取内容
             if hasattr(chunk, 'content'):
@@ -238,9 +264,8 @@ class LLMNode(BaseNode):
                 last_chunk = chunk
                 chunk_count += 1
                 
-                # logger.debug(f"节点 {self.node_id} LLM chunk #{chunk_count}: {content[:50]}...")
                 # 流式返回每个文本片段
-                yield content #AIMessage(content=content)
+                yield content
         
         logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}, 总 chunks: {chunk_count}")
         

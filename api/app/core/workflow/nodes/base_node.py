@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Any, TypedDict, Annotated
 from operator import add
 from langchain_core.messages import AnyMessage, HumanMessage, AIMessage
+from langgraph.config import get_stream_writer
 
 from app.core.workflow.variable_pool import VariablePool
 
@@ -43,6 +44,10 @@ class WorkflowState(TypedDict):
     # 错误信息（用于错误边）
     error: str | None
     error_node: str | None
+    
+    # 流式缓冲区（存储节点的实时流式输出）
+    # 格式：{node_id: {"chunks": [...], "full_content": "..."}}
+    streaming_buffer: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
 
 
 class BaseNode(ABC):
@@ -201,23 +206,25 @@ class BaseNode(ABC):
             return self._wrap_error(str(e), elapsed_time, state)
     
     async def run_stream(self, state: WorkflowState):
-        """执行节点（带错误处理和输出包装，流式）
+        """Execute node with error handling and output wrapping (streaming)
         
-        这个方法由 Executor 调用，负责：
-        1. 时间统计
-        2. 调用节点的 execute_stream() 方法
-        3. 将业务数据包装成标准输出格式
-        4. 错误处理
+        This method is called by the Executor and is responsible for:
+        1. Time tracking
+        2. Calling the node's execute_stream() method
+        3. Using LangGraph's stream writer to send chunks
+        4. Updating streaming buffer in state for downstream nodes
+        5. Wrapping business data into standard output format
+        6. Error handling
         
-        注意：在流式模式下，我们需要：
-        - yield 中间的 chunk 事件（用于实时显示）
-        - 最后 yield 一个包含 state 更新的字典（LangGraph 会合并到 state）
+        Special handling for End nodes:
+        - End nodes don't send chunks via writer (prefix and LLM content already sent)
+        - End nodes only yield suffix for final result assembly
         
         Args:
-            state: 工作流状态
+            state: Workflow state
         
         Yields:
-            标准化的流式事件和最终的 state 更新
+            State updates with streaming buffer and final result
         """
         import time
         
@@ -226,63 +233,102 @@ class BaseNode(ABC):
         try:
             timeout = self.get_timeout()
             
-            # 累积完整结果（用于最后的包装）
+            # Get LangGraph's stream writer for sending custom data
+            writer = get_stream_writer()
+            
+            # Check if this is an End node
+            # End nodes CAN send chunks (for suffix), but only after LLM content
+            is_end_node = self.node_type == "end"
+            
+            # Accumulate complete result (for final wrapping)
             chunks = []
             final_result = None
+            chunk_count = 0
             
-            # 使用异步生成器包装，支持超时
-            async def stream_with_timeout():
-                nonlocal final_result
-                loop_start = asyncio.get_event_loop().time()
+            # Stream chunks in real-time
+            loop_start = asyncio.get_event_loop().time()
+            
+            async for item in self.execute_stream(state):
+                # Check timeout
+                if asyncio.get_event_loop().time() - loop_start > timeout:
+                    raise TimeoutError()
                 
-                async for item in self.execute_stream(state):
-                    # 检查超时
-                    if asyncio.get_event_loop().time() - loop_start > timeout:
-                        raise TimeoutError()
+                # Check if it's a completion marker
+                if isinstance(item, dict) and item.get("__final__"):
+                    final_result = item["result"]
+                elif isinstance(item, str):
+                    # String is a chunk
+                    chunk_count += 1
+                    chunks.append(item)
+                    full_content = "".join(chunks)
                     
-                    # 检查是否是完成标记
-                    if isinstance(item, dict) and item.get("__final__"):
-                        final_result = item["result"]
-                    elif isinstance(item, str):
-                        # 字符串是 chunk
-                        # print("="*50)
-                        # print(item)
-                        # print("-"*50)
-                        chunks.append(item)
+                    # Send chunks for all nodes (including End nodes for suffix)
+                    logger.debug(f"节点 {self.node_id} 发送 chunk #{chunk_count}: {item[:50]}...")
+                    
+                    # 1. Send via stream writer (for real-time client updates)
+                    writer({
+                        "node_id": self.node_id,
+                        "chunk": item,
+                        "full_content": full_content,
+                        "chunk_index": chunk_count
+                    })
+                    
+                    # 2. Update streaming buffer in state (for downstream nodes)
+                    # Only non-End nodes need streaming buffer
+                    if not is_end_node:
                         yield {
-                            "type": "chunk",
-                            "node_id": self.node_id,
-                            "content": item,
-                            "full_content": "".join(chunks)
+                            "streaming_buffer": {
+                                self.node_id: {
+                                    "full_content": full_content,
+                                    "chunk_count": chunk_count,
+                                    "is_complete": False
+                                }
+                            }
                         }
-                    else:
-                        # 其他类型也当作 chunk 处理
-                        chunks.append(str(item))
+                else:
+                    # Other types are also treated as chunks
+                    chunk_count += 1
+                    chunk_str = str(item)
+                    chunks.append(chunk_str)
+                    full_content = "".join(chunks)
+                    
+                    # Send chunks for all nodes
+                    writer({
+                        "node_id": self.node_id,
+                        "chunk": chunk_str,
+                        "full_content": full_content,
+                        "chunk_index": chunk_count
+                    })
+                    
+                    # Only non-End nodes need streaming buffer
+                    if not is_end_node:
                         yield {
-                            "type": "chunk",
-                            "node_id": self.node_id,
-                            "content": str(item),
-                            "full_content": "".join(chunks)
+                            "streaming_buffer": {
+                                self.node_id: {
+                                    "full_content": full_content,
+                                    "chunk_count": chunk_count,
+                                    "is_complete": False
+                                }
+                            }
                         }
-            
-            async for chunk_event in stream_with_timeout():
-                yield chunk_event
             
             elapsed_time = time.time() - start_time
             
-            # 提取处理后的输出（调用子类的 _extract_output）
+            logger.info(f"节点 {self.node_id} 流式执行完成，耗时: {elapsed_time:.2f}s, chunks: {chunk_count}")
+            
+            # Extract processed output (call subclass's _extract_output)
             extracted_output = self._extract_output(final_result)
             
-            # 包装最终结果
+            # Wrap final result
             final_output = self._wrap_output(final_result, elapsed_time, state)
             
-            # 将提取后的输出存储到运行时变量中（供后续节点快速访问）
+            # Store extracted output in runtime variables (for quick access by subsequent nodes)
             if isinstance(extracted_output, dict):
                 runtime_var = extracted_output
             else:
                 runtime_var = {"output": extracted_output}
             
-            # 构建完整的 state 更新（包含 node_outputs 和 runtime_vars）
+            # Build complete state update (including node_outputs, runtime_vars, and final streaming buffer)
             state_update = {
                 **final_output,
                 "runtime_vars": {
@@ -290,13 +336,24 @@ class BaseNode(ABC):
                 }
             }
             
-            # 最后 yield 纯粹的 state 更新（LangGraph 会合并到 state 中）
+            # Add streaming buffer for non-End nodes
+            if not is_end_node:
+                state_update["streaming_buffer"] = {
+                    self.node_id: {
+                        "full_content": "".join(chunks),
+                        "chunk_count": chunk_count,
+                        "is_complete": True  # Mark as complete
+                    }
+                }
+            
+            # Finally yield state update
+            # LangGraph will merge this into state
             yield state_update
                 
         except TimeoutError:
             elapsed_time = time.time() - start_time
-            logger.error(f"节点 {self.node_id} 执行超时（{timeout}秒）")
-            error_output = self._wrap_error(f"节点执行超时（{timeout}秒）", elapsed_time, state)
+            logger.error(f"节点 {self.node_id} 执行超时 ({timeout}s)")
+            error_output = self._wrap_error(f"节点执行超时 ({timeout}s)", elapsed_time, state)
             yield error_output
         except Exception as e:
             elapsed_time = time.time() - start_time
