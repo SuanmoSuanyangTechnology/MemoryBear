@@ -51,16 +51,31 @@ logger = get_memory_logger(__name__)
 
 
 async def main(
+    # Required configuration parameters (no longer from global variables)
+    chunker_strategy: str,
+    group_id: str,
+    user_id: str,
+    apply_id: str,
+    llm_model_id: str,
+    embedding_model_id: str,
+    # Optional parameters
     dialogue_text: Optional[str] = None, 
     is_pilot_run: bool = False,
     progress_callback: Optional[Callable[[str, str, Optional[dict]], Awaitable[None]]] = None
 ):
     """
-    记忆系统主流程 - 重构版本
+    记忆系统主流程 - 重构版本 (Updated to eliminate global variables)
 
     该函数是重构后的主入口，使用新的模块化架构。
+    Global variables have been eliminated in favor of explicit parameters.
 
     Args:
+        chunker_strategy: Chunking strategy to use (required)
+        group_id: Group ID for the operation (required)
+        user_id: User ID for the operation (required)
+        apply_id: Application ID for the operation (required)
+        llm_model_id: LLM model ID to use (required)
+        embedding_model_id: Embedding model ID to use (required)
         dialogue_text: 输入的对话文本（可选，用于试运行模式）
         is_pilot_run: 是否为试运行模式
             - True: 试运行模式，不保存到 Neo4j
@@ -82,12 +97,10 @@ async def main(
     print("MemSci 知识提取流水线 - 重构版本")
     print("=" * 60)
     print(f"运行模式: {'试运行（不保存到Neo4j）' if is_pilot_run else '正常运行（保存到Neo4j）'}")
-    print("Using chunker strategy:", config_defs.SELECTED_CHUNKER_STRATEGY)
-    print("Using group ID:", config_defs.SELECTED_GROUP_ID)
-    print("Using model ID:", config_defs.SELECTED_LLM_ID)
-    print("Using embedding model ID:", config_defs.SELECTED_EMBEDDING_ID)
-    print("LANGFUSE_ENABLED:", config_defs.LANGFUSE_ENABLED)
-    print("AGENTA_ENABLED:", config_defs.AGENTA_ENABLED)
+    print("Using chunker strategy:", chunker_strategy)
+    print("Using group ID:", group_id)
+    print("Using model ID:", llm_model_id)
+    print("Using embedding model ID:", embedding_model_id)
     print("=" * 60)
 
     # 初始化日志
@@ -104,11 +117,11 @@ async def main(
         logger.info("Initializing clients...")
         step_start = time.time()
         
-        llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
+        llm_client = get_llm_client(llm_model_id)
         
         # 获取 embedder 配置并转换为 RedBearModelConfig 对象
         from app.core.models.base import RedBearModelConfig
-        embedder_config_dict = get_embedder_config(config_defs.SELECTED_EMBEDDING_ID)
+        embedder_config_dict = get_embedder_config(embedding_model_id)
         embedder_config = RedBearModelConfig(**embedder_config_dict)
         embedder_client = OpenAIEmbedderClient(embedder_config)
         
@@ -145,9 +158,9 @@ async def main(
             dialog = DialogData(
                 context=context,
                 ref_id="pilot_dialog_1",
-                group_id=config_defs.SELECTED_GROUP_ID,
-                user_id=config_defs.SELECTED_USER_ID,
-                apply_id=config_defs.SELECTED_APPLY_ID,
+                group_id=group_id,
+                user_id=user_id,
+                apply_id=apply_id,
                 metadata={"source": "pilot_run", "input_type": "frontend_text"}
             )
             
@@ -158,7 +171,7 @@ async def main(
             # 对前端传入的对话进行分块处理
             chunked_dialogs = await get_chunked_dialogs_from_preprocessed(
                 data=[dialog],
-                chunker_strategy=config_defs.SELECTED_CHUNKER_STRATEGY,
+                chunker_strategy=chunker_strategy,
                 llm_client=llm_client,
             )
             logger.info(f"Processed frontend dialogue text: {len(messages)} messages")
@@ -172,7 +185,7 @@ async def main(
                             "content": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
                             "full_length": len(chunk.content),
                             "dialog_id": dialog.id,
-                            "chunker_strategy": config_defs.SELECTED_CHUNKER_STRATEGY
+                            "chunker_strategy": chunker_strategy
                         }
                         await progress_callback("text_preprocessing_result", f"分块 {i + 1} 处理完成", chunk_result)
                 
@@ -180,7 +193,7 @@ async def main(
                 preprocessing_summary = {
                     "total_chunks": sum(len(dialog.chunks) for dialog in chunked_dialogs),
                     "total_dialogs": len(chunked_dialogs),
-                    "chunker_strategy": config_defs.SELECTED_CHUNKER_STRATEGY
+                    "chunker_strategy": chunker_strategy
                 }
                 await progress_callback("text_preprocessing_complete", "预处理文本完成", preprocessing_summary)
         else:
@@ -199,11 +212,11 @@ async def main(
                 await progress_callback("text_preprocessing", "开始预处理文本...")
             
             chunked_dialogs = await get_chunked_dialogs_with_preprocessing(
-                chunker_strategy=config_defs.SELECTED_CHUNKER_STRATEGY,
-                group_id=config_defs.SELECTED_GROUP_ID,
-                user_id=config_defs.SELECTED_USER_ID,
-                apply_id=config_defs.SELECTED_APPLY_ID,
-                indices=config_defs.SELECTED_TEST_DATA_INDICES,
+                chunker_strategy=chunker_strategy,
+                group_id=group_id,
+                user_id=user_id,
+                apply_id=apply_id,
+                indices=None,
                 input_data_path=test_data_path,
                 llm_client=llm_client,
                 skip_cleaning=True,
@@ -219,7 +232,7 @@ async def main(
                             "content": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
                             "full_length": len(chunk.content),
                             "dialog_id": dialog.id,
-                            "chunker_strategy": config_defs.SELECTED_CHUNKER_STRATEGY
+                            "chunker_strategy": chunker_strategy
                         }
                         await progress_callback("text_preprocessing_result", f"分块 {i + 1} 处理完成", chunk_result)
                 
@@ -227,7 +240,7 @@ async def main(
                 preprocessing_summary = {
                     "total_chunks": sum(len(dialog.chunks) for dialog in chunked_dialogs),
                     "total_dialogs": len(chunked_dialogs),
-                    "chunker_strategy": config_defs.SELECTED_CHUNKER_STRATEGY
+                    "chunker_strategy": chunker_strategy
                 }
                 await progress_callback("text_preprocessing_complete", "预处理文本完成", preprocessing_summary)
         
@@ -249,6 +262,7 @@ async def main(
             connector=neo4j_connector,
             config=config,
             progress_callback=progress_callback,  # 传递进度回调
+            embedding_id=embedding_model_id,  # 传递嵌入模型ID
         )
         
         log_time("Orchestrator Initialization", time.time() - step_start, log_file)
@@ -352,7 +366,7 @@ async def main(
             )
             
             summaries = await Memory_summary_generation(
-                chunked_dialogs, llm_client=llm_client, embedding_id=config_defs.SELECTED_EMBEDDING_ID
+                chunked_dialogs, llm_client=llm_client, embedding_id=embedding_model_id
             )
             
             if not is_pilot_run:
@@ -400,4 +414,17 @@ async def main(
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    print("⚠️  Warning: This script now requires explicit configuration parameters.")
+    print("Global variables have been removed. Please provide configuration parameters.")
+    print("Example usage:")
+    print("  asyncio.run(main(")
+    print("    chunker_strategy='RecursiveChunker',")
+    print("    group_id='your_group_id',")
+    print("    user_id='your_user_id',")
+    print("    apply_id='your_apply_id',")
+    print("    llm_model_id='your_llm_id',")
+    print("    embedding_model_id='your_embedding_id'")
+    print("  ))")
+    
+    # This will fail because global variables are removed
+    raise RuntimeError("Global variables removed. Please provide explicit configuration parameters.")

@@ -10,28 +10,29 @@
 从 app.core.memory.src.data_config_api.self_reflexion 迁移而来。
 """
 
-import os
+import asyncio
 import json
 import logging
-import asyncio
-from typing import List, Dict, Any
+import os
 import uuid
+from typing import Any, Dict, List
 
-from app.core.memory.utils.config.definitions import (
-    REFLEXION_ENABLED,
-    REFLEXION_ITERATION_PERIOD,
-    REFLEXION_RANGE,
-    REFLEXION_BASELINE,
-)
-from app.db import get_db
-from sqlalchemy.orm import Session
-from app.models.retrieval_info import RetrievalInfo
+#TODO: Fix this
+
+# Default values (previously from definitions.py)
+REFLEXION_ENABLED = os.getenv("REFLEXION_ENABLED", "false").lower() == "true"
+REFLEXION_ITERATION_PERIOD = os.getenv("REFLEXION_ITERATION_PERIOD", "3")
+REFLEXION_RANGE = os.getenv("REFLEXION_RANGE", "retrieval")
+REFLEXION_BASELINE = os.getenv("REFLEXION_BASELINE", "TIME")
+
 from app.core.memory.utils.config.get_data import get_data
 from app.core.memory.utils.self_reflexion_utils.evaluate import conflict
 from app.core.memory.utils.self_reflexion_utils.reflexion import reflexion
+from app.db import get_db
+from app.models.retrieval_info import RetrievalInfo
 from app.repositories.neo4j.cypher_queries import UPDATE_STATEMENT_INVALID_AT
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-
+from sqlalchemy.orm import Session
 
 # 并发限制（可通过环境变量覆盖）
 CONCURRENCY = int(os.getenv("REFLEXION_CONCURRENCY", "5"))

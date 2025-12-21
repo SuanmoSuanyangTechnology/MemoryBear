@@ -1,28 +1,30 @@
-import os
 import asyncio
-from typing import Any, Dict, List, Optional
-import requests
-from datetime import datetime, timezone
+import json
+import os
 import time
 import uuid
+from datetime import datetime, timezone
 from math import ceil
-import redis
-import json
+from typing import Any, Dict, List, Optional
 
-from app.db import get_db
-from app.models.document_model import Document
-from app.models.knowledge_model import Knowledge
-from app.core.rag.llm.cv_model import QWenCV
-from app.core.rag.llm.chat_model import Base
-from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
-from app.core.rag.models.chunk import DocumentChunk
-from app.services.memory_agent_service import MemoryAgentService
-from app.core.config import settings
-from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
-from app.core.rag.prompts.generator import question_proposal
+import redis
+import requests
 
 # Import a unified Celery instance
 from app.celery_app import celery_app
+from app.core.config import settings
+from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
+from app.core.rag.llm.chat_model import Base
+from app.core.rag.llm.cv_model import QWenCV
+from app.core.rag.models.chunk import DocumentChunk
+from app.core.rag.prompts.generator import question_proposal
+from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
+    ElasticSearchVectorFactory,
+)
+from app.db import get_db
+from app.models.document_model import Document
+from app.models.knowledge_model import Knowledge
+from app.services.memory_agent_service import MemoryAgentService
 
 
 @celery_app.task(name="tasks.process_item")
@@ -221,11 +223,17 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
-    except Exception as e:
+    except BaseException as e:
         elapsed_time = time.time() - start_time
+        # Handle ExceptionGroup from TaskGroup
+        if hasattr(e, 'exceptions'):
+            error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
+            detailed_error = "; ".join(error_messages)
+        else:
+            detailed_error = str(e)
         return {
             "status": "FAILURE",
-            "error": str(e),
+            "error": detailed_error,
             "group_id": group_id,
             "config_id": config_id,
             "elapsed_time": elapsed_time,
@@ -283,11 +291,17 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
-    except Exception as e:
+    except BaseException as e:
         elapsed_time = time.time() - start_time
+        # Handle ExceptionGroup from TaskGroup
+        if hasattr(e, 'exceptions'):
+            error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
+            detailed_error = "; ".join(error_messages)
+        else:
+            detailed_error = str(e)
         return {
             "status": "FAILURE",
-            "error": str(e),
+            "error": detailed_error,
             "group_id": group_id,
             "config_id": config_id,
             "elapsed_time": elapsed_time,
@@ -300,8 +314,9 @@ def reflection_engine() -> None:
 
     Intentionally left blank; replace with real reflection logic later.
     """
-    from app.core.memory.utils.self_reflexion_utils.self_reflexion import self_reflexion
     import asyncio
+
+    from app.core.memory.utils.self_reflexion_utils.self_reflexion import self_reflexion
 
     host_id = uuid.UUID("2f6ff1eb-50c7-4765-8e89-e4566be19122")
     asyncio.run(self_reflexion(host_id))
@@ -377,10 +392,10 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     start_time = time.time()
     
     async def _run() -> Dict[str, Any]:
-        from app.services.memory_storage_service import search_all
-        from app.repositories.memory_increment_repository import write_memory_increment
-        from app.models.end_user_model import EndUser
         from app.models.app_model import App
+        from app.models.end_user_model import EndUser
+        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.services.memory_storage_service import search_all
         
         db = next(get_db())
         try:
