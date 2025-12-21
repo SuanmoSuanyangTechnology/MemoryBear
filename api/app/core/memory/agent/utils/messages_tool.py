@@ -1,10 +1,10 @@
 import json
 import logging
 import re
-from typing import List, Any
+from typing import Any, List
 
-from langchain_core.messages import AnyMessage
 from app.core.logging_config import get_agent_logger
+from langchain_core.messages import AnyMessage
 
 logger = get_agent_logger(__name__)
 
@@ -119,11 +119,23 @@ async def Problem_Extension_messages_deal(context):
     extent_quest = []
     original = context.get('original', '')
     messages = context.get('context', '')
-    messages = json.loads(messages)
-    for message in messages:
-        question = message.get('question', '')
-        type = message.get('type', '')
-        extent_quest.append({"role": "user", "content": f"问题:{question}；问题类型：{type}"})
+    
+    # Handle empty or non-string messages
+    if not messages:
+        return extent_quest, original
+    
+    if isinstance(messages, str):
+        try:
+            messages = json.loads(messages)
+        except json.JSONDecodeError:
+            # If JSON parsing fails, return empty list
+            return extent_quest, original
+    
+    if isinstance(messages, list):
+        for message in messages:
+            question = message.get('question', '')
+            type = message.get('type', '')
+            extent_quest.append({"role": "user", "content": f"问题:{question}；问题类型：{type}"})
 
     return extent_quest, original
 
@@ -135,10 +147,19 @@ async def Retriev_messages_deal(context):
         context:
     Returns:
     '''
+    logger.info(f"Retriev_messages_deal input: type={type(context)}, value={str(context)[:500]}")
+    
     if isinstance(context, dict):
+        logger.info(f"Retriev_messages_deal: context is dict with keys={list(context.keys())}")
         if 'context' in context or 'original' in context:
-            return context.get('context', {}), context.get('original', '')
-    return content, original_value
+            content = context.get('context', {})
+            original = context.get('original', '')
+            logger.info(f"Retriev_messages_deal output: content_type={type(content)}, content={str(content)[:300]}, original='{original[:50] if original else ''}'")
+            return content, original
+    
+    # Return empty defaults if context is not a dict or doesn't have expected keys
+    logger.warning(f"Retriev_messages_deal: context missing expected keys, returning empty defaults")
+    return {}, ''
 
 async  def Verify_messages_deal(context):
     '''

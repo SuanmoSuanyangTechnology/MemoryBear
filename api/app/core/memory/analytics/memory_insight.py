@@ -5,9 +5,9 @@ This script can be executed directly to generate a memory insight report for a t
 """
 
 import asyncio
+import json
 import os
 import sys
-import json
 from collections import Counter
 from datetime import datetime
 
@@ -17,12 +17,16 @@ src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
+from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
+from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from pydantic import BaseModel, Field
 
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
-from app.core.memory.utils.config.definitions import SELECTED_GROUP_ID, SELECTED_LLM_ID
+#TODO: Fix this
+
+# Default values (previously from definitions.py)
+DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
+DEFAULT_GROUP_ID = os.getenv("SELECTED_GROUP_ID", "group_123")
 
 # 定义用于LLM结构化输出的Pydantic模型
 class TagClassification(BaseModel):
@@ -55,8 +59,7 @@ class MemoryInsight:
     def __init__(self, user_id: str):
         self.user_id = user_id
         self.neo4j_connector = Neo4jConnector()
-        from app.core.memory.utils.config import definitions as config_defs
-        self.llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
+        self.llm_client = get_llm_client(DEFAULT_LLM_ID)
 
     async def close(self):
         """关闭数据库连接。"""
@@ -294,8 +297,8 @@ async def main():
     """
     Initializes and runs the memory insight analysis for a test user.
     """
-    # 默认从 runtime.json selections.group_id 读取
-    test_user_id = SELECTED_GROUP_ID
+    # 默认从环境变量读取
+    test_user_id = DEFAULT_GROUP_ID
     print(f"正在为用户 {test_user_id} 生成记忆洞察报告...\n")
 
     insight = None

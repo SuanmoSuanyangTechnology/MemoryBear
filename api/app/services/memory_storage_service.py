@@ -4,39 +4,40 @@ Memory Storage Service
 Handles business logic for memory storage operations.
 """
 
-from typing import Dict, List, Optional, Any, AsyncGenerator
-import os
-import json
 import asyncio
+import json
+import os
 import time
 from datetime import datetime
-from sqlalchemy.orm import Session
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from dotenv import load_dotenv
-
-from app.models.user_model import User
-from app.models.end_user_model import EndUser
-from app.core.logging_config import get_logger
-from app.utils.sse_utils import format_sse_message
-from app.schemas.memory_storage_schema import (
-    ConfigFilter,
-    ConfigPilotRun,
-    ConfigParamsCreate,
-    ConfigParamsDelete,
-    ConfigUpdate,
-    ConfigUpdateExtracted,
-    ConfigUpdateForget,
-    ConfigKey,
-)
-from app.repositories.data_config_repository import DataConfigRepository
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
 from app.core.memory.analytics.memory_insight import MemoryInsight
 from app.core.memory.analytics.recent_activity_stats import get_recent_activity_stats
 from app.core.memory.analytics.user_summary import generate_user_summary
+from app.models.end_user_model import EndUser
+from app.models.user_model import User
 from app.repositories.data_config_repository import DataConfigRepository
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.memory_config_schema import ConfigurationError, MemoryConfig
+from app.schemas.memory_storage_schema import (
+    ConfigFilter,
+    ConfigKey,
+    ConfigParamsCreate,
+    ConfigParamsDelete,
+    ConfigPilotRun,
+    ConfigUpdate,
+    ConfigUpdateExtracted,
+    ConfigUpdateForget,
+)
+from app.services.memory_config_service import MemoryConfigService
+from app.utils.sse_utils import format_sse_message
+from dotenv import load_dotenv
+from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)
+config_logger = get_config_logger()
 
 # Load environment variables for Neo4j connector
 load_dotenv()
@@ -48,6 +49,27 @@ class MemoryStorageService:
     
     def __init__(self):
         logger.info("MemoryStorageService initialized")
+
+    def load_memory_config(self, config_id: int, db: Session) -> MemoryConfig:
+        """
+        Load memory configuration from database by config_id.
+        
+        This method delegates to the centralized MemoryConfigService to avoid
+        code duplication with other services.
+        
+        Args:
+            config_id: Configuration ID from database
+            
+        Returns:
+            MemoryConfig: Immutable configuration object
+            
+        Raises:
+            ConfigurationError: If validation fails
+        """
+        return MemoryConfigService.load_memory_config(
+            config_id=config_id,
+            service_name="MemoryStorageService"
+        )
     
     async def get_storage_info(self) -> dict:
         """
@@ -248,7 +270,6 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             RuntimeError: 当管线执行失败时
         """
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        dbrun_path = os.path.join(project_root, "app", "core", "memory", "dbrun.json")
         
         try:
             # 发出初始进度事件
@@ -257,24 +278,12 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "time": int(time.time() * 1000)
             })
             
-            # 步骤 1: 配置加载和验证（复用现有逻辑）
+            # 步骤 1: 配置加载和验证（数据库优先）
             payload_cid = str(getattr(payload, "config_id", "") or "").strip()
             cid: Optional[str] = payload_cid if payload_cid else None
 
-            if not cid and os.path.isfile(dbrun_path):
-                try:
-                    with open(dbrun_path, "r", encoding="utf-8") as f:
-                        dbrun = json.load(f)
-                    if isinstance(dbrun, dict):
-                        sel = dbrun.get("selections", {})
-                        if isinstance(sel, dict):
-                            fallback_cid = str(sel.get("config_id") or "").strip()
-                            cid = fallback_cid or None
-                except Exception:
-                    cid = None
-
             if not cid:
-                raise ValueError("未提供 payload.config_id，且 dbrun.json 未设置 selections.config_id，禁止启动试运行")
+                raise ValueError("未提供 payload.config_id，禁止启动试运行")
 
             # 验证 dialogue_text 必须提供
             dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
@@ -282,12 +291,15 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             if not dialogue_text:
                 raise ValueError("试运行模式必须提供 dialogue_text 参数")
 
-            # 应用内存覆写并刷新常量
-            from app.core.memory.utils.config.definitions import reload_configuration_from_database
-            
-            ok_override = reload_configuration_from_database(cid)
-            if not ok_override:
-                raise RuntimeError("运行时覆写失败，config_id 无效或刷新常量失败")
+            # Load configuration from database only using centralized manager
+            try:
+                memory_config = MemoryConfigService.load_memory_config(
+                    config_id=int(cid),
+                    service_name="MemoryStorageService.pilot_run_stream"
+                )
+                logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
+            except ConfigurationError as e:
+                raise RuntimeError(f"Configuration loading failed: {e}")
 
             # 步骤 2: 创建进度回调函数捕获管线进度
             # 使用队列在回调和生成器之间传递进度事件

@@ -4,45 +4,44 @@ Memory Agent Service
 Handles business logic for memory agent operations including read/write services,
 health checks, and message type classification.
 """
+import json
 import os
 import re
 import time
-import json
 import uuid
 from threading import Lock
-from typing import Dict, List, Optional, Any, AsyncGenerator
-from app.services.memory_konwledges_server import write_rag
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
 import redis
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.tools import load_mcp_tools
-from sqlalchemy.orm import Session
-from sqlalchemy import func
-from pydantic import BaseModel, Field
- 
 from app.core.config import settings
-from app.core.logging_config import get_logger
+from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.agent.langgraph_graph.read_graph import make_read_graph
 from app.core.memory.agent.langgraph_graph.write_graph import make_write_graph
 from app.core.memory.agent.logger_file.log_streamer import LogStreamer
-from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
 from app.core.memory.agent.utils.mcp_tools import get_mcp_server_config
 from app.core.memory.agent.utils.type_classifier import status_typle
-from app.db import get_db
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
 from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.schemas.memory_storage_schema import ApiResponse, ok, fail
+from app.db import get_db
 from app.models.knowledge_model import Knowledge, KnowledgeType
-from app.repositories.data_config_repository import DataConfigRepository
-from app.core.memory.agent.logger_file.log_streamer import LogStreamer
-from app.services.memory_konwledges_server import memory_konwledges_up, SimpleUser, find_document_id_by_kb_and_filename
-from app.core.memory.utils.config.definitions import reload_configuration_from_database
-from app.schemas.file_schema import CustomTextFileCreate
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.memory_config_schema import ConfigurationError, MemoryConfig
+from app.services.memory_config_service import MemoryConfigService
+from app.services.memory_konwledges_server import (
+    write_rag,
+)
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.tools import load_mcp_tools
+from pydantic import BaseModel, Field
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 try:
     from app.core.memory.utils.log.audit_logger import audit_logger
 except ImportError:
     audit_logger = None
 logger = get_logger(__name__)
+config_logger = get_config_logger()
 
 # Initialize Neo4j connector for analytics functions
 _neo4j_connector = Neo4jConnector()
@@ -55,6 +54,27 @@ class MemoryAgentService:
     def __init__(self):
         self.user_locks: Dict[str, Lock] = {}
         self.locks_lock = Lock()
+
+    def load_memory_config(self, config_id: int) -> MemoryConfig:
+        """
+        Load memory configuration from database by config_id.
+        
+        This method delegates to the centralized MemoryConfigService to avoid
+        code duplication with other services.
+        
+        Args:
+            config_id: Configuration ID from database
+            
+        Returns:
+            MemoryConfig: Immutable configuration object
+            
+        Raises:
+            ConfigurationError: If validation fails
+        """
+        return MemoryConfigService.load_memory_config(
+            config_id=config_id,
+            service_name="MemoryAgentService"
+        )
 
     def writer_messages_deal(self,messages,start_time,group_id,config_id,message):
         messages = str(messages).replace("'", '"').replace('\\n', '').replace('\n', '').replace('\\', '')
@@ -277,19 +297,20 @@ class MemoryAgentService:
         import time
         start_time = time.time()
 
-        # 如果 config_id 为 None，使用默认值 "17"
-        config_loaded = reload_configuration_from_database(config_id)
-        if not config_loaded:
-            error_msg = f"Failed to load configuration for config_id: {config_id}"
+        # Load configuration from database only
+        try:
+            memory_config = self.load_memory_config(config_id)
+            logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
+        except ConfigurationError as e:
+            error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
             logger.error(error_msg)
             
-            # 记录失败的操作
+            # Log failed operation
             if audit_logger:
                 duration = time.time() - start_time
-                audit_logger.log_operation( operation="WRITE",  config_id=config_id, group_id=group_id,   success=False, duration=duration, error=error_msg  )
+                audit_logger.log_operation(operation="WRITE", config_id=config_id, group_id=group_id, success=False, duration=duration, error=error_msg)
             
             raise ValueError(error_msg)
-        logger.info(f"Configuration loaded successfully for config_id: {config_id}")
         mcp_config = get_mcp_server_config()
         client = MultiServerMCPClient(mcp_config)
 
@@ -300,20 +321,43 @@ class MemoryAgentService:
             async with client.session("data_flow") as session:
                 logger.debug("Connected to MCP Server: data_flow")
                 tools = await load_mcp_tools(session)
+                workflow_errors = []  # Track errors from workflow
 
-                # Pass config_id to the graph workflow
-                async with make_write_graph(group_id, tools, group_id, group_id, config_id=config_id) as graph:
+                # Pass memory_config to the graph workflow
+                async with make_write_graph(group_id, tools, group_id, group_id, memory_config=memory_config) as graph:
                     logger.debug("Write graph created successfully")
 
                     config = {"configurable": {"thread_id": group_id}}
 
                     async for event in graph.astream(
-                            {"messages": message, "config_id": config_id},
+                            {"messages": message, "memory_config": memory_config, "errors": []},
                             stream_mode="values",
                             config=config
                     ):
                         messages = event.get('messages')
-            return self.writer_messages_deal(messages,start_time,group_id,config_id,message)
+                        # Capture any errors from the state
+                        if event.get('errors'):
+                            workflow_errors.extend(event.get('errors', []))
+            
+            # Check for workflow errors
+            if workflow_errors:
+                error_details = "; ".join([f"{e['tool']}: {e['error']}" for e in workflow_errors])
+                logger.error(f"Write workflow failed with errors: {error_details}")
+                
+                if audit_logger:
+                    duration = time.time() - start_time
+                    audit_logger.log_operation(
+                        operation="WRITE",
+                        config_id=config_id,
+                        group_id=group_id,
+                        success=False,
+                        duration=duration,
+                        error=error_details
+                    )
+                
+                raise ValueError(f"Write workflow failed: {error_details}")
+            
+            return self.writer_messages_deal(messages, start_time, group_id, config_id, message)
     
     async def read_memory(
         self,
@@ -365,15 +409,15 @@ class MemoryAgentService:
         group_lock = self.get_group_lock(group_id)
 
         with group_lock:
-            # Step 1: Load configuration from database
-            from app.core.memory.utils.config.definitions import reload_configuration_from_database
-            
-            config_loaded = reload_configuration_from_database(config_id)
-            if not config_loaded:
-                error_msg = f"Failed to load configuration for config_id: {config_id}"
+            # Step 1: Load configuration from database only
+            try:
+                memory_config = self.load_memory_config(config_id)
+                logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
+            except ConfigurationError as e:
+                error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
                 logger.error(error_msg)
                 
-                # 记录失败的操作
+                # Log failed operation
                 if audit_logger:
                     duration = time.time() - start_time
                     audit_logger.log_operation(
@@ -386,8 +430,6 @@ class MemoryAgentService:
                     )
                 
                 raise ValueError(error_msg)
-            
-            logger.info(f"Configuration loaded successfully for config_id: {config_id}")
             
             # Step 2: Prepare history
             history.append({"role": "user", "content": message})
@@ -404,45 +446,52 @@ class MemoryAgentService:
                 intermediate_outputs = []
                 seen_intermediates = set()  # Track seen intermediate outputs to avoid duplicates
 
-                # Pass config_id to the graph workflow
-                async with make_read_graph(group_id, tools, search_switch, group_id, group_id, config_id=config_id,storage_type=storage_type,user_rag_memory_id=user_rag_memory_id) as graph:
+                # Pass memory_config to the graph workflow
+                async with make_read_graph(group_id, tools, search_switch, group_id, group_id, memory_config=memory_config, storage_type=storage_type, user_rag_memory_id=user_rag_memory_id) as graph:
                     start = time.time()
                     config = {"configurable": {"thread_id": group_id}}
+                    workflow_errors = []  # Track errors from workflow
 
                     async for event in graph.astream(
-                            {"messages": history, "config_id": config_id},
+                            {"messages": history, "memory_config": memory_config, "errors": []},
                             stream_mode="values",
                             config=config
                     ):
                         messages = event.get('messages')
+                        # Capture any errors from the state
+                        if event.get('errors'):
+                            workflow_errors.extend(event.get('errors', []))
+                        
                         for msg in messages:
                             msg_content = msg.content
+                            msg_role = msg.__class__.__name__.lower().replace("message", "")
                             outputs.append({
-                                "role": msg.__class__.__name__.lower().replace("message", ""),
+                                "role": msg_role,
                                 "content": msg_content
                             })
                             
                             # Extract intermediate outputs
                             if hasattr(msg, 'content'):
                                 try:
-                                    # Debug: log message type and content preview
-                                    msg_type = msg.__class__.__name__
-                                    content_preview = str(msg_content)[:200] if msg_content else "empty"
-                                    logger.debug(f"Processing message type={msg_type}, content preview={content_preview}")
+                                    # Handle MCP content format: [{'type': 'text', 'text': '...'}]
+                                    content_to_parse = msg_content
+                                    if isinstance(msg_content, list):
+                                        for block in msg_content:
+                                            if isinstance(block, dict) and block.get('type') == 'text':
+                                                content_to_parse = block.get('text', '')
+                                                break
+                                        else:
+                                            continue  # No text block found
                                     
                                     # Try to parse content as JSON
-                                    if isinstance(msg_content, str):
+                                    if isinstance(content_to_parse, str):
                                         try:
-                                            parsed = json.loads(msg_content)
+                                            parsed = json.loads(content_to_parse)
                                             if isinstance(parsed, dict):
-                                                # Debug: log what keys are in parsed
-                                                logger.debug(f"Parsed dict keys: {list(parsed.keys())}")
-                                                
                                                 # Check for single intermediate output
                                                 if '_intermediate' in parsed:
                                                     intermediate_data = parsed['_intermediate']
                                                     output_key = self._create_intermediate_key(intermediate_data)
-                                                    logger.debug(f"Found _intermediate: {intermediate_data.get('type', 'unknown')}")
                                                     
                                                     if output_key not in seen_intermediates:
                                                         seen_intermediates.add(output_key)
@@ -450,34 +499,14 @@ class MemoryAgentService:
                                                 
                                                 # Check for multiple intermediate outputs (from Retrieve)
                                                 if '_intermediates' in parsed:
-                                                    logger.debug(f"Found _intermediates list with {len(parsed['_intermediates'])} items")
                                                     for intermediate_data in parsed['_intermediates']:
                                                         output_key = self._create_intermediate_key(intermediate_data)
-                                                        logger.debug(f"Processing intermediate: {intermediate_data.get('type', 'unknown')}")
                                                         
                                                         if output_key not in seen_intermediates:
                                                             seen_intermediates.add(output_key)
                                                             intermediate_outputs.append(self._format_intermediate_output(intermediate_data))
                                         except (json.JSONDecodeError, ValueError):
                                             pass
-                                    elif isinstance(msg_content, dict):
-                                        # Check for single intermediate output
-                                        if '_intermediate' in msg_content:
-                                            intermediate_data = msg_content['_intermediate']
-                                            output_key = self._create_intermediate_key(intermediate_data)
-                                            
-                                            if output_key not in seen_intermediates:
-                                                seen_intermediates.add(output_key)
-                                                intermediate_outputs.append(self._format_intermediate_output(intermediate_data))
-                                        
-                                        # Check for multiple intermediate outputs (from Retrieve)
-                                        if '_intermediates' in msg_content:
-                                            for intermediate_data in msg_content['_intermediates']:
-                                                output_key = self._create_intermediate_key(intermediate_data)
-                                                
-                                                if output_key not in seen_intermediates:
-                                                    seen_intermediates.add(output_key)
-                                                    intermediate_outputs.append(self._format_intermediate_output(intermediate_data))
                                 except Exception as e:
                                     logger.debug(f"Failed to extract intermediate output: {e}")
             
@@ -489,18 +518,57 @@ class MemoryAgentService:
             for messages in outputs:
                 if messages['role'] == 'tool':
                     message = messages['content']
+                    
+                    # Handle MCP content format: [{'type': 'text', 'text': '...'}]
+                    if isinstance(message, list):
+                        # Extract text from MCP content blocks
+                        for block in message:
+                            if isinstance(block, dict) and block.get('type') == 'text':
+                                message = block.get('text', '')
+                                break
+                        else:
+                            continue  # No text block found
+                    
                     try:
-                        message = json.loads(message) if isinstance(message, str) else message
-                        if isinstance(message, dict) and message.get('status') != '':
-                            summary_result = message.get('summary_result')
-                            if summary_result:
-                                final_answer = summary_result
+                        parsed = json.loads(message) if isinstance(message, str) else message
+                        if isinstance(parsed, dict):
+                            if parsed.get('status') == 'success':
+                                summary_result = parsed.get('summary_result')
+                                if summary_result:
+                                    final_answer = summary_result
                     except (json.JSONDecodeError, ValueError):
                         pass
             
             # 记录成功的操作
             total_duration = time.time() - start_time
-            if audit_logger:
+            
+            # Check for workflow errors
+            if workflow_errors:
+                error_details = "; ".join([f"{e['tool']}: {e['error']}" for e in workflow_errors])
+                logger.warning(f"Read workflow completed with errors: {error_details}")
+                
+                if audit_logger:
+                    audit_logger.log_operation(
+                        operation="READ",
+                        config_id=config_id,
+                        group_id=group_id,
+                        success=False,
+                        duration=total_duration,
+                        error=error_details,
+                        details={
+                            "search_switch": search_switch,
+                            "history_length": len(history),
+                            "intermediate_outputs_count": len(intermediate_outputs),
+                            "has_answer": bool(final_answer),
+                            "errors": workflow_errors
+                        }
+                    )
+                
+                # Raise error if no answer was produced
+                if not final_answer:
+                    raise ValueError(f"Read workflow failed: {error_details}")
+            
+            if audit_logger and not workflow_errors:
                 audit_logger.log_operation(
                     operation="READ",
                     config_id=config_id,
@@ -612,19 +680,25 @@ class MemoryAgentService:
         else:
             return output
     
-    async def classify_message_type(self, message: str) -> Dict:
+    async def classify_message_type(self, message: str, config_id: int, db: Session) -> Dict:
         """
         Determine the type of user message (read or write)
+        Updated to eliminate global variables in favor of explicit parameters.
         
         Args:
             message: User message to classify
+            config_id: Configuration ID to load LLM model from database
+            db: Database session
             
         Returns:
             Type classification result
         """
         logger.info("Classifying message type")
         
-        status = await status_typle(message)
+        # Load configuration to get LLM model ID
+        memory_config = self.load_memory_config(config_id)
+        
+        status = await status_typle(message, memory_config.llm_model_id)
         logger.debug(f"Message type: {status}")
         return status
     
@@ -790,7 +864,8 @@ class MemoryAgentService:
     async def get_user_profile(
         self,
         end_user_id: Optional[str] = None,
-        current_user_id: Optional[str] = None
+        current_user_id: Optional[str] = None,
+        llm_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         获取用户详情，包含：
@@ -801,6 +876,7 @@ class MemoryAgentService:
         参数：
         - end_user_id: 用户ID（可选）
         - current_user_id: 当前登录用户的ID（保留参数）
+        - llm_id: LLM模型ID（用于生成标签，可选，如果不提供则跳过标签生成）
         
         返回格式：
         {
@@ -862,15 +938,17 @@ class MemoryAgentService:
             
             await connector.close()
             
-            if not statements:
+            if not statements or not llm_id:
                 result["tags"] = []
+                if not llm_id and statements:
+                    logger.warning("llm_id not provided, skipping tag generation")
             else:
                 # 构建摘要文本
                 summary_text = f"用户语句样本：{' | '.join(statements[:20])}\n核心实体：{', '.join(entities)}"
                 logger.debug(f"User data found: {len(statements)} statements, {len(entities)} entities")
                 
                 # 使用LLM提取标签
-                llm_client = get_llm_client()
+                llm_client = get_llm_client(llm_id)
                 
                 # 定义标签提取的结构
                 class UserTags(BaseModel):

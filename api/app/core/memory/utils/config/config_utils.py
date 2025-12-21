@@ -1,22 +1,18 @@
-import uuid
-import json
-from typing import Optional
-
-from sqlalchemy.orm import Session
-from fastapi.exceptions import HTTPException
-from fastapi import status
-
-from app.core.memory.utils.config.definitions import CONFIG, RUNTIME_CONFIG
 from app.core.memory.models.variate_config import (
-    ExtractionPipelineConfig,
     DedupConfig,
-    StatementExtractionConfig,
+    ExtractionPipelineConfig,
     ForgettingEngineConfig,
+    StatementExtractionConfig,
 )
-from app.core.memory.models.config_models import PruningConfig
+from app.core.memory.utils.config.definitions import CONFIG
 from app.db import get_db
-from app.models.models_model import ModelConfig, ModelApiKey
+from app.models.models_model import ModelApiKey
 from app.services.model_service import ModelConfigService
+from fastapi import status
+from fastapi.exceptions import HTTPException
+from sqlalchemy.orm import Session
+
+
 def get_model_config(model_id: str, db: Session | None = None) -> dict:
     if db is None:
         db_gen = get_db()             # get_db 通常是一个生成器
@@ -110,6 +106,13 @@ def get_chunker_config(chunker_strategy: str) -> dict:
 
     # 2) Provide sane defaults for newer strategies
     default_configs = {
+        "RecursiveChunker": {
+            "chunker_strategy": "RecursiveChunker",
+            "embedding_model": "BAAI/bge-m3",
+            "chunk_size": 512,
+            "min_characters_per_chunk": 50
+        },
+        
         "LLMChunker": {
             "chunker_strategy": "LLMChunker",
             "embedding_model": "BAAI/bge-m3",
@@ -147,94 +150,74 @@ def get_chunker_config(chunker_strategy: str) -> dict:
         f"Chunker '{chunker_strategy}' not found in config.json and no default or fallback available"
     )
 
+#TODO: Fix this
 
-def get_pipeline_config() -> ExtractionPipelineConfig:
-    """Build ExtractionPipelineConfig using only runtime.json values.
+def get_pipeline_config(
+    config_id: int,
+    db: Session | None = None,
+) -> ExtractionPipelineConfig:
+    """Build ExtractionPipelineConfig from database.
 
-    Behavior:
-    - Read `deduplication` section from runtime.json if present.
-    - Read `statement_extraction` section from runtime.json if present.
-    - Read `forgetting_engine` section from runtime.json if present.
-    - If absent, check legacy top-level `enable_llm_dedup` key.
-    - Do NOT fall back to environment variables.
-    - Unspecified fields use model defaults defined in DedupConfig.
+    Args:
+        config_id: Database configuration ID (required). Loads pipeline
+            settings from the DataConfig table.
+        db: Optional database session. If not provided, a new session
+            will be created.
+
+    Returns:
+        ExtractionPipelineConfig with deduplication, statement extraction,
+        and forgetting engine settings loaded from database.
+
+    Raises:
+        ValueError: If config_id not found in database.
     """
-    dedup_rc = RUNTIME_CONFIG.get("deduplication", {}) or {}
-    stmt_rc = RUNTIME_CONFIG.get("statement_extraction", {}) or {}
-    forget_rc = RUNTIME_CONFIG.get("forgetting_engine", {}) or {}
+    from app.repositories.data_config_repository import DataConfigRepository
 
-    # Assemble kwargs from runtime.json only
-    kwargs = {}
-    # LLM switch: prefer new key, then legacy top-level, default False
-    if "enable_llm_dedup_blockwise" in dedup_rc:
-        kwargs["enable_llm_dedup_blockwise"] = bool(dedup_rc.get("enable_llm_dedup_blockwise"))
-    else:
-        # Legacy top-level fallback inside runtime.json only
-        legacy = RUNTIME_CONFIG.get("enable_llm_dedup")
-        if legacy is not None:
-            kwargs["enable_llm_dedup_blockwise"] = bool(legacy)
-        else:
-            kwargs["enable_llm_dedup_blockwise"] = False  # default reserve
-    # Disambiguation switch: only from runtime.json deduplication section
-    if "enable_llm_disambiguation" in dedup_rc:
-        kwargs["enable_llm_disambiguation"] = bool(dedup_rc.get("enable_llm_disambiguation"))
+    # Load from database
+    if db is None:
+        db_gen = get_db()
+        db = next(db_gen)
+    
+    db_config = DataConfigRepository.get_by_id(db, config_id)
+    if db_config is None:
+        raise ValueError(f"Configuration {config_id} not found in database")
 
-    # Optional LLM fallback gating
-    if "enable_llm_fallback_only_on_borderline" in dedup_rc:
-        kwargs["enable_llm_fallback_only_on_borderline"] = bool(dedup_rc.get("enable_llm_fallback_only_on_borderline"))
+    # Build DedupConfig from database
+    dedup_kwargs = {
+        "enable_llm_dedup_blockwise": bool(db_config.enable_llm_dedup_blockwise) if db_config.enable_llm_dedup_blockwise is not None else False,
+        "enable_llm_disambiguation": bool(db_config.enable_llm_disambiguation) if db_config.enable_llm_disambiguation is not None else False,
+    }
+    
+    # Fuzzy thresholds
+    if db_config.t_name_strict is not None:
+        dedup_kwargs["fuzzy_name_threshold_strict"] = db_config.t_name_strict
+    if db_config.t_type_strict is not None:
+        dedup_kwargs["fuzzy_type_threshold_strict"] = db_config.t_type_strict
+    if db_config.t_overall is not None:
+        dedup_kwargs["fuzzy_overall_threshold"] = db_config.t_overall
 
-    # Optional fuzzy thresholds: use values if provided; otherwise rely on DedupConfig defaults
-    for key in (
-        "fuzzy_name_threshold_strict",
-        "fuzzy_type_threshold_strict",
-        "fuzzy_overall_threshold",
-        "fuzzy_unknown_type_name_threshold",
-        "fuzzy_unknown_type_type_threshold",
-    ):
-        if key in dedup_rc:
-            kwargs[key] = dedup_rc[key]
+    dedup_config = DedupConfig(**dedup_kwargs)
 
-    # Optional weights and bonuses for overall scoring
-    for key in (
-        "name_weight",
-        "desc_weight",
-        "type_weight",
-        "context_bonus",
-        "llm_fallback_floor",
-        "llm_fallback_ceiling",
-    ):
-        if key in dedup_rc:
-            kwargs[key] = dedup_rc[key]
-
-    # Optional LLM iterative dedup parameters
-    for key in (
-        "llm_block_size",
-        "llm_block_concurrency",
-        "llm_pair_concurrency",
-        "llm_max_rounds",
-    ):
-        if key in dedup_rc:
-            kwargs[key] = dedup_rc[key]
-
-    dedup_config = DedupConfig(**kwargs)
-
-    # Build StatementExtractionConfig from runtime.json
+    # Build StatementExtractionConfig from database
     stmt_kwargs = {}
-    for key in (
-        "statement_granularity",
-        "temperature",
-        "include_dialogue_context",
-        "max_dialogue_context_chars",
-    ):
-        if key in stmt_rc:
-            stmt_kwargs[key] = stmt_rc[key]
+    if db_config.statement_granularity is not None:
+        stmt_kwargs["statement_granularity"] = db_config.statement_granularity
+    if db_config.include_dialogue_context is not None:
+        stmt_kwargs["include_dialogue_context"] = bool(db_config.include_dialogue_context)
+    if db_config.max_context is not None:
+        stmt_kwargs["max_dialogue_context_chars"] = db_config.max_context
+
     stmt_config = StatementExtractionConfig(**stmt_kwargs)
 
-    # Build ForgettingEngineConfig from runtime.json
+    # Build ForgettingEngineConfig from database
     forget_kwargs = {}
-    for key in ("offset", "lambda_time", "lambda_mem"):
-        if key in forget_rc:
-            forget_kwargs[key] = forget_rc[key]
+    if db_config.offset is not None:
+        forget_kwargs["offset"] = db_config.offset
+    if db_config.lambda_time is not None:
+        forget_kwargs["lambda_time"] = db_config.lambda_time
+    if db_config.lambda_mem is not None:
+        forget_kwargs["lambda_mem"] = db_config.lambda_mem
+
     forget_config = ForgettingEngineConfig(**forget_kwargs)
 
     return ExtractionPipelineConfig(
@@ -244,24 +227,37 @@ def get_pipeline_config() -> ExtractionPipelineConfig:
     )
 
 
-def get_pruning_config() -> dict:
-    """Retrieve semantic pruning config from runtime.json.
+def get_pruning_config(
+    config_id: int,
+    db: Session | None = None,
+) -> dict:
+    """Retrieve semantic pruning config from database.
 
-    Returns a dict suitable for PruningConfig.model_validate.
+    Args:
+        config_id: Database configuration ID (required).
+        db: Optional database session.
 
-    Structure in runtime.json:
-    {
-      "pruning": {
-        "enabled": true,
-        "scene": "education" | "online_service" | "outbound",
-        "threshold": 0.5
-      }
-    }
+    Returns:
+        Dict suitable for PruningConfig.model_validate with keys:
+        - pruning_switch: bool
+        - pruning_scene: str ("education" | "online_service" | "outbound")
+        - pruning_threshold: float (0-0.9)
+
+    Raises:
+        ValueError: If config_id not found in database.
     """
-    pruning_rc = RUNTIME_CONFIG.get("pruning", {}) or {}
+    from app.repositories.data_config_repository import DataConfigRepository
+
+    if db is None:
+        db_gen = get_db()
+        db = next(db_gen)
+
+    db_config = DataConfigRepository.get_by_id(db, config_id)
+    if db_config is None:
+        raise ValueError(f"Configuration {config_id} not found in database")
 
     return {
-        "pruning_switch": bool(pruning_rc.get("enabled", False)),
-        "pruning_scene": pruning_rc.get("scene", "education"),
-        "pruning_threshold": float(pruning_rc.get("threshold", 0.5)),
+        "pruning_switch": bool(db_config.pruning_enabled) if db_config.pruning_enabled is not None else False,
+        "pruning_scene": db_config.pruning_scene or "education",
+        "pruning_threshold": float(db_config.pruning_threshold) if db_config.pruning_threshold is not None else 0.5,
     }

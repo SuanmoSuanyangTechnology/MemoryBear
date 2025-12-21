@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage
 from jinja2 import Environment, FileSystemLoader
 from app.core.memory.agent.utils.messages_tool import _to_openai_messages
 from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.utils.config.definitions import SELECTED_LLM_ID
+# Removed global variable imports - use dependency injection instead
 from app.core.logging_config import get_agent_logger
 
 load_dotenv(find_dotenv())
@@ -31,8 +31,17 @@ class State(TypedDict):
 
 
 class VerifyTool:
-    def __init__(self, system_prompt: str="", verify_data: Any=None):
+    def __init__(self, system_prompt: str="", verify_data: Any=None, llm_model_id: str=None):
+        """
+        Updated to eliminate global variables in favor of explicit parameters.
+        
+        Args:
+            system_prompt: System prompt for verification
+            verify_data: Data to verify
+            llm_model_id: LLM model ID (required, no longer from global variables)
+        """
         self.system_prompt = system_prompt
+        self.llm_model_id = llm_model_id
         if isinstance(verify_data, str):
             self.verify_data = verify_data
         else:
@@ -42,7 +51,9 @@ class VerifyTool:
                 self.verify_data = str(verify_data)
 
     async def model_1(self, state: State) -> State:
-        llm_client = get_llm_client(SELECTED_LLM_ID)
+        if not self.llm_model_id:
+            raise ValueError("llm_model_id is required but not provided")
+        llm_client = get_llm_client(self.llm_model_id)
         response_content = await llm_client.chat(
             messages=[{"role": "system", "content": self.system_prompt}, *_to_openai_messages(state["messages"])]
         )

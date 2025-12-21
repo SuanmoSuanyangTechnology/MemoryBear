@@ -1,8 +1,9 @@
-import sys
-import os
 import asyncio
-from neo4j import GraphDatabase
+import os
+import sys
 from typing import List, Tuple
+
+from neo4j import GraphDatabase
 from pydantic import BaseModel, Field
 
 # ------------------- 自包含路径解析 -------------------
@@ -31,10 +32,15 @@ except NameError:
 # ---------------------------------------------------------------------
 
 # 现在路径已经配置好，我们可以使用绝对导入
-from app.core.config import settings
-from app.core.memory.utils.config.definitions import SELECTED_GROUP_ID, SELECTED_LLM_ID
-from app.core.memory.utils.llm.llm_utils import get_llm_client
 import json
+
+from app.core.config import settings
+from app.core.memory.utils.llm.llm_utils import get_llm_client
+
+#TODO: Fix this
+# Default values (previously from definitions.py)
+DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
+DEFAULT_GROUP_ID = os.getenv("SELECTED_GROUP_ID", "group_123")
 
 # 定义用于LLM结构化输出的Pydantic模型
 class FilteredTags(BaseModel):
@@ -140,8 +146,8 @@ async def get_hot_memory_tags(group_id: str | None = None, limit: int = 40, by_u
         limit: 返回的标签数量限制
         by_user: 是否按user_id查询（默认False，按group_id查询）
     """
-    # 默认从 runtime.json selections.group_id 读取
-    group_id = group_id or SELECTED_GROUP_ID
+    # 默认从环境变量读取
+    group_id = group_id or DEFAULT_GROUP_ID
     # 1. 从数据库获取原始排名靠前的标签
     raw_tags_with_freq = get_raw_tags_from_db(group_id, limit, by_user=by_user)
     if not raw_tags_with_freq:
@@ -150,8 +156,7 @@ async def get_hot_memory_tags(group_id: str | None = None, limit: int = 40, by_u
     raw_tag_names = [tag for tag, freq in raw_tags_with_freq]
 
     # 2. 初始化LLM客户端并使用LLM筛选出有意义的标签
-    from app.core.memory.utils.config import definitions as config_defs
-    llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
+    llm_client = get_llm_client(DEFAULT_LLM_ID)
     meaningful_tag_names = await filter_tags_with_llm(raw_tag_names, llm_client)
 
     # 3. 根据LLM的筛选结果，构建最终的标签列表（保留原始频率和顺序）
@@ -165,8 +170,8 @@ async def get_hot_memory_tags(group_id: str | None = None, limit: int = 40, by_u
 if __name__ == "__main__":
     print("开始获取热门记忆标签...")
     try:
-        # 直接使用 runtime.json 中的 group_id
-        group_id_to_query = SELECTED_GROUP_ID
+        # 直接使用环境变量中的 group_id
+        group_id_to_query = DEFAULT_GROUP_ID
         # 使用 asyncio.run 来执行异步主函数
         top_tags = asyncio.run(get_hot_memory_tags(group_id=group_id_to_query))
 

@@ -1,45 +1,45 @@
-from typing import Optional, Union
 import os
 import uuid
-from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, UploadFile
-from fastapi.responses import StreamingResponse
+from typing import Optional
 
-
-from app.db import get_db
-from app.core.logging_config import get_api_logger
-from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
+from app.core.logging_config import get_api_logger
+from app.core.memory.utils.self_reflexion_utils import self_reflexion
+from app.core.response_utils import fail, success
+from app.db import get_db
+from app.dependencies import get_current_user
+from app.models.user_model import User
+from app.schemas.memory_storage_schema import (
+    ConfigKey,
+    ConfigParamsCreate,
+    ConfigParamsDelete,
+    ConfigPilotRun,
+    ConfigUpdate,
+    ConfigUpdateExtracted,
+    ConfigUpdateForget,
+)
+from app.schemas.response_schema import ApiResponse
 from app.services.memory_storage_service import (
-    MemoryStorageService,
     DataConfigService,
-    kb_type_distribution,
-    search_dialogue,
-    search_chunk,
-    search_statement,
-    search_entity,
-    search_all,
-    search_detials,
-    search_edges,
-    search_entity_graph,
+    MemoryStorageService,
     analytics_hot_memory_tags,
     analytics_memory_insight_report,
     analytics_recent_activity_stats,
     analytics_user_summary,
+    kb_type_distribution,
+    search_all,
+    search_chunk,
+    search_detials,
+    search_dialogue,
+    search_edges,
+    search_entity,
+    search_entity_graph,
+    search_statement,
 )
-from app.schemas.response_schema import ApiResponse
-from app.schemas.memory_storage_schema import (
-    ConfigParamsCreate,
-    ConfigParamsDelete,
-    ConfigUpdate,
-    ConfigUpdateExtracted,
-    ConfigUpdateForget,
-    ConfigKey,
-    ConfigPilotRun,
-)
-from app.core.memory.utils.config.definitions import reload_configuration_from_database
-from app.dependencies import get_current_user
-from app.models.user_model import User
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
 # Get API logger
 api_logger = get_api_logger()
 
@@ -329,8 +329,10 @@ async def pilot_run(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    api_logger.info(f"Pilot run requested: config_id={payload.config_id}, dialogue_text_length={len(payload.dialogue_text)}")
-    
+    api_logger.info(
+        f"Pilot run requested: config_id={payload.config_id}, "
+        f"dialogue_text_length={len(payload.dialogue_text)}"
+    )
     svc = DataConfigService(db)
     return StreamingResponse(
         svc.pilot_run_stream(payload),
@@ -338,8 +340,8 @@ async def pilot_run(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
+            "X-Accel-Buffering": "no",
+        },
     )
 
 """
@@ -528,8 +530,8 @@ async def get_user_summary_api(
     except Exception as e:
         api_logger.error(f"User summary failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "用户摘要生成失败", str(e))
-        
-from app.core.memory.utils.self_reflexion_utils import self_reflexion
+
+
 @router.get("/self_reflexion")
 async def self_reflexion_endpoint(host_id: uuid.UUID) -> str:
     """

@@ -8,13 +8,13 @@ class UserInput(BaseModel):
     history: list[dict]
     search_switch: str
     group_id: str
-    config_id: Optional[str] = None
+    config_id: str
 
 
 class Write_UserInput(BaseModel):
     message: str
     group_id: str
-    config_id: Optional[str] = None
+    config_id: str
 
 class End_User_Information(BaseModel):
     end_user_name: str  # 这是要更新的用户名

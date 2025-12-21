@@ -2,25 +2,23 @@
 Problem Tools for question segmentation and extension.
 
 This module contains MCP tools for breaking down and extending user questions.
+LLM clients are constructed from MemoryConfig when needed.
 """
+
 import json
 import time
-from typing import List
-
-from pydantic import BaseModel, Field, RootModel
-from mcp.server.fastmcp import Context
 
 from app.core.logging_config import get_agent_logger, log_time
 from app.core.memory.agent.mcp_server.mcp_instance import mcp
-from app.core.memory.agent.mcp_server.server import get_context_resource
 from app.core.memory.agent.mcp_server.models.problem_models import (
-    ProblemBreakdownItem,
     ProblemBreakdownResponse,
-    ExtendedQuestionItem,
-    ProblemExtensionResponse
+    ProblemExtensionResponse,
 )
+from app.core.memory.agent.mcp_server.server import get_context_resource
 from app.core.memory.agent.utils.messages_tool import Problem_Extension_messages_deal
-
+from app.core.memory.utils.llm.llm_utils import get_llm_client_from_config
+from app.schemas.memory_config_schema import MemoryConfig
+from mcp.server.fastmcp import Context
 
 logger = get_agent_logger(__name__)
 
@@ -32,7 +30,8 @@ async def Split_The_Problem(
     sessionid: str,
     messages_id: str,
     apply_id: str,
-    group_id: str
+    group_id: str,
+    memory_config: MemoryConfig,
 ) -> dict:
     """
     Segment the dialogue or sentence into sub-problems.
@@ -44,17 +43,20 @@ async def Split_The_Problem(
         messages_id: Message identifier
         apply_id: Application identifier
         group_id: Group identifier
+        memory_config: MemoryConfig object containing all configuration
         
     Returns:
         dict: Contains 'context' (JSON string of split results) and 'original' sentence
     """
     start = time.time()
-    
+
     try:
         # Extract services from context
-        template_service = get_context_resource(ctx, 'template_service')
-        session_service = get_context_resource(ctx, 'session_service')
-        llm_client = get_context_resource(ctx, 'llm_client')
+        template_service = get_context_resource(ctx, "template_service")
+        session_service = get_context_resource(ctx, "session_service")
+
+        # Get LLM client from memory_config
+        llm_client = get_llm_client_from_config(memory_config)
         
         # Extract user ID from session
         user_id = session_service.resolve_user_id(sessionid)
@@ -116,8 +118,8 @@ async def Split_The_Problem(
             )
             split_result = json.dumps([], ensure_ascii=False)
         
-        logger.info("问题拆分")
-        logger.info(f"问题拆分结果==>>:{split_result}")
+        logger.info("Problem splitting")
+        logger.info(f"Problem split result: {split_result}")
         
         # Emit intermediate output for frontend
         result = {
@@ -150,7 +152,7 @@ async def Split_The_Problem(
             duration = end - start
         except Exception:
             duration = 0.0
-        log_time('问题拆分', duration)
+        log_time('Problem splitting', duration)
 
 
 @mcp.tool()
@@ -160,8 +162,9 @@ async def Problem_Extension(
     usermessages: str,
     apply_id: str,
     group_id: str,
+    memory_config: MemoryConfig,
     storage_type: str = "",
-    user_rag_memory_id: str = ""
+    user_rag_memory_id: str = "",
 ) -> dict:
     """
     Extend the problem with additional sub-questions.
@@ -172,6 +175,7 @@ async def Problem_Extension(
         usermessages: User messages identifier
         apply_id: Application identifier
         group_id: Group identifier
+        memory_config: MemoryConfig object containing all configuration
         storage_type: Storage type for the workspace (optional)
         user_rag_memory_id: User RAG memory identifier (optional)
         
@@ -179,12 +183,14 @@ async def Problem_Extension(
         dict: Contains 'context' (aggregated questions) and 'original' question
     """
     start = time.time()
-    
+
     try:
         # Extract services from context
-        template_service = get_context_resource(ctx, 'template_service')
-        session_service = get_context_resource(ctx, 'session_service')
-        llm_client = get_context_resource(ctx, 'llm_client')
+        template_service = get_context_resource(ctx, "template_service")
+        session_service = get_context_resource(ctx, "session_service")
+
+        # Get LLM client from memory_config
+        llm_client = get_llm_client_from_config(memory_config)
         
         # Resolve session ID from usermessages
         from app.core.memory.agent.utils.messages_tool import Resolve_username
@@ -250,8 +256,8 @@ async def Problem_Extension(
             )
             aggregated_dict = {}
         
-        logger.info("问题扩展")
-        logger.info(f"问题扩展==>>:{aggregated_dict}")
+        logger.info("Problem extension")
+        logger.info(f"Problem extension result: {aggregated_dict}")
         
         # Emit intermediate output for frontend
         result = {
@@ -290,4 +296,4 @@ async def Problem_Extension(
             duration = end - start
         except Exception:
             duration = 0.0
-        log_time('问题扩展', duration)
+        log_time('Problem extension', duration)

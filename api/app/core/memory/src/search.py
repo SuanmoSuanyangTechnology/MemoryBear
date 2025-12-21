@@ -1,31 +1,41 @@
 import argparse
 import asyncio
 import json
+import math
 import os
 import time
-from typing import List, Dict, Any, Optional
-from dotenv import load_dotenv
 from datetime import datetime
-import math
+from typing import Any, Dict, List, Optional
+
 from app.core.logging_config import get_memory_logger
-# 使用新的仓储层
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.neo4j.graph_search import (
-    search_graph_by_embedding, search_graph,
-    search_graph_by_temporal, search_graph_by_keyword_temporal,
-    search_graph_by_chunk_id
-)
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.models.config_models import TemporalSearchParams
-from app.core.memory.utils.config.config_utils import get_embedder_config, get_pipeline_config
-from app.core.memory.utils.data.time_utils import normalize_date_safe
 from app.core.memory.models.variate_config import ForgettingEngineConfig
-from app.core.memory.utils.config.definitions import CONFIG, RUNTIME_CONFIG
-from app.core.memory.storage_services.forgetting_engine.forgetting_engine import ForgettingEngine
-from app.core.memory.utils.data.text_utils import extract_plain_query
+from app.core.memory.storage_services.forgetting_engine.forgetting_engine import (
+    ForgettingEngine,
+)
 from app.core.memory.utils.config import definitions as config_defs
-from app.core.models.base import RedBearModelConfig
+from app.core.memory.utils.config.config_utils import (
+    get_embedder_config,
+    get_pipeline_config,
+)
+from app.core.memory.utils.config.definitions import CONFIG, RUNTIME_CONFIG
+from app.core.memory.utils.data.text_utils import extract_plain_query
+from app.core.memory.utils.data.time_utils import normalize_date_safe
 from app.core.memory.utils.llm.llm_utils import get_reranker_client
+from app.core.models.base import RedBearModelConfig
+from app.repositories.neo4j.graph_search import (
+    search_graph,
+    search_graph_by_chunk_id,
+    search_graph_by_embedding,
+    search_graph_by_keyword_temporal,
+    search_graph_by_temporal,
+)
+
+# 使用新的仓储层
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from dotenv import load_dotenv
+
 load_dotenv()
 
 logger = get_memory_logger(__name__)
@@ -131,7 +141,7 @@ def rerank_hybrid_results(
 
         # Add keyword results with BM25 scores
         for item in keyword_items:
-            item_id = item.get("id") or item.get("uuid")
+            item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
             if item_id:
                 combined_items[item_id] = item.copy()
                 combined_items[item_id]["bm25_score"] = item.get("normalized_score", 0)
@@ -139,7 +149,7 @@ def rerank_hybrid_results(
 
         # Add or update with embedding results
         for item in embedding_items:
-            item_id = item.get("id") or item.get("uuid")
+            item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
             if item_id:
                 if item_id in combined_items:
                     # Update existing item with embedding score
@@ -220,7 +230,7 @@ def rerank_with_forgetting_curve(
             (keyword_items, False), (embedding_items, True)
         ):
             for item in src_items:
-                item_id = item.get("id") or item.get("uuid")
+                item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
                 if not item_id:
                     continue
                 existing = combined_items.get(item_id)
@@ -266,26 +276,25 @@ def rerank_with_forgetting_curve(
     return reranked
 
 
-def log_search_query(query_text: str, search_type: str, group_id: str | None, limit: int, include: List[str], log_file: str = "search_log.txt"):
-    """Log search query information to file"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def log_search_query(query_text: str, search_type: str, group_id: str | None, limit: int, include: List[str], log_file: str = None):
+    """Log search query information using the logger.
+    
+    Args:
+        query_text: The search query text
+        search_type: Type of search (keyword, embedding, hybrid)
+        group_id: Group identifier for filtering
+        limit: Maximum number of results
+        include: List of result types to include
+        log_file: Deprecated parameter, kept for backward compatibility
+    """
     # Ensure the query text is plain and clean before logging
     cleaned_query = extract_plain_query(query_text)
-    log_entry = {
-        "timestamp": timestamp,
-        # "query": query_text,
-        "query": cleaned_query,
-        "search_type": search_type,
-        "group_id": group_id,
-        "limit": limit,
-        "include": include
-    }
-
-    # Append to log file
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-
-    logger.info(f"Search logged: {query_text} ({search_type})")
+    
+    # Log using the standard logger
+    logger.info(
+        f"Search query: query='{cleaned_query}', type={search_type}, "
+        f"group_id={group_id}, limit={limit}, include={include}"
+    )
 
 
 def _remove_keys_recursive(obj: Any, keys_to_remove: List[str]) -> Any:
@@ -547,6 +556,7 @@ async def run_hybrid_search(
     limit: int,
     include: List[str],
     output_path: str | None,
+    embedding_id: str,
     rerank_alpha: float = 0.6,
     use_forgetting_rerank: bool = False,
     use_llm_rerank: bool = False,
@@ -558,6 +568,7 @@ async def run_hybrid_search(
     # Start overall timing
     search_start_time = time.time()
     latency_metrics = {}
+    logger.info(f"using embedding_id:{embedding_id}...")
 
     # Clean and normalize the incoming query before use/logging
     query_text = extract_plain_query(query_text)
@@ -610,7 +621,7 @@ async def run_hybrid_search(
             
             # 从数据库读取嵌入器配置（按 ID）并构建 RedBearModelConfig
             config_load_start = time.time()
-            embedder_config_dict = get_embedder_config(config_defs.SELECTED_EMBEDDING_ID)
+            embedder_config_dict = get_embedder_config(embedding_id)
             rb_config = RedBearModelConfig(
                 model_name=embedder_config_dict["model_name"],
                 provider=embedder_config_dict["provider"],
@@ -759,18 +770,11 @@ async def run_hybrid_search(
         else:
             result_counts = {key: len(value) if isinstance(value, list) else 0 for key, value in results.items()}
 
-        completion_log = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "query": query_text,
-            "search_type": search_type,
-            "status": "completed",
-            "result_counts": result_counts,
-            "output_file": output_path,
-            "latency_metrics": latency_metrics
-        }
-
-        with open("search_log.txt", "a", encoding="utf-8") as f:
-            f.write(json.dumps(completion_log, ensure_ascii=False) + "\n")
+        # Log completion using the standard logger
+        logger.info(
+            f"Search completed: query='{query_text}', type={search_type}, "
+            f"result_counts={result_counts}, latency={latency_metrics}"
+        )
 
         return results
 
@@ -969,6 +973,7 @@ def main():
             limit=args.limit,
             include=args.include,
             output_path=args.output,
+            embedding_id=config_defs.SELECTED_EMBEDDING_ID,
             rerank_alpha=args.rerank_alpha,
             use_forgetting_rerank=args.forgetting_rerank,
             use_llm_rerank=args.llm_rerank,

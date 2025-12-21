@@ -9,14 +9,14 @@ import logging
 import time
 from typing import Any, Callable, Dict
 
-from langchain_core.messages import AIMessage
-from langgraph.prebuilt import ToolNode
-
 from app.core.memory.agent.langgraph_graph.state.extractors import (
+    extract_content_payload,
     extract_tool_call_id,
-    extract_content_payload
 )
 from app.core.memory.agent.mcp_server.services.parameter_builder import ParameterBuilder
+from app.schemas.memory_config_schema import MemoryConfig
+from langchain_core.messages import AIMessage
+from langgraph.prebuilt import ToolNode
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,9 @@ class ToolExecutionNode:
         apply_id: Application identifier
         group_id: Group identifier
         parameter_builder: Service for building tool-specific arguments
+        memory_config: MemoryConfig object containing all configuration
     """
-    
+
     def __init__(
         self,
         tool: Callable,
@@ -49,8 +50,9 @@ class ToolExecutionNode:
         apply_id: str,
         group_id: str,
         parameter_builder: ParameterBuilder,
-        storage_type:str,
-        user_rag_memory_id:str
+        storage_type: str,
+        user_rag_memory_id: str,
+        memory_config: MemoryConfig,
     ):
         """
         Initialize the tool execution node.
@@ -63,6 +65,9 @@ class ToolExecutionNode:
             apply_id: Application identifier
             group_id: Group identifier
             parameter_builder: Service for building tool-specific arguments
+            storage_type: Storage type for the workspace
+            user_rag_memory_id: User RAG memory identifier
+            memory_config: MemoryConfig object containing all configuration
         """
         self.tool_node = ToolNode([tool])
         self.id = node_id
@@ -72,9 +77,10 @@ class ToolExecutionNode:
         self.apply_id = apply_id
         self.group_id = group_id
         self.parameter_builder = parameter_builder
-        self.storage_type=storage_type
-        self.user_rag_memory_id=user_rag_memory_id
-        
+        self.storage_type = storage_type
+        self.user_rag_memory_id = user_rag_memory_id
+        self.memory_config = memory_config
+
         logger.info(
             f"[ToolExecutionNode] Initialized node '{self.id}' for tool '{self.tool_name}'"
         )
@@ -124,8 +130,12 @@ class ToolExecutionNode:
             # Extract content payload using state extractors
             content = extract_content_payload(last_message)
             logger.debug(
-                f"[ToolExecutionNode] {self.id} - Extracted content type: {type(content)}"
+                f"[ToolExecutionNode] {self.id} - Extracted content type: {type(content)}, content_keys: {list(content.keys()) if isinstance(content, dict) else 'N/A'}"
             )
+            # Log raw message content for debugging
+            if hasattr(last_message, 'content'):
+                raw = last_message.content
+                logger.debug(f"[ToolExecutionNode] {self.id} - Raw message content (first 500 chars): {str(raw)[:500]}")
             
         except Exception as e:
             logger.error(
@@ -143,8 +153,9 @@ class ToolExecutionNode:
                 search_switch=self.search_switch,
                 apply_id=self.apply_id,
                 group_id=self.group_id,
+                memory_config=self.memory_config,
                 storage_type=self.storage_type,
-                user_rag_memory_id=self.user_rag_memory_id
+                user_rag_memory_id=self.user_rag_memory_id,
             )
             logger.debug(
                 f"[ToolExecutionNode] {self.id} - Built tool args with keys: {list(tool_args.keys())}"
@@ -179,7 +190,29 @@ class ToolExecutionNode:
                 f"[ToolExecutionNode] {self.id} - Tool execution completed"
             )
             
-            # Return the result directly - it already contains the messages list
+            # Check for error in tool response
+            error_entry = None
+            if result and "messages" in result:
+                for msg in result["messages"]:
+                    if hasattr(msg, 'content'):
+                        try:
+                            import json
+                            content = msg.content
+                            if isinstance(content, str):
+                                parsed = json.loads(content)
+                                if isinstance(parsed, dict) and "error" in parsed:
+                                    error_msg = parsed["error"]
+                                    logger.warning(
+                                        f"[ToolExecutionNode] {self.id} - Tool returned error: {error_msg}"
+                                    )
+                                    error_entry = {"tool": self.tool_name, "error": error_msg, "node_id": self.id}
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+            
+            # Return result with error tracking if error was found
+            if error_entry:
+                result["errors"] = [error_entry]
+            
             return result
             
         except Exception as e:
@@ -187,13 +220,15 @@ class ToolExecutionNode:
                 f"[ToolExecutionNode] {self.id} - Tool execution failed: {e}",
                 exc_info=True
             )
-            # Return error as ToolMessage to maintain message chain consistency
+            # Track error in state and return error message
             from langchain_core.messages import ToolMessage
+            error_entry = {"tool": self.tool_name, "error": str(e), "node_id": self.id}
             return {
                 "messages": [
                     ToolMessage(
                         content=f"Error executing tool: {str(e)}",
                         tool_call_id=f"{self.id}_{tool_call_id}"
                     )
-                ]
+                ],
+                "errors": [error_entry]
             }
