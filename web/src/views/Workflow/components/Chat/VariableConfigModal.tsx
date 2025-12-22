@@ -12,12 +12,12 @@ interface VariableEditModalProps {
 
 const VariableConfigModal = forwardRef<VariableEditModalRef, VariableEditModalProps>(({
   refresh,
-  variables
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<{variables: StartVariableItem[]}>();
   const [loading, setLoading] = useState(false)
+  const [initialValues, setInitialValues] = useState<StartVariableItem[]>([])
 
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
@@ -26,9 +26,10 @@ const VariableConfigModal = forwardRef<VariableEditModalRef, VariableEditModalPr
     setLoading(false)
   };
 
-  const handleOpen = () => {
-
+  const handleOpen = (values: StartVariableItem[]) => {
     setVisible(true);
+    form.setFieldsValue({variables: values})
+    setInitialValues([...values])
   };
   // 封装保存方法，添加提交逻辑
   const handleSave = () => {
@@ -59,18 +60,18 @@ const VariableConfigModal = forwardRef<VariableEditModalRef, VariableEditModalPr
         form={form}
         layout="horizontal"
         scrollToFirstError={{ behavior: 'instant', block: 'end', focus: true }}
-        initialValues={{ variables: variables }}
       >
         <Form.List name="variables">
           {(fields) => (
             <>
               {fields.map(({ name }, index) => {
-                const field = variables[index]
+                const field = initialValues[index]
                 return (
                   <Form.Item
                     key={name}
                     name={[name, 'value']}
                     label={field.type === 'boolean' ? undefined : `${field.name}·${field.description}`}
+                    valuePropName={field.type === 'boolean' ? 'checked' : 'value'}
                     rules={[
                       { required: field.required, message: field.type === 'boolean' ? t('common.pleaseSelect') : t('common.pleaseEnter') },
                     ]}

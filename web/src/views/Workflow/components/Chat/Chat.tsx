@@ -54,7 +54,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     setChatList([])
   }
   const handleEditVariables = () => {
-    variableConfigModalRef.current?.handleOpen()
+    variableConfigModalRef.current?.handleOpen(variables)
   }
   const handleSave = (values: StartVariableItem[]) => {
     setVariables([...values])
@@ -91,7 +91,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     }])
     setChatList(prev => [...prev, {
       role: 'assistant',
-      content: message,
+      content: '',
       created_at: Date.now(),
     }])
 
