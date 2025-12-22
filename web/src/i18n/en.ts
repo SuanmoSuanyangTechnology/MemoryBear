@@ -585,7 +585,6 @@ export const en = {
       insertContent: 'Insert Content',
       editContent:'Edit Content',
       insertContentPlaceholder: 'Please enter the content',
-      pleaseEnterContent: 'Please enter content',
       documentIdRequired: 'Document ID is required',
       editContentDesc:'Edit content',
       insertContentDesc:'Insert content',
@@ -598,6 +597,10 @@ export const en = {
       semantic:'Semantic',
       hybrid:'Hybrid',
       updateEmbeddingContent:'Are you sure about updating the embedding model? After the update, will the block vector data need to be reconstructed?',
+      question: 'Question',
+      answer: 'Answer',
+      normalMode: 'Normal Mode',
+      qaMode: 'QA Mode',
       createForm:{
         name: 'Name',
         embedding_id: 'Embedding',

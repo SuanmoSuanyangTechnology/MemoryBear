@@ -216,7 +216,6 @@ export const zh = {
       insertContent: '插入内容',
       editContent: '编辑内容',
       insertContentPlaceholder: '请输入内容',
-      pleaseEnterContent: '请输入内容',
       documentIdRequired: '文档ID是必需的',
       editContentDesc: '编辑内容',
       insertContentDesc: '插入内容',
@@ -229,6 +228,10 @@ export const zh = {
       semantic: '语义',
       hybrid: '混合',
       updateEmbeddingContent: '确定要更新嵌入模型吗？更新后，分块向量数据需要重新构建？',
+      question: '问题',
+      answer: '答案',
+      normalMode: '常规模式',
+      qaMode: '问答模式',
       createForm: {
         name: '名称',
         embedding_id: '嵌入模型',
