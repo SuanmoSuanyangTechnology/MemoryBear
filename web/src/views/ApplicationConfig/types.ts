@@ -1,5 +1,7 @@
 import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types'
 import type { ChatItem } from '@/components/Chat/types'
+import type { GraphRef } from '@/views/Workflow/types';
+import type { ApiKey } from '@/views/ApiKeyManagement/types'
 
 export interface ModelConfig {
   label?: string;
@@ -115,6 +117,14 @@ export interface ApplicationModalData {
 // 定义组件暴露的方法接口
 export interface AgentRef {
   handleSave: (flag?: boolean) => Promise<any>;
+}
+export interface ClusterRef {
+  handleSave: (flag?: boolean) => Promise<any>;
+}
+export interface WorkflowRef {
+  handleSave: (flag?: boolean) => Promise<any>;
+  handleRun: () => void;
+  graphRef: GraphRef
 }
 export interface ApplicationModalRef {
   handleOpen: (application?: Config) => void;
