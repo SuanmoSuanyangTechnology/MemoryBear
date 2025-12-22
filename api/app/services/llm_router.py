@@ -385,7 +385,7 @@ class LLMRouter:
             # 获取 API Key 配置
             api_key_config = self.db.query(ModelApiKey).filter(
                 ModelApiKey.model_config_id == self.routing_model_config.id,
-                ModelApiKey.is_active == True
+                ModelApiKey.is_active
             ).first()
             
             if not api_key_config:

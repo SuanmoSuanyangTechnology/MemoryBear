@@ -215,24 +215,58 @@ class StatementNode(Node):
     Attributes:
         chunk_id: ID of the parent chunk this statement belongs to
         stmt_type: Type of the statement (from ontology)
-        temporal_info: Temporal information extracted from the statement
         statement: The actual statement text content
-        connect_strength: Classification of connection strength ('Strong' or 'Weak')
+        emotion_intensity: Optional emotion intensity (0.0-1.0) - displayed on node
+        emotion_target: Optional emotion target (person or object name)
+        emotion_subject: Optional emotion subject (self/other/object)
+        emotion_type: Optional emotion type (joy/sadness/anger/fear/surprise/neutral)
+        emotion_keywords: Optional list of emotion keywords (max 3)
+        temporal_info: Temporal information extracted from the statement
         valid_at: Optional start date of temporal validity
         invalid_at: Optional end date of temporal validity
         statement_embedding: Optional embedding vector for the statement
         chunk_embedding: Optional embedding vector for the parent chunk
+        connect_strength: Classification of connection strength ('Strong' or 'Weak')
         config_id: Configuration ID used to process this statement
     """
+    # Core fields (ordered as requested)
     chunk_id: str = Field(..., description="ID of the parent chunk")
     stmt_type: str = Field(..., description="Type of the statement")
-    temporal_info: TemporalInfo = Field(..., description="Temporal information")
     statement: str = Field(..., description="The statement text content")
-    connect_strength: str = Field(..., description="Strong VS Weak classification of this statement")
+    
+    # Emotion fields (ordered as requested, emotion_intensity first for display)
+    emotion_intensity: Optional[float] = Field(
+        None, 
+        ge=0.0, 
+        le=1.0,
+        description="Emotion intensity: 0.0-1.0 (displayed on node)"
+    )
+    emotion_target: Optional[str] = Field(
+        None,
+        description="Emotion target: person or object name"
+    )
+    emotion_subject: Optional[str] = Field(
+        None,
+        description="Emotion subject: self/other/object"
+    )
+    emotion_type: Optional[str] = Field(
+        None, 
+        description="Emotion type: joy/sadness/anger/fear/surprise/neutral"
+    )
+    emotion_keywords: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Emotion keywords list, max 3 items"
+    )
+    
+    # Temporal fields
+    temporal_info: TemporalInfo = Field(..., description="Temporal information")
     valid_at: Optional[datetime] = Field(None, description="Temporal validity start")
     invalid_at: Optional[datetime] = Field(None, description="Temporal validity end")
+    
+    # Embedding and other fields
     statement_embedding: Optional[List[float]] = Field(None, description="Statement embedding vector")
     chunk_embedding: Optional[List[float]] = Field(None, description="Chunk embedding vector")
+    connect_strength: str = Field(..., description="Strong VS Weak classification of this statement")
     config_id: Optional[int | str] = Field(None, description="Configuration ID used to process this statement (integer or string)")
     
     @field_validator('valid_at', 'invalid_at', mode='before')
@@ -240,6 +274,39 @@ class StatementNode(Node):
     def validate_datetime(cls, v):
         """使用通用的历史日期解析函数"""
         return parse_historical_datetime(v)
+    
+    @field_validator('emotion_type', mode='before')
+    @classmethod
+    def validate_emotion_type(cls, v):
+        """Validate emotion type is one of the valid values"""
+        if v is None:
+            return v
+        valid_types = ['joy', 'sadness', 'anger', 'fear', 'surprise', 'neutral']
+        if v not in valid_types:
+            raise ValueError(f"emotion_type must be one of {valid_types}, got {v}")
+        return v
+    
+    @field_validator('emotion_subject', mode='before')
+    @classmethod
+    def validate_emotion_subject(cls, v):
+        """Validate emotion subject is one of the valid values"""
+        if v is None:
+            return v
+        valid_subjects = ['self', 'other', 'object']
+        if v not in valid_subjects:
+            raise ValueError(f"emotion_subject must be one of {valid_subjects}, got {v}")
+        return v
+    
+    @field_validator('emotion_keywords', mode='before')
+    @classmethod
+    def validate_emotion_keywords(cls, v):
+        """Validate emotion keywords list has max 3 items"""
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            return []
+        # Limit to max 3 keywords
+        return v[:3]
 
 
 class ChunkNode(Node):

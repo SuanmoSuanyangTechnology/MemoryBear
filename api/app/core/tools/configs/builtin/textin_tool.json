@@ -1,0 +1,14 @@
+{
+  "name": "textin_tool",
+  "description": "TextIn OCR工具 - 图像识别：提供通用OCR、手写识别、多语言支持功能",
+  "tool_type": "builtin",
+  "tool_class": "TextInTool",
+  "version": "1.0.0",
+  "enabled": true,
+  "parameters": {
+    "app_id": "",
+    "language": "auto",
+    "recognition_mode": "general"
+  },
+  "tags": ["ocr", "image", "text", "builtin"]
+}

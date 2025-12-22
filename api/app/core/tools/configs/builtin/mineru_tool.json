@@ -1,0 +1,14 @@
+{
+  "name": "mineru_tool",
+  "description": "MinerU PDF解析工具 - 文档处理：提供PDF解析、表格提取、图片识别、文本提取功能",
+  "tool_type": "builtin",
+  "tool_class": "MinerUTool",
+  "version": "1.0.0",
+  "enabled": true,
+  "parameters": {
+    "api_key": "",
+    "parse_mode": "auto",
+    "timeout": 60
+  },
+  "tags": ["pdf", "document", "ocr", "builtin"]
+}

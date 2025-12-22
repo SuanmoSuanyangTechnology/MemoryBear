@@ -37,9 +37,10 @@ def require_api_key(
         @require_api_key(scopes=["app"])
         def chat_with_app(
             resource_id: uuid.UUID,
-            api_key_auth: ApiKeyAuth = Depends(),
+            request: Request,
+            api_key_auth: ApiKeyAuth = None,
             db: Session = Depends(get_db),
-            message: str
+            message: str = Query(..., description="聊天消息内容")
         ):
             # api_key_auth 包含验证后的API Key 信息
             pass
@@ -69,29 +70,6 @@ def require_api_key(
                     "ip_address": request.client.host if request.client else None
                 })
                 raise BusinessException("API Key 无效或已过期", BizCode.API_KEY_INVALID)
-
-            rate_limiter = RateLimiterService()
-            is_allowed, error_msg, rate_headers = await rate_limiter.check_all_limits(api_key_obj)
-            if not is_allowed:
-                logger.warning("API Key 限流触发", extra={
-                    "api_key_id": str(api_key_obj.id),
-                    "endpoint": str(request.url),
-                    "method": request.method,
-                    "error_msg": error_msg
-                })
-                # 根据错误消息判断限流类型
-                if "QPS" in error_msg:
-                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED
-                elif "Daily" in error_msg:
-                    code = BizCode.API_KEY_DAILY_LIMIT_EXCEEDED
-                else:
-                    code = BizCode.API_KEY_QUOTA_EXCEEDED
-
-                raise RateLimitException(
-                    error_msg,
-                    code,
-                    rate_headers=rate_headers
-                )
 
             if scopes:
                 missing_scopes = []
@@ -138,6 +116,30 @@ def require_api_key(
                 scopes=api_key_obj.scopes,
                 resource_id=api_key_obj.resource_id,
             )
+
+            rate_limiter = RateLimiterService()
+            is_allowed, error_msg, rate_headers = await rate_limiter.check_all_limits(api_key_obj)
+            if not is_allowed:
+                logger.warning("API Key 限流触发", extra={
+                    "api_key_id": str(api_key_obj.id),
+                    "endpoint": str(request.url),
+                    "method": request.method,
+                    "error_msg": error_msg
+                })
+                # 根据错误消息判断限流类型
+                if "QPS" in error_msg:
+                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED
+                elif "Daily" in error_msg:
+                    code = BizCode.API_KEY_DAILY_LIMIT_EXCEEDED
+                else:
+                    code = BizCode.API_KEY_QUOTA_EXCEEDED
+
+                raise RateLimitException(
+                    error_msg,
+                    code,
+                    rate_headers=rate_headers
+                )
+
             start_time = time.perf_counter()
             response = await func(*args, **kwargs)
             end_time = time.perf_counter()
