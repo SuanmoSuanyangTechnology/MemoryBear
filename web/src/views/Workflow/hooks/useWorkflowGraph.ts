@@ -75,7 +75,7 @@ export const useWorkflowGraph = ({
 
     if (nodes.length) {
       const nodeList = nodes.map(node => {
-        const { id, type, name, position, config } = node
+        const { id, type, name, position, config = {} } = node
         let nodeLibraryConfig = [...nodeLibrary]
           .flatMap(category => category.nodes)
           .find(n => n.type === type)
@@ -84,7 +84,7 @@ export const useWorkflowGraph = ({
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
             if (nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
-              nodeLibraryConfig.config[key].defaultValue = config[key]
+              nodeLibraryConfig.config[key].defaultValue = config[key] || {}
             }
           })
         }
