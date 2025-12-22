@@ -1,6 +1,7 @@
-import uuid
 import datetime
-from typing import Optional, Any, List, Dict, TYPE_CHECKING
+import uuid
+from typing import Optional, Any, List, Dict
+
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
 
 
@@ -20,18 +21,17 @@ class KnowledgeBaseConfig(BaseModel):
 class KnowledgeRetrievalConfig(BaseModel):
     """知识库检索配置（支持多个知识库，每个有独立配置）"""
     knowledge_bases: List[KnowledgeBaseConfig] = Field(
-        default_factory=list, 
+        default_factory=list,
         description="关联的知识库列表，每个知识库有独立配置"
     )
-    
+
     # 多知识库融合策略
     merge_strategy: str = Field(
-        default="weighted", 
+        default="weighted",
         description="多知识库结果融合策略: weighted | rrf | concat"
     )
     reranker_id: Optional[str] = Field(default=None, description="多知识库结果融合的模型ID")
     reranker_top_k: int = Field(default=10, ge=0, le=1024, description="多知识库结果融合的模型参数")
-
 
 
 class ToolConfig(BaseModel):
@@ -63,7 +63,7 @@ class VariableDefinition(BaseModel):
     name: str = Field(..., description="变量名称（标识符）")
     display_name: Optional[str] = Field(None, description="显示名称（用户看到的名称）")
     type: str = Field(
-        default="string", 
+        default="string",
         description="变量类型: string(单行文本) | text(多行文本) | number(数字)"
     )
     required: bool = Field(default=False, description="是否必填")
@@ -75,32 +75,32 @@ class AgentConfigCreate(BaseModel):
     """Agent 行为配置"""
     # 提示词配置
     system_prompt: Optional[str] = Field(default=None, description="系统提示词，定义 Agent 的角色和行为准则")
-    
+
     # 模型配置
     default_model_config_id: Optional[uuid.UUID] = Field(default=None, description="默认使用的模型配置ID")
     model_parameters: ModelParameters = Field(
         default_factory=ModelParameters,
         description="模型参数配置（temperature、max_tokens 等）"
     )
-    
+
     # 知识库关联
     knowledge_retrieval: Optional[KnowledgeRetrievalConfig] = Field(
         default=None,
         description="知识库检索配置"
     )
-    
+
     # 记忆配置
     memory: MemoryConfig = Field(
         default_factory=lambda: MemoryConfig(enabled=True),
         description="对话历史记忆配置"
     )
-    
+
     # 变量配置
     variables: List[VariableDefinition] = Field(
         default_factory=list,
         description="Agent 可用的变量列表"
     )
-    
+
     # 工具配置
     tools: Dict[str, ToolConfig] = Field(
         default_factory=dict,
@@ -120,7 +120,7 @@ class AppCreate(BaseModel):
 
     # only for type=agent
     agent_config: Optional[AgentConfigCreate] = None
-    
+
     # only for type=multi_agent
     multi_agent_config: Optional[Dict[str, Any]] = None
 
@@ -139,23 +139,23 @@ class AgentConfigUpdate(BaseModel):
     """更新 Agent 行为配置"""
     # 提示词配置
     system_prompt: Optional[str] = Field(default=None, description="系统提示词")
-    
+
     # 模型配置
     default_model_config_id: Optional[uuid.UUID] = Field(default=None, description="默认模型配置ID")
     model_parameters: Optional[ModelParameters] = Field(default=None, description="模型参数配置")
-    
+
     # 知识库关联
     knowledge_retrieval: Optional[KnowledgeRetrievalConfig] = Field(
         default=None,
         description="知识库检索配置"
     )
-    
+
     # 记忆配置
     memory: Optional[MemoryConfig] = Field(default=None, description="对话历史记忆配置")
-    
+
     # 变量配置
     variables: Optional[List[VariableDefinition]] = Field(default=None, description="变量列表")
-    
+
     # 工具配置
     tools: Optional[Dict[str, ToolConfig]] = Field(default=None, description="工具配置")
 
@@ -185,7 +185,7 @@ class App(BaseModel):
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
@@ -197,26 +197,26 @@ class AgentConfig(BaseModel):
 
     id: uuid.UUID
     app_id: uuid.UUID
-    
+
     # 提示词
     system_prompt: Optional[str] = None
-    
+
     # 模型配置
     default_model_config_id: Optional[uuid.UUID] = None
     model_parameters: ModelParameters = Field(default_factory=ModelParameters)
-    
+
     # 知识库检索
     knowledge_retrieval: Optional[KnowledgeRetrievalConfig] = None
-    
+
     # 记忆配置
     memory: MemoryConfig = Field(default_factory=lambda: MemoryConfig(enabled=True))
-    
+
     # 变量配置
     variables: List[VariableDefinition] = []
-    
+
     # 工具配置
     tools: Dict[str, ToolConfig] = {}
-    
+
     is_active: bool
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -228,7 +228,7 @@ class AgentConfig(BaseModel):
         if v is None:
             return ModelParameters()
         return v
-    
+
     @field_validator("memory", mode="before")
     @classmethod
     def validate_memory(cls, v):
@@ -236,7 +236,7 @@ class AgentConfig(BaseModel):
         if v is None:
             return MemoryConfig(enabled=True)
         return v
-    
+
     @field_validator("variables", mode="before")
     @classmethod
     def validate_variables(cls, v):
@@ -244,7 +244,7 @@ class AgentConfig(BaseModel):
         if v is None:
             return []
         return v
-    
+
     @field_validator("tools", mode="before")
     @classmethod
     def validate_tools(cls, v):
@@ -256,7 +256,7 @@ class AgentConfig(BaseModel):
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
@@ -294,15 +294,15 @@ class AppRelease(BaseModel):
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-        
+
     @field_serializer("published_at", when_used="json")
     def _serialize_published_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
 
 # ---------- App Share Schemas ----------
 
@@ -314,7 +314,7 @@ class AppShareCreate(BaseModel):
 class AppShare(BaseModel):
     """应用分享输出"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: uuid.UUID
     source_app_id: uuid.UUID
     source_workspace_id: uuid.UUID
@@ -322,11 +322,11 @@ class AppShare(BaseModel):
     shared_by: uuid.UUID
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    
+
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
@@ -338,6 +338,7 @@ class DraftRunRequest(BaseModel):
     """试运行请求"""
     message: str = Field(..., description="用户消息")
     conversation_id: Optional[str] = Field(default=None, description="会话ID（用于多轮对话）")
+    conversation_vars: Optional[dict[str, Any]] = Field(default=None, description="会话变量")
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
@@ -382,14 +383,14 @@ class DraftRunCompareRequest(BaseModel):
     conversation_id: Optional[str] = Field(None, description="会话ID")
     user_id: Optional[str] = Field(None, description="用户ID")
     variables: Optional[Dict[str, Any]] = Field(None, description="变量参数")
-    
+
     models: List[ModelCompareItem] = Field(
         ...,
         min_length=1,
         max_length=5,
         description="要对比的模型列表（1-5个）"
     )
-    
+
     parallel: bool = Field(True, description="是否并行执行")
     stream: bool = Field(False, description="是否流式返回")
     timeout: Optional[int] = Field(60, ge=10, le=300, description="超时时间（秒）")
@@ -400,14 +401,14 @@ class ModelRunResult(BaseModel):
     model_config_id: uuid.UUID
     model_name: str
     label: Optional[str] = None
-    
+
     parameters_used: Dict[str, Any] = Field(..., description="实际使用的参数")
-    
+
     message: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
     elapsed_time: float
     error: Optional[str] = None
-    
+
     tokens_per_second: Optional[float] = None
     cost_estimate: Optional[float] = None
     conversation_id: Optional[str] = None
@@ -416,10 +417,10 @@ class ModelRunResult(BaseModel):
 class DraftRunCompareResponse(BaseModel):
     """多模型对比响应"""
     results: List[ModelRunResult]
-    
+
     total_elapsed_time: float
     successful_count: int
     failed_count: int
-    
+
     fastest_model: Optional[str] = None
     cheapest_model: Optional[str] = None
