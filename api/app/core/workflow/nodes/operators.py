@@ -100,7 +100,8 @@ class ArrayOperator(OperatorBase):
         self.check()
         # TODO：require type limit in list
         origin = self.pool.get(self.left_selector)
-        self.pool.set(self.left_selector, origin.append(self.right))
+        origin.append(self.right)
+        self.pool.set(self.left_selector, origin)
 
     def extend(self) -> None:
         self.check(no_right=True)
@@ -110,12 +111,14 @@ class ArrayOperator(OperatorBase):
     def remove_last(self) -> None:
         self.check(no_right=True)
         origin = self.pool.get(self.left_selector)
-        self.pool.set(self.left_selector, origin.pop())
+        origin.pop()
+        self.pool.set(self.left_selector, origin)
 
     def remove_first(self) -> None:
         self.check(no_right=True)
         origin = self.pool.get(self.left_selector)
-        self.pool.set(self.left_selector, origin.pop(0))
+        origin.pop(0)
+        self.pool.set(self.left_selector, origin)
 
 
 class ObjectOperator(OperatorBase):
