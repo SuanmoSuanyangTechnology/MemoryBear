@@ -19,10 +19,32 @@ import uuid
 
 from pydantic import BaseModel
 
+
 from app.core.response_utils import success
 from app.repositories.neo4j.cypher_queries import neo4j_query_part, neo4j_statement_part, neo4j_query_all,  neo4j_statement_all
 from app.repositories.neo4j.neo4j_update import neo4j_data
+
+from app.core.memory.llm_tools.openai_client import OpenAIClient
+from app.core.memory.utils.config import definitions as config_defs
+from app.core.memory.utils.config import get_model_config
+from app.core.memory.utils.config.get_data import get_data
+from app.core.memory.utils.config.get_data import get_data_statement
+from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.core.memory.utils.prompt.template_render import render_evaluate_prompt
+from app.core.memory.utils.prompt.template_render import render_reflexion_prompt
+from app.core.models.base import RedBearModelConfig
+from app.repositories.neo4j.cypher_queries import (
+    neo4j_query_all,
+    neo4j_query_part,
+    neo4j_statement_all,
+    neo4j_statement_part,
+)
+from app.repositories.neo4j.cypher_queries import UPDATE_STATEMENT_INVALID_AT
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.repositories.neo4j.neo4j_update import neo4j_data
+from app.schemas.memory_storage_schema import ConflictResultSchema
+from app.schemas.memory_storage_schema import ReflexionResultSchema
+
 
 # 配置日志
 _root_logger = logging.getLogger()
@@ -122,6 +144,7 @@ class ReflectionEngine:
         self.update_query = update_query
         self._semaphore = asyncio.Semaphore(5)  # 默认并发数为5
 
+
         # 延迟导入以避免循环依赖
         self._lazy_init_done = False
 
@@ -131,46 +154,53 @@ class ReflectionEngine:
             return
 
         if self.neo4j_connector is None:
-            from app.repositories.neo4j.neo4j_connector import Neo4jConnector
             self.neo4j_connector = Neo4jConnector()
 
         if self.llm_client is None:
-            from app.core.memory.utils.llm.llm_utils import get_llm_client
-            from app.core.memory.utils.config import definitions as config_defs
             self.llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
         elif isinstance(self.llm_client, str):
             # 如果 llm_client 是字符串（model_id），则用它初始化客户端
-            from app.core.memory.utils.llm.llm_utils import get_llm_client
-            model_id = self.llm_client
-            self.llm_client = get_llm_client(model_id)
+            # from app.core.memory.utils.llm.llm_utils import get_llm_client
+            # model_id = self.llm_client
+            # self.llm_client = get_llm_client(model_id)
+            extra_params={
+                    "temperature": 0.2,  # 降低温度提高响应速度和一致性
+                    "max_tokens": 600,  # 限制最大token数
+                    "top_p": 0.8,  # 优化采样参数
+                    "stream": False,  # 确保非流式输出以获得最快响应
+                }
+
+            model_config = get_model_config(self.llm_client)
+            self.llm_client  = OpenAIClient(RedBearModelConfig(
+                model_name=model_config.get("model_name"),
+                provider=model_config.get("provider"),
+                api_key=model_config.get("api_key"),
+                base_url=model_config.get("base_url"),
+                timeout=model_config.get("timeout", 30),
+                max_retries=model_config.get("max_retries", 2),
+                extra_params=extra_params
+            ), type_=model_config.get("type"))
 
         if self.get_data_func is None:
-            from app.core.memory.utils.config.get_data import get_data
             self.get_data_func = get_data
 
         # 导入get_data_statement函数
         if not hasattr(self, 'get_data_statement'):
-            from app.core.memory.utils.config.get_data import get_data_statement
             self.get_data_statement = get_data_statement
 
         if self.render_evaluate_prompt_func is None:
-            from app.core.memory.utils.prompt.template_render import render_evaluate_prompt
             self.render_evaluate_prompt_func = render_evaluate_prompt
 
         if self.render_reflexion_prompt_func is None:
-            from app.core.memory.utils.prompt.template_render import render_reflexion_prompt
             self.render_reflexion_prompt_func = render_reflexion_prompt
 
         if self.conflict_schema is None:
-            from app.schemas.memory_storage_schema import ConflictResultSchema
             self.conflict_schema = ConflictResultSchema
 
         if self.reflexion_schema is None:
-            from app.schemas.memory_storage_schema import ReflexionResultSchema
             self.reflexion_schema = ReflexionResultSchema
 
         if self.update_query is None:
-            from app.repositories.neo4j.cypher_queries import UPDATE_STATEMENT_INVALID_AT
             self.update_query = UPDATE_STATEMENT_INVALID_AT
 
         self._lazy_init_done = True
@@ -284,7 +314,6 @@ class ReflectionEngine:
         quality_assessments = []
         memory_verifies = []
         for item in conflict_data:
-            print(item)
             quality_assessments.append(item['quality_assessment'])
             memory_verifies.append(item['memory_verify'])
         result_data['quality_assessments'] = quality_assessments
@@ -298,8 +327,18 @@ class ReflectionEngine:
         # 记录冲突数据
         await self._log_data("conflict", conflict_data)
 
+        # Clearn conflict_data，And memory_verify和quality_assessment
+        cleaned_conflict_data = []
+        for item in conflict_data:
+            cleaned_item = {
+                'data': item['data'],
+                'conflict': item['conflict']
+            }
+            cleaned_conflict_data.append(cleaned_item)
+        print(cleaned_conflict_data)
+
         # 3. 解决冲突
-        solved_data = await self._resolve_conflicts(conflict_data, source_data)
+        solved_data = await self._resolve_conflicts(cleaned_conflict_data, source_data)
         if not solved_data:
             return ReflectionResult(
                 success=False,
@@ -391,7 +430,7 @@ class ReflectionEngine:
             return []
 
         # 使用转换后的数据
-        print("转换后的数据:", data[:2] if len(data) > 2 else data)  # 只打印前2条避免日志过长
+        # print("转换后的数据:", data[:2] if len(data) > 2 else data)  # 只打印前2条避免日志过长
         memory_verify = self.config.memory_verify
 
         logging.info("====== 冲突检测开始 ======")
@@ -469,6 +508,7 @@ class ReflectionEngine:
                         memory_verify,
                         statement_databasets
                     )
+                    logging.info(f"提示词长度: {len(rendered_prompt)}")
 
                     messages = [{"role": "user", "content": rendered_prompt}]
 
@@ -629,4 +669,3 @@ class ReflectionEngine:
             )
         else:
             raise ValueError(f"未知的反思基线: {self.config.baseline}")
-

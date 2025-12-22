@@ -31,13 +31,8 @@ class BaseDataSchema(BaseModel):
     # 保持原有必需字段为可选，以兼容不同数据源
     id: Optional[str] = Field(None, description="The unique identifier for the data entry.")
     statement: Optional[str] = Field(None, description="The statement text.")
-    group_id: Optional[str] = Field(None, description="The group identifier.")
-    chunk_id: Optional[str] = Field(None, description="The chunk identifier.")
     created_at: str = Field(..., description="The creation timestamp in ISO 8601 format.")
     expired_at: Optional[str] = Field(None, description="The expiration timestamp in ISO 8601 format.")
-    valid_at: Optional[str] = Field(None, description="The validation timestamp in ISO 8601 format.")
-    invalid_at: Optional[str] = Field(None, description="The invalidation timestamp in ISO 8601 format.")
-    entity_ids: List[str] = Field([], description="The list of entity identifiers.")
     description: Optional[str] = Field(None, description="The description of the data entry.")
 
     # 新增字段以匹配实际输入数据
