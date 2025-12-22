@@ -97,7 +97,7 @@ class ArrayOperator(OperatorBase):
         self.pool.set(self.left_selector, list())
 
     def append(self) -> None:
-        self.check()
+        self.check(no_right=True)
         # TODO：require type limit in list
         origin = self.pool.get(self.left_selector)
         origin.append(self.right)
