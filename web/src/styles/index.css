@@ -175,3 +175,9 @@ body {
 .ant-breadcrumb a:hover {
   background-color: transparent;
 }
+
+/* X6 节点样式 */
+.x6-node foreignObject > body {
+  min-height: 100%;
+  max-height: 100%;
+}

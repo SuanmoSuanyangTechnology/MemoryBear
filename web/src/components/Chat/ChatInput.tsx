@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2025-12-10 16:49:13
+ * @Last Modified time: 2025-12-20 15:38:40
  */
 import { useEffect } from 'react'
 import { Flex, Input, Form } from 'antd'
@@ -40,7 +40,7 @@ const ChatInput = ({ message, onChange, onSend, loading, children }: ChatInputPr
 
   return (
     <div className="rb:absolute rb:bottom-3 rb:left-0 rb:right-0">
-      <Flex vertical justify="space-between" className="rb:border rb:border-[#DFE4ED] rb:rounded-xl rb:min-h-[120px]">
+      <Flex vertical justify="space-between" className="rb:border rb:border-[#DFE4ED] rb:rounded-xl rb:min-h-30">
         {/* 消息输入表单 */}
         <Form form={form} layout="vertical">
             <Form.Item name="message" noStyle>
@@ -66,10 +66,10 @@ const ChatInput = ({ message, onChange, onSend, loading, children }: ChatInputPr
           {children}
           {/* 发送按钮 - 根据状态显示不同图标 */}
           {loading
-            ? <img src={LoadingIcon} className="rb:w-[22px] rb:h-[22px] rb:cursor-pointer" />
+            ? <img src={LoadingIcon} className="rb:w-5.5 rb:h-5.5 rb:cursor-pointer" />
             : !values || !values?.message || values?.message?.trim() === ''
-            ? <img src={SendDisabledIcon} className="rb:w-[22px] rb:h-[22px] rb:cursor-pointer" />
-            : <img src={SendIcon} className="rb:w-[22px] rb:h-[22px] rb:cursor-pointer" onClick={onSend} />
+            ? <img src={SendDisabledIcon} className="rb:w-5.5 rb:h-5.5 rb:cursor-pointer" />
+            : <img src={SendIcon} className="rb:w-5.5 rb:h-5.5 rb:cursor-pointer" onClick={onSend} />
           }
         </Flex>
       </Flex>
