@@ -138,6 +138,15 @@ export const useWorkflowGraph = ({
       })
       graphRef.current.addEdges(edgeList.filter(vo => vo !== null))
     }
+    
+    // 初始化完成后，将节点展示在可视区域内
+    if (nodes.length > 0 || edges.length > 0) {
+      setTimeout(() => {
+        if (graphRef.current) {
+          graphRef.current.centerContent()
+        }
+      }, 200)
+    }
   }
 
   const saveState = () => {

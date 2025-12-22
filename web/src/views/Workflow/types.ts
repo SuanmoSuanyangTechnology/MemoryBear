@@ -75,7 +75,7 @@ export interface WorkflowConfig {
 }
 
 export interface VariableEditModalRef {
-  handleOpen: (values?: StartVariableItem) => void;
+  handleOpen: (values: StartVariableItem[]) => void;
 }
 export interface StartVariableItem {
   name: string;

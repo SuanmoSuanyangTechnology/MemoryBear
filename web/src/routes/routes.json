@@ -28,7 +28,7 @@
       { "path": "/api-key", "element": "ApiKeyManagement" },
       { "path": "/emotion-engine/:id", "element": "EmotionEngine" },
       { "path": "/reflection-engine/:id", "element": "SelfReflectionEngine" },
-      { "path": "/user-memory/emotion/:id", "element": "EmotionDetail" },
+      { "path": "/statement/:id", "element": "StatementDetail" },
       { "path": "/no-permission", "element": "NoPermission" },
       { "path": "/*", "element": "NotFound" }
     ]

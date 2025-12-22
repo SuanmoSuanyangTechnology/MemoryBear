@@ -8,22 +8,15 @@ import down from '@/assets/images/userMemory/down.svg'
 import interestDistribution from '@/assets/images/userMemory/interestDistribution.svg'
 import PieCard from './components/PieCard'
 import RbCard from '@/components/RbCard/Card'
-import type { Data } from './types'
 import {
   getUserSummary,
-  getUserProfile,
-  getTotalMemoryCountByUser,
 } from '@/api/memory'
 import RelationshipNetwork from './components/RelationshipNetwork'
 import MemoryInsight from './components/MemoryInsight'
 import Empty from '@/components/Empty'
 
-import WordCloud from './components/WordCloud'
-import EmotionTags from './components/EmotionTags'
-import Health from './components/Health'
-import Suggestions from './components/Suggestions'
-
-const tagColors = ['21, 94, 239', '156, 111, 255', '255, 93, 52', '54, 159, 33']
+import NodeStatistics from './components/NodeStatistics'
+import EndUserProfile from './components/EndUserProfile'
 
 interface TitleProps {
   type: string;
@@ -34,15 +27,15 @@ interface TitleProps {
   onClick: (type: string) => void;
 }
 const Title: FC<TitleProps> = ({ type, title, icon, t, expanded, onClick }) => (
-  <div className="rb:flex rb:items-center rb:justify-between rb:py-[17px] rb:border-b-[1px] rb:border-[#DFE4ED] rb:text-[16px] rb:font-semibold rb:leading-[22px]">
+  <div className="rb:flex rb:items-center rb:justify-between rb:py-4.25 rb:border-b rb:border-[#DFE4ED] rb:text-[16px] rb:font-semibold rb:leading-5.5">
     <span className="rb:flex rb:items-center">
-      <img src={icon} className="rb:w-[20px] rb:h-[20px] rb:mr-[8px]" />
+      <img src={icon} className="rb:w-5 rb:h-5 rb:mr-2" />
       {title}
     </span>
 
-    <span className="rb:flex rb:items-center rb:cursor-pointer rb:text-[#5B6167] rb:text-[14px] rb:font-regular rb:leading-[20px]" onClick={() => onClick(type)}>
+    <span className="rb:flex rb:items-center rb:cursor-pointer rb:text-[#5B6167] rb:text-[14px] rb:font-regular rb:leading-5" onClick={() => onClick(type)}>
       {t(`userMemory.${expanded ? 'foldUp' : 'expanded'}`)}
-      <img src={down} className={clsx("rb:w-[16px] rb:h-[16px] rb:ml-[4px]", {
+      <img src={down} className={clsx("rb:w-4 rb:h-4 rb:ml-1", {
         'rb:rotate-180': !expanded,
       })} />
     </span>
@@ -52,46 +45,19 @@ const Title: FC<TitleProps> = ({ type, title, icon, t, expanded, onClick }) => (
 const Neo4j: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
-  const [data, setData] = useState<Data | null>(null)
   const [expanded, setExpanded] = useState<string[]>(['aboutUs', 'interestDistribution', 'importantRelationships', 'importantMomentsInLife'])
   const [summary, setSummary] = useState<string | null>(null)
   const [loading, setLoading] = useState<Record<string, boolean>>({
-    detail: false,
     summary: false,
   })
-  const [memory, setMemory] = useState<number | null>(null)
 
   useEffect(() => {
     if (!id) return
-    getMemory()
     getSummary()
-    getDetail()
   }, [id])
 
   const handleTitleClick = (key: string) => {
     setExpanded(expanded.includes(key) ? expanded.filter((item) => item !== key) : [...expanded, key])
-  }
-  // 用户记忆详情
-  const getDetail = () => {
-    if (!id) return
-    setLoading(prev => ({ ...prev, detail: true }))
-    getUserProfile(id).then((res) => {
-      setData((res as Data))
-    })
-    .finally(() => {
-      setLoading(prev => ({ ...prev, detail: false }))
-    })
-  }
-  // 记忆总览
-  const getMemory = () => {
-    if (!id) return
-    setLoading(prev => ({ ...prev, memory: true }))
-    getTotalMemoryCountByUser(id).then((res) => {
-      setMemory(res.total)
-    })
-    .finally(() => {
-      setLoading(prev => ({ ...prev, memory: false }))
-    })
   }
   // 用户摘要
   const getSummary = () => {
@@ -105,42 +71,15 @@ const Neo4j: FC = () => {
     })
   }
 
-  const name = loading.detail ? '' : data?.name && data?.name !== '' ? data.name : id
   return (
     <Row gutter={[16, 16]} className="rb:pb-6">
       <Col span={8}>
-
         <Row gutter={[16, 16]}>
           <Col span={24}>
+            <EndUserProfile />
+          </Col>
+          <Col span={24}>
             <RbCard>
-              <div className="rb:flex rb:items-center">
-                <div className="rb:flex-[0_0_auto] rb:w-[80px] rb:h-[80px] rb:text-center rb:font-semibold rb:text-[28px] rb:leading-[80px] rb:rounded-[8px] rb:text-[#FBFDFF] rb:bg-[#155EEF]">{name?.[0]}</div>
-                <div className="rb:text-[24px] rb:font-semibold rb:leading-[32px] rb:ml-[16px]">
-                  {name}<br/>
-                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-[16px] rb:mt-[8px]">{data?.tags?.join(' | ')}</div>
-                </div>
-              </div>
-
-              <div className="rb:flex rb:gap-[8px] rb:mb-[8px] rb:flex-wrap rb:mt-[25px]">
-                {data?.hot_tags?.map((tag, tagIndex) => (
-                  <span key={tag} className="rb:rounded-[11px] rb:p-[0_8px] rb:leading-[22px] rb:border"
-                    style={{
-                      backgroundColor: `rgba(${tagColors[tagIndex % tagColors.length]}, 0.08)`,
-                      borderColor: `rgba(${tagColors[tagIndex % tagColors.length]}, 0.3)`,
-                      color: `rgba(${tagColors[tagIndex % tagColors.length]}, 1)`,
-                    }}
-                  >
-                    {tag.name}({tag.frequency})
-                  </span>
-                ))}
-              </div>
-
-              {/* 记忆总量 */}
-              <div className="rb:font-regular rb:text-[12px] rb:text-[#5B6167] rb:leading-[16px] rb:mb-[25px]">
-                {t('userMemory.totalNumOfMemories')}
-                <div className="rb:font-extrabold rb:text-[24px] rb:text-[#212332] rb:leading-[30px] rb:mt-[8px]">{memory || 0}</div>
-              </div>
-
               {/* 关于我 */}
               <>
                 <Title
@@ -154,12 +93,12 @@ const Neo4j: FC = () => {
                 {expanded.includes('aboutUs') && (
                   <>
                     {loading.summary
-                      ? <Skeleton className="rb:mt-[16px]" />
+                      ? <Skeleton className="rb:mt-4" />
                       : summary 
-                      ? <div className="rb:font-regular rb:leading-[22px] rb:pt-[16px]">
+                      ? <div className="rb:font-regular rb:leading-5.5 rb:pt-4">
                         {summary || '-'}
                       </div>
-                      : <Empty size={88} className="rb:mt-[48px] rb:mb-[81px]" />
+                      : <Empty size={88} className="rb:mt-12 rb:mb-20.25" />
                     }
                   </>
                 )}
@@ -182,28 +121,19 @@ const Neo4j: FC = () => {
               </>
             </RbCard>
           </Col>
-          <Col span={24}>
-            <EmotionTags />
-          </Col>
         </Row>
       </Col>
       <Col span={16}>
         <Row gutter={[16, 16]}>
+          <Col span={24}>
+            <NodeStatistics />
+          </Col>
           {/* 记忆洞察 */}
           <Col span={24}>
             <MemoryInsight />
           </Col>
           {/* 关系网络 + 记忆详情 */}
           <RelationshipNetwork />
-          <Col span={12}>
-            <WordCloud />
-          </Col>
-          <Col span={12}>
-            <Health />
-          </Col>
-          <Col span={24}>
-            <Suggestions />
-          </Col>
         </Row>
       </Col>
     </Row>

@@ -36,7 +36,7 @@ export const en = {
       apiKeyManagement: 'API KEY Management',
       toolManagement: 'Tool Management',
       emotionEngine: 'Emotion Engine',
-      emotionDetail: 'Emotion Memory',
+      statementDetail: 'Emotion Memory',
       selfReflectionEngine: 'Self Reflection Engine',
     },
     dashboard: {
@@ -1037,7 +1037,24 @@ export const en = {
       conversationMemory: 'Conversation Storage Content',
       sortByTimeDesc: 'Sort by time in descending order',
       editConfig: 'Edit Config',
-      chooseModel: 'Choose Model'
+      chooseModel: 'Choose Model',
+
+      nodeStatistics: 'Memory Classification',
+      total: 'Total',
+      Chunk: 'Long-term Memory',
+      MemorySummary: 'Episodic Memory',
+      Statement: 'Emotional Memory',
+      ExtractedEntity: 'Short-term Memory',
+      endUserProfile: 'Core Profile',
+      editEndUserProfile: 'Edit',
+      name: 'Name',
+      position: 'Position',
+      department: 'Department',
+      contact: 'Contact',
+      phone: 'Phone',
+      hire_date: 'Hire Date',
+      memoryContent: 'Memory Content',
+      created_at: 'Created At',
     },
     space: {
       createSpace: 'Create Space',
@@ -1626,7 +1643,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       expect_improvement_tag: 'Only low threshold will record',
       confidence: 'Confidence'
     },
-    emotionDetail: {
+    statementDetail: {
       wordCloud: 'Emotion Distribution Analysis',
       pieces: 'items',
       emotionTags: 'High-Frequency Emotion Keywords',
