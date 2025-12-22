@@ -39,8 +39,11 @@ class BaseDataSchema(BaseModel):
     entity1_name: str = Field(..., description="The first entity name.")
     entity2_name: Optional[str] = Field(None, description="The second entity name.")
     statement_id: str = Field(..., description="The statement identifier.")
-    relationship_type: str = Field(..., description="The relationship type.")
-    relationship: Optional[Dict[str, Any]] = Field(None, description="The relationship object.")
+    # 新增字段 - 设为可选以保持向后兼容性
+    predicate: Optional[str] = Field(None, description="The predicate describing the relationship between entities.")
+    relationship_statement_id: Optional[str] = Field(None, description="The relationship statement identifier.")
+    # 保留原有字段 - 修改relationship字段类型以支持字符串和字典
+    relationship: Optional[Union[str, Dict[str, Any]]] = Field(None, description="The relationship object or string.")
     entity2: Optional[Dict[str, Any]] = Field(None, description="The second entity object.")
 
 
@@ -94,8 +97,17 @@ class ReflexionSchema(BaseModel):
 
 
 class ChangeRecordSchema(BaseModel):
-    """Schema for individual change records"""
-    field: List[Dict[str, str]] = Field(..., description="List of field changes, each containing field name and new value.")
+    """Schema for individual change records
+    
+    字段值格式说明：
+    - id 和 statement_id: 字符串或 None
+    - 其他字段: 可以是字符串、None，数组 [修改前的值, 修改后的值]，或嵌套字典结构
+    - entity2等嵌套对象的字段也遵循 [old_value, new_value] 格式
+    """
+    field: List[Dict[str, Any]] = Field(
+        ..., 
+        description="List of field changes. First item: {id: value or None}, second: {statement_id: value}, followed by changed fields as {field_name: [old_value, new_value]} or {field_name: new_value} or nested structures like {entity2: {field_name: [old, new]}}"
+    )
 
 class ResolvedSchema(BaseModel):
     """Schema for the resolved memory data in the reflexion_data"""

@@ -18,17 +18,10 @@ from enum import Enum
 import uuid
 
 from pydantic import BaseModel
-
-
-from app.core.response_utils import success
-from app.repositories.neo4j.cypher_queries import neo4j_query_part, neo4j_statement_part, neo4j_query_all,  neo4j_statement_all
-from app.repositories.neo4j.neo4j_update import neo4j_data
-
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.config import definitions as config_defs
 from app.core.memory.utils.config import get_model_config
-from app.core.memory.utils.config.get_data import get_data
-from app.core.memory.utils.config.get_data import get_data_statement
+from app.core.memory.utils.config.get_data import get_data,get_data_statement,extract_and_process_changes
 from app.core.memory.utils.llm.llm_utils import get_llm_client
 from app.core.memory.utils.prompt.template_render import render_evaluate_prompt
 from app.core.memory.utils.prompt.template_render import render_reflexion_prompt
@@ -44,7 +37,6 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.repositories.neo4j.neo4j_update import neo4j_data
 from app.schemas.memory_storage_schema import ConflictResultSchema
 from app.schemas.memory_storage_schema import ReflexionResultSchema
-
 
 # 配置日志
 _root_logger = logging.getLogger()
@@ -241,8 +233,7 @@ class ReflectionEngine:
             print(100 * '-')
             print(conflict_data)
             print(100 * '-')
-
-            # 检查是否真的有冲突
+            # # 检查是否真的有冲突
             has_conflict = conflict_data[0].get('conflict', False)
             conflicts_found = len(conflict_data[0]['data']) if has_conflict else 0
             logging.info(f"冲突状态: {has_conflict}, 发现 {conflicts_found} 个冲突")
@@ -270,7 +261,7 @@ class ReflectionEngine:
             await self._log_data("solved_data", solved_data)
 
             # 4. 应用反思结果（更新记忆库）
-            memories_updated = await self._apply_reflection_results(solved_data)
+            memories_updated=await self._apply_reflection_results(solved_data)
 
             execution_time = asyncio.get_event_loop().time() - start_time
 
@@ -297,6 +288,7 @@ class ReflectionEngine:
     async def reflection_run(self):
         self._lazy_init()
         start_time = time.time()
+        memory_verifies_flag = self.config.memory_verify
 
         asyncio.get_event_loop().time()
         logging.info("====== 自我反思流程开始 ======")
@@ -316,8 +308,8 @@ class ReflectionEngine:
         for item in conflict_data:
             quality_assessments.append(item['quality_assessment'])
             memory_verifies.append(item['memory_verify'])
-        result_data['quality_assessments'] = quality_assessments
         result_data['memory_verifies'] = memory_verifies
+        result_data['quality_assessments'] = quality_assessments
 
         # 检查是否真的有冲突
         has_conflict = conflict_data[0].get('conflict', False)
@@ -354,6 +346,9 @@ class ReflectionEngine:
                 for result in item['results']:
                     reflexion_data.append(result['reflexion'])
         result_data['reflexion_data'] = reflexion_data
+        if memory_verifies_flag==False:
+            result_data['memory_verifies']=[None]
+        print(time.time()-start_time,'----------')
         return result_data
 
 
@@ -561,7 +556,8 @@ class ReflectionEngine:
         Returns:
             int: 成功更新的记忆数量
         """
-        success_count = await neo4j_data(solved_data)
+        changes = extract_and_process_changes(solved_data)
+        success_count = await neo4j_data(changes)
         return success_count
 
     async def _log_data(self, label: str, data: Any) -> None:
