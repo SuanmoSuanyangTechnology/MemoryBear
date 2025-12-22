@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.db import get_db_context
+from app.models import ModelType
 from app.services.model_service import ModelConfigService
         
 from app.core.exceptions import BusinessException
@@ -136,7 +137,7 @@ class LLMNode(BaseNode):
                 base_url=api_base,
                 extra_params=extra_params
             ), 
-            type=model_type
+            type=ModelType(model_type)
         )
         
         logger.debug(f"创建 LLM 实例: provider={provider}, model={model_name}, streaming={stream}")
