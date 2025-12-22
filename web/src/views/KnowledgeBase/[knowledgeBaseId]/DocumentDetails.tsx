@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2025-11-15 16:13:47
  * @LastEditors: yujiangping
- * @LastEditTime: 2025-12-12 20:02:05
+ * @LastEditTime: 2025-12-19 20:19:59
  */
 import { useEffect, useState, useRef, type FC } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
@@ -47,6 +47,7 @@ const DocumentDetails: FC = () => {
   const [chunkLoading, setChunkLoading] = useState(false);
   const [keywords, setKeywords] = useState('');
   const [fileUrl, setFileUrl] = useState('');
+  const [parserMode, setParserMode] = useState(0);
   const insertModalRef = useRef<InsertModalRef>(null);
   const isManualRefreshRef = useRef(false);
   
@@ -127,6 +128,7 @@ const DocumentDetails: FC = () => {
       setInfoItems(formatDocumentInfo(response));
       const url = `${imagePath}/api/files/${response.file_id}`
       setFileUrl(url);
+      setParserMode(response?.parser_config?.auto_questions || 0)
       // ChunkList 会在 useEffect 中根据 document.progress 自动调用
     } catch (error) {
       console.error('获取文档详情失败:', error);
@@ -388,6 +390,7 @@ const DocumentDetails: FC = () => {
             {t('knowledgeBase.chunkList') || '分块列表'}
           </h2>
           <RecallTestResult 
+            
             data={chunkList} 
             showEmpty={false}
             hasMore={hasMore}
@@ -396,6 +399,7 @@ const DocumentDetails: FC = () => {
             scrollableTarget="chunkScrollableDiv"
             editable={true}
             onItemClick={handleChunkClick}
+            parserMode={parserMode}
           />
         </div>
       </div>
