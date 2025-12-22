@@ -111,15 +111,17 @@ const CreateDataset = () => {
     
     // 从参数设置进入确认上传时的处理
     if(current === 1 && nextStep === 2) {
+      // debugger
         // handlePreview(data[0],0) 
-        if(parameterSettings === 'customSettings'){
+        if(parameterSettings === 'customSettings' || processingMethod === 'qaExtract'){
             rechunkFileIds.map((id) => {
                 const params = {
+                  progress: 0,
                   parser_config: {
                       layout_recognize:'DeepDOC',
                       delimiter: delimiter,
                       chunk_token_num: blockSize,
-                      auto_question: processingMethod === 'directBlock' ? 0 : 1,
+                      auto_questions: processingMethod === 'directBlock' ? 0 : 1,
                   }
                 }
                 updateDocument(id, params)
@@ -144,7 +146,6 @@ const CreateDataset = () => {
       });
       return;
     }
-  
 
     // 显示确认弹框
     confirm({
@@ -153,12 +154,18 @@ const CreateDataset = () => {
       okText: t('knowledgeBase.returnToList') || '返回列表页',
       cancelText: t('knowledgeBase.stayOnPage') || '停留在此页',
       onOk: () => {
-        // 用户选择返回列表页
+        // 用户选择返回列表页 - 不显示 loading，直接跳转
         startProcessing(true);
       },
       onCancel: () => {
-        // 用户选择停留在当前页
-        startProcessing(false);
+        // 用户选择停留在当前页 - 显示 loading 并开始轮询
+        console.log('用户选择停留，开始显示 loading');
+        setPollingLoading(true);
+        
+        // 延迟一点时间让用户看到 loading 效果，然后开始处理
+        setTimeout(() => {
+          startProcessing(false);
+        }, 100);
       },
     });
   };
@@ -170,15 +177,12 @@ const CreateDataset = () => {
       parseDocument(id, {});
     });
 
-    // 开启 loading
-    setPollingLoading(true);
-
     if (autoReturnToList) {
-      // 用户选择立即返回，直接跳转
+      // 用户选择立即返回，直接跳转（不显示 loading）
       console.log('用户选择立即返回列表页');
       handleBack();
     } else {
-      // 用户选择停留，启动轮询查看进度
+      // 用户选择停留，启动轮询查看进度（loading 已在 onCancel 中设置）
       console.log('用户选择停留查看进度');
       
       // 立即执行一次轮询（启用自动返回）
@@ -187,7 +191,7 @@ const CreateDataset = () => {
       // 然后每3秒执行一次（启用自动返回）
       pollingTimerRef.current = setInterval(() => {
         pollDocumentStatus(true);
-      }, 5000);
+      }, 3000);
     }
   };
   const handleDelete = (record: AnyObject) => {
@@ -222,7 +226,7 @@ const CreateDataset = () => {
       title: t('knowledgeBase.status'),
       dataIndex: 'progress',
       key: 'progress',
-      render: (value: number) => {
+      render: (value: number, record: any) => {
         return (
           <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
             <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: value === 1 ? '#369F21' : '#FF8A4C' }}></span>
@@ -280,44 +284,59 @@ const CreateDataset = () => {
   // 轮询检查文档处理状态
   // autoReturn: 是否在所有文档完成时自动返回列表页
   const pollDocumentStatus = (autoReturn: boolean = false) => {
+    console.log('开始轮询文档状态，当前 pollingLoading:', pollingLoading);
+    
     if (!knowledgeBaseId || !parentId || rechunkFileIds.length === 0) {
+      console.log('轮询条件不满足，退出');
       return;
     }
 
-    // 刷新 Table 组件的数据（仅在 confirmUpload 步骤）
-    if (current === 2) {
-      tableRef.current?.loadData();
-    }
-
-    // 同时获取文档列表检查是否全部完成
-    getDocumentList({
-      kb_id: knowledgeBaseId,
-      parent_id: parentId,
+    // 获取文档列表检查是否全部完成，并刷新表格数据
+    getDocumentList(knowledgeBaseId, {
       document_ids: rechunkFileIds.join(','),
     })
     .then((res: any) => {
       const documents = res.items || [];
       setData(documents);
       
+      // 只在 confirmUpload 步骤刷新表格数据
+      if (current === 2) {
+        tableRef.current?.loadData();
+      }
+      
+      console.log('documents', documents);
       // 检查是否所有文档的 progress 都为 1
       const allCompleted = documents.every((doc: KnowledgeBaseDocumentData) => doc.progress === 1);
       
-      console.log('轮询状态:', documents.map((d: KnowledgeBaseDocumentData) => ({ name: d.file_name, progress: d.progress })));
+      console.log('轮询状态:', allCompleted);
       
-      // 只有在 autoReturn 为 true 且所有文档完成时才自动返回
-      if (allCompleted && autoReturn) {
-        // 所有文档处理完成，清除定时器和 loading
+      // 检查是否所有文档都完成了
+      // debugger
+      if (allCompleted) {
+        // 清除定时器和 loading 状态
         if (pollingTimerRef.current) {
           clearInterval(pollingTimerRef.current);
           pollingTimerRef.current = null;
         }
-        setPollingLoading(false);
         
-        // 延迟 2 秒后跳转，让用户看到完成状态
-        console.log('所有文档处理完成，2秒后返回列表页');
+        // 延迟清除 loading，让用户看到完成状态
         setTimeout(() => {
-          handleBack();
-        }, 2000);
+          setPollingLoading(false);
+        }, 1000);
+        
+        // 只有在 autoReturn 为 true 时才自动返回
+        if (autoReturn) {
+          // 延迟 2 秒后跳转，让用户看到完成状态
+          console.log('所有文档处理完成，2秒后返回列表页');
+          setTimeout(() => {
+            handleBack();
+          }, 2000);
+        } else {
+          console.log('所有文档处理完成，用户可手动操作');
+        }
+      } else {
+        // 如果还有文档在处理中，确保 loading 状态保持
+        console.log('还有文档在处理中，保持 loading 状态');
       }
     })
     .catch((error) => {
@@ -349,9 +368,7 @@ const CreateDataset = () => {
   useEffect(() => {
     if (initialFileIds.length > 0 && initialStepKey !== 'selectFile' && knowledgeBaseId && parentId) {
       // 加载文档列表数据
-      getDocumentList({
-        kb_id: knowledgeBaseId,
-        parent_id: parentId,
+      getDocumentList(knowledgeBaseId,{
         document_ids: initialFileIds.join(','),
       })
       .then((res: any) => {
@@ -364,7 +381,7 @@ const CreateDataset = () => {
     }
   }, []);
 
-  // 清理函数：组件卸载时清除定时器
+  // 清理函数：组件卸载时清除定时器和 loading 状态
   useEffect(() => {
     return () => {
       if (pollingTimerRef.current) {
@@ -374,6 +391,18 @@ const CreateDataset = () => {
       setPollingLoading(false);
     };
   }, []);
+
+  // 监听路由变化，确保在页面切换时清理状态
+  useEffect(() => {
+    return () => {
+      // 页面卸载时清理状态
+      if (pollingTimerRef.current) {
+        clearInterval(pollingTimerRef.current);
+        pollingTimerRef.current = null;
+      }
+      setPollingLoading(false);
+    };
+  }, [location.pathname]);
 
   return (
     <>
@@ -553,7 +582,7 @@ const CreateDataset = () => {
               <Table
                 ref={tableRef}
                 apiUrl={`/documents/${knowledgeBaseId}/documents`}
-                apiParams={{                    
+                apiParams={{       
                     document_ids: rechunkFileIds.join(','),
                 }}
                 columns={columns}
