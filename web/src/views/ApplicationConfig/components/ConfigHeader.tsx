@@ -1,6 +1,6 @@
-import { type FC, useRef } from 'react';
+import { type FC, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Layout, Tabs, Dropdown } from 'antd';
+import { Layout, Tabs, Dropdown, Button } from 'antd';
 import type { MenuProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 import styles from '../index.module.css'
@@ -11,7 +11,7 @@ import exportIcon from '@/assets/images/export_hover.svg'
 import deleteIcon from '@/assets/images/delete_hover.svg'
 import type { Application, ApplicationModalRef } from '@/views/ApplicationManagement/types';
 import ApplicationModal from '@/views/ApplicationManagement/components/ApplicationModal'
-import type { CopyModalRef } from '../types'
+import type { CopyModalRef, WorkflowRef } from '../types'
 import { deleteApplication } from '@/api/application'
 import CopyModal from './CopyModal'
 
@@ -29,8 +29,12 @@ interface ConfigHeaderProps {
   activeTab: string;
   handleChangeTab: (key: string) => void;
   refresh: () => void;
+  workflowRef: React.RefObject<WorkflowRef>
 }
-const ConfigHeader: FC<ConfigHeaderProps> = ({ application, activeTab, handleChangeTab, refresh }) => {
+const ConfigHeader: FC<ConfigHeaderProps> = ({ 
+  application, activeTab, handleChangeTab, refresh,
+  workflowRef
+}) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { id } = useParams();
@@ -46,7 +50,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({ application, activeTab, handleCha
   const formatMenuItems = () => {
     const items =  ['edit', 'copy', 'delete'].map(key => ({
       key,
-      icon: <img src={menuIcons[key]} className="rb:w-[16px] rb:h-[16px] rb:mr-[8px]" />,
+      icon: <img src={menuIcons[key]} className="rb:w-4 rb:h-4 rb:mr-2" />,
       label: t(`common.${key}`),
     }))
     return {
@@ -85,12 +89,23 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({ application, activeTab, handleCha
   const goToApplication = () => {
     navigate('/application', { replace: true })
   }
-
+  const save = () => {
+    workflowRef.current?.handleSave()
+  }
+  const run = () => {
+    workflowRef.current?.handleSave(false)
+      .then(() => {
+        workflowRef.current?.handleRun()
+      })
+  }
+  const clear = () => {
+    workflowRef?.current?.graphRef?.current?.clearCells()
+  }
   return (
     <>
-      <Header className="rb:w-full rb:h-[64px] rb:grid rb:grid-cols-3 rb:p-[16px_16px_16px_24px]! rb:border-b rb:border-[#EAECEE] rb:leading-[32px]">
-        <div className="rb:h-[32px] rb:flex rb:items-center rb:font-medium">
-          <div className="rb:w-[32px] rb:h-[32px] rb:rounded-[8px] rb:mr-[13px] rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[24px] rb:text-[#ffffff]">
+      <Header className="rb:w-full rb:h-16 rb:grid rb:grid-cols-3 rb:p-[16px_16px_16px_24px]! rb:border-b rb:border-[#EAECEE] rb:leading-8">
+        <div className="rb:h-8 rb:flex rb:items-center rb:font-medium">
+          <div className="rb:w-8 rb:h-8 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[24px] rb:text-[#ffffff]">
             {application?.name[0]}
           </div>
           
@@ -101,7 +116,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({ application, activeTab, handleCha
             placement="bottomRight"
           >
             <div 
-              className="rb:w-[20px] rb:h-[20px] rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]" 
+              className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]" 
             ></div>
           </Dropdown>
         </div>
@@ -114,10 +129,19 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({ application, activeTab, handleCha
             className={styles.tabs}
           />
         </div>
-        <div className="rb:h-[32px] rb:flex rb:items-center rb:justify-end rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
-          <img src={logoutIcon} className="rb:mr-[8px]" />
+        {application?.type === 'workflow'
+        ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
+            <Button onClick={clear}>{t('workflow.clear')}</Button>
+            <Button onClick={run}>{t('workflow.run')}</Button>
+            <Button type="primary" onClick={save}>{t('workflow.save')}</Button>
+            {/* <Button type="primary">{t('workflow.export')}</Button> */}
+            <img src={logoutIcon} className="rb:w-4 rb:h-4 rb:cursor-pointer" onClick={goToApplication} />
+          </div>
+        : <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
+          <img src={logoutIcon} className="rb:mr-2 rb:w-4 rb:h-4" />
           {t('application.returnToApplicationList')}
         </div>
+        }
       </Header>
       <ApplicationModal
         ref={applicationModalRef}
