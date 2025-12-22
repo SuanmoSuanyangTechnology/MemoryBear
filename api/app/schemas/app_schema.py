@@ -338,7 +338,6 @@ class DraftRunRequest(BaseModel):
     """试运行请求"""
     message: str = Field(..., description="用户消息")
     conversation_id: Optional[str] = Field(default=None, description="会话ID（用于多轮对话）")
-    conversation_vars: Optional[dict[str, Any]] = Field(default=None, description="会话变量")
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
