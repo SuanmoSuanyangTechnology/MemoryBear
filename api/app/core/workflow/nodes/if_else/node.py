@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from app.core.workflow.nodes import BaseNode, WorkflowState
+from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.enums import ComparisonOperator
 from app.core.workflow.nodes.if_else import IfElseNodeConfig
 from app.core.workflow.nodes.if_else.config import ConditionDetail

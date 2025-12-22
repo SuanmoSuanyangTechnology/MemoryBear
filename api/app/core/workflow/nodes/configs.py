@@ -14,6 +14,8 @@ from app.core.workflow.nodes.llm.config import LLMNodeConfig, MessageConfig
 from app.core.workflow.nodes.agent.config import AgentNodeConfig
 from app.core.workflow.nodes.transform.config import TransformNodeConfig
 from app.core.workflow.nodes.if_else.config import IfElseNodeConfig
+# from app.core.workflow.nodes.knowledge.config import KnowledgeRetrievalNodeConfig
+from app.core.workflow.nodes.assigner.config import AssignerNodeConfig
 
 __all__ = [
     # 基础类
@@ -28,4 +30,6 @@ __all__ = [
     "AgentNodeConfig",
     "TransformNodeConfig",
     "IfElseNodeConfig",
+    # "KnowledgeRetrievalNodeConfig",
+    "AssignerNodeConfig",
 ]
