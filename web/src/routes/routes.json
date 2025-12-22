@@ -5,7 +5,6 @@
       { "path": "/user-management", "element": "UserManagement" },
       { "path": "/model", "element": "ModelManagement" },
       { "path": "/space", "element": "SpaceManagement" },
-      { "path": "/tool", "element": "ToolManagement" },
       { "path": "/no-permission", "element": "NoPermission" }
     ]
   },
