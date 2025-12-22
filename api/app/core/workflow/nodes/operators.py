@@ -106,7 +106,8 @@ class ArrayOperator(OperatorBase):
     def extend(self) -> None:
         self.check(no_right=True)
         origin = self.pool.get(self.left_selector)
-        self.pool.set(self.left_selector, origin.extend(self.right))
+        origin.extend(self.right)
+        self.pool.set(self.left_selector, origin)
 
     def remove_last(self) -> None:
         self.check(no_right=True)
