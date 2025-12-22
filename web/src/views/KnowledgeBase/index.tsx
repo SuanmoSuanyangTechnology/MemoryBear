@@ -74,7 +74,8 @@ const KnowledgeBaseManagement: FC = () => {
     const items: NonNullable<MenuProps['items']> = [];
 
     // 当权限为 share 时，不显示编辑按钮
-    if (item.permission_id !== 'share') {
+    const permissionId = (item.permission_id || '').toLowerCase();
+    if (permissionId !== 'share') {
       items.push({
         key: '1',
         label: t('knowledgeBase.edit'),
@@ -131,7 +132,7 @@ const KnowledgeBaseManagement: FC = () => {
   };
 
   // 处理创建
-  const handleCreate = (type?: string) => {
+  const handleCreate = useCallback((type?: string) => {
     // 如果在文件夹内，使用 folderPath 的最后一项作为 parent_id
     // 这样更可靠，因为 folderPath 是直接管理的状态
     const currentParentId = folderPath.length > 0 
@@ -142,8 +143,17 @@ const KnowledgeBaseManagement: FC = () => {
       parent_id: currentParentId as string,
     } as KnowledgeBaseListItem : null;
     
+    console.log('handleCreate called:', {
+      type,
+      folderPath,
+      folderPathLength: folderPath.length,
+      queryParentId: query.parent_id,
+      currentParentId,
+      record
+    });
+    
     modalRef?.current?.handleOpen(record, type)
-  }
+  }, [folderPath, query.parent_id])
 
   // 动态生成 createItems
   const createItems: MenuProps['items'] = useMemo(() => {
@@ -155,7 +165,7 @@ const KnowledgeBaseManagement: FC = () => {
         handleCreate(type);
       },
     }));
-  }, [knowledgeBaseTypes, t]);
+  }, [knowledgeBaseTypes, t, handleCreate]);
   const typeToFieldKey = (type: string) => {
     const normalized = (type || '').toLowerCase();
     switch (normalized) {
@@ -180,7 +190,7 @@ const KnowledgeBaseManagement: FC = () => {
       key,
       label: t(`knowledgeBase.${key}`),
       children: key === 'permission_id' 
-        ? (data[key] === 'Private' || data[key] === 'private' ? t('knowledgeBase.private') : t('knowledgeBase.share'))
+        ? ((data[key] || '').toLowerCase() === 'private' ? t('knowledgeBase.private') : t('knowledgeBase.share'))
         : String(data[key] || '-'),
     }))
   }
@@ -283,7 +293,15 @@ const KnowledgeBaseManagement: FC = () => {
   const fetchData = async (pageNum: number = 1, isLoadMore: boolean = false) => {
     if (!modelTypes.length) return;
     if (loading) return;
-    console.log('fetchData called, pageNum:', pageNum, 'isLoadMore:', isLoadMore);
+    
+    console.log('fetchData called:', {
+      pageNum,
+      isLoadMore,
+      currentQuery: query,
+      currentFolderPath: folderPath,
+      folderPathLastId: folderPath.length > 0 ? folderPath[folderPath.length - 1].id : 'none'
+    });
+    
     setLoading(true);
     try {
       const params = {
@@ -293,6 +311,8 @@ const KnowledgeBaseManagement: FC = () => {
         orderby:'created_at',
         desc:true,
       }
+      
+      console.log('API params:', params);
       const res = await getKnowledgeBaseList(undefined, params);
       const response = res as KnowledgeBaseListResponse & { items?: KnowledgeBaseListItem[] };
       console.log('API response:', response);
@@ -373,10 +393,21 @@ const KnowledgeBaseManagement: FC = () => {
     });
   };
   // 处理跳转详情
-  const handleToDetail = (knowledgeBase: KnowledgeBaseListItem) => {
+  const handleToDetail = useCallback((knowledgeBase: KnowledgeBaseListItem) => {
+    // 统一处理类型判断，忽略大小写
+    const itemType = (knowledgeBase.type || '').toLowerCase();
+    
+    console.log('handleToDetail called with:', {
+      id: knowledgeBase.id,
+      name: knowledgeBase.name,
+      type: itemType,
+      currentFolderPath: folderPath,
+      currentQuery: query
+    });
+    
     // 如果是 Folder 类型，刷新当前页面，显示该文件夹下的知识库列表
-    if (knowledgeBase.type === 'Folder' || knowledgeBase.type === 'folder') {
-      // 添加到文件夹路径
+    if (itemType === 'folder') {
+      // 计算新的文件夹路径
       const newFolderPath = [
         ...folderPath,
         {
@@ -384,15 +415,33 @@ const KnowledgeBaseManagement: FC = () => {
           name: knowledgeBase.name,
         },
       ];
-      setFolderPath(newFolderPath);
       
+      console.log('Folder clicked:', {
+        folderId: knowledgeBase.id,
+        folderName: knowledgeBase.name,
+        currentFolderPath: folderPath,
+        newFolderPath: newFolderPath
+      });
+      
+      // 同步更新状态，保持与面包屑逻辑一致
+      setFolderPath(newFolderPath);
       setQuery((prev) => ({
         ...prev,
         parent_id: knowledgeBase.id,
       }));
+      
       return;
     }
+    
+    // 统一处理权限判断，忽略大小写
+    const permissionId = (knowledgeBase.permission_id || '').toLowerCase();
+    const isPrivate = permissionId === 'private';
+    
     // 根据权限类型跳转到不同的详情页
+    const targetPath = isPrivate 
+      ? `/knowledge-base/${knowledgeBase.id}/private`
+      : `/knowledge-base/${knowledgeBase.id}/share`;
+    
     // 跳转时传递当前的文件夹路径信息
     const navigationState = {
       fromKnowledgeBaseList: true,
@@ -400,9 +449,6 @@ const KnowledgeBaseManagement: FC = () => {
       parentId: query.parent_id,
       timestamp: Date.now(), // 添加时间戳确保每次跳转状态都不同
     };
-    const targetPath = knowledgeBase.permission_id === 'Private' || knowledgeBase.permission_id === 'private' 
-      ? `/knowledge-base/${knowledgeBase.id}/private`
-      : `/knowledge-base/${knowledgeBase.id}/share`;
     
     // 检查是否是相同路径跳转
     const currentPath = location.pathname;
@@ -417,7 +463,7 @@ const KnowledgeBaseManagement: FC = () => {
       // 不同路径，正常跳转
       navigate(targetPath, { state: navigationState });
     }
-  }
+  }, [folderPath, query, location.pathname, navigate])
   // 更新面包屑
   useEffect(() => {
     updateBreadcrumbs({

@@ -22,6 +22,7 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
   };
 
   const handleOpen = (folder?: FolderFormData | null) => {
+    debugger
     if (folder) {
       setFolder(folder);      
       // 设置表单值
