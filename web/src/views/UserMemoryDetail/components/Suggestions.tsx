@@ -39,11 +39,11 @@ const Suggestions: FC = () => {
 
   return (
     <RbCard
-      title={t('emotionDetail.suggestions')}
+      title={t('statementDetail.suggestions')}
       headerType="borderless"
       headerClassName="rb:text-[18px]! rb:leading-[24px]"
     >
-      {suggestions
+      {suggestions?.suggestions && suggestions?.suggestions.length > 0
         ? <>
           <RbAlert className="rb:mb-3">{suggestions.health_summary}</RbAlert>
           {suggestions.suggestions.map((item, index) => (
@@ -54,7 +54,7 @@ const Suggestions: FC = () => {
             </div>
           ))}
         </>
-        : <Empty />
+        : <Empty size={88} className="rb:h-full" />
       }
     </RbCard>
   )

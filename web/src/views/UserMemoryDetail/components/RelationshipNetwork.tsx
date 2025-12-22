@@ -8,11 +8,12 @@ import zoom from '@/assets/images/userMemory/zoom.svg'
 import drag from '@/assets/images/userMemory/drag.svg'
 import pointer from '@/assets/images/userMemory/pointer.svg'
 import empty from '@/assets/images/userMemory/empty.svg'
-import type { EdgeData, Node, Edge } from '../types'
+import type { Node, Edge, GraphData } from '../types'
 import {
   getMemorySearchEdges,
 } from '@/api/memory'
 import Empty from '@/components/Empty'
+import dayjs from 'dayjs'
 
 const operations = [
   { name: 'click', icon: pointer },
@@ -35,89 +36,76 @@ const RelationshipNetwork:FC = () => {
     if (!id) return
     setSelectedNode(null)
     getMemorySearchEdges(id).then((res) => {
-      const list = (res as { detials?: EdgeData[] }).detials || []
-      const nodes: Node[] = [];
-      const links: Edge[] = [];
-      const categories: { name: string }[] = []
+      const { nodes, edges, statistics } = res as GraphData
+      const curNodes: Node[] = []
+      const curEdges: Edge[] = []
+      const curNodeTypes = Object.keys(statistics.node_types)
       
-      list.forEach(item => {
-        if (item.edge && item.edge.target_id && item.edge.source_id) {
-          links.push({
-            ...item.edge,
-            target: item.edge.target_id,
-            source: item.edge.source_id,
-          })
-        }
-        if (item.sourceNode) {
-          nodes.push(item.sourceNode)
-          categories.push({name: item.sourceNode.entity_type || 'Unknown'})
-        }
-        if (item.targetNode) {
-          nodes.push(item.targetNode)
-          categories.push({name: item.targetNode.entity_type || 'Unknown'})
-        }
+      // 计算每个节点的连接数
+      const connectionCount: Record<string, number> = {}
+      edges.forEach(edge => {
+        connectionCount[edge.source] = (connectionCount[edge.source] || 0) + 1
+        connectionCount[edge.target] = (connectionCount[edge.target] || 0) + 1
       })
       
-      // 根据ID字段去重节点
-      const uniqueNodes = nodes.filter((node, index, self) =>
-        index === self.findIndex((n) => n.id === node.id && n.name === node.name)
-      )
-      const uniqueLinks = links.filter((node, index, self) =>
-        index === self.findIndex((n) => n.target === node.target && n.source === node.source)
-      )
-      const uniqueCategories = categories.filter((node, index, self) =>
-        index === self.findIndex((n) => n.name === node.name)
-      )
-    
-      setLinks(uniqueLinks)
-      setCategories(uniqueCategories)
-
-      // Calculate node frequency based on appearance in links
-      const nodeFrequency = new Map<string, number>()
-      
-      // Count each node's appearance in links (both as source and target)
-      uniqueLinks.forEach(link => {
-        // Increment source node frequency (only if source exists and is a string)
-        if (typeof link.source === 'string') {
-          nodeFrequency.set(link.source, (nodeFrequency.get(link.source) || 0) + 1)
-        }
-        // Increment target node frequency (only if target exists and is a string)  
-        if (typeof link.target === 'string') {
-          nodeFrequency.set(link.target, (nodeFrequency.get(link.target) || 0) + 1)
-        }
-      })
-
-      // Set minimum frequency to 1 for nodes not in any links
-      uniqueNodes.forEach(node => {
-        if (node.id && typeof node.id === 'string') {
-          if (!nodeFrequency.has(node.id)) {
-            nodeFrequency.set(node.id, 1)
-          }
-        }
-      })
-
-      uniqueNodes.map(item => {
-        const index = uniqueCategories.findIndex((n) => n.name === (item.entity_type || 'Unknown'))
-        item.category = index
+      // 处理节点数据
+      nodes.forEach(node => {
+        const connections = connectionCount[node.id] || 0
+        const categoryIndex = curNodeTypes.indexOf(node.label)
         
-        // Get frequency for the node, ensuring id is a string
-        const frequency = (item.id && typeof item.id === 'string') ? (nodeFrequency.get(item.id) || 1) : 1
-        
-        // Set symbolSize based on frequency
-        // Adjust these thresholds based on expected frequency ranges
-        if (frequency <= 1) {
-          item.symbolSize = 5
-        } else if (frequency <= 10) {
-          item.symbolSize = 10
-        } else if (frequency <= 15) {
-          item.symbolSize = 15
-        } else if (frequency <= 20) {
-          item.symbolSize = 25
+        // 根据节点类型获取显示名称
+        let displayName = ''
+        switch (node.label) {
+          case 'Statement':
+            displayName = 'statement' in node.properties ? node.properties.statement?.slice(0, 5) || '' : ''
+            break
+          case 'ExtractedEntity':
+            displayName = 'name' in node.properties ? node.properties.name || '' : ''
+            break
+          default:
+            displayName = 'content' in node.properties ? node.properties.content?.slice(0, 5) || '' : ''
+            break
+        }
+        let symbolSize = 0
+        if (connections <= 1) {
+          symbolSize = 5
+        } else if (connections <= 10) {
+          symbolSize = 10
+        } else if (connections <= 15) {
+          symbolSize = 15
+        } else if (connections <= 20) {
+          symbolSize = 25
         } else {
-          item.symbolSize = 35
+          symbolSize = 35
         }
+        
+        curNodes.push({
+          ...node,
+          name: displayName,
+          category: categoryIndex >= 0 ? categoryIndex : 0,
+          symbolSize: symbolSize, // 根据连接数调整节点大小
+          itemStyle: {
+            color: ['#155EEF', '#4DA8FF', '#9C6FFF', '#8BAEF7', '#369F21', '#FF5D34', '#FF8A4C', '#FFB048'][categoryIndex % 8]
+          }
+        })
       })
-      setNodes(uniqueNodes)
+      
+      // 处理边数据
+      edges.forEach(edge => {
+        curEdges.push({
+          ...edge,
+          source: edge.source,
+          target: edge.target,
+          value: edge.weight || 1
+        })
+      })
+      
+      // 设置分类
+      const curCategories = curNodeTypes.map(type => ({ name: type }))
+      
+      setNodes(curNodes)
+      setLinks(curEdges)
+      setCategories(curCategories)
     })
   }, [id])
   useEffect(() => {
@@ -147,7 +135,6 @@ const RelationshipNetwork:FC = () => {
     }
   }, [nodes])
 
-  console.log('nodes', nodes)
   return (
     <>
       {/* 关系网络 */}
@@ -157,7 +144,7 @@ const RelationshipNetwork:FC = () => {
           headerType="borderless"
           headerClassName="rb:text-[18px]! rb:leading-[24px]"
         >
-          <div className="rb:h-[496px]">
+          <div className="rb:h-124">
             {nodes.length === 0 ? (
               <Empty className="rb:h-full" />
             ) : (
@@ -175,8 +162,13 @@ const RelationshipNetwork:FC = () => {
                       links: links || [],
                       categories: categories || [],
                       roam: true,
+                      label: {
+                        show: true,
+                        position: 'right',
+                        formatter: '{b}',
+                      },
                       lineStyle: {
-                        color: 'source',
+                        color: '#5B6167',
                         curveness: 0.3
                       },
                       force: {
@@ -218,19 +210,17 @@ const RelationshipNetwork:FC = () => {
                       // 处理节点点击事件
                       console.log('Node clicked:', params.data);
                       // 使用函数式更新避免状态依赖问题
-                      setSelectedNode(prevSelected => 
-                        prevSelected?.id === params.data.id ? null : params.data
-                      )
+                      setSelectedNode(params.data)
                     }
                   }
                 }}
               />
             )}
           </div>
-          <div className="rb:bg-[#F0F3F8] rb:flex rb:items-center rb:gap-[24px] rb:rounded-[0px_0px_12px_12px] rb:p-[14px_40px] rb:m-[0_-20px_-16px_-16px]">
+          <div className="rb:bg-[#F0F3F8] rb:flex rb:items-center rb:gap-6 rb:rounded-[0px_0px_12px_12px] rb:p-[14px_40px] rb:m-[0_-20px_-16px_-16px]">
             {operations.map((item) => (
-              <div key={item.name} className="rb:flex rb:items-center rb:text-[#5B6167] rb:leading-[20px]">
-                <img src={item.icon} className="rb:w-[20px] rb:h-[20px] rb:mr-[4px]" />
+              <div key={item.name} className="rb:flex rb:items-center rb:text-[#5B6167] rb:leading-5">
+                <img src={item.icon} className="rb:w-5 rb:h-5 rb:mr-1" />
                 {t(`userMemory.${item.name}`)}
               </div>
             ))}
@@ -244,27 +234,35 @@ const RelationshipNetwork:FC = () => {
           headerType="borderless"
           headerClassName="rb:text-[18px]! rb:leading-[24px]"
         >
-          {(!selectedNode || (!selectedNode?.description && !selectedNode?.entity_type))
+          {!selectedNode
             ? <Empty 
               url={empty}
               title={t('userMemory.memoryDetailEmpty')}
               subTitle={t('userMemory.memoryDetailEmptyDesc')}
-              className="rb:mb-[12px]"
+              className="rb:mb-3"
               size={88}
             />
             : <>
-              {selectedNode?.description &&
-                <div className="rb:font-medium rb:mb-[8px]">
-                  {t('userMemory.description')}
-                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-[8px]"> {selectedNode.description}</div>
+
+              <div className="rb:font-medium rb:mb-2">
+                {t('userMemory.memoryContent')}
+                <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2">
+                  {['Chunk', 'Dialogue', 'MemorySummary'].includes(selectedNode.label) && 'content' in selectedNode.properties
+                    ? selectedNode.properties.content
+                    : selectedNode.label === 'ExtractedEntity' && 'description' in selectedNode.properties
+                    ? selectedNode.properties.description
+                    : selectedNode.label === 'Statement' && 'statement' in selectedNode.properties
+                    ? selectedNode.properties.statement
+                    : ''
+                  }
                 </div>
-              }
-              {selectedNode?.entity_type &&
-                <div className="rb:font-medium rb:mb-[8px]">
-                  {t('userMemory.entityType')}
-                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-[8px]"> {selectedNode.entity_type}</div>
+              </div>
+              <div className="rb:font-medium rb:mb-2">
+                {t('userMemory.created_at')}
+                <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2">
+                  {dayjs(selectedNode?.properties.created_at).format('YYYY/MM/DD HH:mm:ss')}
                 </div>
-              }
+              </div>
             </>
           }
         </RbCard>

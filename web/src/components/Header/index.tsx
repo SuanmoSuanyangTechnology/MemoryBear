@@ -1,8 +1,9 @@
-import { type FC, useRef } from 'react';
+import { type FC, useCallback, useRef } from 'react';
 import { Layout, Dropdown, Space, Breadcrumb } from 'antd';
 import type { MenuProps, BreadcrumbProps } from 'antd';
 import { UserOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useUser } from '@/store/user';
 import { useMenu } from '@/store/menu';
 import styles from './index.module.css'
@@ -12,6 +13,8 @@ const { Header } = Layout;
 
 const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
   const { t } = useTranslation();
+  const params = useParams();
+  const navigate = useNavigate();
   const settingModalRef = useRef<SettingModalRef>(null)
   const userInfoModalRef = useRef<UserInfoModalRef>(null)
 
@@ -65,7 +68,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
       onClick: handleLogout,
     },
   ];
-  const formatBreadcrumbNames = () => {
+  const formatBreadcrumbNames = useCallback(() => {
     return breadcrumbs.map((menu, index) => {
       const item: any = {
         title: menu.i18nKey ? t(menu.i18nKey) : menu.label,
@@ -84,13 +87,23 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
         };
         item.href = '#';
       } else if (menu.path && menu.path !== '#') {
-        // 只有当 path 不是 '#' 时才设置 path
-        item.path = menu.path;
+        // 对于三级面包屑的二级菜单，如果路径包含动态参数，替换为当前参数值
+        if (breadcrumbs.length === 3 && index === 1 && menu.path.includes(':id') && params.id) {
+          const dynamicPath = menu.path.replace(':id', params.id);
+          item.onClick = (e: React.MouseEvent) => {
+            e.preventDefault();
+            navigate(dynamicPath);
+          };
+          item.href = '#';
+        } else {
+          // 只有当 path 不是 '#' 时才设置 path
+          item.path = menu.path;
+        }
       }
       
       return item;
     });
-  }
+  }, [breadcrumbs, params.id, t, navigate])
   return (
     <Header className={styles.header}>
       <Breadcrumb separator=">" items={formatBreadcrumbNames() as BreadcrumbProps['items']} />

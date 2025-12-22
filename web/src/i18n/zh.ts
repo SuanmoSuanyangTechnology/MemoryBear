@@ -36,7 +36,7 @@ export const zh = {
       userMemoryDetail: '用户记忆详情',
       toolManagement: '工具管理',
       emotionEngine: '情感引擎',
-      emotionDetail: '情绪记忆',
+      statementDetail: '情绪记忆',
       selfReflectionEngine: '反思引擎',
     },
     knowledgeBase: {
@@ -1105,6 +1105,23 @@ export const zh = {
       occupation: '职业',
       memories: '记忆',
       expanded: '展开',
+
+      nodeStatistics: '记忆分类',
+      total: '总计',
+      Chunk: '长期记忆',
+      MemorySummary: '情景记忆',
+      Statement: '情绪记忆',
+      ExtractedEntity: '短期记忆',
+      endUserProfile: '核心档案',
+      editEndUserProfile: '编辑',
+      name: '姓名',
+      position: '职位',
+      department: '部门',
+      contact: '联系方式',
+      phone: '电话',
+      hire_date: '入职时间',
+      memoryContent: '记忆内容',
+      created_at: '创建时间',
     },
     space: {
       createSpace: '创建空间',
@@ -1705,7 +1722,7 @@ export const zh = {
       expect_improvement_tag: '仅低阈值会记录',
       confidence: '置信度'
     },
-    emotionDetail: {
+    statementDetail: {
       wordCloud: '情感分布分析',
       pieces: '条',
       emotionTags: '高频情绪关键词',
