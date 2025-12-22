@@ -1,184 +1,215 @@
-# MemoryBear 让AI拥有如同人类一样的记忆
-### [安装教程](#memorybear安装教程)
-## 项目简介
-MemoryBear是红熊AI自主研发的新一代AI记忆系统，其核心突破在于跳出传统知识“静态存储”的局限，以生物大脑认知机制为原型，构建了具备“感知-提炼-关联-遗忘”全生命周期的智能知识处理体系。该系统致力于让机器摆脱“信息堆砌”的困境，实现对知识的深度理解与自主进化，成为人类认知协作的核心伙伴。
+<img width="2346" height="1310" alt="image" src="https://github.com/user-attachments/assets/bc73a64d-cd1e-4d22-be3e-04ce40423a20" />
 
-## MemoryBear是从解决这些问题来的
-### 一、单模型知识遗忘的核心原因</br>
-上下文窗口限制：主流大模型上下文窗口通常为 8k-32k tokens，长对话中早期信息会被 “挤出”，导致后续回复脱离历史语境：如用户第 1 轮说 “我对海鲜过敏”，第 5 轮问 “推荐今晚的菜品” 时模型可能遗忘过敏信息。</br>
-静态知识库与动态数据割裂：大模型训练时的静态知识库如截止 2023 年数据，无法实时吸收用户对话中的个性化信息如用户偏好、历史订单，需依赖外部记忆模块补充。</br>
-模型注意力机制缺陷：Transformer 的自注意力对长距离依赖的捕捉能力随序列长度下降，出现 “近因效应”更关注最新输入，忽略早期关键信息。</br>
+# MemoryBear empowers AI with human-like memory capabilities
 
-### 二、多 Agent 协作的记忆断层问题</br>
-Agent 数据孤岛：不同 Agent如咨询 Agent、售后 Agent、推荐 Agent各自维护独立记忆，未建立跨模块的共享机制，导致用户重复提供信息如用户向咨询 Agent 说明地址后，售后 Agent 仍需再次询问。</br>
-对话状态不一致：多轮交互中 Agent 切换时，对话状态如用户当前意图、历史问题标签传递不完整，引发服务断层如用户从 “产品咨询” 转 “投诉” 时，新 Agent 未继承前期投诉细节。</br>
-决策冲突：不同 Agent 基于局部记忆做出的响应可能矛盾如推荐 Agent 推荐用户过敏的产品，因未获取健康禁忌的历史记录。</br>
+[中文](./README_CN.md) | English
 
-### 三、模型推理过程中的 “语义歧义” 引发理解偏差</br>
-用户对话中的个性化信息如行业术语、口语化表达、上下文指代未被准确编码，导致模型对记忆内容的语义解析失真，比如对用户历史对话中的模糊表述如 “上次说的那个方案”无法准确定位具体内容。</br>
-多语言、方言场景中，跨语种记忆关联失效如用户混用中英描述需求时，模型无法整合多语言信息。</br>
-典型案例：用户说之前客服说可以‘加急处理’现在进度如何？模型因未记录 “加急” 对应的具体服务等级，回复笼统模糊。</br>
+### [Installation Guide](#memorybear-installation-guide)
+### Paper: <a href="https://memorybear.ai/pdf/memoryBear" target="_blank" rel="noopener noreferrer">《Memory Bear AI: A Breakthrough from Memory to Cognition》</a>
+## Project Overview
+MemoryBear is a next-generation AI memory system independently developed by RedBear AI. Its core breakthrough lies in moving beyond the limitations of traditional "static knowledge storage". Inspired by the cognitive mechanisms of biological brains, MemoryBear builds an intelligent knowledge-processing framework that spans the full lifecycle of perception, refinement, association, and forgetting.The system is designed to free machines from the trap of mere "information accumulation", enabling deep knowledge understanding, autonomous evolution, and ultimately becoming a key partner in human-AI cognitive collaboration.
 
-## MemoryBear核心定位
-与传统记忆管理工具将知识视为“待检索的静态数据”不同，MemoryBear以“模拟人类大脑知识处理逻辑”为核心目标，构建了从知识摄入到智能输出的闭环体系。系统通过复刻大脑海马体的记忆编码、新皮层的知识固化及突触修剪的遗忘机制，让知识具备动态演化的“生命特征”，彻底重构了知识与使用者之间的交互关系——从“被动查询”升级为“主动辅助记忆认知”
+## MemoryBear was created to address these challenges
+### 1. Core causes of knowledge forgetting in single models</br>
+Context window limitations: Mainstream large language models typically have context windows of 8k-32k tokens. In long conversations, earlier messages are pushed out of the window, causing later responses to lose their historical context.For example, a user says in turn 1, "I'm allergic to seafood", but by turn 5 when they ask, "What should I have for dinner tonight?" the model may have already forgotten the allergy information.</br>
 
-## MemoryBear核心哲学
-MemoryBear的设计哲学源于对人类认知本质的深刻洞察：知识的价值不在于存量积累，而在于动态流转中的价值升华。传统系统中，知识一旦存储便陷入“静止状态”，难以形成跨领域关联，更无法主动适配使用者的认知需求；而MemoryBear坚信，只有让知识经历“原始信息提炼为结构化规则、孤立规则关联为知识网络、冗余信息智能遗忘”的完整过程，才能实现从“信息记忆”到“认知理解”的跨越，最终涌现出真正的智能。
+Gap between static knowledge bases and dynamic data: The model's training corpus is a static snapshot (e.g., data up to 2023) and cannot continuously absorb personalized information from user interactions, such as preferences or order history. External memory modules are required to supplement and maintain this dynamic, user-specific knowledge.</br>
 
-## MemoryBear核心特性
-MemoryBear作为模仿生物大脑认知过程的智能记忆管理系统，其核心特性围绕“记忆知识全生命周期管理”与“智能认知进化”两大维度构建，覆盖记忆从摄入提炼到存储检索、动态优化的完整链路，同时通过标准化服务架构实现高效集成与调用。
+Limitations of the attention mechanism: In Transformer architectures, self-attention becomes less effective at capturing long-range dependencies as the sequence grows. This leads to a recency bias, where the model overweights the latest input and ignores crucial information that appeared earlier in the conversation.</br>
 
-### 一、记忆萃取引擎：多维度结构化提炼，夯实认知基础</br>
-记忆萃取是MemoryBear实现“认知化管理”的起点，区别于传统数据提取的“机械转换”，其核心优势在于对非结构化信息的“语义级解析”与“多格式标准化输出”，精准适配后续图谱构建与智能检索需求。具体能力包括：</br>
-多类型信息精准解析：可自动识别并提取文本中的陈述句核心信息，剥离冗余修饰成分，保留“主体-行为-对象”核心逻辑；同时精准抽取三元组数据（如“MemoryBear-核心功能-知识萃取”），为图谱存储提供基础数据单元，保障知识关联的准确性。</br>
-时序信息锚定：针对含有时效性的知识（如事件记录、政策文件、实验数据），自动提取并标记时间戳信息，支持“时间维度”的知识追溯与关联，解决传统知识管理中“时序混乱”导致的认知偏差问题。</br>
-智能剪枝生成：基于上下文语义理解，生成“关键信息全覆盖+逻辑连贯性强”的摘要内容，支持自定义摘要长度（50-500字）与侧重点（如技术型、业务型），适配不同场景的知识快速获取需求。例如对10页技术文档处理时，可在3秒内生成含核心参数、实现逻辑与应用场景的精简摘要。</br>
+### 2. Memory gaps in multi-agent collaboration</br>
+Data silos between agents: Different agents-such as a consulting agent, after-sales agent, and recommendation agent-often maintain their own isolated memories without a shared layer. As a result, users have to repeat information. For instance, after providing their address to the consulting agent, the user may be asked for it again by the after-sales agent.</br>
 
-### 二、图谱存储：对接Neo4j，构建可视化知识网络</br>
-存储层采用“图数据库优先”的架构设计，通过对接业界成熟的Neo4j图数据库，实现知识实体与关系的高效管理，突破传统关系型数据库“关联弱、查询繁”的局限，契合生物大脑“神经元关联”的认知模式。</br>
-该特性核心价值体现在：一是支持海量实体与多元关系的灵活存储，可管理百万级知识实体及千万级关联关系，涵盖“上下位、因果、时序、逻辑”等12种核心关系类型，适配多领域知识场景；二是与知识萃取模块深度联动，萃取的三元组数据可直接同步至Neo4j，自动构建初始知识图谱，无需人工二次映射；三是支持图谱可视化交互，用户可直观查看实体关联路径，手动调整关系权重，实现“机器构建+人工优化”的协同管理。</br>
+Inconsistent dialogue state: When switching between agents in multi-turn interactions, key dialogue state-such as the user's current intent or past issue labels-may not be passed along completely. This causes service discontinuities. For example,a user transitions from "product inquiry" to "complaint", but the new agent does not inherit the complaint details discussed earlier.</br>
 
-### 三、混合搜索：关键词+语义向量，兼顾精准与智能</br>
-为解决传统搜索“要么精准但僵化，要么模糊但失准”的痛点，MemoryBear采用“关键词检索+语义向量检索”的混合搜索架构，实现“精准匹配”与“意图理解”的双重目标。</br>
-其中，关键词检索基于Lucene引擎优化，针对知识中的核心实体、关键参数等结构化信息实现毫秒级精准定位，保障“明确需求”下的高效检索；语义向量检索则通过BERT模型对查询语句进行语义编码，将其转化为高维向量后与知识库中的向量数据比对，可识别同义词、近义词及隐含意图，例如用户查询“如何优化记忆衰减效率”时，系统可关联到“遗忘机制参数调整”“记忆强度评估方法”等相关知识。两种检索方式智能融合：先通过语义检索扩大候选范围，再通过关键词检索精准筛选，使检索准确率提升至92%，较单一检索方式平均提升35%。</br>
+Conflicting decisions: Agents that only see partial memory can generate contradictory responses. For example, a recommendation agent might suggest products that the user is allergic to, simply because it does not have access to the user's recorded health constraints.</br>
 
-### 四、记忆遗忘引擎：基于强度与时效的动态衰减，模拟生物记忆特性</br>
-遗忘是MemoryBear区别于传统静态知识管理工具的核心特性之一，其灵感源于生物大脑“突触修剪”机制，通过“记忆强度+时效”双维度模型实现知识的逐步衰减，避免冗余知识占用资源，保障核心知识的“认知优先级”。</br>
-具体实现逻辑为：系统为每条知识分配“初始记忆强度”（由萃取质量、人工标注重要性决定），并结合“调用频率、关联活跃度”实时更新强度值；同时设定“时效衰减周期”，根据知识类型（如核心规则、临时数据）差异化配置衰减速率。当知识强度低于阈值且超过设定时效后，将进入“休眠-衰减-清除”三阶段流程：休眠阶段保留数据但降低检索优先级，衰减阶段逐步压缩存储体积，清除阶段则彻底删除并备份至冷存储。该机制使系统冗余知识占比控制在8%以内，较传统无遗忘机制系统降低60%以上。</br>
+### 3. Semantic ambiguity during model reasoning distorted understanding of personalized context</br>
+Personalized signals in user conversations-such as domain-specific jargon, colloquial expressions, or context-dependent references-are often not encoded accurately, leading to semantic drift in how the model interprets memory. For instance, when the user refers to "that plan we discussed last time", the model may be unable to reliably locate the specific plan in previous conversations. Broken cross-lingual and dialect memory links in multilingual or dialect-rich scenarios, cross-language associations in memory may fail. When a user mixes Chinese and English in their requests, the model may struggle to integrate information expressed across languages.</br>
 
-### 五、自我反思引擎：定期回顾优化，实现记忆自主进化</br>
-自我反思机制是MemoryBear实现“智能升级”的关键，通过定期对已有记忆进行回顾、校验与优化，模拟人类“复盘总结”的认知行为，持续提升知识体系的准确性与有效性。</br>
-系统默认每日凌晨触发自动反思流程，核心动作包括：一是“一致性校验”，对比关联知识间的逻辑冲突（如同一实体的矛盾属性），标记可疑知识并推送人工审核；二是“价值评估”，统计知识的调用频次、关联贡献度，将高价值知识强化记忆强度，低价值知识加速衰减；三是“关联优化”，基于近期检索与使用行为，调整知识间的关联权重，强化高频关联路径。此外，支持人工触发专项反思（如新增核心知识后），并提供反思报告可视化展示优化结果，实现“自主进化+人工监督”的双重保障。</br>
+Typical example: A user says: "Last time customer support told me it could be processed 'as an urgent case'. What's the status now?" If the system never encoded what "urgent" corresponds to in terms of a concrete service level, the model can only respond with vague, unhelpful answers.</br>
 
-### 六、FastAPI服务：标准化API输出，实现高效集成与管理</br>
-为保障系统与外部业务场景的高效对接，MemoryBear采用FastAPI构建统一服务架构，实现管理端与服务端API的集中暴露，具备“高性能、易集成、强规范”的核心优势。服务端API涵盖知识萃取、图谱操作、搜索查询、遗忘控制等全功能模块，支持JSON/XML多格式数据交互，响应延迟平均低于50ms，单实例可支撑1000QPS并发请求；管理端API则提供系统配置、权限管理、日志查询等运维功能，支持通过API实现批量知识导入导出、反思周期调整等操作。同时，系统自动生成Swagger API文档，包含接口参数说明、请求示例与返回格式定义，开发者可快速完成集成调试。该架构已适配企业级微服务体系，支持Docker容器化部署，可灵活对接CRM、OA、研发管理等各类业务系统。</br>
+## Core Positioning of MemoryBear
+Unlike traditional memory management tools that treat knowledge as static data to be retrieved, MemoryBear is designed around the goal of simulating the knowledge-processing logic of the human brain. It builds a closed-loop system that spans the entire lifecycle-from knowledge intake to intelligent output. By emulating the hippocampus's memory encoding, the neocortex's knowledge consolidation, and synaptic pruning-based forgetting mechanisms, MemoryBear enables knowledge to dynamically evolve with "life-like" properties. This fundamentally redefines the relationship between knowledge and its users-shifting from passive lookup to proactive cognitive assistance.</br>
 
-## MemoryBear架构总览
+## Core Philosophy of MemoryBear
+MemoryBear's design philosophy is rooted in deep insight into the essence of human cognition: the value of knowledge does not lie in its accumulation, but in the continuous transformation and refinement that occurs as it flows.
+
+In traditional systems, once stored, knowledge becomes static-hard to associate across domains and incapable of adapting to users' cognitive needs. MemoryBear, by contrast, is built on the belief that true intelligence emerges only when knowledge undergoes a full evolutionary process: raw information distilled into structured rules, isolated rules connected into a semantic network, redundant information intelligently forgotten. Through this progression, knowledge shifts from mere informational memory to genuine cognitive understanding, enabling the emergence of real intelligence.</br>
+
+## Core Features of MemoryBear
+As an intelligent memory management system inspired by biological cognitive processes, MemoryBear centers its capabilities on two dimensions: full-lifecycle knowledge memory management and intelligent cognitive evolution. It covers the complete chain-from memory ingestion and refinement to storage, retrieval, and dynamic optimization-while providing a standardized service architecture that ensures efficient integration and invocation across applications.</br>
+
+### 1. Memory Extraction Engine: Multi-dimensional Structured Refinement as the Foundation of Cognition</br>
+Memory extraction is the starting point of MemoryBear's cognitive-oriented knowledge management. Unlike traditional data extraction, which performs "mechanical transformation", MemoryBear focuses on semantic-level parsing of unstructured information and standardized multi-format outputs, ensuring precise compatibility with downstream graph construction and intelligent retrieval. Core capabilities include:</br>
+
+Accurate parsing of diverse information types: The engine automatically identifies and extracts core information from declarative sentences, removing redundant modifiers while preserving the essential subject-action-object logic. It also extracts structured triples (e.g., "MemoryBear-core functionality-knowledge extraction"), providing atomic data units for graph storage and ensuring high-accuracy knowledge association.</br>
+
+Temporal information anchoring: For time-sensitive knowledge-such as event logs, policy documents, or experimental data-the engine automatically extracts timestamps and associates them with the content. This enables time-based reasoning and resolves the "temporal confusion" found in traditional knowledge systems.</br>
+
+Intelligent pruning summarization: Based on contextual semantic understanding, the engine generates summaries that cover all key information with strong logical coherence. Users may customize summary length (50-500 words) and emphasis (technical, business, etc.), enabling fast knowledge acquisition across scenarios.Example: For a 10-page technical document, MemoryBear can produce a concise summary including core parameters, implementation logic, and application scenarios in under 3 seconds.</br>
+
+### 2. Graph Storage: Neo4j-Powered Visual Knowledge Networks</br>
+The storage layer adopts a graph-first architecture, integrating with the mature Neo4j graph database to manage knowledge entities and relationships efficiently. This overcomes limitations of traditional relational databases-such as weak relational modeling and slow complex queries-and mirrors the biological "neuron-synapse" cognition model.</br>
+
+Key advantages include:
+Scalable, flexible storage: supportting millions of entities and tens of millions of relational edges, covering 12 core relationship types (hierarchical, causal, temporal, logical, etc.) to fit multi-domain knowledge applications. Seamless integration with the extraction module: Extracting triples synchronize directly into Neo4j, automatically constructing the initial knowledge graph with zero manual mapping. Interactive graph visualization: users can intuitively explore entity connection paths, adjust relationship weights, and perform hybrid "machine-generated + human-optimized" graph management.</br>
+
+### 3. Hybrid Search: Keyword + Semantic Vector for Precision and Intelligence</br>
+To overcome the classic tradeoff-precision but rigidity vs. fuzziness but inaccuracy-MemoryBear implements a hybrid retrieval framework combining keyword search and semantic vector search.</br>
+
+Keyword search: Optimized with Lucene, enabling millisecond-level exact matching of structured Semantic vector search:Powered by BERT embeddings, transforming queries into high-dimensional vectors for deep semantic comparison. This allows recognition of synonyms, near-synonyms, and implicit intent.For example, the query "How to optimize memory decay efficiency?" may surface related knowledge such as "forgetting-mechanism parameter tuning" or "memory strength evaluation methods".
+Intelligent fusion strategy:Semantic retrieval expands the candidate space; keyword retrieval then performs precise filtering.This dual-stage process increases retrieval accuracy to 92%, improving by 35% compared with single-mode retrieval.</br>
+
+### 4. Memory Forgetting Engine: Dynamic Decay Based on Strength & Timeliness</br>
+Forgetting is one of MemoryBear's defining features-setting it apart from static knowledge systems. Inspired by the brain's synaptic pruning mechanism, MemoryBear models forgetting using a dual-dimension approach based on memory strength and time decay, ensuring redundant knowledge is removed while key knowledge retains cognitive priority.</br>
+
+Implementation details:Each knowledge item is assigned an initial memory strength (determined by extraction quality and manual importance labels). Strength is updated dynamically according to usage frequency and association activity; A configurable time-decay cycle defines how different knowledge types (core rules vs. temporary data) lose strength over time. When knowledge falls below the strength threshold and exceeds its validity period, it enters a three-stage lifecycle: Dormancy-retained but with lower retrieval priority. Decay-gradually compressed to reduce storage cost. Clearance -permanently removed and archived into cold storage. This mechanism maintains redundant knowledge under 8%, reducing waste by over 60% compared with systems lacking forgetting capabilities.</br>
+
+### 5. Self-Reflection Engine: Periodic Optimization for Autonomous Memory Evolution</br>
+The self-reflection mechanism is key to MemoryBear's "intelligent self-improvement'. It periodically revisits, validates, and optimizes existing knowledge, mimicking the human behavior of review and retrospection.</br>
+
+A scheduled reflection process runs automatically at midnight each day, performing:
+1. Consistency checks, Detects logical conflicts across related knowledge (e.g., contradictory attributes for the same entity), flags suspicious records, and routes them for human verification;
+2. Value assessment, Evaluates invocation frequency and contribution to associations. High-value knowledge is reinforced; low-value knowledge experiences accelerated decay;
+3. Association optimization, Adjusts relationship weights based on recent usage and retrieval behavior, strengthening high-frequency association paths.</br>
+
+### 6. FastAPI Services: Standardized API Layer for Efficient Integration & Management</br>
+To support seamless integration with external business systems, MemoryBear uses FastAPI to build a unified service architecture that exposes both management and service APIs with high performance, easy integration, and strong consistency. Service-side APIs cover knowledge extraction, graph operations, search queries, forgetting management, and more. Support JSON/XML formats, with average latency below 50 ms, and a single instance sustaining 1000 QPS concurrency. Management-side APIs provide configuration, permissions, log queries, batch knowledge import/export, reflection cycle adjustments, and other operational capabilities. Swagger API documentation is auto-generated, including parameter descriptions, request samples, and response schemas, enabling rapid integration and testing. The architecture is compatible with enterprise microservice ecosystems, supports Docker-based deployment, and integrates easily with CRM, OA, R&D management, and various business applications.</br>
+
+## MemoryBear Architecture Overview
 <img width="2294" height="1154" alt="image" src="https://github.com/user-attachments/assets/3afd3b49-20ea-4847-b9ed-38b646a4ad89" />
 </br>
-- 记忆萃取引擎（Extraction Engine）：预处理、去重、结构化提取</br>
-- 记忆遗忘引擎（Forgetting Engine）：记忆强度模型与衰减策略</br>
-- 记忆自我反思引擎（Reflection Engine）：评价与重写记忆</br>
-- 检索服务：关键词、语义与混合检索</br>
-- Agent 与 MCP：提供多工具协作的智能体能力</br>
+- Memory Extraction Engine: Preprocessing, deduplication, and structured knowledge extraction</br>
+- Memory Forgetting Engine: Memory strength modeling and decay strategies</br>
+- Memory Reflection Engine: Evaluation and rewriting of stored memories</br>
+- Retrieval Services: Keyword search, semantic search, and hybrid retrieval</br>
+- Agent & MCP Integration: Multi-tool collaborative agent capabilities</br>
 
-## 实验室指标
-我们采用不同问题的数据集中，通过具备记忆功能的系统，进行性能对比。评估指标包括F1分数（F1）、BLEU-1（B1）以及LLM-as-a-Judge分数（J），数值越高表示表现越好，性能更高。
-MemoryBear 在 “单跳场景” 的精准度、结果匹配度与任务特异性表现上，均处于领先，“多跳”更强的信息连贯性与推理准确性，“开放泛化”对多样，无边界信息的处理质量与泛化能力更优，“时序”对时效性信息的匹配与处理表现更出色，四大任务的核心指标中，均优于 行业内的其他海外竞争对手Mem O、Zep、Lang Mem 等现有方法，整体性能更突出。
+## Metrics
+We evaluate MemoryBear across multiple datasets covering different types of tasks, comparing its performance with other memory-enabled systems. The evaluation metrics include F1 score (F1), BLEU-1 (B1), and LLM-as-a-Judge score (J)-where higher values indicate better performance. MemoryBear achieves state-of-the-art results across all task categories: 
+In single-hop scenarios, MemoryBear leads in precision, answer matching quality, and task specificity.
+In multi-hop reasoning, it demonstrates stronger information coherence and higher reasoning accuracy.
+In open generalization tasks, it exhibits superior capability in handling diverse, unbounded information and maintaining high-quality generalization.
+In temporal reasoning tasks, it excels at aligning and processing time-sensitive information.
+Across the core metrics of all four task types, MemoryBear consistently outperforms other competing systems in the industry, including Mem O, Zep, and LangMem, demonstrating significantly stronger overall performance.
+
 <img width="2256" height="890" alt="image" src="https://github.com/user-attachments/assets/5ff86c1f-53ac-4816-976d-95b48a4a10c0" />
-Memory Bear 基于向量的知识记忆非图谱版本，成功在保持高准确性的同时，极大地优化了检索效率。该方法在总体准确性上的表现已明显高于现有最高全文检索方法（72.90 ± 0.19%）。更重要的是，它在关键的延迟指标（包括 Search Latency 和 Total Latency 的 p50/p95）上也保持了较低水平，充分体现出 “性能更优且延迟更高效” 的特点，解决了全文检索方法的高准确性伴随的高延迟瓶颈。
+MemoryBear's vector-based knowledge memory (non-graph version) achieves substantial improvements in retrieval efficiency while maintaining high accuracy. Its overall accuracy surpasses the best existing full-text retrieval methods (72.90 ± 0.19%). More importantly, it maintains low latency across critical metrics-including Search Latency and Total Latency at both p50 and p95-demonstrating the characteristics of higher performance with greater latency efficiency. This effectively resolves the common bottleneck in full-text retrieval systems, where high accuracy typically comes at the cost of significantly increased latency.
+
 <img width="2248" height="498" alt="image" src="https://github.com/user-attachments/assets/2759ea19-0b71-4082-8366-e8023e3b28fe" />
-Memory Bear 通过集成知识图谱架构，在需要复杂推理和关系感知的任务上进一步释放了潜力。虽然图谱的遍历和推理可能会引入轻微的检索开销，但该版本通过优化图检索策略和决策流，成功将延迟控制在高效范围。更关键的是，基于图谱的 Memory Bear 将总体准确性推至新的高度（75.00 ± 0.20%），在保持准确性的同时，整体指标显著优于其他所有方法，证明了“结构化记忆带来的性能决定性优势”。
+MemoryBear further unlocks its potential in tasks requiring complex reasoning and relationship awareness through the integration of a knowledge-graph architecture. Although graph traversal and reasoning introduce a slight retrieval overhead, this version effectively keeps latency within an efficient range by optimizing graph-query strategies and decision flows. More importantly, the graph-based MemoryBear pushes overall accuracy to a new benchmark (75.00 ± 0.20%). While maintaining high accuracy, it delivers performance metrics that significantly surpass all other methods, demonstrating the decisive advantage of structured memory systems.
+
 <img width="2238" height="342" alt="image" src="https://github.com/user-attachments/assets/c928e094-45a2-414b-831a-6990b711ed07" />
 
-# MemoryBear安装教程
-## 一、前期准备
+# MemoryBear Installation Guide
+## 1. Prerequisites
 
-### 1.环境要求
+### 1.1 Environment Requirements
 
-* Node.js 20.19+ 或 22.12+  前端运行环境
+* Node.js 20.19+ or 22.12+- Required for running the frontend
 
-* Python 3.12  后端运行环境
+* Python 3.12- Backend runtime environment
 
-* PostgreSQL 13+ 主数据库
+* PostgreSQL 13+- Primary relational database
 
-* Neo4j 4.4+ 图数据库（存储知识图谱）
+* Neo4j 4.4+- Graph database (used for storing the knowledge graph)
 
-* Redis 6.0+ 缓存和消息队列
+* Redis 6.0+- Cache layer and message queue
 
-## 二、项目获取
+## 2. Getting the Project
 
-### 1.获取方式
+### 1. Download Method
 
-Git克隆（推荐）：
+Clone via Git (recommended):
 
 ```plain&#x20;text
 git clone https://github.com/SuanmoSuanyangTechnology/MemoryBear.git
 ```
 
-### 2.目录说明
+### 2. Directory Structure Explanation
 
 <img width="5238" height="1626" alt="diagram" src="https://github.com/user-attachments/assets/416d6079-3f34-40c3-9bcf-8760d186741a" />
 
 
-## 三、安装步骤
+## Installation Steps
 
-### 1.后端API服务启动
+### 1. Start the Backend API Service
 
-#### 1.1 安装python依赖
+#### 1.1 Install Python Dependencies
 
 ```python
-# 0.安装依赖管理工具uv
+# 0. Install the dependency management tool: uv
 pip install uv
 
-# 1.终端切换API目录
+# 1. Switch to the API directory
 cd api
 
-# 2.安装依赖
+# 2. Install dependencies
 uv sync 
 
-# 3.激活虚拟环境 (Windows)
-.venv\Scripts\Activate.ps1  （powershell，在api目录下）
-api\.venv\Scripts\activate （powershell，在根目录下）
-.venv\Scripts\activate.bat （cmd，在api目录下）
+# 3. Activate the Virtual Environment (Windows)
+.venv\Scripts\Activate.ps1  # run inside /api directory
+api\.venv\Scripts\activate  # run inside project root directory
+.venv\Scripts\activate.bat  # run inside /api directory
 
 ```
 
-#### 1.2 安装必备基础服务（docker镜像）
+#### 1.2 Install Required Base Services (Docker Images)
 
-使用docker desktop安装所需的docker镜像
+Use Docker Desktop to install the necessary service images.
 
-* **docker desktop安装地址：**&#x68;ttps://www.docker.com/products/docker-desktop/
+* **Docker Desktop download page:** &#x68;ttps://www.docker.com/products/docker-desktop/
 
 * **PostgreSQL**
 
-  **拉取镜像**
+  **Pull the Image**
 
-  search——select——pull
+  search-select-pull
 
   <img width="1280" height="731" alt="image-9" src="https://github.com/user-attachments/assets/0609eb5f-e259-4f24-8a7b-e354da6bae4d" />
 
 
-**创建容器**
+**Create the Container**
 
 <img width="1280" height="731" alt="image-8" src="https://github.com/user-attachments/assets/d57b3206-1df1-42a4-80fd-e71f37201a25" />
 
 
-**服务启动成功**
+**Service Started Successfully**
 
 <img width="1280" height="731" alt="image" src="https://github.com/user-attachments/assets/76e04c54-7a36-46ec-a68e-241ad268e427" />
 
 
 * **Neo4j**
 
-**拉取镜像**，与PostgreSQL一样从docker desktop中拉取镜像
+**Pull the Image** from Docker Desktop, the same way as with PostgreSQL.
 
-**创建容器**，Neo4j 默认需要映射**2 个关键端口**（7474 对应 Browser，7687 对应 Bolt 协议），同时需设置初始密码
+**Create the Neo4j Container** ensure that you map **the two required ports** 7474 - Neo4j Browser, 7687 - Bolt protocol. Additionally, you must set an initial password for the Neo4j database during container creation.
 
 <img width="1280" height="731" alt="image-1" src="https://github.com/user-attachments/assets/6bfb0c27-74e8-45f7-b381-189325d516bd" />
 
 
-**服务成功启动**
+**Service Started Successfully**
 
 <img width="1280" height="731" alt="image-2" src="https://github.com/user-attachments/assets/0d28b4fa-e8ed-4c05-8983-7a47f0a892d1" />
 
 
 * **Redis**
 
-同上
+The same as above
 
-#### 1.3 配置环境变量
+#### 1.3 Configure environment variables
 
-复制 env.example 为 .env 并填写配置
+Copy env.example as.env and fill in the configuration
 
 ```bash
-# Neo4j 图数据库 
+# Neo4j Graph Database
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=your-password
-# Neo4j Browser访问地址
+#  Neo4j Browser Access URL (optional documentation)
 
-# PostgreSQL 数据库
+# PostgreSQL Database
 DB_HOST=127.0.0.1
 DB_PORT=5432
 DB_USER=postgres
@@ -187,39 +218,38 @@ DB_NAME=redbear-mem
 
 # Database Migration Configuration
 # Set to true to automatically upgrade database schema on startup
-DB_AUTO_UPGRADE=true  # 首次启动设为true自动迁移数据库 在空白数据库创建表结构
+DB_AUTO_UPGRADE=true  # For the first startup, keep this as true to create the schema in an empty database.
 
 # Redis
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 REDIS_DB=1 
 
-# Celery (使用Redis作为broker)
+# Celery (Using Redis as broker)
 BROKER_URL=redis://127.0.0.1:6379/0
 RESULT_BACKEND=redis://127.0.0.1:6379/0
 
-# JWT密钥 (生成方式: openssl rand -hex 32)
+# JWT Secret Key (Formation method: openssl rand -hex 32)
 SECRET_KEY=your-secret-key-here
 ```
 
-#### 1.4 PostgreSQL数据库建立
+#### 1.4 Initialize the PostgreSQL Database
 
-通过项目中已有的 alembic 数据库迁移文件，为全新创建的空白 PostgreSQL 数据库创建对应的表结构。
+MemoryBear uses Alembic migration files included in the project to create the required table structures in a newly created, empty PostgreSQL database.
 
-**（1）配置数据库连接**
+**(1) Configure the Database Connection**
 
-确认项目中`alembic.ini`文件的`sqlalchemy.url`配置指向你的空白 PostgreSQL 数据库，格式示例：
+Ensure that the sqlalchemy.url value in the project's alembic.ini file points to your empty PostgreSQL database. Example format:
 
-```toml
-sqlalchemy.url = postgresql://用户名:密码@数据库地址:端口/空白数据库名
+```bash
+sqlalchemy.url = postgresql://<username>:<password>@<host>:<port>/<database_name>
 ```
 
-同时检查 migrations`/env.py`中`target_metadata`是否正确关联到 ORM 模型的`metadata`（确保迁移脚本和模型一致）
+Also verify that target_metadata in migrations/env.py is correctly linked to the ORM model's metadata object.
 
-**（2）执行迁移文件**
+**(2) Apply the Migration Files**
 
-在API目录执行以下命令，alembic 会自动识别空白数据库，并执行所有未应用的迁移脚本，创建完整表结构：
-
+Run the following command inside the API directory. Alembic will automatically detect the empty database and apply all outstanding migrations to create the full schema:
 ```bash
 alembic upgrade head
 ```
@@ -227,57 +257,57 @@ alembic upgrade head
 <img width="1076" height="341" alt="image-3" src="https://github.com/user-attachments/assets/9edda79d-4637-46e3-bee3-2eec39975d59" />
 
 
-通过Navicat查看迁移创建的数据库表结构
+Use Navicat to inspect the database tables created by the Alembic migration process.
 
 <img width="1280" height="680" alt="image-4" src="https://github.com/user-attachments/assets/aa5c1d98-bdc3-4d25-acb2-5c8cf6ecd3f5" />
 
 
-#### API服务启动
+#### Start the API Service
 
 ```python
 uv run -m app.main
 ```
 
-访问 API 文档：http://localhost:8000/docs
+Access the API documentation at http://localhost:8000/docs
 
 <img width="1280" height="675" alt="image-5" src="https://github.com/user-attachments/assets/68fa62b4-2c4f-4cf0-896c-41d59aa7d712" />
 
 
-### 2.前端web应用启动
+### 2. Start the Frontend Web Application
 
-#### 2.1安装依赖
+#### 2.1 Install Dependencies
 
 ```python
-# 切换web目录下
+# Switch to the web directory
 cd web
 
-# 下载依赖
+# Install dependencies
 npm install
 ```
 
-#### 2.2 修改API代理配置
+#### 2.2 Update the API Proxy Configuration
 
-编辑 web/vite.config.ts，将代理目标改为后端地址
+Edit web/vite.config.ts and update the proxy target to point to your backend API service:
 
 ```python
 proxy: {
   '/api': {
-    target: 'http://127.0.0.1:8000',  // 改为后端地址，win用户127.0.0.1  mac用户0.0.0.0
+    target: 'http://127.0.0.1:8000',  // Change to the backend address, windows users 127.0.0.1  macOS users 0.0.0.0
     changeOrigin: true,
   },
 }
 
 ```
 
-#### 2.3 启动服务
+#### 2.3 Start the Frontend Service
 
 ```python
-# 启动web服务
+# Start the web service
 npm run dev
 
 ```
 
-服务启动会输出可访问的前端界面
+After the service starts, the console will output the URL for accessing the frontend interface.
 
 <img width="935" height="311" alt="image-6" src="https://github.com/user-attachments/assets/cba1074a-440c-4866-8a94-7b6d1c911a93" />
 
@@ -285,33 +315,26 @@ npm run dev
 <img width="1280" height="652" alt="image-7" src="https://github.com/user-attachments/assets/a719dc0a-cbdd-4ba1-9b21-123d5eac32eb" />
 
 
-## 四、用户操作
+## 4. User Guide
 
-step1：项目获取
+step1: Retrieve the Project.
 
-step2：后端API服务启动
+step2: Start the Backend API Service.
 
-step3：前端web应用启动
+step3: Start the Frontend Web Application.
 
-step4： 终端输入 curl.exe -X POST http://127.0.0.1:8000/api/setup ，访问接口初始化数据库获得超级管理员账号
+step4: Enter curl.exe -X POST http://127.0.0.1:8000/api/setup in the terminal to access the interface, initialize the database, and obtain the super administrator account.
 
-step5：超级管理员&#x20;
+step5: Super Administrator Credentials
+Account: admin@example.com
+Password: admin_password
 
-账号：admin@example.com
+step6: Log In to the Frontend Interface.
 
-密码：admin\_password
+## License
+This project is licensed under the Apache License 2.0. For details, see the LICENSE file.
 
-step6：登陆前端页面
-
-
-
-
-## 许可证
-
-本项目采用 Apache License 2.0 开源协议，详情见 `LICENSE`。
-
-## 致谢与交流
-
-- 问题反馈与讨论：请提交 Issue 到代码仓库
-- 欢迎贡献：提交 PR 前请先创建功能分支并遵循常规提交信息格式
-- 如感兴趣需要联络：tianyou_hubm@redbearai.com
+## Acknowledgements & Community
+- Feedback & Issues: Please submit an Issue in the repository for bug reports or discussions.
+- Contributions Welcome: When submitting a Pull Request, please create a feature branch and follow conventional commit message guidelines.
+- Contact: If you are interested in contributing or collaborating, feel free to reach out at tianyou_hubm@redbearai.com

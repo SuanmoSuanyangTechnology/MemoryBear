@@ -1,4 +1,7 @@
 import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types'
+import type { ChatItem } from '@/components/Chat/types'
+import type { GraphRef } from '@/views/Workflow/types';
+import type { ApiKey } from '@/views/ApiKeyManagement/types'
 
 export interface ModelConfig {
   label?: string;
@@ -115,6 +118,14 @@ export interface ApplicationModalData {
 export interface AgentRef {
   handleSave: (flag?: boolean) => Promise<any>;
 }
+export interface ClusterRef {
+  handleSave: (flag?: boolean) => Promise<any>;
+}
+export interface WorkflowRef {
+  handleSave: (flag?: boolean) => Promise<any>;
+  handleRun: () => void;
+  graphRef: GraphRef
+}
 export interface ApplicationModalRef {
   handleOpen: (application?: Config) => void;
 }
@@ -138,11 +149,6 @@ export interface ApiExtensionModalData {
 }
 export interface ApiExtensionModalRef {
   handleOpen: () => void;
-}
-export interface ChatItem { 
-  role: 'answer' | 'question'; 
-  content?: string; 
-  time: number; 
 }
 export interface ChatData {
   label?: string;
@@ -191,4 +197,10 @@ export interface SubAgentItem {
 }
 export interface SubAgentModalRef {
   handleOpen: (agent?: SubAgentItem) => void;
+}
+export interface ApiKeyModalRef {
+  handleOpen: () => void;
+}
+export interface ApiKeyConfigModalRef {
+  handleOpen: (apiKey: ApiKey) => void;
 }

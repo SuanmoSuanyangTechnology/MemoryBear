@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState, useRef, type Key } from 'react'
+import { type FC, useEffect, useState, useRef, forwardRef, useImperativeHandle, type Key } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom';
 import Card from './components/Card'
@@ -11,17 +11,19 @@ import type {
   Config,
   SubAgentModalRef,
   ChatData,
-  SubAgentItem
+  SubAgentItem,
+  ClusterRef
 } from './types'
 import Chat from './components/Chat'
 import RbCard from '@/components/RbCard/Card'
 import SubAgentModal from './components/SubAgentModal'
 import Empty from '@/components/Empty'
+import type { Application } from '@/views/ApplicationManagement/types'
 
 
 const tagColors = ['processing', 'warning', 'default']
 const MAX_LENGTH = 5;
-const Cluster: FC<{application: SubAgentItem}> = ({application}) => {
+const Cluster = forwardRef<ClusterRef, { application: Application }>(({application}, ref) => {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [form] = Form.useForm()
@@ -113,6 +115,9 @@ const Cluster: FC<{application: SubAgentItem}> = ({application}) => {
       form.setFieldsValue({ master_agent_name: option.children })
     }
   }
+  useImperativeHandle(ref, () => ({
+    handleSave
+  }))
 
   return (
     <Row className="rb:h-[calc(100vh-64px)]">
@@ -199,7 +204,7 @@ const Cluster: FC<{application: SubAgentItem}> = ({application}) => {
             chatList={chatList}
             updateChatList={setChatList}
             handleSave={handleSave}
-            source="cluster"
+            source="multi_agent"
           />
         </RbCard>
       </Col>
@@ -210,6 +215,6 @@ const Cluster: FC<{application: SubAgentItem}> = ({application}) => {
       />
     </Row>
   )
-}
+})
 
 export default Cluster

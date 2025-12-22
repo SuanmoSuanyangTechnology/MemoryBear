@@ -8,7 +8,14 @@ import type {
 import type {
   ConfigForm as ExtractionConfigForm
 } from '@/views/MemoryExtractionEngine/types'
+import type {
+  ConfigForm as EmotionConfig
+} from '@/views/EmotionEngine/types'
+import type {
+  ConfigForm as SelfReflectionEngineConfig
+} from '@/views/SelfReflectionEngine/types'
 import type { TestParams } from '@/views/MemoryConversation'
+import { handleSSE, type SSEMessage } from '@/utils/stream'
 
 // 记忆对话
 export const readService = (query: TestParams) => {
@@ -95,6 +102,23 @@ export const getChunkInsight = (end_user_id: string) => {
 export const getRagContent = (end_user_id: string) => {
   return request.get(`/dashboard/rag_content`, { end_user_id, limit: 20 })
 }
+// 情感分布分析
+export const getWordCloud = (group_id: string) => {
+  return request.post(`/memory/emotion/wordcloud`, { group_id, limit: 20 })
+}
+// 高频情绪关键词
+export const getEmotionTags = (group_id: string) => {
+  return request.post(`/memory/emotion/tags`, { group_id, limit: 20 })
+}
+// 情绪健康指数
+export const getEmotionHealth = (group_id: string) => {
+  return request.post(`/memory/emotion/health`, { group_id, limit: 20 })
+}
+// 个性化建议
+export const getEmotionSuggestions = (group_id: string) => {
+  return request.post(`/memory/emotion/suggestions`, { group_id, limit: 20 })
+}
+
 /*************** end 用户记忆 相关接口 ******************************/
 
 /****************** 记忆管理 相关接口 *******************************/
@@ -132,9 +156,30 @@ export const updateMemoryExtractionConfig = (values: ExtractionConfigForm) => {
   return request.post('/memory-storage/update_config_extracted', values)
 }
 // 记忆萃取引擎-试运行
-export const pilotRunMemoryExtractionConfig = (values: { config_id: number | string; dialogue_text: string }) => {
-  return request.post('/memory-storage/pilot_run', values)
+export const pilotRunMemoryExtractionConfig = (values: { config_id: number | string; dialogue_text: string; }, onMessage?: (data: SSEMessage[]) => void) => {
+  return handleSSE('/memory-storage/pilot_run', values, onMessage)
 }
+// 情绪引擎-获取配置
+export const getMemoryEmotionConfig = (config_id: number | string) => {
+  return request.get('/memory/emotion/read_config', { config_id: config_id })
+}
+// 情绪引擎-更新配置
+export const updateMemoryEmotionConfig = (values: EmotionConfig) => {
+  return request.post('/memory/emotion/updated_config', values)
+}
+// 反思引擎-获取配置
+export const getMemoryReflectionConfig = (config_id: number | string) => {
+  return request.get('/memory/reflection/configs', { config_id: config_id })
+}
+// 反思引擎-更新配置
+export const updateMemoryReflectionConfig = (values: SelfReflectionEngineConfig) => {
+  return request.post('/memory/reflection/save', values)
+}
+// 反思引擎-试运行
+export const pilotRunMemoryReflectionConfig = (values: { config_id: number | string; dialogue_text: string; }) => {
+  return request.get('/memory/reflection/run', values)
+}
+
 /*************** end 记忆管理 相关接口 ******************************/
 
 

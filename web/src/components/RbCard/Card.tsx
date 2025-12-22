@@ -52,7 +52,7 @@ const RbCard: FC<RbCardProps> = ({
       title={typeof title === 'function' ? title() : title ?
         <div className="rb:flex rb:items-center">
           {avatarUrl 
-            ? <img src={avatarUrl} className="rb:mr-[13px] rb:w-[48px] rb:h-[48px] rb:rounded-[8px]" />
+            ? <img src={avatarUrl} className="rb:mr-3.25 rb:w-12 rb:h-12 rb:rounded-lg" />
             : avatar ? avatar : null
           }
           <div className={

@@ -1,153 +1,194 @@
-import { type FC, useState } from 'react';
+import { type FC, useState, useRef, useEffect } from 'react';
+import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { Button, Space, App
-  // Slider, Input, 
-  // Form, 
-  // Checkbox
-} from 'antd';
+import { Button, Space, App, Statistic, Row, Col } from 'antd';
 import copy from 'copy-to-clipboard'
 
 import Card from './components/Card';
-// import qpsRestrictions from '@/assets/images/application/qpsRestrictions.svg'
-// import dailyAdjustmentDosage from '@/assets/images/application/dailyAdjustmentDosage.svg'
-// import tokenCap from '@/assets/images/application/tokenCap.svg'
+import type { Application } from '@/views/ApplicationManagement/types'
+import type { ApiKeyModalRef, ApiKeyConfigModalRef } from './types'
+import type { ApiKey } from '@/views/ApiKeyManagement/types'
+import ApiKeyModal from './components/ApiKeyModal';
+import ApiKeyConfigModal from './components/ApiKeyConfigModal';
+import Tag from '@/components/Tag'
+import { getApiKeyList, getApiKeyStats, deleteApiKey } from '@/api/apiKey';
+import { maskApiKeys } from '@/utils/apiKeyReplacer'
 
-// const limitList = [
-//   { key: 'qpsRestrictions', value: '10', icon: qpsRestrictions, unit: ' times/second' },
-//   { key: 'dailyAdjustmentDosage', value: '1000', icon: dailyAdjustmentDosage, unit: ' times/day' },
-//   { key: 'tokenCap', value: '10', icon: tokenCap, unit: 'M Tokens/day' },
-// ]
-// const sdkList = ['pythonSDK', 'nodejsSDK', 'goSDK', 'curlExample']
-
-const Api: FC<{apiKeyList?: string[]}> = ({apiKeyList = []}) => {
+const Api: FC<{ application: Application | null }> = ({ application }) => {
   const { t } = useTranslation();
-  const [activeMethods, setActiveMethod] = useState(['GET']);
-  const { message } = App.useApp()
-  // const [form] = Form.useForm();
+  const activeMethods = ['GET'];
+  const { message, modal } = App.useApp()
   const copyContent = window.location.origin + '/v1/chat'
+  const apiKeyModalRef = useRef<ApiKeyModalRef>(null);
+  const apiKeyConfigModalRef = useRef<ApiKeyConfigModalRef>(null);
+  const [apiKeyList, setApiKeyList] = useState<ApiKey[]>([])
 
   const handleCopy = (content: string) => {
     copy(content)
     message.success(t('common.copySuccess'))
   }
-  return (
-    <div className="rb:w-[1000px] rb:mt-[20px] rb:pb-[20px] rb:mx-auto">
-      {/* <Form form={form} layout="vertical"> */}
-        <Space size={20} direction="vertical" style={{width: '100%'}}>
-          <Card title={t('application.endpointConfiguration')}>
-            <div className="rb:p-[20px_20px_24px_20px] rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-[8px]">
-              <Space size={8}>
-                {['GET', 'POST', 'PUT', 'DELETE'].map((method) => (
-                  <Button key={method} type={activeMethods.includes(method) ? 'primary' : 'default'} onClick={() => setActiveMethod(prev => activeMethods.includes(method) ? prev.filter(m => m !== method) : [...prev, method])}>
-                    {method}
-                  </Button>
-                ))}
-              </Space>
 
-              <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:mt-[20px] rb:p-[20px_16px] rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-[8px] rb:leading-[20px]">
-                {copyContent}
-                
-                <Button className="rb:px-[8px]! rb:h-[28px]! rb:group" onClick={() => handleCopy(copyContent)}>
+  useEffect(() => {
+    getApiList()
+  }, [])
+  const getApiList = () => {
+    if (!application) {
+      return
+    }
+    setApiKeyList([])
+    getApiKeyList({
+      type: application.type,
+      is_active: true,
+      resource_id: application.id,
+      page: 1,
+      pagesize: 10,
+    }).then(res => {
+      const response = res as { items: ApiKey[] }
+      const list = response.items ?? []
+      getAllStats([...list])
+    })
+  }
+  const getAllStats = (list: ApiKey[]) => {
+   const allList: ApiKey[] = []
+   list.forEach(async item => {
+      await getApiKeyStats(item.id)
+        .then(res => {
+          const response = res as { requests_today: number; total_requests: number; quota_limit: number; quota_used: number; }
+          allList.push({
+            ...item,
+            ...response,
+          })
+          setApiKeyList(prev => [...prev, {
+            ...item,
+            ...response,
+          }])
+        })
+    })
+
+  }
+  const handleAdd = () => {
+    apiKeyModalRef.current?.handleOpen()
+  }
+  const handleEdit = (vo: ApiKey) => {
+    apiKeyConfigModalRef.current?.handleOpen(vo)
+  }
+  const handleDelete = (vo: ApiKey) => {
+      modal.confirm({
+        title: t('common.confirmDeleteDesc', { name: vo.name }),
+        content: t('application.apiKeyDeleteContent'),
+        okText: t('common.delete'),
+        okType: 'danger',
+        onOk: () => {
+          deleteApiKey(vo.id)
+            .then(() => {
+              getApiList();
+              message.success(t('common.deleteSuccess'))
+            })
+        }
+      })
+  }
+
+  // 计算total_requests总数
+  const totalRequests = apiKeyList.reduce((total, item) => total + item.total_requests, 0);
+  return (
+    <div className="rb:w-250 rb:mt-5 rb:pb-5 rb:mx-auto">
+      <Space size={20} direction="vertical" style={{width: '100%'}}>
+        <Card 
+          title={t('application.endpointConfiguration')}
+        >
+          <div className="rb:text-[#5B6167] rb:text-[12px] rb:mb-2">{t('application.endpointConfigurationSubTitle')}</div>
+          <div className="rb:p-[20px_20px_24px_20px] rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
+            <Space size={8}>
+              {['GET', 'POST', 'PUT', 'DELETE'].map((method) => (
+                <div key={method} className={clsx("rb:w-20 rb:h-7 rb:leading-7 rb:text-center rb:rounded-md rb:text-regular", {
+                  'rb:bg-[#155EEF] rb:text-white': activeMethods.includes(method),
+                  'rb:bg-white': !activeMethods.includes(method),
+                })}>
+                  {method}
+                </div>
+              ))}
+            </Space>
+
+            <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:mt-5 rb:p-[20px_16px] rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:leading-5">
+              {copyContent}
+              
+              <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(copyContent)}>
+                <div 
+                  className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]" 
+                ></div>
+                {t('common.copy')}
+              </Button>
+            </div>
+          </div>
+        </Card>
+        <Card
+          title={t('application.apiKeys')}
+          extra={
+            <Button style={{padding: '0 8px', height: '24px'}} onClick={handleAdd}>+ {t('application.addApiKey')}</Button>
+          }
+        >
+          <div className="rb:text-[#5B6167] rb:text-[12px] rb:mb-2">{t('application.apiKeySubTitle')}</div>
+          {/* 总览数据 */}
+          <Row>
+            <Col span={6}>
+              <Statistic title={t('application.apiKeyTotal')} value={apiKeyList.length} />
+            </Col>
+            <Col span={6}>
+              <Statistic title={t('application.apiKeyRequestTotal')} value={totalRequests} />
+            </Col>
+          </Row>
+          {/* API Key 列表 */}
+          {apiKeyList.sort((a, b) => b.created_at - a.created_at).map(item => (
+            <div key={item.id} className="rb:mt-4 rb:p-[10px_12px] rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
+              <div className="rb:flex rb:items-center rb:justify-between">
+                <div className="rb:flex rb:items-center rb:max-w-[calc(100%-92px)]">
+                  <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1">{item.name}</div>
+                  <Tag className="rb:ml-2">ID: {item.id}</Tag>
+                </div>
+                <Space>
                   <div 
-                    className="rb:w-[16px] rb:h-[16px] rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]" 
+                    className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]" 
+                    onClick={() => handleEdit(item)}
+                  ></div>
+                  <div 
+                    className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
+                    onClick={() => handleDelete(item)}
+                  ></div>
+                </Space>
+              </div>
+              <div className="rb:mb-3 rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:mt-5 rb:p-[8px_16px] rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:leading-5">
+                {maskApiKeys(item.api_key)}
+                
+                <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(item.api_key)}>
+                  <div 
+                    className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]" 
                   ></div>
                   {t('common.copy')}
                 </Button>
               </div>
+ 
+              <Row gutter={12}>
+                <Col span={8}>
+                  <Statistic valueStyle={{ fontSize: '18px' }} title={t('application.apiKeyRequestTotal')} value={item.total_requests} />
+                </Col>
+                <Col span={8}>
+                  <Statistic valueStyle={{ fontSize: '18px' }} title={t('application.qpsLimit')} value={item.rate_limit} />
+                </Col>
+              </Row>
             </div>
-          </Card>
-          <Card
-            title={t('application.authenticationMethod')}
-            // extra={
-            //   <Button style={{padding: '0 8px', height: '24px'}} onClick={handleAdd}>+ {t('application.addApiKey')}</Button>
-            // }
-          >
-            <div className="rb:p-[10px_20px] rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-[8px] rb:font-medium rb:text-center">
-              {t('application.apiKeyTitle')}
-              <p className="rb:mt-[6px] rb:text-[#5B6167] rb:text-[12px] rb:font-regular">{t('application.apiKeyDesc')}</p>
-            </div>
-            {apiKeyList.map((item, index) => (
-              <div key={index} className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:mt-[20px] rb:p-[12px_16px] rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-[8px] rb:leading-[20px]">
-                {item}
+          ))}
+        </Card>
+      </Space>
 
-                <Space>
-                  <Button className="rb:px-[8px]! rb:h-[28px]! rb:group" onClick={() => handleCopy(item)}>
-                    <div 
-                      className="rb:w-[16px] rb:h-[16px] rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]" 
-                    ></div>
-                    {t('common.copy')}
-                  </Button>
-                  {/* <div 
-                    className="rb:w-[24px] rb:h-[24px] rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]" 
-                    onClick={() => handleDelete(index)}
-                  ></div> */}
-                </Space>
-              </div>
-            ))}
-          </Card>
-          {/* <Card title={t('application.requestResponseExample')}>
-            <div className="rb:mb-[12px] rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:font-regular">
-              {t('application.requestExample')}
-              <Button>{t('application.downloadPostmanCollection')}</Button>
-            </div>
-            <div className="rb:p-[16px_20px] rb:bg-[#F0F3F8] rb:rounded-[8px] rb:text-[#5B6167] rb:leading-[18px]">
-              curl -X POST  https://api.example.com/v1/agent/execute  \ -H "Authorization: Bearer YOUR_API_KEY" \ -H "Content-Type: application/json" \ -d 
-            </div>
-
-            <div className="rb:mb-[12px] rb:mt-[24px] rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:font-regular">
-              {t('application.responseExample')}
-            </div>
-            <div className="rb:p-[16px_20px] rb:bg-[#F0F3F8] rb:rounded-[8px] rb:text-[#5B6167] rb:leading-[18px]">
-              curl -X POST  https://api.example.com/v1/agent/execute  \ -H "Authorization: Bearer YOUR_API_KEY" \ -H "Content-Type: application/json" \ -d 
-            </div>
-          </Card>
-          <Card title={t('application.rateLimitingStrategy')}>
-            <div className="rb:grid rb:grid-cols-3 rb:gap-[18px]">
-              {limitList.map(item => (
-                <div key={item.key} className="rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded-[8px] rb:p-[16px_20px]">
-                  <div className="rb:flex rb:justify-between">
-                    <div className="rb:leading-[20px]">
-                      {t(`application.${item.key}`)}
-                      <div className="rb:text-[14px] rb:font-medium rb:text-[#155EEF] rb:mt-[8px]">{item.value}{item.unit}</div>
-                    </div>
-                    <img src={item.icon} className="rb:w-[24px] rb:h-[24px]" />
-                  </div>
-                  <Slider style={{ margin: '24px 0 0 0' }} value={item.value} />
-                </div>
-              ))}
-            </div>
-          </Card>
-          <Card title={t('application.sdkDownload')}>
-            <div className="rb:grid rb:grid-cols-4 rb:gap-[16px]">
-              {sdkList.map(item => (
-                <div key={item} className="rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded-[8px] rb:p-[24px_20px] rb:text-center">
-                  {t(`application.${item}`)}
-                </div>
-              ))}
-            </div>
-          </Card>
-          <Card title={t('application.advancedSettings')}>
-            <Form.Item 
-              name="WebhookReturnsTimeout"
-              label={<>{t('application.WebhookReturnsTimeout')}<span className="rb:text-[#5B6167] rb:text-[12px] rb:font-regular"> ({t('application.WebhookReturnsTimeoutDesc')})</span></>}
-            >
-              <Input disabled />
-            </Form.Item>
-            <Form.Item 
-              name="whitelistIP"
-              label={<>{t('application.whitelistIP')}<span className="rb:text-[#5B6167] rb:text-[12px] rb:font-regular"> ({t('application.whitelistIPDesc')})</span></>}
-            >
-              <Input.TextArea rows={4} />
-            </Form.Item>
-            <Form.Item 
-              name="whitelistIP"
-              className="rb:mb-[0]!"
-            >
-              <Checkbox>{t('application.publicAPIDocumentation')}</Checkbox>
-            </Form.Item>
-          </Card> */}
-        </Space>
-      {/* </Form> */}
+      <ApiKeyModal
+        ref={apiKeyModalRef}
+        application={application}
+        refresh={getApiList}
+      />
+      <ApiKeyConfigModal
+        ref={apiKeyConfigModalRef}
+        refresh={getApiList}
+      />
     </div>
   );
 }
