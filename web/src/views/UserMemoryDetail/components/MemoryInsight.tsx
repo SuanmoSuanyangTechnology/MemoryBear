@@ -43,7 +43,7 @@ const MemoryInsight:FC = () => {
         ? <Skeleton />
         : report
         ? <div className="rb:flex rb:flex-wrap rb:justify-between rb:h-full">
-          <div className="rb:leading-[22px]">
+          <div className="rb:leading-5.5">
             {report|| '-'}
           </div>
         </div>

@@ -59,7 +59,7 @@ const PieCard: FC = () => {
       {loading
       ? <Loading size={249} />
       : !data || data.length === 0
-      ? <Empty size={88} className="rb:mt-[48px] rb:mb-[81px]" />
+      ? <Empty size={88} className="rb:mt-12 rb:mb-20.25" />
       : data && data.length > 0 &&
         <ReactEcharts
           option={{

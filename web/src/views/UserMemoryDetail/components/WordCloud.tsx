@@ -81,7 +81,7 @@ const WordCloud: FC = () => {
       },
       radar: {
         indicator: radarData.map(item => ({
-          name: t(`emotionDetail.${item.name}`),
+          name: t(`statementDetail.${item.name}`),
           max: 100,
           min: 1
         }))
@@ -99,12 +99,12 @@ const WordCloud: FC = () => {
 
   return (
     <RbCard
-      title={t('emotionDetail.wordCloud')}
+      title={t('statementDetail.wordCloud')}
       headerType="borderless"
       headerClassName="rb:text-[18px]! rb:leading-[24px]"
       height="100%"
     >
-      {wordCloud
+      {wordCloud?.total_count && wordCloud?.total_count > 0
         ? <div className="rb:flex rb:h-100">
           <ReactEcharts ref={chartRef} option={radarOption} style={{ width: '50%', height: '100%' }} />
           <div className="rb:w-[50%] rb:pl-4 rb:flex rb:flex-col rb:justify-center">
@@ -113,8 +113,8 @@ const WordCloud: FC = () => {
               {wordCloud.tags.map(item => (
                 <div key={item.emotion_type}>
                   <div className="rb:flex rb:items-center rb:justify-between rb:font-medium">
-                    {t(`emotionDetail.${item.emotion_type}`)}
-                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular">{item.count}{t('emotionDetail.pieces')}</div>
+                    {t(`statementDetail.${item.emotion_type}`)}
+                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular">{item.count}{t('statementDetail.pieces')}</div>
                   </div>
                   <Progress size="small" percent={item.percentage} />
                 </div>
@@ -122,7 +122,7 @@ const WordCloud: FC = () => {
             </div>
           </div>
         </div>
-        : <Empty />
+        : <Empty size={88} />
       }
     </RbCard>
   )

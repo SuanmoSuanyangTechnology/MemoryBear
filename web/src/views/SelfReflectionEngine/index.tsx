@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Row, Col, Form, App, Button, Switch, Space, Select } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+
 import RbCard from '@/components/RbCard/Card';
 import strategyImpactSimulator from '@/assets/images/memory/strategyImpactSimulator.svg'
 import { getMemoryReflectionConfig, updateMemoryReflectionConfig, pilotRunMemoryReflectionConfig } from '@/api/memory'
@@ -138,6 +139,9 @@ const SelfReflectionEngine: React.FC = () => {
         })
           .then((res) => {
             setResult(res as Result)
+          })
+          .catch(() => {
+            setRunLoading(false)
           })
           .finally(() => {
             setRunLoading(false)
