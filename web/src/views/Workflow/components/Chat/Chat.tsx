@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx'
-import { Input, Form } from 'antd'
+import { Input, Form, App } from 'antd'
 import { Space, Button } from 'antd'
 
 import ChatIcon from '@/assets/images/application/chat.png'
@@ -18,6 +18,7 @@ import { type SSEMessage } from '@/utils/stream'
 
 const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId, graphRef }, ref) => {
   const { t } = useTranslation()
+  const { message: messageApi } = App.useApp()
   const [form] = Form.useForm<{ message: string }>()
   const variableConfigModalRef = useRef<VariableEditModalRef>(null)
   const [open, setOpen] = useState(false)
@@ -60,6 +61,26 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
   }
   const handleClusterSend = () => {
     if (loading || !appId) return
+    let isCanSend = true
+    const params: Record<string, any> = {}
+    if (variables.length > 0) {
+      const needRequired: string[] = []
+      variables.forEach(vo => {
+        params[vo.name] = vo.value ?? vo.defaultValue
+
+        if (vo.required && (params[vo.name] === null || params[vo.name] === undefined || params[vo.name] === '')) {
+          isCanSend = false
+          needRequired.push(vo.name)
+        }
+      })
+
+      if (needRequired.length) {
+        messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
+      }
+    }
+    if (!isCanSend) {
+      return
+    }
 
     setLoading(true)
     const message = form.getFieldValue('message')
@@ -98,12 +119,6 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
         }
       })
     };
-    const params: Record<string, any> = {}
-    if (variables.length > 0) {
-      variables.forEach(vo => {
-        params[vo.name] = vo.value ?? vo.defaultValue
-      })
-    }
     form.setFieldValue('message', undefined)
     draftRun(appId, {
       message: message,
