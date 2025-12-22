@@ -13,7 +13,7 @@ interface TagList {
 const EmotionTags: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
-  const [tagList, setTagList] = useState<TagList | null>(null)
+  const [data, setData] = useState<TagList | null>(null)
 
   useEffect(() => {
     getEmotionTagData()
@@ -25,18 +25,18 @@ const EmotionTags: FC = () => {
     }
     getWordCloud(id)
       .then((res) => {
-        setTagList(res as TagList)
+        setData(res as TagList)
       })
   }
 
   const [visibleCount, setVisibleCount] = useState(0)
 
   useEffect(() => {
-    if (!tagList || tagList?.keywords.length === 0) return
+    if (!data || data?.keywords.length === 0) return
     
     const timer = setInterval(() => {
       setVisibleCount(prev => {
-        if (prev >= tagList?.keywords.length) {
+        if (prev >= data?.keywords.length) {
           clearInterval(timer)
           return prev
         }
@@ -45,7 +45,7 @@ const EmotionTags: FC = () => {
     }, 200)
 
     return () => clearInterval(timer)
-  }, [tagList?.keywords.length])
+  }, [data?.keywords.length])
 
   const getEmotionColor = (emotionType: string) => {
     const colors: Record<string, string> = {
@@ -59,19 +59,19 @@ const EmotionTags: FC = () => {
     return colors[emotionType] || '#8c8c8c'
   }
 
-  const emotionStats = tagList?.keywords.reduce((acc, item) => {
+  const emotionStats = data?.keywords.reduce((acc, item) => {
     acc[item.emotion_type] = (acc[item.emotion_type] || 0) + item.frequency
     return acc
   }, {} as Record<string, number>) ?? {}
 
   return (
     <RbCard
-      title={t('emotionDetail.emotionTags')}
+      title={t('statementDetail.emotionTags')}
       headerType="borderless"
       headerClassName="rb:text-[18px]! rb:leading-[24px]"
-      bodyClassName='rb:p-0! rb:relative'
+      bodyClassName='rb:p-0! rb:pb-3! rb:relative'
     >
-      {tagList
+      {data?.keywords && data?.keywords.length > 0
         ? <>
           <div className="rb:flex rb:flex-wrap rb:items-center rb:gap-6 rb:text-sm rb:mt-3 rb:p-3 rb:bg-[#F0F3F8]">
             {Object.entries(emotionStats).map(([type, count]) => {
@@ -79,13 +79,13 @@ const EmotionTags: FC = () => {
               return (
                 <div key={type} className="rb:flex rb:items-center rb:gap-2">
                   <div className="rb:w-3 rb:h-3 rb:rounded-full" style={{ backgroundColor: getEmotionColor(type) }}></div>
-                  <span className="rb:text-gray-600">{t(`emotionDetail.${type || 'neutral'}`)} ({count}个)</span>
+                  <span className="rb:text-gray-600">{t(`statementDetail.${type || 'neutral'}`)} ({count}个)</span>
                 </div>
               )
             })}
           </div>
           <div className="rb:mt-6 rb:flex rb:items-center rb:flex-wrap rb:gap-3 rb:mb-3 rb:px-6">
-            {tagList.keywords.slice(0, visibleCount).map((item, index) => (
+            {data.keywords.slice(0, visibleCount).map((item, index) => (
               <div
                 key={index}
                 className="rb:flex rb:items-center rb:justify-center rb:animate-fadeIn rb:px-4 rb:py-2 rb:rounded-full rb:text-white rb:font-medium"
@@ -102,7 +102,7 @@ const EmotionTags: FC = () => {
             ))}
           </div>
         </>
-        : <Empty />
+        : <Empty size={88} />
       }
     </RbCard>
   )

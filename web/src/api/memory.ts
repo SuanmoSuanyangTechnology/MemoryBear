@@ -15,6 +15,7 @@ import type {
   ConfigForm as SelfReflectionEngineConfig
 } from '@/views/SelfReflectionEngine/types'
 import type { TestParams } from '@/views/MemoryConversation'
+import type { EndUser } from '@/views/UserMemoryDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 
 // 记忆对话
@@ -66,6 +67,7 @@ export const getTotalEndUsers = () => {
 export const getUserProfile = (end_user_id: string) => {
   return request.get(`/memory/analytics/user_profile`, { end_user_id })
 }
+
 // 用户记忆-记忆洞察
 export const getMemoryInsightReport = (end_user_id: string) => {
   return request.get(`/memory-storage/analytics/memory_insight/report`, { end_user_id })
@@ -74,9 +76,20 @@ export const getMemoryInsightReport = (end_user_id: string) => {
 export const getUserSummary = (end_user_id: string) => {
   return request.get(`/memory-storage/analytics/user_summary`, { end_user_id })
 }
+// 记忆分类
+export const getNodeStatistics = (end_user_id: string) => {
+  return request.get(`/memory-storage/analytics/node_statistics`, { end_user_id })
+}
+// 基本信息
+export const getEndUserProfile = (end_user_id: string) => {
+  return request.get(`/memory-storage/read_end_user/profile`, { end_user_id })
+}
+export const updatedEndUserProfile = (values: EndUser) => {
+  return request.post(`/memory-storage/updated_end_user/profile`, values)
+}
 // 用户记忆-关系网络
 export const getMemorySearchEdges = (end_user_id: string) => {
-  return request.get(`/memory-storage/search/entity_graph`, { end_user_id })
+  return request.get(`/memory-storage/analytics/graph_data`, { end_user_id })
 }
 // 用户记忆-用户兴趣分布
 export const getHotMemoryTagsByUser = (end_user_id: string) => {

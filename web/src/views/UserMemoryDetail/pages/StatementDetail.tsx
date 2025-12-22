@@ -1,5 +1,5 @@
 import { type FC } from 'react'
-import { Row, Col } from 'antd';
+import { Row, Col, Space } from 'antd';
 
 import WordCloud from '../components/WordCloud'
 import EmotionTags from '../components/EmotionTags'
@@ -7,17 +7,15 @@ import Health from '../components/Health'
 import Suggestions from '../components/Suggestions'
 
 
-const EmotionDetail: FC = () => {
+const StatementDetail: FC = () => {
   return (
     <Row gutter={[16, 16]}>
       <Col span={12}>
-        <WordCloud />
-      </Col>
-      <Col span={12}>
-        <EmotionTags />
-      </Col>
-      <Col span={12}>
-        <Health />
+        <Space size={16} direction="vertical" className="rb:w-full">
+          <WordCloud />
+          <EmotionTags />
+          <Health />
+        </Space>
       </Col>
       <Col span={12}>
         <Suggestions />
@@ -26,4 +24,4 @@ const EmotionDetail: FC = () => {
   )
 }
 
-export default EmotionDetail
+export default StatementDetail

@@ -56,12 +56,11 @@ const Health: FC = () => {
 
   return (
     <RbCard
-      title={t('emotionDetail.health')}
+      title={t('statementDetail.health')}
       headerType="borderless"
       headerClassName="rb:text-[18px]! rb:leading-[24px]"
-      height="100%"
     >
-      {health
+      {health?.health_score && health?.health_score > 0
         ? <>
           <div className="rb:flex rb:justify-center rb:items-center">
             <Progress
@@ -78,20 +77,20 @@ const Health: FC = () => {
 
           {health.dimensions && <>
             <div className="rb:flex rb:items-center rb:justify-between rb:mt-6">
-              <div className="rb:w-40 rb:mr-3">{t('emotionDetail.positivity_rate')}</div> 
+              <div className="rb:w-40 rb:mr-3">{t('statementDetail.positivity_rate')}</div> 
               <Progress className="rb:w-[calc(100%-180px)]" percent={health.dimensions.positivity_rate.score} />
             </div>
             <div className="rb:flex rb:items-center rb:gap-3 rb:mt-3">
-              <div className="rb:w-40 rb:mr-3">{t('emotionDetail.stability')}</div>
+              <div className="rb:w-40 rb:mr-3">{t('statementDetail.stability')}</div>
               <Progress className="rb:w-[calc(100%-180px)]" percent={health.dimensions.stability.score} />
             </div>
             <div className="rb:flex rb:items-center rb:gap-3 rb:mt-3">
-              <div className="rb:w-40 rb:mr-3">{t('emotionDetail.resilience')}</div> 
+              <div className="rb:w-40 rb:mr-3">{t('statementDetail.resilience')}</div> 
               <Progress className="rb:w-[calc(100%-180px)]" percent={health.dimensions.resilience.score} />
             </div>
           </>}
         </>
-        : <Empty />
+        : <Empty size={88} className="rb:h-full" />
       }
     </RbCard>
   )
