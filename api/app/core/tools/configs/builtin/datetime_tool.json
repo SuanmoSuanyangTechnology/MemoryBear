@@ -1,0 +1,12 @@
+{
+  "name": "datetime_tool",
+  "description": "时间工具 - 日期时间处理：提供时间格式转化、时区转换、时间戳转换、时间计算",
+  "tool_type": "builtin",
+  "tool_class": "DateTimeTool",
+  "version": "1.0.0",
+  "enabled": true,
+  "parameters": {
+    "timezone": "UTC"
+  },
+  "tags": ["time", "utility", "builtin"]
+}

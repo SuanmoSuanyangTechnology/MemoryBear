@@ -2,7 +2,7 @@
 所有的内容是放错误地方了，应该放在models
 """
 
-from typing import Any, Optional, List, Dict, Literal
+from typing import Any, Optional, List, Dict, Literal, Union
 import time
 import uuid
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
@@ -28,25 +28,48 @@ class Write_UserInput(BaseModel):
 # ============================================================================
 class BaseDataSchema(BaseModel):
     """Base schema for the data"""
-    id: str = Field(..., description="The unique identifier for the data entry.")
-    statement: str = Field(..., description="The statement text.")
-    group_id: str = Field(..., description="The group identifier.")
-    chunk_id: str = Field(..., description="The chunk identifier.")
+    # 保持原有必需字段为可选，以兼容不同数据源
+    id: Optional[str] = Field(None, description="The unique identifier for the data entry.")
+    statement: Optional[str] = Field(None, description="The statement text.")
+    group_id: Optional[str] = Field(None, description="The group identifier.")
+    chunk_id: Optional[str] = Field(None, description="The chunk identifier.")
     created_at: str = Field(..., description="The creation timestamp in ISO 8601 format.")
     expired_at: Optional[str] = Field(None, description="The expiration timestamp in ISO 8601 format.")
     valid_at: Optional[str] = Field(None, description="The validation timestamp in ISO 8601 format.")
     invalid_at: Optional[str] = Field(None, description="The invalidation timestamp in ISO 8601 format.")
     entity_ids: List[str] = Field([], description="The list of entity identifiers.")
+    description: Optional[str] = Field(None, description="The description of the data entry.")
+
+    # 新增字段以匹配实际输入数据
+    entity1_name: str = Field(..., description="The first entity name.")
+    entity2_name: Optional[str] = Field(None, description="The second entity name.")
+    statement_id: str = Field(..., description="The statement identifier.")
+    relationship_type: str = Field(..., description="The relationship type.")
+    relationship: Optional[Dict[str, Any]] = Field(None, description="The relationship object.")
+    entity2: Optional[Dict[str, Any]] = Field(None, description="The second entity object.")
+
+
+class QualityAssessmentSchema(BaseModel):
+    """Schema for memory quality assessment results."""
+    score: int = Field(..., ge=0, le=100, description="Quality score percentage (0-100).")
+    summary: str = Field(..., description="Brief summary of data quality status, including main issues and strengths.")
+
+
+class MemoryVerifySchema(BaseModel):
+    """Schema for memory privacy verification results."""
+    has_privacy: bool = Field(..., description="Whether privacy information was detected.")
+    privacy_types: List[str] = Field([], description="List of detected privacy information types.")
+    summary: str = Field(..., description="Brief summary of privacy detection results.")
 
 
 class ConflictResultSchema(BaseModel):
     """Schema for the conflict result data in the reflexion_data.json file."""
-    data: List[BaseDataSchema] = Field(..., description="The conflict memory data.")
+    data: List[BaseDataSchema] = Field(..., description="The conflict memory data. Only contains conflicting records when conflict is True.")
     conflict: bool = Field(..., description="Whether the memory is in conflict.")
-    conflict_memory: Optional[BaseDataSchema] = Field(None, description="The conflict memory data.")
+    quality_assessment: Optional[QualityAssessmentSchema] = Field(None, description="The quality assessment object. Contains score and summary when quality_assessment is enabled, null otherwise.")
+    memory_verify: Optional[MemoryVerifySchema] = Field(None, description="The memory privacy verification object. Contains privacy detection results when memory_verify is enabled, null otherwise.")
 
     @model_validator(mode="before")
-    @classmethod
     def _normalize_data(cls, v):
         if isinstance(v, dict):
             d = v.get("data")
@@ -61,7 +84,6 @@ class ConflictSchema(BaseModel):
     conflict_memory: Optional[BaseDataSchema] = Field(None, description="The conflict memory data.")
 
     @model_validator(mode="before")
-    @classmethod
     def _normalize_data(cls, v):
         if isinstance(v, dict):
             d = v.get("data")
@@ -76,21 +98,30 @@ class ReflexionSchema(BaseModel):
     solution: str = Field(..., description="The solution for the reflexion.")
 
 
+class ChangeRecordSchema(BaseModel):
+    """Schema for individual change records"""
+    field: List[Dict[str, str]] = Field(..., description="List of field changes, each containing field name and new value.")
+
 class ResolvedSchema(BaseModel):
     """Schema for the resolved memory data in the reflexion_data"""
     original_memory_id: Optional[str] = Field(None, description="The original memory identifier.")
-    resolved_memory: Optional[BaseDataSchema] = Field(None, description="The resolved memory data.")
+    # resolved_memory: Optional[BaseDataSchema] = Field(None, description="The resolved memory data (only contains records that need modification).")
+    resolved_memory: Optional[Union[BaseDataSchema, List[BaseDataSchema]]] = Field(None, description="The resolved memory data (only contains records that need modification). Can be a single record or list of records.")
+    change: Optional[List[ChangeRecordSchema]] = Field(None, description="List of detailed change records with IDs and field information.")
 
+
+class SingleReflexionResultSchema(BaseModel):
+    """Schema for a single reflexion result item."""
+    conflict: ConflictResultSchema = Field(..., description="The conflict result data for this specific conflict type.")
+    reflexion: ReflexionSchema = Field(..., description="The reflexion data for this conflict.")
+    resolved: Optional[ResolvedSchema] = Field(None, description="The resolved memory data for this conflict.")
+    type: str = Field("reflexion_result", description="The type identifier.")
 
 class ReflexionResultSchema(BaseModel):
-    """Schema for the reflexion result data in the reflexion_data.json file."""
-    # 模型输出中 "conflict" 为单个冲突对象（包含 data 与 conflict_memory），而非字典映射
-    conflict: ConflictResultSchema = Field(..., description="The conflict result data.")
-    reflexion: Optional[ReflexionSchema] = Field(None, description="The reflexion data.")
-    resolved: Optional[ResolvedSchema] = Field(None, description="The resolved memory data.")
+    """Schema for the complete reflexion result data - a list of individual conflict resolutions."""
+    results: List[SingleReflexionResultSchema] = Field(..., description="List of individual conflict resolution results, grouped by conflict type.")
 
     @model_validator(mode="before")
-    @classmethod
     def _normalize_resolved(cls, v):
         if isinstance(v, dict):
             conflict = v.get("conflict")

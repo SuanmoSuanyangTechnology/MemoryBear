@@ -58,11 +58,22 @@ class StatementRepository(BaseNeo4jRepository[StatementNode]):
             n['invalid_at'] = datetime.fromisoformat(n['invalid_at'])
         
         # 处理temporal_info字段
-        if isinstance(n.get('temporal_info'), dict):
+        if isinstance(n.get('temporal_info'), str):
+            # 从字符串转换为枚举值
+            n['temporal_info'] = TemporalInfo(n['temporal_info'])
+        elif isinstance(n.get('temporal_info'), dict):
             n['temporal_info'] = TemporalInfo(**n['temporal_info'])
         elif not n.get('temporal_info'):
             # 如果没有temporal_info，创建一个默认的
-            n['temporal_info'] = TemporalInfo()
+            n['temporal_info'] = TemporalInfo.STATIC
+        
+        # 处理情绪字段 - 映射 Neo4j 节点属性到 StatementNode 模型
+        # 处理空值情况，确保字段存在
+        n['emotion_type'] = n.get('emotion_type')
+        n['emotion_intensity'] = n.get('emotion_intensity')
+        n['emotion_keywords'] = n.get('emotion_keywords', [])
+        n['emotion_subject'] = n.get('emotion_subject')
+        n['emotion_target'] = n.get('emotion_target')
         
         return StatementNode(**n)
     

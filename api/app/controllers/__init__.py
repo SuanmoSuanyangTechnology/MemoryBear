@@ -23,11 +23,17 @@ from . import (
     memory_dashboard_controller,
     memory_storage_controller,
     memory_dashboard_controller,
+    memory_reflection_controller,
     api_key_controller,
     release_share_controller,
     public_share_controller,
     multi_agent_controller,
     workflow_controller,
+    emotion_controller,
+    emotion_config_controller,
+    prompt_optimizer_controller,
+    tool_controller,
+    tool_execution_controller,
 )
 
 # 创建管理端 API 路由器
@@ -58,5 +64,11 @@ manager_router.include_router(public_share_controller.router)  # 公开路由（
 manager_router.include_router(memory_dashboard_controller.router)
 manager_router.include_router(multi_agent_controller.router)
 manager_router.include_router(workflow_controller.router)
+manager_router.include_router(emotion_controller.router)
+manager_router.include_router(emotion_config_controller.router)
+manager_router.include_router(prompt_optimizer_controller.router)
+manager_router.include_router(memory_reflection_controller.router)
+manager_router.include_router(tool_controller.router)
+manager_router.include_router(tool_execution_controller.router)
 
 __all__ = ["manager_router"]

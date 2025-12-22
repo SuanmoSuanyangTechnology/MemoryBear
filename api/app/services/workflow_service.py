@@ -1,29 +1,28 @@
 """
 工作流服务层
 """
-
+import datetime
+import json
 import logging
 import uuid
 import datetime
-from typing import Any, Annotated
+from typing import Any, Annotated, AsyncGenerator
 
-from sqlalchemy.orm import Session
 from fastapi import Depends
+from sqlalchemy.orm import Session
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
+from app.core.workflow.validator import validate_workflow_config
+from app.db import get_db
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
-    WorkflowNodeExecutionRepository,
-    get_workflow_config_repository,
-    get_workflow_execution_repository,
-    get_workflow_node_execution_repository
+    WorkflowNodeExecutionRepository
 )
-from app.core.workflow.validator import validate_workflow_config
-from app.core.exceptions import BusinessException
-from app.core.error_codes import BizCode
-from app.db import get_db
 from app.schemas import DraftRunRequest
+from app.utils.sse_utils import format_sse_message
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +80,7 @@ class WorkflowService:
             if not is_valid:
                 logger.warning(f"工作流配置验证失败: {errors}")
                 raise BusinessException(
-                    error_code=BizCode.INVALID_PARAMETER,
+                    code=BizCode.INVALID_PARAMETER,
                     message=f"工作流配置无效: {'; '.join(errors)}"
                 )
 
@@ -140,7 +139,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
@@ -166,7 +165,7 @@ class WorkflowService:
             if not is_valid:
                 logger.warning(f"工作流配置验证失败: {errors}")
                 raise BusinessException(
-                    error_code=BizCode.INVALID_PARAMETER,
+                    code=BizCode.INVALID_PARAMETER,
                     message=f"工作流配置无效: {'; '.join(errors)}"
                 )
 
@@ -195,8 +194,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             return False
-
-        self.config_repo.delete(config.id)
+        config.is_active = False
         logger.info(f"删除工作流配置成功: app_id={app_id}, config_id={config.id}")
         return True
 
@@ -245,7 +243,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
@@ -359,7 +357,7 @@ class WorkflowService:
         execution = self.get_execution(execution_id)
         if not execution:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"执行记录不存在: execution_id={execution_id}"
             )
 
@@ -438,7 +436,7 @@ class WorkflowService:
                 message=f"工作流配置不存在: app_id={app_id}"
             )
         input_data = {"message": payload.message, "variables": payload.variables, "conversation_id": payload.conversation_id}
-        
+
         # 转换 user_id 为 UUID
         triggered_by_uuid = None
         if payload.user_id:
@@ -446,7 +444,7 @@ class WorkflowService:
                 triggered_by_uuid = uuid.UUID(payload.user_id)
             except (ValueError, AttributeError):
                 logger.warning(f"无效的 user_id 格式: {payload.user_id}")
-        
+
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = None
         if payload.conversation_id:
@@ -454,7 +452,7 @@ class WorkflowService:
                 conversation_id_uuid = uuid.UUID(payload.conversation_id)
             except (ValueError, AttributeError):
                 logger.warning(f"无效的 conversation_id 格式: {payload.conversation_id}")
-        
+
         # 2. 创建执行记录
         execution = self.create_execution(
             workflow_config_id=config.id,
@@ -474,11 +472,9 @@ class WorkflowService:
         }
 
         # 4. 获取工作空间 ID（从 app 获取）
-        from app.models import App
-
 
         # 5. 执行工作流
-        from app.core.workflow.executor import execute_workflow, execute_workflow_stream
+        from app.core.workflow.executor import execute_workflow
 
         try:
             # 更新状态为运行中
@@ -530,6 +526,105 @@ class WorkflowService:
                 message=f"工作流执行失败: {str(e)}"
             )
 
+    async def run_stream(
+        self,
+        app_id: uuid.UUID,
+        payload: DraftRunRequest,
+        config: WorkflowConfig
+    ):
+        """运行工作流（流式）
+
+        Args:
+            app_id: 应用 ID
+            payload: 请求对象（包含 message, variables, conversation_id 等）
+            config: 存储类型（可选）
+
+        Yields:
+            SSE 格式的流式事件
+
+        Raises:
+            BusinessException: 配置不存在或执行失败时抛出
+        """
+        # 1. 获取工作流配置
+        if not config:
+            config = self.get_workflow_config(app_id)
+        if not config:
+            raise BusinessException(
+                code=BizCode.CONFIG_MISSING,
+                message=f"工作流配置不存在: app_id={app_id}"
+            )
+        input_data = {"message": payload.message, "variables": payload.variables,
+                      "conversation_id": payload.conversation_id}
+
+        # 转换 user_id 为 UUID
+        triggered_by_uuid = None
+        if payload.user_id:
+            try:
+                triggered_by_uuid = uuid.UUID(payload.user_id)
+            except (ValueError, AttributeError):
+                logger.warning(f"无效的 user_id 格式: {payload.user_id}")
+
+        # 转换 conversation_id 为 UUID
+        conversation_id_uuid = None
+        if payload.conversation_id:
+            try:
+                conversation_id_uuid = uuid.UUID(payload.conversation_id)
+            except (ValueError, AttributeError):
+                logger.warning(f"无效的 conversation_id 格式: {payload.conversation_id}")
+
+        # 2. 创建执行记录
+        execution = self.create_execution(
+            workflow_config_id=config.id,
+            app_id=app_id,
+            trigger_type="manual",
+            triggered_by=triggered_by_uuid,
+            conversation_id=conversation_id_uuid,
+            input_data=input_data
+        )
+
+        # 3. 构建工作流配置字典
+        workflow_config_dict = {
+            "nodes": config.nodes,
+            "edges": config.edges,
+            "variables": config.variables,
+            "execution_config": config.execution_config
+        }
+
+        # 4. 获取工作空间 ID（从 app 获取）
+
+        # 5. 流式执行工作流
+
+        try:
+            # 更新状态为运行中
+            self.update_execution_status(execution.execution_id, "running")
+
+            # 调用流式执行（executor 会发送 workflow_start 和 workflow_end 事件）
+            async for event in self._run_workflow_stream(
+                workflow_config=workflow_config_dict,
+                input_data=input_data,
+                execution_id=execution.execution_id,
+                workspace_id="",
+                user_id=payload.user_id
+            ):
+                # 直接转发 executor 的事件（已经是正确的格式）
+                yield event
+
+        except Exception as e:
+            logger.error(f"工作流流式执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
+            self.update_execution_status(
+                execution.execution_id,
+                "failed",
+                error_message=str(e)
+            )
+            # 发送错误事件
+            yield {
+                "event": "error",
+                "data": {
+                    "execution_id": execution.execution_id,
+                    "error": str(e)
+                }
+            }
+
     async def run_workflow(
         self,
         app_id: uuid.UUID,
@@ -537,7 +632,7 @@ class WorkflowService:
         triggered_by: uuid.UUID,
         conversation_id: uuid.UUID | None = None,
         stream: bool = False
-    ):
+    ) -> AsyncGenerator | dict:
         """运行工作流
 
         Args:
@@ -557,7 +652,7 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
@@ -584,12 +679,12 @@ class WorkflowService:
         app = self.db.query(App).filter(App.id == app_id).first()
         if not app:
             raise BusinessException(
-                error_code=BizCode.RESOURCE_NOT_FOUND,
+                code=BizCode.NOT_FOUND,
                 message=f"应用不存在: app_id={app_id}"
             )
 
         # 5. 执行工作流
-        from app.core.workflow.executor import execute_workflow, execute_workflow_stream
+        from app.core.workflow.executor import execute_workflow
 
         try:
             # 更新状态为运行中
@@ -647,9 +742,40 @@ class WorkflowService:
                 error_message=str(e)
             )
             raise BusinessException(
-                error_code=BizCode.INTERNAL_ERROR,
+                code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
             )
+
+    def _clean_event_for_json(self, event: dict[str, Any]) -> dict[str, Any]:
+        """清理事件数据，移除不可序列化的对象
+
+        Args:
+            event: 原始事件数据
+
+        Returns:
+            可序列化的事件数据
+        """
+        from langchain_core.messages import BaseMessage
+
+        def clean_value(value):
+            """递归清理值"""
+            if isinstance(value, BaseMessage):
+                # 将 Message 对象转换为字典
+                return {
+                    "type": value.__class__.__name__,
+                    "content": value.content,
+                }
+            elif isinstance(value, dict):
+                return {k: clean_value(v) for k, v in value.items()}
+            elif isinstance(value, list):
+                return [clean_value(item) for item in value]
+            elif isinstance(value, (str, int, float, bool, type(None))):
+                return value
+            else:
+                # 其他不可序列化的对象转换为字符串
+                return str(value)
+
+        return clean_value(event)
 
     async def _run_workflow_stream(
         self,
@@ -657,8 +783,7 @@ class WorkflowService:
         input_data: dict[str, Any],
         execution_id: str,
         workspace_id: str,
-        user_id: str
-    ):
+        user_id: str):
         """运行工作流（流式，内部方法）
 
         Args:
@@ -669,13 +794,11 @@ class WorkflowService:
             user_id: 用户 ID
 
         Yields:
-            流式事件
+            流式事件（格式：{"event": "<type>", "data": {...}}）
         """
         from app.core.workflow.executor import execute_workflow_stream
 
         try:
-            output_data = {}
-
             async for event in execute_workflow_stream(
                 workflow_config=workflow_config,
                 input_data=input_data,
@@ -683,30 +806,8 @@ class WorkflowService:
                 workspace_id=workspace_id,
                 user_id=user_id
             ):
-                # 转发事件
+                # 直接转发事件（executor 已经返回正确格式）
                 yield event
-
-                # 收集输出数据
-                if event.get("type") == "node_complete":
-                    node_data = event.get("data", {})
-                    node_outputs = node_data.get("node_outputs", {})
-                    output_data.update(node_outputs)
-
-                # 处理完成事件
-                if event.get("type") == "workflow_complete":
-                    self.update_execution_status(
-                        execution_id,
-                        "completed",
-                        output_data=output_data
-                    )
-
-                # 处理错误事件
-                if event.get("type") == "workflow_error":
-                    self.update_execution_status(
-                        execution_id,
-                        "failed",
-                        error_message=event.get("error")
-                    )
 
         except Exception as e:
             logger.error(f"工作流流式执行失败: execution_id={execution_id}, error={e}", exc_info=True)
@@ -716,9 +817,11 @@ class WorkflowService:
                 error_message=str(e)
             )
             yield {
-                "type": "workflow_error",
-                "execution_id": execution_id,
-                "error": str(e)
+                "event": "error",
+                "data": {
+                    "execution_id": execution_id,
+                    "error": str(e)
+                }
             }
 
 

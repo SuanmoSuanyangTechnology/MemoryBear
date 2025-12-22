@@ -64,6 +64,11 @@ class Statement(BaseModel):
         connect_strength: Optional connection strength ('Strong' or 'Weak')
         temporal_validity: Optional temporal validity range
         triplet_extraction_info: Optional triplet extraction results
+        emotion_type: Optional emotion type (joy/sadness/anger/fear/surprise/neutral)
+        emotion_intensity: Optional emotion intensity (0.0-1.0)
+        emotion_keywords: Optional list of emotion keywords
+        emotion_subject: Optional emotion subject (self/other/object)
+        emotion_target: Optional emotion target (person or object name)
     """
     id: str = Field(default_factory=lambda: uuid4().hex, description="A unique identifier for the statement.")
     chunk_id: str = Field(..., description="ID of the parent chunk this statement belongs to.")
@@ -80,6 +85,12 @@ class Statement(BaseModel):
     triplet_extraction_info: Optional[TripletExtractionResponse] = Field(
         None, description="The triplet extraction information of the statement."
     )
+    # Emotion fields
+    emotion_type: Optional[str] = Field(None, description="Emotion type: joy/sadness/anger/fear/surprise/neutral")
+    emotion_intensity: Optional[float] = Field(None, ge=0.0, le=1.0, description="Emotion intensity: 0.0-1.0")
+    emotion_keywords: Optional[List[str]] = Field(default_factory=list, description="Emotion keywords, max 3")
+    emotion_subject: Optional[str] = Field(None, description="Emotion subject: self/other/object")
+    emotion_target: Optional[str] = Field(None, description="Emotion target: person or object name")
 
 
 class ConversationContext(BaseModel):

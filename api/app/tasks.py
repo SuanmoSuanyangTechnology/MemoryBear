@@ -480,3 +480,149 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
             "workspace_id": workspace_id,
             "elapsed_time": elapsed_time,
         }
+
+
+@celery_app.task(name="app.tasks.workspace_reflection_task", bind=True)
+def workspace_reflection_task(self) -> Dict[str, Any]:
+    """定时任务：每30秒运行工作空间反思功能
+
+    Returns:
+        包含任务执行结果的字典
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.logging_config import get_api_logger
+        from app.models.workspace_model import Workspace
+        from app.services.memory_reflection_service import (
+            MemoryReflectionService,
+            WorkspaceAppService,
+        )
+
+        api_logger = get_api_logger()
+        db = next(get_db())
+
+        try:
+            # 获取所有工作空间
+            workspaces = db.query(Workspace).all()
+
+            if not workspaces:
+                return {
+                    "status": "SUCCESS",
+                    "message": "没有找到工作空间",
+                    "workspace_count": 0,
+                    "reflection_results": []
+                }
+
+            all_reflection_results = []
+
+            # 遍历每个工作空间
+            for workspace in workspaces:
+                workspace_id = workspace.id
+                api_logger.info(f"开始处理工作空间反思，workspace_id: {workspace_id}")
+
+                try:
+                    reflection_service = MemoryReflectionService(db)
+
+                    # 使用服务类处理复杂查询逻辑
+                    service = WorkspaceAppService(db)
+                    result = service.get_workspace_apps_detailed(str(workspace_id))
+
+                    workspace_reflection_results = []
+
+                    for data in result['apps_detailed_info']:
+                        if data['data_configs'] == []:
+                            continue
+
+                        releases = data['releases']
+                        data_configs = data['data_configs']
+                        end_users = data['end_users']
+
+                        for base, config, user in zip(releases, data_configs, end_users):
+                            if int(base['config']) == int(config['config_id']) and base['app_id'] == user['app_id']:
+                                # 调用反思服务
+                                api_logger.info(f"为用户 {user['id']} 启动反思，config_id: {config['config_id']}")
+
+                                reflection_result = await reflection_service.start_reflection_from_data(
+                                    config_data=config,
+                                    end_user_id=user['id']
+                                )
+
+                                workspace_reflection_results.append({
+                                    "app_id": base['app_id'],
+                                    "config_id": config['config_id'],
+                                    "end_user_id": user['id'],
+                                    "reflection_result": reflection_result
+                                })
+
+                    all_reflection_results.append({
+                        "workspace_id": str(workspace_id),
+                        "reflection_count": len(workspace_reflection_results),
+                        "reflection_results": workspace_reflection_results
+                    })
+
+                    api_logger.info(
+                        f"工作空间 {workspace_id} 反思处理完成，处理了 {len(workspace_reflection_results)} 个任务")
+
+                except Exception as e:
+                    api_logger.error(f"处理工作空间 {workspace_id} 反思失败: {str(e)}")
+                    all_reflection_results.append({
+                        "workspace_id": str(workspace_id),
+                        "error": str(e),
+                        "reflection_count": 0,
+                        "reflection_results": []
+                    })
+
+            total_reflections = sum(r.get("reflection_count", 0) for r in all_reflection_results)
+
+            return {
+                "status": "SUCCESS",
+                "message": f"成功处理 {len(workspaces)} 个工作空间，总共 {total_reflections} 个反思任务",
+                "workspace_count": len(workspaces),
+                "total_reflections": total_reflections,
+                "workspace_results": all_reflection_results
+            }
+
+        except Exception as e:
+            api_logger.error(f"工作空间反思任务执行失败: {str(e)}")
+            return {
+                "status": "FAILURE",
+                "error": str(e),
+                "workspace_count": 0,
+                "reflection_results": []
+            }
+        finally:
+            db.close()
+
+    try:
+        # 使用 nest_asyncio 来避免事件循环冲突
+        try:
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError:
+            pass
+
+        # 尝试获取现有事件循环，如果不存在则创建新的
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(_run())
+        elapsed_time = time.time() - start_time
+        result["elapsed_time"] = elapsed_time
+        result["task_id"] = self.request.id
+
+        return result
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "elapsed_time": elapsed_time,
+            "task_id": self.request.id
+        }

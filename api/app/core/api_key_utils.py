@@ -16,7 +16,7 @@ def generate_api_key(key_type: ApiKeyType) -> str:
         key_type: API Key 类型
         
     Returns:
-        tuple: (api_key, key_hash, key_prefix)
+        str: api_key
     """
     # 前缀映射
     prefix_map = {

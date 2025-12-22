@@ -20,20 +20,25 @@ UNWIND $statements AS statement
 MERGE (s:Statement {id: statement.id})
 SET s += {
     id: statement.id,
+    run_id: statement.run_id,
+    chunk_id: statement.chunk_id,
     group_id: statement.group_id,
     user_id: statement.user_id,
     apply_id: statement.apply_id,
-    chunk_id: statement.chunk_id,
-    run_id: statement.run_id,
+    stmt_type: statement.stmt_type,
+    statement: statement.statement,
+    emotion_intensity: statement.emotion_intensity,
+    emotion_target: statement.emotion_target,
+    emotion_subject: statement.emotion_subject,
+    emotion_type: statement.emotion_type,
+    emotion_keywords: statement.emotion_keywords,
+    temporal_info: statement.temporal_info,
     created_at: statement.created_at,
     expired_at: statement.expired_at,
-    stmt_type: statement.stmt_type,
-    temporal_info: statement.temporal_info,
-    relevence_info: statement.relevence_info,
-    statement: statement.statement,
     valid_at: statement.valid_at,
     invalid_at: statement.invalid_at,
-    statement_embedding: statement.statement_embedding
+    statement_embedding: statement.statement_embedding,
+    relevence_info: statement.relevence_info
 }
 RETURN s.id AS uuid
 """
@@ -746,3 +751,57 @@ DETACH DELETE losing
 
 RETURN count(losing) as deleted
 """
+
+neo4j_statement_part = '''
+MATCH (n:Statement)
+WHERE n.group_id = "{}" 
+  AND datetime(n.created_at) >= datetime() - duration('P3D')
+RETURN 
+  n.statement as statement_name,
+  n.id as statement_id,
+   n.created_at as   statement_created_at
+
+'''
+neo4j_statement_all = '''
+MATCH (n:Statement)
+WHERE n.group_id = "{}" 
+RETURN 
+  n.statement as statement_name,
+  n.id as statement_id
+
+'''
+neo4j_query_part = """
+            MATCH (n)-[r]-(m:ExtractedEntity)
+            WHERE n.group_id = "{}" 
+            AND datetime(n.created_at) >= datetime() - duration('P3D')
+            WITH DISTINCT m
+            OPTIONAL MATCH (m)-[rel]-(other:ExtractedEntity)
+            RETURN 
+            m.name as entity1_name,
+            m.description as description,
+            m.statement_id as statement_id,
+            m.created_at as created_at,
+            m.expired_at as expired_at,
+            CASE WHEN rel IS NULL THEN "NO_RELATIONSHIP" ELSE type(rel) END as relationship_type,
+            rel as relationship,
+            CASE WHEN other IS NULL THEN "ISOLATED_NODE" ELSE other.name END as entity2_name,
+            other as entity2
+                          """
+neo4j_query_all = """
+                MATCH (n)-[r]-(m:ExtractedEntity)
+                WHERE n.group_id = "{}" 
+                WITH DISTINCT m
+                OPTIONAL MATCH (m)-[rel]-(other:ExtractedEntity)
+                RETURN 
+                m.name as entity1_name,
+                m.description as description,
+                m.statement_id as statement_id,
+                m.created_at as created_at,
+                m.expired_at as expired_at,
+                CASE WHEN rel IS NULL THEN "NO_RELATIONSHIP" ELSE type(rel) END as relationship_type,
+                rel as relationship,
+                CASE WHEN other IS NULL THEN "ISOLATED_NODE" ELSE other.name END as entity2_name,
+                other as entity2
+                          """
+
+

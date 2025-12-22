@@ -100,7 +100,13 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
                 #     "triplets": [triplet.model_dump() for triplet in statement.triplet_extraction_info.triplets] if statement.triplet_extraction_info else [],
                 #     "entities": [entity.model_dump() for entity in statement.triplet_extraction_info.entities] if statement.triplet_extraction_info else []
                 # }) if statement.triplet_extraction_info else json.dumps({"triplets": [], "entities": []}),
-                "statement_embedding": statement.statement_embedding if statement.statement_embedding else None
+                "statement_embedding": statement.statement_embedding if statement.statement_embedding else None,
+                # 添加情绪字段处理
+                "emotion_type": statement.emotion_type,
+                "emotion_intensity": statement.emotion_intensity,
+                "emotion_keywords": statement.emotion_keywords if statement.emotion_keywords else [],
+                "emotion_subject": statement.emotion_subject,
+                "emotion_target": statement.emotion_target
             }
             flattened_statements.append(flattened_statement)
 
