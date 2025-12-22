@@ -25,9 +25,10 @@ const RbModal: FC<ModalProps> = ({
       onOk={onOk}
       destroyOnHidden={true}
       className={`rb-modal ${className || ''}`}
+      maskClosable={false}
       {...props}
     >
-      <div className='rb:max-h-[550px] rb:overflow-y-auto rb:overflow-x-hidden'>
+      <div className='rb:max-h-137.5 rb:overflow-y-auto rb:overflow-x-hidden'>
         {children}
       </div>
     </Modal>

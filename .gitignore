@@ -5,7 +5,7 @@ build/
 dist/
 wheels/
 logs/
-res/
+api/res/
 *.egg-info
 
 # Virtual environments
@@ -16,17 +16,16 @@ examples/
 # Environment variables
 .env
 .kiro
-.vscode/settings.json
+.vscode
 .idea
 
 # Temporary outputs
-app/core/memory/agent/.DS_Store
-app/core/memory/src/utils/.DS_Store
+.DS_Store
 time.log
 celerybeat-schedule.db
 search_results.json
 
-migrations/versions
+api/migrations/versions
 tmp
 files
 

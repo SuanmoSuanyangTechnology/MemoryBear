@@ -3,7 +3,47 @@ import i18n from '@/i18n'
 import { cookieUtils } from './request'
 const API_PREFIX = '/api'
 
-export const handleSSE = async (url: string, data: any, onMessage?: (data: string) => void, config = {}) => {
+export interface SSEMessage {
+  event?: string
+  data?: string | object
+}
+export function parseSSEToJSON(sseString: string) {
+  const events: SSEMessage[] = []
+  const lines = sseString.trim().split('\n')
+  
+  let currentEvent: SSEMessage = {}
+  
+  try {
+    for (const line of lines) {
+      if (line.startsWith('event:')) {
+        if (Object.keys(currentEvent).length > 0) {
+          events.push(currentEvent)
+          currentEvent = {}
+        }
+        currentEvent.event = line.substring(6).trim()
+      } else if (line.startsWith('data:')) {
+        const dataStr = line.substring(5).trim()
+        try {
+          currentEvent.data = JSON.parse(dataStr.replace(/"/g, '"'))
+        } catch {
+          currentEvent.data = dataStr
+        }
+      }
+    }
+    
+    if (Object.keys(currentEvent).length > 0) {
+      events.push(currentEvent)
+    }
+    
+    return events
+  } catch (error) {
+    console.error('Parse stream error:', error)
+    return []
+  }
+}
+
+
+export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMessage[]) => void, config = { headers: {} }) => {
   try {
     const token = cookieUtils.get('authToken');
     const response = await fetch(`${API_PREFIX}${url}`, {
@@ -37,7 +77,7 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: strin
           
           const chunk = decoder.decode(value, { stream: true });
           if (onMessage) {
-            onMessage(chunk);
+            onMessage(parseSSEToJSON(chunk) ?? {});
           }
         }
         break;
