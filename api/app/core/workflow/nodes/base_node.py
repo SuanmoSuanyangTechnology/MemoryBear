@@ -26,7 +26,12 @@ class WorkflowState(TypedDict):
     messages: Annotated[list[AnyMessage], add]
     
     # 输入变量（从配置的 variables 传入）
-    variables: dict[str, Any]
+    # 使用深度合并函数，支持嵌套字典的更新（如 conv.xxx）
+    variables: Annotated[dict[str, Any], lambda x, y: {
+        **x,
+        **{k: {**x.get(k, {}), **v} if isinstance(v, dict) and isinstance(x.get(k), dict) else v 
+           for k, v in y.items()}
+    }]
     
     # 节点输出（存储每个节点的执行结果，用于变量引用）
     # 使用自定义合并函数，将新的节点输出合并到现有字典中
@@ -544,9 +549,15 @@ class BaseNode(ABC):
         # 使用变量池获取变量
         pool = VariablePool(state)
         
+        # 构建完整的 variables 结构
+        variables = {
+            "sys": pool.get_all_system_vars(),
+            "conv": pool.get_all_conversation_vars()
+        }
+        
         return render_template(
             template=template,
-            variables=pool.get_all_conversation_vars(),
+            variables=variables,
             node_outputs=pool.get_all_node_outputs(),
             system_vars=pool.get_all_system_vars()
         )
@@ -575,9 +586,15 @@ class BaseNode(ABC):
         # 使用变量池获取变量
         pool = VariablePool(state)
         
+        # 构建完整的 variables 结构（包含 sys 和 conv）
+        variables = {
+            "sys": pool.get_all_system_vars(),
+            "conv": pool.get_all_conversation_vars()
+        }
+        
         return evaluate_condition(
             expression=expression,
-            variables=pool.get_all_conversation_vars(),
+            variables=variables,
             node_outputs=pool.get_all_node_outputs(),
             system_vars=pool.get_all_system_vars()
         )

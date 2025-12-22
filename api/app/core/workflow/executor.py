@@ -69,7 +69,17 @@ class WorkflowExecutor:
             初始化的工作流状态
         """
         user_message = input_data.get("message") or ""
-        conversation_vars = input_data.get("conversation_vars") or {}
+        
+        # 会话变量处理：从配置文件获取变量定义列表，转换为字典（name -> default value）
+        config_variables_list = self.workflow_config.get("variables") or []
+        conversation_vars = {}
+        for var_def in config_variables_list:
+            if isinstance(var_def, dict):
+                var_name = var_def.get("name")
+                var_default = var_def.get("default")
+                if var_name:
+                    conversation_vars[var_name] = var_default
+        
         input_variables = input_data.get("variables") or {}  # Start 节点的自定义变量
 
         # 构建分层的变量结构
