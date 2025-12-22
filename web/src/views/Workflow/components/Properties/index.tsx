@@ -125,7 +125,10 @@ const Properties: FC<PropertiesProps> = ({
                   updateNodeLabel(e.target.value);
                 }}
               />
-            </Form.Item>
+          </Form.Item>
+          <Form.Item name="id" label="ID">
+            <Input disabled />
+          </Form.Item>
             {configs && Object.keys(configs).length > 0 && Object.keys(configs).map((key) => {
               const config = configs[key] || {}
 
@@ -207,6 +210,7 @@ const Properties: FC<PropertiesProps> = ({
                     ? <Slider min={config.min} max={config.max} step={config.step} />
                     : config.type === 'customSelect'
                     ? <CustomSelect
+                      placeholder={t('common.pleaseSelect')}
                       url={config.url as string}
                       params={config.params}
                       hasAll={false}
