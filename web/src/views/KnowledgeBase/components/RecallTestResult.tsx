@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2025-11-18 16:19:58
  * @LastEditors: yujiangping
- * @LastEditTime: 2025-11-29 19:08:40
+ * @LastEditTime: 2025-12-22 13:47:53
  */
 import { FileOutlined, FieldTimeOutlined, EditOutlined } from '@ant-design/icons';
 import { Skeleton } from 'antd';
@@ -58,7 +58,7 @@ const RecallTestResult = ({
 
   // 格式化 QA 内容为显示格式
   const formatQAContent = (question: string, answer: string) => {
-    return `**问题：** ${question}\n\n**答案：** ${answer}`;
+    return `**${t('knowledgeBase.question')}:** ${question}\n**${t('knowledgeBase.answer')}:** ${answer}`;
   };
 
   const handleItemClick = (e: React.MouseEvent, item: RecallTestData, index: number) => {
