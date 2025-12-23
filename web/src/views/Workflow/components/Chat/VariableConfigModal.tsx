@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, InputNumber, Checkbox } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { StartVariableItem, VariableEditModalRef } from '../../types'
+import type { StartVariableItem, VariableConfigModalRef } from '../../types'
 import RbModal from '@/components/RbModal'
 
 interface VariableEditModalProps {
@@ -10,7 +10,7 @@ interface VariableEditModalProps {
   variables: StartVariableItem[]
 }
 
-const VariableConfigModal = forwardRef<VariableEditModalRef, VariableEditModalProps>(({
+const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModalProps>(({
   refresh,
 }, ref) => {
   const { t } = useTranslation();
