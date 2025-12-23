@@ -5,6 +5,7 @@
 - **原始句子**: {{ statement_databasets }}
 - **冲突类型**: {{ baseline }} (TIME/FACT/HYBRID)
 - **隐私审核**: {{ memory_verify }} (true/false)
+- **语言类型**：{{language_type}}(zh/en)
 
 ## 任务目标
 作为数据冲突解决专家，分析冲突原因，按类型分组处理，为每种冲突生成独立解决方案。
@@ -110,6 +111,7 @@
 - 隐私保护优先: 所有输出记录必须完成隐私脱敏
 - 脱敏变更记录: 隐私脱敏变更也必须在change字段中记录{% endif %}
 - 不可修改数据: 数据被判定为正确时不可修改，无数据可输出时为空
+- 输出的结果reflexion字段中的reason字段和solution不允许含有（expired_at设为2024-01-01T00:00:00Z、memory_verify=true)等原数据字段以及涉及需要修改的字段以及内容
 
 **变更记录格式**:
 ```json
@@ -181,5 +183,4 @@
 - **resolved.change**: 包含详细变更信息
 - 无需修改的冲突类型resolved为null
 - 与baseline不匹配的冲突类型不包含在results中
-
 模式参考: {{ json_schema }}
