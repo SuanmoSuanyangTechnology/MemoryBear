@@ -10,8 +10,9 @@ Classes:
 """
 
 from typing import List, Optional
-from pydantic import BaseModel, Field, ConfigDict
 from uuid import uuid4
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Entity(BaseModel):

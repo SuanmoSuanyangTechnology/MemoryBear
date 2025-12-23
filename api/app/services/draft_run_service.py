@@ -3,26 +3,26 @@
 
 提供 Agent 试运行功能，允许用户在不发布应用的情况下测试配置。
 """
-import time
-import uuid
-import json
 import asyncio
 import datetime
-from typing import Dict, Any, Optional, List, AsyncGenerator
-from langchain.tools import tool
-from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
-from sqlalchemy import select
+import json
+import time
+import uuid
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from app.models import AgentConfig, ModelConfig, ModelApiKey
-from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
+from app.core.rag.nlp.search import knowledge_retrieval
+from app.models import AgentConfig, ModelApiKey, ModelConfig
+from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
+from app.services.langchain_tool_server import Search
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
-from app.core.rag.nlp.search import knowledge_retrieval
-from app.services.langchain_tool_server import Search
+from langchain.tools import tool
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 logger = get_business_logger()
 class KnowledgeRetrievalInput(BaseModel):
@@ -83,17 +83,23 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
         """
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
-            memory_content = asyncio.run(
-                MemoryAgentService().read_memory(
-                    group_id=end_user_id,
-                    message=question,
-                    history=[],
-                    search_switch="1",
-                    config_id=config_id,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+            from app.db import get_db
+            db = next(get_db())
+            try:
+                memory_content = asyncio.run(
+                    MemoryAgentService().read_memory(
+                        group_id=end_user_id,
+                        message=question,
+                        history=[],
+                        search_switch="1",
+                        config_id=config_id,
+                        db=db,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id
+                    )
                 )
-            )
+            finally:
+                db.close()
             logger.info(f'用户ID：Agent:{end_user_id}')
             logger.debug("调用长期记忆 API", extra={"question": question, "end_user_id": end_user_id})
 
@@ -713,9 +719,9 @@ class DraftRunService:
         Raises:
             BusinessException: 当指定的会话不存在时
         """
-        from app.services.conversation_service import ConversationService
-        from app.schemas.conversation_schema import ConversationCreate
         from app.models import Conversation as ConversationModel
+        from app.schemas.conversation_schema import ConversationCreate
+        from app.services.conversation_service import ConversationService
 
         conversation_service = ConversationService(self.db)
 

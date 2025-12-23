@@ -10,22 +10,21 @@ Routes:
     POST /emotion/suggestions - 获取个性化情绪建议
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-
-from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
+from app.core.logging_config import get_api_logger
+from app.core.response_utils import fail, success
 from app.dependencies import get_current_user, get_db
 from app.models.user_model import User
-from app.schemas.response_schema import ApiResponse
 from app.schemas.emotion_schema import (
+    EmotionHealthRequest,
+    EmotionSuggestionsRequest,
     EmotionTagsRequest,
     EmotionWordcloudRequest,
-    EmotionHealthRequest,
-    EmotionSuggestionsRequest
 )
+from app.schemas.response_schema import ApiResponse
 from app.services.emotion_analytics_service import EmotionAnalyticsService
-from app.core.logging_config import get_api_logger
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -230,7 +229,7 @@ async def get_emotion_suggestions(
         # 调用服务层
         data = await emotion_service.generate_emotion_suggestions(
             end_user_id=request.group_id,
-            config_id=config_id
+            db=db
         )
         
         api_logger.info(

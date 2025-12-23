@@ -163,7 +163,8 @@ async def write_server(
         result = await memory_agent_service.write_memory(
             user_input.group_id, 
             user_input.message, 
-            config_id, 
+            config_id,
+            db,
             storage_type, 
             user_rag_memory_id
         )
@@ -280,6 +281,7 @@ async def read_server(
             user_input.history,
             user_input.search_switch,
             config_id,
+            db,
             storage_type,
             user_rag_memory_id
         )
@@ -548,6 +550,7 @@ async def get_write_task_result(
 @router.post("/status_type", response_model=ApiResponse)
 async def status_type(
     user_input: Write_UserInput,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -561,7 +564,11 @@ async def status_type(
     """
     api_logger.info(f"Status type check requested for group {user_input.group_id}")
     try:
-        result = await memory_agent_service.classify_message_type(user_input.message)
+        result = await memory_agent_service.classify_message_type(
+            user_input.message,
+            user_input.config_id,
+            db
+        )
         return success(data=result)
     except Exception as e:
         api_logger.error(f"Message type classification failed: {str(e)}")
@@ -636,6 +643,7 @@ async def get_hot_memory_tags_by_user_api(
 @router.get("/analytics/user_profile", response_model=ApiResponse)
 async def get_user_profile_api(
     end_user_id: Optional[str] = Query(None, description="用户ID（可选）"),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -659,7 +667,8 @@ async def get_user_profile_api(
     try:
         result = await memory_agent_service.get_user_profile(
             end_user_id=end_user_id,
-            current_user_id=str(current_user.id)
+            current_user_id=str(current_user.id),
+            db=db
         )
         return success(data=result, msg="获取用户详情成功")
     except Exception as e:
@@ -695,3 +704,40 @@ async def get_user_profile_api(
 #     except Exception as e:
 #         api_logger.error(f"API docs retrieval failed: {str(e)}")
 #         return fail(BizCode.INTERNAL_ERROR, "API文档获取失败", str(e))
+
+
+@router.get("/end_user/{end_user_id}/connected_config", response_model=ApiResponse)
+async def get_end_user_connected_config(
+    end_user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取终端用户关联的记忆配置
+    
+    通过以下流程获取配置：
+    1. 根据 end_user_id 获取用户的 app_id
+    2. 获取该应用的最新发布版本
+    3. 从发布版本的 config 字段中提取 memory_config_id
+    
+    Args:
+        end_user_id: 终端用户ID
+    
+    Returns:
+        包含 memory_config_id 和相关信息的响应
+    """
+    from app.services.memory_agent_service import (
+        get_end_user_connected_config as get_config,
+    )
+    
+    api_logger.info(f"Getting connected config for end_user: {end_user_id}")
+    
+    try:
+        result = get_config(end_user_id, db)
+        return success(data=result, msg="获取终端用户关联配置成功")
+    except ValueError as e:
+        api_logger.warning(f"End user config not found: {str(e)}")
+        return fail(BizCode.NOT_FOUND, str(e))
+    except Exception as e:
+        api_logger.error(f"Failed to get end user connected config: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "获取终端用户关联配置失败", str(e))

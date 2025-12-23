@@ -176,7 +176,7 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
     """Celery task to process a read message via MemoryAgentService.
 
     Args:
-        group_id: Group ID for the memory agent
+        group_id: Group ID for the memory agent (also used as end_user_id)
         message: User message to process
         history: Conversation history
         search_switch: Search switch parameter
@@ -190,9 +190,28 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
     """
     start_time = time.time()
     
+    # Resolve config_id if None
+    actual_config_id = config_id
+    if actual_config_id is None:
+        try:
+            from app.services.memory_agent_service import get_end_user_connected_config
+            db = next(get_db())
+            try:
+                connected_config = get_end_user_connected_config(group_id, db)
+                actual_config_id = connected_config.get("memory_config_id")
+            finally:
+                db.close()
+        except Exception as e:
+            # Log but continue - will fail later with proper error
+            pass
+    
     async def _run() -> str:
-        service = MemoryAgentService()
-        return await service.read_memory(group_id, message, history, search_switch, config_id,storage_type,user_rag_memory_id)
+        db = next(get_db())
+        try:
+            service = MemoryAgentService()
+            return await service.read_memory(group_id, message, history, search_switch, actual_config_id, db, storage_type, user_rag_memory_id)
+        finally:
+            db.close()
 
     try:
         # 使用 nest_asyncio 来避免事件循环冲突
@@ -246,7 +265,7 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
     """Celery task to process a write message via MemoryAgentService.
     
     Args:
-        group_id: Group ID for the memory agent
+        group_id: Group ID for the memory agent (also used as end_user_id)
         message: Message to write
         config_id: Optional configuration ID
         
@@ -258,9 +277,28 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
     """
     start_time = time.time()
     
+    # Resolve config_id if None
+    actual_config_id = config_id
+    if actual_config_id is None:
+        try:
+            from app.services.memory_agent_service import get_end_user_connected_config
+            db = next(get_db())
+            try:
+                connected_config = get_end_user_connected_config(group_id, db)
+                actual_config_id = connected_config.get("memory_config_id")
+            finally:
+                db.close()
+        except Exception as e:
+            # Log but continue - will fail later with proper error
+            pass
+    
     async def _run() -> str:
-        service = MemoryAgentService()
-        return await service.write_memory(group_id, message, config_id,storage_type,user_rag_memory_id)
+        db = next(get_db())
+        try:
+            service = MemoryAgentService()
+            return await service.write_memory(group_id, message, actual_config_id, db, storage_type, user_rag_memory_id)
+        finally:
+            db.close()
 
     try:
         # 使用 nest_asyncio 来避免事件循环冲突

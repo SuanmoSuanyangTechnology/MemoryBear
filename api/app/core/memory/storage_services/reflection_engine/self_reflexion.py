@@ -8,21 +8,25 @@
 4. 反思结果应用 - 更新记忆库
 """
 
+import asyncio
 import json
 import logging
-import asyncio
 import os
 import time
-from typing import List, Dict, Any, Optional
-from enum import Enum
 import uuid
-
-from pydantic import BaseModel
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 from app.core.response_utils import success
-from app.repositories.neo4j.cypher_queries import neo4j_query_part, neo4j_statement_part, neo4j_query_all,  neo4j_statement_all
-from app.repositories.neo4j.neo4j_update import neo4j_data
+from app.repositories.neo4j.cypher_queries import (
+    neo4j_query_all,
+    neo4j_query_part,
+    neo4j_statement_all,
+    neo4j_statement_part,
+)
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.repositories.neo4j.neo4j_update import neo4j_data
+from pydantic import BaseModel
 
 # 配置日志
 _root_logger = logging.getLogger()
@@ -135,14 +139,20 @@ class ReflectionEngine:
             self.neo4j_connector = Neo4jConnector()
 
         if self.llm_client is None:
-            from app.core.memory.utils.llm.llm_utils import get_llm_client
             from app.core.memory.utils.config import definitions as config_defs
-            self.llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
+            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            from app.db import get_db_context
+            with get_db_context() as db:
+                factory = MemoryClientFactory(db)
+                self.llm_client = factory.get_llm_client(config_defs.SELECTED_LLM_ID)
         elif isinstance(self.llm_client, str):
             # 如果 llm_client 是字符串（model_id），则用它初始化客户端
-            from app.core.memory.utils.llm.llm_utils import get_llm_client
+            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            from app.db import get_db_context
             model_id = self.llm_client
-            self.llm_client = get_llm_client(model_id)
+            with get_db_context() as db:
+                factory = MemoryClientFactory(db)
+                self.llm_client = factory.get_llm_client(model_id)
 
         if self.get_data_func is None:
             from app.core.memory.utils.config.get_data import get_data
@@ -154,11 +164,15 @@ class ReflectionEngine:
             self.get_data_statement = get_data_statement
 
         if self.render_evaluate_prompt_func is None:
-            from app.core.memory.utils.prompt.template_render import render_evaluate_prompt
+            from app.core.memory.utils.prompt.template_render import (
+                render_evaluate_prompt,
+            )
             self.render_evaluate_prompt_func = render_evaluate_prompt
 
         if self.render_reflexion_prompt_func is None:
-            from app.core.memory.utils.prompt.template_render import render_reflexion_prompt
+            from app.core.memory.utils.prompt.template_render import (
+                render_reflexion_prompt,
+            )
             self.render_reflexion_prompt_func = render_reflexion_prompt
 
         if self.conflict_schema is None:
@@ -170,7 +184,9 @@ class ReflectionEngine:
             self.reflexion_schema = ReflexionResultSchema
 
         if self.update_query is None:
-            from app.repositories.neo4j.cypher_queries import UPDATE_STATEMENT_INVALID_AT
+            from app.repositories.neo4j.cypher_queries import (
+                UPDATE_STATEMENT_INVALID_AT,
+            )
             self.update_query = UPDATE_STATEMENT_INVALID_AT
 
         self._lazy_init_done = True

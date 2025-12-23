@@ -13,7 +13,8 @@ from app.core.memory.agent.mcp_server.models.retrieval_models import (
 )
 from app.core.memory.agent.mcp_server.server import get_context_resource
 from app.core.memory.agent.utils.write_tools import write
-from app.core.memory.utils.llm.llm_utils import get_llm_client_from_config
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.db import get_db_context
 from app.schemas.memory_config_schema import MemoryConfig
 from mcp.server.fastmcp import Context
 
@@ -41,8 +42,10 @@ async def Data_type_differentiation(
         # Extract services from context
         template_service = get_context_resource(ctx, 'template_service')
         
-        # Get LLM client from memory_config
-        llm_client = get_llm_client_from_config(memory_config)
+        # Get LLM client from memory_config using factory pattern
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client_from_config(memory_config)
         
         # Render template
         try:

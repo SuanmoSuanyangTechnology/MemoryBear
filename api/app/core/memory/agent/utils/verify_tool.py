@@ -1,18 +1,19 @@
-from typing import TypedDict, Annotated, List, Any
-from langchain_core.messages import AnyMessage
-from langgraph.constants import START, END
-from langgraph.graph import StateGraph, add_messages
 import asyncio
 import json
-from dotenv import load_dotenv, find_dotenv
 import os
-from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
-from langchain_core.messages import HumanMessage
-from jinja2 import Environment, FileSystemLoader
-from app.core.memory.agent.utils.messages_tool import _to_openai_messages
-from app.core.memory.utils.llm.llm_utils import get_llm_client
+from typing import Annotated, Any, List, TypedDict
+
 # Removed global variable imports - use dependency injection instead
 from app.core.logging_config import get_agent_logger
+from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
+from app.core.memory.agent.utils.messages_tool import _to_openai_messages
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.db import get_db_context
+from dotenv import find_dotenv, load_dotenv
+from jinja2 import Environment, FileSystemLoader
+from langchain_core.messages import AnyMessage, HumanMessage
+from langgraph.constants import END, START
+from langgraph.graph import StateGraph, add_messages
 
 load_dotenv(find_dotenv())
 
@@ -53,7 +54,9 @@ class VerifyTool:
     async def model_1(self, state: State) -> State:
         if not self.llm_model_id:
             raise ValueError("llm_model_id is required but not provided")
-        llm_client = get_llm_client(self.llm_model_id)
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client(self.llm_model_id)
         response_content = await llm_client.chat(
             messages=[{"role": "system", "content": self.system_prompt}, *_to_openai_messages(state["messages"])]
         )

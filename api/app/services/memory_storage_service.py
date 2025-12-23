@@ -49,27 +49,6 @@ class MemoryStorageService:
     
     def __init__(self):
         logger.info("MemoryStorageService initialized")
-
-    def load_memory_config(self, config_id: int, db: Session) -> MemoryConfig:
-        """
-        Load memory configuration from database by config_id.
-        
-        This method delegates to the centralized MemoryConfigService to avoid
-        code duplication with other services.
-        
-        Args:
-            config_id: Configuration ID from database
-            
-        Returns:
-            MemoryConfig: Immutable configuration object
-            
-        Raises:
-            ConfigurationError: If validation fails
-        """
-        return MemoryConfigService.load_memory_config(
-            config_id=config_id,
-            service_name="MemoryStorageService"
-        )
     
     async def get_storage_info(self) -> dict:
         """
@@ -293,7 +272,8 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
 
             # Load configuration from database only using centralized manager
             try:
-                memory_config = MemoryConfigService.load_memory_config(
+                config_service = MemoryConfigService(self.db)
+                memory_config = config_service.load_memory_config(
                     config_id=int(cid),
                     service_name="MemoryStorageService.pilot_run_stream"
                 )
@@ -320,13 +300,14 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             async def run_pipeline():
                 """在后台执行管线并捕获异常"""
                 try:
-                    from app.core.memory.main import main as pipeline_main
+                    from app.services.pilot_run_service import run_pilot_extraction
                     
-                    logger.info(f"[PILOT_RUN_STREAM] Calling pipeline_main with dialogue_text length: {len(dialogue_text)}, is_pilot_run=True")
-                    await pipeline_main(
-                        dialogue_text=dialogue_text, 
-                        is_pilot_run=True,
-                        progress_callback=progress_callback
+                    logger.info(f"[PILOT_RUN_STREAM] Calling run_pilot_extraction with dialogue_text length: {len(dialogue_text)}")
+                    await run_pilot_extraction(
+                        memory_config=memory_config,
+                        dialogue_text=dialogue_text,
+                        db=self.db,
+                        progress_callback=progress_callback,
                     )
                     logger.info("[PILOT_RUN_STREAM] pipeline_main completed")
                     

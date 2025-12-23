@@ -9,7 +9,6 @@ from .config_utils import (
     get_chunker_config,
     get_embedder_config,
     get_model_config,
-    get_neo4j_config,
     get_picture_config,
     get_pipeline_config,
     get_pruning_config,
@@ -41,7 +40,6 @@ __all__ = [
     # config_utils
     "get_model_config",
     "get_embedder_config",
-    "get_neo4j_config",
     "get_chunker_config",
     "get_pipeline_config",
     "get_pruning_config",

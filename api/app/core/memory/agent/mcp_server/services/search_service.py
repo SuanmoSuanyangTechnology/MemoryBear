@@ -141,7 +141,7 @@ class SearchService:
         cleaned_query = self.clean_query(question)
 
         try:
-            # Execute search using embedding_model_id from memory_config
+            # Execute search using memory_config
             answer = await run_hybrid_search(
                 query_text=cleaned_query,
                 search_type=search_type,
@@ -149,7 +149,7 @@ class SearchService:
                 limit=limit,
                 include=include,
                 output_path=output_path,
-                embedding_id=str(config.embedding_model_id),
+                memory_config=config,
                 rerank_alpha=rerank_alpha,
             )
             

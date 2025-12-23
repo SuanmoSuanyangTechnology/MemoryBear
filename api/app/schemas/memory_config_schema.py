@@ -391,6 +391,29 @@ class MemoryConfig:
     embedding_params: Dict[str, Any] = field(default_factory=dict)
     config_version: str = "2.0"
     
+    # Pipeline config: Deduplication
+    enable_llm_dedup_blockwise: bool = False
+    enable_llm_disambiguation: bool = False
+    deep_retrieval: bool = True
+    t_type_strict: float = 0.8
+    t_name_strict: float = 0.8
+    t_overall: float = 0.8
+    
+    # Pipeline config: Statement extraction
+    statement_granularity: int = 2
+    include_dialogue_context: bool = False
+    max_dialogue_context_chars: int = 1000
+    
+    # Pipeline config: Forgetting engine
+    lambda_time: float = 0.5
+    lambda_mem: float = 0.5
+    offset: float = 0.0
+    
+    # Pipeline config: Pruning
+    pruning_enabled: bool = False
+    pruning_scene: Optional[str] = "education"
+    pruning_threshold: float = 0.5
+    
     def __post_init__(self):
         """Validate configuration after initialization."""
         if not self.config_name or not self.config_name.strip():
