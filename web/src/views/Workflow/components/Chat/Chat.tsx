@@ -60,7 +60,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
   const handleSave = (values: StartVariableItem[]) => {
     setVariables([...values])
   }
-  const handleClusterSend = () => {
+  const handleSend = () => {
     if (loading || !appId) return
     let isCanSend = true
     const params: Record<string, any> = {}
@@ -99,36 +99,41 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     const handleStreamMessage = (data: SSEMessage[]) => {
       setStreamLoading(false)
 
-      data.map(item => {
+      data.forEach(item => {
         const { chunk } = item.data as { chunk: string; };
 
         switch(item.event) {
           case 'message':
             setChatList(prev => {
-              const lastChat = { ...prev[prev.length - 1] }
-              lastChat.content = lastChat.content + chunk
-
-              return [
-                ...prev.slice(0, prev.length - 1),
-                lastChat
-              ]
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                newList[lastIndex] = {
+                  ...newList[lastIndex],
+                  content: newList[lastIndex].content + chunk
+                }
+              }
+              return newList
             })
             break
           case 'workflow_end':
             setChatList(prev => {
-              const lastChat = { ...prev[prev.length - 1] }
-              lastChat.content = lastChat.content === '' ? null : lastChat.content
-
-              return [
-                ...prev.slice(0, prev.length - 1),
-                lastChat
-              ]
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                newList[lastIndex] = {
+                  ...newList[lastIndex],
+                  content: newList[lastIndex].content === '' ? null : newList[lastIndex].content
+                }
+              }
+              return newList
             })
-            setStreamLoading(false);
-            break;
+            setStreamLoading(false)
+            break
         }
       })
-    };
+    }
+
     form.setFieldValue('message', undefined)
     draftRun(appId, {
       message: message,
@@ -178,13 +183,13 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
             <Input 
               className="rb:h-11 rb:shadow-[0px_2px_8px_0px_rgba(33,35,50,0.1)]" 
               placeholder={t('application.chatPlaceholder')}
-              onPressEnter={handleClusterSend}
+              onPressEnter={handleSend}
             />
           </Form.Item>
         </Form>
         <img src={ChatSendIcon} className={clsx("rb:w-11 rb:h-11 rb:cursor-pointer", {
           'rb:opacity-50': loading,
-        })} onClick={handleClusterSend} />
+        })} onClick={handleSend} />
       </div>
 
       <VariableConfigModal
