@@ -1,17 +1,21 @@
-import os
 import asyncio
 import logging
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+import os
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from app.core.memory.models.message_models import DialogData, Statement
-#避免在测试收集阶段因为 OpenAIClient 间接引入 langfuse 导致 ModuleNotFoundError 。这只是类型注解与导入时机的调整，不改变实现。
-from app.core.memory.utils.data.ontology import LABEL_DEFINITIONS, StatementType, TemporalInfo
 
+#避免在测试收集阶段因为 OpenAIClient 间接引入 langfuse 导致 ModuleNotFoundError 。这只是类型注解与导入时机的调整，不改变实现。
 from app.core.memory.models.variate_config import StatementExtractionConfig
+from app.core.memory.utils.data.ontology import (
+    LABEL_DEFINITIONS,
+    RelevenceInfo,
+    StatementType,
+    TemporalInfo,
+)
 from app.core.memory.utils.prompt.prompt_utils import render_statement_extraction_prompt
-from app.core.memory.utils.data.ontology import LABEL_DEFINITIONS, StatementType, TemporalInfo, RelevenceInfo
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

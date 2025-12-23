@@ -1,19 +1,22 @@
 """
 去重功能函数
 """
-from app.core.memory.models.variate_config import DedupConfig
-from typing import List, Dict, Tuple, Any
-from app.core.memory.models.graph_models import(
-    StatementEntityEdge,
-    EntityEntityEdge,
-    ExtractedEntityNode
-)
-import os
-from datetime import datetime
-import difflib # 提供字符串相似度计算工具
 import asyncio
+import difflib  # 提供字符串相似度计算工具
 import importlib
+import os
 import re
+from datetime import datetime
+from typing import Any, Dict, List, Tuple
+
+from app.core.memory.models.graph_models import (
+    EntityEntityEdge,
+    ExtractedEntityNode,
+    StatementEntityEdge,
+)
+from app.core.memory.models.variate_config import DedupConfig
+
+
 # 模块级类型统一工具函数
 def _unify_entity_type(canonical: ExtractedEntityNode, losing: ExtractedEntityNode, suggested_type: str = None) -> None:
     """统一实体类型：基于LLM建议或启发式规则选择最合适的类型。
@@ -705,7 +708,8 @@ async def LLM_decision(  # 决策中包含去重和消歧的功能
     statement_entity_edges: List[StatementEntityEdge],
     entity_entity_edges: List[EntityEntityEdge],
     id_redirect: Dict[str, str],
-    config: DedupConfig | None = None,
+    config: DedupConfig,
+    llm_client = None,
 ) -> Tuple[List[ExtractedEntityNode], Dict[str, str], List[str]]:
     """
     基于迭代分块并发的 LLM 判定，生成实体重定向并在本地应用融合。
@@ -717,26 +721,13 @@ async def LLM_decision(  # 决策中包含去重和消歧的功能
     """
     llm_records: List[str] = []
     try:
-        # 优先使用运行时配置；若未提供配置，使用模型默认值，不再回退到环境变量
-        enable_switch = (
-            bool(config.enable_llm_dedup_blockwise) if config is not None else DedupConfig().enable_llm_dedup_blockwise
-        )
-        if not enable_switch:
+        if not bool(config.enable_llm_dedup_blockwise):
             return deduped_entities, id_redirect, llm_records
-        # 从配置读取 LLM 迭代参数；若无配置则使用 DedupConfig 的默认值
-        _defaults = DedupConfig()
-        block_size = (config.llm_block_size if config is not None else _defaults.llm_block_size)
-        block_concurrency = (config.llm_block_concurrency if config is not None else _defaults.llm_block_concurrency)
-        pair_concurrency = (config.llm_pair_concurrency if config is not None else _defaults.llm_pair_concurrency)
-        max_rounds = (config.llm_max_rounds if config is not None else _defaults.llm_max_rounds)
-
-        # 动态导入 llm 客户端（修正导入路径）
-        try:
-            llm_utils_mod = importlib.import_module("app.core.memory.utils.llm.llm_utils")
-            get_llm_client_fn = llm_utils_mod.get_llm_client
-        except Exception as e:
-            llm_records.append(f"[LLM错误] 无法导入 llm_utils 模块: {e}")
-            return deduped_entities, id_redirect, llm_records
+        # 从配置读取 LLM 迭代参数
+        block_size = config.llm_block_size
+        block_concurrency = config.llm_block_concurrency
+        pair_concurrency = config.llm_pair_concurrency
+        max_rounds = config.llm_max_rounds
 
         try:
             llm_mod = importlib.import_module("app.core.memory.storage_services.extraction_engine.deduplication.entity_dedup_llm")
@@ -745,14 +736,9 @@ async def LLM_decision(  # 决策中包含去重和消歧的功能
             llm_records.append(f"[LLM错误] 无法导入 entity_dedup_llm 模块: {e}")
             return deduped_entities, id_redirect, llm_records
 
-        # 获取 LLM 客户端
-        try:
-            llm_client = get_llm_client_fn()
-            if llm_client is None:
-                llm_records.append("[LLM错误] LLM 客户端初始化失败：返回 None")
-                return deduped_entities, id_redirect, llm_records
-        except Exception as e:
-            llm_records.append(f"[LLM错误] 获取 LLM 客户端失败: {e}")
+        # 验证 LLM 客户端
+        if llm_client is None:
+            llm_records.append("[LLM错误] LLM 客户端未提供")
             return deduped_entities, id_redirect, llm_records
 
         llm_redirect, llm_records = await llm_fn(
@@ -813,7 +799,8 @@ async def LLM_disamb_decision(
     statement_entity_edges: List[StatementEntityEdge],
     entity_entity_edges: List[EntityEntityEdge],
     id_redirect: Dict[str, str],
-    config: DedupConfig | None = None,
+    config: DedupConfig,
+    llm_client = None,
 ) -> Tuple[List[ExtractedEntityNode], Dict[str, str], set[tuple[str, str]], List[str]]:
     """
     预消歧阶段：对“同名但类型不同”的实体对调用LLM进行消歧，
@@ -824,22 +811,16 @@ async def LLM_disamb_decision(
     disamb_records: List[str] = []
     blocked_pairs: set[tuple[str, str]] = set()
     try:
-        enable_switch = (
-            config.enable_llm_disambiguation
-            if config is not None
-            else DedupConfig().enable_llm_disambiguation
-        )
-        if not bool(enable_switch):
+        if not bool(config.enable_llm_disambiguation):
             return deduped_entities, id_redirect, blocked_pairs, disamb_records
 
-        from app.core.memory.utils.llm.llm_utils import get_llm_client
-        from app.core.memory.storage_services.extraction_engine.deduplication.entity_dedup_llm import llm_disambiguate_pairs_iterative
-        from app.core.memory.utils.config import definitions as config_defs
+        from app.core.memory.storage_services.extraction_engine.deduplication.entity_dedup_llm import (
+            llm_disambiguate_pairs_iterative,
+        )
         
-        # 获取 LLM 客户端并验证
-        llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
+        # 验证 LLM 客户端
         if llm_client is None:
-            disamb_records.append("[DISAMB错误] LLM 客户端初始化失败：返回 None")
+            disamb_records.append("[DISAMB错误] LLM 客户端未提供")
             return deduped_entities, id_redirect, blocked_pairs, disamb_records
         
         merge_redirect, block_list, disamb_records = await llm_disambiguate_pairs_iterative(
@@ -895,6 +876,7 @@ async def deduplicate_entities_and_edges(
     report_append: bool = False,
     report_stage_notes: List[str] | None = None,
     dedup_config: DedupConfig | None = None,
+    llm_client = None,
 ) -> Tuple[
     List[ExtractedEntityNode], 
     List[StatementEntityEdge], 
@@ -911,7 +893,7 @@ async def deduplicate_entities_and_edges(
 
     # 1.5) LLM 决策消歧：阻断同名不同类型的高相似对，并应用必要的合并
     deduped_entities, id_redirect, blocked_pairs, disamb_records = await LLM_disamb_decision(
-        deduped_entities, statement_entity_edges, entity_entity_edges, id_redirect, config=dedup_config
+        deduped_entities, statement_entity_edges, entity_entity_edges, id_redirect, config=dedup_config, llm_client=llm_client
     )
 
     # 2) 模糊匹配（本地规则）
@@ -936,7 +918,7 @@ async def deduplicate_entities_and_edges(
 
     if should_trigger_llm:
         deduped_entities, id_redirect, llm_decision_records = await LLM_decision(
-            deduped_entities, statement_entity_edges, entity_entity_edges, id_redirect, config=dedup_config
+            deduped_entities, statement_entity_edges, entity_entity_edges, id_redirect, config=dedup_config, llm_client=llm_client
         )
     else:
         llm_decision_records = []

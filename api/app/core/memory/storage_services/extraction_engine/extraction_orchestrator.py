@@ -1253,6 +1253,7 @@ class ExtractionOrchestrator:
                     report_stage="第一层去重消歧（试运行）",
                     report_append=False,
                     dedup_config=self.config.deduplication,
+                    llm_client=self.llm_client,
                 )
                 
                 # 保存去重消歧的详细记录到实例变量
@@ -1284,6 +1285,7 @@ class ExtractionOrchestrator:
                     dialog_data_list,
                     self.config,
                     self.connector,
+                    llm_client=self.llm_client,
                 )
 
                 # 解包返回值

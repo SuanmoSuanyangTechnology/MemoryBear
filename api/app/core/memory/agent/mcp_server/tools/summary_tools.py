@@ -21,8 +21,9 @@ from app.core.memory.agent.utils.messages_tool import (
     Resolve_username,
     Summary_messages_deal,
 )
-from app.core.memory.utils.llm.llm_utils import get_llm_client_from_config
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.rag.nlp.search import knowledge_retrieval
+from app.db import get_db_context
 from app.schemas.memory_config_schema import MemoryConfig
 from dotenv import load_dotenv
 from mcp.server.fastmcp import Context
@@ -66,7 +67,9 @@ async def Summary(
         session_service = get_context_resource(ctx, "session_service")
 
         # Get LLM client from memory_config
-        llm_client = get_llm_client_from_config(memory_config)
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client_from_config(memory_config)
         
         # Resolve session ID
         sessionid = Resolve_username(usermessages)
@@ -210,7 +213,9 @@ async def Retrieve_Summary(
         session_service = get_context_resource(ctx, "session_service")
 
         # Get LLM client from memory_config
-        llm_client = get_llm_client_from_config(memory_config)
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client_from_config(memory_config)
 
         # Resolve session ID
         sessionid = Resolve_username(usermessages)
@@ -425,7 +430,9 @@ async def Input_Summary(
         search_service = get_context_resource(ctx, "search_service")
 
         # Get LLM client from memory_config
-        llm_client = get_llm_client_from_config(memory_config)
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client_from_config(memory_config)
 
         # Resolve session ID
         sessionid = Resolve_username(usermessages) or ""

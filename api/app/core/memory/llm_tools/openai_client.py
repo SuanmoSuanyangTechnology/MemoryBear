@@ -5,18 +5,17 @@ OpenAI LLM 客户端实现
 """
 
 import asyncio
-from typing import List, Dict, Any
 import json
 import logging
+from typing import Any, Dict, List
 
-from pydantic import BaseModel
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-
+from app.core.config import settings
+from app.core.memory.llm_tools.llm_client import LLMClient, LLMClientException
 from app.core.models.base import RedBearModelConfig
 from app.core.models.llm import RedBearLLM
-from app.core.memory.llm_tools.llm_client import LLMClient, LLMClientException
-from app.core.memory.utils.config.definitions import LANGFUSE_ENABLED
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ class OpenAIClient(LLMClient):
 
         # 初始化 Langfuse 回调处理器（如果启用）
         self.langfuse_handler = None
-        if LANGFUSE_ENABLED:
+        if settings.LANGFUSE_ENABLED:
             try:
                 from langfuse.langchain import CallbackHandler
                 self.langfuse_handler = CallbackHandler()

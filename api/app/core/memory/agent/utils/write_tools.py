@@ -13,13 +13,11 @@ from app.core.memory.storage_services.extraction_engine.extraction_orchestrator 
     ExtractionOrchestrator,
 )
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
-    Memory_summary_generation,
+    memory_summary_generation,
 )
-from app.core.memory.utils.embedder.embedder_utils import (
-    get_embedder_client_from_config,
-)
-from app.core.memory.utils.llm.llm_utils import get_llm_client_from_config
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.logging_utils import log_time
+from app.db import get_db_context
 from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
 from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
 from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j
@@ -67,9 +65,11 @@ async def write(
     logger.info(f"Chunker strategy: {chunker_strategy}")
     logger.info(f"Group ID: {group_id}")
 
-    # Construct clients from memory_config
-    llm_client = get_llm_client_from_config(memory_config)
-    embedder_client = get_embedder_client_from_config(memory_config)
+    # Construct clients from memory_config using factory pattern with db session
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        llm_client = factory.get_llm_client_from_config(memory_config)
+        embedder_client = factory.get_embedder_client_from_config(memory_config)
     logger.info("LLM and embedding clients constructed")
 
     # Initialize timing log
@@ -100,7 +100,7 @@ async def write(
     # Step 2: Initialize and run ExtractionOrchestrator
     step_start = time.time()
     from app.core.memory.utils.config.config_utils import get_pipeline_config
-    pipeline_config = get_pipeline_config()
+    pipeline_config = get_pipeline_config(memory_config)
 
     orchestrator = ExtractionOrchestrator(
         llm_client=llm_client,
@@ -155,8 +155,8 @@ async def write(
     # Step 4: Generate Memory summaries and save to Neo4j
     step_start = time.time()
     try:
-        summaries = await Memory_summary_generation(
-            chunked_dialogs, llm_client=llm_client, embedding_id=embedding_model_id
+        summaries = await memory_summary_generation(
+            chunked_dialogs, llm_client=llm_client, embedder_client=embedder_client
         )
 
         try:

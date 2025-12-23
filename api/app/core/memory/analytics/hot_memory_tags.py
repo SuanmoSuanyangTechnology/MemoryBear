@@ -35,7 +35,9 @@ except NameError:
 import json
 
 from app.core.config import settings
-from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.db import get_db_context
+from app.services.memory_config_service import MemoryConfigService
 
 #TODO: Fix this
 # Default values (previously from definitions.py)
@@ -47,11 +49,37 @@ class FilteredTags(BaseModel):
     """用于接收LLM筛选后的核心标签列表的模型。"""
     meaningful_tags: List[str] = Field(..., description="从原始列表中筛选出的具有核心代表意义的名词列表。")
 
-async def filter_tags_with_llm(tags: List[str], llm_client) -> List[str]:
+async def filter_tags_with_llm(tags: List[str], group_id: str) -> List[str]:
     """
     使用LLM筛选标签列表，仅保留具有代表性的核心名词。
     """
     try:
+        # Get config_id using get_end_user_connected_config
+        with get_db_context() as db:
+            try:
+                from app.services.memory_agent_service import (
+                    get_end_user_connected_config,
+                )
+                connected_config = get_end_user_connected_config(group_id, db)
+                config_id = connected_config.get("memory_config_id")
+                
+                if config_id:
+                    # Use the config_id to get the proper LLM client
+                    config_service = MemoryConfigService(db)
+                    memory_config = config_service.load_memory_config(config_id)
+                    factory = MemoryClientFactory(db)
+                    llm_client = factory.get_llm_client(memory_config.llm_model_id)
+                else:
+                    # TODO: Remove DEFAULT_LLM_ID fallback once all users have proper config
+                    # Fallback to default LLM if no config found
+                    factory = MemoryClientFactory(db)
+                    llm_client = factory.get_llm_client(DEFAULT_LLM_ID)
+            except Exception as e:
+                print(f"Failed to get user connected config, using default LLM: {e}")
+                # TODO: Remove DEFAULT_LLM_ID fallback once all users have proper config
+                # Fallback to default LLM
+                factory = MemoryClientFactory(db)
+                llm_client = factory.get_llm_client(DEFAULT_LLM_ID)
 
         # 3. 构建Prompt
         tag_list_str = ", ".join(tags)
@@ -156,8 +184,7 @@ async def get_hot_memory_tags(group_id: str | None = None, limit: int = 40, by_u
     raw_tag_names = [tag for tag, freq in raw_tags_with_freq]
 
     # 2. 初始化LLM客户端并使用LLM筛选出有意义的标签
-    llm_client = get_llm_client(DEFAULT_LLM_ID)
-    meaningful_tag_names = await filter_tags_with_llm(raw_tag_names, llm_client)
+    meaningful_tag_names = await filter_tags_with_llm(raw_tag_names, group_id)
 
     # 3. 根据LLM的筛选结果，构建最终的标签列表（保留原始频率和顺序）
     final_tags = []

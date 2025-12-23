@@ -1,22 +1,34 @@
-import os
 import asyncio
 import json
-from typing import List, Dict, Any, Optional
-from datetime import datetime
+import os
 import re
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from app.core.memory.llm_tools.openai_client import LLMClient
-from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import DialogueChunker
-from app.core.memory.models.message_models import DialogData, ConversationContext, ConversationMessage
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.utils.config.definitions import SELECTED_CHUNKER_STRATEGY, SELECTED_EMBEDDING_ID
+from app.core.memory.models.message_models import (
+    ConversationContext,
+    ConversationMessage,
+    DialogData,
+)
 
 # 使用新的模块化架构
-from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import ExtractionOrchestrator
+from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import (
+    ExtractionOrchestrator,
+)
+from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import (
+    DialogueChunker,
+)
+from app.core.memory.utils.config.definitions import (
+    SELECTED_CHUNKER_STRATEGY,
+    SELECTED_EMBEDDING_ID,
+)
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.db import get_db_context
 
 # Import from database module
 from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 # Cypher queries for evaluation
 # Note: Entity, chunk, and dialogue search queries have been moved to evaluation/dialogue_queries.py
@@ -52,7 +64,9 @@ async def ingest_contexts_via_full_pipeline(
     llm_available = True
     try:
         from app.core.memory.utils.config import definitions as config_defs
-        llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client(config_defs.SELECTED_LLM_ID)
     except Exception as e:
         print(f"[Ingestion] LLM client unavailable, will skip LLM-dependent steps: {e}")
         llm_available = False
@@ -133,12 +147,13 @@ async def ingest_contexts_via_full_pipeline(
         return False
     
     # 初始化 embedder 客户端
-    from app.core.models.base import RedBearModelConfig
-    from app.core.memory.utils.config.config_utils import get_embedder_config
     from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+    from app.core.models.base import RedBearModelConfig
+    from app.services.memory_config_service import MemoryConfigService
     
     try:
-        embedder_config_dict = get_embedder_config(embedding_name or SELECTED_EMBEDDING_ID)
+        with get_db_context() as db:
+            embedder_config_dict = MemoryConfigService(db).get_embedder_config(embedding_name or SELECTED_EMBEDDING_ID)
         embedder_config = RedBearModelConfig(**embedder_config_dict)
         embedder_client = OpenAIEmbedderClient(embedder_config)
     except Exception as e:
@@ -236,15 +251,15 @@ async def ingest_contexts_via_full_pipeline(
     print("[Ingestion] Generating memory summaries...")
     try:
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
-            Memory_summary_generation,
+            memory_summary_generation,
         )
-        from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
         from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
+        from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
         
-        summaries = await Memory_summary_generation(
+        summaries = await memory_summary_generation(
             chunked_dialogs=dialog_data_list,
             llm_client=llm_client,
-            embedding_id=embedding_name or SELECTED_EMBEDDING_ID
+            embedder_client=embedder_client
         )
         print(f"[Ingestion] Generated {len(summaries)} memory summaries")
     except Exception as e:

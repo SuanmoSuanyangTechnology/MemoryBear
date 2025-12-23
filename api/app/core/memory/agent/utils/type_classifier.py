@@ -1,15 +1,14 @@
 """
 Type classification utility for distinguishing read/write operations.
 """
-from jinja2 import Template
-from pydantic import BaseModel
-
+from app.core.config import settings
 from app.core.logging_config import get_agent_logger, log_prompt_rendering
 from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
 from app.core.memory.agent.utils.messages_tool import read_template_file
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.config import settings
-
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.db import get_db_context
+from jinja2 import Template
+from pydantic import BaseModel
 
 logger = get_agent_logger(__name__)
 
@@ -44,7 +43,9 @@ async def status_typle(messages: str, llm_model_id: str) -> dict:
             "message": f"Prompt rendering failed: {str(e)}"
         }
     
-    llm_client = get_llm_client(llm_model_id)
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        llm_client = factory.get_llm_client(llm_model_id)
 
     try:
         structured = await llm_client.response_structured(
