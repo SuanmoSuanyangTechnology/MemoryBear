@@ -268,10 +268,20 @@ async def get_workspace_total_memory_count(
         # 如果提供了 end_user_id，只查询该用户
         if end_user_id:
             search_result = await memory_storage_service.search_all(end_user_id=end_user_id)
+            # 查询用户名称
+            from app.repositories.end_user_repository import EndUserRepository
+            repo = EndUserRepository(db)
+            end_user = repo.get_by_id(uuid.UUID(end_user_id))
+            user_name = end_user.name if end_user else None
+            
             return {
                 "total_memory_count": search_result.get("total", 0),
                 "host_count": 1,
-                "details": [{"end_user_id": end_user_id, "count": search_result.get("total", 0)}]
+                "details": [{
+                    "end_user_id": end_user_id, 
+                    "count": search_result.get("total", 0),
+                    "name": user_name
+                }]
             }
         
         for host in hosts:
@@ -287,17 +297,19 @@ async def get_workspace_total_memory_count(
                 
                 details.append({
                     "end_user_id": end_user_id_str,
-                    "count": host_total
+                    "count": host_total,
+                    "name": host.name  # 添加 name 字段
                 })
                 
-                business_logger.debug(f"EndUser {end_user_id_str} 记忆数: {host_total}")
+                business_logger.debug(f"EndUser {end_user_id_str} ({host.name}) 记忆数: {host_total}")
                 
             except Exception as e:
                 business_logger.warning(f"获取 end_user {host.id} 记忆数失败: {str(e)}")
                 # 失败的 host 记为 0
                 details.append({
                     "end_user_id": str(host.id),
-                    "count": 0
+                    "count": 0,
+                    "name": host.name  # 添加 name 字段
                 })
         
         result = {
