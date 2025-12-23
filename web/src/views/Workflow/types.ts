@@ -75,7 +75,7 @@ export interface WorkflowConfig {
 }
 
 export interface VariableEditModalRef {
-  handleOpen: (values: StartVariableItem[]) => void;
+  handleOpen: (values?: StartVariableItem) => void;
 }
 export interface StartVariableItem {
   name: string;
@@ -93,3 +93,6 @@ export interface ChatRef {
   handleOpen: () => void;
 }
 export type GraphRef = React.MutableRefObject<Graph | undefined>
+export interface VariableConfigModalRef {
+  handleOpen: (values: StartVariableItem[]) => void;
+}

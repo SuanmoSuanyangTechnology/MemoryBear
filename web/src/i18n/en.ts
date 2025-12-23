@@ -324,7 +324,8 @@ export const en = {
       loginApiCannotRefreshToken: 'Login API cannot refresh token',
       logoutApiCannotRefreshToken: 'Logout API cannot refresh token',
       publicApiCannotRefreshToken: 'Public API cannot refresh token',
-      refreshTokenNotExist: 'Refresh token does not exist'
+      refreshTokenNotExist: 'Refresh token does not exist',
+      reset: 'Reset',
     },
     model: {
       searchPlaceholder: 'search model…',
