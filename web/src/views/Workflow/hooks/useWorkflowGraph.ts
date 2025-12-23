@@ -83,8 +83,8 @@ export const useWorkflowGraph = ({
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
-            if (nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
-              nodeLibraryConfig.config[key].defaultValue = config[key] || {}
+            if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && config[key]) {
+              nodeLibraryConfig.config[key].defaultValue = config[key]
             }
           })
         }
