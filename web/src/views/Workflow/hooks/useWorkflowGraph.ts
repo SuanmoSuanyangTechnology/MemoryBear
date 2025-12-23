@@ -624,7 +624,7 @@ export const useWorkflowGraph = ({
     let nodeLibraryConfig = [...nodeLibrary]
       .flatMap(category => category.nodes)
       .find(n => n.type === dragData.type);
-    nodeLibraryConfig = { config: {}, ...nodeLibraryConfig } as NodeProperties;
+    nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
     
     // 创建干净的节点数据，只保留必要的字段
     const cleanNodeData = {
