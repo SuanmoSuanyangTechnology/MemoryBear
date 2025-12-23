@@ -31,6 +31,7 @@ const Properties: FC<PropertiesProps> = ({
   const [editIndex, setEditIndex] = useState<number | null>(null)
 
   useEffect(() => {
+    form.resetFields()
     if (selectedNode && form) {
       const { type = 'default', name = '', config } = selectedNode.getData() || {}
       const initialValue: Record<string, any> = {}
