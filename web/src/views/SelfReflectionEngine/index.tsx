@@ -272,69 +272,75 @@ const SelfReflectionEngine: React.FC = () => {
                 </div>
               </div>
             </RbCard>
-            <RbCard
-              title={t('reflectionEngine.conflictDetection')}
-            >
-              <Space size={12} direction="vertical" className="rb:w-full">
-                {result.reflexion_data.map((item, index) => (
+            {result.reflexion_data.length > 0 && (
+              <RbCard
+                title={t('reflectionEngine.conflictDetection')}
+              >
+                <Space size={12} direction="vertical" className="rb:w-full">
+                  {result.reflexion_data.map((item, index) => (
+                    <div key={index} className="rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md rb:text-[12px]">
+                      {['reason', 'solution'].map(key => (
+                        <div
+                          key={key}
+                          className="rb:flex rb:gap-4 rb:justify-start rb:text-[14px] rb:leading-5 rb:mb-3"
+                        >
+                          <div className="rb:whitespace-nowrap rb:w-45 rb:font-medium">{t(`reflectionEngine.${key}`)}</div>
+                          <div className='rb:flex-inline rb:text-left rb:py-px rb:rounded rb:text-[#5B6167] rb:flex-1'>
+                            {item[key as keyof ReflexionData]}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </Space>
+              </RbCard>
+            )}
+            {result.quality_assessments.length > 0 && (
+              <RbCard
+                title={t('reflectionEngine.qualityAssessment')}
+              >
+                {result.quality_assessments.map((item, index) => (
                   <div key={index} className="rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md rb:text-[12px]">
-                    {['reason', 'solution'].map(key => (
+                    {['score', 'summary'].map(key => (
                       <div
                         key={key}
                         className="rb:flex rb:gap-4 rb:justify-start rb:text-[14px] rb:leading-5 rb:mb-3"
                       >
-                        <div className="rb:whitespace-nowrap rb:w-45 rb:font-medium">{t(`reflectionEngine.${key}`)}</div>
+                        <div className="rb:whitespace-nowrap rb:w-45 rb:font-medium">{t(`reflectionEngine.qualityAssessmentObj.${key}`)}</div>
                         <div className='rb:flex-inline rb:text-left rb:py-px rb:rounded rb:text-[#5B6167] rb:flex-1'>
-                          {item[key as keyof ReflexionData]}
+                          {item[key as keyof QualityAssessment]}
                         </div>
                       </div>
                     ))}
                   </div>
                 ))}
-              </Space>
-            </RbCard>
-            <RbCard
-              title={t('reflectionEngine.qualityAssessment')}
-            >
-              {result.quality_assessments.map((item, index) => (
-                <div key={index} className="rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md rb:text-[12px]">
-                  {['score', 'summary'].map(key => (
-                    <div
-                      key={key}
-                      className="rb:flex rb:gap-4 rb:justify-start rb:text-[14px] rb:leading-5 rb:mb-3"
-                    >
-                      <div className="rb:whitespace-nowrap rb:w-45 rb:font-medium">{t(`reflectionEngine.qualityAssessmentObj.${key}`)}</div>
-                      <div className='rb:flex-inline rb:text-left rb:py-px rb:rounded rb:text-[#5B6167] rb:flex-1'>
-                        {item[key as keyof QualityAssessment]}
+              </RbCard>
+            )}
+            {result.memory_verifies.length > 0 && (
+              <RbCard
+                title={t('reflectionEngine.privacyAudit')}
+              >
+                {result.memory_verifies.map((item, index) => (
+                  <div key={index} className="rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md rb:text-[12px]">
+                    {['has_privacy', 'privacy_types', 'summary'].map(key => (
+                      <div
+                        key={key}
+                        className="rb:flex rb:gap-4 rb:justify-start rb:text-[14px] rb:leading-5 rb:mb-3"
+                      >
+                        <div className="rb:whitespace-nowrap rb:w-45 rb:font-medium">{t(`reflectionEngine.privacyAuditObj.${key}`)}</div>
+                        <div className='rb:flex-inline rb:text-left rb:py-px rb:rounded rb:text-[#5B6167] rb:flex-1'>
+                          {key === 'has_privacy'
+                            ? <Tag color={item[key as keyof MemoryVerify] ? 'success' : 'error'}>{t(`reflectionEngine.privacyAuditObj.${item[key as keyof MemoryVerify]}`)}</Tag>
+                            : key === 'privacy_types' ? (item[key as keyof MemoryVerify] as string[]).join('、')
+                            : item[key as keyof MemoryVerify]
+                          }
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </RbCard>
-            <RbCard
-              title={t('reflectionEngine.privacyAudit')}
-            >
-              {result.memory_verifies.map((item, index) => (
-                <div key={index} className="rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md rb:text-[12px]">
-                  {['has_privacy', 'privacy_types', 'summary'].map(key => (
-                    <div
-                      key={key}
-                      className="rb:flex rb:gap-4 rb:justify-start rb:text-[14px] rb:leading-5 rb:mb-3"
-                    >
-                      <div className="rb:whitespace-nowrap rb:w-45 rb:font-medium">{t(`reflectionEngine.privacyAuditObj.${key}`)}</div>
-                      <div className='rb:flex-inline rb:text-left rb:py-px rb:rounded rb:text-[#5B6167] rb:flex-1'>
-                        {key === 'has_privacy'
-                          ? <Tag color={item[key as keyof MemoryVerify] ? 'success' : 'error'}>{t(`reflectionEngine.privacyAuditObj.${item[key as keyof MemoryVerify]}`)}</Tag>
-                          : key === 'privacy_types' ? (item[key as keyof MemoryVerify] as string[]).join('、')
-                          : item[key as keyof MemoryVerify]
-                        }
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </RbCard>
+                    ))}
+                  </div>
+                ))}
+              </RbCard>
+            )}
           </>}
         </Space>
       </Col>
