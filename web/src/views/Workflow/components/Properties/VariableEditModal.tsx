@@ -26,6 +26,10 @@ const variableType = {
   // array: 'array',
   // object: 'object',
 }
+const initialValues = {
+  max_length: 48,
+  required: true
+}
 
 const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProps>(({
   refresh
@@ -71,17 +75,12 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
     handleOpen,
     handleClose
   }));
-  // 变量类型改变时，更新初始化其他字段值
-  const handleChangeType = (value: StartVariableItem['type']) => {
-    if (value) {
-      form.setFieldsValue({
-        type: value,
-        name: undefined,
-        description: undefined,
-        max_length: undefined,
-        default: undefined
-      })
-    }
+  const nameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (values.description && values.description !== '') return
+    const { value } = e.target
+    form.setFieldsValue({
+      description: value,
+    })
   }
 
   return (
@@ -96,6 +95,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
       <Form
         form={form}
         layout="vertical"
+        initialValues={initialValues}
         scrollToFirstError={{ behavior: 'instant', block: 'end', focus: true }}
       >
         {/* 变量类型 */}
@@ -110,7 +110,6 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               value: key,
               label: t(`workflow.config.start.${key}`),
             }))}
-            onChange={handleChangeType}
             labelRender={(props) => <div className="rb:flex rb:justify-between rb:items-center">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></div>}
             optionRender={(props) => <div className="rb:flex rb:justify-between rb:items-center">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></div>}
           />
@@ -124,7 +123,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
             { pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/, message: t('workflow.config.start.invalidVariableName') },
           ]}
         >
-          <Input placeholder={t('common.enter')} />
+          <Input placeholder={t('common.enter')} onBlur={nameChange} />
         </FormItem>
 
         {/* 显示名称 */}

@@ -13,14 +13,14 @@ import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
 import ChatSendIcon from '@/assets/images/application/chatSend.svg'
 import dayjs from 'dayjs'
-import type { ChatRef, VariableEditModalRef, StartVariableItem, GraphRef } from '../../types'
+import type { ChatRef, VariableConfigModalRef, StartVariableItem, GraphRef } from '../../types'
 import { type SSEMessage } from '@/utils/stream'
 
 const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId, graphRef }, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
   const [form] = Form.useForm<{ message: string }>()
-  const variableConfigModalRef = useRef<VariableEditModalRef>(null)
+  const variableConfigModalRef = useRef<VariableConfigModalRef>(null)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [chatList, setChatList] = useState<ChatItem[]>([])
@@ -38,15 +38,16 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     if (startNodes.length) {
       const curVariables = startNodes[0].config.variables?.defaultValue
 
-      const initialValue: Record<string, any> = {}
-
       curVariables.forEach((vo: StartVariableItem) => {
         if (vo.default) {
-          initialValue[vo.name] = vo.default
+          vo.value = vo.default
+        }
+        const lastVo = variables.find(item => item.name === vo.name)
+        if (lastVo?.value) {
+          vo.value = lastVo.value
         }
       })
       setVariables(curVariables)
-      form.setFieldsValue(initialValue)
     }
   }
   const handleClose = () => {
@@ -114,6 +115,15 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
             })
             break
           case 'workflow_end':
+            setChatList(prev => {
+              const lastChat = { ...prev[prev.length - 1] }
+              lastChat.content = lastChat.content === '' ? null : lastChat.content
+
+              return [
+                ...prev.slice(0, prev.length - 1),
+                lastChat
+              ]
+            })
             setStreamLoading(false);
             break;
         }

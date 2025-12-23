@@ -63,7 +63,7 @@ const Properties: FC<PropertiesProps> = ({
       const { id, ...rest } = values
 
       Object.keys(values).forEach(key => {
-        if (selectedNode.data.config[key]) {
+        if (selectedNode.data?.config[key]) {
           selectedNode.data.config[key].defaultValue = values[key]
         }
       })
@@ -132,7 +132,7 @@ const Properties: FC<PropertiesProps> = ({
             {configs && Object.keys(configs).length > 0 && Object.keys(configs).map((key) => {
               const config = configs[key] || {}
 
-              if (selectedNode.data.type === 'start' && key === 'variables' && config.type === 'define') {
+              if (selectedNode.data?.type === 'start' && key === 'variables' && config.type === 'define') {
                 return (
                   <div key={key}>
                     <div className="rb:flex rb:items-center rb:justify-between rb:mb-2.75">
@@ -177,7 +177,7 @@ const Properties: FC<PropertiesProps> = ({
                 )
               }
 
-              if (selectedNode.data.type === 'llm' && key === 'messages' && config.type === 'define') {
+              if (selectedNode.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                 return (
                   <Form.Item key={key} name={key}>
                     <MessageEditor />

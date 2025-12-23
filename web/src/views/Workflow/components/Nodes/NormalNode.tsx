@@ -19,7 +19,10 @@ const NormalNode: ReactShapeConfig['component'] = ({ node }) => {
         
         <div 
           className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
-          onClick={() => {}}
+          onClick={(e) => {
+            e.stopPropagation()
+            node.remove()
+          }}
         ></div>
       </div>
 
