@@ -21,6 +21,7 @@ interface PropertiesProps {
 }
 const Properties: FC<PropertiesProps> = ({
   selectedNode,
+  graphRef,
 }) => {
   const { t } = useTranslation()
   const { modal } = App.useApp()
@@ -60,8 +61,10 @@ const Properties: FC<PropertiesProps> = ({
   };
 
   useEffect(() => {
+    console.log('values', values)
     if (values && selectedNode) {
       const { id, ...rest } = values
+
 
       Object.keys(values).forEach(key => {
         if (selectedNode.data?.config[key]) {
@@ -181,7 +184,14 @@ const Properties: FC<PropertiesProps> = ({
               if (selectedNode.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                 return (
                   <Form.Item key={key} name={key}>
-                    <MessageEditor />
+                    <MessageEditor selectedNode={selectedNode} graphRef={graphRef} />
+                  </Form.Item>
+                )
+              }
+              if (selectedNode.data?.type === 'end' && key === 'output') {
+                return (
+                  <Form.Item key={key} name={key}>
+                    <MessageEditor isArray={false} parentName={key} selectedNode={selectedNode} graphRef={graphRef} />
                   </Form.Item>
                 )
               }

@@ -1657,6 +1657,8 @@ export const zh = {
       export: '导出',
       variableConfig: '变量配置',
       variableRequired: '必填',
+      addMessage: '添加消息',
+      answerDesc: '回复'
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',
