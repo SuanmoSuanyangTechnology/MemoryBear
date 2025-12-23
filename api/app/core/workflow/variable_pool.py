@@ -10,7 +10,10 @@
 """
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.core.workflow.nodes import WorkflowState
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +85,7 @@ class VariablePool:
         >>> pool.set(["conv", "user_name"], "张三")
     """
     
-    def __init__(self, state: dict[str, Any]):
+    def __init__(self, state: "WorkflowState"):
         """初始化变量池
         
         Args:

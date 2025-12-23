@@ -15,25 +15,6 @@ class ModelType(StrEnum):
     EMBEDDING = "embedding"
     RERANK = "rerank"
 
-    @classmethod
-    def from_str(cls, value: str) -> "ModelType":
-        """
-        Get a ModelType enum instance from a string value.
-
-        Args:
-            value (str): The string representation of the model type.
-
-        Returns:
-            ModelType: The corresponding ModelType enum object.
-
-        Raises:
-            ValueError: If the given value does not match any ModelType.
-        """
-        try:
-            return cls(value)
-        except ValueError:
-            raise ValueError(f"Invalid ModelType: {value}")
-
 
 class ModelProvider(StrEnum):
     """模型提供商枚举"""
