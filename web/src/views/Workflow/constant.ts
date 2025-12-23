@@ -84,7 +84,7 @@ export const nodeLibrary: NodeLibrary[] = [
         type: "end", icon: endIcon,
         config: {
           output: {
-            type: 'textarea'
+            type: 'define'
           }
         }
       },
@@ -121,7 +121,7 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'define',
             defaultValue: [
               {
-                role: 'SYSTEM',
+                role: 'system',
                 content: undefined,
                 readonly: true
               },
