@@ -99,14 +99,14 @@ const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) 
 
   if (!showSuggestions) return null;
 
-  // Group suggestions by node name
+  // Group suggestions by node id
   const groupedSuggestions = suggestions.reduce((groups: Record<string, any[]>, suggestion) => {
     const { nodeData } = suggestion
-    const nodeName = (nodeData.name || nodeData.id) as string;
-    if (!groups[nodeName]) {
-      groups[nodeName] = [];
+    const nodeId = nodeData.id as string;
+    if (!groups[nodeId]) {
+      groups[nodeId] = [];
     }
-    groups[nodeName].push(suggestion);
+    groups[nodeId].push(suggestion);
     return groups;
   }, {});
 
@@ -127,8 +127,10 @@ const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) 
         transform: 'translateY(-100%)',
       }}
     >
-      {Object.entries(groupedSuggestions).map(([nodeName, nodeOptions], groupIndex) => (
-        <div key={nodeName}>
+      {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions], groupIndex) => {
+        const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
+        return (
+          <div key={nodeId}>
           {groupIndex > 0 && <div style={{ height: '1px', background: '#f0f0f0', margin: '4px 0' }} />}
           <div style={{ padding: '4px 12px', fontSize: '12px', color: '#999', fontWeight: 'bold' }}>
             {nodeName}
@@ -176,7 +178,8 @@ const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) 
             );
           })}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
