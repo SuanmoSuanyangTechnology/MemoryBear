@@ -9,7 +9,8 @@ prompt_env = Environment(loader=FileSystemLoader(prompt_dir))
 
 async def render_evaluate_prompt(evaluate_data: List[Any], schema: Dict[str, Any],
                                  baseline: str = "TIME",
-                                 memory_verify: bool = False,quality_assessment:bool = False,statement_databasets: List[str] = []) -> str:
+                                 memory_verify: bool = False,quality_assessment:bool = False,
+                                 statement_databasets: List[str] = [],language_type:str = "zh") -> str:
     """
     Renders the evaluate prompt using the evaluate_optimized.jinja2 template.
 
@@ -30,12 +31,13 @@ async def render_evaluate_prompt(evaluate_data: List[Any], schema: Dict[str, Any
         baseline=baseline,
         memory_verify=memory_verify,
         quality_assessment=quality_assessment,
-        statement_databasets=statement_databasets
+        statement_databasets=statement_databasets,
+        language_type=language_type
     )
     return rendered_prompt
 
 async def render_reflexion_prompt(data: Dict[str, Any], schema: Dict[str, Any], baseline: str, memory_verify: bool = False,
-                                  statement_databasets: List[str] = []) -> str:
+                                  statement_databasets: List[str] = [],language_type:str = "zh") -> str:
     """
     Renders the reflexion prompt using the reflexion_optimized.jinja2 template.
 
@@ -51,6 +53,6 @@ async def render_reflexion_prompt(data: Dict[str, Any], schema: Dict[str, Any], 
 
     rendered_prompt = template.render(data=data, json_schema=schema,
                                       baseline=baseline,memory_verify=memory_verify,
-                                      statement_databasets=statement_databasets)
+                                      statement_databasets=statement_databasets,language_type=language_type)
 
     return rendered_prompt
