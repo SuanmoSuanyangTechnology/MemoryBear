@@ -168,6 +168,8 @@ class EndNode(BaseNode):
         # 解析模板部分
         parts = self._parse_template_parts(output_template, state)
         logger.info(f"节点 {self.node_id} 解析模板，共 {len(parts)} 个部分")
+        for i, part in enumerate(parts):
+            logger.info(f"[模板解析] part[{i}]: {part}")
         
         # 找到第一个引用直接上游节点的动态引用
         upstream_ref_index = None
@@ -204,38 +206,32 @@ class EndNode(BaseNode):
         
         # 收集后缀部分
         suffix_parts = []
+        logger.info(f"[后缀调试] 开始收集后缀，从索引 {upstream_ref_index + 1} 到 {len(parts) - 1}")
         for i in range(upstream_ref_index + 1, len(parts)):
             part = parts[i]
-            
+            logger.info(f"[后缀调试] 处理 part[{i}]: {part}")
             if part["type"] == "static":
                 # 静态文本
+                logger.info(f"[后缀调试] 添加静态文本: '{part['content']}'")
                 suffix_parts.append(part["content"])
                 
             elif part["type"] == "dynamic":
-                # 其他动态引用（如果有多个引用）
+                # Other dynamic references (if there are multiple references)
                 node_id = part["node_id"]
                 field = part["field"]
                 
-                # 从 streaming_buffer 或 node_outputs 读取
-                streaming_buffer = state.get("streaming_buffer", {})
-                if node_id in streaming_buffer:
-                    buffer_data = streaming_buffer[node_id]
-                    content = buffer_data.get("full_content", "")
-                else:
-                    node_outputs = state.get("node_outputs", {})
-                    runtime_vars = state.get("runtime_vars", {})
-                    
+                # Use VariablePool to get variable value
+                pool = self.get_variable_pool(state)
+                try:
+                    # Try to get variable value with default empty string
+                    content = pool.get([node_id, field], default="")
+                    logger.info(f"[后缀调试] 获取变量 {node_id}.{field} 成功: '{content}'")
+                except Exception as e:
+                    logger.warning(f"[后缀调试] 获取变量 {node_id}.{field} 失败: {e}")
                     content = ""
-                    if node_id in node_outputs:
-                        node_output = node_outputs[node_id]
-                        if isinstance(node_output, dict):
-                            content = str(node_output.get(field, ""))
-                    elif node_id in runtime_vars:
-                        runtime_var = runtime_vars[node_id]
-                        if isinstance(runtime_var, dict):
-                            content = str(runtime_var.get(field, ""))
                 
-                suffix_parts.append(content)
+                # Convert to string if not None
+                suffix_parts.append(str(content) if content is not None else "")
         
         # 拼接后缀
         suffix = "".join(suffix_parts)
@@ -243,8 +239,13 @@ class EndNode(BaseNode):
         # 构建完整输出（用于返回，包含前缀 + 动态内容 + 后缀）
         full_output = self._render_template(output_template, state)
         
+        logger.info(f"[后缀调试] 节点 {self.node_id} 后缀部分数量: {len(suffix_parts)}")
+        logger.info(f"[后缀调试] 后缀内容: '{suffix}'")
+        logger.info(f"[后缀调试] 后缀长度: {len(suffix)}")
+        logger.info(f"[后缀调试] 后缀是否为空: {not suffix}")
+        
         if suffix:
-            logger.info(f"节点 {self.node_id} 输出后缀: '{suffix[:50]}...' (长度: {len(suffix)})")
+            logger.info(f"节点 {self.node_id} 输出后缀: '{suffix}...' (长度: {len(suffix)})")
             # 一次性输出后缀（作为单个 chunk）
             # 注意：不要直接 yield 字符串，因为 base_node 会逐字符处理
             # 而是通过 writer 直接发送
@@ -260,7 +261,7 @@ class EndNode(BaseNode):
             })
             logger.info(f"节点 {self.node_id} 已通过 writer 发送后缀，full_content 长度: {len(full_output)}")
         else:
-            logger.info(f"节点 {self.node_id} 没有后缀需要输出")
+            logger.warning(f"[后缀调试] 节点 {self.node_id} 后缀为空，不发送！upstream_ref_index={upstream_ref_index}, parts数量={len(parts)}")
         
         # 统计信息
         node_outputs = state.get("node_outputs", {})
