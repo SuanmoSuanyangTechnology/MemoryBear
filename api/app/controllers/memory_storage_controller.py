@@ -1,8 +1,9 @@
-from typing import Optional, Union
+from typing import Optional
 import os
 import uuid
+import datetime
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 
@@ -10,6 +11,7 @@ from app.db import get_db
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
+from app.core.memory.utils.self_reflexion_utils import self_reflexion
 from app.services.memory_storage_service import (
     MemoryStorageService,
     DataConfigService,
@@ -23,9 +25,7 @@ from app.services.memory_storage_service import (
     search_edges,
     search_entity_graph,
     analytics_hot_memory_tags,
-    analytics_memory_insight_report,
     analytics_recent_activity_stats,
-    analytics_user_summary,
 )
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import (
@@ -36,10 +36,16 @@ from app.schemas.memory_storage_schema import (
     ConfigUpdateForget,
     ConfigKey,
     ConfigPilotRun,
+    GenerateCacheRequest,
 )
-from app.core.memory.utils.config.definitions import reload_configuration_from_database
+from app.schemas.end_user_schema import (
+    EndUserProfileResponse,
+    EndUserProfileUpdate,
+)
+from app.models.end_user_model import EndUser
 from app.dependencies import get_current_user
 from app.models.user_model import User
+
 # Get API logger
 api_logger = get_api_logger()
 
@@ -489,20 +495,6 @@ async def get_hot_memory_tags_api(
         return fail(BizCode.INTERNAL_ERROR, "热门标签查询失败", str(e))
 
 
-@router.get("/analytics/memory_insight/report", response_model=ApiResponse)
-async def get_memory_insight_report_api(
-    end_user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    ) -> dict:
-    api_logger.info(f"Memory insight report requested for end_user_id: {end_user_id}")
-    try:
-        result = await analytics_memory_insight_report(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Memory insight report failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "记忆洞察报告生成失败", str(e))
-
-
 @router.get("/analytics/recent_activity_stats", response_model=ApiResponse)
 async def get_recent_activity_stats_api(
     current_user: User = Depends(get_current_user),
@@ -516,20 +508,6 @@ async def get_recent_activity_stats_api(
         return fail(BizCode.INTERNAL_ERROR, "最近活动统计失败", str(e))
 
 
-@router.get("/analytics/user_summary", response_model=ApiResponse)
-async def get_user_summary_api(
-    end_user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    ) -> dict:
-    api_logger.info(f"User summary requested for end_user_id: {end_user_id}")
-    try:
-        result = await analytics_user_summary(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"User summary failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "用户摘要生成失败", str(e))
-        
-from app.core.memory.utils.self_reflexion_utils import self_reflexion
 @router.get("/self_reflexion")
 async def self_reflexion_endpoint(host_id: uuid.UUID) -> str:
     """
@@ -541,3 +519,4 @@ async def self_reflexion_endpoint(host_id: uuid.UUID) -> str:
         自我反思结果。
     """
     return await self_reflexion(host_id)
+
