@@ -1,3 +1,4 @@
+import datetime
 import os
 import uuid
 from typing import Optional
@@ -8,7 +9,12 @@ from app.core.memory.utils.self_reflexion_utils import self_reflexion
 from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user
+from app.models.end_user_model import EndUser
 from app.models.user_model import User
+from app.schemas.end_user_schema import (
+    EndUserProfileResponse,
+    EndUserProfileUpdate,
+)
 from app.schemas.memory_storage_schema import (
     ConfigKey,
     ConfigParamsCreate,
@@ -21,11 +27,10 @@ from app.schemas.memory_storage_schema import (
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_storage_service import (
     DataConfigService,
+    GenerateCacheRequest,
     MemoryStorageService,
     analytics_hot_memory_tags,
-    analytics_memory_insight_report,
     analytics_recent_activity_stats,
-    analytics_user_summary,
     kb_type_distribution,
     search_all,
     search_chunk,
@@ -491,20 +496,6 @@ async def get_hot_memory_tags_api(
         return fail(BizCode.INTERNAL_ERROR, "热门标签查询失败", str(e))
 
 
-@router.get("/analytics/memory_insight/report", response_model=ApiResponse)
-async def get_memory_insight_report_api(
-    end_user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    ) -> dict:
-    api_logger.info(f"Memory insight report requested for end_user_id: {end_user_id}")
-    try:
-        result = await analytics_memory_insight_report(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Memory insight report failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "记忆洞察报告生成失败", str(e))
-
-
 @router.get("/analytics/recent_activity_stats", response_model=ApiResponse)
 async def get_recent_activity_stats_api(
     current_user: User = Depends(get_current_user),
@@ -543,3 +534,4 @@ async def self_reflexion_endpoint(host_id: uuid.UUID) -> str:
         自我反思结果。
     """
     return await self_reflexion(host_id)
+

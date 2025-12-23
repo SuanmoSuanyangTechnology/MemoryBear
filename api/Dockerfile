@@ -25,17 +25,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 # 4. Setup apt
 # Python package and implicit dependencies:
 # opencv-python: libglib2.0-0 libglx-mesa0 libgl1
-# aspose-slides: pkg-config libicu-dev libgdiplus         libssl1.1_1.1.1f-1ubuntu2_amd64.deb
-# python-pptx:   default-jdk                              tika-server-standard-3.0.0.jar
+# libreoffice: libreoffice libreoffice-writer libreoffice-impress fonts-wqy-zenhei fonts-noto-cjk
+# python-docx:   default-jdk                              tika-server-standard-3.0.0.jar
 # Building C extensions: libpython3-dev libgtk-4-1 libnss3 xdg-utils libgbm-dev
 RUN --mount=type=cache,id=mem_apt,target=/var/cache/apt,sharing=locked \
-    apt install -y libicu-dev && \
     if [ "$NEED_MIRROR" == "1" ]; then \
-        rm -f /etc/apt/sources.list.d/debian.sources && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-backports main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list; \
+        sed -i 's|http://ports.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
+        sed -i 's|http://archive.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
     fi; \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
@@ -44,7 +40,7 @@ RUN --mount=type=cache,id=mem_apt,target=/var/cache/apt,sharing=locked \
     apt --no-install-recommends install -y ca-certificates && \
     apt update && \
     apt install -y libglib2.0-0 libglx-mesa0 libgl1 && \
-    apt install -y pkg-config libgdiplus && \
+    apt install -y libreoffice libreoffice-writer libreoffice-impress fonts-wqy-zenhei fonts-noto-cjk && \
     apt install -y default-jdk && \
     apt install -y libpython3-dev libgtk-4-1 libnss3 xdg-utils libgbm-dev && \
     apt install -y libjemalloc-dev && \
@@ -64,21 +60,13 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
 ENV PYTHONDONTWRITEBYTECODE=1 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 ENV PATH=/root/.local/bin:$PATH
 
-# https://forum.aspose.com/t/aspose-slides-for-net-no-usable-version-of-libssl-found-with-linux-server/271344/13
-# 5. aspose-slides on linux/arm64 is unavailable
-COPY libssl1.1_1.1.1f-1ubuntu2_amd64.deb libssl1.1_1.1.1f-1ubuntu2_arm64.deb /tmp/
-RUN if [ "$(uname -m)" = "x86_64" ]; then \
-        dpkg -i /tmp/libssl1.1_1.1.1f-1ubuntu2_amd64.deb; \
-    elif [ "$(uname -m)" = "aarch64" ]; then \
-        dpkg -i /tmp/libssl1.1_1.1.1f-1ubuntu2_arm64.deb; \
-    fi && \
-    rm -f /tmp/libssl1.1_*.deb
 
-
-# 6. install dependencies from uv.lock file
+# 5. install dependencies from uv.lock file
 COPY ./pyproject.toml /code/pyproject.toml
 COPY ./uv.lock /code/uv.lock
 COPY ./app /code/app
+COPY ./alembic.ini /code/alembic.ini
+COPY ./migrations /code/migrations
 
 # https://github.com/astral-sh/uv/issues/10462
 # uv records index url into uv.lock but doesn't failover among multiple indexes

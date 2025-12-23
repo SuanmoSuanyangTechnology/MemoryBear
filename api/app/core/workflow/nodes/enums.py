@@ -1,5 +1,14 @@
 from enum import StrEnum
 
+from app.core.workflow.nodes.operators import (
+    StringOperator,
+    NumberOperator,
+    AssignmentOperatorType,
+    BooleanOperator,
+    ArrayOperator,
+    ObjectOperator
+)
+
 
 class NodeType(StrEnum):
     START = "start"
@@ -14,6 +23,7 @@ class NodeType(StrEnum):
     HTTP_REQUEST = "http-request"
     TOOL = "tool"
     AGENT = "agent"
+    ASSIGNER = "assigner"
 
 
 class ComparisonOperator(StrEnum):
@@ -34,3 +44,32 @@ class ComparisonOperator(StrEnum):
 class LogicOperator(StrEnum):
     AND = "and"
     OR = "or"
+
+
+class AssignmentOperator(StrEnum):
+    ASSIGN = "assign"
+    CLEAR = "clear"
+
+    ADD = "add"  # +=
+    SUBTRACT = "subtract"  # -=
+    MULTIPLY = "multiply"  # *=
+    DIVIDE = "divide"  # /=
+
+    APPEND = "append"
+    REMOVE_LAST = "remove_last"
+    REMOVE_FIRST = "remove_first"
+
+    @classmethod
+    def get_operator(cls, obj) -> AssignmentOperatorType:
+        if isinstance(obj, str):
+            return StringOperator
+        elif isinstance(obj, bool):
+            return BooleanOperator
+        elif isinstance(obj, (int, float)):
+            return NumberOperator
+        elif isinstance(obj, list):
+            return ArrayOperator
+        elif isinstance(obj, dict):
+            return ObjectOperator
+
+        raise TypeError(f"Unsupported variable type ({type(obj)})")

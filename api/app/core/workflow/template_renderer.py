@@ -66,19 +66,26 @@ class TemplateRenderer:
             '分析结果: 正面情绪'
         """
         # 构建命名空间上下文
+        # variables 的结构：{"sys": {...}, "conv": {...}}
+        sys_vars = variables.get("sys", {}) if isinstance(variables, dict) else {}
+        conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+        
         context = {
-            "var": variables,                    # 用户变量：{{var.user_input}}
+            "conv": conv_vars,                   # 会话变量：{{conv.user_name}}
             "node": node_outputs,                # 节点输出：{{node.node_1.output}}
-            "sys": system_vars or {},            # 系统变量：{{sys.execution_id}}
+            "sys": {**(system_vars or {}), **sys_vars},  # 系统变量：{{sys.execution_id}}（合并两个来源）
         }
         
         # 支持直接通过节点ID访问节点输出：{{llm_qa.output}}
         # 将所有节点输出添加到顶层上下文
-        context.update(node_outputs)
+        if node_outputs:
+            context.update(node_outputs)
         
-        # 为了向后兼容，也支持直接访问用户变量
-        context.update(variables)
-        context["nodes"] = node_outputs  # 旧语法兼容
+        # 支持直接访问会话变量（不需要 conv. 前缀）：{{user_name}}
+        if conv_vars:
+            context.update(conv_vars)
+        
+        context["nodes"] = node_outputs or {}  # 旧语法兼容
         
         try:
             tmpl = self.env.from_string(template)

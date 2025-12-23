@@ -7,6 +7,7 @@
 import logging
 from typing import Any, Union
 
+# from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
 from app.core.workflow.nodes.agent import AgentNode
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.end import EndNode
@@ -15,6 +16,7 @@ from app.core.workflow.nodes.if_else import IfElseNode
 from app.core.workflow.nodes.llm import LLMNode
 from app.core.workflow.nodes.start import StartNode
 from app.core.workflow.nodes.transform import TransformNode
+from app.core.workflow.nodes.assigner import AssignerNode
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,8 @@ WorkflowNode = Union[
     IfElseNode,
     AgentNode,
     TransformNode,
+    AssignerNode,
+    # KnowledgeRetrievalNode,
 ]
 
 
@@ -42,7 +46,9 @@ class NodeFactory:
         NodeType.LLM: LLMNode,
         NodeType.AGENT: AgentNode,
         NodeType.TRANSFORM: TransformNode,
-        NodeType.IF_ELSE: IfElseNode
+        NodeType.IF_ELSE: IfElseNode,
+        # NodeType.KNOWLEDGE_RETRIEVAL: KnowledgeRetrievalNode,
+        NodeType.ASSIGNER: AssignerNode,
     }
 
     @classmethod
@@ -81,10 +87,6 @@ class NodeFactory:
             ValueError: 不支持的节点类型
         """
         node_type = node_config.get("type")
-
-        # 跳过条件节点（由 LangGraph 处理）
-        if node_type == "condition":
-            return None
 
         # 获取节点类
         node_class = cls._node_types.get(node_type)

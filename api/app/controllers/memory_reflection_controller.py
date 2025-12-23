@@ -218,6 +218,7 @@ async def start_reflection_configs(
 @router.get("/reflection/run")
 async def reflection_run(
     config_id: int,
+    language_type: str = "zh",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -257,7 +258,8 @@ async def reflection_run(
         memory_verify=result.memory_verify,
         quality_assessment=result.quality_assessment,
         violation_handling_strategy="block",
-        model_id=model_id
+        model_id=model_id,
+        language_type=language_type
     )
     connector = Neo4jConnector()
     engine = ReflectionEngine(

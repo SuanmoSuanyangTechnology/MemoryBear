@@ -169,7 +169,7 @@ class PromptOptimizerService:
             provider=api_config.provider,
             api_key=api_config.api_key,
             base_url=api_config.api_base
-        ), type=ModelType.from_str(model_config.type))
+        ), type=ModelType(model_config.type))
 
         # build message
         messages = [

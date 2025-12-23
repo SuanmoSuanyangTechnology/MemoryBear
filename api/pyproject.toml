@@ -127,6 +127,7 @@ dependencies = [
     "uvicorn>=0.34.0",
     "celery>=5.5.2",
     "simpleeval>=1.0.3",
+    "langchain-aws>=1.0.0a1",
 ]
 
 [tool.pytest.ini_options]

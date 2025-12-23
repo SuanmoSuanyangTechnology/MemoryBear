@@ -39,14 +39,14 @@ class WorkflowService:
     # ==================== 配置管理 ====================
 
     def create_workflow_config(
-        self,
-        app_id: uuid.UUID,
-        nodes: list[dict[str, Any]],
-        edges: list[dict[str, Any]],
-        variables: list[dict[str, Any]] | None = None,
-        execution_config: dict[str, Any] | None = None,
-        triggers: list[dict[str, Any]] | None = None,
-        validate: bool = True
+            self,
+            app_id: uuid.UUID,
+            nodes: list[dict[str, Any]],
+            edges: list[dict[str, Any]],
+            variables: list[dict[str, Any]] | None = None,
+            execution_config: dict[str, Any] | None = None,
+            triggers: list[dict[str, Any]] | None = None,
+            validate: bool = True
     ) -> WorkflowConfig:
         """创建工作流配置
 
@@ -109,14 +109,14 @@ class WorkflowService:
         return self.config_repo.get_by_app_id(app_id)
 
     def update_workflow_config(
-        self,
-        app_id: uuid.UUID,
-        nodes: list[dict[str, Any]] | None = None,
-        edges: list[dict[str, Any]] | None = None,
-        variables: list[dict[str, Any]] | None = None,
-        execution_config: dict[str, Any] | None = None,
-        triggers: list[dict[str, Any]] | None = None,
-        validate: bool = True
+            self,
+            app_id: uuid.UUID,
+            nodes: list[dict[str, Any]] | None = None,
+            edges: list[dict[str, Any]] | None = None,
+            variables: list[dict[str, Any]] | None = None,
+            execution_config: dict[str, Any] | None = None,
+            triggers: list[dict[str, Any]] | None = None,
+            validate: bool = True
     ) -> WorkflowConfig:
         """更新工作流配置
 
@@ -226,8 +226,8 @@ class WorkflowService:
         return config
 
     def validate_workflow_config_for_publish(
-        self,
-        app_id: uuid.UUID
+            self,
+            app_id: uuid.UUID
     ) -> tuple[bool, list[str]]:
         """验证工作流配置是否可以发布
 
@@ -260,13 +260,13 @@ class WorkflowService:
     # ==================== 执行管理 ====================
 
     def create_execution(
-        self,
-        workflow_config_id: uuid.UUID,
-        app_id: uuid.UUID,
-        trigger_type: str,
-        triggered_by: uuid.UUID | None = None,
-        conversation_id: uuid.UUID | None = None,
-        input_data: dict[str, Any] | None = None
+            self,
+            workflow_config_id: uuid.UUID,
+            app_id: uuid.UUID,
+            trigger_type: str,
+            triggered_by: uuid.UUID | None = None,
+            conversation_id: uuid.UUID | None = None,
+            input_data: dict[str, Any] | None = None
     ) -> WorkflowExecution:
         """创建工作流执行记录
 
@@ -314,10 +314,10 @@ class WorkflowService:
         return self.execution_repo.get_by_execution_id(execution_id)
 
     def get_executions_by_app(
-        self,
-        app_id: uuid.UUID,
-        limit: int = 50,
-        offset: int = 0
+            self,
+            app_id: uuid.UUID,
+            limit: int = 50,
+            offset: int = 0
     ) -> list[WorkflowExecution]:
         """获取应用的执行记录列表
 
@@ -332,12 +332,12 @@ class WorkflowService:
         return self.execution_repo.get_by_app_id(app_id, limit, offset)
 
     def update_execution_status(
-        self,
-        execution_id: str,
-        status: str,
-        output_data: dict[str, Any] | None = None,
-        error_message: str | None = None,
-        error_node_id: str | None = None
+            self,
+            execution_id: str,
+            status: str,
+            output_data: dict[str, Any] | None = None,
+            error_message: str | None = None,
+            error_node_id: str | None = None
     ) -> WorkflowExecution:
         """更新执行状态
 
@@ -407,10 +407,10 @@ class WorkflowService:
     # ==================== 工作流执行 ====================
 
     async def run(
-        self,
-        app_id: uuid.UUID,
-        payload: DraftRunRequest,
-        config: WorkflowConfig
+            self,
+            app_id: uuid.UUID,
+            payload: DraftRunRequest,
+            config: WorkflowConfig
     ):
         """运行工作流
 
@@ -527,10 +527,10 @@ class WorkflowService:
             )
 
     async def run_stream(
-        self,
-        app_id: uuid.UUID,
-        payload: DraftRunRequest,
-        config: WorkflowConfig
+            self,
+            app_id: uuid.UUID,
+            payload: DraftRunRequest,
+            config: WorkflowConfig
     ):
         """运行工作流（流式）
 
@@ -600,11 +600,11 @@ class WorkflowService:
 
             # 调用流式执行（executor 会发送 workflow_start 和 workflow_end 事件）
             async for event in self._run_workflow_stream(
-                workflow_config=workflow_config_dict,
-                input_data=input_data,
-                execution_id=execution.execution_id,
-                workspace_id="",
-                user_id=payload.user_id
+                    workflow_config=workflow_config_dict,
+                    input_data=input_data,
+                    execution_id=execution.execution_id,
+                    workspace_id="",
+                    user_id=payload.user_id
             ):
                 # 直接转发 executor 的事件（已经是正确的格式）
                 yield event
@@ -626,12 +626,12 @@ class WorkflowService:
             }
 
     async def run_workflow(
-        self,
-        app_id: uuid.UUID,
-        input_data: dict[str, Any],
-        triggered_by: uuid.UUID,
-        conversation_id: uuid.UUID | None = None,
-        stream: bool = False
+            self,
+            app_id: uuid.UUID,
+            input_data: dict[str, Any],
+            triggered_by: uuid.UUID,
+            conversation_id: uuid.UUID | None = None,
+            stream: bool = False
     ) -> AsyncGenerator | dict:
         """运行工作流
 
@@ -778,12 +778,12 @@ class WorkflowService:
         return clean_value(event)
 
     async def _run_workflow_stream(
-        self,
-        workflow_config: dict[str, Any],
-        input_data: dict[str, Any],
-        execution_id: str,
-        workspace_id: str,
-        user_id: str):
+            self,
+            workflow_config: dict[str, Any],
+            input_data: dict[str, Any],
+            execution_id: str,
+            workspace_id: str,
+            user_id: str):
         """运行工作流（流式，内部方法）
 
         Args:
@@ -800,11 +800,11 @@ class WorkflowService:
 
         try:
             async for event in execute_workflow_stream(
-                workflow_config=workflow_config,
-                input_data=input_data,
-                execution_id=execution_id,
-                workspace_id=workspace_id,
-                user_id=user_id
+                    workflow_config=workflow_config,
+                    input_data=input_data,
+                    execution_id=execution_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id
             ):
                 # 直接转发事件（executor 已经返回正确格式）
                 yield event
@@ -828,7 +828,7 @@ class WorkflowService:
 # ==================== 依赖注入函数 ====================
 
 def get_workflow_service(
-    db: Annotated[Session, Depends(get_db)]
+        db: Annotated[Session, Depends(get_db)]
 ) -> WorkflowService:
     """获取工作流服务（依赖注入）"""
     return WorkflowService(db)

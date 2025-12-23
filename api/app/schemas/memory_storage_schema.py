@@ -31,21 +31,19 @@ class BaseDataSchema(BaseModel):
     # 保持原有必需字段为可选，以兼容不同数据源
     id: Optional[str] = Field(None, description="The unique identifier for the data entry.")
     statement: Optional[str] = Field(None, description="The statement text.")
-    group_id: Optional[str] = Field(None, description="The group identifier.")
-    chunk_id: Optional[str] = Field(None, description="The chunk identifier.")
     created_at: str = Field(..., description="The creation timestamp in ISO 8601 format.")
     expired_at: Optional[str] = Field(None, description="The expiration timestamp in ISO 8601 format.")
-    valid_at: Optional[str] = Field(None, description="The validation timestamp in ISO 8601 format.")
-    invalid_at: Optional[str] = Field(None, description="The invalidation timestamp in ISO 8601 format.")
-    entity_ids: List[str] = Field([], description="The list of entity identifiers.")
     description: Optional[str] = Field(None, description="The description of the data entry.")
 
     # 新增字段以匹配实际输入数据
     entity1_name: str = Field(..., description="The first entity name.")
     entity2_name: Optional[str] = Field(None, description="The second entity name.")
     statement_id: str = Field(..., description="The statement identifier.")
-    relationship_type: str = Field(..., description="The relationship type.")
-    relationship: Optional[Dict[str, Any]] = Field(None, description="The relationship object.")
+    # 新增字段 - 设为可选以保持向后兼容性
+    predicate: Optional[str] = Field(None, description="The predicate describing the relationship between entities.")
+    relationship_statement_id: Optional[str] = Field(None, description="The relationship statement identifier.")
+    # 保留原有字段 - 修改relationship字段类型以支持字符串和字典
+    relationship: Optional[Union[str, Dict[str, Any]]] = Field(None, description="The relationship object or string.")
     entity2: Optional[Dict[str, Any]] = Field(None, description="The second entity object.")
 
 
@@ -99,8 +97,17 @@ class ReflexionSchema(BaseModel):
 
 
 class ChangeRecordSchema(BaseModel):
-    """Schema for individual change records"""
-    field: List[Dict[str, str]] = Field(..., description="List of field changes, each containing field name and new value.")
+    """Schema for individual change records
+    
+    字段值格式说明：
+    - id 和 statement_id: 字符串或 None
+    - 其他字段: 可以是字符串、None，数组 [修改前的值, 修改后的值]，或嵌套字典结构
+    - entity2等嵌套对象的字段也遵循 [old_value, new_value] 格式
+    """
+    field: List[Dict[str, Any]] = Field(
+        ..., 
+        description="List of field changes. First item: {id: value or None}, second: {statement_id: value}, followed by changed fields as {field_name: [old_value, new_value]} or {field_name: new_value} or nested structures like {entity2: {field_name: [old, new]}}"
+    )
 
 class ResolvedSchema(BaseModel):
     """Schema for the resolved memory data in the reflexion_data"""
@@ -374,4 +381,13 @@ def fail(
         data=payload,
         error=error_code,
         time=time or _now_ms(),
+    )
+
+class GenerateCacheRequest(BaseModel):
+    """缓存生成请求模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    end_user_id: Optional[str] = Field(
+        None, 
+        description="终端用户ID（UUID格式）。如果提供，只为该用户生成；如果不提供，为当前工作空间的所有用户生成"
     )
