@@ -4,6 +4,7 @@
 
 中文 | [English](./README.md)
 测试fork 外部开发提交审核机制
+测试合并机制
 
 ### [安装教程](#memorybear安装教程)
 ### 论文：<a href="https://memorybear.ai/pdf/memoryBear" target="_blank" rel="noopener noreferrer">《Memory Bear AI: 从记忆到认知的突破》</a>
