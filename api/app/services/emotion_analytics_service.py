@@ -492,7 +492,7 @@ class EmotionAnalyticsService:
                         config_id=int(config_id),
                         service_name="EmotionAnalyticsService.generate_emotion_suggestions"
                     )
-                    from app.core.memory.client_factory import MemoryClientFactory
+                    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
                     factory = MemoryClientFactory(db)
                     llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
             except Exception as e:

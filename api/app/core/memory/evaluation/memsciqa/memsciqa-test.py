@@ -24,7 +24,6 @@ for _p in (_SRC_DIR, _PROJECT_ROOT):
         sys.path.insert(0, _p)
 
 # 对齐 locomo_test 的检索逻辑：直接使用 graph_search 与 Neo4jConnector/Embedder1
-from app.core.memory.client_factory import MemoryClientFactory
 from app.core.memory.evaluation.common.metrics import (
     avg_context_tokens,
     exact_match,
@@ -37,6 +36,7 @@ from app.core.memory.utils.config.definitions import (
     SELECTED_GROUP_ID,
     SELECTED_LLM_ID,
 )
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.models.base import RedBearModelConfig
 from app.db import get_db_context
 from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding

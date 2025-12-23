@@ -23,7 +23,6 @@ except ImportError:
     def load_dotenv():
         pass
 
-from app.core.memory.client_factory import MemoryClientFactory
 from app.core.memory.evaluation.common.metrics import (
     avg_context_tokens,
     bleu1,
@@ -51,6 +50,7 @@ from app.core.memory.utils.definitions import (
     SELECTED_GROUP_ID,
     SELECTED_LLM_ID,
 )
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.models.base import RedBearModelConfig
 from app.db import get_db_context
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector

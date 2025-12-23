@@ -23,11 +23,11 @@ from app.schemas.memory_storage_schema import (
     ConfigUpdate,
     ConfigUpdateExtracted,
     ConfigUpdateForget,
+    GenerateCacheRequest,
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_storage_service import (
     DataConfigService,
-    GenerateCacheRequest,
     MemoryStorageService,
     analytics_hot_memory_tags,
     analytics_recent_activity_stats,
@@ -41,6 +41,7 @@ from app.services.memory_storage_service import (
     search_entity_graph,
     search_statement,
 )
+from app.services.user_memory_service import analytics_user_summary
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session

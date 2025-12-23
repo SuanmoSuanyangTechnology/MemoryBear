@@ -15,7 +15,6 @@ except Exception:
     def load_dotenv():
         return None
 
-from app.core.memory.client_factory import MemoryClientFactory
 from app.core.memory.evaluation.common.metrics import (
     avg_context_tokens,
     exact_match,
@@ -31,6 +30,7 @@ from app.core.memory.utils.config.definitions import (
     SELECTED_GROUP_ID,
     SELECTED_LLM_ID,
 )
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 

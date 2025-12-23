@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Optional
 
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.config import definitions as config_defs
-from app.core.memory.utils.config import get_model_config
 from app.core.memory.utils.config.get_data import (
     extract_and_process_changes,
     get_data,
@@ -169,12 +168,18 @@ class ReflectionEngine:
                 self.llm_client = factory.get_llm_client(config_defs.SELECTED_LLM_ID)
         elif isinstance(self.llm_client, str):
             # 如果 llm_client 是字符串（model_id），则用它初始化客户端
-            # from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
             from app.db import get_db_context
-            # model_id = self.llm_client
+            from app.services.memory_config_service import MemoryConfigService
+            model_id = self.llm_client
             with get_db_context() as db:
                 factory = MemoryClientFactory(db)
                 # self.llm_client = factory.get_llm_client(model_id)
+                
+                # Use MemoryConfigService to get model config
+                config_service = MemoryConfigService(db)
+                model_config = config_service.get_model_config(model_id)
+                
             extra_params={
                     "temperature": 0.2,  # 降低温度提高响应速度和一致性
                     "max_tokens": 600,  # 限制最大token数
@@ -182,7 +187,6 @@ class ReflectionEngine:
                     "stream": False,  # 确保非流式输出以获得最快响应
                 }
 
-            model_config = get_model_config(self.llm_client)
             self.llm_client  = OpenAIClient(RedBearModelConfig(
                 model_name=model_config.get("model_name"),
                 provider=model_config.get("provider"),

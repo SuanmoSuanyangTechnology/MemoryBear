@@ -15,7 +15,6 @@ except Exception:
         return None
 
 # 与现有评估脚本保持一致的导入方式
-from app.core.memory.client_factory import MemoryClientFactory
 from app.core.memory.evaluation.common.metrics import (
     avg_context_tokens,
     jaccard,
@@ -29,6 +28,7 @@ from app.core.memory.utils.config.definitions import (
     SELECTED_EMBEDDING_ID,
     SELECTED_LLM_ID,
 )
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.models.base import RedBearModelConfig
 from app.db import get_db_context
 from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding

@@ -435,12 +435,12 @@ async def run_enhanced_evaluation():
             return None
      
     # 修正导入路径：使用 app.core.memory.src 前缀
-    from app.core.memory.client_factory import MemoryClientFactory
     from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
     from app.core.memory.utils.config.definitions import (
         SELECTED_EMBEDDING_ID,
         SELECTED_LLM_ID,
     )
+    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
     from app.core.models.base import RedBearModelConfig
     from app.db import get_db_context
     from app.repositories.neo4j.graph_search import search_graph_by_embedding
