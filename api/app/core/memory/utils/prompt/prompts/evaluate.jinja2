@@ -6,7 +6,7 @@
 - **冲突类型**: {{ baseline }} (TIME/FACT/HYBRID)
 - **隐私审核**: {{ memory_verify }} (true/false)
 - **质量评估**: {{ quality_assessment }} (true/false)
-
+- **语言类型**：{{language_type}}(zh/en)
 ## 任务目标
 对用户记忆数据进行冲突检测、隐私审核和质量评估，输出结构化JSON结果。
 **数据关系**: statement_databasets中的statement_id对应evaluate_data中的记录，代表句子拆分后的实体关系。
@@ -23,7 +23,7 @@
 - **身份冲突**: 同一实体被赋予不同类型或角色
 ### 混合冲突
 检测所有逻辑不一致或相互矛盾的记录。
-**检测原则**: 
+**检测原则**:
 - 重点检查相同实体的记录
 - 分析description字段语义冲突
 - 验证时间字段逻辑一致性
@@ -54,7 +54,7 @@
 1. **conflict=true**: 存在冲突或隐私信息时，将所有相关记录放入data数组
 2. **conflict=false**: 无冲突且无隐私信息时，data为空数组
 3. **独立功能**: 冲突检测、隐私审核、质量评估三者完全独立
-4. **条件输出**: 
+4. **条件输出**:
    - quality_assessment=true时输出评估对象，否则为null
    - memory_verify=true时输出隐私检测对象，否则为null
 5. **不输出conflict_memory字段**
@@ -63,7 +63,6 @@
 2. 隐私审核(如启用) → 将隐私记录加入data
 3. 质量评估(如启用) → 独立输出评估结果
 4. 去重data数组中的记录
-
 **输出结构**:
 ```json
 {
@@ -82,6 +81,8 @@
 ```
 **字段说明**:
 - **data**: 包含冲突记录和隐私信息记录，无则为空数组
-- **quality_assessment**: quality_assessment=true时输出评估对象，否则为null
+- **quality_assessment**:
+    quality_assessment=true时输出评估对象，否则为null（注意：- summary输出的结果不允许含有（expired_at设为2024-01-01T00:00:00Z)等原数据字段以及涉及需要修改的字段以及内容）
 - **memory_verify**: memory_verify=true时输出隐私检测对象，否则为null
+    （注意：- summary输出的结果不允许含有（expired_at设为2024-01-01T00:00:00Z)等原数据字段以及涉及需要修改的字段以及内容）
 模式参考：{{ json_schema }}

@@ -15,11 +15,9 @@ from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 
 from app.models.user_model import User
-from app.models.end_user_model import EndUser
 from app.core.logging_config import get_logger
 from app.utils.sse_utils import format_sse_message
 from app.schemas.memory_storage_schema import (
-    ConfigFilter,
     ConfigPilotRun,
     ConfigParamsCreate,
     ConfigParamsDelete,
@@ -34,7 +32,8 @@ from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
 from app.core.memory.analytics.memory_insight import MemoryInsight
 from app.core.memory.analytics.recent_activity_stats import get_recent_activity_stats
 from app.core.memory.analytics.user_summary import generate_user_summary
-from app.repositories.data_config_repository import DataConfigRepository
+from app.repositories.end_user_repository import EndUserRepository
+import uuid
 
 logger = get_logger(__name__)
 
@@ -67,6 +66,7 @@ class MemoryStorageService:
         }
         
         return result
+    
 
 class DataConfigService: # 数据配置服务类（PostgreSQL）
     """Service layer for config params CRUD.
@@ -85,7 +85,6 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
     @staticmethod
     def _convert_timestamps_to_format(data_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """将 created_at 和 updated_at 字段从 datetime 对象转换为 YYYYMMDDHHmmss 格式"""
-        from datetime import datetime
 
         for item in data_list:
             for field in ['created_at', 'updated_at']:
@@ -576,14 +575,6 @@ async def analytics_hot_memory_tags(
     return [{"name": t, "frequency": f} for t, f in top_tags]
 
 
-async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    insight = MemoryInsight(end_user_id)
-    report = await insight.generate_insight_report()
-    await insight.close()
-    data = {"report": report}
-    return data
-
-
 async def analytics_recent_activity_stats() -> Dict[str, Any]:
     stats, _msg = get_recent_activity_stats()
     total = (
@@ -617,8 +608,3 @@ async def analytics_recent_activity_stats() -> Dict[str, Any]:
     data = {"total": total, "stats": stats, "latest_relative": latest_relative}
     return data
 
-
-async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    summary = await generate_user_summary(end_user_id)
-    data = {"summary": summary}
-    return data

@@ -5,6 +5,7 @@
 - **原始句子**: {{ statement_databasets }}
 - **冲突类型**: {{ baseline }} (TIME/FACT/HYBRID)
 - **隐私审核**: {{ memory_verify }} (true/false)
+- **语言类型**：{{language_type}}(zh/en)
 
 ## 任务目标
 作为数据冲突解决专家，分析冲突原因，按类型分组处理，为每种冲突生成独立解决方案。
@@ -61,7 +62,7 @@
 - 微信号: user123456 → use****3456
 - 邮箱: zhang.san@example.com → zha****@example.com
 
-**脱敏字段**: name、entity1_name、entity2_name、description
+**脱敏字段**: name、entity1_name、entity2_name、description、relationship
 
 ## 4. 处理流程
 
@@ -97,21 +98,11 @@
 
 ### 处理规则
 
-**情况1: 正确答案存在于data中**
-- 保留正确记录不变
-- 时间冲突: 修改错误记录的expired_at为当前时间(2025-12-16T12:00:00)
-- 事实冲突: 同样处理
-- resolved.resolved_memory只包含被设为失效的错误记录
-- change字段只记录expired_at变更: `[{"expired_at": "2025-12-16T12:00:00"}]`
-- 注意: 如果已存在时间则不需要修改
-
-**情况2: 正确答案不存在于data中**  
-- 选择最合适记录进行修改
-- 更新相关字段:
-  - description字段: 添加或修改描述信息{% if memory_verify %}(含隐私信息需脱敏){% endif %}
-  - name字段: 修改名称字段{% if memory_verify %}(含隐私信息需脱敏){% endif %}
-- resolved.resolved_memory包含修改后的完整记录{% if memory_verify %}(已脱敏){% endif %}
-- change字段记录所有被修改字段{% if memory_verify %}，包括脱敏变更{% endif %}
+** baseline是TIME
+    -保留正确记录不变修改错误记录的expired_at为当前时间(2025-12-16T12:00:00),以及name需要修改成正确的
+** baseline不是TIME
+    - 修改字段内容（ name、entity1_name、entity2_name、description、relationship）字段内容是否正确，如果不正确，需要对这些字段的内容重新生成，则不需要修改expired_at字段,
+    如果涉及到修改entity1_name/entity2_name字段的时候，同时也需要修改description字段，输出修改前和修改后的放入change里面的field
 
 **核心原则**:
 - 只输出需要修改的记录
@@ -120,14 +111,17 @@
 - 隐私保护优先: 所有输出记录必须完成隐私脱敏
 - 脱敏变更记录: 隐私脱敏变更也必须在change字段中记录{% endif %}
 - 不可修改数据: 数据被判定为正确时不可修改，无数据可输出时为空
+- 输出的结果reflexion字段中的reason字段和solution不允许含有（expired_at设为2024-01-01T00:00:00Z、memory_verify=true)等原数据字段以及涉及需要修改的字段以及内容
 
 **变更记录格式**:
 ```json
 "change": [
   {
     "field": [
-      {"字段名1": "修改后的值1"},
-      {"字段名2": "修改后的值2"}
+      {"id":修改字段对应的ID}
+      {"statement_id":需要修改的对象对应的statement_id}
+      {"字段名1": ["修改前的值1","修改后的值1"]},
+      {"字段名2": ["修改前的值2","修改后的值2"]}
     ]
   }
 ]
@@ -149,7 +143,8 @@
 
 **嵌套字段映射**(系统自动处理):
 - `entity2.name` → 自动映射为 `name`
-- `entity1.name` → 自动映射为 `name`  
+- `entity1.name` → 自动映射为 `name`
+- `relationship` → 自动映射为 `statement`
 - `entity1.description` → 自动映射为 `description`
 - `entity2.description` → 自动映射为 `description`
 
@@ -188,5 +183,4 @@
 - **resolved.change**: 包含详细变更信息
 - 无需修改的冲突类型resolved为null
 - 与baseline不匹配的冲突类型不包含在results中
-
 模式参考: {{ json_schema }}
