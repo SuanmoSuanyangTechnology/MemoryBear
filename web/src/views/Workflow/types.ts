@@ -26,6 +26,8 @@ export interface NodeConfig {
 export interface NodeProperties {
   type: string;
   icon: string;
+  name?: string;
+  id?: string;
   config?: Record<string, NodeConfig>;
 }
 
