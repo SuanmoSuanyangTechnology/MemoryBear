@@ -382,3 +382,12 @@ def fail(
         error=error_code,
         time=time or _now_ms(),
     )
+
+class GenerateCacheRequest(BaseModel):
+    """缓存生成请求模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    end_user_id: Optional[str] = Field(
+        None, 
+        description="终端用户ID（UUID格式）。如果提供，只为该用户生成；如果不提供，为当前工作空间的所有用户生成"
+    )

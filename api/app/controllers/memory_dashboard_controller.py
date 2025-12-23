@@ -287,7 +287,7 @@ async def get_workspace_total_memory_count(
         "total_memory_count": int,
         "host_count": int,
         "details": [
-            {"host_id": "uuid", "count": 100},
+            {"end_user_id": "uuid", "count": 100, "name": "用户名称"},
             ...
         ]
     }
