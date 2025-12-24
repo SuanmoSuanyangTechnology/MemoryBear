@@ -30,16 +30,74 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
   const updateBreadcrumbs = useCallback((breadcrumbPath: BreadcrumbPath) => {
     const breadcrumbType = options?.breadcrumbType || 'list';
     
-    // 获取基础面包屑，对于详情页面，使用列表页面的基础面包屑作为起点
-    const baseBreadcrumbs = breadcrumbType === 'list' 
-      ? (allBreadcrumbs['space'] || [])
-      : (allBreadcrumbs['space'] || []); // 详情页面也从 space 获取基础面包屑
+    // 对于详情页面，直接使用固定的知识库管理面包屑，不依赖可能被污染的 allBreadcrumbs
+    let baseBreadcrumbs: MenuItem[] = [];
     
-    // 只保留知识库菜单项之前的面包屑
-    const knowledgeBaseMenuIndex = baseBreadcrumbs.findIndex(item => item.path === '/knowledge-base');
-    const filteredBaseBreadcrumbs = knowledgeBaseMenuIndex >= 0 
-      ? baseBreadcrumbs.slice(0, knowledgeBaseMenuIndex + 1)
-      : baseBreadcrumbs;
+    if (breadcrumbType === 'detail') {
+      // 详情页面：始终使用固定的知识库管理面包屑
+      baseBreadcrumbs = [
+        {
+          id: 6,
+          parent: 0,
+          code: 'knowledge',
+          label: '知识库',
+          i18nKey: 'menu.knowledgeManagement',
+          path: '/knowledge-base',
+          enable: true,
+          display: true,
+          level: 1,
+          sort: 0,
+          icon: null,
+          iconActive: null,
+          menuDesc: null,
+          deleted: null,
+          updateTime: 0,
+          new_: null,
+          keepAlive: false,
+          master: null,
+          disposable: false,
+          appSystem: null,
+          subs: [],
+        }
+      ];
+    } else {
+      // 列表页面：从 space 获取基础面包屑，但确保包含知识库管理
+      const spaceBreadcrumbs = allBreadcrumbs['space'] || [];
+      const knowledgeBaseMenuIndex = spaceBreadcrumbs.findIndex(item => item.path === '/knowledge-base');
+      
+      if (knowledgeBaseMenuIndex >= 0) {
+        baseBreadcrumbs = spaceBreadcrumbs.slice(0, knowledgeBaseMenuIndex + 1);
+      } else {
+        // 如果没有找到知识库菜单，使用默认的知识库管理面包屑
+        baseBreadcrumbs = [
+          {
+            id: 6,
+            parent: 0,
+            code: 'knowledge',
+            label: '知识库',
+            i18nKey: 'menu.knowledgeManagement',
+            path: '/knowledge-base',
+            enable: true,
+            display: true,
+            level: 1,
+            sort: 0,
+            icon: null,
+            iconActive: null,
+            menuDesc: null,
+            deleted: null,
+            updateTime: 0,
+            new_: null,
+            keepAlive: false,
+            master: null,
+            disposable: false,
+            appSystem: null,
+            subs: [],
+          }
+        ];
+      }
+    }
+    
+    const filteredBaseBreadcrumbs = baseBreadcrumbs;
 
     // 给"知识库管理"添加点击事件
     const breadcrumbsWithClick = filteredBaseBreadcrumbs.map((item) => {

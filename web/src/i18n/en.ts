@@ -613,6 +613,8 @@ export const en = {
       answer: 'Answer',
       normalMode: 'Normal Mode',
       qaMode: 'QA Mode',
+      fileParsingSettings: 'File Parsing Settings',
+      pdfEnhancementAnalysis: 'PDF Enhancement Analysis',
       createForm:{
         name: 'Name',
         embedding_id: 'Embedding',
