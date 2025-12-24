@@ -80,7 +80,7 @@ class HttpRequestNode(BaseNode):
                     self.typed_config.auth.header: api_key
                 }
             case _:
-                raise RuntimeError(f"Auth type not supported: {self.typed_config.auth_type}")
+                raise RuntimeError(f"Auth type not supported: {self.typed_config.auth.auth_type}")
 
     def _build_header(self, state: WorkflowState) -> dict[str, str]:
         """
@@ -142,7 +142,7 @@ class HttpRequestNode(BaseNode):
             case HttpContentType.RAW:
                 content["content"] = self._render_template(self.typed_config.body.data, state)
             case _:
-                raise RuntimeError(f"Content type not supported: {self.typed_config.content_type}")
+                raise RuntimeError(f"Content type not supported: {self.typed_config.body.content_type}")
         return content
 
     def _get_client_method(self, client: AsyncClient) -> Callable[..., Coroutine[Any, Any, Response]]:
