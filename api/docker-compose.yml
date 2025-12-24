@@ -3,7 +3,7 @@ version: '3.9'
 services:
   # MCP Server - standalone service
   mcp-server:
-    image: redbear-mem:latest
+    image: redbear-mem-open:latest
     container_name: mcp-server
     ports:
       - "8081:8081"  # MCP server port
@@ -28,14 +28,14 @@ services:
 
   # FastAPI application - connects to  MCP server
   api:
-    image: redbear-mem:latest
+    image: redbear-mem-open:latest
     container_name: api
     ports:
       - "8002:8000"
     env_file:
       - .env
     environment:
-      - MCP_SERVER_URL=http://mcp-server:8081
+      - MCP_SERVER_URL=http://mcp-server:8081  # Back to using container name
       - SERVER_IP=0.0.0.0  # Ensure MCP server binds to all interfaces
     volumes:
       - ./files:/files
@@ -51,12 +51,12 @@ services:
 
   # Celery worker - connects to MCP server
   worker:
-    image: redbear-mem:latest
+    image: redbear-mem-open:latest
     container_name: worker
     env_file:
       - .env
     environment:
-      - MCP_SERVER_URL=http://mcp-server:8081
+      - MCP_SERVER_URL=http://mcp-server:8081  # Back to using container name
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
