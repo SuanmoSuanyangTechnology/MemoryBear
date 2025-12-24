@@ -198,8 +198,8 @@ async def get_node_statistics_api(
         api_logger.info(f"成功获取节点统计: end_user_id={end_user_id}, total={result['total']}")
         return success(data=result, msg="查询成功")
     except Exception as e:
-        api_logger.error(f"用户摘要查询失败: end_user_id={end_user_id}, error={str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "用户摘要查询失败", str(e))
+        api_logger.error(f"节点统计查询失败: end_user_id={end_user_id}, error={str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "节点统计查询失败", str(e))
 
 @router.get("/analytics/graph_data", response_model=ApiResponse)
 async def get_graph_data_api(

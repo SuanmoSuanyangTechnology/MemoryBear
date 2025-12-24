@@ -41,7 +41,6 @@ from app.services.memory_storage_service import (
     search_entity_graph,
     search_statement,
 )
-from app.services.user_memory_service import analytics_user_summary
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -510,18 +509,6 @@ async def get_recent_activity_stats_api(
         return fail(BizCode.INTERNAL_ERROR, "最近活动统计失败", str(e))
 
 
-@router.get("/analytics/user_summary", response_model=ApiResponse)
-async def get_user_summary_api(
-    end_user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    ) -> dict:
-    api_logger.info(f"User summary requested for end_user_id: {end_user_id}")
-    try:
-        result = await analytics_user_summary(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"User summary failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "用户摘要生成失败", str(e))
 
 
 @router.get("/self_reflexion")
