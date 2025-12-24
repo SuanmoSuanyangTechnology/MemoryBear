@@ -118,6 +118,17 @@ const Private: FC = () => {
       let url = `/documents/${knowledgeBaseId}/documents`;
       setTableApi(url);
       fetchKnowledgeBaseDetail(knowledgeBaseId);
+      
+      // 立即设置基础面包屑，确保不会显示其他页面的面包屑
+      updateBreadcrumbs({
+        knowledgeBaseFolderPath,
+        knowledgeBase: {
+          id: knowledgeBaseId,
+          name: '加载中...',
+          type: 'knowledgeBase'
+        },
+        documentFolderPath: folderPath,
+      });
     }
   }, [knowledgeBaseId]);
 
