@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from math import ceil
 from typing import Any, Dict, List, Optional
+import re
 
 import redis
 import requests
@@ -16,6 +17,7 @@ from app.core.config import settings
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.cv_model import QWenCV
+from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.prompts.generator import question_proposal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
@@ -83,6 +85,22 @@ def parse_document(file_path: str, document_id: uuid.UUID):
                 lang="Chinese",
                 base_url=db_knowledge.image2text.api_keys[0].api_base
             )
+            if re.search(r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$", file_path, re.IGNORECASE):
+                vision_model = QWenSeq2txt(
+                    key=os.getenv("QWEN3_OMNI_API_KEY", ""),
+                    model_name=os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash"),
+                    lang="Chinese",
+                    base_url=os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+                )
+            elif re.search(r"\.(png|jpeg|jpg|gif|bmp|svg|mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$", file_path, re.IGNORECASE):
+                vision_model = QWenCV(
+                    key=os.getenv("QWEN3_OMNI_API_KEY", ""),
+                    model_name=os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash"),
+                    lang="Chinese",
+                    base_url=os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+                )
+            else:
+                print(file_path)
             from app.core.rag.app.naive import chunk
             res = chunk(filename=file_path,
                         from_page=0,
