@@ -1,6 +1,9 @@
 import uuid
 from typing import List, Optional
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.db import get_db
@@ -13,15 +16,11 @@ from app.dependencies import (
 )
 from app.models.tenant_model import Tenants
 from app.models.user_model import User
-from app.models.workspace_model import InviteStatus, Workspace
-from app.schemas import knowledge_schema
+from app.models.workspace_model import InviteStatus
 from app.schemas.response_schema import ApiResponse
 from app.schemas.workspace_schema import (
-    InviteAcceptRequest,
-    InviteValidateResponse,
     WorkspaceCreate,
     WorkspaceInviteCreate,
-    WorkspaceInviteResponse,
     WorkspaceMemberItem,
     WorkspaceMemberUpdate,
     WorkspaceModelsConfig,
@@ -29,9 +28,7 @@ from app.schemas.workspace_schema import (
     WorkspaceResponse,
     WorkspaceUpdate,
 )
-from app.services import document_service, knowledge_service, workspace_service
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from app.services import workspace_service
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -71,7 +68,7 @@ def get_workspaces(
     current_tenant: Tenants = Depends(get_current_tenant)
 ):
     """获取当前租户下用户参与的所有工作空间
-    
+
     Args:
         include_current: 是否包含当前工作空间（默认 True）
     """
@@ -79,9 +76,9 @@ def get_workspaces(
         f"用户 {current_user.username} 在租户 {current_tenant.name} 中请求获取工作空间列表",
         extra={"include_current": include_current}
     )
-    
+
     workspaces = workspace_service.get_user_workspaces(db, current_user)
-    
+
     # 如果不包含当前工作空间，则过滤掉
     if not include_current and current_user.current_workspace_id:
         workspaces = [w for w in workspaces if w.id != current_user.current_workspace_id]
@@ -89,7 +86,7 @@ def get_workspaces(
             "过滤掉当前工作空间",
             extra={"current_workspace_id": str(current_user.current_workspace_id)}
         )
-    
+
     api_logger.info(f"成功获取 {len(workspaces)} 个工作空间")
     workspaces_schema = [WorkspaceResponse.model_validate(w) for w in workspaces]
     return success(data=workspaces_schema, msg="工作空间列表获取成功")
@@ -103,17 +100,17 @@ def create_workspace(
 ):
     """创建新的工作空间"""
     api_logger.info(f"用户 {current_user.username} 请求创建工作空间: {workspace.name}")
-    
+
     result = workspace_service.create_workspace(
         db=db, workspace=workspace, user=current_user)
-    
+
     api_logger.info(f"工作空间创建成功 - 名称: {workspace.name}, ID: {result.id}, 创建者: {current_user.username}")
     result_schema = WorkspaceResponse.model_validate(result)
     return success(data=result_schema, msg="工作空间创建成功")
 
 @router.put("", response_model=ApiResponse)
 @cur_workspace_access_guard()
-def update_workspace(    
+def update_workspace(
     workspace: WorkspaceUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -121,7 +118,7 @@ def update_workspace(
     """更新工作空间"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求更新工作空间 ID: {workspace_id}")
-    
+
     result = workspace_service.update_workspace(
         db=db,
         workspace_id=workspace_id,
@@ -140,7 +137,7 @@ def get_cur_workspace_members(
 ):
     """获取工作空间成员列表（关系序列化）"""
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {current_user.current_workspace_id} 的成员列表")
-    
+
     members = workspace_service.get_workspace_members(
         db=db,
         workspace_id=current_user.current_workspace_id,
@@ -154,7 +151,7 @@ def get_cur_workspace_members(
 @router.put("/members", response_model=ApiResponse)
 @cur_workspace_access_guard()
 def update_workspace_members(
-    
+
     updates: List[WorkspaceMemberUpdate],
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -180,7 +177,7 @@ def delete_workspace_member(
 ):
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求删除工作空间 {workspace_id} 的成员 {member_id}")
-    
+
     workspace_service.delete_workspace_member(
         db=db,
         workspace_id=workspace_id,
@@ -194,7 +191,7 @@ def delete_workspace_member(
 # 创建空间协作邀请
 @router.post("/invites", response_model=ApiResponse)
 @cur_workspace_access_guard()
-def create_workspace_invite(    
+def create_workspace_invite(
     invite_data: WorkspaceInviteCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -202,7 +199,7 @@ def create_workspace_invite(
     """创建工作空间邀请"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求为工作空间 {workspace_id} 创建邀请: {invite_data.email}")
-    
+
     result = workspace_service.create_workspace_invite(
         db=db,
         workspace_id=workspace_id,
@@ -216,7 +213,7 @@ def create_workspace_invite(
 @router.get("/invites", response_model=ApiResponse)
 @cur_workspace_access_guard()
 def get_workspace_invites(
-    
+
     status_filter: Optional[InviteStatus] = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -226,7 +223,7 @@ def get_workspace_invites(
     """获取工作空间邀请列表"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的邀请列表")
-    
+
     invites = workspace_service.get_workspace_invites(
         db=db,
         workspace_id=workspace_id,
@@ -246,14 +243,14 @@ def get_workspace_invite_info(
 ):
     """获取工作空间邀请用户信息（无需认证）"""
     result = workspace_service.validate_invite_token(db=db, token=token)
-    api_logger.info(f"工作空间邀请验证成功 - 邀请: {token}")    
+    api_logger.info(f"工作空间邀请验证成功 - 邀请: {token}")
     return success(data=result, msg="邀请验证成功")
 
 
 @router.delete("/invites/{invite_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
 def revoke_workspace_invite(
-    
+
     invite_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -261,7 +258,7 @@ def revoke_workspace_invite(
     """撤销工作空间邀请"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求撤销工作空间 {workspace_id} 的邀请 {invite_id}")
-    
+
     result = workspace_service.revoke_workspace_invite(
         db=db,
         workspace_id=workspace_id,
@@ -289,13 +286,13 @@ def revoke_workspace_invite(
 @router.put("/{workspace_id}/switch", response_model=ApiResponse)
 @workspace_access_guard()
 def switch_workspace(
-    workspace_id: uuid.UUID,   
+    workspace_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """切换工作空间"""
     api_logger.info(f"用户 {current_user.username} 请求切换工作空间为 {workspace_id}")
-    
+
     workspace_service.switch_workspace(
         db=db,
         workspace_id=workspace_id,
@@ -339,14 +336,14 @@ def workspace_models_configs(
         workspace_id=workspace_id,
         user=current_user
     )
-    
+
     if configs is None:
         api_logger.warning(f"工作空间 {workspace_id} 不存在或无权访问")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="工作空间不存在或无权访问"
         )
-    
+
     api_logger.info(
         f"成功获取工作空间 {workspace_id} 的模型配置: "
         f"llm={configs.get('llm')}, embedding={configs.get('embedding')}, rerank={configs.get('rerank')}"
@@ -371,7 +368,7 @@ def update_workspace_models_configs(
         models_update=models_update,
         user=current_user
     )
-    
+
     api_logger.info(
         f"成功更新工作空间 {workspace_id} 的模型配置: "
         f"llm={updated_workspace.llm}, embedding={updated_workspace.embedding}, rerank={updated_workspace.rerank}"
