@@ -1,5 +1,5 @@
 import {  useMemo,useRef, useState, useEffect } from 'react';
-import { Button, Flex, Radio, Steps, Modal, Input, Spin,message} from 'antd';
+import { Button, Flex, Radio, Steps, Modal, Input, Spin, message, Checkbox} from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Table, { type TableRef } from '@/components/Table'
@@ -81,6 +81,7 @@ const CreateDataset = () => {
   const [blockSize, setBlockSize] = useState<number>(130);
   const [processingMethod, setProcessingMethod] = useState<ProcessingMethod>('directBlock');
   const [parameterSettings, setParameterSettings] = useState<ParameterSettings>('defaultSettings');
+  const [pdfEnhancementEnabled, setPdfEnhancementEnabled] = useState<boolean>(false);
   const [messageApi, contextHolder] = message.useMessage();
   const fileType = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'htm', 'html', 'json', 'ppt', 'pptx', 'txt','png','jpg']
   const steps = useMemo(
@@ -469,6 +470,26 @@ const CreateDataset = () => {
               </div>
             )}
             <div className='rb:text-base rb:font-medium rb:text-gray-800'>
+                {t('knowledgeBase.fileParsingSettings')}
+            </div>
+            <div className='rb:mt-4'>
+              <div 
+                className={`rb:flex rb:items-center rb:w-full rb:border rb:rounded-lg rb:p-4 rb:cursor-pointer ${
+                  pdfEnhancementEnabled ? 'rb:border-blue-500' : 'rb:border-gray-300'
+                }`}
+                onClick={() => setPdfEnhancementEnabled(!pdfEnhancementEnabled)}
+              >
+                <Checkbox 
+                  checked={pdfEnhancementEnabled}
+                  onChange={(e) => setPdfEnhancementEnabled(e.target.checked)}
+                  className='rb:mr-3'
+                />
+                <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
+                  {t('knowledgeBase.pdfEnhancementAnalysis')}
+                </span>
+              </div>
+            </div>
+            <div className='rb:text-base rb:font-medium rb:text-gray-800 rb:mt-6'>
                 {t('knowledgeBase.dataProcessingSettings')}
             </div>
             <div className='rb:font-medium rb:text-gray-500 rb:mt-4 rb:mb-3'>
