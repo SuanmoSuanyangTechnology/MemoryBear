@@ -140,15 +140,12 @@ const SelfReflectionEngine: React.FC = () => {
           .then((res) => {
             setResult(res as Result)
           })
-          .catch(() => {
-            setRunLoading(false)
-          })
           .finally(() => {
             setRunLoading(false)
           })
       })
-      .finally(() => {
-        setLoading(false)
+      .catch(() => {
+        setRunLoading(false)
       })
   }
 

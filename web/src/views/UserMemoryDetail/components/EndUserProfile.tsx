@@ -40,7 +40,7 @@ const EndUserProfile:FC = () => {
     return ['name', 'position', 'department', 'contact', 'phone', 'hire_date'].map(key => ({
       key,
       label: t(`userMemory.${key}`),
-      children: key === 'hire_date' ? dayjs(data[key as keyof EndUser]).format('YYYY-MM-DD') : String(data[key as keyof EndUser] || ''),
+      children: key === 'hire_date' && data[key] ? dayjs(data[key as keyof EndUser]).format('YYYY-MM-DD') : String(data[key as keyof EndUser] || ''),
     }))
   }, [data])
   const handleEdit = () => {
