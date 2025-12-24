@@ -3,25 +3,24 @@ Retrieval Tools for database and context retrieval.
 
 This module contains MCP tools for retrieving data using hybrid search.
 """
-from dotenv import load_dotenv
+
 import os
-
-from app.core.rag.nlp.search import knowledge_retrieval
-
-# 加载.env文件
-load_dotenv()
 import time
-from typing import List
-
-from mcp.server.fastmcp import Context
 
 from app.core.logging_config import get_agent_logger, log_time
 from app.core.memory.agent.mcp_server.mcp_instance import mcp
 from app.core.memory.agent.mcp_server.server import get_context_resource
-from app.core.memory.agent.utils.llm_tools import deduplicate_entries, merge_to_key_value_pairs
+from app.core.memory.agent.utils.llm_tools import (
+    deduplicate_entries,
+    merge_to_key_value_pairs,
+)
 from app.core.memory.agent.utils.messages_tool import Retriev_messages_deal
+from app.core.rag.nlp.search import knowledge_retrieval
+from app.schemas.memory_config_schema import MemoryConfig
+from dotenv import load_dotenv
+from mcp.server.fastmcp import Context
 
-
+load_dotenv()
 logger = get_agent_logger(__name__)
 
 
@@ -32,8 +31,9 @@ async def Retrieve(
     usermessages: str,
     apply_id: str,
     group_id: str,
+    memory_config: MemoryConfig,
     storage_type: str = "",
-    user_rag_memory_id: str = ""
+    user_rag_memory_id: str = "",
 ) -> dict:
     """
     Retrieve data from the database using hybrid search.
@@ -44,6 +44,7 @@ async def Retrieve(
         usermessages: User messages identifier
         apply_id: Application identifier
         group_id: Group identifier
+        memory_config: MemoryConfig object containing all configuration
         storage_type: Storage type for the workspace (e.g., 'rag', 'vector')
         user_rag_memory_id: User RAG memory identifier
         
@@ -66,6 +67,7 @@ async def Retrieve(
     }
     start = time.time()
     logger.info(f"Retrieve: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
+    logger.info(f"Retrieve: context type={type(context)}, context={str(context)[:500]}")
     
     try:
         # Extract services from context
@@ -77,7 +79,13 @@ async def Retrieve(
         if isinstance(context, dict):
             # Process dict context with extended questions
             all_items = []
+            logger.info(f"Retrieve: context keys={list(context.keys())}")
             content, original = await Retriev_messages_deal(context)
+            logger.info(f"Retrieve: after Retriev_messages_deal - content_type={type(content)}, content={str(content)[:300]}")
+            logger.info(f"Retrieve: original='{original[:100] if original else 'EMPTY'}'")
+            
+            if not original:
+                logger.warning(f"Retrieve: original query is empty! context={context}")
             
             # Extract all query items from content
             # content is like {original_question: [extended_questions...], ...}
@@ -113,9 +121,11 @@ async def Retrieve(
                             clean_content = ''
                             raw_results=''
                             cleaned_query = question
-                            logger.info(f"知识库没有检索的内容{user_rag_memory_id}")
+                            logger.info(f"No content retrieved from knowledge base: {user_rag_memory_id}")
                     else:
-                        clean_content, cleaned_query, raw_results = await search_service.execute_hybrid_search(**search_params)
+                        clean_content, cleaned_query, raw_results = await search_service.execute_hybrid_search(
+                            **search_params, memory_config=memory_config
+                        )
 
                     databases_anser.append({
                         "Query_small": cleaned_query,
@@ -206,9 +216,11 @@ async def Retrieve(
                         clean_content = ''
                         raw_results = ''
                         cleaned_query = query
-                        logger.info(f"知识库没有检索的内容{user_rag_memory_id}")
+                        logger.info(f"No content retrieved from knowledge base: {user_rag_memory_id}")
                 else:
-                    clean_content, cleaned_query, raw_results = await search_service.execute_hybrid_search(**search_params)
+                    clean_content, cleaned_query, raw_results = await search_service.execute_hybrid_search(
+                        **search_params, memory_config=memory_config
+                    )
                 # Keep structure for Verify/Retrieve_Summary compatibility
                 dup_databases = {
                     "Query": cleaned_query,
@@ -236,7 +248,7 @@ async def Retrieve(
                 }
         
         logger.info(
-            f"检索==>>:{storage_type}--{user_rag_memory_id}--Query={dup_databases.get('Query', '')}, "
+            f"Retrieval: {storage_type}--{user_rag_memory_id}--Query={dup_databases.get('Query', '')}, "
             f"Expansion_issue count={len(dup_databases.get('Expansion_issue', []))}"
         )
         
@@ -279,4 +291,4 @@ async def Retrieve(
             duration = end - start
         except Exception:
             duration = 0.0
-        log_time('检索', duration)
+        log_time('Retrieval', duration)

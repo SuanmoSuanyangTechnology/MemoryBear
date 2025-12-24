@@ -7,14 +7,15 @@ Classes:
     EmotionAnalyticsService: 情绪分析服务，提供各种情绪分析功能
 """
 
-from typing import Dict, Any, Optional, List
-import statistics
 import json
-from pydantic import BaseModel, Field
+import statistics
+from typing import Any, Dict, List, Optional
 
+from app.core.logging_config import get_business_logger
 from app.repositories.neo4j.emotion_repository import EmotionRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.logging_config import get_business_logger
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 logger = get_business_logger()
 
@@ -454,7 +455,7 @@ class EmotionAnalyticsService:
     async def generate_emotion_suggestions(
         self,
         end_user_id: str,
-        config_id: Optional[int] = None
+        db: Session,
     ) -> Dict[str, Any]:
         """生成个性化情绪建议
         
@@ -462,7 +463,7 @@ class EmotionAnalyticsService:
         
         Args:
             end_user_id: 宿主ID（用户组ID）
-            config_id: 配置ID（可选，用于从数据库加载LLM配置）
+            db: 数据库会话
             
         Returns:
             Dict: 包含个性化建议的响应：
@@ -470,14 +471,32 @@ class EmotionAnalyticsService:
                 - suggestions: 建议列表（3-5条）
         """
         try:
-            logger.info(f"生成个性化情绪建议: user={end_user_id}, config_id={config_id}")
+            logger.info(f"生成个性化情绪建议: user={end_user_id}")
             
-            # 1. 如果提供了 config_id，从数据库加载配置
-            if config_id is not None:
-                from app.core.memory.utils.config.definitions import reload_configuration_from_database
-                config_loaded = reload_configuration_from_database(config_id)
-                if not config_loaded:
-                    logger.warning(f"无法加载配置 config_id={config_id}，将使用默认配置")
+            # 1. 从 end_user_id 获取关联的 memory_config_id
+            llm_client = None
+            try:
+                from app.services.memory_agent_service import (
+                    get_end_user_connected_config,
+                )
+                
+                connected_config = get_end_user_connected_config(end_user_id, db)
+                config_id = connected_config.get("memory_config_id")
+                
+                if config_id is not None:
+                    from app.services.memory_config_service import (
+                        MemoryConfigService,
+                    )
+                    config_service = MemoryConfigService(db)
+                    memory_config = config_service.load_memory_config(
+                        config_id=int(config_id),
+                        service_name="EmotionAnalyticsService.generate_emotion_suggestions"
+                    )
+                    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+                    factory = MemoryClientFactory(db)
+                    llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
+            except Exception as e:
+                logger.warning(f"无法获取 end_user {end_user_id} 的配置，将使用默认配置: {e}")
             
             # 2. 获取情绪健康数据
             health_data = await self.calculate_emotion_health_index(end_user_id, time_range="30d")
@@ -498,8 +517,9 @@ class EmotionAnalyticsService:
             prompt = await self._build_suggestion_prompt(health_data, patterns, user_profile)
             
             # 7. 调用LLM生成建议（使用配置中的LLM）
-            from app.core.memory.utils.llm.llm_utils import get_llm_client
-            llm_client = get_llm_client()
+            if llm_client is None:
+                # 无法获取配置时，抛出错误而不是使用默认配置
+                raise ValueError("无法获取LLM配置，请确保end_user关联了有效的memory_config")
             
             # 将 prompt 转换为 messages 格式
             messages = [
@@ -598,7 +618,9 @@ class EmotionAnalyticsService:
         Returns:
             str: LLM prompt
         """
-        from app.core.memory.utils.prompt.prompt_utils import render_emotion_suggestions_prompt
+        from app.core.memory.utils.prompt.prompt_utils import (
+            render_emotion_suggestions_prompt,
+        )
         
         prompt = await render_emotion_suggestions_prompt(
             health_data=health_data,

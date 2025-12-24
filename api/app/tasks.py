@@ -1,26 +1,30 @@
 import asyncio
-from typing import Any, Dict, List
-import requests
-from datetime import datetime, timezone
+import json
+import os
 import time
 import uuid
+from datetime import datetime, timezone
 from math import ceil
-import redis
+from typing import Any, Dict, List, Optional
 
-from app.db import get_db_context
-from app.models.document_model import Document
-from app.models.knowledge_model import Knowledge
-from app.core.rag.llm.cv_model import QWenCV
-from app.core.rag.llm.chat_model import Base
-from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
-from app.core.rag.models.chunk import DocumentChunk
-from app.services.memory_agent_service import MemoryAgentService
-from app.core.config import settings
-from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
-from app.core.rag.prompts.generator import question_proposal
+import redis
+import requests
 
 # Import a unified Celery instance
 from app.celery_app import celery_app
+from app.core.config import settings
+from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
+from app.core.rag.llm.chat_model import Base
+from app.core.rag.llm.cv_model import QWenCV
+from app.core.rag.models.chunk import DocumentChunk
+from app.core.rag.prompts.generator import question_proposal
+from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
+    ElasticSearchVectorFactory,
+)
+from app.db import get_db, get_db_context
+from app.models.document_model import Document
+from app.models.knowledge_model import Knowledge
+from app.services.memory_agent_service import MemoryAgentService
 
 
 @celery_app.task(name="tasks.process_item")
@@ -170,7 +174,7 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
     """Celery task to process a read message via MemoryAgentService.
 
     Args:
-        group_id: Group ID for the memory agent
+        group_id: Group ID for the memory agent (also used as end_user_id)
         message: User message to process
         history: Conversation history
         search_switch: Search switch parameter
@@ -184,9 +188,28 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
     """
     start_time = time.time()
     
+    # Resolve config_id if None
+    actual_config_id = config_id
+    if actual_config_id is None:
+        try:
+            from app.services.memory_agent_service import get_end_user_connected_config
+            db = next(get_db())
+            try:
+                connected_config = get_end_user_connected_config(group_id, db)
+                actual_config_id = connected_config.get("memory_config_id")
+            finally:
+                db.close()
+        except Exception as e:
+            # Log but continue - will fail later with proper error
+            pass
+    
     async def _run() -> str:
-        service = MemoryAgentService()
-        return await service.read_memory(group_id, message, history, search_switch, config_id,storage_type,user_rag_memory_id)
+        db = next(get_db())
+        try:
+            service = MemoryAgentService()
+            return await service.read_memory(group_id, message, history, search_switch, actual_config_id, db, storage_type, user_rag_memory_id)
+        finally:
+            db.close()
 
     try:
         # 使用 nest_asyncio 来避免事件循环冲突
@@ -217,11 +240,17 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
-    except Exception as e:
+    except BaseException as e:
         elapsed_time = time.time() - start_time
+        # Handle ExceptionGroup from TaskGroup
+        if hasattr(e, 'exceptions'):
+            error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
+            detailed_error = "; ".join(error_messages)
+        else:
+            detailed_error = str(e)
         return {
             "status": "FAILURE",
-            "error": str(e),
+            "error": detailed_error,
             "group_id": group_id,
             "config_id": config_id,
             "elapsed_time": elapsed_time,
@@ -234,7 +263,7 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
     """Celery task to process a write message via MemoryAgentService.
     
     Args:
-        group_id: Group ID for the memory agent
+        group_id: Group ID for the memory agent (also used as end_user_id)
         message: Message to write
         config_id: Optional configuration ID
         
@@ -246,9 +275,28 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
     """
     start_time = time.time()
     
+    # Resolve config_id if None
+    actual_config_id = config_id
+    if actual_config_id is None:
+        try:
+            from app.services.memory_agent_service import get_end_user_connected_config
+            db = next(get_db())
+            try:
+                connected_config = get_end_user_connected_config(group_id, db)
+                actual_config_id = connected_config.get("memory_config_id")
+            finally:
+                db.close()
+        except Exception as e:
+            # Log but continue - will fail later with proper error
+            pass
+    
     async def _run() -> str:
-        service = MemoryAgentService()
-        return await service.write_memory(group_id, message, config_id,storage_type,user_rag_memory_id)
+        db = next(get_db())
+        try:
+            service = MemoryAgentService()
+            return await service.write_memory(group_id, message, actual_config_id, db, storage_type, user_rag_memory_id)
+        finally:
+            db.close()
 
     try:
         # 使用 nest_asyncio 来避免事件循环冲突
@@ -279,17 +327,44 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
-    except Exception as e:
+    except BaseException as e:
         elapsed_time = time.time() - start_time
+        # Handle ExceptionGroup from TaskGroup
+        if hasattr(e, 'exceptions'):
+            error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
+            detailed_error = "; ".join(error_messages)
+        else:
+            detailed_error = str(e)
         return {
             "status": "FAILURE",
-            "error": str(e),
+            "error": detailed_error,
             "group_id": group_id,
             "config_id": config_id,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
 
+
+def reflection_engine() -> None:
+    """Empty function placeholder for timed background reflection.
+
+    Intentionally left blank; replace with real reflection logic later.
+    """
+    import asyncio
+
+    from app.core.memory.utils.self_reflexion_utils.self_reflexion import self_reflexion
+
+    host_id = uuid.UUID("2f6ff1eb-50c7-4765-8e89-e4566be19122")
+    asyncio.run(self_reflexion(host_id))
+
+
+@celery_app.task(name="app.core.memory.agent.reflection.timer")
+def reflection_timer_task() -> None:
+    """Periodic Celery task that invokes reflection_engine.
+    
+    Raises an exception on failure.
+    """
+    reflection_engine()
 
 
 @celery_app.task(name="app.core.memory.agent.health.check_read_service")
@@ -353,10 +428,10 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     start_time = time.time()
     
     async def _run() -> Dict[str, Any]:
-        from app.services.memory_storage_service import search_all
-        from app.repositories.memory_increment_repository import write_memory_increment
-        from app.models.end_user_model import EndUser
         from app.models.app_model import App
+        from app.models.end_user_model import EndUser
+        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.services.memory_storage_service import search_all
         
         with get_db_context() as db:
             try:
@@ -465,9 +540,9 @@ def regenerate_memory_cache(self) -> Dict[str, Any]:
     start_time = time.time()
     
     async def _run() -> Dict[str, Any]:
-        from app.services.user_memory_service import UserMemoryService
-        from app.repositories.end_user_repository import EndUserRepository
         from app.core.logging_config import get_logger
+        from app.repositories.end_user_repository import EndUserRepository
+        from app.services.user_memory_service import UserMemoryService
         
         logger = get_logger(__name__)
         logger.info("开始执行记忆缓存重新生成定时任务")
@@ -645,9 +720,12 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
     start_time = time.time()
 
     async def _run() -> Dict[str, Any]:
-        from app.services.memory_reflection_service import WorkspaceAppService, MemoryReflectionService
-        from app.models.workspace_model import Workspace
         from app.core.logging_config import get_api_logger
+        from app.models.workspace_model import Workspace
+        from app.services.memory_reflection_service import (
+            MemoryReflectionService,
+            WorkspaceAppService,
+        )
 
         api_logger = get_api_logger()
         

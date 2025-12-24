@@ -4,15 +4,15 @@ User Memory Service
 处理用户记忆相关的业务逻辑，包括记忆洞察、用户摘要、节点统计和图数据等。
 """
 
-from typing import Dict, List, Optional, Any
 import uuid
-from sqlalchemy.orm import Session
+from typing import Any, Dict, List, Optional
 
 from app.core.logging_config import get_logger
-from app.repositories.end_user_repository import EndUserRepository
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.analytics.memory_insight import MemoryInsight
 from app.core.memory.analytics.user_summary import generate_user_summary
+from app.repositories.end_user_repository import EndUserRepository
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)
 
@@ -284,8 +284,7 @@ class UserMemoryService:
             # 使用 end_user_id 调用分析函数
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成用户摘要")
-                result = await analytics_user_summary(end_user_id)
-                summary = result.get("summary", "")
+                summary = await generate_user_summary(end_user_id)
                 
                 if not summary:
                     logger.warning(f"end_user_id {end_user_id} 的用户摘要生成结果为空")

@@ -10,22 +10,21 @@ Routes:
     POST /emotion/suggestions - 获取个性化情绪建议
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-
-from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
+from app.core.logging_config import get_api_logger
+from app.core.response_utils import fail, success
 from app.dependencies import get_current_user, get_db
 from app.models.user_model import User
-from app.schemas.response_schema import ApiResponse
 from app.schemas.emotion_schema import (
+    EmotionHealthRequest,
+    EmotionSuggestionsRequest,
     EmotionTagsRequest,
     EmotionWordcloudRequest,
-    EmotionHealthRequest,
-    EmotionSuggestionsRequest
 )
+from app.schemas.response_schema import ApiResponse
 from app.services.emotion_analytics_service import EmotionAnalyticsService
-from app.core.logging_config import get_api_logger
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -211,13 +210,28 @@ async def get_emotion_suggestions(
     """
     try:
         # 验证 config_id（如果提供）
+        # 获取终端用户关联的配置
         config_id = request.config_id
-        if config_id is not None:
-            from app.controllers.memory_agent_controller import validate_config_id
+        if config_id is None:
+            # 如果没有提供 config_id，尝试获取用户关联的配置
             try:
-                config_id = validate_config_id(config_id, db)
+                from app.services.memory_agent_service import (
+                    get_end_user_connected_config,
+                )
+                connected_config = get_end_user_connected_config(request.group_id, db)
+                config_id = connected_config.get("memory_config_id")
             except ValueError as e:
-                return fail(BizCode.INVALID_PARAMETER, "配置ID无效", str(e))
+                return fail(BizCode.INVALID_PARAMETER, "无法获取用户关联的配置", str(e))
+        else:
+            # 如果提供了 config_id，验证其有效性
+            from app.services.memory_config_service import MemoryConfigService
+            try:
+                config_service = MemoryConfigService(db)
+                config = config_service.get_config_by_id(config_id)
+                if not config:
+                    return fail(BizCode.INVALID_PARAMETER, "配置ID无效", f"配置 {config_id} 不存在")
+            except Exception as e:
+                return fail(BizCode.INVALID_PARAMETER, "配置ID验证失败", str(e))
         
         api_logger.info(
             f"用户 {current_user.username} 请求获取个性化情绪建议",
@@ -230,7 +244,7 @@ async def get_emotion_suggestions(
         # 调用服务层
         data = await emotion_service.generate_emotion_suggestions(
             end_user_id=request.group_id,
-            config_id=config_id
+            db=db
         )
         
         api_logger.info(

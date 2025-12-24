@@ -7,12 +7,20 @@ This module provides functionality to extract meaningful tags from chunk content
 import asyncio
 from collections import Counter
 from typing import List, Tuple
+
+from app.core.logging_config import get_business_logger
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.db import get_db_context
 from pydantic import BaseModel, Field
 
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.logging_config import get_business_logger
-
 business_logger = get_business_logger()
+
+
+def _get_llm_client():
+    """Get LLM client using db context."""
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        return factory.get_llm_client(None)  # Uses default LLM
 
 
 class ExtractedTags(BaseModel):
@@ -56,7 +64,7 @@ async def extract_chunk_tags(chunks: List[str], max_tags: int = 10, max_chunks: 
             "标签应该是名词或名词短语，能够准确概括文本的核心内容。"
         )
         
-        llm_client = get_llm_client()
+        llm_client = _get_llm_client()
         
         # 为每个chunk单独提取标签，然后统计频率
         all_tags = []
@@ -151,7 +159,7 @@ async def extract_chunk_persona(chunks: List[str], max_personas: int = 5, max_ch
         ]
         
         # 调用LLM提取人物形象
-        llm_client = get_llm_client()
+        llm_client = _get_llm_client()
         structured_response = await llm_client.response_structured(
             messages=messages,
             response_model=ExtractedPersona

@@ -1,50 +1,50 @@
-from typing import Optional
+import datetime
 import os
 import uuid
-import datetime
-from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from typing import Optional
 
-
-from app.db import get_db
-from app.core.logging_config import get_api_logger
-from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
+from app.core.logging_config import get_api_logger
 from app.core.memory.utils.self_reflexion_utils import self_reflexion
-from app.services.memory_storage_service import (
-    MemoryStorageService,
-    DataConfigService,
-    kb_type_distribution,
-    search_dialogue,
-    search_chunk,
-    search_statement,
-    search_entity,
-    search_all,
-    search_detials,
-    search_edges,
-    search_entity_graph,
-    analytics_hot_memory_tags,
-    analytics_recent_activity_stats,
-)
-from app.schemas.response_schema import ApiResponse
-from app.schemas.memory_storage_schema import (
-    ConfigParamsCreate,
-    ConfigParamsDelete,
-    ConfigUpdate,
-    ConfigUpdateExtracted,
-    ConfigUpdateForget,
-    ConfigKey,
-    ConfigPilotRun,
-    GenerateCacheRequest,
-)
+from app.core.response_utils import fail, success
+from app.db import get_db
+from app.dependencies import get_current_user
+from app.models.end_user_model import EndUser
+from app.models.user_model import User
 from app.schemas.end_user_schema import (
     EndUserProfileResponse,
     EndUserProfileUpdate,
 )
-from app.models.end_user_model import EndUser
-from app.dependencies import get_current_user
-from app.models.user_model import User
+from app.schemas.memory_storage_schema import (
+    ConfigKey,
+    ConfigParamsCreate,
+    ConfigParamsDelete,
+    ConfigPilotRun,
+    ConfigUpdate,
+    ConfigUpdateExtracted,
+    ConfigUpdateForget,
+    GenerateCacheRequest,
+)
+from app.schemas.response_schema import ApiResponse
+from app.services.memory_storage_service import (
+    DataConfigService,
+    MemoryStorageService,
+    analytics_hot_memory_tags,
+    analytics_recent_activity_stats,
+    kb_type_distribution,
+    search_all,
+    search_chunk,
+    search_detials,
+    search_dialogue,
+    search_edges,
+    search_entity,
+    search_entity_graph,
+    search_statement,
+)
+from app.services.user_memory_service import analytics_user_summary
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
 # Get API logger
 api_logger = get_api_logger()
@@ -335,8 +335,10 @@ async def pilot_run(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    api_logger.info(f"Pilot run requested: config_id={payload.config_id}, dialogue_text_length={len(payload.dialogue_text)}")
-    
+    api_logger.info(
+        f"Pilot run requested: config_id={payload.config_id}, "
+        f"dialogue_text_length={len(payload.dialogue_text)}"
+    )
     svc = DataConfigService(db)
     return StreamingResponse(
         svc.pilot_run_stream(payload),
@@ -344,8 +346,8 @@ async def pilot_run(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
+            "X-Accel-Buffering": "no",
+        },
     )
 
 """
@@ -506,6 +508,20 @@ async def get_recent_activity_stats_api(
     except Exception as e:
         api_logger.error(f"Recent activity stats failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "最近活动统计失败", str(e))
+
+
+@router.get("/analytics/user_summary", response_model=ApiResponse)
+async def get_user_summary_api(
+    end_user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    ) -> dict:
+    api_logger.info(f"User summary requested for end_user_id: {end_user_id}")
+    try:
+        result = await analytics_user_summary(end_user_id)
+        return success(data=result, msg="查询成功")
+    except Exception as e:
+        api_logger.error(f"User summary failed: {str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "用户摘要生成失败", str(e))
 
 
 @router.get("/self_reflexion")

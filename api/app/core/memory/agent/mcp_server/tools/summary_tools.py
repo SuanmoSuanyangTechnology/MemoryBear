@@ -2,33 +2,32 @@
 Summary Tools for data summarization.
 
 This module contains MCP tools for summarizing retrieved data and generating responses.
+LLM clients are constructed from MemoryConfig when needed.
 """
+
 import json
+import os
 import re
 import time
-from typing import List
-
-from pydantic import BaseModel, Field
-from mcp.server.fastmcp import Context
 
 from app.core.logging_config import get_agent_logger, log_time
 from app.core.memory.agent.mcp_server.mcp_instance import mcp
-from app.core.memory.agent.mcp_server.server import get_context_resource
 from app.core.memory.agent.mcp_server.models.summary_models import (
-    SummaryData,
+    RetrieveSummaryResponse,
     SummaryResponse,
-    RetrieveSummaryData,
-    RetrieveSummaryResponse
 )
+from app.core.memory.agent.mcp_server.server import get_context_resource
 from app.core.memory.agent.utils.messages_tool import (
+    Resolve_username,
     Summary_messages_deal,
-    Resolve_username
 )
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.rag.nlp.search import knowledge_retrieval
+from app.db import get_db_context
+from app.schemas.memory_config_schema import MemoryConfig
 from dotenv import load_dotenv
-import os
+from mcp.server.fastmcp import Context
 
-# 加载.env文件
 load_dotenv()
 logger = get_agent_logger(__name__)
 
@@ -40,8 +39,9 @@ async def Summary(
     usermessages: str,
     apply_id: str,
     group_id: str,
+    memory_config: MemoryConfig,
     storage_type: str = "",
-    user_rag_memory_id: str = ""
+    user_rag_memory_id: str = "",
 ) -> dict:
     """
     Summarize the verified data.
@@ -52,6 +52,7 @@ async def Summary(
         usermessages: User messages identifier
         apply_id: Application identifier
         group_id: Group identifier
+        memory_config: MemoryConfig object containing all configuration
         storage_type: Storage type for the workspace (optional)
         user_rag_memory_id: User RAG memory identifier (optional)
         
@@ -59,12 +60,16 @@ async def Summary(
         dict: Contains 'status' and 'summary_result'
     """
     start = time.time()
-    
+
     try:
         # Extract services from context
-        template_service = get_context_resource(ctx, 'template_service')
-        session_service = get_context_resource(ctx, 'session_service')
-        llm_client = get_context_resource(ctx, 'llm_client')
+        template_service = get_context_resource(ctx, "template_service")
+        session_service = get_context_resource(ctx, "session_service")
+
+        # Get LLM client from memory_config
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client_from_config(memory_config)
         
         # Resolve session ID
         sessionid = Resolve_username(usermessages)
@@ -155,7 +160,7 @@ async def Summary(
     if aimessages == '':
         aimessages = '信息不足，无法回答'
 
-    logger.info(f"验证之后的总结==>>:{aimessages}")
+    logger.info(f"Summary after verification: {aimessages}")
 
     # Log execution time
     end = time.time()
@@ -163,7 +168,7 @@ async def Summary(
         duration = end - start
     except Exception:
         duration = 0.0
-    log_time('总结', duration)
+    log_time('Summary', duration)
 
     return {
         "status": "success",
@@ -180,8 +185,9 @@ async def Retrieve_Summary(
     usermessages: str,
     apply_id: str,
     group_id: str,
+    memory_config: MemoryConfig,
     storage_type: str = "",
-    user_rag_memory_id: str = ""
+    user_rag_memory_id: str = "",
 ) -> dict:
     """
     Summarize data directly from retrieval results.
@@ -192,6 +198,7 @@ async def Retrieve_Summary(
         usermessages: User messages identifier
         apply_id: Application identifier
         group_id: Group identifier
+        memory_config: MemoryConfig object containing all configuration
         storage_type: Storage type for the workspace (optional)
         user_rag_memory_id: User RAG memory identifier (optional)
 
@@ -202,9 +209,13 @@ async def Retrieve_Summary(
 
     try:
         # Extract services from context
-        template_service = get_context_resource(ctx, 'template_service')
-        session_service = get_context_resource(ctx, 'session_service')
-        llm_client = get_context_resource(ctx, 'llm_client')
+        template_service = get_context_resource(ctx, "template_service")
+        session_service = get_context_resource(ctx, "session_service")
+
+        # Get LLM client from memory_config
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client_from_config(memory_config)
 
         # Resolve session ID
         sessionid = Resolve_username(usermessages)
@@ -212,6 +223,8 @@ async def Retrieve_Summary(
 
 
         # Handle both 'content' and 'context' keys (LangGraph uses 'content')
+        logger.debug(f"Retrieve_Summary: raw context type={type(context)}, keys={list(context.keys()) if isinstance(context, dict) else 'N/A'}")
+        
         if isinstance(context, dict):
             if "content" in context:
                 inner = context["content"]
@@ -252,17 +265,19 @@ async def Retrieve_Summary(
 
         query = context_dict.get("Query", "")
         expansion_issue = context_dict.get("Expansion_issue", [])
+        
+        logger.debug(f"Retrieve_Summary: query='{query}', expansion_issue count={len(expansion_issue)}")
+        logger.debug(f"Retrieve_Summary: expansion_issue={expansion_issue[:2] if expansion_issue else 'empty'}")
 
         # Extract retrieve_info from expansion_issue
         retrieve_info = []
         for item in expansion_issue:
-            # Check for both Answer_Small and Answer_Samll (typo) for backward compatibility
+            # Check for both Answer_Small and Answer_Small (typo) for backward compatibility
             answer = None
             if isinstance(item, dict):
                 if "Answer_Small" in item:
                     answer = item["Answer_Small"]
-                elif "Answer_Samll" in item:
-                    answer = item["Answer_Samll"]
+
 
                 if answer is not None:
                     # Handle both string and list formats
@@ -350,7 +365,7 @@ async def Retrieve_Summary(
     if aimessages == '':
         aimessages = '信息不足，无法回答'
 
-    logger.info(f"检索之后的总结==>>:{aimessages}")
+    logger.info(f"Summary after retrieval: {aimessages}")
 
     # Log execution time
     end = time.time()
@@ -358,7 +373,7 @@ async def Retrieve_Summary(
         duration = end - start
     except Exception:
         duration = 0.0
-    log_time('检索总结', duration)
+    log_time('Retrieval summary', duration)
 
     # Emit intermediate output for frontend
     return {
@@ -384,8 +399,9 @@ async def Input_Summary(
     search_switch: str,
     apply_id: str,
     group_id: str,
+    memory_config: MemoryConfig,
     storage_type: str = "",
-    user_rag_memory_id: str = ""
+    user_rag_memory_id: str = "",
 ) -> dict:
     """
     Generate a quick summary for direct input without verification.
@@ -397,6 +413,7 @@ async def Input_Summary(
         search_switch: Search switch value for routing ('2' for summaries only)
         apply_id: Application identifier
         group_id: Group identifier
+        memory_config: MemoryConfig object containing all configuration
         storage_type: Storage type for the workspace (e.g., 'rag', 'vector')
         user_rag_memory_id: User RAG memory identifier
 
@@ -406,21 +423,16 @@ async def Input_Summary(
     start = time.time()
     logger.info(f"Input_Summary: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
 
-    # Initialize variables to avoid UnboundLocalError
-
-
     try:
         # Extract services from context
-        template_service = get_context_resource(ctx, 'template_service')
-        session_service = get_context_resource(ctx, 'session_service')
-        llm_client = get_context_resource(ctx, 'llm_client')
-        search_service = get_context_resource(ctx, 'search_service')
+        template_service = get_context_resource(ctx, "template_service")
+        session_service = get_context_resource(ctx, "session_service")
+        search_service = get_context_resource(ctx, "search_service")
 
-        # Check if llm_client is None
-        if llm_client is None:
-            error_msg = "LLM client is not available. Please check server configuration and SELECTED_LLM_ID environment variable."
-            logger.error(error_msg)
-            return error_msg
+        # Get LLM client from memory_config
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client_from_config(memory_config)
 
         # Resolve session ID
         sessionid = Resolve_username(usermessages) or ""
@@ -479,7 +491,7 @@ async def Input_Summary(
 
             # Add storage-specific parameters
 
-            '''检索'''
+            # Retrieval
             if search_switch == '2':
                 search_params["include"] = ["summaries"]
                 if storage_type == "rag" and user_rag_memory_id:
@@ -509,12 +521,16 @@ async def Input_Summary(
                     except:
                         retrieve_info=''
                         raw_results=['']
-                        logger.info(f"知识库没有检索的内容{user_rag_memory_id}")
+                        logger.info(f"No content retrieved from knowledge base: {user_rag_memory_id}")
                 else:
-                    retrieve_info, question, raw_results = await search_service.execute_hybrid_search(**search_params)
-                logger.info("Input_Summary: 使用 summary 进行检索")
+                    retrieve_info, question, raw_results = await search_service.execute_hybrid_search(
+                        **search_params, memory_config=memory_config
+                    )
+                logger.info("Input_Summary: Using summary for retrieval")
             else:
-                retrieve_info, question, raw_results = await search_service.execute_hybrid_search(**search_params)
+                retrieve_info, question, raw_results = await search_service.execute_hybrid_search(
+                    **search_params, memory_config=memory_config
+                )
 
         except Exception as e:
             logger.error(
@@ -547,7 +563,7 @@ async def Input_Summary(
             )
             aimessages = "信息不足，无法回答"
 
-        logger.info(f"快速答案总结==>>:{storage_type}--{user_rag_memory_id}--{aimessages}")
+        logger.info(f"Quick answer summary: {storage_type}--{user_rag_memory_id}--{aimessages}")
 
         # Emit intermediate output for frontend
         return {
@@ -587,7 +603,7 @@ async def Input_Summary(
             duration = end - start
         except Exception:
             duration = 0.0
-        log_time('检索', duration)
+        log_time('Retrieval', duration)
 
 
 @mcp.tool()

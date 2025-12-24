@@ -9,18 +9,19 @@ LangChain Agent 封装
 """
 import os
 import time
-from typing import Dict, Any, List, Optional, AsyncGenerator, Sequence
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
-from langchain_core.tools import BaseTool
-from langchain.agents import create_agent
+from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
+from app.core.logging_config import get_business_logger
 from app.core.memory.agent.utils.redis_tool import store
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.models.models_model import ModelType
-from app.core.logging_config import get_business_logger
 from app.services.memory_konwledges_server import write_rag
 from app.services.task_service import get_task_memory_write_result
 from app.tasks import write_message_task
+from langchain.agents import create_agent
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.tools import BaseTool
+
 logger = get_business_logger()
 
 
@@ -198,10 +199,24 @@ class LangChainAgent:
         """
         message_chat= message
         start_time = time.time()
-        if config_id == None:
-            actual_config_id = os.getenv("config_id")
-        else:
-            actual_config_id = config_id
+        actual_config_id = config_id
+        # If config_id is None, try to get from end_user's connected config
+        if actual_config_id is None and end_user_id:
+            try:
+                from app.db import get_db
+                from app.services.memory_agent_service import (
+                    get_end_user_connected_config,
+                )
+                db = next(get_db())
+                try:
+                    connected_config = get_end_user_connected_config(end_user_id, db)
+                    actual_config_id = connected_config.get("memory_config_id")
+                except Exception as e:
+                    logger.warning(f"Failed to get connected config for end_user {end_user_id}: {e}")
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.warning(f"Failed to get db session: {e}")
         actual_end_user_id = end_user_id if end_user_id is not None else "unknown"
         logger.info(f'写入类型{storage_type,str(end_user_id), message, str(user_rag_memory_id)}')
         print(f'写入类型{storage_type,str(end_user_id), message, str(user_rag_memory_id)}')
@@ -295,10 +310,24 @@ class LangChainAgent:
         logger.info(f"  Tool count: {len(self.tools) if self.tools else 0}")
         logger.info("=" * 80)
         message_chat = message
-        if config_id == None:
-            actual_config_id = os.getenv("config_id")
-        else:
-            actual_config_id = config_id
+        actual_config_id = config_id
+        # If config_id is None, try to get from end_user's connected config
+        if actual_config_id is None and end_user_id:
+            try:
+                from app.db import get_db
+                from app.services.memory_agent_service import (
+                    get_end_user_connected_config,
+                )
+                db = next(get_db())
+                try:
+                    connected_config = get_end_user_connected_config(end_user_id, db)
+                    actual_config_id = connected_config.get("memory_config_id")
+                except Exception as e:
+                    logger.warning(f"Failed to get connected config for end_user {end_user_id}: {e}")
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.warning(f"Failed to get db session: {e}")
 
         history_term_memory = await self.term_memory_redis_read(end_user_id)
         if memory_flag:

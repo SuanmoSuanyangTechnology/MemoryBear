@@ -4,10 +4,20 @@
 本模块提供统一的搜索服务接口，支持关键词搜索、语义搜索和混合搜索。
 """
 
-from app.core.memory.storage_services.search.search_strategy import SearchStrategy, SearchResult
-from app.core.memory.storage_services.search.keyword_search import KeywordSearchStrategy
-from app.core.memory.storage_services.search.semantic_search import SemanticSearchStrategy
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.schemas.memory_config_schema import MemoryConfig
+
 from app.core.memory.storage_services.search.hybrid_search import HybridSearchStrategy
+from app.core.memory.storage_services.search.keyword_search import KeywordSearchStrategy
+from app.core.memory.storage_services.search.search_strategy import (
+    SearchResult,
+    SearchStrategy,
+)
+from app.core.memory.storage_services.search.semantic_search import (
+    SemanticSearchStrategy,
+)
 
 __all__ = [
     "SearchStrategy",
@@ -34,7 +44,7 @@ async def run_hybrid_search(
     include: list[str] | None = None,
     alpha: float = 0.6,
     use_forgetting_curve: bool = False,
-    embedding_id: str | None = None,
+    memory_config: "MemoryConfig" = None,
     **kwargs
 ) -> dict:
     """运行混合搜索（向后兼容的函数式API）
@@ -51,24 +61,26 @@ async def run_hybrid_search(
         include: 要包含的搜索类别列表
         alpha: BM25分数权重（0.0-1.0）
         use_forgetting_curve: 是否使用遗忘曲线
-        embedding_id: 嵌入模型ID
+        memory_config: MemoryConfig object containing embedding_model_id
         **kwargs: 其他参数
         
     Returns:
         dict: 搜索结果字典，格式与旧API兼容
     """
-    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
     from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-    from app.core.memory.utils.config.config_utils import get_embedder_config
-    from app.core.memory.utils.config import definitions as config_defs
     from app.core.models.base import RedBearModelConfig
+    from app.db import get_db_context
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+    from app.services.memory_config_service import MemoryConfigService
     
-    # 使用提供的embedding_id或默认值
-    emb_id = embedding_id or config_defs.SELECTED_EMBEDDING_ID
+    if not memory_config:
+        raise ValueError("memory_config is required for search")
     
     # 初始化客户端
     connector = Neo4jConnector()
-    embedder_config_dict = get_embedder_config(emb_id)
+    with get_db_context() as db:
+        config_service = MemoryConfigService(db)
+        embedder_config_dict = config_service.get_embedder_config(str(memory_config.embedding_model_id))
     embedder_config = RedBearModelConfig(**embedder_config_dict)
     embedder_client = OpenAIEmbedderClient(embedder_config)
     

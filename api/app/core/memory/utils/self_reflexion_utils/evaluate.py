@@ -6,11 +6,12 @@
 """
 
 import logging
-from typing import List, Any
 import time
+from typing import Any, List
 
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.prompt.template_render import render_evaluate_prompt
-from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.db import get_db_context
 from app.schemas.memory_storage_schema import ConflictResultSchema
 from pydantic import BaseModel
 
@@ -25,7 +26,9 @@ async def conflict(evaluate_data: List[Any]) -> List[Any]:
         冲突记忆列表（JSON 数组）。
     """
     from app.core.memory.utils.config import definitions as config_defs
-    client = get_llm_client(config_defs.SELECTED_LLM_ID)
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        client = factory.get_llm_client(config_defs.SELECTED_LLM_ID)
     rendered_prompt = await render_evaluate_prompt(evaluate_data, ConflictResultSchema)
     messages = [{"role": "user", "content": rendered_prompt}]
     print(f"提示词长度: {len(rendered_prompt)}")
