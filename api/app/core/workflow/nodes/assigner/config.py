@@ -1,21 +1,32 @@
-from pydantic import Field
+from pydantic import Field, BaseModel
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
 from app.core.workflow.nodes.enums import AssignmentOperator
 
 
-class AssignerNodeConfig(BaseNodeConfig):
+class AssignmentItem(BaseModel):
+    """
+    Single assignment definition.
+    """
+
     variable_selector: str | list[str] = Field(
         ...,
-        description="Variables to be assigned",
+        description="Target variable name(s) to assign",
     )
 
     operation: AssignmentOperator = Field(
         ...,
-        description="Operator to assign",
+        description="Assignment operator",
     )
 
     value: str | list[str] = Field(
         ...,
-        description="Values to assign",
+        description="Value(s) to assign to the variable(s)",
+    )
+
+
+class AssignerNodeConfig(BaseNodeConfig):
+    assignments: list[AssignmentItem] = Field(
+        ...,
+        description="List of variable assignment definitions",
     )

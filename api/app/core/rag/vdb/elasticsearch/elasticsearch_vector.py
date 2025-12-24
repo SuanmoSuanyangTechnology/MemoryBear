@@ -740,8 +740,9 @@ class ElasticSearchVector(BaseVector):
             self._client.indices.create(index=self._collection_name, body=index_mapping)
 
 
-class ElasticSearchVectorFactory(ABC):
-    def init_vector(self, knowledge: Knowledge) -> ElasticSearchVector:
+class ElasticSearchVectorFactory:
+    @staticmethod
+    def init_vector(knowledge: Knowledge) -> ElasticSearchVector:
         collection_name = f"Vector_index_{knowledge.id}_Node"
 
         # Use regular Elasticsearch with config values
@@ -763,17 +764,17 @@ class ElasticSearchVectorFactory(ABC):
             }
         )
 
-        if knowledge.embedding and knowledge.reranker:
-            return ElasticSearchVector(
-                index_name=collection_name,
-                config=ElasticSearchConfig(**config_dict),
-                embedding_config=knowledge.embedding.api_keys[0],
-                reranker_config=knowledge.reranker.api_keys[0]
-            )
-        else:
-            if knowledge.embedding is None:
-                raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
-            if knowledge.reranker is None:
-                raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
+        if knowledge.embedding is None:
+            raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
+        if knowledge.reranker is None:
+            raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
+
+        return ElasticSearchVector(
+            index_name=collection_name,
+            config=ElasticSearchConfig(**config_dict),
+            embedding_config=knowledge.embedding.api_keys[0],
+            reranker_config=knowledge.reranker.api_keys[0]
+        )
+
 
 

@@ -44,11 +44,11 @@ nodes:
         - role: user
           content: "{{ sys.message }}"
       
-      model_id: gpt-3.5-turbo
+      model_id: null
       temperature: 0.7
       max_tokens: 1000
     position:
-      x: 300
+      x: 500
       y: 100
 
   - id: end
@@ -57,7 +57,7 @@ nodes:
     config:
       output: "{{ llm_qa.output }}"
     position:
-      x: 500
+      x: 900
       y: 100
 
 edges:

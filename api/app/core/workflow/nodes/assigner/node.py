@@ -29,52 +29,52 @@ class AssignerNode(BaseNode):
         """
         # Initialize a variable pool for accessing conversation, node, and system variables
         pool = VariablePool(state)
+        for assignment in self.typed_config.assignments:
+            # Get the target variable selector (e.g., "conv.test")
+            variable_selector = assignment.variable_selector
+            if isinstance(variable_selector, str):
+                # Support dot-separated string paths, e.g., "conv.test" -> ["conv", "test"]
+                variable_selector = variable_selector.split('.')
 
-        # Get the target variable selector (e.g., "conv.test")
-        variable_selector = self.typed_config.variable_selector
-        if isinstance(variable_selector, str):
-            # Support dot-separated string paths, e.g., "conv.test" -> ["conv", "test"]
-            variable_selector = variable_selector.split('.')
+            # Only conversation variables ('conv') are allowed
+            if variable_selector[0] != 'conv':  # TODO: Loop node variable support (Feature)
+                raise ValueError("Only conversation variables can be assigned.")
 
-        # Only conversation variables ('conv') are allowed
-        if variable_selector[0] != 'conv':  # TODO: Loop node variable support (Feature)
-            raise ValueError("Only conversation variables can be assigned.")
+            # Get the value or expression to assign
+            value = assignment.value
+            if isinstance(value, list):
+                value = '.'.join(value)
+            value = ExpressionEvaluator.evaluate(
+                expression=value,
+                variables=pool.get_all_conversation_vars(),
+                node_outputs=pool.get_all_node_outputs(),
+                system_vars=pool.get_all_system_vars(),
+            )
 
-        # Get the value or expression to assign
-        value = self.typed_config.value
-        if isinstance(value, list):
-            value = '.'.join(value)
-        value = ExpressionEvaluator.evaluate(
-            expression=value,
-            variables=pool.get_all_conversation_vars(),
-            node_outputs=pool.get_all_node_outputs(),
-            system_vars=pool.get_all_system_vars(),
-        )
+            # Select the appropriate assignment operator instance based on the target variable type
+            operator: AssignmentOperatorInstance = AssignmentOperator.get_operator(pool.get(variable_selector))(
+                pool, variable_selector, value
+            )
 
-        # Select the appropriate assignment operator instance based on the target variable type
-        operator: AssignmentOperatorInstance = AssignmentOperator.get_operator(pool.get(variable_selector))(
-            pool, variable_selector, value
-        )
-
-        # Execute the configured assignment operation
-        match self.typed_config.operation:
-            case AssignmentOperator.ASSIGN:
-                operator.assign()
-            case AssignmentOperator.CLEAR:
-                operator.clear()
-            case AssignmentOperator.ADD:
-                operator.add()
-            case AssignmentOperator.SUBTRACT:
-                operator.subtract()
-            case AssignmentOperator.MULTIPLY:
-                operator.multiply()
-            case AssignmentOperator.DIVIDE:
-                operator.divide()
-            case AssignmentOperator.APPEND:
-                operator.append()
-            case AssignmentOperator.REMOVE_FIRST:
-                operator.remove_first()
-            case AssignmentOperator.REMOVE_LAST:
-                operator.remove_last()
-            case _:
-                raise ValueError(f"Invalid Operator: {self.typed_config.operation}")
+            # Execute the configured assignment operation
+            match assignment.operation:
+                case AssignmentOperator.ASSIGN:
+                    operator.assign()
+                case AssignmentOperator.CLEAR:
+                    operator.clear()
+                case AssignmentOperator.ADD:
+                    operator.add()
+                case AssignmentOperator.SUBTRACT:
+                    operator.subtract()
+                case AssignmentOperator.MULTIPLY:
+                    operator.multiply()
+                case AssignmentOperator.DIVIDE:
+                    operator.divide()
+                case AssignmentOperator.APPEND:
+                    operator.append()
+                case AssignmentOperator.REMOVE_FIRST:
+                    operator.remove_first()
+                case AssignmentOperator.REMOVE_LAST:
+                    operator.remove_last()
+                case _:
+                    raise ValueError(f"Invalid Operator: {assignment.operation}")
