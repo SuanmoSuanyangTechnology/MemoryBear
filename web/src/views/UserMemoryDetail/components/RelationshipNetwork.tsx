@@ -20,6 +20,7 @@ const operations = [
   { name: 'drag', icon: drag },
   { name: 'zoom', icon: zoom },
 ]
+const colors = ['#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
 const RelationshipNetwork:FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
@@ -30,7 +31,7 @@ const RelationshipNetwork:FC = () => {
   const [categories, setCategories] = useState<{ name: string }[]>([])
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
 
-
+  console.log('categories', categories)
   // 关系网络
   const getEdgeData = useCallback(() => {
     if (!id) return
@@ -39,7 +40,7 @@ const RelationshipNetwork:FC = () => {
       const { nodes, edges, statistics } = res as GraphData
       const curNodes: Node[] = []
       const curEdges: Edge[] = []
-      const curNodeTypes = Object.keys(statistics.node_types)
+      const curNodeTypes = Object.keys(statistics.node_types).filter(vo => vo !== 'Dialogue')
       
       // 计算每个节点的连接数
       const connectionCount: Record<string, number> = {}
@@ -49,22 +50,22 @@ const RelationshipNetwork:FC = () => {
       })
       
       // 处理节点数据
-      nodes.forEach(node => {
+      nodes.filter(vo => vo.label !== 'Dialogue').forEach(node => {
         const connections = connectionCount[node.id] || 0
         const categoryIndex = curNodeTypes.indexOf(node.label)
         
         // 根据节点类型获取显示名称
         let displayName = ''
         switch (node.label) {
-          case 'Statement':
-            displayName = 'statement' in node.properties ? node.properties.statement?.slice(0, 5) || '' : ''
-            break
+          // case 'Statement':
+          //   displayName = 'statement' in node.properties ? node.properties.statement?.slice(0, 5) || '' : ''
+          //   break
           case 'ExtractedEntity':
             displayName = 'name' in node.properties ? node.properties.name || '' : ''
             break
-          default:
-            displayName = 'content' in node.properties ? node.properties.content?.slice(0, 5) || '' : ''
-            break
+          // default:
+          //   displayName = 'content' in node.properties ? node.properties.content?.slice(0, 5) || '' : ''
+          //   break
         }
         let symbolSize = 0
         if (connections <= 1) {
@@ -85,7 +86,7 @@ const RelationshipNetwork:FC = () => {
           category: categoryIndex >= 0 ? categoryIndex : 0,
           symbolSize: symbolSize, // 根据连接数调整节点大小
           itemStyle: {
-            color: ['#155EEF', '#4DA8FF', '#9C6FFF', '#8BAEF7', '#369F21', '#FF5D34', '#FF8A4C', '#FFB048'][categoryIndex % 8]
+            color: colors[categoryIndex % 8]
           }
         })
       })
@@ -150,9 +151,13 @@ const RelationshipNetwork:FC = () => {
             ) : (
               <ReactEcharts
                 option={{
-                  colors: ['#155EEF', '4DA8FF', '#9C6FFF', '#8BAEF7', '#369F21', '#FF5D34', '#FF8A4C', '#FFB048'],
+                  colors: colors,
                   tooltip: {
                     show: false
+                  },
+                  legend: {
+                    show: true,
+                    bottom: 20,
                   },
                   series: [
                     {
@@ -160,7 +165,9 @@ const RelationshipNetwork:FC = () => {
                       layout: 'force',
                       data: nodes || [],
                       links: links || [],
-                      categories: categories || [],
+                      categories: categories.map(vo => ({
+                        name: t(`userMemory.${vo.name}`)
+                      })) || [],
                       roam: true,
                       label: {
                         show: true,

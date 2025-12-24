@@ -35,7 +35,7 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
     form.setFieldsValue({
       ...user,
       end_user_id: user.id,
-      hire_date: dayjs(user.hire_date)
+      hire_date: user.hire_date ? dayjs(user.hire_date) : undefined
     });
     setVisible(true);
   };
