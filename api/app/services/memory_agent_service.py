@@ -255,7 +255,7 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
     
-    async def write_memory(self, group_id: str, message: str, config_id: str, db: Session, storage_type: str, user_rag_memory_id: str) -> str:
+    async def write_memory(self, group_id: str, message: str, config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
         """
         Process write operation with config_id
         
@@ -278,8 +278,13 @@ class MemoryAgentService:
             try:
                 connected_config = get_end_user_connected_config(group_id, db)
                 config_id = connected_config.get("memory_config_id")
+                if config_id is None:
+                    raise ValueError(f"No memory configuration found for end_user {group_id}. Please ensure the user has a connected memory configuration.")
             except Exception as e:
-                logger.warning(f"Failed to get connected config for end_user {group_id}: {e}")
+                if "No memory configuration found" in str(e):
+                    raise  # Re-raise our specific error
+                logger.error(f"Failed to get connected config for end_user {group_id}: {e}")
+                raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
         
         import time
         start_time = time.time()
@@ -356,7 +361,7 @@ class MemoryAgentService:
         message: str,
         history: List[Dict],
         search_switch: str,
-        config_id: str,
+        config_id: Optional[str],
         db: Session,
         storage_type: str,
         user_rag_memory_id: str
@@ -394,8 +399,13 @@ class MemoryAgentService:
             try:
                 connected_config = get_end_user_connected_config(group_id, db)
                 config_id = connected_config.get("memory_config_id")
+                if config_id is None:
+                    raise ValueError(f"No memory configuration found for end_user {group_id}. Please ensure the user has a connected memory configuration.")
             except Exception as e:
-                logger.warning(f"Failed to get connected config for end_user {group_id}: {e}")
+                if "No memory configuration found" in str(e):
+                    raise  # Re-raise our specific error
+                logger.error(f"Failed to get connected config for end_user {group_id}: {e}")
+                raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
         
         logger.info(f"Read operation for group {group_id} with config_id {config_id}")
         
