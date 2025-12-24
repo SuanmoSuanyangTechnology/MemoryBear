@@ -8,22 +8,25 @@ Classes:
     DataConfigRepository: 数据配置仓储类，提供CRUD操作
 """
 
-from typing import Dict, List, Optional, Tuple
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
 import uuid
+from typing import Dict, List, Optional, Tuple
 
+from app.core.logging_config import get_config_logger, get_db_logger
 from app.models.data_config_model import DataConfig
 from app.schemas.memory_storage_schema import (
+    ConfigKey,
     ConfigParamsCreate,
     ConfigUpdate,
     ConfigUpdateExtracted,
     ConfigUpdateForget,
 )
-from app.core.logging_config import get_db_logger
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
+# 获取配置专用日志器
+config_logger = get_config_logger()
 
 TABLE_NAME = "data_config"
 class DataConfigRepository:
@@ -525,7 +528,129 @@ class DataConfigRepository:
         except Exception as e:
             db_logger.error(f"根据ID查询数据配置失败: config_id={config_id} - {str(e)}")
             raise
+    @staticmethod
+    def get_config_with_workspace(db: Session, config_id: int) -> Optional[tuple]:
+        """Get data config and its associated workspace information
+        
+        Args:
+            db: Database session
+            config_id: Configuration ID
+            
+        Returns:
+            Optional[tuple]: (DataConfig, Workspace) tuple, None if not found
+            
+        Raises:
+            ValueError: Raised when config exists but workspace doesn't
+        """
+        import time
 
+        from app.models.workspace_model import Workspace
+        
+        start_time = time.time()
+        
+        # Log configuration loading start
+        config_logger.info(
+            "Loading configuration with workspace",
+            extra={
+                "operation": "get_config_with_workspace",
+                "config_id": config_id
+            }
+        )
+        
+        db_logger.debug(f"Querying data config and workspace: config_id={config_id}")
+        
+        try:
+            # Use join query to get both config and workspace
+            result = db.query(DataConfig, Workspace).join(
+                Workspace, DataConfig.workspace_id == Workspace.id
+            ).filter(DataConfig.config_id == config_id).first()
+            
+            elapsed_ms = (time.time() - start_time) * 1000
+            
+            if not result:
+                # Check if config exists but workspace is missing
+                config_only = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+                if config_only:
+                    if config_only.workspace_id is None:
+                        config_logger.error(
+                            "Configuration has no associated workspace ID",
+                            extra={
+                                "operation": "get_config_with_workspace",
+                                "config_id": config_id,
+                                "workspace_id": None,
+                                "load_result": "no_workspace_id",
+                                "elapsed_ms": elapsed_ms
+                            }
+                        )
+                        db_logger.error(f"Data config {config_id} has no associated workspace ID")
+                        raise ValueError(f"Configuration {config_id} has no associated workspace")
+                    else:
+                        config_logger.error(
+                            "Configuration references non-existent workspace",
+                            extra={
+                                "operation": "get_config_with_workspace",
+                                "config_id": config_id,
+                                "workspace_id": str(config_only.workspace_id),
+                                "load_result": "workspace_not_found",
+                                "elapsed_ms": elapsed_ms
+                            }
+                        )
+                        db_logger.error(f"Data config {config_id} references non-existent workspace {config_only.workspace_id}")
+                        raise ValueError(f"Workspace {config_only.workspace_id} not found for configuration {config_id}")
+                
+                config_logger.debug(
+                    "Configuration not found",
+                    extra={
+                        "operation": "get_config_with_workspace",
+                        "config_id": config_id,
+                        "load_result": "not_found",
+                        "elapsed_ms": elapsed_ms
+                    }
+                )
+                db_logger.debug(f"Data config not found: config_id={config_id}")
+                return None
+            
+            config, workspace = result
+            
+            # Log successful configuration loading
+            config_logger.info(
+                "Configuration with workspace loaded successfully",
+                extra={
+                    "operation": "get_config_with_workspace",
+                    "config_id": config_id,
+                    "config_name": config.config_name,
+                    "workspace_id": str(workspace.id),
+                    "workspace_name": workspace.name,
+                    "tenant_id": str(workspace.tenant_id),
+                    "load_result": "success",
+                    "elapsed_ms": elapsed_ms
+                }
+            )
+            
+            db_logger.debug(f"Data config and workspace query successful: config={config.config_name}, workspace={workspace.name}")
+            return (config, workspace)
+            
+        except ValueError:
+            # Re-raise known business exceptions
+            raise
+        except Exception as e:
+            elapsed_ms = (time.time() - start_time) * 1000
+            
+            config_logger.error(
+                "Failed to load configuration with workspace",
+                extra={
+                    "operation": "get_config_with_workspace",
+                    "config_id": config_id,
+                    "load_result": "error",
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "elapsed_ms": elapsed_ms
+                },
+                exc_info=True
+            )
+            
+            db_logger.error(f"Failed to query data config and workspace: config_id={config_id} - {str(e)}")
+            raise
     @staticmethod
     def get_all(db: Session, workspace_id: Optional[uuid.UUID] = None) -> List[DataConfig]:
         """获取所有配置参数

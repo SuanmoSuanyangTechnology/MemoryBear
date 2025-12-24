@@ -1,14 +1,16 @@
 # file name: check_neo4j_connection_fixed.py
 import asyncio
-import os
-import sys
 import json
-import time
 import math
+import os
 import re
+import sys
+import time
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 from dotenv import load_dotenv
+
 # 1
 # 添加项目根目录到路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,7 +36,7 @@ def _loc_normalize(text: str) -> str:
 
 # 尝试从 metrics.py 导入基础指标
 try:
-    from common.metrics import f1_score, bleu1, jaccard
+    from common.metrics import bleu1, f1_score, jaccard
     print("✅ 从 metrics.py 导入基础指标成功")
 except ImportError as e:
     print(f"❌ 从 metrics.py 导入失败: {e}")
@@ -111,10 +113,14 @@ try:
 
     # 尝试从不同位置导入
     try:
-        from locomo.qwen_search_eval import loc_f1_score, loc_multi_f1, _resolve_relative_times
+        from locomo.qwen_search_eval import (
+            _resolve_relative_times,
+            loc_f1_score,
+            loc_multi_f1,
+        )
         print("✅ 从 locomo.qwen_search_eval 导入 LoCoMo 特定指标成功")
     except ImportError:
-        from qwen_search_eval import loc_f1_score, loc_multi_f1, _resolve_relative_times
+        from qwen_search_eval import _resolve_relative_times, loc_f1_score, loc_multi_f1
         print("✅ 从 qwen_search_eval 导入 LoCoMo 特定指标成功")
 
 except ImportError as e:
@@ -429,13 +435,17 @@ async def run_enhanced_evaluation():
             return None
      
     # 修正导入路径：使用 app.core.memory.src 前缀
-    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-    from app.repositories.neo4j.graph_search import search_graph_by_embedding
     from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+    from app.core.memory.utils.config.definitions import (
+        SELECTED_EMBEDDING_ID,
+        SELECTED_LLM_ID,
+    )
+    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
     from app.core.models.base import RedBearModelConfig
-    from app.core.memory.utils.llm.llm_utils import get_llm_client
-    from app.core.memory.utils.config.config_utils import get_embedder_config
-    from app.core.memory.utils.config.definitions import SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
+    from app.db import get_db_context
+    from app.repositories.neo4j.graph_search import search_graph_by_embedding
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+    from app.services.memory_config_service import MemoryConfigService
 
     # 加载数据
     # 获取项目根目录
@@ -458,10 +468,14 @@ async def run_enhanced_evaluation():
     # 初始化增强监控器
     monitor = EnhancedEvaluationMonitor(reset_interval=5, performance_threshold=0.6)
     
-    llm = get_llm_client(SELECTED_LLM_ID)
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        llm = factory.get_llm_client(SELECTED_LLM_ID)
     
     # 初始化embedder
-    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
+    with get_db_context() as db:
+        config_service = MemoryConfigService(db)
+        cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
     embedder = OpenAIEmbedderClient(
         model_config=RedBearModelConfig.model_validate(cfg_dict)
     )

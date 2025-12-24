@@ -9,11 +9,11 @@ import logging
 import re
 import uuid
 from datetime import datetime
-from typing import Dict, Any
-
-from langchain_core.messages import AIMessage
+from typing import Any, Dict
 
 from app.core.memory.agent.utils.multimodal import MultimodalProcessor
+from app.schemas.memory_config_schema import MemoryConfig
+from langchain_core.messages import AIMessage
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,8 @@ async def create_input_message(
     search_switch: str,
     apply_id: str,
     group_id: str,
-    multimodal_processor: MultimodalProcessor
+    multimodal_processor: MultimodalProcessor,
+    memory_config: MemoryConfig,
 ) -> Dict[str, Any]:
     """
     Create initial tool call message from user input.
@@ -46,6 +47,7 @@ async def create_input_message(
         apply_id: Application identifier
         group_id: Group identifier
         multimodal_processor: Processor for handling image/audio inputs
+        memory_config: MemoryConfig object containing all configuration
         
     Returns:
         State update with AIMessage containing tool_call
@@ -53,7 +55,7 @@ async def create_input_message(
     Examples:
         >>> state = {"messages": [HumanMessage(content="What is AI?")]}
         >>> result = await create_input_message(
-        ...     state, "Split_The_Problem", "call_id_user123", "0", "app1", "group1", processor
+        ...     state, "Split_The_Problem", "call_id_user123", "0", "app1", "group1", processor, config
         ... )
         >>> result["messages"][0].tool_calls[0]["name"]
         'Split_The_Problem'
@@ -123,20 +125,24 @@ async def create_input_message(
         f"with ID: {tool_call_id}"
     )
     
+    # Build tool arguments
+    tool_args = {
+        "sentence": last_message,
+        "sessionid": session_id,
+        "messages_id": str(uuid_str),
+        "search_switch": search_switch,
+        "apply_id": apply_id,
+        "group_id": group_id,
+        "memory_config": memory_config,
+    }
+    
     return {
         "messages": [
             AIMessage(
                 content="",
                 tool_calls=[{
                     "name": tool_name,
-                    "args": {
-                        "sentence": last_message,
-                        "sessionid": session_id,
-                        "messages_id": str(uuid_str),
-                        "search_switch": search_switch,
-                        "apply_id": apply_id,
-                        "group_id": group_id
-                    },
+                    "args": tool_args,
                     "id": tool_call_id
                 }]
             )

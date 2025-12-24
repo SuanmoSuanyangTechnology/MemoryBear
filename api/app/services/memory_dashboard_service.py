@@ -272,7 +272,7 @@ async def get_workspace_total_memory_count(
             from app.repositories.end_user_repository import EndUserRepository
             repo = EndUserRepository(db)
             end_user = repo.get_by_id(uuid.UUID(end_user_id))
-            user_name = end_user.name if end_user else None
+            user_name = end_user.other_name if end_user else None
             
             return {
                 "total_memory_count": search_result.get("total", 0),
@@ -298,10 +298,10 @@ async def get_workspace_total_memory_count(
                 details.append({
                     "end_user_id": end_user_id_str,
                     "count": host_total,
-                    "name": host.name  # 添加 name 字段
+                    "name": host.other_name  # 使用 other_name 字段
                 })
                 
-                business_logger.debug(f"EndUser {end_user_id_str} ({host.name}) 记忆数: {host_total}")
+                business_logger.debug(f"EndUser {end_user_id_str} ({host.other_name}) 记忆数: {host_total}")
                 
             except Exception as e:
                 business_logger.warning(f"获取 end_user {host.id} 记忆数失败: {str(e)}")
@@ -309,7 +309,7 @@ async def get_workspace_total_memory_count(
                 details.append({
                     "end_user_id": str(host.id),
                     "count": 0,
-                    "name": host.name  # 添加 name 字段
+                    "name": host.other_name  # 使用 other_name 字段
                 })
         
         result = {

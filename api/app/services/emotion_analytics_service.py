@@ -7,14 +7,15 @@ Classes:
     EmotionAnalyticsService: 情绪分析服务，提供各种情绪分析功能
 """
 
-from typing import Dict, Any, Optional, List
-import statistics
 import json
-from pydantic import BaseModel, Field
+import statistics
+from typing import Any, Dict, List, Optional
 
+from app.core.logging_config import get_business_logger
 from app.repositories.neo4j.emotion_repository import EmotionRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.logging_config import get_business_logger
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 logger = get_business_logger()
 
@@ -64,19 +65,9 @@ class EmotionAnalyticsService:
         """获取情绪标签统计
         
         查询指定用户的情绪类型分布，包括计数、百分比和平均强度。
-        
-        Args:
-            end_user_id: 宿主ID（用户组ID）
-            emotion_type: 可选的情绪类型过滤
-            start_date: 可选的开始日期（ISO格式）
-            end_date: 可选的结束日期（ISO格式）
-            limit: 返回结果的最大数量
-            
-        Returns:
-            Dict: 包含情绪标签统计的响应数据：
-                - tags: 情绪标签列表
-                - total_count: 总情绪数量
-                - time_range: 时间范围信息
+        确保返回所有6个情绪维度（joy、sadness、anger、fear、surprise、neutral），
+        即使某些维度没有数据也会返回count=0的记录。
+
         """
         try:
             logger.info(f"获取情绪标签统计: user={end_user_id}, type={emotion_type}, "
@@ -91,8 +82,34 @@ class EmotionAnalyticsService:
                 limit=limit
             )
             
+            # 定义所有6个情绪维度
+            all_emotion_types = ['joy', 'sadness', 'anger', 'fear', 'surprise', 'neutral']
+            
+            # 将查询结果转换为字典，方便查找
+            tags_dict = {tag["emotion_type"]: tag for tag in tags}
+            
+            # 补全缺失的情绪维度
+            complete_tags = []
+            for emotion in all_emotion_types:
+                if emotion in tags_dict:
+                    complete_tags.append(tags_dict[emotion])
+                else:
+                    # 如果该情绪类型不存在，添加默认值
+                    complete_tags.append({
+                        "emotion_type": emotion,
+                        "count": 0,
+                        "percentage": 0.0,
+                        "avg_intensity": 0.0
+                    })
+            
             # 计算总数
-            total_count = sum(tag["count"] for tag in tags)
+            total_count = sum(tag["count"] for tag in complete_tags)
+            
+            # 如果有数据，重新计算百分比（因为补全了0值项）
+            if total_count > 0:
+                for tag in complete_tags:
+                    if tag["count"] > 0:
+                        tag["percentage"] = round((tag["count"] / total_count) * 100, 2)
             
             # 构建时间范围信息
             time_range = {}
@@ -103,12 +120,12 @@ class EmotionAnalyticsService:
             
             # 格式化响应
             response = {
-                "tags": tags,
+                "tags": complete_tags,
                 "total_count": total_count,
                 "time_range": time_range if time_range else None
             }
             
-            logger.info(f"情绪标签统计完成: total_count={total_count}, tags_count={len(tags)}")
+            logger.info(f"情绪标签统计完成: total_count={total_count}, tags_count={len(complete_tags)}")
             return response
             
         except Exception as e:
@@ -454,7 +471,7 @@ class EmotionAnalyticsService:
     async def generate_emotion_suggestions(
         self,
         end_user_id: str,
-        config_id: Optional[int] = None
+        db: Session,
     ) -> Dict[str, Any]:
         """生成个性化情绪建议
         
@@ -462,7 +479,7 @@ class EmotionAnalyticsService:
         
         Args:
             end_user_id: 宿主ID（用户组ID）
-            config_id: 配置ID（可选，用于从数据库加载LLM配置）
+            db: 数据库会话
             
         Returns:
             Dict: 包含个性化建议的响应：
@@ -470,14 +487,32 @@ class EmotionAnalyticsService:
                 - suggestions: 建议列表（3-5条）
         """
         try:
-            logger.info(f"生成个性化情绪建议: user={end_user_id}, config_id={config_id}")
+            logger.info(f"生成个性化情绪建议: user={end_user_id}")
             
-            # 1. 如果提供了 config_id，从数据库加载配置
-            if config_id is not None:
-                from app.core.memory.utils.config.definitions import reload_configuration_from_database
-                config_loaded = reload_configuration_from_database(config_id)
-                if not config_loaded:
-                    logger.warning(f"无法加载配置 config_id={config_id}，将使用默认配置")
+            # 1. 从 end_user_id 获取关联的 memory_config_id
+            llm_client = None
+            try:
+                from app.services.memory_agent_service import (
+                    get_end_user_connected_config,
+                )
+                
+                connected_config = get_end_user_connected_config(end_user_id, db)
+                config_id = connected_config.get("memory_config_id")
+                
+                if config_id is not None:
+                    from app.services.memory_config_service import (
+                        MemoryConfigService,
+                    )
+                    config_service = MemoryConfigService(db)
+                    memory_config = config_service.load_memory_config(
+                        config_id=int(config_id),
+                        service_name="EmotionAnalyticsService.generate_emotion_suggestions"
+                    )
+                    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+                    factory = MemoryClientFactory(db)
+                    llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
+            except Exception as e:
+                logger.warning(f"无法获取 end_user {end_user_id} 的配置，将使用默认配置: {e}")
             
             # 2. 获取情绪健康数据
             health_data = await self.calculate_emotion_health_index(end_user_id, time_range="30d")
@@ -498,8 +533,9 @@ class EmotionAnalyticsService:
             prompt = await self._build_suggestion_prompt(health_data, patterns, user_profile)
             
             # 7. 调用LLM生成建议（使用配置中的LLM）
-            from app.core.memory.utils.llm.llm_utils import get_llm_client
-            llm_client = get_llm_client()
+            if llm_client is None:
+                # 无法获取配置时，抛出错误而不是使用默认配置
+                raise ValueError("无法获取LLM配置，请确保end_user关联了有效的memory_config")
             
             # 将 prompt 转换为 messages 格式
             messages = [
@@ -598,7 +634,9 @@ class EmotionAnalyticsService:
         Returns:
             str: LLM prompt
         """
-        from app.core.memory.utils.prompt.prompt_utils import render_emotion_suggestions_prompt
+        from app.core.memory.utils.prompt.prompt_utils import (
+            render_emotion_suggestions_prompt,
+        )
         
         prompt = await render_emotion_suggestions_prompt(
             health_data=health_data,

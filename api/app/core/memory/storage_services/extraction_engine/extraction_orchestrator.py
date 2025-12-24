@@ -19,48 +19,49 @@
 import asyncio
 import logging
 import os
-from typing import List, Dict, Any, Tuple, Optional, Callable, Awaitable
 from datetime import datetime
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from app.core.memory.models.message_models import DialogData
+from app.core.memory.llm_tools.openai_client import LLMClient
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.models.graph_models import (
-    DialogueNode,
     ChunkNode,
-    StatementNode,
+    DialogueNode,
+    EntityEntityEdge,
     ExtractedEntityNode,
     StatementChunkEdge,
     StatementEntityEdge,
-    EntityEntityEdge,
+    StatementNode,
 )
-from app.core.memory.utils.data.ontology import TemporalInfo
+from app.core.memory.models.message_models import DialogData
 from app.core.memory.models.variate_config import (
     ExtractionPipelineConfig,
 )
-from app.core.memory.llm_tools.openai_client import LLMClient
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.memory.storage_services.extraction_engine.deduplication.two_stage_dedup import (
+    dedup_layers_and_merge_and_return,
+)
+from app.core.memory.storage_services.extraction_engine.knowledge_extraction.embedding_generation import (
+    embedding_generation,
+    embedding_generation_all,
+    generate_entity_embeddings_from_triplets,
+)
 
 # 导入各个提取模块
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.statement_extraction import (
     StatementExtractor,
 )
-from app.core.memory.storage_services.extraction_engine.knowledge_extraction.triplet_extraction import (
-    TripletExtractor,
-)
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.temporal_extraction import (
     TemporalExtractor,
 )
-from app.core.memory.storage_services.extraction_engine.knowledge_extraction.embedding_generation import (
-    embedding_generation,
-    generate_entity_embeddings_from_triplets,
-)
-from app.core.memory.storage_services.extraction_engine.deduplication.two_stage_dedup import (
-    dedup_layers_and_merge_and_return,
+from app.core.memory.storage_services.extraction_engine.knowledge_extraction.triplet_extraction import (
+    TripletExtractor,
 )
 from app.core.memory.storage_services.extraction_engine.pipeline_help import (
     _write_extracted_result_summary,
     export_test_input_doc,
 )
+from app.core.memory.utils.data.ontology import TemporalInfo
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -94,6 +95,7 @@ class ExtractionOrchestrator:
         connector: Neo4jConnector,
         config: Optional[ExtractionPipelineConfig] = None,
         progress_callback: Optional[Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]] = None,
+        embedding_id: Optional[str] = None,
     ):
         """
         初始化流水线编排器
@@ -106,6 +108,7 @@ class ExtractionOrchestrator:
             progress_callback: 进度回调函数
                 - 接受 (stage: str, message: str, data: Optional[Dict[str, Any]]) 并返回 Awaitable[None]
                 - 在管线关键点调用以报告进度和结果数据
+            embedding_id: 嵌入模型ID，如果为 None 则从全局配置获取（向后兼容）
         """
         self.llm_client = llm_client
         self.embedder_client = embedder_client
@@ -113,6 +116,7 @@ class ExtractionOrchestrator:
         self.config = config or ExtractionPipelineConfig()
         self.is_pilot_run = False  # 默认非试运行模式
         self.progress_callback = progress_callback  # 保存进度回调函数
+        self.embedding_id = embedding_id  # 保存嵌入模型ID
         
         # 保存去重消歧的详细记录（内存中的数据结构）
         self.dedup_merge_records: List[Dict[str, Any]] = []  # 实体合并记录
@@ -398,7 +402,9 @@ class ExtractionOrchestrator:
             except Exception as e:
                 logger.error(f"陈述句 {statement.id} 三元组提取失败: {e}")
                 completed_statements += 1
-                from app.core.memory.models.triplet_models import TripletExtractionResponse
+                from app.core.memory.models.triplet_models import (
+                    TripletExtractionResponse,
+                )
                 return TripletExtractionResponse(triplets=[], entities=[])
 
         tasks = [extract_for_statement(stmt_data, i) for i, stmt_data in enumerate(all_statements)]
@@ -412,7 +418,9 @@ class ExtractionOrchestrator:
             d_idx, stmt_id = statement_metadata[i]
             if isinstance(result, Exception):
                 logger.error(f"陈述句处理异常: {result}")
-                from app.core.memory.models.triplet_models import TripletExtractionResponse
+                from app.core.memory.models.triplet_models import (
+                    TripletExtractionResponse,
+                )
                 triplet_maps[d_idx][stmt_id] = TripletExtractionResponse(triplets=[], entities=[])
             else:
                 triplet_maps[d_idx][stmt_id] = result
@@ -525,8 +533,8 @@ class ExtractionOrchestrator:
                 temporal_maps[d_idx][stmt_id] = result
 
         # 为 ATEMPORAL 陈述句添加空的时间范围
-        from app.core.memory.utils.data.ontology import TemporalInfo
         from app.core.memory.models.message_models import TemporalValidityRange
+        from app.core.memory.utils.data.ontology import TemporalInfo
         for d_idx, dialog in enumerate(dialog_data_list):
             for chunk in dialog.chunks:
                 for statement in chunk.statements:
@@ -738,17 +746,14 @@ class ExtractionOrchestrator:
         logger.info("开始生成基础嵌入向量（陈述句、分块、对话）")
 
         try:
-            # 从 runtime.json 获取嵌入模型配置ID
-            from app.core.memory.utils.config import definitions as config_defs
-            embedding_id = config_defs.SELECTED_EMBEDDING_ID
-            
-            if not embedding_id:
-                logger.error("未在 runtime.json 中配置 embedding 模型 ID")
-                raise ValueError("未配置嵌入模型ID")
+            # embedding_id is required - no fallback to global variable
+            if not self.embedding_id:
+                logger.error("embedding_id is required but was not provided to ExtractionOrchestrator")
+                raise ValueError("embedding_id is required but was not provided")
             
             # 只生成陈述句、分块和对话的嵌入（不包括实体）
             statement_embedding_maps, chunk_embedding_maps, dialog_embeddings = await embedding_generation(
-                dialog_data_list, embedding_id
+                dialog_data_list, self.embedding_id
             )
 
             # 统计生成结果
@@ -792,17 +797,14 @@ class ExtractionOrchestrator:
         logger.info("开始生成实体嵌入向量")
 
         try:
-            # 从 runtime.json 获取嵌入模型配置ID
-            from app.core.memory.utils.config import definitions as config_defs
-            embedding_id = config_defs.SELECTED_EMBEDDING_ID
-            
-            if not embedding_id:
-                logger.error("未在 runtime.json 中配置 embedding 模型 ID")
+            # embedding_id is required - no fallback to global variable
+            if not self.embedding_id:
+                logger.error("embedding_id is required but was not provided to ExtractionOrchestrator")
                 return triplet_maps
             
             # 生成实体嵌入
             updated_triplet_maps = await generate_entity_embeddings_from_triplets(
-                triplet_maps, embedding_id
+                triplet_maps, self.embedding_id
             )
 
             logger.info("实体嵌入生成完成")
@@ -1240,7 +1242,9 @@ class ExtractionOrchestrator:
             if self.is_pilot_run:
                 logger.info("试运行模式：仅执行第一层去重，跳过第二层数据库去重")
                 # 只执行第一层去重
-                from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import deduplicate_entities_and_edges
+                from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+                    deduplicate_entities_and_edges,
+                )
                 
                 dedup_entity_nodes, dedup_statement_entity_edges, dedup_entity_entity_edges, dedup_details = await deduplicate_entities_and_edges(
                     entity_nodes,
@@ -1249,6 +1253,7 @@ class ExtractionOrchestrator:
                     report_stage="第一层去重消歧（试运行）",
                     report_append=False,
                     dedup_config=self.config.deduplication,
+                    llm_client=self.llm_client,
                 )
                 
                 # 保存去重消歧的详细记录到实例变量
@@ -1280,6 +1285,7 @@ class ExtractionOrchestrator:
                     dialog_data_list,
                     self.config,
                     self.connector,
+                    llm_client=self.llm_client,
                 )
 
                 # 解包返回值
@@ -1824,7 +1830,9 @@ async def get_chunked_dialogs(
         )
         
         # 创建分块器并处理对话
-        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import DialogueChunker
+        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import (
+            DialogueChunker,
+        )
         chunker = DialogueChunker(chunker_strategy)
         extracted_chunks = await chunker.process_dialogue(dialog_data)
         dialog_data.chunks = extracted_chunks
@@ -1871,7 +1879,9 @@ def preprocess_data(
         经过清洗转换后的 DialogData 列表
     """
     print("\n=== 数据预处理 ===")
-    from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_preprocessor import DataPreprocessor
+    from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_preprocessor import (
+        DataPreprocessor,
+    )
     preprocessor = DataPreprocessor()
     try:
         cleaned_data = preprocessor.preprocess(input_path=input_path, output_path=output_path, skip_cleaning=skip_cleaning, indices=indices)
@@ -1902,7 +1912,9 @@ async def get_chunked_dialogs_from_preprocessed(
         raise ValueError("预处理数据为空，无法进行分块")
         
     all_chunked_dialogs: List[DialogData] = []
-    from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import DialogueChunker
+    from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import (
+        DialogueChunker,
+    )
     
     for dialog_data in data:
         chunker = DialogueChunker(chunker_strategy, llm_client=llm_client)
@@ -1963,7 +1975,9 @@ async def get_chunked_dialogs_with_preprocessing(
         
     # 步骤2: 语义剪枝
     try:
-        from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_pruning import SemanticPruner
+        from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_pruning import (
+            SemanticPruner,
+        )
         pruner = SemanticPruner(llm_client=llm_client)
         
         # 记录单对话场景下剪枝前的消息数量
@@ -1986,7 +2000,9 @@ async def get_chunked_dialogs_with_preprocessing(
             
         # 保存剪枝后的数据
         try:
-            from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_preprocessor import DataPreprocessor
+            from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_preprocessor import (
+                DataPreprocessor,
+            )
             pruned_output_path = settings.get_memory_output_path("pruned_data.json")
             dp = DataPreprocessor(output_file_path=pruned_output_path)
             dp.save_data(preprocessed_data, output_path=pruned_output_path)

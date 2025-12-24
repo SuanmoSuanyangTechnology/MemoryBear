@@ -8,35 +8,43 @@
 4. 反思结果应用 - 更新记忆库
 """
 
+import asyncio
 import json
 import logging
-import asyncio
 import os
 import time
-from typing import List, Dict, Any, Optional
-from enum import Enum
 import uuid
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.config import definitions as config_defs
-from app.core.memory.utils.config import get_model_config
-from app.core.memory.utils.config.get_data import get_data,get_data_statement,extract_and_process_changes
+from app.core.memory.utils.config.get_data import (
+    extract_and_process_changes,
+    get_data,
+    get_data_statement,
+)
 from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.utils.prompt.template_render import render_evaluate_prompt
-from app.core.memory.utils.prompt.template_render import render_reflexion_prompt
+from app.core.memory.utils.prompt.template_render import (
+    render_evaluate_prompt,
+    render_reflexion_prompt,
+)
 from app.core.models.base import RedBearModelConfig
+from app.core.response_utils import success
 from app.repositories.neo4j.cypher_queries import (
+    UPDATE_STATEMENT_INVALID_AT,
     neo4j_query_all,
     neo4j_query_part,
     neo4j_statement_all,
     neo4j_statement_part,
 )
-from app.repositories.neo4j.cypher_queries import UPDATE_STATEMENT_INVALID_AT
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.repositories.neo4j.neo4j_update import neo4j_data
-from app.schemas.memory_storage_schema import ConflictResultSchema
-from app.schemas.memory_storage_schema import ReflexionResultSchema
+from app.schemas.memory_storage_schema import (
+    ConflictResultSchema,
+    ReflexionResultSchema,
+)
+from pydantic import BaseModel
 
 # 配置日志
 _root_logger = logging.getLogger()
@@ -152,12 +160,26 @@ class ReflectionEngine:
             self.neo4j_connector = Neo4jConnector()
 
         if self.llm_client is None:
-            self.llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
+            from app.core.memory.utils.config import definitions as config_defs
+            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            from app.db import get_db_context
+            with get_db_context() as db:
+                factory = MemoryClientFactory(db)
+                self.llm_client = factory.get_llm_client(config_defs.SELECTED_LLM_ID)
         elif isinstance(self.llm_client, str):
             # 如果 llm_client 是字符串（model_id），则用它初始化客户端
-            # from app.core.memory.utils.llm.llm_utils import get_llm_client
-            # model_id = self.llm_client
-            # self.llm_client = get_llm_client(model_id)
+            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            from app.db import get_db_context
+            from app.services.memory_config_service import MemoryConfigService
+            model_id = self.llm_client
+            with get_db_context() as db:
+                factory = MemoryClientFactory(db)
+                # self.llm_client = factory.get_llm_client(model_id)
+                
+                # Use MemoryConfigService to get model config
+                config_service = MemoryConfigService(db)
+                model_config = config_service.get_model_config(model_id)
+                
             extra_params={
                     "temperature": 0.2,  # 降低温度提高响应速度和一致性
                     "max_tokens": 600,  # 限制最大token数
@@ -165,7 +187,6 @@ class ReflectionEngine:
                     "stream": False,  # 确保非流式输出以获得最快响应
                 }
 
-            model_config = get_model_config(self.llm_client)
             self.llm_client  = OpenAIClient(RedBearModelConfig(
                 model_name=model_config.get("model_name"),
                 provider=model_config.get("provider"),
@@ -184,9 +205,15 @@ class ReflectionEngine:
             self.get_data_statement = get_data_statement
 
         if self.render_evaluate_prompt_func is None:
+            from app.core.memory.utils.prompt.template_render import (
+                render_evaluate_prompt,
+            )
             self.render_evaluate_prompt_func = render_evaluate_prompt
 
         if self.render_reflexion_prompt_func is None:
+            from app.core.memory.utils.prompt.template_render import (
+                render_reflexion_prompt,
+            )
             self.render_reflexion_prompt_func = render_reflexion_prompt
 
         if self.conflict_schema is None:
@@ -196,6 +223,9 @@ class ReflectionEngine:
             self.reflexion_schema = ReflexionResultSchema
 
         if self.update_query is None:
+            from app.repositories.neo4j.cypher_queries import (
+                UPDATE_STATEMENT_INVALID_AT,
+            )
             self.update_query = UPDATE_STATEMENT_INVALID_AT
 
         self._lazy_init_done = True
@@ -239,8 +269,6 @@ class ReflectionEngine:
             # # 检查是否真的有冲突
             conflicts_found=''
 
-            # 记录冲突数据
-            await self._log_data("conflict", conflict_data)
             conflicts_found=''
             # 3. 解决冲突
             solved_data = await self._resolve_conflicts(conflict_data, statement_databasets)
@@ -258,8 +286,6 @@ class ReflectionEngine:
             conflicts_resolved = len(solved_data)
             logging.info(f"解决了 {conflicts_resolved} 个冲突")
 
-            # 记录解决方案
-            await self._log_data("solved_data", solved_data)
 
             # 4. 应用反思结果（更新记忆库）
             memories_updated=await self._apply_reflection_results(solved_data)
@@ -360,14 +386,7 @@ class ReflectionEngine:
             memory_verifies.append(item['memory_verify'])
         result_data['memory_verifies'] = memory_verifies
         result_data['quality_assessments'] = quality_assessments
-
-        # 检查是否真的有冲突
-        has_conflict = conflict_data[0].get('conflict', False)
-        conflicts_found = len(conflict_data[0]['data']) if has_conflict else 0
-        logging.info(f"冲突状态: {has_conflict}, 发现 {conflicts_found} 个冲突")
-
-        # 记录冲突数据
-        await self._log_data("conflict", conflict_data)
+        conflicts_found=''
 
         # Clearn conflict_data，And memory_verify和quality_assessment
         cleaned_conflict_data = []
@@ -377,6 +396,7 @@ class ReflectionEngine:
                 'conflict': item['conflict']
             }
             cleaned_conflict_data.append(cleaned_item)
+
         # 3. 解决冲突
         solved_data = await self._resolve_conflicts(cleaned_conflict_data, source_data)
         if not solved_data:
@@ -615,26 +635,7 @@ class ReflectionEngine:
         success_count = await neo4j_data(changes)
         return success_count
 
-    async def _log_data(self, label: str, data: Any) -> None:
-        """
-        记录数据到文件
 
-        Args:
-            label: 数据标签
-            data: 要记录的数据
-        """
-
-        def _write():
-            try:
-                with open("reflexion_data.json", "a", encoding="utf-8") as f:
-                    f.write(f"### {label} ###\n")
-                    json.dump(data, f, ensure_ascii=False, indent=4)
-                    f.write("\n\n")
-            except Exception as e:
-                logging.warning(f"记录数据失败: {e}")
-
-        # 在后台线程中执行写入，避免阻塞事件循环
-        await asyncio.to_thread(_write)
 
     # 基于时间的反思方法
     async def time_based_reflection(
@@ -721,6 +722,5 @@ class ReflectionEngine:
         else:
 
             raise ValueError(f"未知的反思基线: {self.config.baseline}")
-
 
 

@@ -13,6 +13,7 @@ from PIL import Image
 import copy
 
 from app.core.rag.llm.cv_model import AzureGptV4, QWenCV
+from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
 from app.core.rag.common.file_utils import get_project_base_directory
 from app.core.rag.utils.file_utils import extract_embed_file, extract_links_from_pdf, extract_links_from_docx, extract_html
 from app.core.rag.utils.libre_office import convert_to_pdf, async_convert_to_pdf
@@ -809,12 +810,30 @@ if __name__ == "__main__":
     # chunk(sys.argv[1], from_page=0, to_page=10, callback=dummy)
 
     # Prepare to configure vision_model information
-    vision_model = QWenCV(
-        key="sk-8e9e40cd171749858ce2d3722ea75669",
-        model_name="qwen-vl-max",
+    # 文字+图片
+    # vision_model = QWenCV(
+    #     key="",
+    #     model_name="qwen-vl-max",
+    #     lang="chinese",  # 默认使用中文
+    #     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # )
+
+    # 音频
+    vision_model = QWenSeq2txt(
+        key="",
+        model_name="qwen3-omni-flash",
         lang="chinese",  # 默认使用中文
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
     )
+
+
+    # 视频
+    # vision_model = QWenCV(
+    #     key="",
+    #     model_name="qwen3-omni-flash",
+    #     lang="chinese",  # 默认使用中文
+    #     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # )
 
     def progress_callback(prog=None, msg=None):
         print(f"prog: {prog} msg: {msg}\n")

@@ -1,7 +1,8 @@
-import os
 import json
+import os
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -81,6 +82,7 @@ class Settings:
     VOLC_QUERY_URL: str = os.getenv("VOLC_QUERY_URL", "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query")
 
     # Langfuse configuration
+    LANGFUSE_ENABLED: bool = os.getenv("LANGFUSE_ENABLED", "false").lower() == "true"
     LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
     LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY", "")
     LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "")
@@ -156,9 +158,6 @@ class Settings:
     # Memory Module Configuration (internal)
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")
     MEMORY_CONFIG_DIR: str = os.getenv("MEMORY_CONFIG_DIR", "app/core/memory")
-    MEMORY_CONFIG_FILE: str = os.getenv("MEMORY_CONFIG_FILE", "config.json")
-    MEMORY_RUNTIME_FILE: str = os.getenv("MEMORY_RUNTIME_FILE", "runtime.json")
-    MEMORY_DBRUN_FILE: str = os.getenv("MEMORY_DBRUN_FILE", "dbrun.json")
     
     # Tool Management Configuration
     TOOL_CONFIG_DIR: str = os.getenv("TOOL_CONFIG_DIR", "app/core/tools")
@@ -180,65 +179,6 @@ class Settings:
         if filename:
             return str(base_path / filename)
         return str(base_path)
-    
-    def get_memory_config_path(self, config_file: str = "") -> str:
-        """
-        Get the full path for memory module configuration files.
-        
-        Args:
-            config_file: Optional config filename (defaults to MEMORY_CONFIG_FILE)
-            
-        Returns:
-            Full path to the config file
-        """
-        if not config_file:
-            config_file = self.MEMORY_CONFIG_FILE
-        return str(Path(self.MEMORY_CONFIG_DIR) / config_file)
-    
-    def load_memory_config(self) -> Dict[str, Any]:
-        """
-        Load memory module configuration from config.json.
-        
-        Returns:
-            Dictionary containing memory configuration
-        """
-        config_path = self.get_memory_config_path(self.MEMORY_CONFIG_FILE)
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Warning: Memory config file not found or malformed at {config_path}. Error: {e}")
-            return {}
-    
-    def load_memory_runtime_config(self) -> Dict[str, Any]:
-        """
-        Load memory module runtime configuration from runtime.json.
-        
-        Returns:
-            Dictionary containing runtime configuration
-        """
-        runtime_path = self.get_memory_config_path(self.MEMORY_RUNTIME_FILE)
-        try:
-            with open(runtime_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Warning: Memory runtime config not found or malformed at {runtime_path}. Error: {e}")
-            return {"selections": {}}
-    
-    def load_memory_dbrun_config(self) -> Dict[str, Any]:
-        """
-        Load memory module database run configuration from dbrun.json.
-        
-        Returns:
-            Dictionary containing dbrun configuration
-        """
-        dbrun_path = self.get_memory_config_path(self.MEMORY_DBRUN_FILE)
-        try:
-            with open(dbrun_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Warning: Memory dbrun config not found or malformed at {dbrun_path}. Error: {e}")
-            return {"selections": {}}
     
     def ensure_memory_output_dir(self) -> None:
         """

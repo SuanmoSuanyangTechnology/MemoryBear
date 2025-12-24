@@ -1,23 +1,27 @@
 from __future__ import annotations
 
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
 
-from app.core.memory.models.variate_config import ExtractionPipelineConfig
-from app.core.memory.utils.config.config_utils import get_pipeline_config
-from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import deduplicate_entities_and_edges
-from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import second_layer_dedup_and_merge_with_neo4j
-# 使用新的仓储层
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.models.graph_models import (
-    DialogueNode,
     ChunkNode,
-    StatementNode,
+    DialogueNode,
+    EntityEntityEdge,
     ExtractedEntityNode,
     StatementChunkEdge,
     StatementEntityEdge,
-    EntityEntityEdge,
+    StatementNode,
 )
 from app.core.memory.models.message_models import DialogData
+from app.core.memory.models.variate_config import ExtractionPipelineConfig
+from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+    deduplicate_entities_and_edges,
+)
+from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
+    second_layer_dedup_and_merge_with_neo4j,
+)
+
+# 使用新的仓储层
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 
 async def dedup_layers_and_merge_and_return(
@@ -29,8 +33,9 @@ async def dedup_layers_and_merge_and_return(
     statement_entity_edges: List[StatementEntityEdge],
     entity_entity_edges: List[EntityEntityEdge],
     dialog_data_list: List[DialogData],
-    pipeline_config: Optional[ExtractionPipelineConfig] = None,
+    pipeline_config: ExtractionPipelineConfig,
     connector: Optional[Neo4jConnector] = None,
+    llm_client = None,
 ) -> Tuple[
     List[DialogueNode],
     List[ChunkNode],
@@ -48,12 +53,9 @@ async def dedup_layers_and_merge_and_return(
     返回融合后的实体与边，同时保留原始的对话、片段与语句节点与边。
     """
 
-    # 默认从 runtime.json 加载管线配置，避免回退到环境变量
+    # pipeline_config is required - caller must provide it
     if pipeline_config is None:
-        try:
-            pipeline_config = get_pipeline_config()
-        except Exception:
-            pipeline_config = None
+        raise ValueError("pipeline_config is required for dedup_layers_and_merge_and_return")
 
     # 先探测 group_id，决定报告写入策略
     group_id: Optional[str] = None
@@ -70,6 +72,7 @@ async def dedup_layers_and_merge_and_return(
         report_stage="第一层去重消歧",
         report_append=False,
         dedup_config=(pipeline_config.deduplication if pipeline_config else None),
+        llm_client=llm_client,
     )
 
     # 初始化第二层融合结果为第一层结果
@@ -88,6 +91,7 @@ async def dedup_layers_and_merge_and_return(
                     statement_entity_edges=dedup_statement_entity_edges,
                     entity_entity_edges=dedup_entity_entity_edges,
                     dedup_config=(pipeline_config.deduplication if pipeline_config else None),
+                    llm_client=llm_client,
                 )
             else:
                 print("Skip second-layer dedup: missing connector")

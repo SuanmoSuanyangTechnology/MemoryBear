@@ -19,7 +19,6 @@ class EndUser(Base):
     updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
     
     # 用户基本信息字段
-    name = Column(String, nullable=True, comment="姓名")
     position = Column(String, nullable=True, comment="职位")
     department = Column(String, nullable=True, comment="部门")
     contact = Column(String, nullable=True, comment="联系方式")

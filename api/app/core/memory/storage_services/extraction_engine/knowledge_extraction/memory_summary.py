@@ -1,21 +1,17 @@
-import os
 import asyncio
 from datetime import datetime
 from typing import List, Optional
-
-from pydantic import Field, field_validator
+from uuid import uuid4
 
 from app.core.logging_config import get_memory_logger
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.memory.models.base_response import RobustLLMResponse
+from app.core.memory.models.graph_models import MemorySummaryNode
 from app.core.memory.models.message_models import DialogData
+from app.core.memory.utils.prompt.prompt_utils import render_memory_summary_prompt
+from pydantic import Field
 
 logger = get_memory_logger(__name__)
-from app.core.memory.models.graph_models import MemorySummaryNode
-from app.core.memory.models.base_response import RobustLLMResponse
-from app.core.models.base import RedBearModelConfig
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.memory.utils.config.config_utils import get_embedder_config
-from app.core.memory.utils.prompt.prompt_utils import render_memory_summary_prompt
-from uuid import uuid4
 
 
 class MemorySummaryResponse(RobustLLMResponse):
@@ -91,22 +87,17 @@ async def _process_chunk_summary(
         return None
 
 
-async def Memory_summary_generation(
+async def memory_summary_generation(
     chunked_dialogs: List[DialogData],
     llm_client,
-    embedding_id,
+    embedder_client: OpenAIEmbedderClient,
 ) -> List[MemorySummaryNode]:
     """Generate memory summaries per chunk, embed them, and return nodes."""
-    embedder_cfg_dict = get_embedder_config(embedding_id)
-    embedder = OpenAIEmbedderClient(
-        model_config=RedBearModelConfig.model_validate(embedder_cfg_dict),
-    )
-
     # Collect all tasks for parallel processing
     tasks = []
     for dialog in chunked_dialogs:
         for chunk in dialog.chunks:
-            tasks.append(_process_chunk_summary(dialog, chunk, llm_client, embedder))
+            tasks.append(_process_chunk_summary(dialog, chunk, llm_client, embedder_client))
 
     # Process all chunks in parallel
     results = await asyncio.gather(*tasks, return_exceptions=False)

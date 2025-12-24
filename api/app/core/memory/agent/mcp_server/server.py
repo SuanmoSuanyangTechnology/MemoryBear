@@ -6,19 +6,15 @@ in the context for dependency injection into tool functions.
 """
 import os
 import sys
-from mcp.server.fastmcp import FastMCP
 
 from app.core.config import settings
 from app.core.logging_config import get_agent_logger
-from app.core.memory.agent.utils.redis_tool import RedisSessionStore, store
-from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
-from app.core.memory.utils.config.definitions import SELECTED_LLM_ID,reload_configuration_from_database
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.agent.mcp_server.services.template_service import TemplateService
+from app.core.memory.agent.mcp_server.mcp_instance import mcp
 from app.core.memory.agent.mcp_server.services.search_service import SearchService
 from app.core.memory.agent.mcp_server.services.session_service import SessionService
-from app.core.memory.agent.mcp_server.mcp_instance import mcp
-
+from app.core.memory.agent.mcp_server.services.template_service import TemplateService
+from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
+from app.core.memory.agent.utils.redis_tool import store
 
 logger = get_agent_logger(__name__)
 
@@ -78,17 +74,11 @@ def initialize_context():
         logger.info("Registering session_store in context")
         mcp.session_store = store
         
-        # Register LLM client
-        try:
-            logger.info(f"Registering llm_client in context with model ID: {SELECTED_LLM_ID}")
-            llm_client = get_llm_client(SELECTED_LLM_ID)
-            mcp.llm_client = llm_client
-            logger.info("llm_client registered successfully")
-        except Exception as e:
-            logger.error(f"Failed to register llm_client: {e}", exc_info=True)
-            # 注册一个 None 值，避免工具调用时找不到资源
-            mcp.llm_client = None
-            logger.warning("llm_client set to None due to initialization failure")
+        # Note: LLM client is NOT loaded at server startup
+        # It should be loaded dynamically when needed, with config_id passed explicitly
+        # to make_write_graph or make_read_graph functions
+        logger.info("LLM client will be loaded dynamically with config_id when needed")
+        mcp.llm_client = None  # Placeholder - actual client loaded per-request with config_id
         
         # Register application settings (renamed to avoid conflict with FastMCP's settings)
         logger.info("Registering app_settings in context")
@@ -124,26 +114,20 @@ def main():
     Initializes context and starts the server with SSE transport.
     """
     try:
-        # logger.info("Starting MCP server initialization")
-        reload_configuration_from_database(config_id=os.getenv("config_id"), force_reload=True)
+        logger.info("Starting MCP server initialization")
         # Initialize context resources
         initialize_context()
         
-        # Import and register tools
-        # logger.info("Importing MCP tools")
-        from app.core.memory.agent.mcp_server.tools import (
+        # Import and register tools (imports trigger tool registration)
+        from app.core.memory.agent.mcp_server.tools import (  # noqa: F401
+            data_tools,
             problem_tools,
             retrieval_tools,
-            verification_tools,
             summary_tools,
-            data_tools
+            verification_tools,
         )
-        # logger.info("All MCP tools imported and registered")
         
-        # Log registered tools for debugging
-        import asyncio
-        tools_list = asyncio.run(mcp.list_tools())
-        # logger.info(f"Registered {len(tools_list)} MCP tools: {[t.name for t in tools_list]}")
+        # Tools are registered via imports above
         
         # Get MCP port from environment (default: 8081)
         mcp_port = int(os.getenv("MCP_PORT", "8081"))

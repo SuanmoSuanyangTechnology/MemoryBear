@@ -4,21 +4,31 @@ Search Service for executing hybrid search and processing results.
 This service provides clean search result processing with content extraction
 and deduplication.
 """
-from typing import List, Tuple, Optional
+
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from app.core.logging_config import get_agent_logger
 from app.core.memory.src.search import run_hybrid_search
 from app.core.memory.utils.data.text_utils import escape_lucene_query
 
+if TYPE_CHECKING:
+    from app.schemas.memory_config_schema import MemoryConfig
 
 logger = get_agent_logger(__name__)
 
 
 class SearchService:
     """Service for executing hybrid search and processing results."""
-    
-    def __init__(self):
-        """Initialize the search service."""
+
+    def __init__(self, memory_config: "MemoryConfig" = None):
+        """
+        Initialize the search service.
+        
+        Args:
+            memory_config: Optional MemoryConfig for embedding model configuration.
+                          If not provided, must be passed to execute_hybrid_search.
+        """
+        self.memory_config = memory_config
         logger.info("SearchService initialized")
     
     def extract_content_from_result(self, result: dict) -> str:
@@ -93,12 +103,13 @@ class SearchService:
         self,
         group_id: str,
         question: str,
-        limit: int = 5,
+        limit: int = 15,
         search_type: str = "hybrid",
         include: Optional[List[str]] = None,
         rerank_alpha: float = 0.4,
         output_path: str = "search_results.json",
-        return_raw_results: bool = False
+        return_raw_results: bool = False,
+        memory_config: "MemoryConfig" = None,
     ) -> Tuple[str, str, Optional[dict]]:
         """
         Execute hybrid search and return clean content.
@@ -112,6 +123,7 @@ class SearchService:
             rerank_alpha: Weight for BM25 scores in reranking (default: 0.4)
             output_path: Path to save search results (default: "search_results.json")
             return_raw_results: If True, also return the raw search results as third element (default: False)
+            memory_config: MemoryConfig object for embedding model. Falls back to self.memory_config if not provided.
         
         Returns:
             Tuple of (clean_content, cleaned_query, raw_results)
@@ -119,12 +131,17 @@ class SearchService:
         """
         if include is None:
             include = ["statements", "chunks", "entities", "summaries"]
-        
+
+        # Use provided memory_config or fall back to instance config
+        config = memory_config or self.memory_config
+        if not config:
+            raise ValueError("memory_config is required for search - either pass it to __init__ or execute_hybrid_search")
+
         # Clean query
         cleaned_query = self.clean_query(question)
-        
+
         try:
-            # Execute search
+            # Execute search using memory_config
             answer = await run_hybrid_search(
                 query_text=cleaned_query,
                 search_type=search_type,
@@ -132,7 +149,8 @@ class SearchService:
                 limit=limit,
                 include=include,
                 output_path=output_path,
-                rerank_alpha=rerank_alpha
+                memory_config=config,
+                rerank_alpha=rerank_alpha,
             )
             
             # Extract results based on search type and include parameter

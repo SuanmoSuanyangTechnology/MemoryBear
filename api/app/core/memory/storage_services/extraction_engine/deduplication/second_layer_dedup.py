@@ -10,15 +10,27 @@
 
 from __future__ import annotations
 
-from typing import List, Dict, Any, Tuple
 from datetime import datetime
+from typing import Any, Dict, List, Tuple
+
+from app.core.memory.models.graph_models import (
+    EntityEntityEdge,
+    ExtractedEntityNode,
+    StatementEntityEdge,
+)
+from app.core.memory.models.variate_config import DedupConfig
+from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (  # 导入报告写入以在跳过时追加说明
+    _write_dedup_fusion_report,
+    deduplicate_entities_and_edges,
+)
+from app.repositories.neo4j.graph_search import (
+    get_dedup_candidates_for_entities,  # 导入ge函数，用于从 Neo4j 中检索与输入实体可能重复的候选实体（去重的核心检索逻辑）。
+)
 
 # 使用新的仓储层
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector # 导入 Neo4j 数据库连接器类，用于与 Neo4j 数据库进行交互
-from app.repositories.neo4j.graph_search import get_dedup_candidates_for_entities # 导入ge函数，用于从 Neo4j 中检索与输入实体可能重复的候选实体（去重的核心检索逻辑）。
-from app.core.memory.models.graph_models import ExtractedEntityNode, StatementEntityEdge, EntityEntityEdge
-from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import deduplicate_entities_and_edges, _write_dedup_fusion_report  # 导入报告写入以在跳过时追加说明
-from app.core.memory.models.variate_config import DedupConfig
+from app.repositories.neo4j.neo4j_connector import (
+    Neo4jConnector,  # 导入 Neo4j 数据库连接器类，用于与 Neo4j 数据库进行交互
+)
 
 
 def _parse_dt(val: Any) -> datetime: # 定义内部辅助函数_parse_dt，用于将任意类型的输入值解析为datetime对象（处理实体节点中的时间字段）
@@ -72,6 +84,7 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
     statement_entity_edges: List[StatementEntityEdge], # 输入的语句实体边列表，用于处理实体之间的关系
     entity_entity_edges: List[EntityEntityEdge], # 输入的实体实体边列表，用于处理实体之间的关系
     dedup_config: DedupConfig | None = None,
+    llm_client = None,
 ) -> Tuple[List[ExtractedEntityNode], List[StatementEntityEdge], List[EntityEntityEdge]]:
     """
     第二层去重消歧：
@@ -137,13 +150,14 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
     union_entities: List[ExtractedEntityNode] = db_candidate_models + list(entity_nodes)
 
     # 融合（内部执行精确/模糊/LLM 决策；随后再做边重定向与去重）
-    fused_entities, fused_stmt_entity_edges, fused_entity_entity_edges = await deduplicate_entities_and_edges(
+    fused_entities, fused_stmt_entity_edges, fused_entity_entity_edges, _ = await deduplicate_entities_and_edges(
         union_entities,
         statement_entity_edges,
         entity_entity_edges,
         report_stage="第二层去重消歧",
         report_append=True,
         dedup_config=dedup_config,
+        llm_client=llm_client,
     )
 
     return fused_entities, fused_stmt_entity_edges, fused_entity_entity_edges

@@ -1,9 +1,17 @@
-import email
-from pydantic import BaseModel, Field, EmailStr, field_serializer, computed_field, ConfigDict
 import datetime
+import email
 import uuid
-from typing import Literal
-from app.models.workspace_model import WorkspaceRole, InviteStatus
+from typing import Literal, Optional
+
+from app.models.workspace_model import InviteStatus, WorkspaceRole
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    computed_field,
+    field_serializer,
+)
 
 
 class WorkspaceBase(BaseModel):
@@ -170,3 +178,19 @@ class InviteValidateResponse(BaseModel):
 
 class InviteAcceptRequest(BaseModel):
     token: str = Field(..., description="邀请令牌")
+
+
+class WorkspaceModelsUpdate(BaseModel):
+    """工作空间模型配置更新请求"""
+    llm: Optional[uuid.UUID] = Field(default=None, description="LLM模型ID")
+    embedding: Optional[uuid.UUID] = Field(default=None, description="嵌入模型ID") 
+    rerank: Optional[uuid.UUID] = Field(default=None, description="重排序模型ID")
+
+
+class WorkspaceModelsConfig(BaseModel):
+    """工作空间模型配置响应"""
+    model_config = ConfigDict(from_attributes=True)
+    
+    llm: Optional[str] = Field(default=None, description="LLM模型ID")
+    embedding: Optional[str] = Field(default=None, description="嵌入模型ID")
+    rerank: Optional[str] = Field(default=None, description="重排序模型ID")

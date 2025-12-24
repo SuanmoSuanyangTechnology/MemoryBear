@@ -26,7 +26,7 @@ def chunk(filename, binary, lang, callback=None, seq2txt_mdl=None, **kwargs):
             tmp_path = os.path.abspath(tmpf.name)
 
         callback(0.1, "USE Sequence2Txt LLM to transcription the audio")
-        ans = seq2txt_mdl.transcription(tmp_path)
+        ans, ans_num_tokens = seq2txt_mdl.transcription(tmp_path)
         callback(0.8, "Sequence2Txt LLM respond: %s ..." % ans[:32])
 
         tokenize(doc, ans, eng)
