@@ -1,12 +1,13 @@
 import uuid
 from functools import wraps
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 
 from app.db import get_db, SessionLocal
+from app.models import App
 from app.schemas import token_schema
 from app.core.config import settings
 from app.core.security import get_token_id
@@ -25,6 +26,51 @@ auth_logger = get_auth_logger()
 security_logger = get_security_logger()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+
+class APIKeyExtractor:
+    """
+    Custom dependency to extract API Key from request headers
+    
+    Supports two formats:
+    1. Authorization: Bearer <api_key>
+    2. X-API-Key: <api_key>
+    """
+    
+    async def __call__(self, request: Request) -> str:
+        """Extract API Key from request headers
+        
+        Args:
+            request: FastAPI Request object
+        
+        Returns:
+            API Key string
+        
+        Raises:
+            HTTPException: If API Key is not found
+        """
+        # Try Authorization header first
+        auth_header = request.headers.get("Authorization")
+        if auth_header and " " in auth_header:
+            auth_scheme, auth_token = auth_header.split(" ", 1)
+            if auth_scheme.lower() == "bearer":
+                return auth_token
+        
+        # Try X-API-Key header
+        api_key = request.headers.get("X-API-Key")
+        if api_key:
+            return api_key
+        
+        # No API Key found
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API Key not found in request headers",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+api_key_extractor = APIKeyExtractor()
+
 
 
 async def get_current_user(
@@ -304,7 +350,7 @@ def workspace_access_guard(get_workspace_id_from_body: bool = False):
       - db: Session = Depends(get_db)
       - user 或 current_user: User = Depends(get_current_user)
       - workspace_id: uuid.UUID （query/path 参数）或 payload: AppCreate（body，含 workspace_id）
-    
+
     支持同步和异步函数。
     """
     import asyncio
@@ -360,7 +406,7 @@ def workspace_access_guard(get_workspace_id_from_body: bool = False):
 def get_uow() -> IUnitOfWork:
     """
     获取工作单元实例
-    
+
     Returns:
         IUnitOfWork: 工作单元实例
     """
@@ -373,7 +419,7 @@ def cur_workspace_access_guard():
     要求端点函数签名包含：
       - db: Session = Depends(get_db)
       - current_user: User = Depends(get_current_user)
-    
+
     支持同步和异步函数。
     """
     import asyncio
@@ -423,10 +469,10 @@ async def get_share_user_id(
 ) -> ShareTokenData:
     """
     从分享访问 token 中获取用户 ID 和 share_token
-    
+
     这个函数用于公开分享的接口，验证访问 token 并返回用户信息
     不需要验证用户是否存在或激活，只需要验证 token 的有效性和 share_token 是否有效
-    
+
     Returns:
         ShareTokenData: 包含 user_id 和 share_token
     """
@@ -468,5 +514,76 @@ async def get_share_user_id(
         auth_logger.error(f"验证分享访问 token 时发生错误: {str(e)}")
         raise credentials_exception
 
+
+async def get_app_or_workspace(
+        api_key: str = Depends(api_key_extractor),
+        db: Session = Depends(get_db)
+) -> App | Workspace:
+    """
+    Get App or Workspace from API Key
+    
+    Supports two API Key formats:
+    1. Authorization: Bearer <api_key>
+    2. X-API-Key: <api_key>
+    
+    Args:
+        api_key: API Key extracted from request headers
+        db: Database session
+    
+    Returns:
+        App or Workspace object based on API Key
+    
+    Raises:
+        HTTPException: If API Key is invalid or not found
+    """
+    from app.services.api_key_service import ApiKeyAuthService
+    from app.repositories.app_repository import get_apps_by_id
+    from app.repositories.workspace_repository import get_workspace_by_id
+    
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate API Key",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        auth_logger.debug(f"Validating API Key: {api_key[:10]}...")
+        
+        # Validate API Key
+        api_key_obj = ApiKeyAuthService.validate_api_key(db, api_key)
+        if not api_key_obj:
+            auth_logger.warning(f"Invalid or expired API Key: {api_key[:10]}...")
+            raise credentials_exception
+        
+        auth_logger.debug(f"API Key validated successfully, type: {api_key_obj.type}")
+        
+        # Return App or Workspace based on API Key type
+        if (api_key_obj.type == "agent" or api_key.type == "multi_agent") and api_key_obj.resource_id:
+            # App API Key
+            app = get_apps_by_id(db, api_key_obj.resource_id)
+            if not app:
+                auth_logger.warning(f"App not found for API Key: {api_key_obj.resource_id}")
+                raise credentials_exception
+            auth_logger.info(f"App access granted: {app.id}")
+            return app
+        
+        elif api_key_obj.type == "service":
+            # Workspace API Key
+            workspace = get_workspace_by_id(db, api_key_obj.workspace_id)
+            if not workspace:
+                auth_logger.warning(f"Workspace not found for API Key: {api_key_obj.workspace_id}")
+                raise credentials_exception
+            auth_logger.info(f"Workspace access granted: {workspace.id}")
+            return workspace
+        
+        else:
+            auth_logger.warning(f"Unsupported API Key type: {api_key_obj.type}")
+            raise credentials_exception
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        auth_logger.error(f"Error validating API Key: {str(e)}", exc_info=True)
+        raise credentials_exception
 
 

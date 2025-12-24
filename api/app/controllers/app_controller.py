@@ -361,7 +361,8 @@ async def draft_run(
         workspace_id=workspace_id,
         user=current_user
     )
-    if storage_type is None: storage_type = 'neo4j'
+    if storage_type is None: 
+        storage_type = 'neo4j'
     user_rag_memory_id = ''
     if workspace_id:
 
@@ -370,7 +371,8 @@ async def draft_run(
             name="USER_RAG_MERORY",
             workspace_id=workspace_id
         )
-        if knowledge: user_rag_memory_id = str(knowledge.id)
+        if knowledge: 
+            user_rag_memory_id = str(knowledge.id)
 
 
     # 提前验证和准备（在流式响应开始前完成）
