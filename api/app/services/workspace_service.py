@@ -1,36 +1,38 @@
-from sqlalchemy.orm import Session
-from typing import List, Optional
-import uuid
-import secrets
-import hashlib
 import datetime
-from fastapi import HTTPException, status
+import hashlib
+import secrets
+import uuid
+from os import getenv
+from typing import List, Optional
+
+from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, PermissionDeniedException
-from app.models.tenant_model import Tenants
+from app.core.logging_config import get_business_logger
 from app.models.user_model import User
-from app.models.app_model import App
-from app.models.end_user_model import EndUser
-from app.models.workspace_model import Workspace, WorkspaceRole, WorkspaceInvite, InviteStatus, WorkspaceMember
-from app.schemas.workspace_schema import (
-    WorkspaceCreate, 
-    WorkspaceUpdate, 
-    WorkspaceInviteCreate, 
-    WorkspaceInviteResponse,
-    InviteValidateResponse,
-    InviteAcceptRequest,
-    WorkspaceMemberUpdate
+from app.models.workspace_model import (
+    InviteStatus,
+    Workspace,
+    WorkspaceMember,
+    WorkspaceRole,
 )
 from app.repositories import workspace_repository
 from app.repositories.workspace_invite_repository import WorkspaceInviteRepository
-from app.core.logging_config import get_business_logger
-from app.core.config import settings
-from app.services import user_service
-from os import getenv
+from app.schemas.workspace_schema import (
+    InviteAcceptRequest,
+    InviteValidateResponse,
+    WorkspaceCreate,
+    WorkspaceInviteCreate,
+    WorkspaceInviteResponse,
+    WorkspaceMemberUpdate,
+    WorkspaceModelsUpdate,
+    WorkspaceUpdate,
+)
+from dotenv import load_dotenv
+from sqlalchemy.orm import Session
+
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
-import os  #
-from dotenv import load_dotenv
 load_dotenv()
 def switch_workspace(
     db: Session,
@@ -134,10 +136,9 @@ def create_workspace(
                 f"{db_workspace.id} 创建知识库"
             )
             try:
-                import os
-                from app.schemas.knowledge_schema import KnowledgeCreate
                 from app.models.knowledge_model import KnowledgeType, PermissionType
                 from app.repositories import knowledge_repository
+                from app.schemas.knowledge_schema import KnowledgeCreate
                 
                 # 创建知识库数据
                 knowledge_data = KnowledgeCreate(
@@ -232,7 +233,7 @@ def get_workspace_members(
         )
 
     # 权限检查：工作空间成员或超级管理员可以查看成员列表
-    from app.core.permissions import permission_service, Subject, Resource, Action
+    from app.core.permissions import Action, Resource, Subject, permission_service
     member = workspace_repository.get_member_in_workspace(
         db=db, user_id=user.id, workspace_id=workspace_id
     )
@@ -287,7 +288,7 @@ def _check_workspace_member_permission(db: Session, workspace_id: uuid.UUID, use
         )
     
     # 使用统一权限服务检查访问权限
-    from app.core.permissions import permission_service, Subject, Resource, Action
+    from app.core.permissions import Action, Resource, Subject, permission_service
     
     # 获取用户的工作空间成员关系
     member = workspace_repository.get_member_in_workspace(
@@ -325,7 +326,7 @@ def _check_workspace_admin_permission(db: Session, workspace_id: uuid.UUID, user
         )
     
     # 使用统一权限服务检查管理权限
-    from app.core.permissions import permission_service, Subject, Resource, Action
+    from app.core.permissions import Action, Resource, Subject, permission_service
     
     # 获取用户的工作空间成员关系
     member = workspace_repository.get_member_in_workspace(
@@ -802,3 +803,54 @@ def get_workspace_models_configs(
         f"llm={configs.get('llm')}, embedding={configs.get('embedding')}, rerank={configs.get('rerank')}"
     )
     return configs
+
+
+def update_workspace_models_configs(
+    db: Session,
+    workspace_id: uuid.UUID,
+    models_update: WorkspaceModelsUpdate,
+    user: User,
+) -> Workspace:
+    """更新工作空间的模型配置（llm, embedding, rerank）
+
+    Args:
+        db: 数据库会话
+        workspace_id: 工作空间ID
+        models_update: 模型配置更新对象
+        user: 当前用户
+
+    Returns:
+        Workspace: 更新后的工作空间对象
+    """
+    business_logger.info(f"用户 {user.username} 请求更新工作空间 {workspace_id} 的模型配置")
+
+    # 检查用户是否有管理员权限
+    db_workspace = _check_workspace_admin_permission(db, workspace_id, user)
+
+    try:
+        if models_update.llm is not None:
+            db_workspace.llm = str(models_update.llm) if models_update.llm else None
+            business_logger.debug(f"更新LLM配置: {models_update.llm}")
+        
+        if models_update.embedding is not None:
+            db_workspace.embedding = str(models_update.embedding) if models_update.embedding else None
+            business_logger.debug(f"更新嵌入模型配置: {models_update.embedding}")
+        
+        if models_update.rerank is not None:
+            db_workspace.rerank = str(models_update.rerank) if models_update.rerank else None
+            business_logger.debug(f"更新重排序模型配置: {models_update.rerank}")
+
+        db.add(db_workspace)
+        db.commit()
+        db.refresh(db_workspace)
+
+        business_logger.info(
+            f"工作空间模型配置更新成功: workspace_id={workspace_id}, "
+            f"llm={db_workspace.llm}, embedding={db_workspace.embedding}, rerank={db_workspace.rerank}"
+        )
+        return db_workspace
+
+    except Exception as e:
+        business_logger.error(f"工作空间模型配置更新失败: workspace_id={workspace_id} - {str(e)}")
+        db.rollback()
+        raise BusinessException(f"更新模型配置失败: {str(e)}", BizCode.INTERNAL_ERROR)
