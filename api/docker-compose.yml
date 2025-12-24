@@ -3,32 +3,6 @@ version: '3.9'
 services:
   # MCP Server - standalone service
   mcp-server:
-    image: redbear-mem:latest
-    container_name: mcp-server
-    ports:
-      - "8081:8081"  # MCP server port
-    env_file:
-      - .env
-    environment:
-      - SERVER_IP=0.0.0.0  # Bind to all interfaces
-    volumes:
-      - ./files:/files
-      - /etc/localtime:/etc/localtime:ro
-    command: python -m app.core.memory.agent.mcp_server.server
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/sse')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-    networks:
-      - default
-      - celery
-
-  # FastAPI application - connects to  MCP server
-  # MCP Server - standalone service
-  mcp-server:
     image: redbear-mem-open:latest
     container_name: mcp-server
     ports:
@@ -61,9 +35,6 @@ services:
     env_file:
       - .env
     environment:
-      - MCP_SERVER_URL=http://mcp-server:8081
-      - SERVER_IP=0.0.0.0  # Ensure MCP server binds to all interfaces
-    environment:
       - MCP_SERVER_URL=http://mcp-server:8081  # Back to using container name
       - SERVER_IP=0.0.0.0  # Ensure MCP server binds to all interfaces
     volumes:
@@ -89,16 +60,7 @@ services:
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
-      - /etc/localtime:/etc/localtime:ro
     command: celery -A app.celery_worker.celery_app worker --loglevel=info
-    depends_on:
-      mcp-server:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - celery
-networks:
-  celery:
     depends_on:
       mcp-server:
         condition: service_healthy
