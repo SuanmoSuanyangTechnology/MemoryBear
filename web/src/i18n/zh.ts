@@ -237,6 +237,8 @@ export const zh = {
       answer: '答案',
       normalMode: '常规模式',
       qaMode: '问答模式',
+      fileParsingSettings: '文件解析设置',
+      pdfEnhancementAnalysis: 'PDF增强解析',
       createForm: {
         name: '名称',
         embedding_id: '嵌入模型',
