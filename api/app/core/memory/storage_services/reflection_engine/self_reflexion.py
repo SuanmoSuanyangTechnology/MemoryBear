@@ -239,8 +239,6 @@ class ReflectionEngine:
             # # 检查是否真的有冲突
             conflicts_found=''
 
-            # 记录冲突数据
-            await self._log_data("conflict", conflict_data)
             conflicts_found=''
             # 3. 解决冲突
             solved_data = await self._resolve_conflicts(conflict_data, statement_databasets)
@@ -258,8 +256,6 @@ class ReflectionEngine:
             conflicts_resolved = len(solved_data)
             logging.info(f"解决了 {conflicts_resolved} 个冲突")
 
-            # 记录解决方案
-            await self._log_data("solved_data", solved_data)
 
             # 4. 应用反思结果（更新记忆库）
             memories_updated=await self._apply_reflection_results(solved_data)
@@ -360,14 +356,7 @@ class ReflectionEngine:
             memory_verifies.append(item['memory_verify'])
         result_data['memory_verifies'] = memory_verifies
         result_data['quality_assessments'] = quality_assessments
-
-        # 检查是否真的有冲突
-        has_conflict = conflict_data[0].get('conflict', False)
-        conflicts_found = len(conflict_data[0]['data']) if has_conflict else 0
-        logging.info(f"冲突状态: {has_conflict}, 发现 {conflicts_found} 个冲突")
-
-        # 记录冲突数据
-        await self._log_data("conflict", conflict_data)
+        conflicts_found=''
 
         # Clearn conflict_data，And memory_verify和quality_assessment
         cleaned_conflict_data = []
@@ -377,6 +366,7 @@ class ReflectionEngine:
                 'conflict': item['conflict']
             }
             cleaned_conflict_data.append(cleaned_item)
+
         # 3. 解决冲突
         solved_data = await self._resolve_conflicts(cleaned_conflict_data, source_data)
         if not solved_data:
@@ -615,26 +605,7 @@ class ReflectionEngine:
         success_count = await neo4j_data(changes)
         return success_count
 
-    async def _log_data(self, label: str, data: Any) -> None:
-        """
-        记录数据到文件
 
-        Args:
-            label: 数据标签
-            data: 要记录的数据
-        """
-
-        def _write():
-            try:
-                with open("reflexion_data.json", "a", encoding="utf-8") as f:
-                    f.write(f"### {label} ###\n")
-                    json.dump(data, f, ensure_ascii=False, indent=4)
-                    f.write("\n\n")
-            except Exception as e:
-                logging.warning(f"记录数据失败: {e}")
-
-        # 在后台线程中执行写入，避免阻塞事件循环
-        await asyncio.to_thread(_write)
 
     # 基于时间的反思方法
     async def time_based_reflection(
@@ -721,6 +692,5 @@ class ReflectionEngine:
         else:
 
             raise ValueError(f"未知的反思基线: {self.config.baseline}")
-
 
 
