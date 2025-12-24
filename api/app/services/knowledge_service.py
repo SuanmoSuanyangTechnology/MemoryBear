@@ -45,7 +45,7 @@ def get_chunded_knowledgeids(
     business_logger.debug(f"Query the list of vectorized knowledge base IDs: username={current_user.username}")
 
     try:
-        items = knowledge_repository.get_chunded_knowledgeids(
+        items = knowledge_repository.get_chunked_knowledgeids(
             db=db,
             filters=filters
         )

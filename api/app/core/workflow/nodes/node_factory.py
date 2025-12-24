@@ -7,7 +7,7 @@
 import logging
 from typing import Any, Union
 
-# from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
+from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
 from app.core.workflow.nodes.agent import AgentNode
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.end import EndNode
@@ -29,7 +29,7 @@ WorkflowNode = Union[
     AgentNode,
     TransformNode,
     AssignerNode,
-    # KnowledgeRetrievalNode,
+    KnowledgeRetrievalNode,
 ]
 
 
@@ -47,7 +47,7 @@ class NodeFactory:
         NodeType.AGENT: AgentNode,
         NodeType.TRANSFORM: TransformNode,
         NodeType.IF_ELSE: IfElseNode,
-        # NodeType.KNOWLEDGE_RETRIEVAL: KnowledgeRetrievalNode,
+        NodeType.KNOWLEDGE_RETRIEVAL: KnowledgeRetrievalNode,
         NodeType.ASSIGNER: AssignerNode,
     }
 
