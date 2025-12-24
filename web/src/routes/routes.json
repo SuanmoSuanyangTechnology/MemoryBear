@@ -5,6 +5,9 @@
       { "path": "/user-management", "element": "UserManagement" },
       { "path": "/model", "element": "ModelManagement" },
       { "path": "/space", "element": "SpaceManagement" },
+      { "path": "/pricing", "element": "Pricing" },
+      { "path": "/order-pay", "element": "OrderPayment" },
+      { "path": "/orders", "element": "OrderHistory" },
       { "path": "/no-permission", "element": "NoPermission" }
     ]
   },
