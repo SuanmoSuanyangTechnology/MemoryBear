@@ -11,47 +11,85 @@ export const useNavigationBreadcrumbs = (source: 'space' | 'manage' = 'manage') 
     const menus = allMenus[source] || [];
 
     // 查找匹配的菜单项并构建keyPath
-    const findMenuKeyPath = (menuList: any[]): string[] | null => {
-      const checkDynamicMatch = (pattern: string, path: string) => {
-        const pathPattern = pattern.replace(/:[\w-]+/g, '[^/]+');
-        const regex = new RegExp(`^${pathPattern}$`);
-        return regex.test(path);
-      };
+    const findMenuKeyPath = (menuList: any[], parentKeys: string[] = []): string[] | null => {
+      let bestMatch: { path: string; parentId?: string; score: number } | null = null;
       
       for (const menu of menuList) {
+        // 检查子菜单
         if (menu.subs && menu.subs.length > 0) {
+          const menuPath = menu.path ? (menu.path[0] !== '/' ? '/' + menu.path : menu.path) : '';
           for (const sub of menu.subs) {
-            // 检查三级菜单
-            if (sub.subs && sub.subs.length > 0) {
-              for (const subSub of sub.subs) {
-                if (subSub.path) {
-                  const subSubPath = subSub.path[0] !== '/' ? '/' + subSub.path : subSub.path;
-                  if (subSubPath === currentPath || (subSubPath.includes(':') && checkDynamicMatch(subSubPath, currentPath))) {
-                    return [subSub.path, `${sub.id}`, `${menu.id}`];
-                  }
-                }
-              }
-            }
-            
-            // 检查二级菜单
             if (sub.path) {
               const subPath = sub.path[0] !== '/' ? '/' + sub.path : sub.path;
-              if (subPath === currentPath || (subPath.includes(':') && checkDynamicMatch(subPath, currentPath))) {
+              
+              // 精确匹配优先
+              if (subPath === currentPath) {
                 return [sub.path, `${menu.id}`];
+              }
+              console.log('menuPath', menuPath)
+              // 动态路由匹配
+              if (subPath.includes(':')) {
+                // 检查是否在父菜单下
+                if (menuPath && currentPath.startsWith(menuPath + '/')) {
+                  const relativePath = currentPath.replace(menuPath, '');
+                  const pathSegments = subPath.split('/');
+                  const relativeSegments = relativePath.split('/');
+                  if (pathSegments.length === relativeSegments.length) {
+                    const pathPattern = subPath.replace(/:[\w-]+/g, '[^/]+').replace(/\[[\w-]+\]/g, '[^/]+');
+                    const regex = new RegExp(`^${pathPattern}$`);
+                    if (regex.test(relativePath)) {
+                      return [sub.path, `${menu.id}`];
+                    }
+                  }
+                }
+                // 直接匹配子菜单路径
+                const pathSegments = subPath.split('/');
+                const currentSegments = currentPath.split('/');
+                if (pathSegments.length === currentSegments.length) {
+                  const pathPattern = subPath.replace(/:[\w-]+/g, '[^/]+').replace(/\[[\w-]+\]/g, '[^/]+');
+                  const regex = new RegExp(`^${pathPattern}$`);
+                  if (regex.test(currentPath)) {
+                    return [sub.path, `${menu.id}`];
+                  }
+                }
               }
             }
           }
         }
         
-        // 检查一级菜单
+        // 检查主菜单
         if (menu.path) {
           const menuPath = menu.path[0] !== '/' ? '/' + menu.path : menu.path;
-          if (menuPath === currentPath || (menuPath.includes(':') && checkDynamicMatch(menuPath, currentPath))) {
-            return [menu.path];
+          // 精确匹配优先
+          if (menuPath === currentPath) {
+            return [menu.path, ...parentKeys].reverse();
+          }
+          // 动态路由匹配
+          if (menuPath.includes(':')) {
+            const pathSegments = menuPath.split('/');
+            const currentSegments = currentPath.split('/');
+            if (pathSegments.length === currentSegments.length) {
+              const pathPattern = menuPath.replace(/:[\w-]+/g, '[^/]+').replace(/\[[\w-]+\]/g, '[^/]+');
+              const regex = new RegExp(`^${pathPattern}$`);
+              if (regex.test(currentPath)) {
+                const score = menuPath.split('/').length;
+                if (!bestMatch || score > bestMatch.score) {
+                  bestMatch = { path: menu.path, score };
+                }
+              }
+            }
+          } else if (currentPath.startsWith(menuPath + '/')) {
+            const score = menuPath.split('/').length;
+            if (!bestMatch || score > bestMatch.score) {
+              bestMatch = { path: menu.path, score };
+            }
           }
         }
       }
       
+      if (bestMatch) {
+        return bestMatch.parentId ? [bestMatch.path, bestMatch.parentId] : [bestMatch.path];
+      }
       return null;
     };
 
