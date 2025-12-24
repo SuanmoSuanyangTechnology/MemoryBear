@@ -192,7 +192,9 @@ async def get_node_statistics_api(
         # 调用新的记忆类型统计函数
         result = await analytics_memory_types(db, end_user_id)
         
-        api_logger.info(f"成功获取记忆类型统计: end_user_id={end_user_id}, 感知记忆={result.get('感知记忆', 0)}")
+        # 计算总数用于日志
+        total_count = sum(item["count"] for item in result)
+        api_logger.info(f"成功获取记忆类型统计: end_user_id={end_user_id}, 总记忆数={total_count}, 类型数={len(result)}")
         return success(data=result, msg="查询成功")
     except Exception as e:
         api_logger.error(f"记忆类型查询失败: end_user_id={end_user_id}, error={str(e)}")

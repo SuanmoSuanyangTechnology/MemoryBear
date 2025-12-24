@@ -537,35 +537,43 @@ async def analytics_node_statistics(
 async def analytics_memory_types(
     db: Session,
     end_user_id: Optional[str] = None
-) -> Dict[str, Any]:
+) -> List[Dict[str, Any]]:
     """
-    统计8种记忆类型的数量
+    统计8种记忆类型的数量和百分比
     
     计算规则：
-    1. 感知记忆 = statement + entity
-    2. 工作记忆 = chunk + entity
-    3. 短期记忆 = chunk
-    4. 长期记忆 = entity
-    5. 显性记忆 = 1/2 * entity
-    6. 隐形记忆 = 1/3 * entity
-    7. 情绪记忆 = statement
-    8. 情景记忆 = memory_summary
+    1. 感知记忆 (PERCEPTUAL_MEMORY) = statement + entity
+    2. 工作记忆 (WORKING_MEMORY) = chunk + entity
+    3. 短期记忆 (SHORT_TERM_MEMORY) = chunk
+    4. 长期记忆 (LONG_TERM_MEMORY) = entity
+    5. 显性记忆 (EXPLICIT_MEMORY) = 1/2 * entity
+    6. 隐性记忆 (IMPLICIT_MEMORY) = 1/3 * entity
+    7. 情绪记忆 (EMOTIONAL_MEMORY) = statement
+    8. 情景记忆 (EPISODIC_MEMORY) = memory_summary
     
     Args:
         db: 数据库会话
         end_user_id: 可选的终端用户ID (UUID)，用于过滤特定用户的节点
         
     Returns:
-        {
-            "感知记忆": int,
-            "工作记忆": int,
-            "短期记忆": int,
-            "长期记忆": int,
-            "显性记忆": int,
-            "隐形记忆": int,
-            "情绪记忆": int,
-            "情景记忆": int
-        }
+        [
+            {
+                "type": str,  # 记忆类型枚举值 (如 PERCEPTUAL_MEMORY, WORKING_MEMORY 等)
+                "count": int,  # 该类型的数量
+                "percentage": float  # 该类型在所有记忆中的占比
+            },
+            ...
+        ]
+        
+    记忆类型枚举值：
+        - PERCEPTUAL_MEMORY: 感知记忆
+        - WORKING_MEMORY: 工作记忆
+        - SHORT_TERM_MEMORY: 短期记忆
+        - LONG_TERM_MEMORY: 长期记忆
+        - EXPLICIT_MEMORY: 显性记忆
+        - IMPLICIT_MEMORY: 隐性记忆
+        - EMOTIONAL_MEMORY: 情绪记忆
+        - EPISODIC_MEMORY: 情景记忆
     """
     # 定义需要查询的节点类型
     node_types = {
@@ -604,17 +612,30 @@ async def analytics_memory_types(
     chunk_count = node_counts.get("Chunk", 0)
     memory_summary_count = node_counts.get("MemorySummary", 0)
     
-    # 按规则计算8种记忆类型
-    memory_types = {
-        "感知记忆": statement_count + entity_count,
-        "工作记忆": chunk_count + entity_count,
-        "短期记忆": chunk_count,
-        "长期记忆": entity_count,
-        "显性记忆": entity_count // 2,  # 1/2 entity，使用整除
-        "隐形记忆": entity_count // 3,  # 1/3 entity，使用整除
-        "情绪记忆": statement_count,
-        "情景记忆": memory_summary_count
+    # 按规则计算8种记忆类型的数量（使用英文枚举作为key）
+    memory_counts = {
+        "PERCEPTUAL_MEMORY": statement_count + entity_count,      # 感知记忆
+        "WORKING_MEMORY": chunk_count + entity_count,             # 工作记忆
+        "SHORT_TERM_MEMORY": chunk_count,                         # 短期记忆
+        "LONG_TERM_MEMORY": entity_count,                         # 长期记忆
+        "EXPLICIT_MEMORY": entity_count // 2,                     # 显性记忆 (1/2 entity)
+        "IMPLICIT_MEMORY": entity_count // 3,                     # 隐性记忆 (1/3 entity)
+        "EMOTIONAL_MEMORY": statement_count,                      # 情绪记忆
+        "EPISODIC_MEMORY": memory_summary_count                   # 情景记忆
     }
+    
+    # 计算总数
+    total = sum(memory_counts.values())
+    
+    # 构建返回数据，包含 type、count 和 percentage
+    memory_types = []
+    for memory_type, count in memory_counts.items():
+        percentage = round((count / total * 100), 2) if total > 0 else 0.0
+        memory_types.append({
+            "type": memory_type,
+            "count": count,
+            "percentage": percentage
+        })
     
     return memory_types
 
