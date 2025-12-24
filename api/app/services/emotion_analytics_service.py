@@ -65,19 +65,9 @@ class EmotionAnalyticsService:
         """获取情绪标签统计
         
         查询指定用户的情绪类型分布，包括计数、百分比和平均强度。
-        
-        Args:
-            end_user_id: 宿主ID（用户组ID）
-            emotion_type: 可选的情绪类型过滤
-            start_date: 可选的开始日期（ISO格式）
-            end_date: 可选的结束日期（ISO格式）
-            limit: 返回结果的最大数量
-            
-        Returns:
-            Dict: 包含情绪标签统计的响应数据：
-                - tags: 情绪标签列表
-                - total_count: 总情绪数量
-                - time_range: 时间范围信息
+        确保返回所有6个情绪维度（joy、sadness、anger、fear、surprise、neutral），
+        即使某些维度没有数据也会返回count=0的记录。
+
         """
         try:
             logger.info(f"获取情绪标签统计: user={end_user_id}, type={emotion_type}, "
@@ -92,8 +82,34 @@ class EmotionAnalyticsService:
                 limit=limit
             )
             
+            # 定义所有6个情绪维度
+            all_emotion_types = ['joy', 'sadness', 'anger', 'fear', 'surprise', 'neutral']
+            
+            # 将查询结果转换为字典，方便查找
+            tags_dict = {tag["emotion_type"]: tag for tag in tags}
+            
+            # 补全缺失的情绪维度
+            complete_tags = []
+            for emotion in all_emotion_types:
+                if emotion in tags_dict:
+                    complete_tags.append(tags_dict[emotion])
+                else:
+                    # 如果该情绪类型不存在，添加默认值
+                    complete_tags.append({
+                        "emotion_type": emotion,
+                        "count": 0,
+                        "percentage": 0.0,
+                        "avg_intensity": 0.0
+                    })
+            
             # 计算总数
-            total_count = sum(tag["count"] for tag in tags)
+            total_count = sum(tag["count"] for tag in complete_tags)
+            
+            # 如果有数据，重新计算百分比（因为补全了0值项）
+            if total_count > 0:
+                for tag in complete_tags:
+                    if tag["count"] > 0:
+                        tag["percentage"] = round((tag["count"] / total_count) * 100, 2)
             
             # 构建时间范围信息
             time_range = {}
@@ -104,12 +120,12 @@ class EmotionAnalyticsService:
             
             # 格式化响应
             response = {
-                "tags": tags,
+                "tags": complete_tags,
                 "total_count": total_count,
                 "time_range": time_range if time_range else None
             }
             
-            logger.info(f"情绪标签统计完成: total_count={total_count}, tags_count={len(tags)}")
+            logger.info(f"情绪标签统计完成: total_count={total_count}, tags_count={len(complete_tags)}")
             return response
             
         except Exception as e:

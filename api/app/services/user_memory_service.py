@@ -534,6 +534,91 @@ async def analytics_node_statistics(
     return data
 
 
+async def analytics_memory_types(
+    db: Session,
+    end_user_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    统计8种记忆类型的数量
+    
+    计算规则：
+    1. 感知记忆 = statement + entity
+    2. 工作记忆 = chunk + entity
+    3. 短期记忆 = chunk
+    4. 长期记忆 = entity
+    5. 显性记忆 = 1/2 * entity
+    6. 隐形记忆 = 1/3 * entity
+    7. 情绪记忆 = statement
+    8. 情景记忆 = memory_summary
+    
+    Args:
+        db: 数据库会话
+        end_user_id: 可选的终端用户ID (UUID)，用于过滤特定用户的节点
+        
+    Returns:
+        {
+            "感知记忆": int,
+            "工作记忆": int,
+            "短期记忆": int,
+            "长期记忆": int,
+            "显性记忆": int,
+            "隐形记忆": int,
+            "情绪记忆": int,
+            "情景记忆": int
+        }
+    """
+    # 定义需要查询的节点类型
+    node_types = {
+        "Statement": "Statement",
+        "Entity": "ExtractedEntity",
+        "Chunk": "Chunk",
+        "MemorySummary": "MemorySummary"
+    }
+    
+    # 存储每种节点类型的计数
+    node_counts = {}
+    
+    # 查询每种节点类型的数量
+    for key, node_type in node_types.items():
+        if end_user_id:
+            query = f"""
+            MATCH (n:{node_type})
+            WHERE n.group_id = $group_id
+            RETURN count(n) as count
+            """
+            result = await _neo4j_connector.execute_query(query, group_id=end_user_id)
+        else:
+            query = f"""
+            MATCH (n:{node_type})
+            RETURN count(n) as count
+            """
+            result = await _neo4j_connector.execute_query(query)
+        
+        # 提取计数结果
+        count = result[0]["count"] if result and len(result) > 0 else 0
+        node_counts[key] = count
+    
+    # 获取各节点类型的数量
+    statement_count = node_counts.get("Statement", 0)
+    entity_count = node_counts.get("Entity", 0)
+    chunk_count = node_counts.get("Chunk", 0)
+    memory_summary_count = node_counts.get("MemorySummary", 0)
+    
+    # 按规则计算8种记忆类型
+    memory_types = {
+        "感知记忆": statement_count + entity_count,
+        "工作记忆": chunk_count + entity_count,
+        "短期记忆": chunk_count,
+        "长期记忆": entity_count,
+        "显性记忆": entity_count // 2,  # 1/2 entity，使用整除
+        "隐形记忆": entity_count // 3,  # 1/3 entity，使用整除
+        "情绪记忆": statement_count,
+        "情景记忆": memory_summary_count
+    }
+    
+    return memory_types
+
+
 async def analytics_graph_data(
     db: Session,
     end_user_id: str,

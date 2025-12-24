@@ -272,7 +272,7 @@ async def get_workspace_total_memory_count(
             from app.repositories.end_user_repository import EndUserRepository
             repo = EndUserRepository(db)
             end_user = repo.get_by_id(uuid.UUID(end_user_id))
-            user_name = end_user.name if end_user else None
+            user_name = end_user.other_name if end_user else None
             
             return {
                 "total_memory_count": search_result.get("total", 0),

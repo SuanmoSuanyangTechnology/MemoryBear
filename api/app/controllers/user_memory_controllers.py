@@ -14,6 +14,7 @@ from app.core.error_codes import BizCode
 from app.services.user_memory_service import (
     UserMemoryService,
     analytics_node_statistics,
+    analytics_memory_types,
     analytics_graph_data,
 )
 from app.schemas.response_schema import ApiResponse
@@ -185,21 +186,17 @@ async def get_node_statistics_api(
         api_logger.warning(f"用户 {current_user.username} 尝试查询节点统计但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
     
-    api_logger.info(f"节点统计请求: end_user_id={end_user_id}, user={current_user.username}, workspace={workspace_id}")
+    api_logger.info(f"记忆类型统计请求: end_user_id={end_user_id}, user={current_user.username}, workspace={workspace_id}")
     
     try:
-        result = await analytics_node_statistics(db, end_user_id)
+        # 调用新的记忆类型统计函数
+        result = await analytics_memory_types(db, end_user_id)
         
-        # 检查是否有错误消息
-        if "message" in result and result["total"] == 0:
-            api_logger.warning(f"节点统计查询返回空结果: {result.get('message')}")
-            return success(data=result, msg=result.get("message", "查询成功"))
-        
-        api_logger.info(f"成功获取节点统计: end_user_id={end_user_id}, total={result['total']}")
+        api_logger.info(f"成功获取记忆类型统计: end_user_id={end_user_id}, 感知记忆={result.get('感知记忆', 0)}")
         return success(data=result, msg="查询成功")
     except Exception as e:
-        api_logger.error(f"节点统计查询失败: end_user_id={end_user_id}, error={str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "节点统计查询失败", str(e))
+        api_logger.error(f"记忆类型查询失败: end_user_id={end_user_id}, error={str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "记忆类型查询失败", str(e))
 
 @router.get("/analytics/graph_data", response_model=ApiResponse)
 async def get_graph_data_api(
@@ -293,7 +290,7 @@ async def get_end_user_profile(
         # 构建响应数据
         profile_data = EndUserProfileResponse(
             id=end_user.id,
-            name=end_user.name,
+            other_name=end_user.other_name,
             position=end_user.position,
             department=end_user.department,
             contact=end_user.contact,
@@ -364,7 +361,7 @@ async def update_end_user_profile(
         # 构建响应数据
         profile_data = EndUserProfileResponse(
             id=end_user.id,
-            name=end_user.name,
+            other_name=end_user.other_name,
             position=end_user.position,
             department=end_user.department,
             contact=end_user.contact,
