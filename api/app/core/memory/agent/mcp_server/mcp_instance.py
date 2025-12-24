@@ -8,7 +8,4 @@ from mcp.server.fastmcp import FastMCP
 
 # Initialize FastMCP server instance
 # This instance is shared across all tool modules
-mcp = FastMCP(
-    'data_flow',
-    allowed_hosts=["mcp-server", "localhost"]
-)
+mcp = FastMCP('data_flow')

@@ -147,6 +147,18 @@ def main():
         
         # Get MCP port from environment (default: 8081)
         mcp_port = int(os.getenv("MCP_PORT", "8081"))
+        logger.info(f"Starting MCP server on {settings.SERVER_IP}:{mcp_port} with SSE transport")
+        
+        # Configure DNS rebinding protection for Docker container compatibility
+        from mcp.server.fastmcp.server import TransportSecuritySettings
+        
+        # Disable DNS rebinding protection to allow Docker container hostnames
+        # This allows containers to connect using service names like 'mcp-server'
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False,
+        )
+        logger.info("DNS rebinding protection: disabled for Docker container compatibility")
+        
         # logger.info(f"Starting MCP server on {settings.SERVER_IP}:{mcp_port} with SSE transport")
         
         # Run the server with SSE transport for HTTP connections
