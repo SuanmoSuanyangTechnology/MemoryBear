@@ -50,9 +50,7 @@
         "entity2_name": "用户",
         "entity2": {
           "description": "叙述者，讲述个人工作与生活经历的个体",
-          "statement_id": "62beac695b1346f4871740a45db88782",
-          "name": "用户",
-          "id": "3d3896797b334572a80d57590026063d"
+          "name": "用户"
         }
       },
       {
@@ -62,9 +60,7 @@
         "entity2_name": "身份信息",
         "entity2": {
           "description": "用于个人身份识别的数据",
-          "statement_id": "030afd362e9b4110b139e68e5d3e7143",
-          "name": "身份信息",
-          "id": "aa766a517e82490599a9b3af54cfd933"
+          "name": "身份信息"
         }
       },
       {
@@ -74,9 +70,7 @@
         "entity2_name": "6222023847595898",
         "entity2": {
           "description": "用户的银行卡号码",
-          "statement_id": "6c7567cd1f3c478bb42d1b65383e6f2f",
-          "name": "6222023847595898",
-          "id": "610ba361918f4e68a65ce6ad06e5c7a0"
+          "name": "6222023847595898"
         }
       },
       {
@@ -88,9 +82,7 @@
           "entity_idx": 1,
           "aliases": ["上海办"],
           "description": "位于上海的工作办公场所",
-          "statement_id": "8b1b12e23b844b8088dfeb67da6ad669",
-          "name": "上海办公室",
-          "id": "fb702ef695c14e14af3e56786bc8815b"
+          "name": "上海办公室"
         }
       },
       {
@@ -101,9 +93,7 @@
         "entity2": {
           "aliases": ["京", "京城", "北平"],
           "description": "中国的首都城市，用户主要工作和生活所在地",
-          "statement_id": "62beac695b1346f4871740a45db88782",
-          "name": "北京",
-          "id": "81b2d1a571bb46a08a2d7a1e87efb945"
+          "name": "北京"
         }
       },
       {
@@ -113,9 +103,7 @@
         "entity2_name": "身份证号",
         "entity2": {
           "description": "中华人民共和国公民的身份号码",
-          "statement_id": "030afd362e9b4110b139e68e5d3e7143",
-          "name": "身份证号",
-          "id": "3e5f920645b2404fadb0e9ff60d1306e"
+          "name": "身份证号"
         }
       }
     ]

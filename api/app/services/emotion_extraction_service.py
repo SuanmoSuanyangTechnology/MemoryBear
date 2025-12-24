@@ -9,10 +9,12 @@ Classes:
 
 import logging
 from typing import Optional
-from app.core.memory.models.emotion_models import EmotionExtraction
-from app.models.data_config_model import DataConfig
-from app.core.memory.utils.llm.llm_utils import get_llm_client
+
 from app.core.memory.llm_tools.llm_client import LLMClientException
+from app.core.memory.models.emotion_models import EmotionExtraction
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.db import get_db_context
+from app.models.data_config_model import DataConfig
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,9 @@ class EmotionExtractionService:
         """
         if self.llm_client is None or model_id:
             effective_model_id = model_id or self.llm_id
-            self.llm_client = get_llm_client(effective_model_id)
+            with get_db_context() as db:
+                factory = MemoryClientFactory(db)
+                self.llm_client = factory.get_llm_client(effective_model_id)
         return self.llm_client
     
     async def extract_emotion(
@@ -142,7 +146,9 @@ class EmotionExtractionService:
         Returns:
             Formatted prompt string for LLM
         """
-        from app.core.memory.utils.prompt.prompt_utils import render_emotion_extraction_prompt
+        from app.core.memory.utils.prompt.prompt_utils import (
+            render_emotion_extraction_prompt,
+        )
         
         prompt = await render_emotion_extraction_prompt(
             statement=statement,

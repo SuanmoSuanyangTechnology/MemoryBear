@@ -20,14 +20,14 @@ Classes:
     MemorySummaryNode: Node representing a memory summary
 """
 
-from uuid import uuid4
+import re
 from datetime import datetime, timezone
 from typing import List, Optional
-from pydantic import BaseModel, Field, field_validator
-import re
+from uuid import uuid4
 
-from app.core.memory.utils.data.ontology import TemporalInfo
 from app.core.memory.utils.alias_utils import validate_aliases
+from app.core.memory.utils.data.ontology import TemporalInfo
+from pydantic import BaseModel, Field, field_validator
 
 
 def parse_historical_datetime(v):
@@ -361,7 +361,7 @@ class ExtractedEntityNode(Node):
         description="Entity aliases - alternative names for this entity"
     )
     name_embedding: Optional[List[float]] = Field(default_factory=list, description="Name embedding vector")
-    fact_summary: str = Field(..., description="Summary of the fact about this entity")
+    fact_summary: str = Field(default="", description="Summary of the fact about this entity")
     connect_strength: str = Field(..., description="Strong VS Weak about this entity")
     config_id: Optional[int | str] = Field(None, description="Configuration ID used to process this entity (integer or string)")
     

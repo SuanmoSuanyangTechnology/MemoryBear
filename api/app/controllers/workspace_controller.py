@@ -1,25 +1,38 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from typing import List, Optional
 import uuid
+from typing import List, Optional
 
+from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.db import get_db
-from app.dependencies import get_current_superuser, get_current_user, get_current_tenant, workspace_access_guard, cur_workspace_access_guard
-from app.models.user_model import User
+from app.dependencies import (
+    cur_workspace_access_guard,
+    get_current_superuser,
+    get_current_tenant,
+    get_current_user,
+    workspace_access_guard,
+)
 from app.models.tenant_model import Tenants
-from app.models.workspace_model import Workspace, InviteStatus
+from app.models.user_model import User
+from app.models.workspace_model import InviteStatus, Workspace
+from app.schemas import knowledge_schema
 from app.schemas.response_schema import ApiResponse
 from app.schemas.workspace_schema import (
-    WorkspaceCreate, WorkspaceUpdate, WorkspaceResponse,
-    WorkspaceInviteCreate, WorkspaceInviteResponse, 
-    InviteValidateResponse, InviteAcceptRequest,
-    WorkspaceMemberUpdate, WorkspaceMemberItem
+    InviteAcceptRequest,
+    InviteValidateResponse,
+    WorkspaceCreate,
+    WorkspaceInviteCreate,
+    WorkspaceInviteResponse,
+    WorkspaceMemberItem,
+    WorkspaceMemberUpdate,
+    WorkspaceModelsConfig,
+    WorkspaceModelsUpdate,
+    WorkspaceResponse,
+    WorkspaceUpdate,
 )
-from app.schemas import knowledge_schema
-from app.services import workspace_service
-from app.core.logging_config import get_api_logger
-from app.services import knowledge_service, document_service
+from app.services import document_service, knowledge_service, workspace_service
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
 # 获取API专用日志器
 api_logger = get_api_logger()
 # 需要认证的路由器
@@ -338,5 +351,30 @@ def workspace_models_configs(
         f"成功获取工作空间 {workspace_id} 的模型配置: "
         f"llm={configs.get('llm')}, embedding={configs.get('embedding')}, rerank={configs.get('rerank')}"
     )
-    return success(data=configs, msg="模型配置获取成功")
+    return success(data=WorkspaceModelsConfig.model_validate(configs), msg="模型配置获取成功")
+
+
+@router.put("/workspace_models", response_model=ApiResponse)
+@cur_workspace_access_guard()
+def update_workspace_models_configs(
+        models_update: WorkspaceModelsUpdate,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    """更新当前工作空间的模型配置（llm, embedding, rerank）"""
+    workspace_id = current_user.current_workspace_id
+    api_logger.info(f"用户 {current_user.username} 请求更新工作空间 {workspace_id} 的模型配置")
+
+    updated_workspace = workspace_service.update_workspace_models_configs(
+        db=db,
+        workspace_id=workspace_id,
+        models_update=models_update,
+        user=current_user
+    )
+    
+    api_logger.info(
+        f"成功更新工作空间 {workspace_id} 的模型配置: "
+        f"llm={updated_workspace.llm}, embedding={updated_workspace.embedding}, rerank={updated_workspace.rerank}"
+    )
+    return success(data=WorkspaceModelsConfig.model_validate(updated_workspace), msg="模型配置更新成功")
 

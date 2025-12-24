@@ -252,7 +252,7 @@ class QWenCV(GptV4):
                             "fps": 2,
                         },
                         {
-                            "text": "Please summarize this video in proper sentences.",
+                            "text": "视频的内容是什么?,并且，请用恰当的句子总结这个视频。" if self.lang.lower() == "chinese" else "What is the content of the video? And please summarize this video in proper sentences.",
                         },
                     ],
                 }

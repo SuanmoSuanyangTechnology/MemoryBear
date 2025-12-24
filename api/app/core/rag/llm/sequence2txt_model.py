@@ -46,11 +46,12 @@ class GPTSeq2txt(Base):
 class QWenSeq2txt(Base):
     _FACTORY_NAME = "Tongyi-Qianwen"
 
-    def __init__(self, key, model_name="qwen-audio-asr", **kwargs):
+    def __init__(self, key, model_name="qwen-audio-asr", lang="Chinese", **kwargs):
         import dashscope
 
         dashscope.api_key = key
         self.model_name = model_name
+        self.lang = lang
 
     def transcription(self, audio_path):
         if "paraformer" in self.model_name or "sensevoice" in self.model_name:
@@ -62,14 +63,21 @@ class QWenSeq2txt(Base):
         messages = [
             {
                 "role": "user",
-                "content": [{"audio": audio_path}],
+                "content": [
+                    {
+                        "audio": audio_path
+                    },
+                    {
+                        "text": "这段音频在说什么?" if self.lang.lower() == "chinese" else "What is this audio saying?",
+                    },
+                ],
             }
         ]
 
         response = None
         full_content = ""
         try:
-            response = MultiModalConversation.call(model="qwen-audio-asr", messages=messages, result_format="message", stream=True)
+            response = MultiModalConversation.call(model=self.model_name, messages=messages, result_format="message", stream=True)
             for response in response:
                 try:
                     full_content += response["output"]["choices"][0]["message"].content[0]["text"]

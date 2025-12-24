@@ -1,91 +1,93 @@
-import asyncio
-from dotenv import load_dotenv
+"""
+Write Tools for Memory Knowledge Extraction Pipeline
+
+This module provides the main write function for executing the knowledge extraction
+pipeline. Only MemoryConfig is needed - clients are constructed internally.
+"""
 import time
 from datetime import datetime
 
-from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j
-
-from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
 from app.core.logging_config import get_agent_logger
-
-logger = get_agent_logger(__name__)
-# 使用新的模块化架构
-from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import ExtractionOrchestrator
-from app.core.memory.storage_services.extraction_engine.knowledge_extraction.embedding_generation import (
-    embedding_generation_all,
+from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
+from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import (
+    ExtractionOrchestrator,
 )
-
-# 使用新的仓储层
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-# 导入配置模块（而不是直接导入变量）
-from app.core.memory.utils.config import definitions as config_defs
-from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
+    memory_summary_generation,
+)
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.logging_utils import log_time
-from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import Memory_summary_generation
-from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
+from app.db import get_db_context
 from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
+from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
+from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.memory_config_schema import MemoryConfig
+from dotenv import load_dotenv
+
 load_dotenv()
 
+logger = get_agent_logger(__name__)
 
-async def write(content: str, user_id: str, apply_id: str, group_id: str, ref_id: str = "wyl20251027", config_id: str = None) -> None:
+
+async def write(
+    content: str,
+    user_id: str,
+    apply_id: str,
+    group_id: str,
+    memory_config: MemoryConfig,
+    ref_id: str = "wyl20251027",
+) -> None:
     """
-    执行完整的知识提取流水线（使用新的 ExtractionOrchestrator）
+    Execute the complete knowledge extraction pipeline.
+    
+    Only MemoryConfig is needed - LLM and embedding clients are constructed
+    internally from the config.
 
     Args:
-        content: 对话内容
-        user_id: 用户ID
-        apply_id: 应用ID
-        group_id: 组ID
-        ref_id: 参考ID，默认为 "wyl20251027"
-        config_id: 配置ID，用于标记数据处理配置
+        content: Dialogue content to process
+        user_id: User identifier
+        apply_id: Application identifier
+        group_id: Group identifier
+        memory_config: MemoryConfig object containing all configuration
+        ref_id: Reference ID, defaults to "wyl20251027"
     """
-    # 如果提供了config_id，重新加载配置
-    if config_id:
-        from app.core.memory.utils.config.definitions import reload_configuration_from_database
-        logger.info(f"Reloading configuration for config_id: {config_id}")
-        config_loaded = reload_configuration_from_database(config_id)
-        if not config_loaded:
-            error_msg = f"Failed to load configuration for config_id: {config_id}"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        logger.info(f"Configuration reloaded successfully for config_id: {config_id}")
+    # Extract config values
+    embedding_model_id = str(memory_config.embedding_model_id)
+    chunker_strategy = memory_config.chunker_strategy
+    config_id = str(memory_config.config_id)
     
     logger.info("=== MemSci Knowledge Extraction Pipeline ===")
-    logger.info(f"Using model: {config_defs.SELECTED_LLM_NAME}")
-    logger.info(f"Using LLM ID: {config_defs.SELECTED_LLM_ID}")
-    logger.info(f"Using chunker strategy: {config_defs.SELECTED_CHUNKER_STRATEGY}")
-    logger.info(f"Using group ID: {config_defs.SELECTED_GROUP_ID}")
-    logger.info(f"Using embedding ID: {config_defs.SELECTED_EMBEDDING_ID}")
-    logger.info(f"Config ID: {config_id if config_id else 'None'}")
-    logger.info(f"LANGFUSE_ENABLED: {config_defs.LANGFUSE_ENABLED}")
-    logger.info(f"AGENTA_ENABLED: {config_defs.AGENTA_ENABLED}")
+    logger.info(f"Config: {memory_config.config_name} (ID: {config_id})")
+    logger.info(f"Workspace: {memory_config.workspace_name}")
+    logger.info(f"LLM model: {memory_config.llm_model_name}")
+    logger.info(f"Embedding model: {memory_config.embedding_model_name}")
+    logger.info(f"Chunker strategy: {chunker_strategy}")
+    logger.info(f"Group ID: {group_id}")
+
+    # Construct clients from memory_config using factory pattern with db session
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        llm_client = factory.get_llm_client_from_config(memory_config)
+        embedder_client = factory.get_embedder_client_from_config(memory_config)
+    logger.info("LLM and embedding clients constructed")
 
     # Initialize timing log
     log_file = "logs/time.log"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"\n=== Pipeline Run Started: {timestamp} ===\n")
+        f.write(f"Config: {memory_config.config_name} (ID: {config_id})\n")
 
     pipeline_start = time.time()
 
-    # 初始化客户端
-    llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
-    
-    # 获取 embedder 配置
-    from app.core.models.base import RedBearModelConfig
-    from app.core.memory.utils.config.config_utils import get_embedder_config
-    from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-    
-    embedder_config_dict = get_embedder_config(config_defs.SELECTED_EMBEDDING_ID)
-    embedder_config = RedBearModelConfig(**embedder_config_dict)
-    embedder_client = OpenAIEmbedderClient(embedder_config)
-    
+    # Initialize Neo4j connector
     neo4j_connector = Neo4jConnector()
-    
-    # Step 1: 加载和分块数据
+
+    # Step 1: Load and chunk data
     step_start = time.time()
     chunked_dialogs = await get_chunked_dialogs(
-        chunker_strategy=config_defs.SELECTED_CHUNKER_STRATEGY,
+        chunker_strategy=chunker_strategy,
         group_id=group_id,
         user_id=user_id,
         apply_id=apply_id,
@@ -94,21 +96,21 @@ async def write(content: str, user_id: str, apply_id: str, group_id: str, ref_id
         config_id=config_id,
     )
     log_time("Data Loading & Chunking", time.time() - step_start, log_file)
-    
-    # Step 2: 初始化并运行 ExtractionOrchestrator
+
+    # Step 2: Initialize and run ExtractionOrchestrator
     step_start = time.time()
     from app.core.memory.utils.config.config_utils import get_pipeline_config
-    config = get_pipeline_config()
-    
+    pipeline_config = get_pipeline_config(memory_config)
+
     orchestrator = ExtractionOrchestrator(
         llm_client=llm_client,
         embedder_client=embedder_client,
         connector=neo4j_connector,
-        config=config,
+        config=pipeline_config,
+        embedding_id=embedding_model_id,
     )
-    
-    # 运行完整的提取流水线
-    # orchestrator.run returns a flat tuple of 7 values after deduplication
+
+    # Run the complete extraction pipeline
     (
         all_dialogue_nodes,
         all_chunk_nodes,
@@ -118,14 +120,12 @@ async def write(content: str, user_id: str, apply_id: str, group_id: str, ref_id
         all_statement_entity_edges,
         all_entity_entity_edges,
         all_dedup_details,
-
     ) = await orchestrator.run(chunked_dialogs, is_pilot_run=False)
-    
+
     log_time("Extraction Pipeline", time.time() - step_start, log_file)
 
-    # Step 8: Save all data to Neo4j database using graph models
+    # Step 3: Save all data to Neo4j database
     step_start = time.time()
-    # 运行索引创建
     from app.repositories.neo4j.create_indexes import create_fulltext_indexes
     try:
         await create_fulltext_indexes()
@@ -152,18 +152,16 @@ async def write(content: str, user_id: str, apply_id: str, group_id: str, ref_id
 
     log_time("Neo4j Database Save", time.time() - step_start, log_file)
 
-    # Step 9: Generate Memory summaries and save to local vector DB and Neo4j
+    # Step 4: Generate Memory summaries and save to Neo4j
     step_start = time.time()
     try:
-        summaries = await Memory_summary_generation(
-            chunked_dialogs, llm_client=llm_client, embedding_id=config_defs.SELECTED_EMBEDDING_ID
+        summaries = await memory_summary_generation(
+            chunked_dialogs, llm_client=llm_client, embedder_client=embedder_client
         )
 
-        # Save memory summaries to Neo4j as nodes
         try:
             ms_connector = Neo4jConnector()
             await add_memory_summary_nodes(summaries, ms_connector)
-            # Link summaries to statements via chunks for summary→entity queries
             await add_memory_summary_statement_edges(summaries, ms_connector)
         finally:
             try:
@@ -173,24 +171,15 @@ async def write(content: str, user_id: str, apply_id: str, group_id: str, ref_id
     except Exception as e:
         logger.error(f"Memory summary step failed: {e}", exc_info=True)
     finally:
-        log_time("Memory Summary (Local Vector DB & Neo4j)", time.time() - step_start, log_file)
-
-
+        log_time("Memory Summary (Neo4j)", time.time() - step_start, log_file)
 
     # Log total pipeline time
     total_time = time.time() - pipeline_start
     log_time("TOTAL PIPELINE TIME", total_time, log_file)
 
-    # Add completion marker to log
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"=== Pipeline Run Completed: {timestamp} ===\n\n")
 
     logger.info("=== Pipeline Complete ===")
     logger.info(f"Total execution time: {total_time:.2f} seconds")
-    logger.info(f"Timing details saved to: {log_file}")
-
-
-if __name__ == "__main__":
-    content = "你好，我是张三，是张曼婷的新朋友。请问张曼婷喜欢什么？"
-    asyncio.run(write(content, ref_id="wyl20251027"))

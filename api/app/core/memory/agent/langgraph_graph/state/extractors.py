@@ -128,6 +128,15 @@ def extract_content_payload(message: Any) -> Any:
     # For ToolMessages (responses from tools), extract from content
     if hasattr(message, "content"):
         raw_content = message.content
+        logger.info(f"extract_content_payload: raw_content type={type(raw_content)}, value={str(raw_content)[:500]}")
+        
+        # Handle MCP content format: [{'type': 'text', 'text': '...'}]
+        if isinstance(raw_content, list):
+            for block in raw_content:
+                if isinstance(block, dict) and block.get('type') == 'text':
+                    raw_content = block.get('text', '')
+                    logger.info(f"extract_content_payload: extracted text from MCP format: {str(raw_content)[:300]}")
+                    break
         
         # If content is empty and this is an AIMessage with tool_calls,
         # extract from args (this handles the initial tool call from content_input)
@@ -140,13 +149,16 @@ def extract_content_payload(message: Any) -> Any:
     
     # If content is already a dict or list, return it directly
     if isinstance(raw_content, (dict, list)):
+        logger.info(f"extract_content_payload: returning raw dict/list with keys={list(raw_content.keys()) if isinstance(raw_content, dict) else 'list'}")
         return raw_content
     
     # Try to parse as JSON
     if isinstance(raw_content, str):
         # First, try direct JSON parsing
         try:
-            return json.loads(raw_content)
+            parsed = json.loads(raw_content)
+            logger.info(f"extract_content_payload: parsed JSON, keys={list(parsed.keys()) if isinstance(parsed, dict) else 'list'}")
+            return parsed
         except (json.JSONDecodeError, ValueError):
             pass
         
@@ -156,9 +168,12 @@ def extract_content_payload(message: Any) -> Any:
         json_candidates = re.findall(r'[\[{].*[\]}]', raw_content, flags=re.DOTALL)
         for candidate in json_candidates:
             try:
-                return json.loads(candidate)
+                parsed = json.loads(candidate)
+                logger.info(f"extract_content_payload: parsed JSON from candidate, keys={list(parsed.keys()) if isinstance(parsed, dict) else 'list'}")
+                return parsed
             except (json.JSONDecodeError, ValueError):
                 continue
     
     # If all parsing attempts fail, return the raw content
+    logger.info(f"extract_content_payload: returning raw content (parsing failed)")
     return raw_content

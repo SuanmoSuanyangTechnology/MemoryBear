@@ -4,19 +4,35 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import TYPE_CHECKING, Any, Dict, List
+
+if TYPE_CHECKING:
+    from app.schemas.memory_config_schema import MemoryConfig
+
 try:
     from dotenv import load_dotenv
 except Exception:
     def load_dotenv():
         return None
 
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.memory.evaluation.common.metrics import (
+    avg_context_tokens,
+    exact_match,
+    latency_stats,
+)
+from app.core.memory.evaluation.extraction_utils import (
+    ingest_contexts_via_full_pipeline,
+)
 from app.core.memory.storage_services.search import run_hybrid_search
-from app.core.memory.utils.config.definitions import PROJECT_ROOT, SELECTED_GROUP_ID, SELECTED_EMBEDDING_ID, SELECTED_LLM_ID
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
-from app.core.memory.evaluation.common.metrics import exact_match, latency_stats, avg_context_tokens
+from app.core.memory.utils.config.definitions import (
+    PROJECT_ROOT,
+    SELECTED_EMBEDDING_ID,
+    SELECTED_GROUP_ID,
+    SELECTED_LLM_ID,
+)
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.db import get_db_context
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 
 def smart_context_selection(contexts: List[str], question: str, max_chars: int = 4000) -> str:
@@ -119,7 +135,7 @@ def _combine_dialogues_for_hybrid(results: Dict[str, Any]) -> List[Dict[str, Any
     return merged
 
 
-async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid") -> Dict[str, Any]:
+async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid", memory_config: "MemoryConfig" = None) -> Dict[str, Any]:
     group_id = group_id or SELECTED_GROUP_ID
     # Load data
     data_path = os.path.join(PROJECT_ROOT, "data", "msc_self_instruct.jsonl")
@@ -134,7 +150,9 @@ async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, s
     await ingest_contexts_via_full_pipeline(contexts, group_id)
 
     # LLM client (使用异步调用)
-    llm_client = get_llm_client(SELECTED_LLM_ID)
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        llm_client = factory.get_llm_client(SELECTED_LLM_ID)
 
     # Evaluate each item
     connector = Neo4jConnector()
@@ -159,6 +177,7 @@ async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, s
                     limit=search_limit,
                     include=["dialogues", "statements", "entities"],
                     output_path=None,
+                    memory_config=memory_config,
                 )
             except Exception:
                 results = None
@@ -242,7 +261,11 @@ async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, s
             pred = resp.content.strip() if hasattr(resp, 'content') else (resp["choices"][0]["message"]["content"].strip() if isinstance(resp, dict) else str(resp).strip())
             # Metrics: F1, BLEU-1, Jaccard; keep exact match for reference
             correct_flags.append(exact_match(pred, reference))
-            from app.core.memory.evaluation.common.metrics import f1_score, bleu1, jaccard
+            from app.core.memory.evaluation.common.metrics import (
+                bleu1,
+                f1_score,
+                jaccard,
+            )
             f1s.append(f1_score(str(pred), str(reference)))
             b1s.append(bleu1(str(pred), str(reference)))
             jss.append(jaccard(str(pred), str(reference)))

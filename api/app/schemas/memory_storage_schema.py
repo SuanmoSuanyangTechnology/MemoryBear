@@ -31,7 +31,7 @@ class BaseDataSchema(BaseModel):
     # 保持原有必需字段为可选，以兼容不同数据源
     id: Optional[str] = Field(None, description="The unique identifier for the data entry.")
     statement: Optional[str] = Field(None, description="The statement text.")
-    created_at: str = Field(..., description="The creation timestamp in ISO 8601 format.")
+    created_at: Optional[str] = Field(None, description="The creation timestamp in ISO 8601 format.")
     expired_at: Optional[str] = Field(None, description="The expiration timestamp in ISO 8601 format.")
     description: Optional[str] = Field(None, description="The description of the data entry.")
 
@@ -45,6 +45,14 @@ class BaseDataSchema(BaseModel):
     # 保留原有字段 - 修改relationship字段类型以支持字符串和字典
     relationship: Optional[Union[str, Dict[str, Any]]] = Field(None, description="The relationship object or string.")
     entity2: Optional[Dict[str, Any]] = Field(None, description="The second entity object.")
+
+    @model_validator(mode="before")
+    def _set_default_created_at(cls, v):
+        """Set default created_at if missing"""
+        if isinstance(v, dict) and v.get("created_at") is None:
+            from datetime import datetime
+            v["created_at"] = datetime.now().isoformat()
+        return v
 
 
 class QualityAssessmentSchema(BaseModel):

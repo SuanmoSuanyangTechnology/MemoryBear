@@ -2,10 +2,11 @@ import argparse
 import asyncio
 import json
 import os
+import statistics
 import time
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
-import statistics
+from typing import Any, Dict, List
+
 try:
     from dotenv import load_dotenv
 except Exception:
@@ -13,16 +14,31 @@ except Exception:
         return None
 
 import re
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
+
+from app.core.memory.evaluation.common.metrics import (
+    avg_context_tokens,
+    bleu1,
+    jaccard,
+    latency_stats,
+)
+from app.core.memory.evaluation.common.metrics import f1_score as common_f1
+from app.core.memory.evaluation.extraction_utils import (
+    ingest_contexts_via_full_pipeline,
+)
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.models.base import RedBearModelConfig
-from app.core.memory.utils.config.config_utils import get_embedder_config
 from app.core.memory.storage_services.search import run_hybrid_search
-from app.core.memory.utils.config.definitions import PROJECT_ROOT, SELECTED_GROUP_ID, SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
-from app.core.memory.evaluation.common.metrics import f1_score as common_f1, bleu1, jaccard, latency_stats, avg_context_tokens
+from app.core.memory.utils.config.definitions import (
+    PROJECT_ROOT,
+    SELECTED_EMBEDDING_ID,
+    SELECTED_GROUP_ID,
+    SELECTED_LLM_ID,
+)
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.models.base import RedBearModelConfig
+from app.db import get_db_context
+from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.services.memory_config_service import MemoryConfigService
 
 
 # 参考 evaluation/locomo/evaluation.py 的 F1 计算逻辑（移除外部依赖，内联实现）
@@ -327,9 +343,13 @@ async def run_locomo_eval(
     await ingest_contexts_via_full_pipeline(contents, group_id, save_chunk_output=True)
 
     # 使用异步LLM客户端
-    llm_client = get_llm_client(SELECTED_LLM_ID)
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        llm_client = factory.get_llm_client(SELECTED_LLM_ID)
     # 初始化embedder用于直接调用
-    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
+    with get_db_context() as db:
+        config_service = MemoryConfigService(db)
+        cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
     embedder = OpenAIEmbedderClient(
         model_config=RedBearModelConfig.model_validate(cfg_dict)
     )

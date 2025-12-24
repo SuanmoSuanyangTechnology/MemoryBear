@@ -4,15 +4,15 @@ User Memory Service
 处理用户记忆相关的业务逻辑，包括记忆洞察、用户摘要、节点统计和图数据等。
 """
 
-from typing import Dict, List, Optional, Any
 import uuid
-from sqlalchemy.orm import Session
+from typing import Any, Dict, List, Optional
 
 from app.core.logging_config import get_logger
-from app.repositories.end_user_repository import EndUserRepository
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.analytics.memory_insight import MemoryInsight
 from app.core.memory.analytics.user_summary import generate_user_summary
+from app.repositories.end_user_repository import EndUserRepository
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)
 
@@ -284,8 +284,7 @@ class UserMemoryService:
             # 使用 end_user_id 调用分析函数
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成用户摘要")
-                result = await analytics_user_summary(end_user_id)
-                summary = result.get("summary", "")
+                summary = await generate_user_summary(end_user_id)
                 
                 if not summary:
                     logger.warning(f"end_user_id {end_user_id} 的用户摘要生成结果为空")
@@ -533,6 +532,112 @@ async def analytics_node_statistics(
     }
     
     return data
+
+
+async def analytics_memory_types(
+    db: Session,
+    end_user_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    统计8种记忆类型的数量和百分比
+    
+    计算规则：
+    1. 感知记忆 (PERCEPTUAL_MEMORY) = statement + entity
+    2. 工作记忆 (WORKING_MEMORY) = chunk + entity
+    3. 短期记忆 (SHORT_TERM_MEMORY) = chunk
+    4. 长期记忆 (LONG_TERM_MEMORY) = entity
+    5. 显性记忆 (EXPLICIT_MEMORY) = 1/2 * entity
+    6. 隐性记忆 (IMPLICIT_MEMORY) = 1/3 * entity
+    7. 情绪记忆 (EMOTIONAL_MEMORY) = statement
+    8. 情景记忆 (EPISODIC_MEMORY) = memory_summary
+    
+    Args:
+        db: 数据库会话
+        end_user_id: 可选的终端用户ID (UUID)，用于过滤特定用户的节点
+        
+    Returns:
+        [
+            {
+                "type": str,  # 记忆类型枚举值 (如 PERCEPTUAL_MEMORY, WORKING_MEMORY 等)
+                "count": int,  # 该类型的数量
+                "percentage": float  # 该类型在所有记忆中的占比
+            },
+            ...
+        ]
+        
+    记忆类型枚举值：
+        - PERCEPTUAL_MEMORY: 感知记忆
+        - WORKING_MEMORY: 工作记忆
+        - SHORT_TERM_MEMORY: 短期记忆
+        - LONG_TERM_MEMORY: 长期记忆
+        - EXPLICIT_MEMORY: 显性记忆
+        - IMPLICIT_MEMORY: 隐性记忆
+        - EMOTIONAL_MEMORY: 情绪记忆
+        - EPISODIC_MEMORY: 情景记忆
+    """
+    # 定义需要查询的节点类型
+    node_types = {
+        "Statement": "Statement",
+        "Entity": "ExtractedEntity",
+        "Chunk": "Chunk",
+        "MemorySummary": "MemorySummary"
+    }
+    
+    # 存储每种节点类型的计数
+    node_counts = {}
+    
+    # 查询每种节点类型的数量
+    for key, node_type in node_types.items():
+        if end_user_id:
+            query = f"""
+            MATCH (n:{node_type})
+            WHERE n.group_id = $group_id
+            RETURN count(n) as count
+            """
+            result = await _neo4j_connector.execute_query(query, group_id=end_user_id)
+        else:
+            query = f"""
+            MATCH (n:{node_type})
+            RETURN count(n) as count
+            """
+            result = await _neo4j_connector.execute_query(query)
+        
+        # 提取计数结果
+        count = result[0]["count"] if result and len(result) > 0 else 0
+        node_counts[key] = count
+    
+    # 获取各节点类型的数量
+    statement_count = node_counts.get("Statement", 0)
+    entity_count = node_counts.get("Entity", 0)
+    chunk_count = node_counts.get("Chunk", 0)
+    memory_summary_count = node_counts.get("MemorySummary", 0)
+    
+    # 按规则计算8种记忆类型的数量（使用英文枚举作为key）
+    memory_counts = {
+        "PERCEPTUAL_MEMORY": statement_count + entity_count,      # 感知记忆
+        "WORKING_MEMORY": chunk_count + entity_count,             # 工作记忆
+        "SHORT_TERM_MEMORY": chunk_count,                         # 短期记忆
+        "LONG_TERM_MEMORY": entity_count,                         # 长期记忆
+        "EXPLICIT_MEMORY": entity_count // 2,                     # 显性记忆 (1/2 entity)
+        "IMPLICIT_MEMORY": entity_count // 3,                     # 隐性记忆 (1/3 entity)
+        "EMOTIONAL_MEMORY": statement_count,                      # 情绪记忆
+        "EPISODIC_MEMORY": memory_summary_count                   # 情景记忆
+    }
+    
+    # 计算总数
+    total = sum(memory_counts.values())
+    
+    # 构建返回数据，包含 type、count 和 percentage
+    memory_types = []
+    for memory_type, count in memory_counts.items():
+        percentage = round((count / total * 100), 2) if total > 0 else 0.0
+        memory_types.append({
+            "type": memory_type,
+            "count": count,
+            "percentage": percentage
+        })
+    
+    return memory_types
 
 
 async def analytics_graph_data(

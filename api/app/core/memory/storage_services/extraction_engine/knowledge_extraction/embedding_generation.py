@@ -5,11 +5,13 @@
 """
 
 import asyncio
-from typing import List, Dict, Any, Tuple
-from app.core.memory.models.message_models import DialogData
+from typing import Any, Dict, List, Tuple
+
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.memory.utils.config.config_utils import get_embedder_config
+from app.core.memory.models.message_models import DialogData
 from app.core.models.base import RedBearModelConfig
+from app.db import get_db_context
+from app.services.memory_config_service import MemoryConfigService
 
 
 class EmbeddingGenerator:
@@ -21,7 +23,9 @@ class EmbeddingGenerator:
         Args:
             embedding_id: 嵌入模型 ID
         """
-        embedder_config = get_embedder_config(embedding_id)
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+            embedder_config = config_service.get_embedder_config(embedding_id)
         self.embedder_client = OpenAIEmbedderClient(
             model_config=RedBearModelConfig.model_validate(embedder_config),
         )
