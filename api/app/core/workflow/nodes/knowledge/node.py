@@ -20,7 +20,7 @@ class KnowledgeRetrievalNode(BaseNode):
 
     async def execute(self, state: WorkflowState) -> Any:
         query = self._render_template(self.typed_config.query, state)
-        with get_db_context():
+        with get_db_context() as db:
             filters = [
                 knowledge_model.Knowledge.id.in_(self.typed_config.kb_ids),
                 knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Private,
