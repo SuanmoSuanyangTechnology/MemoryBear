@@ -27,6 +27,46 @@
       "subs": []
     },
     {
+      "id": 6,
+      "parent": 0,
+      "code": "pricing",
+      "label": "收费管理",
+      "i18nKey": "menu.pricing",
+      "path": "/pricing",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "subs": [
+        {
+          "id": 61,
+          "parent": 6,
+          "code": "order",
+          "label": "订单支付",
+          "i18nKey": "menu.orderPayment",
+          "path": "/order-pay",
+          "enable": true,
+          "display": false,
+          "level": 1,
+          "sort": 0,
+          "subs": []
+        },
+        {
+          "id": 62,
+          "parent": 6,
+          "code": "orderHistory",
+          "label": "订单记录",
+          "i18nKey": "menu.orderHistory",
+          "path": "/orders",
+          "enable": true,
+          "display": false,
+          "level": 1,
+          "sort": 0,
+          "subs": []
+        }
+      ]
+    },
+    {
       "id": 3,
       "parent": 0,
       "code": "user",
