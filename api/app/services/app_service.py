@@ -9,7 +9,7 @@
 """
 import datetime
 import uuid
-from typing import Optional, List, Dict, Any, Tuple, Type
+from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.orm import Session
@@ -27,6 +27,7 @@ from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
 from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services.agent_config_converter import AgentConfigConverter
+from app.models import AppShare, Workspace
 
 # 获取业务日志器
 logger = get_business_logger()
@@ -1390,7 +1391,7 @@ class AppService:
         target_workspace_ids: List[uuid.UUID],
         user_id: uuid.UUID,
         workspace_id: Optional[uuid.UUID] = None
-    ) -> List["AppShare"]:
+    ) -> AppShare:
         """分享应用到其他工作空间
 
         Args:
@@ -1406,7 +1407,7 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用不在指定工作空间或目标工作空间无效时
         """
-        from app.models import AppShare, Workspace
+        
 
         logger.info(
             "分享应用",
@@ -1548,7 +1549,7 @@ class AppService:
         *,
         app_id: uuid.UUID,
         workspace_id: Optional[uuid.UUID] = None
-    ) -> List["AppShare"]:
+    ) -> List[AppShare]:
         """列出应用的所有分享记录
 
         Args:

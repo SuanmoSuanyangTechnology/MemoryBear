@@ -5,6 +5,8 @@ import uuid
 from os import getenv
 from typing import List, Optional
 
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, PermissionDeniedException
@@ -36,6 +38,22 @@ from sqlalchemy.orm import Session
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
+from app.models.workspace_model import Workspace, WorkspaceRole, InviteStatus, WorkspaceMember
+from app.repositories import workspace_repository
+from app.repositories.workspace_invite_repository import WorkspaceInviteRepository
+from app.schemas.workspace_schema import (
+    WorkspaceCreate,
+    WorkspaceUpdate,
+    WorkspaceInviteCreate,
+    WorkspaceInviteResponse,
+    InviteValidateResponse,
+    InviteAcceptRequest,
+    WorkspaceMemberUpdate
+)
+
+# 获取业务逻辑专用日志器
+business_logger = get_business_logger()
+from dotenv import load_dotenv
 load_dotenv()
 def switch_workspace(
     db: Session,
@@ -330,6 +348,7 @@ def _check_workspace_admin_permission(db: Session, workspace_id: uuid.UUID, user
 
     # 使用统一权限服务检查管理权限
     from app.core.permissions import Action, Resource, Subject, permission_service
+    from app.core.permissions import permission_service, Subject, Resource, Action
 
     # 获取用户的工作空间成员关系
     member = workspace_repository.get_member_in_workspace(

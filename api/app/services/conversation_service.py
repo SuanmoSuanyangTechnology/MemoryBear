@@ -10,7 +10,14 @@ from app.db import get_db
 from app.models import Conversation, Message
 from app.core.exceptions import ResourceNotFoundException, BusinessException
 from app.core.error_codes import BizCode
+from typing import Optional, List, Tuple
+
+from sqlalchemy import select, desc
+from sqlalchemy.orm import Session
+
+from app.core.exceptions import ResourceNotFoundException
 from app.core.logging_config import get_business_logger
+from app.models import Conversation, Message
 
 logger = get_business_logger()
 
