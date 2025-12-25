@@ -1028,9 +1028,7 @@ export const en = {
       memories: 'memories',
       expanded: 'Expand',
       description: 'Description',
-      entityType: 'Entity Type',
       conversationMemory: 'Conversation Storage Content',
-      sortByTimeDesc: 'Sort by time in descending order',
       editConfig: 'Edit Config',
       chooseModel: 'Choose Model',
 
