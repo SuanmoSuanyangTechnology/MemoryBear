@@ -1,22 +1,17 @@
 """会话服务"""
 import uuid
-from typing import Optional, List, Tuple, Annotated
-
-from fastapi import Depends
-from sqlalchemy.orm import Session
-from sqlalchemy import select, desc
-
-from app.db import get_db
-from app.models import Conversation, Message
-from app.core.exceptions import ResourceNotFoundException, BusinessException
-from app.core.error_codes import BizCode
+from typing import Annotated
 from typing import Optional, List, Tuple
 
+from fastapi import Depends
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.exceptions import ResourceNotFoundException
 from app.core.logging_config import get_business_logger
+from app.db import get_db
 from app.models import Conversation, Message
 
 logger = get_business_logger()
