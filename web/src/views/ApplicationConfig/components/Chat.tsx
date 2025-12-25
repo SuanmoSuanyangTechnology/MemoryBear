@@ -361,7 +361,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
                 data={chat.list || []}
                 streamLoading={compareLoading}
                 labelPosition="top"
-                labelFormat={(item) => item.role === 'user' ? 'You' : chat.label}
+                labelFormat={(item) => item.role === 'user' ? t('application.you') : chat.label}
                 errorDesc={t('application.ReplyException')}
               />
               
