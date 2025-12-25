@@ -7,7 +7,7 @@ import httpx
 # import filetypes # TODO: File support (Feature)
 from httpx import AsyncClient, Response, Timeout
 
-from app.core.workflow.nodes import BaseNode, WorkflowState
+from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.enums import HttpRequestMethod, HttpErrorHandle, HttpAuthType, HttpContentType
 from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig, HttpRequestNodeOutput
 
@@ -204,6 +204,7 @@ class HttpRequestNode(BaseNode):
                 timeout=self._build_timeout(),
                 headers=self._build_header(state) | self._build_auth(state),
                 params=self._build_params(state),
+                follow_redirects=True
         ) as client:
             retries = self.typed_config.retry.max_attempts
             while retries > 0:

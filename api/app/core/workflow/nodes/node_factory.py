@@ -7,17 +7,18 @@
 import logging
 from typing import Any, Union
 
-from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
-from app.core.workflow.nodes.http_request import HttpRequestNode
 from app.core.workflow.nodes.agent import AgentNode
+from app.core.workflow.nodes.assigner import AssignerNode
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.end import EndNode
 from app.core.workflow.nodes.enums import NodeType
+from app.core.workflow.nodes.http_request import HttpRequestNode
 from app.core.workflow.nodes.if_else import IfElseNode
+from app.core.workflow.nodes.jinja_render import JinjaRenderNode
+from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
 from app.core.workflow.nodes.llm import LLMNode
 from app.core.workflow.nodes.start import StartNode
 from app.core.workflow.nodes.transform import TransformNode
-from app.core.workflow.nodes.assigner import AssignerNode
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ WorkflowNode = Union[
     AssignerNode,
     HttpRequestNode,
     KnowledgeRetrievalNode,
+    JinjaRenderNode,
 ]
 
 
@@ -52,6 +54,7 @@ class NodeFactory:
         NodeType.KNOWLEDGE_RETRIEVAL: KnowledgeRetrievalNode,
         NodeType.ASSIGNER: AssignerNode,
         NodeType.HTTP_REQUEST: HttpRequestNode,
+        NodeType.JINJARENDER: JinjaRenderNode,
     }
 
     @classmethod

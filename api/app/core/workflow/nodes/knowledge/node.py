@@ -163,5 +163,6 @@ class KnowledgeRetrievalNode(BaseNode):
                                                              indices=indices,
                                                              score_threshold=self.typed_config.similarity_threshold)
                     # Deduplicate hybrid retrieval results
-                    rs = self._deduplicate_docs(rs1, rs2)
+                    unique_rs = self._deduplicate_docs(rs1, rs2)
+                    rs = vector_service.rerank(query=query, docs=unique_rs, top_k=self.typed_config.top_k)
             return [chunk.model_dump() for chunk in rs]
