@@ -137,7 +137,7 @@ export interface ModelConfigModalData {
   [key: string]: string;
 }
 export interface AiPromptModalRef {
-  handleOpen: (application?: Config) => void;
+  handleOpen: () => void;
 }
 export interface KnowledgeModalRef {
   handleOpen: (config?: KnowledgeConfig[]) => void;
@@ -203,4 +203,13 @@ export interface ApiKeyModalRef {
 }
 export interface ApiKeyConfigModalRef {
   handleOpen: (apiKey: ApiKey) => void;
+}
+export interface AiPromptVariableModalRef {
+  handleOpen: () => void;
+}
+
+export interface AiPromptForm {
+  model_id?: string;
+  message?: string;
+  current_prompt?: string;
 }
