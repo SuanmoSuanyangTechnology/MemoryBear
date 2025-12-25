@@ -11,6 +11,7 @@ from app.db import get_db
 from app.core.response_utils import success
 from app.core.logging_config import get_business_logger
 from app.dependencies import get_app_or_workspace
+from app.models import AppRelease
 from app.repositories import knowledge_repository
 from app.schemas import AppChatRequest, conversation_schema
 from app.models.app_model import App
@@ -23,7 +24,7 @@ from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.app_service import AppService
 from app.services.conversation_service import ConversationService, get_conversation_service
 from app.services.workflow_service import WorkflowService, get_workflow_service
-from app.utils.app_config_utils import dict_to_multi_agent_config,dict_to_agent_config,dict_to_workflow_config
+from app.utils.app_config_utils import dict_to_multi_agent_config,dict_to_workflow_config,agent_config_4_app_release
 
 router = APIRouter(prefix="/app", tags=["V1 - App API"])
 logger = get_business_logger()
@@ -93,7 +94,8 @@ async def chat(
         original_user_id=other_id  # Save original user_id to other_id
     )
     end_user_id = str(new_end_user.id)
-
+    web_search=True
+    memory=True
     # 提前验证和准备（在流式响应开始前完成）
     storage_type = workspace_service.get_workspace_storage_type_without_auth(
         db=db,
@@ -131,7 +133,11 @@ async def chat(
     )
 
     if app_type == AppType.AGENT:
-        agent_config = dict_to_agent_config(app.current_release.config)
+
+        print("="*50)
+        print(app.current_release.default_model_config_id)
+        agent_config = agent_config_4_app_release(app.current_release)
+        print(agent_config.default_model_config_id)
         # 流式返回
         if payload.stream:
             async def event_generator():
@@ -140,9 +146,9 @@ async def chat(
                     conversation_id=conversation.id,  # 使用已创建的会话 ID
                     user_id= end_user_id,  # 转换为字符串
                     variables=payload.variables,
-                    web_search=payload.web_search,
-                    config=app.current_release.config,
-                    memory=payload.memory,
+                    web_search=web_search,
+                    config=agent_config,
+                    memory=memory,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
                 ):
@@ -165,15 +171,15 @@ async def chat(
             user_id=end_user_id,  # 转换为字符串
             variables=payload.variables,
             config= agent_config,
-            web_search=payload.web_search,
-            memory=payload.memory,
+            web_search=web_search,
+            memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id
         )
         return success(data=conversation_schema.ChatResponse(**result))
     elif app_type == AppType.MULTI_AGENT:
         # 多 Agent 流式返回
-        config = dict_to_multi_agent_config(app.current_release.config)
+        config = dict_to_multi_agent_config(app.current_release.config,app.id)
         if payload.stream:
             async def event_generator():
                 async for event in app_chat_service.multi_agent_chat_stream(
@@ -183,8 +189,8 @@ async def chat(
                     user_id=end_user_id,  # 转换为字符串
                     variables=payload.variables,
                     config=config,
-                    web_search=payload.web_search,
-                    memory=payload.memory,
+                    web_search=web_search,
+                    memory=memory,
                         storage_type=storage_type,
                         user_rag_memory_id=user_rag_memory_id
                 ):
@@ -208,8 +214,8 @@ async def chat(
             user_id=end_user_id,  # 转换为字符串
             variables=payload.variables,
             config=config,
-            web_search=payload.web_search,
-            memory=payload.memory,
+            web_search=web_search,
+            memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id
         )
@@ -217,7 +223,7 @@ async def chat(
         return success(data=conversation_schema.ChatResponse(**result))
     elif app_type == AppType.WORKFLOW:
         # 多 Agent 流式返回
-        config = dict_to_workflow_config(app.current_release.config)
+        config = dict_to_workflow_config(app.current_release.config,app.id)
         if payload.stream:
             async def event_generator():
                 async for event in app_chat_service.workflow_chat_stream(
@@ -227,8 +233,8 @@ async def chat(
                     user_id=end_user_id,  # 转换为字符串
                     variables=payload.variables,
                     config=config,
-                    web_search=payload.web_search,
-                    memory=payload.memory,
+                    web_search=web_search,
+                    memory=memory,
                         storage_type=storage_type,
                         user_rag_memory_id=user_rag_memory_id
                 ):
@@ -252,8 +258,8 @@ async def chat(
             user_id=end_user_id,  # 转换为字符串
             variables=payload.variables,
             config=config,
-            web_search=payload.web_search,
-            memory=payload.memory,
+            web_search=web_search,
+            memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id
         )

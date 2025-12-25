@@ -8,10 +8,12 @@ import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+from app.models import AppRelease
+
 
 class AgentConfigProxy:
     """Proxy class for AgentConfig (legacy compatibility)"""
-    
+
     def __init__(self, release, app, config_data):
         self.id = release.id
         self.app_id = release.app_id
@@ -22,86 +24,44 @@ class AgentConfigProxy:
         self.default_model_config_id = release.default_model_config_id
 
 
-def dict_to_agent_config(config_dict: Dict[str, Any], app_id: Optional[uuid.UUID] = None):
-    """Convert dict to AgentConfig model object
-    
-    Args:
-        config_dict: Configuration dictionary
-        app_id: Optional app ID (if not provided in dict)
-    
-    Returns:
-        AgentConfig model instance (not yet persisted to database)
-    
-    Example:
-        >>> config_dict = {
-        ...     "app_id": "uuid-here",
-        ...     "system_prompt": "You are a helpful assistant",
-        ...     "default_model_config_id": "model-uuid",
-        ...     "model_parameters": {"temperature": 0.7, "max_tokens": 2000},
-        ...     "knowledge_retrieval": {"enabled": True, "top_k": 5},
-        ...     "memory": {"enabled": True, "window_size": 10},
-        ...     "variables": [{"name": "user_name", "type": "string"}],
-        ...     "tools": {"enabled_tools": ["web_search", "calculator"]},
-        ...     "agent_role": "standalone",
-        ...     "agent_domain": "customer_service",
-        ...     "capabilities": ["chat", "search"]
-        ... }
-        >>> agent_config = dict_to_agent_config(config_dict)
-    """
+def agent_config_4_app_release(release: AppRelease ):
     from app.models.agent_app_config_model import AgentConfig
-    
-    # Extract app_id
-    final_app_id = config_dict.get("app_id") or app_id
-    if not final_app_id:
-        raise ValueError("app_id is required")
-    
-    # Convert string UUID to UUID object if needed
-    if isinstance(final_app_id, str):
-        final_app_id = uuid.UUID(final_app_id)
-    
-    # Convert default_model_config_id if present
-    default_model_config_id = config_dict.get("default_model_config_id")
-    if default_model_config_id and isinstance(default_model_config_id, str):
-        default_model_config_id = uuid.UUID(default_model_config_id)
-    
-    # Convert parent_agent_id if present
-    parent_agent_id = config_dict.get("parent_agent_id")
-    if parent_agent_id and isinstance(parent_agent_id, str):
-        parent_agent_id = uuid.UUID(parent_agent_id)
-    
     # Create AgentConfig instance
+    # config = {
+    #     "system_prompt": agent_cfg.system_prompt,
+    #     "model_parameters": agent_cfg.model_parameters,
+    #     "knowledge_retrieval": agent_cfg.knowledge_retrieval,
+    #     "memory": agent_cfg.memory,
+    #     "variables": agent_cfg.variables or [],
+    #     "tools": agent_cfg.tools or {},
+    # }
+    #
+    config_dict = release.config
+
     agent_config = AgentConfig(
-        id=uuid.UUID(config_dict["id"]) if "id" in config_dict else uuid.uuid4(),
-        app_id=final_app_id,
+        app_id=release.app_id,
         system_prompt=config_dict.get("system_prompt"),
-        default_model_config_id=default_model_config_id,
+        default_model_config_id=release.default_model_config_id,
         model_parameters=config_dict.get("model_parameters"),
         knowledge_retrieval=config_dict.get("knowledge_retrieval"),
         memory=config_dict.get("memory"),
         variables=config_dict.get("variables", []),
         tools=config_dict.get("tools", {}),
-        agent_role=config_dict.get("agent_role"),
-        agent_domain=config_dict.get("agent_domain"),
-        parent_agent_id=parent_agent_id,
-        capabilities=config_dict.get("capabilities", []),
-        is_active=config_dict.get("is_active", True),
-        created_at=config_dict.get("created_at", datetime.now()),
-        updated_at=config_dict.get("updated_at", datetime.now())
     )
-    
+
     return agent_config
 
 
 def dict_to_multi_agent_config(config_dict: Dict[str, Any], app_id: Optional[uuid.UUID] = None):
     """Convert dict to MultiAgentConfig model object
-    
+
     Args:
         config_dict: Configuration dictionary
         app_id: Optional app ID (if not provided in dict)
-    
+
     Returns:
         MultiAgentConfig model instance (not yet persisted to database)
-    
+
     Example:
         >>> config_dict = {
         ...     "app_id": "uuid-here",
@@ -121,23 +81,23 @@ def dict_to_multi_agent_config(config_dict: Dict[str, Any], app_id: Optional[uui
         >>> multi_agent_config = dict_to_multi_agent_config(config_dict)
     """
     from app.models.multi_agent_model import MultiAgentConfig
-    
+
     # Extract app_id
     final_app_id = config_dict.get("app_id") or app_id
     if not final_app_id:
         raise ValueError("app_id is required")
-    
+
     # Convert string UUID to UUID object if needed
     if isinstance(final_app_id, str):
         final_app_id = uuid.UUID(final_app_id)
-    
+
     # Convert master_agent_id
     master_agent_id = config_dict.get("master_agent_id")
     if not master_agent_id:
         raise ValueError("master_agent_id is required")
     if isinstance(master_agent_id, str):
         master_agent_id = uuid.UUID(master_agent_id)
-    
+
     # Create MultiAgentConfig instance
     multi_agent_config = MultiAgentConfig(
         id=uuid.UUID(config_dict["id"]) if "id" in config_dict else uuid.uuid4(),
@@ -153,20 +113,20 @@ def dict_to_multi_agent_config(config_dict: Dict[str, Any], app_id: Optional[uui
         created_at=config_dict.get("created_at", datetime.now()),
         updated_at=config_dict.get("updated_at", datetime.now())
     )
-    
+
     return multi_agent_config
 
 
 def dict_to_workflow_config(config_dict: Dict[str, Any], app_id: Optional[uuid.UUID] = None):
     """Convert dict to WorkflowConfig model object
-    
+
     Args:
         config_dict: Configuration dictionary
         app_id: Optional app ID (if not provided in dict)
-    
+
     Returns:
         WorkflowConfig model instance (not yet persisted to database)
-    
+
     Example:
         >>> config_dict = {
         ...     "app_id": "uuid-here",
@@ -194,16 +154,16 @@ def dict_to_workflow_config(config_dict: Dict[str, Any], app_id: Optional[uuid.U
         >>> workflow_config = dict_to_workflow_config(config_dict)
     """
     from app.models.workflow_model import WorkflowConfig
-    
+
     # Extract app_id
     final_app_id = config_dict.get("app_id") or app_id
     if not final_app_id:
         raise ValueError("app_id is required")
-    
+
     # Convert string UUID to UUID object if needed
     if isinstance(final_app_id, str):
         final_app_id = uuid.UUID(final_app_id)
-    
+
     # Create WorkflowConfig instance
     workflow_config = WorkflowConfig(
         id=uuid.UUID(config_dict["id"]) if "id" in config_dict else uuid.uuid4(),
@@ -217,16 +177,16 @@ def dict_to_workflow_config(config_dict: Dict[str, Any], app_id: Optional[uuid.U
         created_at=config_dict.get("created_at", datetime.now()),
         updated_at=config_dict.get("updated_at", datetime.now())
     )
-    
+
     return workflow_config
 
 
 def agent_config_to_dict(agent_config) -> Dict[str, Any]:
     """Convert AgentConfig model to dict
-    
+
     Args:
         agent_config: AgentConfig model instance
-    
+
     Returns:
         Configuration dictionary
     """
@@ -252,10 +212,10 @@ def agent_config_to_dict(agent_config) -> Dict[str, Any]:
 
 def multi_agent_config_to_dict(multi_agent_config) -> Dict[str, Any]:
     """Convert MultiAgentConfig model to dict
-    
+
     Args:
         multi_agent_config: MultiAgentConfig model instance
-    
+
     Returns:
         Configuration dictionary
     """
@@ -277,10 +237,10 @@ def multi_agent_config_to_dict(multi_agent_config) -> Dict[str, Any]:
 
 def workflow_config_to_dict(workflow_config) -> Dict[str, Any]:
     """Convert WorkflowConfig model to dict
-    
+
     Args:
         workflow_config: WorkflowConfig model instance
-    
+
     Returns:
         Configuration dictionary
     """
