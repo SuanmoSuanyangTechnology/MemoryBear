@@ -13,6 +13,9 @@ from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig, H
 
 logger = logging.getLogger(__file__)
 
+DEFAULT_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36")
+
 
 class HttpRequestNode(BaseNode):
     """
@@ -88,7 +91,9 @@ class HttpRequestNode(BaseNode):
 
         Both header keys and values support runtime template rendering.
         """
-        headers = {}
+        headers = {
+            "user-agent": DEFAULT_USER_AGENT
+        }
         for key, value in self.typed_config.headers.items():
             headers[self._render_template(key, state)] = self._render_template(value, state)
         return headers
@@ -204,6 +209,7 @@ class HttpRequestNode(BaseNode):
                 timeout=self._build_timeout(),
                 headers=self._build_header(state) | self._build_auth(state),
                 params=self._build_params(state),
+                follow_redirects=True
         ) as client:
             retries = self.typed_config.retry.max_attempts
             while retries > 0:
