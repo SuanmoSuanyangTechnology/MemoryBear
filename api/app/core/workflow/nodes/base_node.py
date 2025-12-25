@@ -7,10 +7,12 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, TypedDict, Annotated
 from operator import add
-from langchain_core.messages import AnyMessage, HumanMessage, AIMessage
+from typing import Any
+
+from langchain_core.messages import AnyMessage, AIMessage
 from langgraph.config import get_stream_writer
+from typing_extensions import TypedDict, Annotated
 
 from app.core.workflow.variable_pool import VariablePool
 

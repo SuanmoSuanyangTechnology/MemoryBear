@@ -188,6 +188,50 @@ class HttpRequestNodeConfig(BaseNodeConfig):
         description="Configuration for handling HTTP request errors",
     )
 
+    class Config:
+        json_schema_extra = {
+            "examples": [
+                {
+                    "method": "GET",
+                    "url": "{{sys.message}}",
+                    "auth": {
+                        "auth_type": "none",
+                        "header": "",
+                        "api_key": ""
+                    },
+                    "headers": {
+                        # "Content-Type": "application/json",
+                        # "User-Agent": "Workflow-HttpNode/1.0"
+                    },
+                    "params": {},
+                    "body": {
+                        "content_type": "none",
+                        "data": ""
+                    },
+                    "verify_ssl": True,
+                    "timeouts": {
+                        "connect_timeout": 5,
+                        "read_timeout": 30,
+                        "write_timeout": 10
+                    },
+                    "retry": {
+                        "max_attempts": 3,
+                        "retry_interval": 500
+                    },
+                    "error_handle": {
+                        "method": "default",
+                        "default": {
+                            "body": "Upstream service unavailable",
+                            "status_code": 502,
+                            "headers": {
+                                "Content-Type": "text/plain"
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+
 
 class HttpRequestNodeOutput(BaseModel):
     body: str = Field(
