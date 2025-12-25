@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any
 
 from app.core.workflow.expression_evaluator import ExpressionEvaluator
@@ -34,7 +35,9 @@ class AssignerNode(BaseNode):
             variable_selector = assignment.variable_selector
             if isinstance(variable_selector, str):
                 # Support dot-separated string paths, e.g., "conv.test" -> ["conv", "test"]
-                variable_selector = variable_selector.split('.')
+                pattern = r"\{\{\s*(.*?)\s*\}\}"
+                expression = re.sub(pattern, r"\1", variable_selector).strip()
+                variable_selector = expression.split('.')
 
             # Only conversation variables ('conv') are allowed
             if variable_selector[0] != 'conv':  # TODO: Loop node variable support (Feature)

@@ -30,3 +30,18 @@ class AssignerNodeConfig(BaseNodeConfig):
         ...,
         description="List of variable assignment definitions",
     )
+
+    class Config:
+        json_schema_extra = {
+            "examples": [
+                {
+                    "assignments": [
+                        {
+                            "variable_selector": "{{ conv.test1 }}",
+                            "operation": "add",
+                            "value": "3"
+                        }
+                    ]
+                }
+            ]
+        }
