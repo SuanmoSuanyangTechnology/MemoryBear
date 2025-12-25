@@ -242,6 +242,11 @@ export const zh = {
       qaMode: '问答模式',
       fileParsingSettings: '文件解析设置',
       pdfEnhancementAnalysis: 'PDF增强解析',
+      fileSizeExceeds: '文件大小超过限制',
+      sizeLimitError: '文件大小超过限制，最大支持256MB，当前文件大小',
+      fileDurationExceeds:'文件时长超过限制',
+      fileDurationLimitError: '媒体文件时长超过限制，最大支持150秒，当前时长',
+      unableReadFile:'无法读取媒体文件信息，请检查文件格式',
       createForm: {
         name: '名称',
         embedding_id: '嵌入模型',
