@@ -10,6 +10,7 @@ import type { ConfigForm, Result, ReflexionData, MemoryVerify, QualityAssessment
 import CustomSelect from '@/components/CustomSelect';
 import { getModelListUrl } from '@/api/models'
 import Tag from '@/components/Tag'
+import { useI18n } from '@/store/locale';
 
 const configList = [
   // 启用反思引擎
@@ -78,6 +79,7 @@ const SelfReflectionEngine: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [runLoading, setRunLoading] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
+  const { language } = useI18n()
 
   const values = Form.useWatch([], form);
 
@@ -135,7 +137,7 @@ const SelfReflectionEngine: React.FC = () => {
       .then(() => {
         pilotRunMemoryReflectionConfig({
           config_id: id,
-          dialogue_text: t('reflectionEngine.exampleText')
+          language_type: language
         })
           .then((res) => {
             setResult(res as Result)

@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState } from 'react'
+import { type FC, useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton } from 'antd';
@@ -7,8 +7,9 @@ import Empty from '@/components/Empty';
 import {
   getMemoryInsightReport,
 } from '@/api/memory'
+import type { MemoryInsightRef } from '../types'
 
-const MemoryInsight:FC = () => {
+const MemoryInsight = forwardRef<MemoryInsightRef>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
@@ -31,6 +32,10 @@ const MemoryInsight:FC = () => {
       setLoading(false)
     })
   }
+  // 暴露给父组件的方法
+  useImperativeHandle(ref, () => ({
+    getInsightReport,
+  }));
   return (
     <RbCard 
       title={t('userMemory.memoryInsight')} 
@@ -51,5 +56,5 @@ const MemoryInsight:FC = () => {
       }
     </RbCard>
   )
-}
+})
 export default MemoryInsight

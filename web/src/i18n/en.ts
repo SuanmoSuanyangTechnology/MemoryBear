@@ -329,6 +329,7 @@ export const en = {
       publicApiCannotRefreshToken: 'Public API cannot refresh token',
       refreshTokenNotExist: 'Refresh token does not exist',
       reset: 'Reset',
+      refresh: 'Refresh'
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -1039,6 +1040,16 @@ export const en = {
       MemorySummary: 'Episodic Memory',
       Statement: 'Emotional Memory',
       ExtractedEntity: 'Short-term Memory',
+
+      PERCEPTUAL_MEMORY: 'Perceptual Memory',
+      WORKING_MEMORY: 'Working Memory',
+      SHORT_TERM_MEMORY: 'Shot Term Memory',
+      LONG_TERM_MEMORY: 'Long Term Memory',
+      EXPLICIT_MEMORY: 'Explicit Memory',
+      IMPLICIT_MEMORY: 'Implicit Memory',
+      EMOTIONAL_MEMORY: 'Emotional Memory',
+      EPISODIC_MEMORY: 'Episodic Memory',
+
       endUserProfile: 'Core Profile',
       editEndUserProfile: 'Edit',
       name: 'Name',

@@ -1,5 +1,6 @@
 import { request } from '@/utils/request'
 import type { SpaceModalData } from '@/views/SpaceManagement/types'
+import type { ConfigModalData } from '@/views/UserMemory/types'
 
 // 空间列表
 export const getWorkspaces = () => {
@@ -22,6 +23,6 @@ export const getWorkspaceModels = () => {
   return request.get(`/workspaces/workspace_models`)
 }
 // 更新空间模型配置
-export const updateWorkspaceModels = () => {
-  return request.post(`/workspaces/workspace_models`)
+export const updateWorkspaceModels = (data: ConfigModalData) => {
+  return request.put(`/workspaces/workspace_models`, data)
 }

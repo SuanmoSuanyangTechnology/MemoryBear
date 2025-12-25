@@ -795,7 +795,8 @@ export const zh = {
       logoutApiCannotRefreshToken: '退出登录接口不能刷新token',
       publicApiCannotRefreshToken: '公共接口不能刷新token',
       refreshTokenNotExist: '刷新token不存在',
-      reset: '重置'
+      reset: '重置',
+      refresh: '刷新'
     },
     product: {
       applicationManagement: '应用管理',
@@ -1111,10 +1112,21 @@ export const zh = {
 
       nodeStatistics: '记忆分类',
       total: '总计',
+
       Chunk: '长期记忆',
       MemorySummary: '情景记忆',
       Statement: '情绪记忆',
       ExtractedEntity: '短期记忆',
+
+      PERCEPTUAL_MEMORY: '感知记忆',
+      WORKING_MEMORY: '工作记忆',
+      SHORT_TERM_MEMORY: '短期记忆',
+      LONG_TERM_MEMORY: '长期记忆',
+      EXPLICIT_MEMORY: '显性记忆',
+      IMPLICIT_MEMORY: '隐性记忆',
+      EMOTIONAL_MEMORY: '情绪记忆',
+      EPISODIC_MEMORY: '情景记忆',
+
       endUserProfile: '核心档案',
       editEndUserProfile: '编辑',
       name: '姓名',
