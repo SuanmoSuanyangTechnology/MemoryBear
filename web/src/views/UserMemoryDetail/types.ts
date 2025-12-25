@@ -126,7 +126,7 @@ export interface EndUser {
   department: string;
   contact: string;
   phone: string;
-  hire_date: string | number | Dayjs
+  hire_date: string | number | Dayjs | null;
 }
 export interface EndUserProfileModalRef {
   handleOpen: (vo: EndUser) => void;

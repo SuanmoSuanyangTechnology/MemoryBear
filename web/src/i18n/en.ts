@@ -1067,7 +1067,7 @@ export const en = {
 
       endUserProfile: 'Core Profile',
       editEndUserProfile: 'Edit',
-      name: 'Name',
+      other_name: 'Name',
       position: 'Position',
       department: 'Department',
       contact: 'Contact',
