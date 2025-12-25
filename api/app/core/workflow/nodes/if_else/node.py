@@ -158,10 +158,21 @@ class IfElseNode(BaseNode):
 
     async def execute(self, state: WorkflowState) -> Any:
         """
+        Execute the conditional branching logic of the node.
+
+        Evaluates the node's configured conditional expressions (expressions) in order.
+        Once a condition is satisfied, it returns the corresponding CASE identifier.
+        If none of the conditions match, it returns the default last CASE.
+
+        Args:
+            state (WorkflowState): The current workflow state, containing variables, messages, node outputs, etc.
+
+        Returns:
+            str: The matched branch identifier, e.g., 'CASE1', 'CASE2', ..., used for node transitions.
         """
         expressions = self.build_conditional_edge_expressions()
         for i in range(len(expressions)):
             logger.info(expressions[i])
             if self._evaluate_condition(expressions[i], state):
-                return f'CASE{i+1}'
+                return f'CASE{i + 1}'
         return f'CASE{len(expressions)}'

@@ -36,3 +36,19 @@ class KnowledgeRetrievalNodeConfig(BaseNodeConfig):
         default=RetrieveType.PARTICIPLE,
         description="Retrieve type"
     )
+
+    class Config:
+        json_schema_extra = {
+            "examples": [
+                {
+                    "query": "{{sys.message}}",
+                    "kb_ids": [
+                        "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                    ],
+                    "similarity_threshold": 0.2,
+                    "vector_similarity_weight": 0.3,
+                    "top_k": 1,
+                    "retrieve_type": "hybrid"
+                }
+            ]
+        }
