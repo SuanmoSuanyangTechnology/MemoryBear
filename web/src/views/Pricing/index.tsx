@@ -202,7 +202,7 @@ const PricingView: React.FC = () => {
             {/* Price */}
             <div className="rb:mb-5">
               {typeof item.priceObj.price !== 'undefined' ? (
-                <div className="rb:flex rb:items-baseline">
+                <div className="rb:flex rb:items-baseline rb:h-16">
                   <span className="rb:text-[16px] rb:text-[#5B6167] rb:font-regular rb:mr-1 rb:mb-1">¥</span>
                   <span className="rb:text-[40px] rb:font-extrabold">
                     {item.priceObj.price.toLocaleString()}
@@ -212,7 +212,7 @@ const PricingView: React.FC = () => {
                   </span>
                 </div>
               ) : (
-                <div className="rb:text-2xl rb:font-bold rb:text-gray-900">
+                  <div className="rb:text-[28px] rb:h-16 rb:pb-1 rb:font-extrabold rb:flex rb:items-end">
                     {t(item.priceObj.time)}
                 </div>
               )}
