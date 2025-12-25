@@ -15,6 +15,7 @@ from app.core.workflow.nodes.agent.config import AgentNodeConfig
 from app.core.workflow.nodes.transform.config import TransformNodeConfig
 from app.core.workflow.nodes.if_else.config import IfElseNodeConfig
 from app.core.workflow.nodes.knowledge.config import KnowledgeRetrievalNodeConfig
+from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig
 from app.core.workflow.nodes.assigner.config import AssignerNodeConfig
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "IfElseNodeConfig",
     "KnowledgeRetrievalNodeConfig",
     "AssignerNodeConfig",
+    "HttpRequestNodeConfig"
 ]

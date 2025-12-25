@@ -73,3 +73,34 @@ class AssignmentOperator(StrEnum):
             return ObjectOperator
 
         raise TypeError(f"Unsupported variable type ({type(obj)})")
+
+
+class HttpRequestMethod(StrEnum):
+    GET = "GET"
+    POST = "POST"
+    HEAD = "HEAD"
+    PUT = "PUT"
+    PATCH = "PATCH"
+    DELETE = "DELETE"
+
+
+class HttpAuthType(StrEnum):
+    NONE = "none"
+    BASIC = "basic"
+    BEARER = "bearer"
+    CUSTOM = "custom"
+
+
+class HttpContentType(StrEnum):
+    NONE = "none"
+    FROM_DATA = "form-data"
+    WWW_FORM = "x-www-form-urlencoded"
+    JSON = "json"
+    RAW = "raw"
+    BINARY = "binary"
+
+
+class HttpErrorHandle(StrEnum):
+    NONE = "none"
+    DEFAULT = "default"
+    BRANCH = "branch"
