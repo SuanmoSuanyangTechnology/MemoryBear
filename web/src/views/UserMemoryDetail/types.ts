@@ -131,3 +131,6 @@ export interface EndUser {
 export interface EndUserProfileModalRef {
   handleOpen: (vo: EndUser) => void;
 }
+export interface MemoryInsightRef {
+  getInsightReport: () => void
+}
