@@ -343,11 +343,11 @@ async def update_end_user_profile(
             api_logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
             return fail(BizCode.INVALID_PARAMETER, "终端用户不存在", f"end_user_id={end_user_id}")
         
-        # 更新字段（只更新提供的非 None 字段，排除 end_user_id）
+        # 更新字段（只更新提供的字段，排除 end_user_id）
+        # 允许 None 值来重置字段（如 hire_date）
         update_data = profile_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
         for field, value in update_data.items():
-            if value is not None:
-                setattr(end_user, field, value)
+            setattr(end_user, field, value)
         
         # 更新 updated_at 时间戳
         end_user.updated_at = datetime.datetime.now()
