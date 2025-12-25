@@ -13,6 +13,7 @@ import folderIcon from '@/assets/images/knowledgeBase/folder.png';
 import textIcon from '@/assets/images/knowledgeBase/text.png';
 import editIcon from '@/assets/images/knowledgeBase/edit.png';
 import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
+import imageIcon from '@/assets/images/knowledgeBase/image.png'
 import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase } from '@/api/knowledgeBase';
 import { 
   type CreateModalRef, 
@@ -327,15 +328,15 @@ const Private: FC = () => {
         // handleCreate('folder'); // 传入 type: 'folder'
       },
     },
-    // 暂时未实现
-    // {
-    //   key: '3',
-    //   icon: <img src={imageIcon} alt="image" style={{ width: 16, height: 16 }} />,
-    //   label: t('knowledgeBase.imageDataSet'),
-    //   onClick: () => {
-    //     createImageDataset?.current?.handleOpen(knowledgeBaseId || '', parentId || '')
-    //   },
-    // },
+    {
+      key: '3',
+      icon: <img src={imageIcon} alt="image" style={{ width: 16, height: 16 }} />,
+      label: t('knowledgeBase.mediaDataSet'),
+      onClick: () => {
+        createImageDataset?.current?.handleOpen(knowledgeBaseId || '', parentId || '')
+      },
+    },
+        // 暂时未实现
     // {
     //   key: '4',
     //   icon: <img src={blankIcon} alt="blank" style={{ width: 16, height: 16 }} />,

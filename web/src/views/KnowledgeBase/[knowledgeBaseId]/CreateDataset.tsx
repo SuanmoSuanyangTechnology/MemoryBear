@@ -53,8 +53,8 @@ interface CreateDatasetLocationState {
   knowledgeBaseId?: string;
   parentId?: string;
   startStep?: StepKey;
-  fileId?: string;
-  fileIds?: string[];
+  fileId?: string | string[];
+  fileIds?: string | string[];
 }
 
 const CreateDataset = () => {
@@ -67,7 +67,11 @@ const CreateDataset = () => {
   const knowledgeBaseId = locationState.knowledgeBaseId || routeKnowledgeBaseId;
   const parentId = locationState.parentId;
   const initialStepKey = locationState.startStep ?? 'selectFile';
-  const initialFileIds = locationState.fileIds ?? (locationState.fileId ? [locationState.fileId] : []);
+  const initialFileIds = (() => {
+    const fileIds = locationState.fileIds || locationState.fileId;
+    if (!fileIds) return [];
+    return Array.isArray(fileIds) ? fileIds : [fileIds];
+  })();
   const [current, setCurrent] = useState<number>(stepIndexMap[initialStepKey]);
   const tableRef = useRef<TableRef>(null);
 
