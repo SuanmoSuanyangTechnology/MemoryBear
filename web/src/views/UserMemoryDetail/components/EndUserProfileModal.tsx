@@ -47,7 +47,7 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
         setLoading(true)
         updatedEndUserProfile({
           ...values,
-          hire_date: values.hire_date.valueOf()
+          hire_date: values.hire_date?.valueOf() || null
         })
           .then(() => {
             setLoading(false)
@@ -85,8 +85,8 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
       >
         <FormItem name="end_user_id" hidden></FormItem>
         <FormItem
-          name="name"
-          label={t('userMemory.name')}
+          name="other_name"
+          label={t('userMemory.other_name')}
         >
           <Input placeholder={t('common.enter')} />
         </FormItem>
@@ -118,7 +118,7 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
           name="hire_date"
           label={t('userMemory.hire_date')}
         >
-          <DatePicker className="rb:w-full" />
+          <DatePicker className="rb:w-full" allowClear />
         </FormItem>
       </Form>
     </RbModal>
