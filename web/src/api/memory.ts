@@ -131,6 +131,9 @@ export const getEmotionHealth = (group_id: string) => {
 export const getEmotionSuggestions = (group_id: string) => {
   return request.post(`/memory/emotion/suggestions`, { group_id, limit: 20 })
 }
+export const analyticsRefresh = (end_user_id: string) => {
+  return request.post('/memory-storage/analytics/generate_cache', { end_user_id })
+}
 
 /*************** end 用户记忆 相关接口 ******************************/
 
@@ -189,7 +192,7 @@ export const updateMemoryReflectionConfig = (values: SelfReflectionEngineConfig)
   return request.post('/memory/reflection/save', values)
 }
 // 反思引擎-试运行
-export const pilotRunMemoryReflectionConfig = (values: { config_id: number | string; dialogue_text: string; }) => {
+export const pilotRunMemoryReflectionConfig = (values: { config_id: number | string; language_type: string; }) => {
   return request.get('/memory/reflection/run', values)
 }
 
