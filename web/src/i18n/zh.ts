@@ -1134,7 +1134,7 @@ export const zh = {
 
       endUserProfile: '核心档案',
       editEndUserProfile: '编辑',
-      name: '姓名',
+      other_name: '姓名',
       position: '职位',
       department: '部门',
       contact: '联系方式',
