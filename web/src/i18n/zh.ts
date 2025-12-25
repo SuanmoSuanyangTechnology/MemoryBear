@@ -1126,6 +1126,11 @@ export const zh = {
       memories: '记忆',
       expanded: '展开',
 
+      description: '描述',
+      conversationMemory: '对话存储内容',
+      editConfig: '编辑模型',
+      chooseModel: '选择模型',
+
       nodeStatistics: '记忆分类',
       total: '总计',
 
@@ -1166,6 +1171,9 @@ export const zh = {
       ragDesc: '基于向量检索，适合文档问答和语义搜索',
       neo4j: '图存储',
       neo4jDesc: '基于知识图谱，适合关系推理和路径查询',
+      llmModel: 'LLM 模型',
+      embeddingModel: 'Embedding 模型',
+      rerankModel: 'Rerank 模型'
     },
     memoryExtractionEngine: {
       title: '记忆引擎模块配置中心',
