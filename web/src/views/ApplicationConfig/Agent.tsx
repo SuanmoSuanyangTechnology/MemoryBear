@@ -17,6 +17,7 @@ import type {
   KnowledgeConfig,
   Variable,
   MemoryConfig,
+  AiPromptModalRef
 } from './types'
 import type { Model } from '@/views/ModelManagement/types'
 import { getModelList } from '@/api/models';
@@ -27,19 +28,19 @@ import { getApplicationConfig } from '@/api/application'
 import { getKnowledgeBaseList } from '@/api/knowledgeBase'
 import { memoryConfigListUrl } from '@/api/memory'
 import CustomSelect from '@/components/CustomSelect'
-
-
+import aiPrompt from '@/assets/images/application/aiPrompt.png'
+import AiPromptModal from './components/AiPromptModal'
 
 const DescWrapper: FC<{desc: string, className?: string}> = ({desc, className}) => {
   return (
-    <div className={clsx(className, "rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-[16px] ")}>
+    <div className={clsx(className, "rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 ")}>
       {desc}
     </div>
   )
 }
 const LabelWrapper: FC<{title: string, className?: string; children?: ReactNode}> = ({title, className, children}) => {
   return (
-    <div className={clsx(className, "rb:text-[14px] rb:font-medium rb:leading-[20px]")}>
+    <div className={clsx(className, "rb:text-[14px] rb:font-medium rb:leading-5")}>
       {title}
       {children}
     </div>
@@ -50,12 +51,12 @@ const SwitchWrapper: FC<{ title: string, desc: string, name: string }> = ({ titl
   return (
     <div className="rb:flex rb:items-center rb:justify-between">
       <LabelWrapper title={t(`application.${title}`)}>
-        <DescWrapper desc={t(`application.${desc}`)} className="rb:mt-[8px]" />
+        <DescWrapper desc={t(`application.${desc}`)} className="rb:mt-2" />
       </LabelWrapper>
       <Form.Item
         name={name}
         valuePropName="checked"
-        className="rb:mb-[0px]!"
+        className="rb:mb-0!"
       >
         <Switch />
       </Form.Item>
@@ -66,11 +67,11 @@ const SelectWrapper: FC<{ title: string, desc: string, name: string, url: string
   const { t } = useTranslation();
   return (
     <>
-      <LabelWrapper title={t(`application.${title}`)} className="rb:mb-[8px]">
+      <LabelWrapper title={t(`application.${title}`)} className="rb:mb-2">
       </LabelWrapper>
       <Form.Item
         name={name}
-        className="rb:mb-[0px]!"
+        className="rb:mb-0!"
       >
         <CustomSelect
           url={url}
@@ -79,7 +80,7 @@ const SelectWrapper: FC<{ title: string, desc: string, name: string, url: string
           labelKey="config_name"
         />
       </Form.Item>
-      <DescWrapper desc={t(`application.${desc}`)} className="rb:mt-[8px]" />
+      <DescWrapper desc={t(`application.${desc}`)} className="rb:mt-2" />
     </>
   )
 }
@@ -336,15 +337,22 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     handleSave
   }))
 
+  const aiPromptModalRef = useRef<AiPromptModalRef>(null)
+  const handlePrompt = () => {
+    aiPromptModalRef.current?.handleOpen()
+  }
+  const updatePrompt = (value: string) => {
+    form.setFieldValue('system_prompt', value)
+  }
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
       <Row className="rb:h-[calc(100vh-64px)]">
         <Col span={12} className="rb:h-full rb:overflow-x-auto rb:border-r rb:border-[#DFE4ED] rb:p-[20px_16px_24px_16px]">
-          <div className="rb:flex rb:items-center rb:justify-end rb:mb-[20px]">
+          <div className="rb:flex rb:items-center rb:justify-end rb:mb-5">
             <Space size={10}>
               <Button onClick={handleModelConfig} className="rb:group">
-                {defaultModel?.name ? <div className="rb:w-[16px] rb:h-[16px] rb:bg-[url('@/assets/images/application/model.svg')] rb:group-hover:bg-[url('@/assets/images/application/model_hover.svg')]"></div> : null}
+                {defaultModel?.name ? <div className="rb:w-4 rb:h-4 rb:bg-[url('@/assets/images/application/model.svg')] rb:group-hover:bg-[url('@/assets/images/application/model_hover.svg')]"></div> : null}
                 {defaultModel?.name || t('application.chooseModel')}
               </Button>
               <Button type="primary" onClick={() => handleSave()}>
@@ -356,14 +364,18 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
             <Space size={16} direction="vertical" style={{ width: '100%' }}>
               {/* 提示词 */}
               <Card title={t('application.promptConfiguration')}>
-                <div className="rb:flex rb:items-center rb:justify-between rb:mb-[11px]">
-                  <div className="rb:font-medium rb:leading-[20px]">
+                <div className="rb:flex rb:items-center rb:justify-between rb:mb-2.75">
+                  <div className="rb:font-medium rb:leading-5">
                     {t('application.configuration')}
                     <span className="rb:font-regular rb:text-[12px] rb:text-[#5B6167]"> ({t('application.configurationDesc')})</span>
                   </div>
+                  <Button style={{ padding: '0 8px', height: '24px' }} onClick={handlePrompt}>
+                    <img src={aiPrompt} className="rb:size-5" />
+                    {t('application.aiPrompt')}
+                  </Button>
                 </div>
 
-                <Form.Item name="system_prompt" className="rb:mb-[0]!">
+                <Form.Item name="system_prompt" className="rb:mb-0!">
                   <Input.TextArea
                     placeholder={t('application.promptPlaceholder')}
                     styles={{
@@ -412,14 +424,14 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
           </Form>
         </Col>
         <Col span={12} className="rb:h-full rb:overflow-x-hidden rb:p-[20px_16px_24px_16px]">
-          <div className="rb:flex rb:items-center rb:justify-between rb:mb-[20px]">
+          <div className="rb:flex rb:items-center rb:justify-between rb:mb-5">
             {t('application.debuggingAndPreview')}
 
             <Space size={10}>
               <Button type="primary" ghost onClick={handleAddModel}>
                 +{t('application.addModel')}
               </Button>
-              <div className="rb:w-[32px] rb:h-[32px] rb:cursor-pointer rb:bg-[url('@/assets/images/application/clean.svg')]" onClick={handleClearDebugging}></div>
+              <div className="rb:w-8 rb:h-8 rb:cursor-pointer rb:bg-[url('@/assets/images/application/clean.svg')]" onClick={handleClearDebugging}></div>
             </Space>
           </div>
           <RbCard height="calc(100vh - 160px)" bodyClassName="rb:p-[0]! rb:h-full rb:overflow-hidden">
@@ -439,6 +451,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         chatList={chatList}
         ref={modelConfigModalRef}
         refresh={refresh}
+      />
+      <AiPromptModal
+        ref={aiPromptModalRef}
+        defaultModel={defaultModel}
+        refresh={updatePrompt}
       />
     </>
   );

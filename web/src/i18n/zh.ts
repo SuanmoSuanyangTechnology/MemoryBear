@@ -505,6 +505,15 @@ export const zh = {
       apiKeyDeleteContent: '删除后将无法恢复，使用此Key的应用将无法访问 API',
       currentValue: '当前值',
       qpsLimitUnit: '次/秒',
+      addVariable: '插入变量',
+      defineVariableName: '自定义变量名',
+      defineVariableNamePlaceholder: '输入变量名，例如：user_name',
+      defineVariableNameExtra: '格式：变量名会自动添加{{}}包裹',
+      you: '你',
+      ai: 'AI 助手',
+      promptChatPlaceholder: '描述你需要的提示词，例如：我需要一个客服助手',
+      promptChatEmpty: '目前没有对话内容',
+      promptEmpty: '在左侧描述您的用例，编排预览将在此处显示。',
     },
     // 角色管理相关翻译
     role: {
