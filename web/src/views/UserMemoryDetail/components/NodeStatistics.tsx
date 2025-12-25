@@ -29,9 +29,11 @@ const NodeStatistics: FC = () => {
     if (!id) return
     setLoading(true)
     getNodeStatistics(id).then((res) => {
-      const response = res as { nodes: NodeStatisticsItem[], total: number }
-      setData(response.nodes)
-      setTotal(response.total)
+      const response = res as NodeStatisticsItem[]
+      setData(response)
+      // 计算count总计
+      const totalCount = response.reduce((sum, item) => sum + (item.count || 0), 0)
+      setTotal(totalCount)
       setLoading(false) 
     })
     .finally(() => {
@@ -40,7 +42,7 @@ const NodeStatistics: FC = () => {
   }
   const handleViewDetail = (type: string) => {
     switch (type) {
-      case 'Statement':
+      case 'EMOTIONAL_MEMORY':
         navigate(`/statement/${id}`)
         break
     }
@@ -56,19 +58,19 @@ const NodeStatistics: FC = () => {
     >
       {loading
         ? <Skeleton />
-        : data.length > 0
-          ? <div className={`rb:w-full rb:grid rb:grid-cols-${data.length} rb:gap-2`}>
+        : data && data.length > 0
+          ? <div className={`rb:w-full rb:grid rb:grid-cols-3 rb:gap-2`}>
             {data.map(vo => (
               <div
                 key={vo.type}
                 className={clsx("rb:group rb:border rb:border-[#DFE4ED] rb:p-0 rb:rounded-xl rb:hover:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)]", {
-                  'rb:cursor-pointer': vo.type === 'Statement'
+                  'rb:cursor-pointer': vo.type === 'EMOTIONAL_MEMORY'
                 })}
                 onClick={() => handleViewDetail(vo.type)}
               >
                 <div className="rb:gap-0.5 rb:p-3 rb:leading-4 rb:text-[#5B6167] rb:flex rb:items-center rb:justify-between rb:border-b rb:border-[#DFE4ED]">
                   <div className="rb:wrap-break-word rb:line-clamp-1">{t(`userMemory.${vo.type}`)}</div>
-                  {vo.type === 'Statement' && <div
+                  {vo.type === 'EMOTIONAL_MEMORY' && <div
                     className="rb:w-3 rb:h-3 rb:-ml-0.75 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/home/arrow_top_right.svg')] rb:group-hover:bg-[url('@/assets/images/home/arrow_top_right_hover.svg')]"
                   ></div>}
                 </div>

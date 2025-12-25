@@ -38,6 +38,8 @@ import toolIcon from '@/assets/images/menu/tool.png';
 import toolActiveIcon from '@/assets/images/menu/tool_active.png';
 import apiKeyIcon from '@/assets/images/menu/apiKey.png';
 import apiKeyActiveIcon from '@/assets/images/menu/apiKey_active.png';
+import pricingIcon from '@/assets/images/menu/pricing.svg'
+import pricingActiveIcon from '@/assets/images/menu/pricing_active.svg'
 
 // 图标路径映射表
 const iconPathMap: Record<string, string> = {
@@ -65,6 +67,8 @@ const iconPathMap: Record<string, string> = {
   'toolActive': toolActiveIcon,
   'apiKey': apiKeyIcon,
   'apiKeyActive': apiKeyActiveIcon,
+  'pricing': pricingIcon,
+  'pricingActive': pricingActiveIcon
 };
 
 const { Sider } = Layout;

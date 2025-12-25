@@ -41,15 +41,15 @@ const ConfigModal = forwardRef<ConfigModalRef>((_props, ref) => {
       .validateFields()
       .then(() => {
         setLoading(true)
-        // updateWorkspaceModels(values as ConfigModalData)
-        //   .then(() => {
-        //     setLoading(false)
-        //     handleClose()
-        //     message.success(t('common.createSuccess'))
-        //   })
-        //   .catch(() => {
-        //     setLoading(false)
-        //   });
+        updateWorkspaceModels(values)
+          .then(() => {
+            setLoading(false)
+            handleClose()
+            message.success(t('common.updateSuccess'))
+          })
+          .catch(() => {
+            setLoading(false)
+          });
 
         handleClose()
       })
