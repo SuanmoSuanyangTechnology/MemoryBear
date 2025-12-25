@@ -275,8 +275,9 @@ class TextInTool(BuiltinTool):
                 "total_confidence": result.get("confidence", 0),
                 "processing_time": result.get("processing_time", 0)
             }
-    
-    def _format_formula_result(self, result: Dict[str, Any], output_format: str) -> Dict[str, Any]:
+
+    @staticmethod
+    def _format_formula_result( result: Dict[str, Any], output_format: str) -> Dict[str, Any]:
         """格式化公式识别结果"""
         formulas = result.get("formulas", [])
         
@@ -288,8 +289,9 @@ class TextInTool(BuiltinTool):
             "total_confidence": result.get("confidence", 0),
             "processing_time": result.get("processing_time", 0)
         }
-    
-    def _format_table_result(self, result: Dict[str, Any], output_format: str) -> Dict[str, Any]:
+
+    @staticmethod
+    def _format_table_result(result: Dict[str, Any], output_format: str) -> Dict[str, Any]:
         """格式化表格识别结果"""
         tables = result.get("tables", [])
         
@@ -301,8 +303,9 @@ class TextInTool(BuiltinTool):
             "total_confidence": result.get("confidence", 0),
             "processing_time": result.get("processing_time", 0)
         }
-    
-    def _format_document_result(self, result: Dict[str, Any], output_format: str) -> Dict[str, Any]:
+
+    @staticmethod
+    def _format_document_result(result: Dict[str, Any], output_format: str) -> Dict[str, Any]:
         """格式化文档识别结果"""
         return {
             "recognition_mode": "document",
@@ -314,8 +317,9 @@ class TextInTool(BuiltinTool):
             "total_confidence": result.get("confidence", 0),
             "processing_time": result.get("processing_time", 0)
         }
-    
-    def _group_lines_to_paragraphs(self, lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+
+    @staticmethod
+    def _group_lines_to_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """将行分组为段落"""
         paragraphs = []
         current_paragraph = []
