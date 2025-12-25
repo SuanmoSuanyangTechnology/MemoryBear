@@ -513,6 +513,22 @@ const Private: FC = () => {
       },
     },
     {
+      title: t('knowledgeBase.status'),
+      dataIndex: 'progress',
+      key: 'progress',
+      render: (value: string | number) => {
+        return (
+          <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
+            <span
+              className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full"
+              style={{ backgroundColor: value === 1 ? '#369F21' : value === 0 ? '#FF0000' : '#FF8A4C' }}
+            ></span>
+            <span>{value === 1 ? t('knowledgeBase.completed') : value === 0 ? t('knowledgeBase.pending') : t('knowledgeBase.processing')}</span>
+          </span>
+        );
+      }
+    },
+    {
       title: t('knowledgeBase.processingMode'),
       dataIndex: 'parser_id',
       key: 'parser_id',
@@ -532,22 +548,7 @@ const Private: FC = () => {
         )
       }
     },
-    {
-      title: t('knowledgeBase.status'),
-      dataIndex: 'progress',
-      key: 'progress',
-      render: (value: string | number) => {
-        return (
-          <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
-            <span
-              className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full"
-              style={{ backgroundColor: value === 1 ? '#369F21' : value === 0 ? '#FF0000' : '#FF8A4C' }}
-            ></span>
-            <span>{value === 1 ? t('knowledgeBase.completed') : value === 0 ? t('knowledgeBase.pending') : t('knowledgeBase.processing')}</span>
-          </span>
-        );
-      }
-    },
+
     {
       title: t('common.operation'),
       key: 'action',
