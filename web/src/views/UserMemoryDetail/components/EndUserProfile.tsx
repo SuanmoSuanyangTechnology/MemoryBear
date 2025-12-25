@@ -37,7 +37,7 @@ const EndUserProfile:FC = () => {
   }
   const formatItems = useCallback(() => {
     if (!data) return []
-    return ['name', 'position', 'department', 'contact', 'phone', 'hire_date'].map(key => ({
+    return ['other_name', 'position', 'department', 'contact', 'phone', 'hire_date'].map(key => ({
       key,
       label: t(`userMemory.${key}`),
       children: key === 'hire_date' && data[key] ? dayjs(data[key as keyof EndUser]).format('YYYY-MM-DD') : String(data[key as keyof EndUser] || ''),
