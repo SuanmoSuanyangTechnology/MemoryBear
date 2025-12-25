@@ -619,6 +619,11 @@ export const en = {
       qaMode: 'QA Mode',
       fileParsingSettings: 'File Parsing Settings',
       pdfEnhancementAnalysis: 'PDF Enhancement Analysis',
+      fileSizeExceeds: 'File size exceeds the limit',
+      sizeLimitError: 'The file size exceeds the limit. The maximum supported size is 256MB. The current file size is',
+      fileDurationExceeds: 'File duration exceeds the limit',
+      fileDurationLimitError: 'The duration of the media file exceeds the limit. The maximum supported duration is 150 seconds. Current duration',
+      unableReadFile:'Unable to read the information of the media file. Please check the file format.',
       createForm:{
         name: 'Name',
         embedding_id: 'Embedding',
