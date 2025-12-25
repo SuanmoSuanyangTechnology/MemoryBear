@@ -1,5 +1,5 @@
 import {  useMemo,useRef, useState, useEffect } from 'react';
-import { Button, Flex, Radio, Steps, Modal, Input, Spin, message, Checkbox} from 'antd';
+import { Button, Flex, Radio, Steps, Modal, Input, Spin, message, Checkbox, Select} from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Table, { type TableRef } from '@/components/Table'
@@ -81,9 +81,10 @@ const CreateDataset = () => {
   const [blockSize, setBlockSize] = useState<number>(130);
   const [processingMethod, setProcessingMethod] = useState<ProcessingMethod>('directBlock');
   const [parameterSettings, setParameterSettings] = useState<ParameterSettings>('defaultSettings');
-  const [pdfEnhancementEnabled, setPdfEnhancementEnabled] = useState<boolean>(false);
+  const [pdfEnhancementEnabled, setPdfEnhancementEnabled] = useState<boolean>(true);
+  const [pdfEnhancementMethod, setPdfEnhancementMethod] = useState<string>('deepdoc');
   const [messageApi, contextHolder] = message.useMessage();
-  const fileType = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'htm', 'html', 'json', 'ppt', 'pptx', 'txt','png','jpg']
+  const fileType = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'htm', 'html', 'json', 'ppt', 'pptx', 'txt','png','jpg','mp3','mp4','mov','wav']
   const steps = useMemo(
     () => [
       { title: t('knowledgeBase.selectFile') },
@@ -119,7 +120,7 @@ const CreateDataset = () => {
                 const params = {
                   progress: 0,
                   parser_config: {
-                      layout_recognize:'DeepDOC',
+                      layout_recognize: pdfEnhancementMethod || 'DeepDOC',
                       delimiter: delimiter,
                       chunk_token_num: blockSize,
                       auto_questions: processingMethod === 'directBlock' ? 0 : 1,
@@ -244,11 +245,61 @@ const CreateDataset = () => {
       ),
     },
   ];
-  // 上传文件
-  const handleUpload = (options: UploadRequestOption) => {
-    const { file, onSuccess, onError, onProgress, filename = 'file' } = options;
-    const formData = new FormData();
+  // 检查媒体文件时长的辅助函数
+  const checkMediaDuration = (file: File): Promise<number> => {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const media = document.createElement(file.type.startsWith('video/') ? 'video' : 'audio');
+      
+      media.onloadedmetadata = () => {
+        URL.revokeObjectURL(url);
+        resolve(media.duration);
+      };
+      
+      media.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('无法读取媒体文件'));
+      };
+      
+      media.src = url;
+    });
+  };
 
+  // 上传文件
+  const handleUpload = async (options: UploadRequestOption) => {
+    const { file, onSuccess, onError, onProgress, filename = 'file' } = options;
+    
+    // 获取文件扩展名
+    const fileExtension = (file as File).name.split('.').pop()?.toLowerCase();
+    const mediaExtensions = ['mp3', 'mp4', 'mov', 'wav'];
+    
+    // 如果是媒体文件，进行大小和时长检查
+    if (fileExtension && mediaExtensions.includes(fileExtension)) {
+      const fileSizeInMB = (file as File).size / (1024 * 1024);
+      
+      // 检查文件大小（256MB限制）
+      if (fileSizeInMB > 256) {
+        messageApi.error(`${t('knowledgeBase.sizeLimitError')}：${fileSizeInMB.toFixed(2)}MB`);
+        onError?.(new Error(`${t('knowledgeBase.fileSizeExceeds')}`));
+        return;
+      }
+      
+      try {
+        // 检查媒体时长（150秒限制）
+        const duration = await checkMediaDuration(file as File);
+        if (duration > 150) {
+          messageApi.error(`${t('knowledgeBase.fileDurationLimitError')}：${Math.round(duration)}秒`);
+          onError?.(new Error(`${t('knowledgeBase.fileDurationExceeds')}`));
+          return;
+        }
+      } catch (error) {
+        messageApi.error(`${t('knowledgeBase.unableReadFile')}`);
+        onError?.(error as Error);
+        return;
+      }
+    }
+
+    const formData = new FormData();
     formData.append(filename, file as File);
     if (knowledgeBaseId) {
       formData.append('kb_id', knowledgeBaseId);
@@ -469,7 +520,7 @@ const CreateDataset = () => {
                   ))}
               </div>
             )}
-            <div className='rb:text-base rb:font-medium rb:text-gray-800'>
+            <div className='rb:text-base rb:font-medium rb:text-gray-800 rb:mt-4'>
                 {t('knowledgeBase.fileParsingSettings')}
             </div>
             <div className='rb:mt-4'>
@@ -477,7 +528,7 @@ const CreateDataset = () => {
                 className={`rb:flex rb:items-center rb:w-full rb:border rb:rounded-lg rb:p-4 rb:cursor-pointer ${
                   pdfEnhancementEnabled ? 'rb:border-blue-500' : 'rb:border-gray-300'
                 }`}
-                onClick={() => setPdfEnhancementEnabled(!pdfEnhancementEnabled)}
+                // onClick={() => setPdfEnhancementEnabled(!pdfEnhancementEnabled)}
               >
                 <Checkbox 
                   checked={pdfEnhancementEnabled}
@@ -487,7 +538,22 @@ const CreateDataset = () => {
                 <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
                   {t('knowledgeBase.pdfEnhancementAnalysis')}
                 </span>
+                {pdfEnhancementEnabled && (
+                <div className='rb:ml-10'>
+                  <Select
+                    value={pdfEnhancementMethod}
+                    onChange={(value) => setPdfEnhancementMethod(value)}
+                    className='rb:w-48'
+                    options={[
+                      { value: 'deepdoc', label: 'DeepDoc' },
+                      { value: 'mineru', label: 'MinerU' },
+                      { value: 'textln', label: 'TextLN' }
+                    ]}
+                  />
+                </div>
+              )}
               </div>
+              
             </div>
             <div className='rb:text-base rb:font-medium rb:text-gray-800 rb:mt-6'>
                 {t('knowledgeBase.dataProcessingSettings')}
