@@ -18,6 +18,7 @@ from app.core.workflow.nodes.knowledge.config import KnowledgeRetrievalNodeConfi
 from app.core.workflow.nodes.llm.config import LLMNodeConfig, MessageConfig
 from app.core.workflow.nodes.start.config import StartNodeConfig
 from app.core.workflow.nodes.transform.config import TransformNodeConfig
+from app.core.workflow.nodes.variable_aggregator.config import VariableAggregatorNodeConfig
 
 __all__ = [
     # 基础类
@@ -36,4 +37,5 @@ __all__ = [
     "AssignerNodeConfig",
     "HttpRequestNodeConfig",
     "JinjaRenderNodeConfig",
+    "VariableAggregatorNodeConfig",
 ]

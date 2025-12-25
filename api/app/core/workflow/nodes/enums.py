@@ -25,6 +25,7 @@ class NodeType(StrEnum):
     AGENT = "agent"
     ASSIGNER = "assigner"
     JINJARENDER = "jinja-render"
+    VAR_AGGREGATOR = "var-aggregator"
 
 
 class ComparisonOperator(StrEnum):

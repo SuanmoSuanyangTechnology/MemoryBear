@@ -19,6 +19,7 @@ from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
 from app.core.workflow.nodes.llm import LLMNode
 from app.core.workflow.nodes.start import StartNode
 from app.core.workflow.nodes.transform import TransformNode
+from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ WorkflowNode = Union[
     HttpRequestNode,
     KnowledgeRetrievalNode,
     JinjaRenderNode,
+    VariableAggregatorNode
 ]
 
 
@@ -55,6 +57,7 @@ class NodeFactory:
         NodeType.ASSIGNER: AssignerNode,
         NodeType.HTTP_REQUEST: HttpRequestNode,
         NodeType.JINJARENDER: JinjaRenderNode,
+        NodeType.VAR_AGGREGATOR: VariableAggregatorNode
     }
 
     @classmethod
