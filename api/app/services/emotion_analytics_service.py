@@ -542,15 +542,14 @@ class EmotionAnalyticsService:
                 {"role": "user", "content": prompt}
             ]
             
-            response = await llm_client.chat(messages=messages)
-            response_text = response.content.strip()
-            
-            # 8. 解析LLM响应
+            # 8. 使用结构化输出直接获取 Pydantic 模型
             try:
-                response_data = json.loads(response_text)
-                suggestions_response = EmotionSuggestionsResponse(**response_data)
-            except (json.JSONDecodeError, Exception) as e:
-                logger.error(f"解析LLM响应失败: {str(e)}, response={response_text}")
+                suggestions_response = await llm_client.response_structured(
+                    messages=messages,
+                    response_model=EmotionSuggestionsResponse
+                )
+            except Exception as e:
+                logger.error(f"LLM 结构化输出失败: {str(e)}")
                 # 返回默认建议
                 suggestions_response = self._get_default_suggestions(health_data)
             
