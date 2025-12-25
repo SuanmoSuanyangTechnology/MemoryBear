@@ -4,7 +4,8 @@ from typing import Dict, Any, List
 import aiohttp
 
 from app.models.tool_model import ToolType
-from app.core.tools.base import BaseTool, ToolParameter, ToolResult, ParameterType
+from app.core.tools.base import BaseTool
+from app.schemas.tool_schema import ToolParameter, ToolResult, ParameterType
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
@@ -123,33 +124,43 @@ class MCPTool(BaseTool):
     async def connect(self) -> bool:
         """连接到MCP服务器"""
         try:
-            # 这里应该实现实际的MCP连接逻辑
-            # 为了简化，这里只是模拟连接
+            from .client import MCPClient
             
-            # 测试服务器连接
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                # 尝试获取服务器信息
-                async with session.get(f"{self.server_url}/info") as response:
-                    if response.status == 200:
-                        server_info = await response.json()
-                        self.available_tools = server_info.get("tools", [])
-                        self._connected = True
-                        logger.info(f"MCP服务器连接成功: {self.server_url}")
-                        return True
-                    else:
-                        raise Exception(f"服务器响应错误: {response.status}")
+            if self._connected:
+                return True
+            
+            self._client = MCPClient(self.server_url, self.connection_config)
+            
+            if await self._client.connect():
+                self._connected = True
+                # 更新可用工具列表
+                await self._update_available_tools()
+                logger.info(f"MCP服务器连接成功: {self.server_url}")
+                return True
+            else:
+                logger.error(f"MCP服务器连接失败: {self.server_url}")
+                return False
             
         except Exception as e:
-            logger.error(f"MCP服务器连接失败: {self.server_url}, 错误: {e}")
+            logger.error(f"MCP服务器连接异常: {self.server_url}, 错误: {e}")
             self._connected = False
             return False
+    
+    async def _update_available_tools(self):
+        """更新可用工具列表"""
+        try:
+            if self._client and self._connected:
+                tools = await self._client.list_tools()
+                self.available_tools = [tool.get("name") for tool in tools if tool.get("name")]
+                logger.info(f"MCP工具列表已更新: {len(self.available_tools)} 个工具")
+        except Exception as e:
+            logger.error(f"更新MCP工具列表失败: {e}")
     
     async def disconnect(self) -> bool:
         """断开MCP服务器连接"""
         try:
             if self._client:
-                # 这里应该实现实际的断开逻辑
+                await self._client.disconnect()
                 self._client = None
             
             self._connected = False
@@ -171,38 +182,15 @@ class MCPTool(BaseTool):
     
     async def _call_mcp_tool(self, tool_name: str, arguments: Dict[str, Any], timeout: int) -> Any:
         """调用MCP工具"""
-        # 构建MCP请求
-        request_data = {
-            "jsonrpc": "2.0",
-            "id": f"req_{int(time.time() * 1000)}",
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": arguments
-            }
-        }
+        if not self._client or not self._connected:
+            raise Exception("MCP客户端未连接")
         
-        # 发送请求
-        client_timeout = aiohttp.ClientTimeout(total=timeout)
-        async with aiohttp.ClientSession(timeout=client_timeout) as session:
-            async with session.post(
-                f"{self.server_url}/mcp",
-                json=request_data,
-                headers={"Content-Type": "application/json"}
-            ) as response:
-                
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"MCP请求失败 {response.status}: {error_text}")
-                
-                result = await response.json()
-                
-                # 检查MCP响应
-                if "error" in result:
-                    error = result["error"]
-                    raise Exception(f"MCP工具错误: {error.get('message', '未知错误')}")
-                
-                return result.get("result", {})
+        try:
+            result = await self._client.call_tool(tool_name, arguments, timeout)
+            return result
+        except Exception as e:
+            logger.error(f"MCP工具调用失败: {tool_name}, 错误: {e}")
+            raise
     
     async def list_available_tools(self) -> List[Dict[str, Any]]:
         """列出可用的MCP工具"""
@@ -210,27 +198,10 @@ class MCPTool(BaseTool):
             if not self._connected:
                 await self.connect()
             
-            # 获取工具列表
-            request_data = {
-                "jsonrpc": "2.0",
-                "id": f"req_{int(time.time() * 1000)}",
-                "method": "tools/list"
-            }
-            
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    f"{self.server_url}/mcp",
-                    json=request_data,
-                    headers={"Content-Type": "application/json"}
-                ) as response:
-                    
-                    if response.status == 200:
-                        result = await response.json()
-                        if "result" in result:
-                            tools = result["result"].get("tools", [])
-                            self.available_tools = [tool.get("name") for tool in tools]
-                            return tools
+            if self._client:
+                tools = await self._client.list_tools()
+                self.available_tools = [tool.get("name") for tool in tools if tool.get("name")]
+                return tools
             
             return []
             

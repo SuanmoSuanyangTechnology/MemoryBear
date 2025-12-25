@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List
 import pytz
 
-from app.core.tools.base import ToolParameter, ToolResult, ParameterType
+from app.schemas.tool_schema import ToolParameter, ToolResult, ParameterType
 from .base import BuiltinTool
 
 
@@ -54,14 +54,14 @@ class DateTimeTool(BuiltinTool):
                 type=ParameterType.STRING,
                 description="源时区（如：UTC, Asia/Shanghai）",
                 required=False,
-                default="UTC"
+                default="Asia/Shanghai"
             ),
             ToolParameter(
                 name="to_timezone",
                 type=ParameterType.STRING,
                 description="目标时区（如：UTC, Asia/Shanghai）",
                 required=False,
-                default="UTC"
+                default="Asia/Shanghai"
             ),
             ToolParameter(
                 name="calculation",
@@ -106,10 +106,11 @@ class DateTimeTool(BuiltinTool):
                 error_code="DATETIME_ERROR",
                 execution_time=execution_time
             )
-    
-    def _get_current_time(self, kwargs) -> dict:
+
+    @staticmethod
+    def _get_current_time(kwargs) -> dict:
         """获取当前时间"""
-        timezone_str = kwargs.get("to_timezone", "UTC")
+        timezone_str = kwargs.get("to_timezone", "Asia/Shanghai")
         output_format = kwargs.get("output_format", "%Y-%m-%d %H:%M:%S")
         
         if timezone_str == "UTC":
@@ -118,15 +119,20 @@ class DateTimeTool(BuiltinTool):
             tz = pytz.timezone(timezone_str)
         
         now = datetime.now(tz)
+
+        utc_now = datetime.now(timezone.utc)
         
         return {
             "datetime": now.strftime(output_format),
             "timestamp": int(now.timestamp()),
             "timezone": timezone_str,
-            "iso_format": now.isoformat()
+            "iso_format": now.isoformat(),
+            "timestamp_ms": int(now.timestamp() * 1000),
+            "utc_datetime": utc_now.strftime(output_format)
         }
-    
-    def _format_datetime(self, kwargs) -> dict:
+
+    @staticmethod
+    def _format_datetime(kwargs) -> dict:
         """格式化时间"""
         input_value = kwargs.get("input_value")
         input_format = kwargs.get("input_format", "%Y-%m-%d %H:%M:%S")
@@ -144,8 +150,9 @@ class DateTimeTool(BuiltinTool):
             "timestamp": int(dt.timestamp()),
             "iso_format": dt.isoformat()
         }
-    
-    def _convert_timezone(self, kwargs) -> dict:
+
+    @staticmethod
+    def _convert_timezone(kwargs) -> dict:
         """时区转换"""
         input_value = kwargs.get("input_value")
         input_format = kwargs.get("input_format", "%Y-%m-%d %H:%M:%S")
@@ -184,8 +191,9 @@ class DateTimeTool(BuiltinTool):
             "converted_timezone": to_timezone,
             "timestamp": int(converted_dt.timestamp())
         }
-    
-    def _timestamp_to_datetime(self, kwargs) -> dict:
+
+    @staticmethod
+    def _timestamp_to_datetime(kwargs) -> dict:
         """时间戳转日期时间"""
         input_value = kwargs.get("input_value")
         output_format = kwargs.get("output_format", "%Y-%m-%d %H:%M:%S")
@@ -196,6 +204,8 @@ class DateTimeTool(BuiltinTool):
         
         # 转换时间戳
         timestamp = float(input_value)
+        if timestamp > 1e12:
+            timestamp = timestamp / 1000
         
         # 设置时区
         if timezone_str == "UTC":
@@ -211,8 +221,9 @@ class DateTimeTool(BuiltinTool):
             "timezone": timezone_str,
             "iso_format": dt.isoformat()
         }
-    
-    def _datetime_to_timestamp(self, kwargs) -> dict:
+
+    @staticmethod
+    def _datetime_to_timestamp(kwargs) -> dict:
         """日期时间转时间戳"""
         input_value = kwargs.get("input_value")
         input_format = kwargs.get("input_format", "%Y-%m-%d %H:%M:%S")
@@ -240,7 +251,7 @@ class DateTimeTool(BuiltinTool):
             "timestamp": int(dt.timestamp()),
             "iso_format": dt.isoformat()
         }
-    
+
     def _calculate_datetime(self, kwargs) -> dict:
         """时间计算"""
         input_value = kwargs.get("input_value")
@@ -278,8 +289,9 @@ class DateTimeTool(BuiltinTool):
             "timezone": timezone_str,
             "timestamp": int(calculated_dt.timestamp())
         }
-    
-    def _parse_time_delta(self, calculation: str) -> timedelta:
+
+    @staticmethod
+    def _parse_time_delta(calculation: str) -> timedelta:
         """解析时间计算表达式"""
         import re
         
