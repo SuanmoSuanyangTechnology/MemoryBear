@@ -312,7 +312,24 @@ class MemoryInsight:
 
         response = await self.llm_client.chat(messages=messages)
 
-        return response.content
+        # 确保返回字符串类型
+        content = response.content
+        if isinstance(content, list):
+            # 如果是列表格式（如 [{'type': 'text', 'text': '...'}]），提取文本
+            if len(content) > 0:
+                if isinstance(content[0], dict):
+                    # 尝试提取 'text' 字段
+                    text = content[0].get('text', content[0].get('content', str(content[0])))
+                    return str(text)
+                else:
+                    return str(content[0])
+            return ""
+        elif isinstance(content, dict):
+            # 如果是字典格式，提取 text 字段
+            return str(content.get('text', content.get('content', str(content))))
+        else:
+            # 已经是字符串或其他类型，转为字符串
+            return str(content) if content is not None else ""
 
     async def close(self):
         """
