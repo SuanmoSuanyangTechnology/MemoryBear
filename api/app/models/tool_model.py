@@ -130,8 +130,8 @@ class BuiltinToolConfig(Base):
     id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
     tool_class = Column(String(255), nullable=False)  # 工具类名
     parameters = Column(JSON, default=dict)  # 工具参数配置
-    is_enabled = Column(Boolean, default=False, nullable=False)  # 启用开关
-    requires_config = Column(Boolean, default=False, nullable=False)  # 是否需要配置
+    is_enabled = Column(Boolean, default=False, server_default='false', nullable=False)  # 启用开关
+    requires_config = Column(Boolean, default=False, server_default='false', nullable=False)  # 是否需要配置
 
     # 关联关系
     base_config = relationship("ToolConfig", foreign_keys=[id])
