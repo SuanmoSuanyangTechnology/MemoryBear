@@ -10,6 +10,9 @@ from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
 
+# 为了兼容性，创建别名
+# SchemaParser = OpenAPISchemaParser = None
+
 
 class OpenAPISchemaParser:
     """OpenAPI Schema解析器 - 解析OpenAPI 3.0规范"""
@@ -88,8 +91,9 @@ class OpenAPISchemaParser:
         except Exception as e:
             logger.error(f"解析schema内容失败: {e}")
             return False, {}, str(e)
-    
-    def _parse_content(self, content: str, content_type: str) -> Optional[Dict[str, Any]]:
+
+    @staticmethod
+    def _parse_content(content: str, content_type: str) -> Optional[Dict[str, Any]]:
         """解析内容为字典
         
         Args:
@@ -101,7 +105,7 @@ class OpenAPISchemaParser:
         """
         try:
             # 根据内容类型解析
-            if 'json' in content_type:
+            if 'application/json' in content_type:
                 return json.loads(content)
             elif 'yaml' in content_type or 'yml' in content_type:
                 return yaml.safe_load(content)
@@ -228,8 +232,9 @@ class OpenAPISchemaParser:
                 }
         
         return operations
-    
-    def _extract_parameters(self, operation: Dict[str, Any]) -> Dict[str, Any]:
+
+    @staticmethod
+    def _extract_parameters(operation: Dict[str, Any]) -> Dict[str, Any]:
         """提取操作参数
         
         Args:
@@ -266,8 +271,9 @@ class OpenAPISchemaParser:
             }
         
         return parameters
-    
-    def _extract_request_body(self, operation: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+
+    @staticmethod
+    def _extract_request_body(operation: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """提取请求体信息
         
         Args:
@@ -298,8 +304,9 @@ class OpenAPISchemaParser:
             "schema": schema,
             "content_types": list(content.keys())
         }
-    
-    def _extract_responses(self, operation: Dict[str, Any]) -> Dict[str, Any]:
+
+    @staticmethod
+    def _extract_responses(operation: Dict[str, Any]) -> Dict[str, Any]:
         """提取响应信息
         
         Args:
@@ -331,8 +338,9 @@ class OpenAPISchemaParser:
             }
         
         return responses
-    
-    def generate_tool_parameters(self, operations: Dict[str, Any]) -> List[Dict[str, Any]]:
+
+    @staticmethod
+    def generate_tool_parameters(operations: Dict[str, Any]) -> List[Dict[str, Any]]:
         """生成工具参数定义
         
         Args:
@@ -396,7 +404,7 @@ class OpenAPISchemaParser:
         parameters.extend(all_params.values())
         
         return parameters
-    
+
     def validate_operation_parameters(self, operation: Dict[str, Any], params: Dict[str, Any]) -> Tuple[bool, List[str]]:
         """验证操作参数
         
@@ -447,8 +455,9 @@ class OpenAPISchemaParser:
                         errors.append(f"请求体参数 {prop_name} 类型错误，期望: {prop_type}")
         
         return len(errors) == 0, errors
-    
-    def _validate_parameter_type(self, value: Any, expected_type: str) -> bool:
+
+    @staticmethod
+    def _validate_parameter_type(value: Any, expected_type: str) -> bool:
         """验证参数类型
         
         Args:
@@ -475,3 +484,6 @@ class OpenAPISchemaParser:
             return isinstance(value, expected_python_type)
         
         return True
+
+# 为了兼容性，创建别名
+SchemaParser = OpenAPISchemaParser

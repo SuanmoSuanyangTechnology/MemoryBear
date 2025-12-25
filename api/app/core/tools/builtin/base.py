@@ -3,7 +3,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 
 from app.models.tool_model import ToolType
-from app.core.tools.base import BaseTool, ToolResult, ToolParameter
+from app.core.tools.base import BaseTool
+from app.schemas.tool_schema import ToolResult, ToolParameter
 
 
 class BuiltinTool(BaseTool, ABC):

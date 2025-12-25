@@ -2,7 +2,6 @@
 import base64
 import hashlib
 import hmac
-import time
 from typing import Dict, Any, Tuple
 from urllib.parse import quote
 import aiohttp
@@ -51,8 +50,9 @@ class AuthManager:
             
         except Exception as e:
             return False, f"验证认证配置时出错: {e}"
-    
-    def _validate_api_key_config(self, auth_config: Dict[str, Any]) -> Tuple[bool, str]:
+
+    @staticmethod
+    def _validate_api_key_config(auth_config: Dict[str, Any]) -> Tuple[bool, str]:
         """验证API Key认证配置
         
         Args:
@@ -79,8 +79,9 @@ class AuthManager:
             return False, "API Key位置必须是 header、query 或 cookie"
         
         return True, ""
-    
-    def _validate_bearer_token_config(self, auth_config: Dict[str, Any]) -> Tuple[bool, str]:
+
+    @staticmethod
+    def _validate_bearer_token_config(auth_config: Dict[str, Any]) -> Tuple[bool, str]:
         """验证Bearer Token认证配置
         
         Args:
@@ -135,9 +136,9 @@ class AuthManager:
         except Exception as e:
             logger.error(f"应用认证时出错: {e}")
             return url, headers, params
-    
+
+    @staticmethod
     def _apply_api_key_auth(
-        self,
         auth_config: Dict[str, Any],
         url: str,
         headers: Dict[str, str],
@@ -176,9 +177,9 @@ class AuthManager:
                 headers["Cookie"] = cookie_value
         
         return url, headers, params
-    
+
+    @staticmethod
     def _apply_bearer_token_auth(
-        self,
         auth_config: Dict[str, Any],
         url: str,
         headers: Dict[str, str],
@@ -260,8 +261,9 @@ class AuthManager:
         except Exception as e:
             logger.error(f"解密认证配置失败: {e}")
             return encrypted_config
-    
-    def _encrypt_string(self, value: str, key: str) -> str:
+
+    @staticmethod
+    def _encrypt_string(value: str, key: str) -> str:
         """加密字符串
         
         Args:
@@ -289,8 +291,9 @@ class AuthManager:
         except Exception as e:
             logger.error(f"加密字符串失败: {e}")
             return value
-    
-    def _decrypt_string(self, encrypted_value: str, key: str) -> str:
+
+    @staticmethod
+    def _decrypt_string(encrypted_value: str, key: str) -> str:
         """解密字符串
         
         Args:
@@ -471,8 +474,9 @@ class AuthManager:
                 "error": f"测试认证时出错: {e}",
                 "auth_type": auth_type.value
             }
-    
-    def get_auth_config_template(self, auth_type: AuthType) -> Dict[str, Any]:
+
+    @staticmethod
+    def get_auth_config_template(auth_type: AuthType) -> Dict[str, Any]:
         """获取认证配置模板
         
         Args:
@@ -498,8 +502,9 @@ class AuthManager:
         }
         
         return templates.get(auth_type, {})
-    
-    def mask_sensitive_config(self, auth_config: Dict[str, Any]) -> Dict[str, Any]:
+
+    @staticmethod
+    def mask_sensitive_config(auth_config: Dict[str, Any]) -> Dict[str, Any]:
         """遮蔽认证配置中的敏感信息
         
         Args:

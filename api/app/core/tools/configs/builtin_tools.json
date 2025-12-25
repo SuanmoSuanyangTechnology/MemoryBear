@@ -54,7 +54,8 @@
     "enabled": true,
     "parameters": {
       "api_key": {"type": "string", "description": "TextIn API密钥", "sensitive": true, "required": true},
-      "api_secret": {"type": "string", "description": "TextIn API密钥", "sensitive": true, "required": true}
+      "api_secret": {"type": "string", "description": "TextIn API密钥", "sensitive": true, "required": true},
+      "base_url": {"type": "string", "description": "API地址", "default": "https://api.textin.com/v1"}
     }
   }
 }

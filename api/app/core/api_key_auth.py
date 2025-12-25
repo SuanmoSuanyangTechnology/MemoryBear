@@ -33,10 +33,9 @@ def require_api_key(
         scopes: 所需的权限范围列表[“app”, "rag", "memory"]
 
     Usage:
-        @router.get("/app/{resource_id}/chat")
+        @router.get("/app/chat")
         @require_api_key(scopes=["app"])
         def chat_with_app(
-            resource_id: uuid.UUID,
             request: Request,
             api_key_auth: ApiKeyAuth = None,
             db: Session = Depends(get_db),
@@ -88,26 +87,6 @@ def require_api_key(
                         BizCode.API_KEY_INVALID_SCOPE,
                         context={"required_scopes": scopes, "missing_scopes": missing_scopes}
                     )
-
-            resource_id = kwargs.get("resource_id")
-            if resource_id and not ApiKeyAuthService.check_resource(
-                    api_key_obj,
-                    resource_id
-            ):
-                logger.warning("API Key 资源访问被拒绝", extra={
-                    "api_key_id": str(api_key_obj.id),
-                    "required_resource_id": str(resource_id),
-                    "bound_resource_id": str(api_key_obj.resource_id) if api_key_obj.resource_id else None,
-                    "endpoint": str(request.url)
-                })
-                return BusinessException(
-                    "API Key 未授权访问该资源",
-                    BizCode.API_KEY_INVALID_RESOURCE,
-                    context={
-                        "required_resource_id": str(resource_id),
-                        "bound_resource_id": str(api_key_obj.resource_id)
-                    }
-                )
 
             kwargs["api_key_auth"] = ApiKeyAuth(
                 api_key_id=api_key_obj.id,

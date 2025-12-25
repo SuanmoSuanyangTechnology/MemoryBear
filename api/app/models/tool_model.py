@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Column, String, Text, DateTime, JSON, ForeignKey, Integer, Float
+from sqlalchemy import Column, String, Text, DateTime, JSON, ForeignKey, Integer, Float, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -19,10 +19,40 @@ class ToolType(StrEnum):
 
 class ToolStatus(StrEnum):
     """工具状态枚举"""
-    ACTIVE = "active"
-    INACTIVE = "inactive"
-    ERROR = "error"
-    LOADING = "loading"
+    AVAILABLE = "available"  # 可用（已配置且已启用）
+    UNCONFIGURED = "unconfigured"  # 未配置
+    CONFIGURED_DISABLED = "configured_disabled"  # 已配置未启用
+    ERROR = "error"  # 错误状态
+
+    @classmethod
+    def get_all_statuses(cls):
+        """获取所有工具状态"""
+        return [status.value for status in cls]
+
+    @classmethod
+    def get_all_statuses_with_labels(cls):
+        """获取所有工具状态及其文本描述"""
+        return [
+            {"value": cls.AVAILABLE.value, "label": "可用"},
+            {"value": cls.UNCONFIGURED.value, "label": "未配置"},
+            {"value": cls.CONFIGURED_DISABLED.value, "label": "已配置未启用"},
+            {"value": cls.ERROR.value, "label": "错误状态"}
+        ]
+
+    @classmethod
+    def is_valid_status(cls, status):
+        """检查状态是否有效"""
+        return status in cls._value2member_map_
+
+    @classmethod
+    def get_active_statuses(cls):
+        """获取所有活跃状态"""
+        return [cls.AVAILABLE.value]
+
+    @classmethod
+    def get_inactive_statuses(cls):
+        """获取所有非活跃状态"""
+        return [cls.UNCONFIGURED.value, cls.CONFIGURED_DISABLED.value, cls.ERROR.value]
 
 
 class AuthType(StrEnum):
@@ -30,6 +60,27 @@ class AuthType(StrEnum):
     NONE = "none"
     API_KEY = "api_key"
     BEARER_TOKEN = "bearer_token"
+    BASIC_AUTH = "basic_auth"
+
+    @classmethod
+    def get_all_types(cls):
+        """获取所有认证类型"""
+        return [auth_type.value for auth_type in cls]
+
+    @classmethod
+    def get_all_types_with_labels(cls):
+        """获取所有认证类型及其文本描述"""
+        return [
+            {"value": cls.NONE.value, "label": "无需认证"},
+            {"value": cls.API_KEY.value, "label": "API Key"},
+            {"value": cls.BEARER_TOKEN.value, "label": "Bearer Token"},
+            {"value": cls.BASIC_AUTH.value, "label": "Basic Auth"}
+        ]
+
+    @classmethod
+    def is_valid_types(cls, auth_type):
+        """检查认证类型是否有效"""
+        return auth_type in cls._value2member_map_
 
 
 class ExecutionStatus(StrEnum):
@@ -48,13 +99,14 @@ class ToolConfig(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text)
+    icon = Column(String(255))  # 工具图标
     tool_type = Column(String(50), nullable=False, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)  # 必须属于租户
-    status = Column(String(50), default=ToolStatus.INACTIVE.value, nullable=False, index=True)  # 工具状态
+    status = Column(String(50), default=ToolStatus.UNCONFIGURED.value, nullable=False, index=True)  # 工具状态
     
     # 工具特定配置（JSON格式存储）
     config_data = Column(JSON, default=dict)
-    
+
     # 元数据
     version = Column(String(50), default="1.0.0")
     tags = Column(JSON, default=list)  # 标签列表
@@ -78,12 +130,14 @@ class BuiltinToolConfig(Base):
     id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
     tool_class = Column(String(255), nullable=False)  # 工具类名
     parameters = Column(JSON, default=dict)  # 工具参数配置
-    
+    is_enabled = Column(Boolean, default=False, nullable=False)  # 启用开关
+    requires_config = Column(Boolean, default=False, nullable=False)  # 是否需要配置
+
     # 关联关系
     base_config = relationship("ToolConfig", foreign_keys=[id])
     
     def __repr__(self):
-        return f"<BuiltinToolConfig(id={self.id}, tool_class={self.tool_class})>"
+        return f"<BuiltinToolConfig(id={self.id}, tool_class={self.tool_class}, enabled={self.is_enabled})>"
 
 
 class CustomToolConfig(Base):
@@ -115,7 +169,7 @@ class MCPToolConfig(Base):
 
     id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
     server_url = Column(String(1000), nullable=False)  # MCP服务器URL
-    connection_config = Column(JSON, default=dict)  # 连接配置
+    connection_config = Column(JSON, default=dict)  # 连接配置（包含认证信息）
     
     # 服务状态
     last_health_check = Column(DateTime)

@@ -1,98 +1,10 @@
 """工具基础接口定义"""
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field
-from enum import Enum
+from typing import Any, Dict, List, Optional
 
 from app.models.tool_model import ToolType, ToolStatus
-
-
-class ParameterType(str, Enum):
-    """参数类型枚举"""
-    STRING = "string"
-    INTEGER = "integer"
-    NUMBER = "number"
-    BOOLEAN = "boolean"
-    ARRAY = "array"
-    OBJECT = "object"
-
-
-class ToolParameter(BaseModel):
-    """工具参数定义"""
-    name: str = Field(..., description="参数名称")
-    type: ParameterType = Field(..., description="参数类型")
-    description: str = Field("", description="参数描述")
-    required: bool = Field(False, description="是否必需")
-    default: Any = Field(None, description="默认值")
-    enum: Optional[List[Any]] = Field(None, description="枚举值")
-    minimum: Optional[Union[int, float]] = Field(None, description="最小值")
-    maximum: Optional[Union[int, float]] = Field(None, description="最大值")
-    pattern: Optional[str] = Field(None, description="正则表达式模式")
-    
-    class Config:
-        use_enum_values = True
-
-
-class ToolResult(BaseModel):
-    """工具执行结果"""
-    success: bool = Field(..., description="执行是否成功")
-    data: Any = Field(None, description="返回数据")
-    error: Optional[str] = Field(None, description="错误信息")
-    error_code: Optional[str] = Field(None, description="错误代码")
-    execution_time: float = Field(..., description="执行时间（秒）")
-    token_usage: Optional[Dict[str, int]] = Field(None, description="Token使用情况")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="额外元数据")
-    
-    @classmethod
-    def success_result(
-        cls, 
-        data: Any, 
-        execution_time: float,
-        token_usage: Optional[Dict[str, int]] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> "ToolResult":
-        """创建成功结果"""
-        return cls(
-            success=True,
-            data=data,
-            execution_time=execution_time,
-            token_usage=token_usage,
-            metadata=metadata or {}
-        )
-    
-    @classmethod
-    def error_result(
-        cls,
-        error: str,
-        execution_time: float,
-        error_code: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> "ToolResult":
-        """创建错误结果"""
-        return cls(
-            success=False,
-            error=error,
-            error_code=error_code,
-            execution_time=execution_time,
-            metadata=metadata or {}
-        )
-
-
-class ToolInfo(BaseModel):
-    """工具信息"""
-    id: str = Field(..., description="工具ID")
-    name: str = Field(..., description="工具名称")
-    description: str = Field(..., description="工具描述")
-    tool_type: ToolType = Field(..., description="工具类型")
-    version: str = Field("1.0.0", description="工具版本")
-    parameters: List[ToolParameter] = Field(default_factory=list, description="工具参数")
-    status: ToolStatus = Field(ToolStatus.ACTIVE, description="工具状态")
-    tags: List[str] = Field(default_factory=list, description="工具标签")
-    tenant_id: Optional[str] = Field(None, description="租户ID")
-    
-    class Config:
-        use_enum_values = True
+from app.schemas.tool_schema import ToolParameter, ParameterType, ToolResult
 
 
 class BaseTool(ABC):
@@ -107,7 +19,7 @@ class BaseTool(ABC):
         """
         self.tool_id = tool_id
         self.config = config
-        self._status = ToolStatus.ACTIVE
+        self._status = ToolStatus.AVAILABLE
     
     @property
     @abstractmethod
@@ -152,20 +64,6 @@ class BaseTool(ABC):
     def tags(self) -> List[str]:
         """工具标签"""
         return self.config.get("tags", [])
-    
-    def get_info(self) -> ToolInfo:
-        """获取工具信息"""
-        return ToolInfo(
-            id=self.tool_id,
-            name=self.name,
-            description=self.description,
-            tool_type=self.tool_type,
-            version=self.version,
-            parameters=self.parameters,
-            status=self.status,
-            tags=self.tags,
-            tenant_id=self.config.get("tenant_id")
-        )
     
     def validate_parameters(self, parameters: Dict[str, Any]) -> Dict[str, str]:
         """验证参数

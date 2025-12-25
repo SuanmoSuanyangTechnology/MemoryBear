@@ -5,7 +5,8 @@ import aiohttp
 from urllib.parse import urljoin
 
 from app.models.tool_model import ToolType, AuthType
-from app.core.tools.base import BaseTool, ToolParameter, ToolResult, ParameterType
+from app.core.tools.base import BaseTool
+from app.schemas.tool_schema import ToolParameter, ToolResult, ParameterType
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
@@ -173,8 +174,9 @@ class CustomTool(BaseTool):
                     }
         
         return operations
-    
-    def _convert_openapi_type(self, openapi_type: str) -> ParameterType:
+
+    @staticmethod
+    def _convert_openapi_type(openapi_type: str) -> ParameterType:
         """转换OpenAPI类型到内部类型"""
         type_mapping = {
             "string": ParameterType.STRING,
@@ -239,8 +241,9 @@ class CustomTool(BaseTool):
                 headers["Authorization"] = f"Bearer {token}"
         
         return headers
-    
-    def _build_request_data(self, operation: Dict[str, Any], params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+
+    @staticmethod
+    def _build_request_data(operation: Dict[str, Any], params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """构建请求数据"""
         if operation["method"] in ["POST", "PUT", "PATCH"]:
             request_body = operation.get("request_body")
@@ -284,6 +287,7 @@ class CustomTool(BaseTool):
                 try:
                     return await response.json()
                 except Exception as e:
+                    logger.error(f"解析HTTP响应JSON失败: {str(e)}")
                     return await response.text()
     
     @classmethod

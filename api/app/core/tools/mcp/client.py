@@ -134,11 +134,40 @@ class MCPClient:
             logger.error(f"断开MCP服务器连接失败: {e}")
             return False
     
+    def _build_auth_headers(self) -> Dict[str, str]:
+        """构建认证头"""
+        headers = {}
+        auth_type = self.connection_config.get("auth_type", "none")
+        auth_config = self.connection_config.get("auth_config", {})
+        
+        if auth_type == "api_key":
+            api_key = auth_config.get("api_key")
+            key_name = auth_config.get("key_name", "X-API-Key")
+            if api_key:
+                headers[key_name] = api_key
+        
+        elif auth_type == "bearer_token":
+            token = auth_config.get("token")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        
+        elif auth_type == "basic_auth":
+            username = auth_config.get("username")
+            password = auth_config.get("password")
+            if username and password:
+                import base64
+                credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+                headers["Authorization"] = f"Basic {credentials}"
+        
+        return headers
+    
     async def _connect_websocket(self) -> bool:
         """建立WebSocket连接"""
         try:
             # WebSocket连接配置
             extra_headers = self.connection_config.get("headers", {})
+            auth_headers = self._build_auth_headers()
+            extra_headers.update(auth_headers)
             
             self._websocket = await websockets.connect(
                 self.server_url,
@@ -190,6 +219,8 @@ class MCPClient:
             # HTTP会话配置
             timeout = aiohttp.ClientTimeout(total=self.connection_timeout)
             headers = self.connection_config.get("headers", {})
+            auth_headers = self._build_auth_headers()
+            headers.update(auth_headers)
             
             self._session = aiohttp.ClientSession(
                 timeout=timeout,
@@ -251,8 +282,9 @@ class MCPClient:
                 
         except Exception as e:
             logger.error(f"处理消息失败: {e}")
-    
-    async def _handle_notification(self, message: Dict[str, Any]):
+
+    @staticmethod
+    async def _handle_notification(message: Dict[str, Any]):
         """处理通知消息"""
         method = message.get("method")
         params = message.get("params", {})
@@ -327,7 +359,7 @@ class MCPClient:
         try:
             response = await self._send_request(request_data, timeout)
             
-            if not response["error"] is None:
+            if response.get("error", None) is not None:
                 error = response["error"]
                 raise MCPProtocolError(f"获取工具列表失败: {error.get('message', '未知错误')}")
             
@@ -372,10 +404,10 @@ class MCPClient:
             return response
             
         except asyncio.TimeoutError:
-            self._pending_requests.pop(request_id, None)
+            await self._pending_requests.pop(request_id, None)
             raise
         except Exception as e:
-            self._pending_requests.pop(request_id, None)
+            await self._pending_requests.pop(request_id, None)
             raise MCPConnectionError(f"发送WebSocket请求失败: {e}")
     
     async def _send_http_request(self, request_data: Dict[str, Any], timeout: int) -> Dict[str, Any]:
@@ -424,9 +456,9 @@ class MCPClient:
             
             start_time = time.time()
             response = await self._send_request(request_data, timeout=5)
-            response_time = time.time() - start_time
+            response_time = round((time.time() - start_time) * 1000)
             
-            self._last_health_check = time.time()
+            self._last_health_check = round(time.time() * 1000)
             
             return {
                 "healthy": True,

@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session
 
-from app.models.tool_model import MCPToolConfig, ToolConfig, ToolType
+from app.models.tool_model import MCPToolConfig, ToolConfig, ToolType, ToolStatus
 from app.core.logging_config import get_business_logger
 from .client import MCPClient, MCPConnectionPool
 
@@ -148,7 +148,7 @@ class MCPServiceManager:
                 connection_config=connection_config,
                 available_tools=tool_names,
                 health_status="healthy",
-                last_health_check=datetime.utcnow()
+                last_health_check=datetime.now()
             )
             
             self.db.add(mcp_config)
@@ -410,7 +410,8 @@ class MCPServiceManager:
         """加载现有服务"""
         try:
             mcp_configs = self.db.query(MCPToolConfig).join(ToolConfig).filter(
-                ToolConfig.is_enabled == True
+                ToolConfig.status == ToolStatus.AVAILABLE.value,
+                ToolConfig.tool_type == ToolType.MCP.value
             ).all()
             
             for mcp_config in mcp_configs:
@@ -531,7 +532,7 @@ class MCPServiceManager:
             
             if mcp_config:
                 mcp_config.health_status = "healthy" if health_status["healthy"] else "unhealthy"
-                mcp_config.last_health_check = datetime.utcnow()
+                mcp_config.last_health_check = datetime.now()
                 
                 if not health_status["healthy"]:
                     mcp_config.error_message = health_status.get("error", "")
