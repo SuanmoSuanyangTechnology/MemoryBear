@@ -7,14 +7,11 @@ import httpx
 # import filetypes # TODO: File support (Feature)
 from httpx import AsyncClient, Response, Timeout
 
-from app.core.workflow.nodes import BaseNode, WorkflowState
+from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.enums import HttpRequestMethod, HttpErrorHandle, HttpAuthType, HttpContentType
 from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig, HttpRequestNodeOutput
 
 logger = logging.getLogger(__file__)
-
-DEFAULT_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36")
 
 
 class HttpRequestNode(BaseNode):
@@ -91,9 +88,7 @@ class HttpRequestNode(BaseNode):
 
         Both header keys and values support runtime template rendering.
         """
-        headers = {
-            "user-agent": DEFAULT_USER_AGENT
-        }
+        headers = {}
         for key, value in self.typed_config.headers.items():
             headers[self._render_template(key, state)] = self._render_template(value, state)
         return headers

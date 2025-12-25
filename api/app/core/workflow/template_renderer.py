@@ -7,7 +7,7 @@
 import logging
 from typing import Any
 
-from jinja2 import Template, TemplateSyntaxError, UndefinedError, Environment, StrictUndefined
+from jinja2 import TemplateSyntaxError, UndefinedError, Environment, StrictUndefined, Undefined
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class TemplateRenderer:
             strict: 是否使用严格模式（未定义变量会抛出异常）
         """
         self.env = Environment(
-            undefined=StrictUndefined if strict else None,
+            undefined=StrictUndefined if strict else Undefined,
             autoescape=False  # 不自动转义，因为我们处理的是文本而非 HTML
         )
     

@@ -24,6 +24,7 @@ class NodeType(StrEnum):
     TOOL = "tool"
     AGENT = "agent"
     ASSIGNER = "assigner"
+    JINJARENDER = "jinja-render"
 
 
 class ComparisonOperator(StrEnum):
