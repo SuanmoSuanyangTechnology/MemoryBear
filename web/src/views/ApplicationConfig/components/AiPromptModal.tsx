@@ -194,8 +194,8 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
               <Input.TextArea ref={currentPromptRef} className="rb:bg-[#FBFDFF]! rb:h-100.5!" />
             </Form.Item>
             <div className="rb:grid rb:grid-cols-2 rb:gap-4 rb:mt-6">
-              <Button block disabled={!values.current_prompt} onClick={handleCopy}>{t('common.copy')}</Button>
-              <Button type="primary" block disabled={!values.current_prompt} onClick={handleApply}>{t('application.apply')}</Button>
+              <Button block disabled={!values?.current_prompt} onClick={handleCopy}>{t('common.copy')}</Button>
+              <Button type="primary" block disabled={!values?.current_prompt} onClick={handleApply}>{t('application.apply')}</Button>
             </div>
           </div>
         </div>
