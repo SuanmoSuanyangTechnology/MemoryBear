@@ -1,30 +1,28 @@
 """App 服务接口 - 基于 API Key 认证"""
-import uuid
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Request, Body
 from sqlalchemy.orm import Session
-from typing import Optional, Annotated
-
 from starlette.responses import StreamingResponse
 
 from app.core.api_key_auth import require_api_key
-from app.db import get_db
-from app.core.response_utils import success
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.response_utils import success
+from app.db import get_db
 from app.dependencies import get_app_or_workspace
-from app.models import AppRelease
-from app.repositories import knowledge_repository
-from app.schemas import AppChatRequest, conversation_schema
 from app.models.app_model import App
 from app.models.app_model import AppType
+from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
-from app.core.exceptions import BusinessException
-from app.core.error_codes import BizCode
+from app.schemas import AppChatRequest, conversation_schema
+from app.schemas.api_key_schema import ApiKeyAuth
 from app.services import workspace_service
 from app.services.app_chat_service import AppChatService, get_app_chat_service
-from app.services.app_service import AppService
 from app.services.conversation_service import ConversationService, get_conversation_service
-from app.services.workflow_service import WorkflowService, get_workflow_service
-from app.utils.app_config_utils import dict_to_multi_agent_config,dict_to_workflow_config,agent_config_4_app_release
+from app.utils.app_config_utils import dict_to_multi_agent_config, dict_to_workflow_config, agent_config_4_app_release
+from app.services.app_service import get_app_service, AppService
 
 router = APIRouter(prefix="/app", tags=["V1 - App API"])
 logger = get_business_logger()
@@ -37,8 +35,9 @@ async def list_apps():
 
 # /v1/apps/{resource_id}/chat
 
-
-# async def chat(
+# @router.post("/chat")
+# @require_api_key(scopes=["app"])
+# async def chat2(
 #     request: Request,
 #     api_key_auth: ApiKeyAuth = None,
 #     db: Session = Depends(get_db),
@@ -57,7 +56,6 @@ async def list_apps():
 #         db: db_session
 #     """
 #     logger.info(f"API Key Auth: {api_key_auth}")
-#     logger.info(f"Resource ID: {resource_id}")
 #     logger.info(f"Message: {message}")
 #     return success(data={"received": True}, msg="消息已接收")
 
@@ -76,15 +74,21 @@ def _checkAppConfig(app: App):
         raise BusinessException("不支持的应用类型", BizCode.AGENT_CONFIG_MISSING)
 
 @router.post("/chat")
-# @require_api_key(scopes=["app"])
+@require_api_key(scopes=["app"])
 async def chat(
-    payload: AppChatRequest,
-    app: App = Depends(get_app_or_workspace),
+    request:Request,
+    api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
     conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
     app_chat_service: Annotated[AppChatService, Depends(get_app_chat_service)] = None,
-
+    app_service: Annotated[AppService, Depends(get_app_service)] = None,
+    message: str = Body(..., description="聊天消息内容"),
 ):
+    body = await request.json()
+    payload = AppChatRequest(**body)
+
+    other_id = payload.user_id
+    app = app_service.get_app(api_key_auth.resource_id, api_key_auth.workspace_id)
     other_id = payload.user_id
     workspace_id = app.workspace_id
     end_user_repo = EndUserRepository(db)
@@ -176,7 +180,7 @@ async def chat(
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id
         )
-        return success(data=conversation_schema.ChatResponse(**result))
+        return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
         # 多 Agent 流式返回
         config = dict_to_multi_agent_config(app.current_release.config,app.id)
@@ -220,7 +224,7 @@ async def chat(
             user_rag_memory_id=user_rag_memory_id
         )
 
-        return success(data=conversation_schema.ChatResponse(**result))
+        return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.WORKFLOW:
         # 多 Agent 流式返回
         config = dict_to_workflow_config(app.current_release.config,app.id)
@@ -264,7 +268,7 @@ async def chat(
             user_rag_memory_id=user_rag_memory_id
         )
 
-        return success(data=conversation_schema.ChatResponse(**result))
+        return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     else:
         from app.core.exceptions import BusinessException
         from app.core.error_codes import BizCode
