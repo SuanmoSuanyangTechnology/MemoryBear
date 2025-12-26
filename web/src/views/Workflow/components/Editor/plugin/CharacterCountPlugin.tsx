@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
-import { $getRoot } from 'lexical';
+import { $getRoot, $isParagraphNode } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
+
+import { $isVariableNode } from '../nodes/VariableNode';
 
 const CharacterCountPlugin = ({ setCount, onChange }: { setCount: (count: number) => void; onChange?: (value: string) => void }) => {
   const [editor] = useLexicalComposerContext();
@@ -9,9 +11,23 @@ const CharacterCountPlugin = ({ setCount, onChange }: { setCount: (count: number
     return editor.registerUpdateListener(({ editorState }) => {
       editorState.read(() => {
         const root = $getRoot();
-        const textContent = root.getTextContent();
-        setCount(textContent.length);
-        onChange?.(textContent);
+        let serializedContent = '';
+        
+        // Traverse all nodes and serialize properly
+        root.getChildren().forEach(child => {
+          if ($isParagraphNode(child)) {
+            child.getChildren().forEach(node => {
+              if ($isVariableNode(node)) {
+                serializedContent += node.getTextContent();
+              } else {
+                serializedContent += node.getTextContent();
+              }
+            });
+          }
+        });
+        
+        setCount(serializedContent.length);
+        onChange?.(serializedContent);
       });
     });
   }, [editor, setCount, onChange]);
