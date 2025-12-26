@@ -461,7 +461,7 @@ class ToolService:
                     parser = OpenAPISchemaParser()
                     
                     if config.get("schema_content"):
-                        success, schema, _ = parser.parse_from_content(json.dumps(config["schema_content"]), "application/json")
+                        success, schema, _ = parser.parse_from_content(config["schema_content"], "application/json")
                     else:
                         success, schema, _ = parser.parse_from_url(config["schema_url"])
                     
@@ -515,7 +515,7 @@ class ToolService:
                         parser = OpenAPISchemaParser()
 
                         if config.get("schema_content"):
-                            success, schema, _ = parser.parse_from_content(json.dumps(config["schema_content"]),
+                            success, schema, _ = parser.parse_from_content(config["schema_content"],
                                                                            "application/json")
                         else:
                             success, schema, _ = parser.parse_from_url(config["schema_url"])
@@ -686,7 +686,7 @@ class ToolService:
 
             if await client.connect():
                 try:
-                    tools = await client.list_tools()
+                    # tools = await client.list_tools()
                     await client.disconnect()
 
                     # 更新连接状态
@@ -701,7 +701,8 @@ class ToolService:
                     return {
                         "success": True,
                         "message": "MCP连接成功",
-                        "details": {"server_url": mcp_config.server_url, "tools_count": len(tools)}
+                        # "details": {"server_url": mcp_config.server_url, "tools_count": len(tools)}
+                        "details": {"server_url": mcp_config.server_url}
                     }
                 except Exception as e:
                     await client.disconnect()
@@ -739,16 +740,15 @@ class ToolService:
             return {"success": False, "message": f"MCP测试异常: {str(e)}"}
 
     @staticmethod
-    async def parse_openapi_schema(schema_data: Dict[str, Any] = None, schema_url: str = None) -> Dict[str, Any]:
+    async def parse_openapi_schema(schema_data: str = None, schema_url: str = None) -> Dict[str, Any]:
         """解析OpenAPI schema获取接口信息"""
         try:
             from app.core.tools.custom.schema_parser import OpenAPISchemaParser
             
             parser = OpenAPISchemaParser()
-            
-            # 使用现有的解析器
+
             if schema_data:
-                success, schema, error = parser.parse_from_content(json.dumps(schema_data), "application/json")
+                success, schema, error = parser.parse_from_content(schema_data, "application/json")
             elif schema_url:
                 success, schema, error = await parser.parse_from_url(schema_url)
             else:
