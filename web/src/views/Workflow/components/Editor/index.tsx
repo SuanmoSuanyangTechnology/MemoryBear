@@ -3,11 +3,18 @@ import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
-import { AutoFocusPlugin } from '@lexical/react/LexicalAutoFocusPlugin';
+// import { AutoFocusPlugin } from '@lexical/react/LexicalAutoFocusPlugin';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
+// import { HeadingNode, QuoteNode } from '@lexical/rich-text';
+// import { ListItemNode, ListNode } from '@lexical/list';
+// import { LinkNode } from '@lexical/link';
+// import { CodeNode } from '@lexical/code';
+
 import AutocompletePlugin, { type Suggestion } from './plugin/AutocompletePlugin'
 import CharacterCountPlugin from './plugin/CharacterCountPlugin'
 import InitialValuePlugin from './plugin/InitialValuePlugin';
+import CommandPlugin from './plugin/CommandPlugin';
+import { VariableNode } from './nodes/VariableNode'
 
 interface LexicalEditorProps {
   placeholder?: string;
@@ -30,10 +37,19 @@ const Editor: FC<LexicalEditorProps> =({
   onChange,
   suggestions,
 }) => {
-  const [count, setCount] = useState(0);
+  const [_count, setCount] = useState(0);
   const initialConfig = {
     namespace: 'AutocompleteEditor',
     theme,
+    nodes: [
+      // HeadingNode,
+      // QuoteNode,
+      // ListItemNode,
+      // ListNode,
+      // LinkNode,
+      // CodeNode,
+      VariableNode
+    ],
     onError: (error: Error) => {
       console.error(error);
     },
@@ -74,10 +90,10 @@ const Editor: FC<LexicalEditorProps> =({
           ErrorBoundary={LexicalErrorBoundary}
         />
         <HistoryPlugin />
-        <AutoFocusPlugin />
+        <CommandPlugin />
         <AutocompletePlugin suggestions={suggestions} />
         <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
-        <InitialValuePlugin value={value} />
+        <InitialValuePlugin value={value} suggestions={suggestions} />
       </div>
     </LexicalComposer>
   );

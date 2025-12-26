@@ -1,7 +1,10 @@
 import { useEffect, useState, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getRoot, $createTextNode, $createParagraphNode, $setSelection, $createRangeSelection, $getSelection } from 'lexical';
+import { $getRoot, $getSelection } from 'lexical';
+
+import { INSERT_VARIABLE_COMMAND } from '../commands';
 import type { NodeProperties } from '../../../types'
+
 export interface Suggestion {
   key: string;
   label: string;
@@ -10,6 +13,7 @@ export interface Suggestion {
   value: string;
   nodeData: NodeProperties
 }
+
 const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) => {
   const [editor] = useLexicalComposerContext();
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -32,19 +36,14 @@ const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) 
               const range = domSelection.getRangeAt(0);
               const rect = range.getBoundingClientRect();
 
-              // Calculate popup dimensions
               const popupWidth = 280;
               const popupHeight = 200;
-
-              // Get viewport dimensions
               const viewportWidth = window.innerWidth;
               const viewportHeight = window.innerHeight;
 
-              // Calculate position with viewport constraints
               let left = rect.left;
               let top = rect.top - 10;
 
-              // Adjust horizontal position if popup would overflow
               if (left + popupWidth > viewportWidth) {
                 left = viewportWidth - popupWidth - 10;
               }
@@ -52,9 +51,7 @@ const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) 
                 left = 10;
               }
 
-              // Adjust vertical position if popup would overflow
               if (top - popupHeight < 10) {
-                // Show below cursor if not enough space above
                 top = rect.bottom + 10;
                 if (top + popupHeight > viewportHeight) {
                   top = viewportHeight - popupHeight - 10;
@@ -69,31 +66,8 @@ const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) 
     });
   }, [editor]);
 
-  const insertMention = (suggestion: any) => {
-    editor.update(() => {
-      const root = $getRoot();
-      const text = root.getTextContent();
-      const lastSlashIndex = text.lastIndexOf('/');
-      const beforeSlash = text.slice(0, lastSlashIndex);
-      const afterSlash = text.slice(lastSlashIndex + 1);
-      const insertedText = `{{${suggestion.value}}} `;
-      const newText = beforeSlash + insertedText + afterSlash;
-      const cursorPosition = beforeSlash.length + insertedText.length;
-
-      root.clear();
-      const paragraph = $createParagraphNode();
-      paragraph.append($createTextNode(newText));
-      root.append(paragraph);
-
-      // Set cursor after the inserted text
-      const textNode = paragraph.getFirstChild();
-      if (textNode) {
-        const selection = $createRangeSelection();
-        selection.anchor.set(textNode.getKey(), cursorPosition, 'text');
-        selection.focus.set(textNode.getKey(), cursorPosition, 'text');
-        $setSelection(selection);
-      }
-    });
+  const insertMention = (suggestion: Suggestion) => {
+    editor.dispatchCommand(INSERT_VARIABLE_COMMAND, { data: suggestion });
     setShowSuggestions(false);
   };
 
@@ -131,53 +105,53 @@ const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) 
         const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
         return (
           <div key={nodeId}>
-          {groupIndex > 0 && <div style={{ height: '1px', background: '#f0f0f0', margin: '4px 0' }} />}
-          <div style={{ padding: '4px 12px', fontSize: '12px', color: '#999', fontWeight: 'bold' }}>
-            {nodeName}
-          </div>
-          {nodeOptions.map((option, index) => {
-            const globalIndex = Object.values(groupedSuggestions).flat().indexOf(option);
-            return (
-              <div
-                key={option.key}
-                style={{
-                  padding: '8px 12px',
-                  cursor: 'pointer',
-                  background: selectedIndex === globalIndex ? '#f0f8ff' : 'white',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-                onClick={() => insertMention(option)}
-                onMouseEnter={() => setSelectedIndex(globalIndex)}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span
-                    style={{
-                      background: option.type === 'context' ? '#722ed1' :
-                        option.type === 'system' ? '#1890ff' : '#52c41a',
-                      color: 'white',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      fontSize: '12px',
-                      minWidth: '16px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {option.type === 'context' ? '📄' :
-                      option.type === 'system' ? 'x' : 'x'}
-                  </span>
-                  <span style={{ fontSize: '14px' }}>{option.label}</span>
+            {groupIndex > 0 && <div style={{ height: '1px', background: '#f0f0f0', margin: '4px 0' }} />}
+            <div style={{ padding: '4px 12px', fontSize: '12px', color: '#999', fontWeight: 'bold' }}>
+              {nodeName}
+            </div>
+            {nodeOptions.map((option, index) => {
+              const globalIndex = Object.values(groupedSuggestions).flat().indexOf(option);
+              return (
+                <div
+                  key={option.key}
+                  style={{
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    background: selectedIndex === globalIndex ? '#f0f8ff' : 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                  onClick={() => insertMention(option)}
+                  onMouseEnter={() => setSelectedIndex(globalIndex)}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span
+                      style={{
+                        background: option.type === 'context' ? '#722ed1' :
+                          option.type === 'system' ? '#1890ff' : '#52c41a',
+                        color: 'white',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        minWidth: '16px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      {option.type === 'context' ? '📄' :
+                        option.type === 'system' ? 'x' : 'x'}
+                    </span>
+                    <span style={{ fontSize: '14px' }}>{option.label}</span>
+                  </div>
+                  {option.dataType && (
+                    <span style={{ fontSize: '12px', color: '#999' }}>
+                      {option.dataType}
+                    </span>
+                  )}
                 </div>
-                {option.dataType && (
-                  <span style={{ fontSize: '12px', color: '#999' }}>
-                    {option.dataType}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
         );
       })}
     </div>

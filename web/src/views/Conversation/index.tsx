@@ -208,7 +208,7 @@ const Conversation: FC = () => {
 
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
-      <div className="rb:w-[345px] rb:h-screen rb:overflow-hidden rb:border-r rb:border-[#EAECEE] rb:p-3">
+      <div className="rb:w-86.25 rb:h-screen rb:overflow-hidden rb:border-r rb:border-[#EAECEE] rb:p-3">
         <div className="rb:group rb:flex rb:items-center rb:justify-center rb:font-regular rb:cursor-pointer rb:mb-5 rb:border rb:border-[#DFE4ED] rb:hover:border-[#155EEF] rb:hover:text-[#155EEF] rb:rounded-lg rb:py-2.5"
           onClick={() => handleChangeHistory(null)}
         >
@@ -250,7 +250,7 @@ const Conversation: FC = () => {
             </InfiniteScroll>
           </div>
         }
-        <img src={BgImg} className="rb:absolute rb:bottom-0 rb:left-0 rb:w-[345px]" />
+        <img src={BgImg} className="rb:absolute rb:bottom-0 rb:left-0 rb:w-86.25" />
       </div>
 
       <div className="rb:relative rb:h-screen rb:px-4 rb:flex-[1_1_auto]">
@@ -264,7 +264,7 @@ const Conversation: FC = () => {
           onSend={handleSend}
           labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
         >
-          <Form form={form}>
+          <Form form={form} initialValues={{ memory: false, web_search: false}}>
             <Flex gap={8}>
               <Form.Item name="web_search" valuePropName="checked" className="rb:mb-0!">
                 <ButtonCheckbox
