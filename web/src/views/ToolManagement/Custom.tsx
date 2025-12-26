@@ -98,7 +98,7 @@ const Custom: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ get
                 extra={getStatusTag(item.status)}
               >
                 <div>
-                  {['auth_type', 'tag', 'created_at'].map(key => (
+                  {['auth_type', 'tags', 'created_at'].map(key => (
                     <div 
                       key={key}
                       className="rb:flex rb:gap-4 rb:justify-start rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3"
@@ -108,7 +108,9 @@ const Custom: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ get
                         {key === 'created_at' && item[key]
                           ? dayjs(item[key]).format('YYYY-MM-DD HH:mm:ss')
                           : key === 'auth_type'
-                            ? t(`tool.${(item.config_data as any)?.[key]}`)
+                          ? t(`tool.${(item.config_data as any)?.[key]}`)
+                          : key === 'tags'
+                          ? (item[key] as string[]).join('、')
                           : (item.config_data as any)?.[key] || '-'
                         }
                       </div>
