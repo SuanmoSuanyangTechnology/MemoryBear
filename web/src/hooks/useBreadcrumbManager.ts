@@ -213,10 +213,23 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
               refresh: true, // 添加刷新标志
               timestamp: Date.now(), // 添加时间戳确保状态变化
             };
-            navigate(`/knowledge-base/${breadcrumbPath.knowledgeBase!.id}/private`, { 
-              state: navigationState,
-              replace: true // 使用 replace 避免历史记录堆积
-            });
+            
+            // 使用当前页面路径进行导航，避免不必要的路由变化
+            const currentPath = window.location.pathname;
+            const targetPath = `/knowledge-base/${breadcrumbPath.knowledgeBase!.id}/private`;
+            
+            if (currentPath === targetPath) {
+              // 如果已经在目标页面，直接更新状态而不导航
+              navigate(targetPath, { 
+                state: navigationState,
+                replace: true // 使用 replace 避免历史记录堆积
+              });
+            } else {
+              // 如果不在目标页面，正常导航
+              navigate(targetPath, { 
+                state: navigationState
+              });
+            }
             return false;
           },
         }] : []),
