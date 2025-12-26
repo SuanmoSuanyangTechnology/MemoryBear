@@ -203,7 +203,7 @@ const PricingView: React.FC = () => {
             <div className="rb:mb-5">
               {typeof item.priceObj.price !== 'undefined' ? (
                 <div className="rb:flex rb:items-baseline rb:h-16">
-                  <span className="rb:text-[16px] rb:text-[#5B6167] rb:font-regular rb:mr-1 rb:mb-1">¥</span>
+                  <span className="rb:text-[16px] rb:text-[#5B6167] rb:font-regular rb:mr-1 rb:mb-1">$</span>
                   <span className="rb:text-[40px] rb:font-extrabold">
                     {item.priceObj.price.toLocaleString()}
                   </span>
@@ -227,6 +227,12 @@ const PricingView: React.FC = () => {
             >
               {item.btnType === 'started' ? t('pricing.startedBtn') : item.btnType === 'choosePlan' ? t('pricing.choosePlanBtn') : t('pricing.contactBtn')}
             </Button>
+            {Object.keys(item.priceDescObj).map(key => (
+              <div key={key} className="rb:mt-4 rb:border-t rb:border-[#DFE4ED]">
+                <div className="rb:font-[Gilroy] rb:font-extrabold rb:text-[12px] rb:h-auto rb:leading-4 rb:mt-4">{t(`pricing.${key}`)}</div>
+                <div className="rb:font-[PingFangSC] rb:font-normal rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:mt-1.5">{t(item.priceDescObj[key as keyof typeof item.priceDescObj])}</div>
+              </div>
+            ))}
 
             {/* Features */}
             <div className="rb:space-y-3 rb:border-t rb:border-t-[#DFE4ED] rb:mt-6 rb:pt-6">
@@ -239,7 +245,7 @@ const PricingView: React.FC = () => {
               <div className="rb:flex rb:mb-2">
                 <img src={checkIcon} className="rb:w-4 rb:h-4 rb:mr-1 rb:mt-0.5" />
                 <div className="rb:font-regular rb:text-[12px] rb:text-[#5B6167] rb:leading-5">
-                  {t('pricing.intelligentSearchFrequency')}<span className="rb:text-[#FFFFFF]">{ item.intelligentSearchFrequency } {t('pricing.timesMonth')}</span>
+                  {t('pricing.intelligentSearchFrequency')}<span>{ item.intelligentSearchFrequency } {t('pricing.timesMonth')}</span>
                 </div>
               </div>
               {['supportServices', 'flexibleDeployment', 'reliableGuarantee'].map(type => {
