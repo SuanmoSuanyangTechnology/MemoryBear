@@ -219,7 +219,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
           {/* 认证方式 */}
           <FormItem
             name={['config', 'connection_config', 'auth_type']}
-            label={t('tool.authType')}
+            label={t('tool.auth_type')}
             hidden={activeTab !== 'auth'}
           >
             <Select

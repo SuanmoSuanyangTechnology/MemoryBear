@@ -103,9 +103,14 @@ const Custom: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ get
                       key={key}
                       className="rb:flex rb:gap-4 rb:justify-start rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3"
                     >
-                      <div className="rb:whitespace-nowrap rb:w-27.5">{t(`tool.${key}`)}</div>
+                      <div className="rb:whitespace-nowrap rb:w-32">{t(`tool.${key}`)}</div>
                       <div className='rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-inline rb:text-left rb:py-px rb:rounded rb:font-medium'>
-                        {key === 'created_at' && item[key] ? dayjs(item[key]).format('YYYY-MM-DD HH:mm:ss') : (item.config_data as any)?.[key] || '-'}
+                        {key === 'created_at' && item[key]
+                          ? dayjs(item[key]).format('YYYY-MM-DD HH:mm:ss')
+                          : key === 'auth_type'
+                            ? t(`tool.${(item.config_data as any)?.[key]}`)
+                          : (item.config_data as any)?.[key] || '-'
+                        }
                       </div>
                     </div>
                   ))}

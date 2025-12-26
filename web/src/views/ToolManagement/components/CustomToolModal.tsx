@@ -136,8 +136,15 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
           }
         }}
       >
+        <Form.Item
+          name="name"
+          label={t('tool.name')}
+          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+        >
+          <Input placeholder={t('common.pleaseEnter')} />
+        </Form.Item>
         {/* 名称和图标 */}
-        <Form.Item label={t('tool.nameAndIcon')} required>
+        {/* <Form.Item label={t('tool.nameAndIcon')} required>
           <Row gutter={8}>
             <Col span={16}>
               <Form.Item
@@ -152,7 +159,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
               <Button>icon</Button>
             </Col>
           </Row>
-        </Form.Item>
+        </Form.Item> */}
         <Form.Item
           name={['config', 'schema_content']}
           label={t('tool.schema')}
@@ -200,7 +207,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
           {/* 认证方式 */}
           <FormItem
             name={['config', 'auth_type']}
-            label={t('tool.authType')}
+            label={t('tool.auth_type')}
           >
             <Select
               placeholder={t('common.pleaseSelect')}
