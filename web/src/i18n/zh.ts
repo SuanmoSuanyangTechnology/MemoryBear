@@ -1337,6 +1337,8 @@ export const zh = {
       startANewConversation: '开始新对话',
       normalReply: '正常回复',
       quickReply: '快速回复',
+      web_search: '联网搜索',
+      memory: '记忆',
     },
     login: {
       title: '红熊记忆科学',
@@ -1474,7 +1476,7 @@ export const zh = {
       auth: '认证',
       requestHeader: '请求头',
       config: '配置',
-      authType: '认证方式',
+      auth_Type: '认证方式',
       none: '无需认证',
       api_key: 'API Key',
       basic_auth: 'Basic Auth',

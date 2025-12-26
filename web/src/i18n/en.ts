@@ -1374,7 +1374,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       auth: 'Authentication',
       requestHeader: 'Request Headers',
       config: 'Configuration',
-      authType: 'Authentication Type',
+      auth_type: 'Authentication Type',
       none: 'No Authentication',
       api_key: 'API Key',
       basic_auth: 'Basic Auth',
