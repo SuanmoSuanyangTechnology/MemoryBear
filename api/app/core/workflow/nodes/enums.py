@@ -26,6 +26,7 @@ class NodeType(StrEnum):
     ASSIGNER = "assigner"
     JINJARENDER = "jinja-render"
     VAR_AGGREGATOR = "var-aggregator"
+    PARAMETER_EXTRACTOR = "parameter-extractor"
 
 
 class ComparisonOperator(StrEnum):
