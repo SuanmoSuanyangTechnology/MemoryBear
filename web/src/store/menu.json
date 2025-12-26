@@ -27,6 +27,19 @@
       "subs": []
     },
     {
+      "id": 7,
+      "parent": 0,
+      "code": "tool",
+      "label": "工具管理",
+      "i18nKey": "menu.toolManagement",
+      "path": "/tool",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "subs": []
+    },
+    {
       "id": 6,
       "parent": 0,
       "code": "pricing",

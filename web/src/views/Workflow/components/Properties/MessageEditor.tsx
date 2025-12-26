@@ -85,7 +85,7 @@ const MessageEditor: FC<TextareaProps> = ({
           nodeData.config?.variables?.sys.forEach((variable: any) => {
             suggestions.push({
               key: `${nodeId}_${variable.name}`,
-              label: variable.name,
+              label: `sys.${variable.name}`,
               type: 'variable',
               dataType: variable.type,
               value: `sys.${variable.name}`,
