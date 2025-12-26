@@ -83,7 +83,8 @@ class ToolService:
             tenant_id: uuid.UUID,
             icon: Optional[str] = None,
             description: Optional[str] = None,
-            config: Optional[Dict[str, Any]] = None
+            config: Optional[Dict[str, Any]] = None,
+            tags: Optional[List[str]] = None
     ) -> str:
         """创建工具"""
         if tool_type == ToolType.BUILTIN:
@@ -98,7 +99,8 @@ class ToolService:
                 tool_type=tool_type.value,
                 tenant_id=tenant_id,
                 status=ToolStatus.AVAILABLE.value,
-                config_data=config or {}
+                config_data=config or {},
+                tags=tags
             )
             self.db.add(tool_config)
             self.db.flush()
@@ -123,7 +125,8 @@ class ToolService:
             description: Optional[str] = None,
             icon: Optional[str] = None,
             config: Optional[Dict[str, Any]] = None,
-            is_enabled: Optional[bool] = None
+            is_enabled: Optional[bool] = None,
+            tags: Optional[List[str]] = None
     ) -> bool:
         """更新工具"""
         config_obj = self._get_tool_config(tool_id, tenant_id)
@@ -140,6 +143,8 @@ class ToolService:
                 config_obj.description = description
             if icon:
                 config_obj.icon = icon
+            if tags:
+                config_obj.tags = tags
             if config:
                 config_obj.config_data = config.copy()
 

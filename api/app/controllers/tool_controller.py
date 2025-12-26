@@ -87,7 +87,8 @@ async def create_tool(
             tenant_id=current_user.tenant_id,
             icon=request.icon,
             description=request.description,
-            config=request.config
+            config=request.config,
+            tags=request.tags
         )
         return success(data={"tool_id": tool_id}, msg="工具创建成功")
     except ValueError as e:
@@ -112,7 +113,8 @@ async def update_tool(
             description=request.description,
             icon=request.icon,
             config=request.config,
-            is_enabled=request.config.get("is_enabled", None)
+            is_enabled=request.config.get("is_enabled", None),
+            tags=request.tags
         )
         if not success_flag:
             raise HTTPException(status_code=404, detail="工具不存在")
@@ -220,6 +222,8 @@ async def test_tool_connection(
         else:
             # 普通连接测试
             result = await service.test_connection(tool_id, current_user.tenant_id)
+        if result["success"] is False:
+            raise HTTPException(status_code=400, detail=result["message"])
         return success(data=result, msg="连接测试完成")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
