@@ -674,7 +674,8 @@ async def draft_run_compare(
         workspace_id=workspace_id,
         user=current_user
     )
-    if storage_type is None: storage_type = 'neo4j'
+    if storage_type is None: 
+        storage_type = 'neo4j'
     user_rag_memory_id = ''
     if workspace_id:
         knowledge = knowledge_repository.get_knowledge_by_name(
@@ -682,7 +683,8 @@ async def draft_run_compare(
             name="USER_RAG_MERORY",
             workspace_id=workspace_id
         )
-        if knowledge: user_rag_memory_id = str(knowledge.id)
+        if knowledge: 
+            user_rag_memory_id = str(knowledge.id)
 
     logger.info(
         "多模型对比试运行",
