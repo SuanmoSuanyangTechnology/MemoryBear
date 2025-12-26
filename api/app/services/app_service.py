@@ -9,8 +9,9 @@
 """
 import datetime
 import uuid
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Annotated
 
+from fastapi import Depends
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,7 @@ from app.core.exceptions import (
     BusinessException,
 )
 from app.core.logging_config import get_business_logger
+from app.db import get_db
 from app.models import App, AgentConfig, AppRelease, MultiAgentConfig, WorkflowConfig
 from app.models.app_model import AppStatus, AppType
 from app.repositories.app_repository import get_apps_by_id
@@ -1407,7 +1409,7 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用不在指定工作空间或目标工作空间无效时
         """
-        
+
 
         logger.info(
             "分享应用",
@@ -2095,3 +2097,14 @@ async def draft_run_stream(
         workspace_id=workspace_id
     ):
         yield event
+
+
+
+
+# ==================== 依赖注入函数 ====================
+
+def get_app_service(
+        db: Annotated[Session, Depends(get_db)]
+) -> AppService:
+    """获取工作流服务（依赖注入）"""
+    return AppService(db)
