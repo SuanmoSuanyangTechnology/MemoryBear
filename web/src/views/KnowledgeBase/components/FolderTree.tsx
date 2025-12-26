@@ -309,9 +309,13 @@ const FolderTree: FC<FolderTreeProps> = ({
     const load = async () => {
       if (!knowledgeBaseId) {
         setTreeData([]);
+        setExpandedKeys([]); // 重置展开状态
         return;
       }
       try {
+        // 重置展开状态，确保从根目录开始
+        setExpandedKeys([]);
+        
         const nodes = await buildTreeNodes(knowledgeBaseId, knowledgeBaseId);
         if (!cancelled) {
           setTreeData(nodes);
