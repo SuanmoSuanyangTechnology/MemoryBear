@@ -1603,7 +1603,7 @@ export const zh = {
       schema: 'Schema',
       schemaPlaceholder: '在此处输入您的 OpenAPI schema',
       authentication: '鉴权方式',
-      tag: '标签',
+      tags: '标签',
       created_at: '创建时间',
       headerName: 'Header 名称',
       null: '无',

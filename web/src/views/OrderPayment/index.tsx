@@ -364,7 +364,7 @@ const OrderPayment: React.FC = () => {
               label={t('pricing.transferDate')}
               required
             >
-              <DatePicker className="rb:w-full" />
+              <DatePicker className="rb:w-full" placeholder={t('common.pleaseSelect')} />
             </Form.Item>
             <Form.Item
               name="remarks"
