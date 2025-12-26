@@ -191,6 +191,7 @@ class ToolCreateRequest(BaseModel):
     icon: Optional[str] = Field(None, max_length=255)
     tool_type: ToolType
     config: Dict[str, Any] = Field(default_factory=dict)
+    tags: List[str] = Field(default_factory=list)
 
 
 class ToolUpdateRequest(BaseModel):
@@ -200,6 +201,7 @@ class ToolUpdateRequest(BaseModel):
     icon: Optional[str] = Field(None, max_length=255)
     config: Optional[Dict[str, Any]] = None
     is_enabled: Optional[bool] = None
+    tags: Optional[List[str]] = None
 
 
 class ToolExecuteRequest(BaseModel):
