@@ -1501,7 +1501,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       schema: 'Schema',
       schemaPlaceholder: 'Enter your OpenAPI schema here',
       authentication: 'Authentication Method',
-      tag: 'Tag',
+      tags: 'Tag',
       created_at: 'Created At',
       headerName: 'Header Name',
       null: 'None',

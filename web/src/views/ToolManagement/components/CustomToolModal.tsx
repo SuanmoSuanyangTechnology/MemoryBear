@@ -268,7 +268,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
         </>
         <FormItem
           name="tags"
-          label={t('tool.tag')}
+          label={t('tool.tags')}
           extra={t('tool.tagDesc')}
         >
           <Select
