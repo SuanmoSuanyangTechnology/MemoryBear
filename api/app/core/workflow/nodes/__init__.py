@@ -16,6 +16,7 @@ from app.core.workflow.nodes.llm import LLMNode
 from app.core.workflow.nodes.node_factory import NodeFactory, WorkflowNode
 from app.core.workflow.nodes.start import StartNode
 from app.core.workflow.nodes.transform import TransformNode
+from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNode
 
 __all__ = [
     "BaseNode",
@@ -32,4 +33,5 @@ __all__ = [
     "AssignerNode",
     "HttpRequestNode",
     "JinjaRenderNode",
+    "ParameterExtractorNode"
 ]
