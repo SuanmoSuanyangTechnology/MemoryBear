@@ -14,7 +14,7 @@ import type { ToolItem, Query, CustomToolModalRef } from './types';
 import CustomToolModal from './components/CustomToolModal';
 import SearchInput from '@/components/SearchInput'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
-import RbCard from '@/components/RbCard'
+import RbCard from '@/components/RbCard/Card'
 import { getTools, deleteTool } from '@/api/tools'
 
 const Custom: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getStatusTag }) => {
