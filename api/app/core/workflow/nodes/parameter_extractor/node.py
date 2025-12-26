@@ -68,10 +68,10 @@ class ParameterExtractorNode(BaseNode):
             config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
 
             if not config:
-                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
+                raise BusinessException("Configured model does not exist", BizCode.NOT_FOUND)
 
             if not config.api_keys or len(config.api_keys) == 0:
-                raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
+                raise BusinessException("Model configuration is missing API Key", BizCode.INVALID_PARAMETER)
 
             api_config = config.api_keys[0]
             model_name = api_config.model_name
