@@ -99,16 +99,11 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
   };
   const formatSchema = (value: string) => {
     setParseSchemaData({} as ParseSchemaData)
-    try {
-      const json = JSON.parse(value)
-      parseSchema({ schema_content: json })
-        .then(res => {
-          const response = res as { data: ParseSchemaData }
-          setParseSchemaData(response.data)
-        })
-    } catch (error) {
-      console.log('error', error)
-    }
+    parseSchema({ schema_content: value })
+      .then(res => {
+        const response = res as { data: ParseSchemaData }
+        setParseSchemaData(response.data)
+      })
   }
 
   // 暴露给父组件的方法
