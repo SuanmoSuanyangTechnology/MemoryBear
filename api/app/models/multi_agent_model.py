@@ -34,7 +34,7 @@ class MultiAgentConfig(Base):
     master_agent_id = Column(UUID(as_uuid=True), ForeignKey("app_releases.id"), nullable=True, comment="主 Agent 发布版本 ID")
     master_agent_name = Column(String(100), comment="主 Agent 名称")
 
-    default_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=False,server_default=str(uuid.UUID(int=0)), index=True, comment="默认模型配置ID")
+    default_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id", name="multi_agent_configs_default_model_config_id_fkey"), nullable=True, index=True, comment="默认模型配置ID")
     # 结构化配置（直接存储 JSON）
     model_parameters = Column(JSON, nullable=True, comment="模型参数配置（temperature、max_tokens等）")
     # 协作模式
