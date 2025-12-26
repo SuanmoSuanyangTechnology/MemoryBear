@@ -11,17 +11,6 @@ import {
 import type { NodeStatisticsItem } from '../types'
 
 
-const BG_LIST = [
-  'rb:bg-[linear-gradient(316deg,rgba(21,94,239,0.06)_0%,rgba(251,253,255,0)_100%)]',
-  'rb:bg-[linear-gradient(316deg,rgba(54,159,33,0.06)_0%,rgba(251,253,255,0)_100%)]',
-  'rb:bg-[linear-gradient(314deg,rgba(156,111,255,0.06)_0%,rgba(251,253,255,0)_100%)]',
-  'rb:bg-[linear-gradient(314deg,rgba(255,93,52,0.06)_0%,rgba(251,253,255,0)_100%)]',
-  'rb:bg-[linear-gradient(180deg,rgba(156,111,255,0.06)_0%,rgba(251,253,255,0)_100%)]',
-  'rb:bg-[linear-gradient(180deg,rgba(21,94,239,0.06)_0%,rgba(251,253,255,0)_100%)]',
-  'rb:bg-[linear-gradient(180deg,rgba(54,159,33,0.06)_0%,rgba(251,253,255,0)_100%)]',
-  'rb:bg-[]',
-]
-
 const NodeStatistics: FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation()
@@ -60,32 +49,36 @@ const NodeStatistics: FC = () => {
   }
   return (
     <RbCard 
-      title={<>{t('userMemory.nodeStatistics')} <span className="rb:text-[#5B6167] rb:font-normal!">({t('userMemory.total')}: {total})</span></>}
+      title={<>{t('userMemory.nodeStatistics')}<div>{t('userMemory.total')}: {total}</div></>}
       headerType="borderless"
     >
       {loading
         ? <Skeleton />
         : data && data.length > 0
-          ? <div className={`rb:w-full rb:grid rb:grid-cols-8 rb:gap-3`}>
-            {data.map((vo, index) => (
+          ? <div className={`rb:w-full rb:grid rb:grid-cols-3 rb:gap-2`}>
+            {data.map(vo => (
               <div
                 key={vo.type}
-                className={clsx("rb:flex rb:flex-col rb:justify-between rb:group rb:border rb:border-[#DFE4ED] rb:h-45 rb:rounded-lg rb:pt-3 rb:px-4 rb:pb-5", {
+                className={clsx("rb:group rb:border rb:border-[#DFE4ED] rb:p-0 rb:rounded-xl rb:hover:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)]", {
                   'rb:cursor-pointer': vo.type === 'EMOTIONAL_MEMORY'
-                }, BG_LIST[index])}
+                })}
                 onClick={() => handleViewDetail(vo.type)}
               >
-                <div>
-                  <div className="rb:text-[#5B6167] rb:leading-5 rb:font-regular">
-                    {t(`userMemory.${vo.type}`)}
-                  </div>
+                <div className="rb:gap-0.5 rb:p-3 rb:leading-4 rb:text-[#5B6167] rb:flex rb:items-center rb:justify-between rb:border-b rb:border-[#DFE4ED]">
+                  <div className="rb:wrap-break-word rb:line-clamp-1">{t(`userMemory.${vo.type}`)}</div>
                   {vo.type === 'EMOTIONAL_MEMORY' && <div
                     className="rb:w-3 rb:h-3 rb:-ml-0.75 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/home/arrow_top_right.svg')] rb:group-hover:bg-[url('@/assets/images/home/arrow_top_right_hover.svg')]"
                   ></div>}
                 </div>
-                <div className="rb:text-[28px] rb:leading-8.75 rb:font-extrabold">{vo.count ?? 0}</div>
+
+                <div className="rb:p-3 rb:flex rb:justify-between rb:items-center rb:font-bold rb:text-[20px] rb:text-[#212332] rb:text-left">
+                  {vo.count ?? 0}
+                  <div className="rb:text-right rb:font-normal rb:text-[14px] rb:text-[#5F6266] rb:leading-4 rb:gap-1">
+                    {vo.percentage ?? 0}%
+                  </div>
+                </div>
               </div>
-            ))}
+          ))}
           </div>
         : <Empty size={80} />
       }

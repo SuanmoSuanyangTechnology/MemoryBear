@@ -38,6 +38,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   Home: lazy(() => import('@/views/Home')),
   UserMemory: lazy(() => import('@/views/UserMemory')),
   UserMemoryDetail: lazy(() => import('@/views/UserMemoryDetail')),
+  Neo4jUserMemoryDetail: lazy(() => import('@/views/UserMemoryDetail/Neo4j')),
   MemberManagement: lazy(() => import('@/views/MemberManagement')),
   MemoryManagement: lazy(() => import('@/views/MemoryManagement')),
   ForgettingEngine: lazy(() => import('@/views/ForgettingEngine')),

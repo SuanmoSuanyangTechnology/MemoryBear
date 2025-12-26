@@ -1,17 +1,21 @@
-import { type FC, useEffect, useState, useRef, useCallback } from 'react'
+import { forwardRef, useImperativeHandle, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Descriptions, Button } from 'antd';
+import { Skeleton } from 'antd';
 import dayjs from 'dayjs'
+
 import RbCard from '@/components/RbCard/Card'
-import Empty from '@/components/Empty';
 import {
   getEndUserProfile,
 } from '@/api/memory'
 import EndUserProfileModal from './EndUserProfileModal'
-import type { EndUser, EndUserProfileModalRef } from '../types'
+import type { EndUser, EndUserProfileModalRef, EndUserProfileRef } from '../types'
 
-const EndUserProfile:FC = () => {
+interface EndUserProfileProps {
+  onDataLoaded?: (data: { other_name?: string; id: string }) => void
+}
+
+const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onDataLoaded }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const endUserProfileModalRef = useRef<EndUserProfileModalRef>(null)
@@ -28,7 +32,12 @@ const EndUserProfile:FC = () => {
     if (!id) return
     setLoading(true)
     getEndUserProfile(id).then((res) => {
-      setData(res as EndUser)
+      const userData = res as EndUser
+      setData(userData)
+      onDataLoaded?.({
+        other_name: userData.other_name,
+        id: userData.id
+      })
       setLoading(false) 
     })
     .finally(() => {
@@ -36,31 +45,45 @@ const EndUserProfile:FC = () => {
     })
   }
   const formatItems = useCallback(() => {
-    if (!data) return []
     return ['other_name', 'position', 'department', 'contact', 'phone', 'hire_date'].map(key => ({
       key,
       label: t(`userMemory.${key}`),
-      children: key === 'hire_date' && data[key] ? dayjs(data[key as keyof EndUser]).format('YYYY-MM-DD') : String(data[key as keyof EndUser] || ''),
+      children: key === 'hire_date' && data?.[key] ? dayjs(data[key as keyof EndUser]).format('YYYY-MM-DD') : String(data?.[key as keyof EndUser] || '-'),
     }))
   }, [data])
   const handleEdit = () => {
     if (!data) return
     endUserProfileModalRef.current?.handleOpen(data)
   }
+
+  useImperativeHandle(ref, () => ({
+    data
+  }));
+
   return (
     <RbCard 
       title={t('userMemory.endUserProfile')} 
-      headerType="borderless"
-      headerClassName="rb:text-[18px]! rb:leading-[24px]"
+      extra={
+        <div 
+          className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]" 
+          onClick={handleEdit}
+        ></div>
+      }
     >
       {loading
         ? <Skeleton />
-        : data
-        ? <div className="rb:flex rb:flex-wrap rb:justify-between rb:h-full">
-            <Descriptions column={1} items={formatItems()} classNames={{ label: 'rb:w-24' }} />
-            <Button className="rb:mt-3" block onClick={handleEdit}>{t('common.edit')}</Button>
+        : <div className="rb:flex rb:flex-col rb:justify-between rb:gap-3 rb:h-full">
+            {formatItems().map(vo => (
+              <div key={vo.key} className="rb:flex rb:justify-between rb:items-center rb:gap-3 rb:leading-5">
+                <div className="rb:text-[#5B6167]">{vo.label}</div>
+                <div className="">{vo.children}</div>
+              </div>
+            ))}
+
+          <div className="rb:border-t rb:border-t-[#DFE4ED] rb:pt-4 rb:text-[#5B6167] rb:text-[12px] rb:leading-4">
+              {t('userMemory.updated_at')}: {data?.updatetime_profile ? dayjs(data?.updatetime_profile).format('YYYY/MM/DD HH:mm:ss') : ''}
+            </div>
         </div>
-        : <Empty size={80} />
       }
       <EndUserProfileModal
         ref={endUserProfileModalRef}
@@ -68,5 +91,5 @@ const EndUserProfile:FC = () => {
       />
     </RbCard>
   )
-}
+})
 export default EndUserProfile

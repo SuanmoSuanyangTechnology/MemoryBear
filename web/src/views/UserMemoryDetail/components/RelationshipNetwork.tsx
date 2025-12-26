@@ -1,25 +1,18 @@
 import React, { type FC, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Col } from 'antd'
+import { Col, Row } from 'antd'
+import dayjs from 'dayjs'
+
 import RbCard from '@/components/RbCard/Card'
 import ReactEcharts from 'echarts-for-react'
-import zoom from '@/assets/images/userMemory/zoom.svg'
-import drag from '@/assets/images/userMemory/drag.svg'
-import pointer from '@/assets/images/userMemory/pointer.svg'
-import empty from '@/assets/images/userMemory/empty.svg'
+import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
 import type { Node, Edge, GraphData } from '../types'
 import {
   getMemorySearchEdges,
 } from '@/api/memory'
 import Empty from '@/components/Empty'
-import dayjs from 'dayjs'
 
-const operations = [
-  { name: 'click', icon: pointer },
-  { name: 'drag', icon: drag },
-  { name: 'zoom', icon: zoom },
-]
 const colors = ['#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
 const RelationshipNetwork:FC = () => {
   const { t } = useTranslation()
@@ -30,6 +23,7 @@ const RelationshipNetwork:FC = () => {
   const [links, setLinks] = useState<Edge[]>([])
   const [categories, setCategories] = useState<{ name: string }[]>([])
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
+  // const [fullScreen, setFullScreen] = useState<boolean>(false)
 
   console.log('categories', categories)
   // 关系网络
@@ -136,16 +130,30 @@ const RelationshipNetwork:FC = () => {
     }
   }, [nodes])
 
+  // const handleFullScreen = () => {
+  //   setFullScreen(prev => !prev)
+  // }
+
+  console.log('selectedNode', selectedNode)
+
   return (
-    <>
+    <Row gutter={16}>
       {/* 关系网络 */}
-      <Col span={24}>
+      <Col span={16}>
         <RbCard 
           title={t('userMemory.relationshipNetwork')}
           headerType="borderless"
-          headerClassName="rb:text-[18px]! rb:leading-[24px]"
+          // extra={
+          //   <div
+          //     onClick={handleFullScreen}
+          //     className="rb:group rb:cursor-pointer rb:hover:text-[#212332] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:flex rb:items-center rb:gap-1"
+          //   >
+          //     <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/fullScreen.svg')] rb:hover:bg-[url('@/assets/images/fullScreen_hover.svg')]"></div>
+          //     {t('userMemory.fullScreen')}
+          //   </div>
+          // }
         >
-          <div className="rb:h-124">
+          <div className="rb:h-129.5 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-sm">
             {nodes.length === 0 ? (
               <Empty className="rb:h-full" />
             ) : (
@@ -157,7 +165,7 @@ const RelationshipNetwork:FC = () => {
                   },
                   legend: {
                     show: true,
-                    bottom: 20,
+                    bottom: 12,
                   },
                   series: [
                     {
@@ -207,12 +215,12 @@ const RelationshipNetwork:FC = () => {
                     }
                   ]
                 }}
-                style={{ height: '496px', width: '100%' }}
+                style={{ height: '518px', width: '100%' }}
                 notMerge={false}
                 lazyUpdate={true}
                 onEvents={{
                   // 节点点击事件处理
-                  click: (params: { dataType: string; data: Node }) => {
+                  click: (params: { dataType: string; data: Node; name: string }) => {
                     if (params.dataType === 'node') {
                       // 处理节点点击事件
                       console.log('Node clicked:', params.data);
@@ -224,57 +232,52 @@ const RelationshipNetwork:FC = () => {
               />
             )}
           </div>
-          <div className="rb:bg-[#F0F3F8] rb:flex rb:items-center rb:gap-6 rb:rounded-[0px_0px_12px_12px] rb:p-[14px_40px] rb:m-[0_-20px_-16px_-16px]">
-            {operations.map((item) => (
-              <div key={item.name} className="rb:flex rb:items-center rb:text-[#5B6167] rb:leading-5">
-                <img src={item.icon} className="rb:w-5 rb:h-5 rb:mr-1" />
-                {t(`userMemory.${item.name}`)}
-              </div>
-            ))}
-          </div>
         </RbCard>
       </Col>
       {/* 记忆详情 */}
-      <Col span={24}>
+      <Col span={8}>
         <RbCard 
           title={t('userMemory.memoryDetails')}
           headerType="borderless"
-          headerClassName="rb:text-[18px]! rb:leading-[24px]"
+          bodyClassName='rb:p-0!'
         >
-          {!selectedNode
-            ? <Empty 
-              url={empty}
-              title={t('userMemory.memoryDetailEmpty')}
-              subTitle={t('userMemory.memoryDetailEmptyDesc')}
-              className="rb:mb-3"
-              size={88}
-            />
-            : <>
-
-              <div className="rb:font-medium rb:mb-2">
-                {t('userMemory.memoryContent')}
-                <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2">
-                  {['Chunk', 'Dialogue', 'MemorySummary'].includes(selectedNode.label) && 'content' in selectedNode.properties
-                    ? selectedNode.properties.content
-                    : selectedNode.label === 'ExtractedEntity' && 'description' in selectedNode.properties
-                    ? selectedNode.properties.description
-                    : selectedNode.label === 'Statement' && 'statement' in selectedNode.properties
-                    ? selectedNode.properties.statement
-                    : ''
-                  }
+          <div className="rb:h-133.5">
+            {!selectedNode
+              ? <Empty 
+                url={detailEmpty}
+                subTitle={t('userMemory.memoryDetailEmptyDesc')}
+                className="rb:h-full rb:mx-10 rb:text-center"
+                size={90}
+              />
+              : <>
+                <div className="rb:bg-[#F6F8FC] rb:border-t rb:border-b rb:border-[#DFE4ED] rb:font-medium rb:py-2 rb:px-4 rb:h-10">{selectedNode.name}</div>
+                <div className="rb:p-4">
+                  <>
+                    <div className="rb:font-medium rb:leading-5">{t('userMemory.memoryContent')}</div>
+                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                      {['Chunk', 'Dialogue', 'MemorySummary'].includes(selectedNode.label) && 'content' in selectedNode.properties
+                        ? selectedNode.properties.content
+                        : selectedNode.label === 'ExtractedEntity' && 'description' in selectedNode.properties
+                        ? selectedNode.properties.description
+                        : selectedNode.label === 'Statement' && 'statement' in selectedNode.properties
+                        ? selectedNode.properties.statement
+                        : ''
+                      }
+                    </div>
+                  </>
+                  <div className="rb:font-medium rb:mb-2 rb:mt-4">
+                    <div className="rb:font-medium rb:leading-5">{t('userMemory.created_at')}</div>
+                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4">
+                      {dayjs(selectedNode?.properties.created_at).format('YYYY-MM-DD HH:mm:ss')}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="rb:font-medium rb:mb-2">
-                {t('userMemory.created_at')}
-                <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2">
-                  {dayjs(selectedNode?.properties.created_at).format('YYYY/MM/DD HH:mm:ss')}
-                </div>
-              </div>
-            </>
-          }
+              </>
+            }
+          </div>
         </RbCard>
       </Col>
-    </>
+    </Row>
   )
 }
 // 使用React.memo包装组件，避免不必要的渲染
