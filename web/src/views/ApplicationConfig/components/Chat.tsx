@@ -208,20 +208,6 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       }
       return [...modelChatList]
     })
-    updateChatList((prev: ChatData[]) => prev.map((item, index) => {
-      if (index === 0) {
-        return {
-          ...item,
-          list: item.list?.map((msg, msgIndex) => {
-            if (msgIndex === item.list!.length - 1 && msg.role === 'assistant') {
-              return { ...msg, content: (msg.content || '') + content };
-            }
-            return msg;
-          }) || []
-        };
-      }
-      return item;
-    }))
   }
   const updateClusterErrorAssistantMessage  = (message_length: number) => {
     if (message_length > 0) return
