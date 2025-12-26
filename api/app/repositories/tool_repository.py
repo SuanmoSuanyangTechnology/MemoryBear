@@ -36,7 +36,7 @@ class ToolRepository:
             query = query.filter(ToolConfig.status == status.value)
         if is_enabled is not None:
             query = query.filter(ToolConfig.is_enabled == is_enabled)
-        
+        query = query.order_by(ToolConfig.created_at.desc())
         return query.all()
 
     @staticmethod
