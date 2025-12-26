@@ -9,12 +9,12 @@ const FormItem = Form.Item;
 
 const tabKeys = ['currentTime', 'timestampConversion', 'timeFormat']
 const formatList = [
-  { label: '%Y-%m-%d %H:%M:%S', value: '%Y-%m-%d %H:%M:%S' },
-  { label: '%Y%m%d_%H%M%S', value: '%Y%m%d_%H%M%S' },
-  { label: '%Y年%m月%d日 %H:%M', value: '%Y年%m月%d日 %H:%M' },
-  { label: '%Y-%m-%d %H:%M:%S.%f', value: '%Y-%m-%d %H:%M:%S.%f' },
-  { label: '%d/%m/%Y', value: '%d/%m/%Y' },
-  { label: '%m/%d/%Y', value: '%m/%d/%Y' },
+  { label: 'YYYY-MM-DD HH:mm:ss', value: '%Y-%m-%d %H:%M:%S' },
+  { label: 'YYYYMMDD_HHmmss', value: '%Y%m%d_%H%M%S' },
+  { label: 'YYYY年MM月DD日 HH:mm', value: '%Y年%m月%d日 %H:%M' },
+  { label: 'YYYY-MM-DD HH:mm:ss.SS', value: '%Y-%m-%d %H:%M:%S.%f' },
+  { label: 'DD/MM/YYYY', value: '%d/%m/%Y' },
+  { label: 'MM/DD/YYYY', value: '%m/%d/%Y' },
 ]
 interface CurrentTimeObj {
   datetime: string;
@@ -79,7 +79,7 @@ const TimeToolModal = forwardRef<TimeToolModalRef>((_props, ref) => {
     execute({
       "tool_id": data.id,
       "parameters": {
-        "operation": "now",
+        "operation": "timestamp_to_datetime",
         "input_value": timestamp,
       }
     })
