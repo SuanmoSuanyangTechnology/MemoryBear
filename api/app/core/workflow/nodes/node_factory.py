@@ -17,6 +17,7 @@ from app.core.workflow.nodes.if_else import IfElseNode
 from app.core.workflow.nodes.jinja_render import JinjaRenderNode
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
 from app.core.workflow.nodes.llm import LLMNode
+from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNode
 from app.core.workflow.nodes.start import StartNode
 from app.core.workflow.nodes.transform import TransformNode
 from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
@@ -35,7 +36,8 @@ WorkflowNode = Union[
     HttpRequestNode,
     KnowledgeRetrievalNode,
     JinjaRenderNode,
-    VariableAggregatorNode
+    VariableAggregatorNode,
+    ParameterExtractorNode
 ]
 
 
@@ -57,7 +59,8 @@ class NodeFactory:
         NodeType.ASSIGNER: AssignerNode,
         NodeType.HTTP_REQUEST: HttpRequestNode,
         NodeType.JINJARENDER: JinjaRenderNode,
-        NodeType.VAR_AGGREGATOR: VariableAggregatorNode
+        NodeType.VAR_AGGREGATOR: VariableAggregatorNode,
+        NodeType.PARAMETER_EXTRACTOR: ParameterExtractorNode,
     }
 
     @classmethod
