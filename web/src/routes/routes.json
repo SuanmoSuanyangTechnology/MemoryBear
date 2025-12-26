@@ -41,7 +41,8 @@
     "element": "BasicLayout",
     "children": [
       { "path": "/application/config/:id", "element": "ApplicationConfig" },
-      { "path": "/conversation/:token", "element": "Conversation" }
+      { "path": "/conversation/:token", "element": "Conversation" },
+      { "path": "/user-memory/neo4j/:id", "element": "Neo4jUserMemoryDetail" }
     ]
   },
   {

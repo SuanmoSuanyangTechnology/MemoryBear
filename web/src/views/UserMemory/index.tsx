@@ -13,6 +13,7 @@ import onlineNum from '@/assets/images/memory/onlineNum.svg'
 import Table from '@/components/Table'
 import { getTotalEndUsers, userMemoryListUrl, getUserMemoryList } from '@/api/memory';
 import ConfigModal from './components/ConfigModal';
+import { useUser } from '@/store/user'
 
 const bgList = [
   'linear-gradient( 180deg, #F1F6FE 0%, #FBFDFF 100%)',
@@ -31,6 +32,7 @@ const IconList: Record<string, string> = {
 export default function UserMemory() {
   const { t } = useTranslation();
   const navigate = useNavigate()
+  const { storageType } = useUser()
   const configModalRef = useRef<ConfigModalRef>(null)
   const [loading, setLoading] = useState<boolean>(false);
   const [data, setData] = useState<Data[]>([]);
@@ -58,8 +60,15 @@ export default function UserMemory() {
       setLoading(false)
     })
   }
+  console.log('storageType', storageType)
   const handleViewDetail = (id: string | number) => {
-    navigate(`/user-memory/${id}`)
+    switch (storageType) {
+      case 'neo4j':
+        navigate(`/user-memory/neo4j/${id}`)
+        break;
+      default:
+        navigate(`/user-memory/${id}`)
+    }
   }
   const handleChangeLayout = (e: RadioChangeEvent) => {
     const type = e.target.value

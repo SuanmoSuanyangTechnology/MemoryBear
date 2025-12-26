@@ -121,16 +121,23 @@ export interface NodeStatisticsItem {
 export interface EndUser {
   end_user_id: string;
   id: string;
-  name: string;
+  other_name: string;
   position: string;
   department: string;
   contact: string;
   phone: string;
   hire_date: string | number | Dayjs | null;
+  updatetime_profile?: number;
 }
 export interface EndUserProfileModalRef {
   handleOpen: (vo: EndUser) => void;
 }
 export interface MemoryInsightRef {
-  getInsightReport: () => void
+  getData: () => void
+}
+export interface AboutMeRef {
+  getData: () => void
+}
+export interface EndUserProfileRef {
+  data: EndUser | null
 }

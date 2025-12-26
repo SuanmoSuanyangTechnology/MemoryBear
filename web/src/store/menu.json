@@ -284,7 +284,7 @@
           "code": "userMemoryDetail",
           "label": "记忆详情",
           "i18nKey": "menu.userMemoryDetail",
-          "path": "/user-memory/:id",
+          "path": "/user-memory/neo4j/:id",
           "enable": true,
           "display": false,
           "level": 2,
@@ -304,6 +304,18 @@
               "subs": null
             }
           ]
+        },
+        {
+          "id": 81,
+          "parent": 8,
+          "code": "userMemoryDetail",
+          "label": "记忆详情",
+          "i18nKey": "menu.userMemoryDetail",
+          "path": "/user-memory/:id",
+          "enable": true,
+          "display": false,
+          "level": 2,
+          "sort": 0
         }
       ]
     },
