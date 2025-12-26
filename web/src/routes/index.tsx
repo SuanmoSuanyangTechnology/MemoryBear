@@ -61,6 +61,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   OrderPayment: lazy(() => import('@/views/OrderPayment')),
   OrderHistory: lazy(() => import('@/views/OrderHistory')),
   Pricing: lazy(() => import('@/views/Pricing')),
+  ToolManagement: lazy(() => import('@/views/ToolManagement')),
   Login: lazy(() => import('@/views/Login')),
   InviteRegister: lazy(() => import('@/views/InviteRegister')),
   NoPermission: lazy(() => import('@/views/NoPermission')),
