@@ -308,13 +308,10 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     })
   }
   const getModels = () => {
-    const requests = [getModelList({ type: 'llm', pagesize: 100, page: 1 }), getModelList({ type: 'chat', pagesize: 100, page: 1 })]
-    Promise.all(requests)
-      .then(responses => {
-        const [chatRes, modelRes] = responses as { items: Model[] }[]
-        const chatList = chatRes.items || []
-        const modelList = modelRes.items || []
-        setModelList([...chatList, ...modelList])
+    getModelList({ type: 'llm,chat', pagesize: 100, page: 1 })
+      .then(res => {
+        const response = res as { items: Model[] }
+        setModelList(response.items)
       })
   }
   const handleAddModel = () => {

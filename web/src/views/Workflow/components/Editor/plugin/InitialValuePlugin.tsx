@@ -25,9 +25,17 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, suggesti
 
         parts.forEach(part => {
           const match = part.match(/^\{\{([^.]+)\.([^}]+)\}\}$/);
+
           if (match) {
-            const [, nodeId, label] = match;
-            const suggestion = suggestions.find(s => s.nodeData.id === nodeId && s.label === label);
+            const [_, nodeId, label] = match;
+
+            const suggestion = suggestions.find(s => {
+              if (nodeId === 'sys') {
+                return s.nodeData.type === 'start' && s.label === `sys.${label}`
+              }
+              return s.nodeData.id === nodeId && s.label === label
+            });
+
             if (suggestion) {
               paragraph.append($createVariableNode(suggestion));
             } else {
@@ -43,7 +51,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, suggesti
       
       initializedRef.current = true;
     }
-  }, []);
+  }, [suggestions]);
 
   return null;
 };
