@@ -210,8 +210,15 @@ const Private: FC = () => {
       // 清除自动展开路径
       setAutoExpandPath([]);
       
-      // 刷新文件夹树（简单的刷新，不需要复杂的重置逻辑）
-      setFolderTreeRefreshKey((prev) => prev + 1);
+      // 刷新文件夹树 - 使用延迟确保状态重置完成后再刷新
+      setTimeout(() => {
+        setFolderTreeRefreshKey((prev) => prev + 1);
+      }, 100);
+      
+      // 手动触发表格刷新，确保数据更新
+      setTimeout(() => {
+        tableRef.current?.loadData();
+      }, 200);
       
       // 清除 state，避免重复处理
       navigate(location.pathname, { replace: true, state: {} });
@@ -584,6 +591,8 @@ const Private: FC = () => {
     await new Promise(resolve => setTimeout(resolve, 300));
      // 然后刷新文件夹树
     setFolderTreeRefreshKey((prev) => prev + 1);
+    
+    // 确保 folder 状态正确设置
     if (!folder) {
       setFolder({
         kb_id: knowledgeBaseId ?? '',
