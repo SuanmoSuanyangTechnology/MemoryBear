@@ -225,7 +225,7 @@ class CustomToolCreateRequest(BaseModel):
 
 class ParseSchemaRequest(BaseModel):
     """解析Schema请求"""
-    schema_content: Optional[Dict[str, Any]] = Field(None, description="OpenAPI schema内容")
+    schema_content: Optional[str] = Field(None, description="OpenAPI schema内容")
     schema_url: Optional[str] = Field(None, description="OpenAPI schema URL")
 
 

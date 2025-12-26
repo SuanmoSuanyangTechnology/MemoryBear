@@ -379,9 +379,8 @@ class MCPClient:
         Returns:
             响应数据
         """
-        request_id = str(request_data["id"])
-        
         if self.connection_type == "websocket":
+            request_id = str(request_data["id"])
             return await self._send_websocket_request(request_data, request_id, timeout)
         else:
             return await self._send_http_request(request_data, timeout)
@@ -423,12 +422,19 @@ class MCPClient:
                 json=request_data,
                 timeout=aiohttp.ClientTimeout(total=timeout)
             ) as response:
-                
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise MCPConnectionError(f"HTTP请求失败 {response.status}: {error_text}")
-                
-                return await response.json()
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    async with self._session.post(
+                            self.server_url,
+                            json=request_data,
+                            timeout=aiohttp.ClientTimeout(total=timeout)
+                    ) as root_response:
+                        if root_response.status != 200:
+                            error_text = await root_response.text()
+                            raise MCPConnectionError(f"HTTP请求失败 {response.status}: {error_text}")
+
+                        return await response.json()
                 
         except aiohttp.ClientError as e:
             raise MCPConnectionError(f"HTTP请求失败: {e}")

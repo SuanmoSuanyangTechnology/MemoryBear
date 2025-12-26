@@ -157,8 +157,8 @@ class DateTimeTool(BuiltinTool):
         input_value = kwargs.get("input_value")
         input_format = kwargs.get("input_format", "%Y-%m-%d %H:%M:%S")
         output_format = kwargs.get("output_format", "%Y-%m-%d %H:%M:%S")
-        from_timezone = kwargs.get("from_timezone", "UTC")
-        to_timezone = kwargs.get("to_timezone", "UTC")
+        from_timezone = kwargs.get("from_timezone", "Asia/Shanghai")
+        to_timezone = kwargs.get("to_timezone", "Asia/Shanghai")
         
         if not input_value:
             raise ValueError("input_value 参数是必需的")
@@ -197,7 +197,7 @@ class DateTimeTool(BuiltinTool):
         """时间戳转日期时间"""
         input_value = kwargs.get("input_value")
         output_format = kwargs.get("output_format", "%Y-%m-%d %H:%M:%S")
-        timezone_str = kwargs.get("to_timezone", "UTC")
+        timezone_str = kwargs.get("to_timezone", "Asia/Shanghai")
         
         if not input_value:
             raise ValueError("input_value 参数是必需的")
@@ -227,7 +227,7 @@ class DateTimeTool(BuiltinTool):
         """日期时间转时间戳"""
         input_value = kwargs.get("input_value")
         input_format = kwargs.get("input_format", "%Y-%m-%d %H:%M:%S")
-        timezone_str = kwargs.get("from_timezone", "UTC")
+        timezone_str = kwargs.get("from_timezone", "Asia/Shanghai")
         
         if not input_value:
             raise ValueError("input_value 参数是必需的")
@@ -258,7 +258,7 @@ class DateTimeTool(BuiltinTool):
         input_format = kwargs.get("input_format", "%Y-%m-%d %H:%M:%S")
         output_format = kwargs.get("output_format", "%Y-%m-%d %H:%M:%S")
         calculation = kwargs.get("calculation")
-        timezone_str = kwargs.get("from_timezone", "UTC")
+        timezone_str = kwargs.get("from_timezone", "Asia/Shanghai")
         
         if not input_value:
             raise ValueError("input_value 参数是必需的")
