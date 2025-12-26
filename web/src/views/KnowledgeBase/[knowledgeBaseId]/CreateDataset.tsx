@@ -119,7 +119,7 @@ const CreateDataset = () => {
     if(current === 1 && nextStep === 2) {
       // debugger
         // handlePreview(data[0],0) 
-        if(parameterSettings === 'customSettings' || processingMethod === 'qaExtract'){
+        if(parameterSettings === 'customSettings' || processingMethod === 'qaExtract' || pdfEnhancementEnabled){
             rechunkFileIds.map((id) => {
                 const params = {
                   progress: 0,
