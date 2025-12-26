@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next';
 import type { ToolItem, TimeToolModalRef } from '../types'
 import RbModal from '@/components/RbModal';
 import { execute } from '@/api/tools';
+import { useI18n } from '@/store/locale'
+
 const FormItem = Form.Item;
 
 const tabKeys = ['currentTime', 'timestampConversion', 'timeFormat']
@@ -24,6 +26,7 @@ interface CurrentTimeObj {
 }
 const TimeToolModal = forwardRef<TimeToolModalRef>((_props, ref) => {
   const { t } = useTranslation();
+  const { timeZone } = useI18n()
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<{ timestamp: string; formatType: string; }>();
   const [data, setData] = useState<ToolItem>({} as ToolItem)
@@ -81,6 +84,7 @@ const TimeToolModal = forwardRef<TimeToolModalRef>((_props, ref) => {
       "parameters": {
         "operation": "timestamp_to_datetime",
         "input_value": timestamp,
+        "to_timezone": timeZone
       }
     })
     .then(res => {
@@ -95,7 +99,7 @@ const TimeToolModal = forwardRef<TimeToolModalRef>((_props, ref) => {
       parameters: {
         operation: 'now',
         output_format: values.formatType,
-        to_timezone: 'UTC'
+        to_timezone: timeZone
       }
     }).then(res => {
       const response = res as { data: CurrentTimeObj }
