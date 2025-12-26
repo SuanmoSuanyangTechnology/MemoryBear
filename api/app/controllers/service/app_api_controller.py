@@ -33,7 +33,7 @@ async def list_apps():
     """列出可访问的应用（占位）"""
     return success(data=[], msg="App API - Coming Soon")
 
-# /v1/apps/{resource_id}/chat
+# /v1/app/chat
 
 # @router.post("/chat")
 # @require_api_key(scopes=["app"])
@@ -49,7 +49,6 @@ async def list_apps():
 #     scopes: 所需的权限范围列表["app", "rag", "memory"]
 
 #     Args:
-#         resource_id: 如果是应用的apikey传的是应用id; 如果是服务的apikey传的是工作空间id
 #         message: 请求参数
 #         request: 声明请求
 #         api_key_auth: 包含验证后的API Key 信息
