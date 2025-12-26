@@ -329,7 +329,8 @@ export const en = {
       publicApiCannotRefreshToken: 'Public API cannot refresh token',
       refreshTokenNotExist: 'Refresh token does not exist',
       reset: 'Reset',
-      refresh: 'Refresh'
+      refresh: 'Refresh',
+      return: 'Return',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -1023,7 +1024,7 @@ export const en = {
       drag: 'Drag and drop to move nodes',
       zoom: 'Scroll zoom view',
       memoryDetailEmpty: 'Please select a memory node',
-      memoryDetailEmptyDesc: 'Click on any node in the above view to view detailed information',
+      memoryDetailEmptyDesc: 'Click on the node in the left graph to view the details of entity memory',
 
       totalNumOfMemories: 'Total Number of Memories',
       footprintCity: 'Footprint City',
@@ -1067,6 +1068,8 @@ export const en = {
       hire_date: 'Hire Date',
       memoryContent: 'Memory Content',
       created_at: 'Created At',
+
+      memoryWindow: "{{name}}'s Window of Memory"
     },
     space: {
       createSpace: 'Create Space',

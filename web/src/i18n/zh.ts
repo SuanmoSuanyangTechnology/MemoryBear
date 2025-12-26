@@ -805,7 +805,8 @@ export const zh = {
       publicApiCannotRefreshToken: '公共接口不能刷新token',
       refreshTokenNotExist: '刷新token不存在',
       reset: '重置',
-      refresh: '刷新'
+      refresh: '刷新',
+      return: '返回',
     },
     product: {
       applicationManagement: '应用管理',
@@ -1105,7 +1106,7 @@ export const zh = {
       drag: '拖放移动节点',
       zoom: '滚动缩放视图',
       memoryDetailEmpty: '请选择一个记忆节点',
-      memoryDetailEmptyDesc: '点击上方视图中的任何节点以查看详细信息',
+      memoryDetailEmptyDesc: '点击左侧图表中的节点查看实体记忆详情',
 
       totalNumOfMemories: '记忆总数',
       footprintCity: '足迹城市',
@@ -1151,6 +1152,8 @@ export const zh = {
       hire_date: '入职时间',
       memoryContent: '记忆内容',
       created_at: '创建时间',
+      updated_at: '最后更新时间',
+      fullScreen: '全屏'
     },
     space: {
       createSpace: '创建空间',
@@ -1476,7 +1479,7 @@ export const zh = {
       auth: '认证',
       requestHeader: '请求头',
       config: '配置',
-      auth_Type: '认证方式',
+      auth_type: '认证方式',
       none: '无需认证',
       api_key: 'API Key',
       basic_auth: 'Basic Auth',
