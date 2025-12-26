@@ -97,12 +97,6 @@ const JsonToolModal = forwardRef<JsonToolModalRef>((_props, ref) => {
           case 'minify':
             setFormatValue(data.minified_json)
             break
-          case 'validate':
-            setFormatValue(data.structure)
-            break
-          case 'convert':
-            setFormatValue(data.converted_json)
-            break
         }
       })
   }
@@ -141,16 +135,13 @@ const JsonToolModal = forwardRef<JsonToolModalRef>((_props, ref) => {
         <Space size={8} className="rb:mb-3">
           <Button onClick={() => handleOperate('format')}>{t('tool.format')}</Button>
           <Button onClick={() => handleOperate('minify')}>{t('tool.minify')}</Button>
-          <Button onClick={() => handleOperate('validate')}>{t('tool.validate')}</Button>
         </Space>
         <FormItem
           label={t('tool.outputResult')}
         >
           {typeof formatValue === "string" && formatValue
             ? <CodeBlock value={formatValue} />
-            : formatValue && typeof formatValue === "object"
-            ? <div className="rb:bg-[#F0F3F8] rb:p-[16px_20px_16px_24px] rb:rounded-lg"><Tree showLine treeData={convertToTreeData(formatValue)} /></div>
-              : <div className="rb:bg-[#F0F3F8] rb:p-[16px_20px_16px_24px] rb:rounded-lg rb:text-[#A8A9AA]">{t('tool.noResult')}</div>
+            : <div className="rb:bg-[#F0F3F8] rb:text-[12px] rb:p-[16px_20px_16px_24px] rb:rounded-lg rb:text-[#A8A9AA]">{t('tool.noResult')}</div>
           }
         </FormItem>
       </Form>
