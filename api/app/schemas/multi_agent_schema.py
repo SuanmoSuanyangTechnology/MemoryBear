@@ -4,6 +4,8 @@ import datetime
 from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
+from app.schemas import ModelParameters
+
 
 # ==================== 子 Agent 配置 ====================
 
@@ -30,7 +32,7 @@ class ExecutionConfig(BaseModel):
     parallel_limit: int = Field(default=3, ge=1, le=10, description="并行限制")
     retry_on_failure: bool = Field(default=True, description="失败时是否重试")
     max_retries: int = Field(default=3, ge=0, le=10, description="最大重试次数")
-    
+
     # 新增：路由模式配置
     routing_mode: str = Field(
         default="master_agent",
@@ -41,14 +43,14 @@ class ExecutionConfig(BaseModel):
         default=True,
         description="是否启用规则快速路径（性能优化，高置信度关键词直接返回）"
     )
-    
+
     # 新增：结果整合模式配置
     result_merge_mode: str = Field(
         default="smart",
         pattern="^(smart|master)$",
         description="结果整合模式：smart（规则去重，快速）| master（Master Agent 智能整合，连贯）"
     )
-    
+
     # 新增：子 Agent 执行模式配置
     sub_agent_execution_mode: str = Field(
         default="parallel",
@@ -82,6 +84,11 @@ class MultiAgentConfigUpdate(BaseModel):
     """更新多 Agent 配置"""
     master_agent_id: Optional[uuid.UUID] = None
     master_agent_name: Optional[str] = Field(None, max_length=100, description="主 Agent 名称")
+    default_model_config_id : uuid.UUID = Field(description="默认模型配置ID")
+    model_parameters: ModelParameters | None = Field(
+        default_factory=ModelParameters,
+        description="模型参数配置（temperature、max_tokens 等）"
+    )
     orchestration_mode: Optional[str] = Field(
         None,
         pattern="^(sequential|parallel|conditional|loop)$"
@@ -99,11 +106,16 @@ class MultiAgentConfigUpdate(BaseModel):
 class MultiAgentConfigSchema(BaseModel):
     """多 Agent 配置输出"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: uuid.UUID
     app_id: uuid.UUID
     master_agent_id: uuid.UUID
     master_agent_name: Optional[str]
+    default_model_config_id : uuid.UUID | None = Field(description="默认模型配置ID")
+    model_parameters: ModelParameters | None = Field(
+        default_factory=ModelParameters,
+        description="模型参数配置（temperature、max_tokens 等）"
+    )
     orchestration_mode: str
     sub_agents: List[Dict[str, Any]]
     routing_rules: Optional[List[Dict[str, Any]]]
@@ -112,11 +124,11 @@ class MultiAgentConfigSchema(BaseModel):
     is_active: bool
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    
+
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
