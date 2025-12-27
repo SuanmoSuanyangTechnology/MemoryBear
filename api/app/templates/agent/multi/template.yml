@@ -1,0 +1,12 @@
+# 简单问答工作流模板
+id: simple
+name: 简单问答Agent
+description: 最基础的问答Agent，适合快速开始
+category: basic
+version: "1.0.0"
+author: RedBear Memory Team
+tags:
+  - 问答
+  - 基础
+  - LLM
+
