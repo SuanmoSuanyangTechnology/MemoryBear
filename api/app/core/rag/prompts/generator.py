@@ -91,6 +91,7 @@ QUESTION_PROMPT_TEMPLATE = load_prompt("question_prompt")
 VISION_LLM_DESCRIBE_PROMPT = load_prompt("vision_llm_describe_prompt")
 VISION_LLM_FIGURE_DESCRIBE_PROMPT = load_prompt("vision_llm_figure_describe_prompt")
 STRUCTURED_OUTPUT_PROMPT = load_prompt("structured_output_prompt")
+GRAPH_ENTITY_TYPES_PROMPT_TEMPLATE = load_prompt("graph_entity_types")
 
 ANALYZE_TASK_SYSTEM = load_prompt("analyze_task_system")
 ANALYZE_TASK_USER = load_prompt("analyze_task_user")
@@ -132,6 +133,21 @@ def keyword_extraction(chat_mdl, content, topn=3):
 def question_proposal(chat_mdl, content, topn=3):
     template = PROMPT_JINJA_ENV.from_string(QUESTION_PROMPT_TEMPLATE)
     rendered_prompt = template.render(content=content, topn=topn)
+
+    msg = [{"role": "system", "content": rendered_prompt}, {"role": "user", "content": "Output: "}]
+    _, msg = message_fit_in(msg, getattr(chat_mdl, 'max_length', 8096))
+    kwd = chat_mdl.chat(rendered_prompt, msg[1:], {"temperature": 0.2})
+    if isinstance(kwd, tuple):
+        kwd = kwd[0]
+    kwd = re.sub(r"^.*</think>", "", kwd, flags=re.DOTALL)
+    if kwd.find("**ERROR**") >= 0:
+        return ""
+    return kwd
+
+
+def graph_entity_types(chat_mdl, scenario):
+    template = PROMPT_JINJA_ENV.from_string(GRAPH_ENTITY_TYPES_PROMPT_TEMPLATE)
+    rendered_prompt = template.render(scenario=scenario)
 
     msg = [{"role": "system", "content": rendered_prompt}, {"role": "user", "content": "Output: "}]
     _, msg = message_fit_in(msg, getattr(chat_mdl, 'max_length', 8096))

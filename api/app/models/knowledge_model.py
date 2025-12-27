@@ -70,9 +70,9 @@ class Knowledge(Base):
                                         "person",
                                         "geo",
                                         "event",
-                                        "category",
+                                        "category"
                                     ],
-                                    "method": "general",
+                                    "method": "general"
                                 }
                            },
                            comment="default parser config")

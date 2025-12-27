@@ -1,4 +1,5 @@
 import asyncio
+import trio
 import json
 import os
 import time
@@ -17,8 +18,10 @@ from app.core.config import settings
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.cv_model import QWenCV
+from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
 from app.core.rag.models.chunk import DocumentChunk
+from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
 from app.core.rag.prompts.generator import question_proposal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
@@ -52,138 +55,325 @@ def parse_document(file_path: str, document_id: uuid.UUID):
     """
     Document parsing, vectorization, and storage
     """
-    with get_db_context() as db:
-        db_document = None
-        db_knowledge = None
-        progress_msg = f"{datetime.now().strftime('%H:%M:%S')} Task has been received.\n"
-        try:
-            db_document = db.query(Document).filter(Document.id == document_id).first()
-            db_knowledge = db.query(Knowledge).filter(Knowledge.id == db_document.kb_id).first()
-            # 1. Document parsing & segmentation
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Start to parse.\n"
-            start_time = time.time()
-            db_document.progress = 0.0
-            db_document.progress_msg = progress_msg
-            db_document.process_begin_at = datetime.now(tz=timezone.utc)
-            db_document.process_duration = 0.0
-            db_document.run = 1
-            db.commit()
-            db.refresh(db_document)
+    db = next(get_db())  # Manually call the generator
+    db_document = None
+    db_knowledge = None
+    progress_msg = f"{datetime.now().strftime('%H:%M:%S')} Task has been received.\n"
+    try:
+        db_document = db.query(Document).filter(Document.id == document_id).first()
+        db_knowledge = db.query(Knowledge).filter(Knowledge.id == db_document.kb_id).first()
+        # 1. Document parsing & segmentation
+        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Start to parse.\n"
+        start_time = time.time()
+        db_document.progress = 0.0
+        db_document.progress_msg = progress_msg
+        db_document.process_begin_at = datetime.now(tz=timezone.utc)
+        db_document.process_duration = 0.0
+        db_document.run = 1
+        db.commit()
+        db.refresh(db_document)
 
-            def progress_callback(prog=None, msg=None):
-                nonlocal progress_msg  # Declare the use of an external progress_msg variable
-                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} parse progress: {prog} msg: {msg}.\n"
-            # Prepare to configure chat_mdl、vision_model information
-            chat_model = Base(
-                key=db_knowledge.llm.api_keys[0].api_key,
-                model_name=db_knowledge.llm.api_keys[0].model_name,
-                base_url=db_knowledge.llm.api_keys[0].api_base
-            )
-            vision_model = QWenCV(
-                key=db_knowledge.image2text.api_keys[0].api_key,
-                model_name=db_knowledge.image2text.api_keys[0].model_name,
+        def progress_callback(prog=None, msg=None):
+            nonlocal progress_msg  # Declare the use of an external progress_msg variable
+            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} parse progress: {prog} msg: {msg}.\n"
+
+        # Prepare to configure chat_mdl、embedding_model、vision_model information
+        chat_model = Base(
+            key=db_knowledge.llm.api_keys[0].api_key,
+            model_name=db_knowledge.llm.api_keys[0].model_name,
+            base_url=db_knowledge.llm.api_keys[0].api_base
+        )
+        embedding_model = OpenAIEmbed(
+            key=db_knowledge.embedding.api_keys[0].api_key,
+            model_name=db_knowledge.embedding.api_keys[0].model_name,
+            base_url=db_knowledge.embedding.api_keys[0].api_base
+        )
+        vision_model = QWenCV(
+            key=db_knowledge.image2text.api_keys[0].api_key,
+            model_name=db_knowledge.image2text.api_keys[0].model_name,
+            lang="Chinese",
+            base_url=db_knowledge.image2text.api_keys[0].api_base
+        )
+        if re.search(r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$", file_path,
+                     re.IGNORECASE):
+            vision_model = QWenSeq2txt(
+                key=os.getenv("QWEN3_OMNI_API_KEY", ""),
+                model_name=os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash"),
                 lang="Chinese",
-                base_url=db_knowledge.image2text.api_keys[0].api_base
+                base_url=os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
             )
-            if re.search(r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$", file_path, re.IGNORECASE):
-                vision_model = QWenSeq2txt(
-                    key=os.getenv("QWEN3_OMNI_API_KEY", ""),
-                    model_name=os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash"),
-                    lang="Chinese",
-                    base_url=os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-                )
-            elif re.search(r"\.(png|jpeg|jpg|gif|bmp|svg|mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$", file_path, re.IGNORECASE):
-                vision_model = QWenCV(
-                    key=os.getenv("QWEN3_OMNI_API_KEY", ""),
-                    model_name=os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash"),
-                    lang="Chinese",
-                    base_url=os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-                )
-            else:
-                print(file_path)
-            from app.core.rag.app.naive import chunk
-            res = chunk(filename=file_path,
-                        from_page=0,
-                        to_page=100000,
-                        callback=progress_callback,
-                        vision_model=vision_model,
-                        parser_config=db_document.parser_config,
-                        is_root=False)
+        elif re.search(r"\.(png|jpeg|jpg|gif|bmp|svg|mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$", file_path,
+                       re.IGNORECASE):
+            vision_model = QWenCV(
+                key=os.getenv("QWEN3_OMNI_API_KEY", ""),
+                model_name=os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash"),
+                lang="Chinese",
+                base_url=os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            )
+        else:
+            print(file_path)
 
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Finish parsing.\n"
-            db_document.progress = 0.8
+        from app.core.rag.app.naive import chunk
+        res = chunk(filename=file_path,
+                    from_page=0,
+                    to_page=100000,
+                    callback=progress_callback,
+                    vision_model=vision_model,
+                    parser_config=db_document.parser_config,
+                    is_root=False)
+
+        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Finish parsing.\n"
+        db_document.progress = 0.8
+        db_document.progress_msg = progress_msg
+        db.commit()
+        db.refresh(db_document)
+
+        # 2. Document vectorization and storage
+        total_chunks = len(res)
+        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Generate {total_chunks} chunks.\n"
+        batch_size = 100
+        total_batches = ceil(total_chunks / batch_size)
+        progress_per_batch = 0.2 / total_batches  # Progress of each batch
+        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+        # 2.1 Delete document vector index
+        vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
+        # 2.2 Vectorize and import batch documents
+        for batch_start in range(0, total_chunks, batch_size):
+            batch_end = min(batch_start + batch_size, total_chunks)  # prevent out-of-bounds
+            batch = res[batch_start: batch_end]  # Retrieve the current batch
+            chunks = []
+
+            # Process the current batch
+            for idx_in_batch, item in enumerate(batch):
+                global_idx = batch_start + idx_in_batch  # Calculate global index
+                metadata = {
+                    "doc_id": uuid.uuid4().hex,
+                    "file_id": str(db_document.file_id),
+                    "file_name": db_document.file_name,
+                    "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                    "document_id": str(db_document.id),
+                    "knowledge_id": str(db_document.kb_id),
+                    "sort_id": global_idx,
+                    "status": 1,
+                }
+                if db_document.parser_config.get("auto_questions", 0):
+                    topn = db_document.parser_config["auto_questions"]
+                    cached = get_llm_cache(chat_model.model_name, item["content_with_weight"], "question",
+                                           {"topn": topn})
+                    if not cached:
+                        cached = question_proposal(chat_model, item["content_with_weight"], topn)
+                        set_llm_cache(chat_model.model_name, item["content_with_weight"], cached, "question",
+                                      {"topn": topn})
+                    chunks.append(
+                        DocumentChunk(page_content=f"question: {cached} answer: {item['content_with_weight']}",
+                                      metadata=metadata))
+                else:
+                    chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
+
+            # Bulk segmented vector import
+            vector_service.add_chunks(chunks)
+
+            # Update progress
+            db_document.progress += progress_per_batch
+            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Embedding progress  ({db_document.progress}).\n"
             db_document.progress_msg = progress_msg
-            db.commit()
-            db.refresh(db_document)
-
-            # 2. Document vectorization and storage
-            total_chunks = len(res)
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Generate {total_chunks} chunks.\n"
-            batch_size = 100
-            total_batches = ceil(total_chunks / batch_size)
-            progress_per_batch = 0.2 / total_batches  # Progress of each batch
-            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-            # 2.1 Delete document vector index
-            vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
-            # 2.2 Vectorize and import batch documents
-            for batch_start in range(0, total_chunks, batch_size):
-                batch_end = min(batch_start + batch_size, total_chunks)  # prevent out-of-bounds
-                batch = res[batch_start: batch_end]  # Retrieve the current batch
-                chunks = []
-
-                # Process the current batch
-                for idx_in_batch, item in enumerate(batch):
-                    global_idx = batch_start + idx_in_batch  # Calculate global index
-                    metadata = {
-                        "doc_id": uuid.uuid4().hex,
-                        "file_id": str(db_document.file_id),
-                        "file_name": db_document.file_name,
-                        "file_created_at": int(db_document.created_at.timestamp() * 1000),
-                        "document_id": str(db_document.id),
-                        "knowledge_id": str(db_document.kb_id),
-                        "sort_id": global_idx,
-                        "status": 1,
-                    }
-                    if db_document.parser_config.get("auto_questions", 0):
-                        topn = db_document.parser_config["auto_questions"]
-                        cached = get_llm_cache(chat_model.model_name, item["content_with_weight"], "question", {"topn": topn})
-                        if not cached:
-                            cached = question_proposal(chat_model, item["content_with_weight"], topn)
-                            set_llm_cache(chat_model.model_name, item["content_with_weight"], cached, "question", {"topn": topn})
-                        chunks.append(DocumentChunk(page_content=f"question: {cached} answer: {item['content_with_weight']}", metadata=metadata))
-                    else:
-                        chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
-
-                # Bulk segmented vector import
-                vector_service.add_chunks(chunks)
-
-                # Update progress
-                db_document.progress += progress_per_batch
-                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Embedding progress  ({db_document.progress}).\n"
-                db_document.progress_msg = progress_msg
-                db_document.process_duration = time.time() - start_time
-                db_document.run = 0
-                db.commit()
-                db.refresh(db_document)
-
-            # Vectorization and data entry completed
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Indexing done.\n"
-            db_document.chunk_num = total_chunks
-            db_document.progress = 1.0
             db_document.process_duration = time.time() - start_time
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Task done ({db_document.process_duration}s).\n"
-            db_document.progress_msg = progress_msg
             db_document.run = 0
             db.commit()
-            result = f"parse document '{db_document.file_name}' processed successfully."
-            return result
-        except Exception as e:
-            if 'db_document' in locals():
-                db_document.progress_msg += f"Failed to vectorize and import the parsed document:{str(e)}\n"
-                db_document.run = 0
-                db.commit()
-            result = f"parse document '{db_document.file_name}' failed."
-            return result
+            db.refresh(db_document)
+
+        # Vectorization and data entry completed
+        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Indexing done.\n"
+        db_document.chunk_num = total_chunks
+        db_document.progress = 1.0
+        db_document.process_duration = time.time() - start_time
+        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Task done ({db_document.process_duration}s).\n"
+        db_document.progress_msg = progress_msg
+        db_document.run = 0
+        db.commit()
+
+        # using graphrag
+        if db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
+            graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
+            with_resolution = graphrag_conf.get("resolution", False)
+            with_community = graphrag_conf.get("community", False)
+
+            def callback(msg=None):
+                nonlocal progress_msg
+                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} run graphrag msg: {msg}.\n"
+
+            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Start to run graphrag.\n"
+            start_time = time.time()
+            db_document.progress_msg = progress_msg
+            db.commit()
+            db.refresh(db_document)
+
+            task = {
+                "id": str(db_document.id),
+                "workspace_id": str(db_knowledge.workspace_id),
+                "kb_id": str(db_knowledge.id),
+                "parser_config": db_knowledge.parser_config,
+            }
+
+            # init_graphrag
+            vts, _ = embedding_model.encode(["ok"])
+            vector_size = len(vts[0])
+            init_graphrag(task, vector_size)
+
+            async def _run(row: dict, document_ids: list[str], language: str, parser_config: dict, vector_service,
+                           chat_model, embedding_model, callback, with_resolution: bool = True,
+                           with_community: bool = True, ) -> dict:
+                nonlocal progress_msg  # Declare the use of an external progress_msg variable
+                result = await run_graphrag_for_kb(
+                    row=row,
+                    document_ids=document_ids,
+                    language=language,
+                    parser_config=parser_config,
+                    vector_service=vector_service,
+                    chat_model=chat_model,
+                    embedding_model=embedding_model,
+                    callback=callback,
+                    with_resolution=with_resolution,
+                    with_community=with_community,
+                )
+                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task result for task {task}:\n{result}\n"
+                return result
+
+            try:
+                trio.run(
+                    lambda: _run(
+                        row=task,
+                        document_ids=[str(db_document.id)],
+                        language="Chinese",
+                        parser_config=db_knowledge.parser_config,
+                        vector_service=vector_service,
+                        chat_model=chat_model,
+                        embedding_model=embedding_model,
+                        callback=callback,
+                        with_resolution=with_resolution,
+                        with_community=with_community,
+                    )
+                )
+            except Exception as e:
+                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task failed for task {task}:\n{str(e)}\n"
+            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({time.time() - start_time}s)"
+            db_document.progress_msg = progress_msg
+            db.commit()
+            db.refresh(db_document)
+
+        result = f"parse document '{db_document.file_name}' processed successfully."
+        return result
+    except Exception as e:
+        if 'db_document' in locals():
+            db_document.progress_msg += f"Failed to vectorize and import the parsed document:{str(e)}\n"
+            db_document.run = 0
+            db.commit()
+        result = f"parse document '{db_document.file_name}' failed."
+        return result
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.core.rag.tasks.build_graphrag_for_kb")
+def build_graphrag_for_kb(kb_id: uuid.UUID):
+    """
+    build knowledge graph
+    """
+    db = next(get_db())  # Manually call the generator
+    db_knowledge = None
+    try:
+        db_knowledge = db.query(Knowledge).filter(Knowledge.id == kb_id).first()
+        # 1. Prepare to configure chat_mdl、embedding_model、vision_model information
+        chat_model = Base(
+            key=db_knowledge.llm.api_keys[0].api_key,
+            model_name=db_knowledge.llm.api_keys[0].model_name,
+            base_url=db_knowledge.llm.api_keys[0].api_base
+        )
+        embedding_model = OpenAIEmbed(
+            key=db_knowledge.embedding.api_keys[0].api_key,
+            model_name=db_knowledge.embedding.api_keys[0].model_name,
+            base_url=db_knowledge.embedding.api_keys[0].api_base
+        )
+        vision_model = QWenCV(
+            key=db_knowledge.image2text.api_keys[0].api_key,
+            model_name=db_knowledge.image2text.api_keys[0].model_name,
+            lang="Chinese",
+            base_url=db_knowledge.image2text.api_keys[0].api_base
+        )
+
+        # 2. get all document_ids from knowledge base
+        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+        total, items = vector_service.search_by_segment(document_id=None, query=None, pagesize=9999, page=1, asc=True)
+        document_ids = [item.metadata["document_id"] for item in items]
+
+        # 2. using graphrag
+        if db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
+            graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
+            with_resolution = graphrag_conf.get("resolution", False)
+            with_community = graphrag_conf.get("community", False)
+
+            def callback(msg=None):
+                print(f"{datetime.now().strftime('%H:%M:%S')} run graphrag msg: {msg}.\n")
+
+            start_time = time.time()
+            task = {
+                "id": str(db_knowledge.id),
+                "workspace_id": str(db_knowledge.workspace_id),
+                "kb_id": str(db_knowledge.id),
+                "parser_config": db_knowledge.parser_config,
+            }
+
+            # init_graphrag
+            vts, _ = embedding_model.encode(["ok"])
+            vector_size = len(vts[0])
+            init_graphrag(task, vector_size)
+
+            async def _run(row: dict, document_ids: list[str], language: str, parser_config: dict, vector_service,
+                           chat_model, embedding_model, callback, with_resolution: bool = True,
+                           with_community: bool = True, ) -> dict:
+                result = await run_graphrag_for_kb(
+                    row=row,
+                    document_ids=document_ids,
+                    language=language,
+                    parser_config=parser_config,
+                    vector_service=vector_service,
+                    chat_model=chat_model,
+                    embedding_model=embedding_model,
+                    callback=callback,
+                    with_resolution=with_resolution,
+                    with_community=with_community,
+                )
+                print(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task result for task {task}:\n{result}\n")
+                return result
+
+            try:
+                trio.run(
+                    lambda: _run(
+                        row=task,
+                        document_ids=document_ids,
+                        language="Chinese",
+                        parser_config=db_knowledge.parser_config,
+                        vector_service=vector_service,
+                        chat_model=chat_model,
+                        embedding_model=embedding_model,
+                        callback=callback,
+                        with_resolution=with_resolution,
+                        with_community=with_community,
+                    )
+                )
+            except Exception as e:
+                print(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task failed for task {task}:\n{str(e)}\n")
+            print(f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({time.time() - start_time}s)")
+
+        result = f"build knowledge graph '{db_knowledge.name}' processed successfully."
+        return result
+    except Exception as e:
+        if 'db_knowledge' in locals():
+            print(f"Failed to build knowledge grap:{str(e)}\n")
+        result = f"build knowledge grap '{db_knowledge.name}' failed."
+        return result
+    finally:
+        db.close()
 
 
 @celery_app.task(name="app.core.memory.agent.read_message", bind=True)

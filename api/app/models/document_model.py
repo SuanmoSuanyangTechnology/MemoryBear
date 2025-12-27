@@ -31,9 +31,9 @@ class Document(Base):
                                         "person",
                                         "geo",
                                         "event",
-                                        "category",
+                                        "category"
                                     ],
-                                    "method": "general",
+                                    "method": "general"
                                 }
                            }, comment="default parser config")
     chunk_num = Column(Integer, default=0, comment="chunk num")
