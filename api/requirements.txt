@@ -76,7 +76,7 @@ pytest>=9.0.1
 pytest-asyncio>=0.24.0
 matplotlib>=3.10.7
 langfuse>=3.10.0
-beartype>=0.18.5,<0.19.0
+beartype==0.22.5
 pdfplumber==0.11.7
 olefile==0.47
 cachetools==6.2.1
@@ -126,6 +126,6 @@ celery>=5.5.2
 simpleeval>=1.0.3
 networkx>=3.4.2
 editdistance==0.8.1
-graspologic>=3.4.1,<4.0.0
+graspologic==3.4.5.dev2
 markdown-to-json==2.1.1
 valkey==6.0.2
