@@ -280,8 +280,10 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
     build knowledge graph
     """
     db = next(get_db())  # Manually call the generator
+    db_document = None
     db_knowledge = None
     try:
+        db_document = db.query(Document).filter(Document.kb_id == kb_id).all()
         db_knowledge = db.query(Knowledge).filter(Knowledge.id == kb_id).first()
         # 1. Prepare to configure chat_mdl、embedding_model、vision_model information
         chat_model = Base(
@@ -304,7 +306,7 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
         # 2. get all document_ids from knowledge base
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
         total, items = vector_service.search_by_segment(document_id=None, query=None, pagesize=9999, page=1, asc=True)
-        document_ids = [item.metadata["document_id"] for item in items]
+        document_ids = [item.id for item in db_document]
 
         # 2. using graphrag
         if db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
