@@ -1,0 +1,3 @@
+[submodule "redbear-mem-benchmark"]
+	path = redbear-mem-benchmark
+	url = ./redbear-mem-benchmark
