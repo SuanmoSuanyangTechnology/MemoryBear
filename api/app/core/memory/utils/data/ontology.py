@@ -3,9 +3,12 @@ from enum import StrEnum
 
 # Use jinja template.render
 PREDICATE_DEFINITIONS = {
+    # Core Relationships
     "IS_A": "Denotes a class-or-type relationship between two entities (e.g., 'Model Y IS_A electric-SUV'). Includes 'is' and 'was'.",
     "HAS_A": "Denotes a part-whole relationship between two entities (e.g., 'Model Y HAS_A electric-engine'). Includes 'has' and 'had'.",
     "LOCATED_IN": "Specifies geographic or organisational containment or proximity (e.g., headquarters LOCATED_IN Berlin).",
+    
+    # Business/Corporate
     "HOLDS_ROLE": "Connects a person to a formal office or title within an organisation (CEO, Chair, Director, etc.).",
     "PRODUCES": "Indicates that an entity manufactures, builds, or creates a product, service, or infrastructure (includes scale-ups and component inclusion).",
     "SELLS": "Marks a commercial seller-to-customer relationship for a product or service (markets, distributes, sells).",
@@ -23,10 +26,19 @@ PREDICATE_DEFINITIONS = {
     "PART_OF": "Expresses hierarchical membership or subset relationships (division, subsidiary, managed by, belongs to).",
     "DISCONTINUED": "Indicates official end-of-life, shutdown, or termination of a product, service, or relationship.",
     "SECURED": "Marks the successful acquisition of funding, contracts, assets, or rights by an entity.",
+    
+    # Learning/Education Domain (NEW - for educational/learning contexts)
+    "STUDIES": "Indicates a learning or study relationship between a person and educational content, subject, or material (e.g., '李阳 STUDIES 历史', 'student STUDIES mathematics').",
+    "COMMUNICATES_WITH": "Denotes direct communication, conversation, or interaction between two entities (e.g., '李阳 COMMUNICATES_WITH 张明'). Includes verbal and written communication.",
+    "RECORDS_IN": "Indicates recording, writing, or documenting information in a medium (e.g., '李阳 RECORDS_IN 课本', 'user RECORDS_IN notebook').",
+    "EVALUATES": "Expresses evaluation, assessment, or judgment of an entity (e.g., '老师 EVALUATES 作业', '李阳 EVALUATES 分封制').",
+    "REFERENCES": "Denotes a reference, comparison, or analogy relationship (e.g., '游戏 REFERENCES 历史', 'book REFERENCES theory').",
+    "CREATES": "Indicates creation, production, or generation of content, art, or artifacts (e.g., '李阳 CREATES 简笔画', 'artist CREATES painting').",
+    
+    # General
     "MENTIONS": "Denotes a reference or mention of an entity in a text or document.",
 
     # 移除了过于宽泛的谓语集合
-    # "MENTIONS": "Denotes a reference or mention of an entity in a text or document." ,
     # "FEELS" : "Denotes a subjective opinion or feeling about an entity (e.g., 'I feel like X').Includes 'THINKS'.",
     # "HELPS" :"Express a action that make it easier or possible for (someone) to do something by offering one's services or resources. Includes 'assist', 'aid' and 'support' " ,
     # "IS_DOING" : "Denotes a subjective action or activity about an entity (e.g., 'I am doing X').Includes 'DOES'.",
@@ -158,9 +170,12 @@ LABEL_DEFINITIONS: dict[str, dict[str, dict[str, str]]] = {
 class Predicate(StrEnum):
     """Enumeration of normalised predicates."""
 
+    # Core Relationships
     IS_A = "IS_A"
     HAS_A = "HAS_A"
     LOCATED_IN = "LOCATED_IN"
+    
+    # Business/Corporate
     HOLDS_ROLE = "HOLDS_ROLE"
     PRODUCES = "PRODUCES"
     SELLS = "SELLS"
@@ -178,6 +193,16 @@ class Predicate(StrEnum):
     PART_OF = "PART_OF"
     DISCONTINUED = "DISCONTINUED"
     SECURED = "SECURED"
+    
+    # Learning/Education Domain
+    STUDIES = "STUDIES"
+    COMMUNICATES_WITH = "COMMUNICATES_WITH"
+    RECORDS_IN = "RECORDS_IN"
+    EVALUATES = "EVALUATES"
+    REFERENCES = "REFERENCES"
+    CREATES = "CREATES"
+    
+    # General
     MENTIONS = "MENTIONS"
 
 

@@ -15,7 +15,7 @@ from app.core.memory.utils.data.ontology import (
     TemporalInfo,
 )
 from app.core.memory.utils.prompt.prompt_utils import render_statement_extraction_prompt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,33 @@ class ExtractedStatement(BaseModel):
 # 统一使用 StatementExtractionResponse 作为 LLM 的结构化返回（仅语句）
 class StatementExtractionResponse(BaseModel):
     statements: List[ExtractedStatement] = Field(default_factory=list, description="List of extracted statements")
+    
+    @field_validator('statements', mode='before')
+    @classmethod
+    def filter_empty_statements(cls, v):
+        """Filter out empty or invalid statement dicts before validation.
+        
+        This handles cases where the LLM returns malformed responses with empty dicts,
+        which can happen due to response truncation or parsing issues (especially with
+        providers like Bedrock that don't support with_structured_output).
+        """
+        if isinstance(v, list):
+            # Filter out empty dicts or dicts missing the required 'statement' field
+            valid_statements = []
+            filtered_count = 0
+            for i, stmt in enumerate(v):
+                if isinstance(stmt, dict) and stmt.get('statement'):
+                    valid_statements.append(stmt)
+                elif isinstance(stmt, dict):
+                    # Log which statement was filtered
+                    filtered_count += 1
+                    logger.debug(f"Filtering out invalid statement at index {i}: {stmt}")
+            
+            if filtered_count > 0:
+                logger.warning(f"Filtered out {filtered_count} empty/invalid statements from LLM response")
+            
+            return valid_statements
+        return v
 
 class StatementExtractor:
     """Class for extracting statements from dialog chunks using LLM (relations separated)"""
