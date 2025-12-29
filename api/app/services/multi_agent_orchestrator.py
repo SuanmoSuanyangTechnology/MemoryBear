@@ -631,7 +631,7 @@ class MultiAgentOrchestrator:
                                         "agent_name": agent_name,
                                         "sub_question": sub_question
                                     })
-                            except:
+                            except Exception:
                                 pass
                         else:
                             # 非 data 事件直接转发

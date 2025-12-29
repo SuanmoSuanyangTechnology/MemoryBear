@@ -109,7 +109,7 @@ class MultiAgentConfigSchema(BaseModel):
 
     id: uuid.UUID
     app_id: uuid.UUID
-    master_agent_id: uuid.UUID
+    master_agent_id: uuid.UUID | None
     master_agent_name: Optional[str]
     default_model_config_id : uuid.UUID | None = Field(description="默认模型配置ID")
     model_parameters: ModelParameters | None = Field(
