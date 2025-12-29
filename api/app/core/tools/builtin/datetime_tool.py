@@ -5,7 +5,7 @@ from typing import List
 import pytz
 
 from app.schemas.tool_schema import ToolParameter, ToolResult, ParameterType
-from .base import BuiltinTool
+from app.core.tools.builtin.base import BuiltinTool
 
 
 class DateTimeTool(BuiltinTool):
