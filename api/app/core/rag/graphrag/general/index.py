@@ -186,7 +186,7 @@ async def run_graphrag_for_kb(
 
         chunks = all_document_chunks.get(document_id, [])
         if not chunks:
-            callback(msg=f"[GraphRAG] doc:{document_id} has no available chunks, skip generation.")
+            callback(msg=f"[GraphRAG] document:{document_id} has no available chunks, skip generation.")
             return
 
         kg_extractor = LightKGExt if ("method" not in parser_config.get("graphrag", {}) or parser_config["graphrag"]["method"] != "general") else GeneralKGExt

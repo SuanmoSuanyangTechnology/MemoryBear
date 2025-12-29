@@ -198,9 +198,10 @@ def parse_document(file_path: str, document_id: uuid.UUID):
             with_resolution = graphrag_conf.get("resolution", False)
             with_community = graphrag_conf.get("community", False)
 
-            def callback(msg=None):
+            def callback(*args, msg=None, **kwargs):
                 nonlocal progress_msg
-                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} run graphrag msg: {msg}.\n"
+                message = msg or (args[0] if args else "No message")
+                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} run graphrag msg: {message}.\n"
 
             progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Start to run graphrag.\n"
             start_time = time.time()
@@ -306,7 +307,7 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
         # 2. get all document_ids from knowledge base
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
         total, items = vector_service.search_by_segment(document_id=None, query=None, pagesize=9999, page=1, asc=True)
-        document_ids = [item.id for item in db_documents]
+        document_ids = [str(item.id) for item in db_documents]
 
         # 2. using graphrag
         if db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
@@ -314,8 +315,9 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
             with_resolution = graphrag_conf.get("resolution", False)
             with_community = graphrag_conf.get("community", False)
 
-            def callback(msg=None):
-                print(f"{datetime.now().strftime('%H:%M:%S')} run graphrag msg: {msg}.\n")
+            def callback(*args, msg=None, **kwargs):
+                message = msg or (args[0] if args else "No message")
+                print(f"{datetime.now().strftime('%H:%M:%S')} run graphrag msg: {message}.\n")
 
             start_time = time.time()
             task = {
