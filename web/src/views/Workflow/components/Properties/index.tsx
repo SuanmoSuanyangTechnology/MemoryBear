@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState, useRef } from "react";
+import { type FC, useEffect, useState, useRef, useMemo } from "react";
 import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
 import { Form, Input, Button, Select, InputNumber, Slider, Space, Divider, App } from 'antd'
@@ -9,6 +9,9 @@ import emptyIcon from '@/assets/images/workflow/empty.png'
 import CustomSelect from "@/components/CustomSelect";
 import VariableEditModal from './VariableEditModal';
 import MessageEditor from './MessageEditor'
+import Knowledge from './Knowledge/Knowledge';
+import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
+import VariableSelect from './VariableSelect';
 
 interface PropertiesProps {
   selectedNode?: Node | null; 
@@ -67,7 +70,16 @@ const Properties: FC<PropertiesProps> = ({
 
   useEffect(() => {
     if (values && selectedNode) {
-      const { id, ...rest } = values
+      const { id, knowledge_retrieval, ...rest } = values
+      const { knowledge_bases, ...restKnowledgeConfig } = knowledge_retrieval || {}
+      let allRest = {
+        ...rest,
+        ...restKnowledgeConfig,
+        knowledge_bases: knowledge_bases?.map(vo => ({
+          id: vo.id,
+          ...vo.config
+        }))
+      }
 
       Object.keys(values).forEach(key => {
         if (selectedNode.data?.config[key]) {
@@ -75,7 +87,10 @@ const Properties: FC<PropertiesProps> = ({
         }
       })
 
-      selectedNode?.setData({ ...selectedNode.data, ...rest })
+      selectedNode?.setData({
+        ...selectedNode.data,
+        ...allRest,
+      })
     }
   }, [values, selectedNode])
 
@@ -118,6 +133,83 @@ const Properties: FC<PropertiesProps> = ({
       }
     })
   }
+
+
+  const variableList = useMemo(() => {
+    if (!selectedNode || !graphRef?.current) return [];
+    
+    const variableList: Suggestion[] = [];
+    const graph = graphRef.current;
+    const edges = graph.getEdges();
+    const nodes = graph.getNodes();
+    
+    // Find all connected previous nodes (recursive)
+    const getAllPreviousNodes = (nodeId: string, visited = new Set<string>()): string[] => {
+      if (visited.has(nodeId)) return [];
+      visited.add(nodeId);
+      
+      const directPrevious = edges
+        .filter(edge => edge.getTargetCellId() === nodeId)
+        .map(edge => edge.getSourceCellId());
+      
+      const allPrevious = [...directPrevious];
+      directPrevious.forEach(prevNodeId => {
+        allPrevious.push(...getAllPreviousNodes(prevNodeId, visited));
+      });
+      
+      return allPrevious;
+    };
+    
+    const allPreviousNodeIds = getAllPreviousNodes(selectedNode.id);
+    
+    allPreviousNodeIds.forEach(nodeId => {
+      const node = nodes.find(n => n.id === nodeId);
+      if (!node) return;
+      
+      const nodeData = node.getData();
+
+      switch(nodeData.type) {
+        case 'start':
+          const list = [
+            ...(nodeData.config?.variables?.defaultValue ?? []),
+            ...(nodeData.config?.variables?.value ?? [])
+          ]
+          list.forEach((variable: any) => {
+            variableList.push({
+              key: `${nodeId}_${variable.name}`,
+              label: variable.name,
+              type: 'variable',
+              dataType: variable.type,
+              value: `{{${nodeId}.${variable.name}}}`,
+              nodeData: nodeData,
+            });
+          });
+          nodeData.config?.variables?.sys.forEach((variable: any) => {
+            variableList.push({
+              key: `${nodeId}_${variable.name}`,
+              label: `sys.${variable.name}`,
+              type: 'variable',
+              dataType: variable.type,
+              value: `{{sys.${variable.name}}}`,
+              nodeData: nodeData,
+            });
+          });
+          break
+        case 'llm':
+          variableList.push({
+            key: `${nodeId}_output`,
+            label: 'output',
+            type: 'variable',
+            dataType: 'String',
+            value: `${nodeId}.output`,
+            nodeData: nodeData,
+          });
+          break
+      }
+    });
+
+    return variableList;
+  }, [selectedNode, graphRef]);
 
   return (
     <div className="rb:w-75 rb:fixed rb:right-0 rb:top-16 rb:bottom-0 rb:p-3">
@@ -203,6 +295,17 @@ const Properties: FC<PropertiesProps> = ({
                 return null
               }
 
+              if (config.type === 'knowledge') {
+                return (
+                  <Form.Item
+                    key={key}
+                    name={key}
+                  >
+                    <Knowledge />
+                  </Form.Item>
+                )
+              }
+
               return (
                 <Form.Item 
                   key={key} 
@@ -231,6 +334,11 @@ const Properties: FC<PropertiesProps> = ({
                       valueKey={config.valueKey}
                       labelKey={config.labelKey}
                     />
+                    : config.type === 'variableList'
+                    ? <VariableSelect
+                        placeholder={t('common.pleaseSelect')}
+                        options={variableList}
+                      />
                     : null
                   }
                 </Form.Item>
