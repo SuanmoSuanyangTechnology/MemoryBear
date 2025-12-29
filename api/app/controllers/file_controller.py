@@ -172,7 +172,7 @@ async def upload_file(
     # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
     save_dir = os.path.join(settings.FILE_PATH, str(kb_id), str(parent_id))
     Path(save_dir).mkdir(parents=True, exist_ok=True)  # Ensure that the directory exists
-    save_path = os.path.join(save_dir, f"{db_file.id}{file_extension}")
+    save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
 
     # Save file
     with open(save_path, "wb") as f:
