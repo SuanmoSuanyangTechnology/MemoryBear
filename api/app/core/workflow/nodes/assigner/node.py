@@ -6,7 +6,7 @@ from app.core.workflow.expression_evaluator import ExpressionEvaluator
 from app.core.workflow.nodes.assigner.config import AssignerNodeConfig
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.enums import AssignmentOperator
-from app.core.workflow.nodes.operators import AssignmentOperatorInstance
+from app.core.workflow.nodes.operators import AssignmentOperatorInstance, AssignmentOperatorResolver
 from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
@@ -40,8 +40,8 @@ class AssignerNode(BaseNode):
                 variable_selector = expression.split('.')
 
             # Only conversation variables ('conv') are allowed
-            if variable_selector[0] != 'conv':  # TODO: Loop node variable support (Feature)
-                raise ValueError("Only conversation variables can be assigned.")
+            if variable_selector[0] != 'conv' and variable_selector[0] not in state["cycle_nodes"]:
+                raise ValueError("Only conversation or cycle variables can be assigned.")
 
             # Get the value or expression to assign
             value = assignment.value
@@ -55,7 +55,9 @@ class AssignerNode(BaseNode):
             )
 
             # Select the appropriate assignment operator instance based on the target variable type
-            operator: AssignmentOperatorInstance = AssignmentOperator.get_operator(pool.get(variable_selector))(
+            operator: AssignmentOperatorInstance = AssignmentOperatorResolver.resolve_by_value(
+                pool.get(variable_selector)
+            )(
                 pool, variable_selector, value
             )
 

@@ -10,6 +10,7 @@ from typing import Any, Union
 from app.core.workflow.nodes.agent import AgentNode
 from app.core.workflow.nodes.assigner import AssignerNode
 from app.core.workflow.nodes.base_node import BaseNode
+from app.core.workflow.nodes.cycle_graph.node import CycleGraphNode
 from app.core.workflow.nodes.end import EndNode
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.nodes.http_request import HttpRequestNode
@@ -22,6 +23,7 @@ from app.core.workflow.nodes.start import StartNode
 from app.core.workflow.nodes.transform import TransformNode
 from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
 from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
+from app.core.workflow.nodes.breaker import BreakNode
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,9 @@ WorkflowNode = Union[
     KnowledgeRetrievalNode,
     JinjaRenderNode,
     VariableAggregatorNode,
+    ParameterExtractorNode,
+    CycleGraphNode,
+    BreakNode,
     ParameterExtractorNode,
     QuestionClassifierNode
 ]
@@ -64,6 +69,9 @@ class NodeFactory:
         NodeType.VAR_AGGREGATOR: VariableAggregatorNode,
         NodeType.PARAMETER_EXTRACTOR: ParameterExtractorNode,
         NodeType.QUESTION_CLASSIFIER: QuestionClassifierNode,
+        NodeType.LOOP: CycleGraphNode,
+        NodeType.ITERATION: CycleGraphNode,
+        NodeType.BREAK: BreakNode,
     }
 
     @classmethod

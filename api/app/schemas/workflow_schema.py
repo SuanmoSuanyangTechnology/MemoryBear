@@ -20,6 +20,7 @@ class NodeDefinition(BaseModel):
     id: str = Field(..., description="节点唯一标识")
     type: str = Field(..., description="节点类型: start, end, llm, agent, tool, condition, loop, transform, human, code")
     name: str | None = Field(None, description="节点名称")
+    cycle: str | None = Field(None, description="父循环节点id")
     description: str | None = Field(None, description="节点描述")
     config: dict[str, Any] = Field(default_factory=dict, description="节点配置")
     position: dict[str, float] | None = Field(None, description="节点位置 {x, y}")

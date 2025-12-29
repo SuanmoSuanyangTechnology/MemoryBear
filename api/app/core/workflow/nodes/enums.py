@@ -1,14 +1,5 @@
 from enum import StrEnum
 
-from app.core.workflow.nodes.operators import (
-    StringOperator,
-    NumberOperator,
-    AssignmentOperatorType,
-    BooleanOperator,
-    ArrayOperator,
-    ObjectOperator
-)
-
 
 class NodeType(StrEnum):
     START = "start"
@@ -27,6 +18,10 @@ class NodeType(StrEnum):
     JINJARENDER = "jinja-render"
     VAR_AGGREGATOR = "var-aggregator"
     PARAMETER_EXTRACTOR = "parameter-extractor"
+    LOOP = "loop"
+    ITERATION = "iteration"
+    CYCLE_START = "cycle-start"
+    BREAK = "break"
 
 
 class ComparisonOperator(StrEnum):
@@ -61,21 +56,6 @@ class AssignmentOperator(StrEnum):
     APPEND = "append"
     REMOVE_LAST = "remove_last"
     REMOVE_FIRST = "remove_first"
-
-    @classmethod
-    def get_operator(cls, obj) -> AssignmentOperatorType:
-        if isinstance(obj, str):
-            return StringOperator
-        elif isinstance(obj, bool):
-            return BooleanOperator
-        elif isinstance(obj, (int, float)):
-            return NumberOperator
-        elif isinstance(obj, list):
-            return ArrayOperator
-        elif isinstance(obj, dict):
-            return ObjectOperator
-
-        raise TypeError(f"Unsupported variable type ({type(obj)})")
 
 
 class HttpRequestMethod(StrEnum):

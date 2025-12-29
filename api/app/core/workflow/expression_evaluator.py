@@ -74,6 +74,7 @@ class ExpressionEvaluator:
         # 为了向后兼容，也支持直接访问（但会在日志中警告）
         context.update(variables)
         context["nodes"] = node_outputs
+        context.update(node_outputs)
         
         try:
             # simpleeval 只支持安全的操作：
