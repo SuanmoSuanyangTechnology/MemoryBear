@@ -242,8 +242,9 @@ async def _update_knowledge(
         if "embedding_id" in update_dict:
             embedding_id = update_dict["embedding_id"]
             if embedding_id != db_knowledge.embedding_id:
-                vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-                vector_service.delete()
+                if db_knowledge.embedding_id and db_knowledge.reranker_id:
+                    vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+                    vector_service.delete()
                 document_service.reset_documents_progress_by_kb_id(db, kb_id=db_knowledge.id, current_user=current_user)
 
         # 2. Update fields (only update non-null fields)
