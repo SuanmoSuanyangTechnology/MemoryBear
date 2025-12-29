@@ -202,3 +202,68 @@ class BatchRoutingTestRequest(BaseModel):
         le=1.0,
         description="关键词置信度阈值"
     )
+
+
+
+# ==================== Agent Handoffs ====================
+
+class HandoffHistoryItem(BaseModel):
+    """Handoff 历史记录项"""
+    from_agent: str = Field(..., description="源 Agent ID")
+    to_agent: str = Field(..., description="目标 Agent ID")
+    reason: str = Field(..., description="切换原因")
+    timestamp: Optional[str] = Field(None, description="切换时间")
+    user_message: Optional[str] = Field(None, description="触发切换的用户消息")
+    context_summary: Optional[str] = Field(None, description="上下文摘要")
+
+
+class HandoffChatResponse(BaseModel):
+    """Handoff 聊天响应"""
+    message: str = Field(..., description="最终回复")
+    conversation_id: str = Field(..., description="会话 ID")
+    final_agent_id: str = Field(..., description="最终处理的 Agent ID")
+    handoff_count: int = Field(..., description="切换次数")
+    handoff_history: List[HandoffHistoryItem] = Field(
+        default_factory=list,
+        description="切换历史"
+    )
+    elapsed_time: float = Field(..., description="总耗时（秒）")
+    usage: Optional[Dict[str, Any]] = Field(None, description="资源使用情况")
+    error: Optional[str] = Field(None, description="错误信息")
+
+
+class HandoffStateResponse(BaseModel):
+    """Handoff 状态响应"""
+    conversation_id: str = Field(..., description="会话 ID")
+    current_agent_id: str = Field(..., description="当前活跃的 Agent ID")
+    handoff_count: int = Field(..., description="总切换次数")
+    handoff_history: List[HandoffHistoryItem] = Field(
+        default_factory=list,
+        description="切换历史"
+    )
+    created_at: str = Field(..., description="创建时间")
+    updated_at: str = Field(..., description="更新时间")
+
+
+class HandoffToolInfo(BaseModel):
+    """Handoff 工具信息"""
+    name: str = Field(..., description="工具名称")
+    target_agent_id: str = Field(..., description="目标 Agent ID")
+    target_agent_name: str = Field(..., description="目标 Agent 名称")
+    description: str = Field(..., description="工具描述")
+
+
+class HandoffRoutingTestResponse(BaseModel):
+    """Handoff 路由测试响应"""
+    message: str = Field(..., description="测试消息")
+    initial_agent_id: str = Field(..., description="初始 Agent ID")
+    initial_agent_name: str = Field(..., description="初始 Agent 名称")
+    available_handoff_tools: List[HandoffToolInfo] = Field(
+        default_factory=list,
+        description="可用的 handoff 工具"
+    )
+    handoff_suggestion: Optional[Dict[str, Any]] = Field(
+        None,
+        description="自动切换建议"
+    )
+    total_agents: int = Field(..., description="总 Agent 数量")
