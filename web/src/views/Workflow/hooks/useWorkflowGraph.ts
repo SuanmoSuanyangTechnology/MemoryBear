@@ -32,7 +32,7 @@ export interface UseWorkflowGraphReturn {
   deleteEvent: () => boolean | void;
   copyEvent: () => boolean | void;
   parseEvent: () => boolean | void;
-  handleSave: (flag?: boolean) => Promise<any>;
+  handleSave: (flag?: boolean) => Promise<unknown>;
 }
 
 const edge_color = '#155EEF';
@@ -83,7 +83,13 @@ export const useWorkflowGraph = ({
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
-            if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && config[key]) {
+            if (key === 'knowledge_retrieval' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+              const { query, ...rest } = config
+              nodeLibraryConfig.config[key].defaultValue = {
+                ...rest
+              }
+              console.log(type, config, nodeLibraryConfig)
+            } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && config[key]) {
               nodeLibraryConfig.config[key].defaultValue = config[key]
             }
           })
@@ -686,12 +692,17 @@ export const useWorkflowGraph = ({
         nodes: nodes.map((node: Node) => {
           const data = node.getData();
           const position = node.getPosition();
-          const config: Record<string, any> = {}
+          let itemConfig: Record<string, any> = {}
 
           if (data.config) {
             Object.keys(data.config).forEach(key => {
-              if (data.config[key] && 'defaultValue' in data.config[key]) {
-                config[key] = data.config[key].defaultValue
+              if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
+                itemConfig[key] = data.config[key].defaultValue
+              } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
+                itemConfig = {
+                  ...itemConfig,
+                  ...data.config[key].defaultValue
+                }
               }
             })
           }
@@ -704,7 +715,7 @@ export const useWorkflowGraph = ({
               x: position.x,
               y: position.y,
             },
-            config: config
+            config: itemConfig
           };
         }),
         edges: edges.map((edge: Edge) => {

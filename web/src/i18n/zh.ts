@@ -393,12 +393,6 @@ export const zh = {
       clusterName: '集群名称',
       clusterDescription: '集群描述',
       clusterDescriptionPlaceholder: '这是一个专门处理核心业务的Agent集群，能够协作完成复杂的业务处理任务。',
-      toolCalling: '工具调用',
-      toolCallingDesc: '主控代理将子代理作为工具调用',
-      toolCallingFeature: '集中控制，适合结构化工作流',
-      handoffs: '交接',
-      handoffsDesc: '代理之间动态转移控制权',
-      handoffsFeature: '去中心化控制，适合复杂对话场景',
       recommend: '推荐',
       advanced: '高级',
       multiAgentArchitecture: '多代理架构模式',
@@ -425,7 +419,7 @@ export const zh = {
       stateSharingStrategy: '状态共享策略',
       intermediateResultProcessing: '中间结果处理',
       metadataTransfer: '元数据传输',
-
+      knowledgeConfig: '知识库配置',
       temperature: '温度',
       temperature_desc: '温度参数，控制输出的随机性',
       max_tokens: '最大令牌数',
@@ -453,9 +447,9 @@ export const zh = {
       releasePreview: '发布预览',
       globalConfig: '全局配置',
       globalConfigDesc: '全局配置将应用于所有关联的知识库作为默认配置。单个知识库的配置将覆盖全局配置。',
-      rerankModel: '重排序模型',
+      rerankModel: 'Reranker 模型',
       rerankModelDesc: '激活后，搜索结果将被重新排序以提高相关性',
-      rearrangementModel: '重排序模型',
+      rearrangementModel: 'Reranker 模型',
       rearrangementModelDesc: '选择用于重新排序的模型',
       reranker_top_k: 'Top K',
       reranker_top_k_desc: '返回的文档片段数量，范围从1到20',
@@ -514,6 +508,21 @@ export const zh = {
       promptChatPlaceholder: '描述你需要的提示词，例如：我需要一个客服助手',
       promptChatEmpty: '目前没有对话内容',
       promptEmpty: '在左侧描述您的用例，编排预览将在此处显示。',
+
+      master: '主管模式',
+      master_agent: '主管模式',
+      masterDesc: '由主 Agent 统一调度和管理，子 Agent 按照主管分配的任务执行，适合需要集中控制的场景。',
+      handoffs: '协作模式',
+      handoffsDesc: '多个 Agent 平等协作，根据任务需求自主协调配合，适合需要灵活互动的复杂场景。',
+      masterConfig: '主管配置',
+      orchestrationMode: '任务分配策略',
+      conditional: '智能分配',
+      sequential: '顺序分配',
+      parallel: '并行分配',
+      aggregationStrategy: '结果汇总方式',
+      merge: '完整汇总',
+      vote: '关键信息提取',
+      priority: '结构化整合',
     },
     // 角色管理相关翻译
     role: {
@@ -1629,7 +1638,7 @@ export const zh = {
       llm: '大语言模型 (LLM)',
       model_selection: '多模型选择',
       model_voting: '多模型投票',
-      rag: '知识检索 (RAG)',
+      'knowledge-retrieval': '知识检索 (RAG)',
       classification: '智能分类',
       parameter_extraction: '参数提取',
       flowControl: '流程控制',
@@ -1694,6 +1703,11 @@ export const zh = {
         },
         end: {
           output: '回复'
+        },
+        'knowledge-retrieval': {
+          query: '查询变量',
+          knowledge_retrieval: '知识库',
+          recallConfig: '召回测试',
         }
       },
 
