@@ -64,8 +64,8 @@ export const getModelTypeList = async () => {
     return response as any[];
 };
 // 获取模型列表
-export const getModelList = async (type: string | string[], pageInfo: PageRequest) => {
-    const response = await request.get(`${apiPrefix}/models`, { type, ...pageInfo });
+export const getModelList = async (pageInfo: PageRequest) => {
+    const response = await request.get(`${apiPrefix}/models`, pageInfo);
     return response as any;
 };
 //获取模型提供者
@@ -135,16 +135,18 @@ interface UploadFileOptions {
   kb_id?: string;
   parent_id?: string;
   onUploadProgress?: (event: AxiosProgressEvent) => void;
+  signal?: AbortSignal;
 }
 // 上传文件
 export const uploadFile = async (data: FormData, options?: UploadFileOptions) => {
-  const { kb_id, parent_id, onUploadProgress } = options || {};
+  const { kb_id, parent_id, onUploadProgress, signal } = options || {};
   const params: Record<string, string> = {};
   if (kb_id) params.kb_id = kb_id;
   if (parent_id) params.parent_id = parent_id;
   const response = await request.uploadFile(`${apiPrefix}/files/file`, data, {
     params,
     onUploadProgress,
+    signal,
   });
   return response as UploadFileResponse;
 };

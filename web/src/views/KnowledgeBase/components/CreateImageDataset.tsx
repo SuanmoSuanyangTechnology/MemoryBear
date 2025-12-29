@@ -1,14 +1,14 @@
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Form, Input, message } from 'antd';
+import { Form, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { UploadFile } from 'antd';
-import type { CreateSetModalRef, CreateSetMoealRefProps, UploadFileResponse } from '@/views/KnowledgeBase/types';
+import type { CreateSetModalRef, CreateSetMoealRefProps } from '@/views/KnowledgeBase/types';
 import type { UploadRequestOption } from 'rc-upload/lib/interface';
 import RbModal from '@/components/RbModal';
 import UploadFiles from '@/components/Upload/UploadFiles';
-import { uploadFile } from '@/api/knowledgeBase';
+import { uploadFile, deleteDocument } from '@/api/knowledgeBase';
 
 interface ImageDatasetFormData {
   name: string;
@@ -26,16 +26,26 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
     const [loading, setLoading] = useState(false);
     const [kbId, setKbId] = useState<string>('');
     const [parentId, setParentId] = useState<string>('');
+    const [hasFiles, setHasFiles] = useState(false);
     const uploadRef = useRef<{ fileList: UploadFile[]; clearFiles: () => void }>(null);
+    // 存储每个文件的 AbortController，用于取消上传
+    const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
     // const fileIds = [];
 
     const handleClose = () => {
+      // 取消所有正在进行的上传
+      abortControllersRef.current.forEach((controller) => {
+        controller.abort();
+      });
+      abortControllersRef.current.clear();
+      
       form.resetFields();
       uploadRef.current?.clearFiles();
       setLoading(false);
       setVisible(false);
       setKbId('');
       setParentId('');
+      setHasFiles(false);
     };
 
     const handleOpen = (kb_id: string, parent_id: string) => {
@@ -43,6 +53,7 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
       setParentId(parent_id);
       form.resetFields();
       uploadRef.current?.clearFiles();
+      setHasFiles(false);
       setVisible(true);
     };
 
@@ -120,21 +131,38 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
         media.src = url;
       });
     };
+    // 删除已上传的文件
+    const handleDeleteFile = async (fileId: string) => {
+      try {
+        await deleteDocument(fileId);
+        console.log(`${t('common.deleteSuccess')}`);
+      } catch (error) {
+        messageApi.error(`${t('common.deleteFailed')}`);
+      }
+    };
+
     // 上传文件
     const handleUpload = async (options: UploadRequestOption) => {
       const { file, onSuccess, onError, onProgress, filename = 'file' } = options;
+      
+      // 创建 AbortController 用于取消上传
+      const abortController = new AbortController();
+      const fileUid = (file as any).uid;
+      abortControllersRef.current.set(fileUid, abortController);
+      
       // 获取文件扩展名
     const fileExtension = (file as File).name.split('.').pop()?.toLowerCase();
     const mediaExtensions = ['mp3', 'mp4', 'mov', 'wav'];
     
     // 如果是媒体文件，进行大小和时长检查
     if (fileExtension && mediaExtensions.includes(fileExtension)) {
-      const fileSizeInMB = (file as File).size / (1024 * 1024);
+      const fileSizeInMB = (file as File).size / (50 * 1024);
       
-      // 检查文件大小（256MB限制）
-      if (fileSizeInMB > 256) {
+      // 检查文件大小（50MB限制）
+      if (fileSizeInMB > 50) {
         messageApi.error(`${t('knowledgeBase.sizeLimitError')}：${fileSizeInMB.toFixed(2)}MB`);
         onError?.(new Error(`${t('knowledgeBase.fileSizeExceeds')}`));
+        abortControllersRef.current.delete(fileUid);
         return;
       }
       
@@ -144,11 +172,13 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
         if (duration > 150) {
           messageApi.error(`${t('knowledgeBase.fileDurationLimitError')}：${Math.round(duration)}秒`);
           onError?.(new Error(`${t('knowledgeBase.fileDurationExceeds')}`));
+          abortControllersRef.current.delete(fileUid);
           return;
         }
       } catch (error) {
         messageApi.error(`${t('knowledgeBase.unableReadFile')}`);
         onError?.(error as Error);
+        abortControllersRef.current.delete(fileUid);
         return;
       }
     }
@@ -162,36 +192,53 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
         formData.append('parent_id', parentId);
       }
 
-      uploadFile(formData, {
-        kb_id: kbId,
-        parent_id: parentId,
-        onUploadProgress: (event) => {
-          if (!event.total) return;
-          const percent = Math.round((event.loaded / event.total) * 100);
-          onProgress?.({ percent }, file);
-        },
-      })
-        .then((res: UploadFileResponse) => {
-          onSuccess?.(res, new XMLHttpRequest());
-          if (res?.id) {
-            // 上传成功
-            // fileIds.push(res.id)
-          }
-        })
-        .catch((error) => {
-          onError?.(error as Error);
+      try {
+        const res = await uploadFile(formData, {
+          kb_id: kbId,
+          parent_id: parentId,
+          signal: abortController.signal,
+          onUploadProgress: (event) => {
+            if (!event.total) return;
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress?.({ percent }, file);
+          },
         });
+        
+        // 上传成功，移除 AbortController
+        abortControllersRef.current.delete(fileUid);
+        onSuccess?.(res, new XMLHttpRequest());
+        
+        if (res?.id) {
+          // 上传成功
+          // fileIds.push(res.id)
+        }
+      } catch (error: any) {
+        // 移除 AbortController
+        abortControllersRef.current.delete(fileUid);
+        
+        // 如果是用户主动取消，不显示错误信息
+        if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+          console.log('上传已取消:', (file as File).name);
+          return;
+        }
+        
+        onError?.(error as Error);
+      }
     };
     return (
       <>
       {contextHolder}
       <RbModal
-        title={`${t('knowledgeBase.createA')} ${t('knowledgeBase.imageDataSet')}`}
+        title={`${t('knowledgeBase.createA')} ${t('knowledgeBase.mediaDataSet')}`}
         open={visible}
         onCancel={handleClose}
         okText={t('common.create')}
         onOk={handleSave}
         confirmLoading={loading}
+        maskClosable={false}
+        okButtonProps={{
+          disabled: loading || !hasFiles
+        }}
       >
         <Form form={form} layout="vertical">
           {/* <Form.Item
@@ -206,11 +253,31 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
             <UploadFiles 
               ref={uploadRef}
               isCanDrag={true} 
-              fileSize={100} 
+              fileSize={50} 
               multiple={true} 
               maxCount={99} 
               fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'mp3', 'mp4', 'mov', 'wav']} 
-              customRequest={handleUpload} 
+              customRequest={handleUpload}
+              onChange={(fileList) => {
+                // 实时更新文件状态
+                setHasFiles(fileList.length > 0);
+              }}
+              onRemove={async (file) => {
+                // 如果文件正在上传，取消上传
+                const fileUid = file.uid;
+                const abortController = abortControllersRef.current.get(fileUid);
+                if (abortController) {
+                  abortController.abort();
+                  abortControllersRef.current.delete(fileUid);
+                }
+                
+                // 如果文件已经上传成功，删除服务器上的文件
+                if (file.response?.id) {
+                  await handleDeleteFile(file.response.id);
+                }
+                
+                return true; // 允许移除文件
+              }}
             />
           </Form.Item>
         </Form>
