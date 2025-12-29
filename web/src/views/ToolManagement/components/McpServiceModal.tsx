@@ -25,7 +25,7 @@ export interface RequestHeaderModalRef {
   handleOpen: (index?: number, data?: RequestHeader) => void;
   handleClose: () => void;
 }
-const authTypeList = ['none', 'api_key', 'basic_auth']
+const authTypeList = ['none', 'api_key', 'basic_auth', 'bearer_token']
 const tabKeys = ['auth', 'requestHeader', 'config']
 const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
   refresh

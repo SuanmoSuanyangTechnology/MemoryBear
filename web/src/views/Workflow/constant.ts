@@ -131,7 +131,16 @@ export const nodeLibrary: NodeLibrary[] = [
       },
       // { type: "model_selection", icon: modelSelectionIcon },
       // { type: "model_voting", icon: modelVotingIcon },
-      // { type: "rag", icon: ragIcon },
+      { type: "knowledge-retrieval", icon: ragIcon,
+        config: {
+          query: {
+            type: 'variableList',
+          },
+          knowledge_retrieval: {
+            type: 'knowledge'
+          }
+        }
+      },
       // { type: "classification", icon: classificationIcon },
       // { type: "parameter_extraction", icon: parameterExtractionIcon }
     ]
