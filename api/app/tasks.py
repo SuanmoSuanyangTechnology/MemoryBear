@@ -193,7 +193,7 @@ def parse_document(file_path: str, document_id: uuid.UUID):
         db.commit()
 
         # using graphrag
-        if db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
+        if db_knowledge.parser_config and db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
             graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
             with_resolution = graphrag_conf.get("resolution", False)
             with_community = graphrag_conf.get("community", False)
@@ -311,7 +311,7 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
         document_ids = [str(item.id) for item in db_documents]
 
         # 2. using graphrag
-        if db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
+        if db_knowledge.parser_config and db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
             graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
             with_resolution = graphrag_conf.get("resolution", False)
             with_community = graphrag_conf.get("community", False)
