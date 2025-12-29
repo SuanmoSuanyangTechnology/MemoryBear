@@ -1,7 +1,7 @@
 
 import { Graph } from '@antv/x6';
 export interface NodeConfig {
-  type: 'input' | 'textarea' | 'select' | 'inputNumber' | 'slider' | 'customSelect' | 'define';
+  type: 'input' | 'textarea' | 'select' | 'inputNumber' | 'slider' | 'customSelect' | 'define' | 'knowledge' | 'variableList';
   options?: { label: string; value: string }[];
 
   max?: number;
