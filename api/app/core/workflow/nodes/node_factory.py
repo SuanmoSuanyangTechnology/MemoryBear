@@ -21,6 +21,7 @@ from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNode
 from app.core.workflow.nodes.start import StartNode
 from app.core.workflow.nodes.transform import TransformNode
 from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
+from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,8 @@ WorkflowNode = Union[
     KnowledgeRetrievalNode,
     JinjaRenderNode,
     VariableAggregatorNode,
-    ParameterExtractorNode
+    ParameterExtractorNode,
+    QuestionClassifierNode
 ]
 
 
@@ -61,6 +63,7 @@ class NodeFactory:
         NodeType.JINJARENDER: JinjaRenderNode,
         NodeType.VAR_AGGREGATOR: VariableAggregatorNode,
         NodeType.PARAMETER_EXTRACTOR: ParameterExtractorNode,
+        NodeType.QUESTION_CLASSIFIER: QuestionClassifierNode,
     }
 
     @classmethod
