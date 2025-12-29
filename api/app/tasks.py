@@ -224,6 +224,7 @@ def parse_document(file_path: str, document_id: uuid.UUID):
             async def _run(row: dict, document_ids: list[str], language: str, parser_config: dict, vector_service,
                            chat_model, embedding_model, callback, with_resolution: bool = True,
                            with_community: bool = True, ) -> dict:
+                await trio.sleep(5)  # Delay for 10 seconds
                 nonlocal progress_msg  # Declare the use of an external progress_msg variable
                 result = await run_graphrag_for_kb(
                     row=row,
