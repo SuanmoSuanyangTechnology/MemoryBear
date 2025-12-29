@@ -82,6 +82,7 @@ dependencies = [
     "pytest>=9.0.1",
     "matplotlib>=3.10.7",
     "langfuse>=3.10.0",
+    "beartype==0.22.5",
     "pdfplumber==0.11.7",
     "olefile==0.47",
     "cachetools==6.2.1",
