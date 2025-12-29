@@ -30,6 +30,7 @@ from app.schemas import app_schema
 from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services.agent_config_converter import AgentConfigConverter
 from app.models import AppShare, Workspace
+from app.services.model_service import ModelApiKeyService
 
 # 获取业务日志器
 logger = get_business_logger()
@@ -200,34 +201,28 @@ class AppService:
                 "多智能体配置未激活，无法运行",
                 BizCode.AGENT_CONFIG_MISSING
             )
-
-        # 2. 检查主 Agent 配置
-        if not multi_agent_config.master_agent_id:
-            raise BusinessException(
-                "未配置主 Agent，无法运行",
-                BizCode.AGENT_CONFIG_MISSING
-            )
-
-        master_agent_release = self.db.get(AppRelease, multi_agent_config.master_agent_id)
-        if not master_agent_release:
-            raise BusinessException(
-                f"主 Agent 配置不存在: {multi_agent_config.master_agent_id}",
-                BizCode.AGENT_CONFIG_MISSING
-            )
-
-        # 检查主 Agent 的模型配置
-        if master_agent_release.default_model_config_id:
-            master_model = self.db.get(ModelConfig, master_agent_release.default_model_config_id)
-            if not master_model:
+        if not multi_agent_config.default_model_config_id:
+            # # 2. 检查主 Agent 配置
+            if not multi_agent_config.master_agent_id:
                 raise BusinessException(
-                    f"主 Agent 的模型配置不存在: {master_agent_release.default_model_config_id}",
-                    BizCode.MODEL_NOT_FOUND
+                    "未配置主 Agent，无法运行",
+                    BizCode.AGENT_CONFIG_MISSING
                 )
-        else:
-            raise BusinessException(
-                "主 Agent 未配置模型，无法运行",
-                BizCode.MODEL_NOT_FOUND
-            )
+
+            master_agent_release = self.db.get(AppRelease, multi_agent_config.master_agent_id)
+            if not master_agent_release:
+                raise BusinessException(
+                    f"主 Agent 配置不存在: {multi_agent_config.master_agent_id}",
+                    BizCode.AGENT_CONFIG_MISSING
+                )
+
+            # 检查主 Agent 的模型配置
+            multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
+
+        model_api_key = ModelApiKeyService.get_a_api_key(self.db, multi_agent_config.default_model_config_id)
+        if not model_api_key:
+            raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
+
 
         # 3. 检查子 Agent 配置
         if not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0:
