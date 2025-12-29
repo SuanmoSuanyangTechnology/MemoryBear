@@ -20,6 +20,7 @@ from app.core.workflow.nodes.start.config import StartNodeConfig
 from app.core.workflow.nodes.transform.config import TransformNodeConfig
 from app.core.workflow.nodes.variable_aggregator.config import VariableAggregatorNodeConfig
 from app.core.workflow.nodes.parameter_extractor.config import ParameterExtractorNodeConfig
+from app.core.workflow.nodes.question_classifier.config import QuestionClassifierNodeConfig
 
 __all__ = [
     # 基础类
@@ -40,4 +41,5 @@ __all__ = [
     "JinjaRenderNodeConfig",
     "VariableAggregatorNodeConfig",
     "ParameterExtractorNodeConfig",
+    "QuestionClassifierNodeConfig"
 ]
