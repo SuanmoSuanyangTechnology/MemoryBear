@@ -14,8 +14,12 @@ class VariableType(StrEnum):
     STRING = "string"
     NUMBER = "number"
     BOOLEAN = "boolean"
-    ARRAY = "array"
     OBJECT = "object"
+
+    ARRAY_STRING = "array[string]"
+    ARRAY_NUMBER = "array[number]"
+    ARRAY_BOOLEAN = "array[boolean]"
+    ARRAY_OBJECT = "array[object]"
 
 
 class VariableDefinition(BaseModel):

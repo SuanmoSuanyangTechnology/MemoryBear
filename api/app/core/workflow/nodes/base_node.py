@@ -20,40 +20,44 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowState(TypedDict):
-    """工作流状态
-    
-    在节点间传递的状态对象，包含消息、变量、节点输出等信息。
+    """Workflow state
+
+    The state object passed between nodes in a workflow, containing messages, variables, node outputs, etc.
     """
-    # 消息列表（追加模式）
+    # List of messages (append mode)
     messages: Annotated[list[AnyMessage], add]
-    
-    # 输入变量（从配置的 variables 传入）
-    # 使用深度合并函数，支持嵌套字典的更新（如 conv.xxx）
+
+    # Set of loop node IDs, used for assigning values in loop nodes
+    cycle_nodes: list
+    looping: bool
+
+    # Input variables (passed from configured variables)
+    # Uses a deep merge function, supporting nested dict updates (e.g., conv.xxx)
     variables: Annotated[dict[str, Any], lambda x, y: {
         **x,
         **{k: {**x.get(k, {}), **v} if isinstance(v, dict) and isinstance(x.get(k), dict) else v 
            for k, v in y.items()}
     }]
-    
-    # 节点输出（存储每个节点的执行结果，用于变量引用）
-    # 使用自定义合并函数，将新的节点输出合并到现有字典中
+
+    # Node outputs (stores execution results of each node for variable references)
+    # Uses a custom merge function to combine new node outputs into the existing dictionary
     node_outputs: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
-    
-    # 运行时节点变量（简化版，只存储业务数据，供节点间快速访问）
-    # 格式：{node_id: business_result}
+
+    # Runtime node variables (simplified version, stores business data for fast access between nodes)
+    # Format: {node_id: business_result}
     runtime_vars: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
     
-    # 执行上下文
+    # Execution context
     execution_id: str
     workspace_id: str
     user_id: str
     
-    # 错误信息（用于错误边）
+    # Error information (for error edges)
     error: str | None
     error_node: str | None
-    
-    # 流式缓冲区（存储节点的实时流式输出）
-    # 格式：{node_id: {"chunks": [...], "full_content": "..."}}
+
+    # Streaming buffer (stores real-time streaming output of nodes)
+    # Format: {node_id: {"chunks": [...], "full_content": "..."}}
     streaming_buffer: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
 
 
@@ -170,10 +174,10 @@ class BaseNode(ABC):
         import time
         
         start_time = time.time()
+
+        timeout = self.get_timeout()
         
         try:
-            timeout = self.get_timeout()
-            
             # 调用节点的业务逻辑
             business_result = await asyncio.wait_for(
                 self.execute(state),
@@ -200,7 +204,8 @@ class BaseNode(ABC):
                 **wrapped_output,
                 "runtime_vars": {
                     self.node_id: runtime_var
-                }
+                },
+                "looping": state["looping"]
             }
             
         except TimeoutError:
@@ -236,10 +241,10 @@ class BaseNode(ABC):
         import time
         
         start_time = time.time()
+
+        timeout = self.get_timeout()
         
         try:
-            timeout = self.get_timeout()
-            
             # Get LangGraph's stream writer for sending custom data
             writer = get_stream_writer()
             

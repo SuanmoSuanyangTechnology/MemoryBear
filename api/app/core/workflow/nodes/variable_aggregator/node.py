@@ -59,7 +59,7 @@ class VariableAggregatorNode(BaseNode):
         # Group mode
         # --------------------------
         result = {}
-        for group_name, variables in zip(self.typed_config.group_names, self.typed_config.group_variables):
+        for group_name, variables in self.typed_config.group_variables.items():
             for variable in variables:
                 var_express = self._get_express(variable)
                 try:

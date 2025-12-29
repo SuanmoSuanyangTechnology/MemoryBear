@@ -4,9 +4,9 @@
 基于 LangGraph 的工作流执行引擎。
 """
 
-import logging
 # import uuid
 import datetime
+import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -107,7 +107,13 @@ class WorkflowExecutor:
             "user_id": self.user_id,
             "error": None,
             "error_node": None,
-            "streaming_buffer": {}  # 流式缓冲区
+            "streaming_buffer": {},  # 流式缓冲区
+            "cycle_nodes": [
+                node.get("id")
+                for node in self.workflow_config.get("nodes")
+                if node.get("type") in [NodeType.LOOP, NodeType.ITERATION]
+            ],  # loop, iteration node id
+            "looping": False  # loop runing flag, only use in loop node,not use in main loop
         }
 
     def _analyze_end_node_prefixes(self) -> tuple[dict[str, str], set[str]]:
@@ -199,6 +205,10 @@ class WorkflowExecutor:
         for node in self.nodes:
             node_type = node.get("type")
             node_id = node.get("id")
+            cycle_node = node.get("cycle")
+            if cycle_node:
+                # 处于循环子图中的节点由 CycleGraphNode 进行构建处理
+                continue
 
             # 记录 start 和 end 节点 ID
             if node_type == NodeType.START:
@@ -271,7 +281,7 @@ class WorkflowExecutor:
             workflow.add_edge(START, start_node_id)
             logger.debug(f"添加边: START -> {start_node_id}")
 
-        for edge in self.edges:
+        for edge in self.workflow_config.get("edges", []):
             source = edge.get("source")
             target = edge.get("target")
             edge_type = edge.get("type")
@@ -284,12 +294,12 @@ class WorkflowExecutor:
                 logger.debug(f"添加边: {source} -> {target}")
                 continue
 
-            # 处理到 end 节点的边
-            if target in end_node_ids:
-                # 连接到 end 节点
-                workflow.add_edge(source, target)
-                logger.debug(f"添加边: {source} -> {target}")
-                continue
+            # # 处理到 end 节点的边
+            # if target in end_node_ids:
+            #     # 连接到 end 节点
+            #     workflow.add_edge(source, target)
+            #     logger.debug(f"添加边: {source} -> {target}")
+            #     continue
 
             # 跳过错误边（在节点内部处理）
             if edge_type == "error":

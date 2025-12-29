@@ -1,6 +1,7 @@
 from abc import ABC
 from typing import Union, Type
 
+from app.core.workflow.nodes.enums import ComparisonOperator
 from app.core.workflow.variable_pool import VariablePool
 
 
@@ -136,6 +137,23 @@ class ObjectOperator(OperatorBase):
         self.pool.set(self.left_selector, dict())
 
 
+class AssignmentOperatorResolver:
+    @classmethod
+    def resolve_by_value(cls, value):
+        if isinstance(value, str):
+            return StringOperator
+        elif isinstance(value, bool):
+            return BooleanOperator
+        elif isinstance(value, (int, float)):
+            return NumberOperator
+        elif isinstance(value, list):
+            return ArrayOperator
+        elif isinstance(value, dict):
+            return ObjectOperator
+        else:
+            raise TypeError(f"Unsupported variable type: {type(value)}")
+
+
 AssignmentOperatorInstance = Union[
     StringOperator,
     NumberOperator,
@@ -144,3 +162,83 @@ AssignmentOperatorInstance = Union[
     ObjectOperator
 ]
 AssignmentOperatorType = Type[AssignmentOperatorInstance]
+
+
+class ConditionExpressionBuilder:
+    """
+    Build a Python boolean expression string based on a comparison operator.
+
+    This class does not evaluate the expression.
+    It only generates a valid Python expression string
+    that can be evaluated later in a workflow context.
+    """
+
+    def __init__(self, left: str, operator: ComparisonOperator, right: str):
+        self.left = left
+        self.operator = operator
+        self.right = right
+
+    def _empty(self):
+        return f"{self.left} == ''"
+
+    def _not_empty(self):
+        return f"{self.left} != ''"
+
+    def _contains(self):
+        return f"{self.right} in {self.left}"
+
+    def _not_contains(self):
+        return f"{self.right} not in {self.left}"
+
+    def _startswith(self):
+        return f'{self.left}.startswith({self.right})'
+
+    def _endswith(self):
+        return f'{self.left}.endswith({self.right})'
+
+    def _eq(self):
+        return f"{self.left} == {self.right}"
+
+    def _ne(self):
+        return f"{self.left} != {self.right}"
+
+    def _lt(self):
+        return f"{self.left} < {self.right}"
+
+    def _le(self):
+        return f"{self.left} <= {self.right}"
+
+    def _gt(self):
+        return f"{self.left} > {self.right}"
+
+    def _ge(self):
+        return f"{self.left} >= {self.right}"
+
+    def build(self):
+        match self.operator:
+            case ComparisonOperator.EMPTY:
+                return self._empty()
+            case ComparisonOperator.NOT_EMPTY:
+                return self._not_empty()
+            case ComparisonOperator.CONTAINS:
+                return self._contains()
+            case ComparisonOperator.NOT_CONTAINS:
+                return self._not_contains()
+            case ComparisonOperator.START_WITH:
+                return self._startswith()
+            case ComparisonOperator.END_WITH:
+                return self._endswith()
+            case ComparisonOperator.EQ:
+                return self._eq()
+            case ComparisonOperator.NE:
+                return self._ne()
+            case ComparisonOperator.LT:
+                return self._lt()
+            case ComparisonOperator.LE:
+                return self._le()
+            case ComparisonOperator.GT:
+                return self._gt()
+            case ComparisonOperator.GE:
+                return self._ge()
+            case _:
+                raise ValueError(f"Invalid condition: {self.operator}")

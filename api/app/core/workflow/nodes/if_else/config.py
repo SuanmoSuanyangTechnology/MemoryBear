@@ -30,7 +30,7 @@ class ConditionBranchConfig(BaseModel):
         description="Logical operator used to combine multiple condition expressions"
     )
 
-    conditions: list[ConditionDetail] = Field(
+    expressions: list[ConditionDetail] = Field(
         ...,
         description="List of condition expressions within this branch"
     )
@@ -57,7 +57,7 @@ class IfElseNodeConfig(BaseNodeConfig):
                         # CASE1 / IF Branch
                         {
                             "logical_operator": "and",
-                            "conditions": [
+                            "expressions": [
                                 [
                                     {
                                         "left": "node.userinput.message",
@@ -75,7 +75,7 @@ class IfElseNodeConfig(BaseNodeConfig):
                         # CASE1 / ELIF Branch
                         {
                             "logical_operator": "or",
-                            "conditions": [
+                            "expressions": [
                                 [
                                     {
                                         "left": "node.userinput.test",
