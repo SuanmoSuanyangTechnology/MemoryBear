@@ -321,28 +321,27 @@ const Private: FC = () => {
     {
       key: '2',
       icon: <img src={textIcon} alt="text" style={{ width: 16, height: 16 }} />,
-      label: (<span>{t('knowledgeBase.text')} {t('knowledgeBase.dataset')}</span>),
+      label: (<span>{t('knowledgeBase.createA')} {t('knowledgeBase.dataset')}</span>),
       onClick: () => {
         datasetModalRef?.current?.handleOpen(knowledgeBase?.id,folder?.parent_id ?? knowledgeBase?.id ?? '');
       },
     },
-    {
-      key: '8',
-      icon: <img src={blankIcon} alt="Custome Text" style={{ width: 16, height: 16 }} />,
-      label: t('knowledgeBase.customTextDataset'),
-      onClick: () => {
-        createContentModalRef?.current?.handleOpen(knowledgeBase?.id ?? '', folder?.parent_id ?? knowledgeBase?.id ?? '');
-        // handleCreate('folder'); // 传入 type: 'folder'
-      },
-    },
-    {
-      key: '3',
-      icon: <img src={imageIcon} alt="image" style={{ width: 16, height: 16 }} />,
-      label: t('knowledgeBase.mediaDataSet'),
-      onClick: () => {
-        createImageDataset?.current?.handleOpen(knowledgeBaseId || '', parentId || '')
-      },
-    },
+    // {
+    //   key: '8',
+    //   icon: <img src={blankIcon} alt="Custome Text" style={{ width: 16, height: 16 }} />,
+    //   label: t('knowledgeBase.mediaDataSet'),
+    //   onClick: () => {
+    //     createContentModalRef?.current?.handleOpen(knowledgeBase?.id ?? '', folder?.parent_id ?? knowledgeBase?.id ?? '');
+    //   },
+    // },
+    // {
+    //   key: '3',
+    //   icon: <img src={imageIcon} alt="image" style={{ width: 16, height: 16 }} />,
+    //   label: t('knowledgeBase.imageDataSet'),
+    //   onClick: () => {
+    //     createImageDataset?.current?.handleOpen(knowledgeBaseId || '', parentId || '')
+    //   },
+    // },
         // 暂时未实现
     // {
     //   key: '4',
