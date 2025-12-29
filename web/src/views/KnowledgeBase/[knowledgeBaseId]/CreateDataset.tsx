@@ -1,14 +1,15 @@
 import {  useMemo,useRef, useState, useEffect } from 'react';
-import { Button, Flex, Radio, Steps, Modal, Input, Spin, message, Checkbox, Select} from 'antd';
+import { Button, Flex, Radio, Steps, Modal, Input, Spin, message, Checkbox, Select, Form} from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Table, { type TableRef } from '@/components/Table'
 import type { AnyObject } from 'antd/es/_util/type';
 import type { UploadFileResponse,KnowledgeBaseDocumentData } from '@/views/KnowledgeBase/types';
 import type { ColumnsType } from 'antd/es/table';
+import type { UploadFile } from 'antd';
 import UploadFiles from '@/components/Upload/UploadFiles';
 import type { UploadRequestOption } from 'rc-upload/lib/interface';
-import { uploadFile, getDocumentList, parseDocument, updateDocument, deleteDocument } from '@/api/knowledgeBase';
+import { uploadFile, getDocumentList, parseDocument, updateDocument, deleteDocument, createDocumentAndUpload } from '@/api/knowledgeBase';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 
 import SliderInput from '@/components/SliderInput';
@@ -56,7 +57,10 @@ interface CreateDatasetLocationState {
   fileId?: string | string[];
   fileIds?: string | string[];
 }
-
+interface ContentFormData {
+  title: string;
+  content: string;
+}
 const CreateDataset = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -75,7 +79,7 @@ const CreateDataset = () => {
   const [current, setCurrent] = useState<number>(stepIndexMap[initialStepKey]);
   const tableRef = useRef<TableRef>(null);
 
-
+  const [form] = Form.useForm<ContentFormData>();
   const [data, setData] = useState<KnowledgeBaseDocumentData[]>([]);
   const [rechunkFileIds, setRechunkFileIds] = useState<string[]>(initialFileIds);
 
@@ -98,12 +102,15 @@ const CreateDataset = () => {
     ],
     [t],
   );
-  
-  const handleNext = () => {
+  // 存储每个文件的 AbortController，用于取消上传
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const uploadRef = useRef<{ fileList: UploadFile[]; clearFiles: () => void }>(null);
+  console.log('上传文件',uploadRef.current?.fileList.length)
+  const handleNext = async () => {
     // 暂时隐藏第三步：调整步骤索引（0->1->2 对应 选择文件->参数设置->确认上传）
     let nextStep = current + 1;
     
-    if(nextStep === 1) {
+    if(nextStep === 1 && source === 'local') {
       // 检查是否有文件已上传
       if (rechunkFileIds.length === 0) {
         // 如果没有文件，提示用户先上传文件
@@ -113,6 +120,27 @@ const CreateDataset = () => {
         });
         return; // 不进入下一步
       }
+    }else if(nextStep === 1 && source === 'text'){
+        try {
+            const values = await form.validateFields();
+            // setLoading(true);
+
+            // TODO: 这里需要调用相应的API来保存内容
+            const params = {
+              // ...values,
+              kb_id: knowledgeBaseId,
+              parent_id: parentId,
+            };
+            const response = await createDocumentAndUpload(values, params)
+            if(response) {
+                setRechunkFileIds([response.id])
+            }
+            
+          } catch (err) {
+              messageApi.error(t('knowledgeBase.createContentError'));
+          } finally {
+            // setLoading(false);
+          }
     }
     
     // 从参数设置进入确认上传时的处理
@@ -262,7 +290,7 @@ const CreateDataset = () => {
       
       media.onerror = () => {
         URL.revokeObjectURL(url);
-        reject(new Error('无法读取媒体文件'));
+        reject(new Error(`${t('knowledgeBase.unableReadFile')}`));
       };
       
       media.src = url;
@@ -273,18 +301,24 @@ const CreateDataset = () => {
   const handleUpload = async (options: UploadRequestOption) => {
     const { file, onSuccess, onError, onProgress, filename = 'file' } = options;
     
+    // 创建 AbortController 用于取消上传
+    const abortController = new AbortController();
+    const fileUid = (file as any).uid;
+    abortControllersRef.current.set(fileUid, abortController);
+
     // 获取文件扩展名
     const fileExtension = (file as File).name.split('.').pop()?.toLowerCase();
     const mediaExtensions = ['mp3', 'mp4', 'mov', 'wav'];
     
     // 如果是媒体文件，进行大小和时长检查
     if (fileExtension && mediaExtensions.includes(fileExtension)) {
-      const fileSizeInMB = (file as File).size / (1024 * 1024);
+      const fileSizeInMB = (file as File).size / (100 * 1024);
       
-      // 检查文件大小（256MB限制）
-      if (fileSizeInMB > 256) {
+      // 检查文件大小（50MB限制）
+      if (fileSizeInMB > 100) {
         messageApi.error(`${t('knowledgeBase.sizeLimitError')}：${fileSizeInMB.toFixed(2)}MB`);
         onError?.(new Error(`${t('knowledgeBase.fileSizeExceeds')}`));
+        abortControllersRef.current.delete(fileUid);
         return;
       }
       
@@ -294,11 +328,13 @@ const CreateDataset = () => {
         if (duration > 150) {
           messageApi.error(`${t('knowledgeBase.fileDurationLimitError')}：${Math.round(duration)}秒`);
           onError?.(new Error(`${t('knowledgeBase.fileDurationExceeds')}`));
+          abortControllersRef.current.delete(fileUid);
           return;
         }
       } catch (error) {
         messageApi.error(`${t('knowledgeBase.unableReadFile')}`);
         onError?.(error as Error);
+        abortControllersRef.current.delete(fileUid);
         return;
       }
     }
@@ -315,6 +351,7 @@ const CreateDataset = () => {
     uploadFile(formData, {
       kb_id: knowledgeBaseId,
       parent_id: parentId,
+      signal: abortController.signal,
       onUploadProgress: (event) => {
         if (!event.total) return;
         const percent = Math.round((event.loaded / event.total) * 100);
@@ -332,6 +369,14 @@ const CreateDataset = () => {
         }
       })
       .catch((error) => {
+        // 移除 AbortController
+        abortControllersRef.current.delete(fileUid);
+        
+        // 如果是用户主动取消，不显示错误信息
+        if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+          console.log('上传已取消:', (file as File).name);
+          return;
+        }
         onError?.(error as Error);
       });
   };
@@ -419,23 +464,33 @@ const CreateDataset = () => {
         setBlockSize(value);
       }
   }
-
-  // 当从其他页面跳转过来且带有 fileIds 时，加载对应的文档数据
-  useEffect(() => {
-    if (initialFileIds.length > 0 && initialStepKey !== 'selectFile' && knowledgeBaseId && parentId) {
-      // 加载文档列表数据
-      getDocumentList(knowledgeBaseId,{
-        document_ids: initialFileIds.join(','),
-      })
-      .then((res: any) => {
-        const documents = res.items || [];
-        setData(documents);
-      })
-      .catch((error) => {
-        console.error('加载文档列表失败:', error);
-      });
+  // 删除已上传的文件
+  const handleDeleteFile = async (fileId: string) => {
+    try {
+      await deleteDocument(fileId);
+      // 删除成功，从 rechunkFileIds 中移除该 id
+      setRechunkFileIds((prev) => prev.filter((id) => id !== fileId));
+      console.log(`${t('common.deleteSuccess')}`);
+    } catch (error) {
+      messageApi.error(`${t('common.deleteFailed')}`);
     }
-  }, []);
+  };
+  // 当从其他页面跳转过来且带有 fileIds 时，加载对应的文档数据
+  // useEffect(() => {
+  //   if (initialFileIds.length > 0 && initialStepKey !== 'selectFile' && knowledgeBaseId && parentId) {
+  //     // 加载文档列表数据
+  //     getDocumentList(knowledgeBaseId,{
+  //       document_ids: initialFileIds.join(','),
+  //     })
+  //     .then((res: any) => {
+  //       const documents = res.items || [];
+  //       setData(documents);
+  //     })
+  //     .catch((error) => {
+  //       console.error('加载文档列表失败:', error);
+  //     });
+  //   }
+  // }, []);
 
   // 清理函数：组件卸载时清除定时器和 loading 状态
   useEffect(() => {
@@ -480,7 +535,40 @@ const CreateDataset = () => {
       {current === 0 && (
         <div className='rb:flex rb:w-full rb:mt-10'>
             {source && source === 'local' && (
-                <UploadFiles isCanDrag={true} fileSize={50} multiple={true} maxCount={99} fileType={fileType} customRequest={handleUpload} />
+                <UploadFiles 
+                  ref={uploadRef}
+                  isCanDrag={true} 
+                  fileSize={100} 
+                  multiple={true} 
+                  maxCount={99} 
+                  fileType={fileType} 
+                  customRequest={handleUpload}
+                  onChange={(fileList) => {
+                    console.log('文件列表变化:', fileList);
+                  }}
+                  onRemove={async (file) => {
+                      // 如果文件正在上传，取消上传
+                      const fileUid = file.uid;
+                      const abortController = abortControllersRef.current.get(fileUid);
+                      if (abortController) {
+                        abortController.abort();
+                        abortControllersRef.current.delete(fileUid);
+                        
+                      }
+                      console.log('文件移除前:', uploadRef.current?.fileList);
+                      // 如果文件已经上传成功，删除服务器上的文件并从rechunkFileIds中移除对应的ID
+                      if (file.response?.id) {
+                        try {
+                          await deleteDocument(file.response.id);
+                          setRechunkFileIds(prev => prev.filter(id => id !== file.response.id));
+                        } catch (error) {
+                          console.error('删除文件失败:', error);
+                          messageApi.error('删除文件失败');
+                        }
+                      }
+                      
+                      return true; // 允许移除文件
+                    }} />
             )}
             {source && source === 'link' && (
                 <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
@@ -500,15 +588,36 @@ const CreateDataset = () => {
             )}
             {source && source === 'text' && (
                 <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
+                    <Form form={form} layout="vertical">
+                        <Form.Item
+                          name="title"
+                          label={t('knowledgeBase.title')}
+                          rules={[{ required: true, message: t('knowledgeBase.pleaseEnterTitle') }]}
+                        >
+                          <Input placeholder={t('knowledgeBase.pleaseEnterTitle')} />
+                        </Form.Item>
 
-                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
+                        <Form.Item
+                          name="content"
+                          label={t('knowledgeBase.customContent')}
+                          rules={[{ required: true, message: t('knowledgeBase.pleaseEnterContent') }]}
+                        >
+                          <Input.TextArea
+                            placeholder={t('knowledgeBase.pleaseEnterContent')}
+                            rows={8}
+                            showCount
+                            maxLength={5000}
+                          />
+                        </Form.Item>
+                      </Form>
+                    {/* <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
                         {t('knowledgeBase.customText')}
                     </div>
                     <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
                     <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
                         {t('knowledgeBase.customContent')}
                     </div>
-                    <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} />
+                    <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} /> */}
                 </div>
             )}
         </div>
@@ -700,7 +809,7 @@ const CreateDataset = () => {
         <Button 
           type='primary' 
           onClick={current === 2 ? handleStartUpload : handleNext}
-          disabled={pollingLoading}
+          disabled={pollingLoading || (current === 0 && rechunkFileIds.length === 0)}
           loading={pollingLoading}
         >
           {current === 2 ? t('knowledgeBase.startUploading') || 'Start Upload' : t('common.next') || 'Next'}
