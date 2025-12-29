@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
 from app.core.tools.base import ToolParameter, ToolResult, ParameterType
-from .base import BuiltinTool
+from app.core.tools.builtin.base import BuiltinTool
 
 
 class JsonTool(BuiltinTool):

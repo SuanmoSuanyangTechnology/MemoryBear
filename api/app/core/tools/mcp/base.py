@@ -1,7 +1,6 @@
 """MCP工具基类"""
 import time
 from typing import Dict, Any, List
-import aiohttp
 
 from app.models.tool_model import ToolType
 from app.core.tools.base import BaseTool
