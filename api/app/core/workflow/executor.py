@@ -307,22 +307,30 @@ class WorkflowExecutor:
 
             if condition:
                 # 条件边
-                def router(state: WorkflowState, cond=condition, tgt=target):
-                    """条件路由函数"""
-                    if evaluate_condition(
-                            cond,
-                            state.get("variables", {}),
-                            state.get("node_outputs", {}),
-                            {
-                                "execution_id": state.get("execution_id"),
-                                "workspace_id": state.get("workspace_id"),
-                                "user_id": state.get("user_id")
-                            }
-                    ):
-                        return tgt
-                    return END  # 条件不满足，结束
+                def make_router(cond, tgt):
+                    """Dynamically generate a conditional router function to ensure each branch has a unique name."""
 
-                workflow.add_conditional_edges(source, router)
+
+                    def router_fn(state: WorkflowState):
+                        if evaluate_condition(
+                                cond,
+                                state.get("variables", {}),
+                                state.get("node_outputs", {}),
+                                {
+                                    "execution_id": state.get("execution_id"),
+                                    "workspace_id": state.get("workspace_id"),
+                                    "user_id": state.get("user_id")
+                                }
+                        ):
+                            return tgt
+                        return END
+
+                    # 动态修改函数名，避免重复
+                    router_fn.__name__ = f"router_{tgt}"
+                    return router_fn
+
+                router_fn = make_router(condition, target)
+                workflow.add_conditional_edges(source, router_fn)
                 logger.debug(f"添加条件边: {source} -> {target} (condition={condition})")
             else:
                 # 普通边
