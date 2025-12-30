@@ -8,17 +8,23 @@ const { Header } = Layout;
 
 interface ConfigHeaderProps {
   name?: string;
-  operation: ReactNode
+  operation?: ReactNode;
+  source?: 'detail' | 'statement'
 }
 const PageHeader: FC<ConfigHeaderProps> = ({ 
   name,
-  operation
+  operation,
+  source = 'detail'
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
   const goBack = () => {
-    navigate('/user-memory', { replace: true })
+    if (source === 'detail') {
+      navigate('/user-memory', { replace: true })
+    } else {
+      navigate(-1)
+    }
   }
   return (
     <Header className="rb:w-full rb:h-16 rb:flex rb:justify-between rb:p-[16px_16px_16px_24px]! rb:border-b rb:border-[#EAECEE] rb:leading-8">
