@@ -48,6 +48,7 @@ const MemoryManagement: React.FC = () => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: item.config_name }),
       okText: t('common.delete'),
+      cancelText: t('common.cancel'),
       okType: 'danger',
       onOk: () => {
         deleteMemoryConfig(item.config_id)
