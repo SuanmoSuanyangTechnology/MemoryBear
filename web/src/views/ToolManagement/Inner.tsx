@@ -86,11 +86,11 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getS
           grid={{ gutter: 16, column: 2 }}
           dataSource={data}
           renderItem={(item) => (
-            <List.Item key={item.id}>
+            <List.Item key={item.id} className='rb:h-full!'>
               <RbCard
-                className={clsx({
-                  'rb:h-85.5!': item.config_data.tool_class === 'DateTimeTool' || item.config_data.tool_class === 'JsonTool'
-                })}
+                // className={clsx({
+                //   'rb:h-85.5!': item.config_data.tool_class === 'DateTimeTool' || item.config_data.tool_class === 'JsonTool'
+                // })}
                 // avatar={
                 //   <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
                 //     {item.name[0]}
