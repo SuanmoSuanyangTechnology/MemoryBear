@@ -130,7 +130,7 @@ const Mcp: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getSta
                         className="rb:flex rb:gap-4 rb:justify-start rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3"
                       >
                         <div className="rb:whitespace-nowrap rb:w-27.5">{t(`tool.${key}`)}</div>
-                        {displayValue}
+                        <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1">{displayValue}</div>
                       </div>
                     );
                   })}
