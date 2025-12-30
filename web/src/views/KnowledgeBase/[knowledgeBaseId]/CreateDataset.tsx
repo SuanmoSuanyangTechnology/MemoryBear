@@ -312,7 +312,7 @@ const CreateDataset = () => {
     
     // 如果是媒体文件，进行大小和时长检查
     if (fileExtension && mediaExtensions.includes(fileExtension)) {
-      const fileSizeInMB = (file as File).size / (100 * 1024);
+      const fileSizeInMB = (file as File).size / (1024 * 1024);
       
       // 检查文件大小（50MB限制）
       if (fileSizeInMB > 100) {
