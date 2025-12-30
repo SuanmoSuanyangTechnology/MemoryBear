@@ -109,10 +109,10 @@ const TimeToolModal = forwardRef<TimeToolModalRef>((_props, ref) => {
   }
 
   useEffect(() => {
-    if (values?.formatType) {
+    if (values?.formatType && data.id && activeTab === 'timeFormat') {
       handleChangeFormatType()
     }
-  }, [values?.formatType])
+  }, [values?.formatType, data.id, activeTab, timeZone])
 
   // 暴露给父组件的方法
   useImperativeHandle(ref, () => ({
@@ -190,7 +190,6 @@ const TimeToolModal = forwardRef<TimeToolModalRef>((_props, ref) => {
             <FormItem label={t('tool.chooseFormatType')} name="formatType">
               <Select
                 options={formatList}
-                onChange={handleChangeFormatType}
               />
             </FormItem>
             <div className="rb:mt-3 rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md">
