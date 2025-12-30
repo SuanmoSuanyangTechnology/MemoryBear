@@ -113,11 +113,9 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         request.then((res: any) => {
           message.success(t('common.saveSuccess'));
           testConnection(res.tool_id || editVo?.id)
-            .then(() => {
-              handleClose();
-            })
             .finally(() => {
               setLoading(false);
+              handleClose();
               refresh()
             })
         })
