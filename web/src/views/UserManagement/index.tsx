@@ -37,6 +37,7 @@ const UserManagement: React.FC = () => {
     modal.confirm({
       title: t(`user.${record.is_active ? 'disabled' : 'enabled'}Confirm`),
       okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
       okType: 'danger',
       onOk: () => {
         const res = record.is_active ? deleteUser(record.id) : enableUser(record.id);

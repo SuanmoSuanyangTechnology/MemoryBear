@@ -70,6 +70,7 @@ const Mcp: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getSta
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: item.name }),
       okText: t('common.delete'),
+      cancelText: t('common.cancel'),
       okType: 'danger',
       onOk: () => {
         deleteTool(item.id as string)
