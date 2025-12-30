@@ -91,7 +91,7 @@ export const zh = {
       operation: '操作',
       selectDataSource: '选择来源',
       localFile: '本地文件',
-      uploadFileTypes: '上传 PDF、TXT、DOCX, IMAGE, MEDIA 等格式的文件',
+      uploadFileTypes: '上传 PDF、 TXT、 DOCX、 IMAGE、 MEDIA 等格式的文件',
       webLink: '网页链接',
       webLinkPlaceholder: '请输入',
       webLinkDesc: '仅支持静态链接。如果上传的数据显示为空，则该链接可能无法读取。每行一个，一次最多{{count}}个链接',
