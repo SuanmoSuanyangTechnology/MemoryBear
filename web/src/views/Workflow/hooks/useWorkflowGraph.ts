@@ -783,20 +783,21 @@ export const useWorkflowGraph = ({
         }),
         edges: edges.map((edge: Edge) => {
           const sourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
+          const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
           const sourcePortId = edge.getSourcePortId();
           
           // 如果是if-else节点的右侧端口连线，添加label
           if (sourceCell?.getData()?.type === 'if-else' && sourcePortId?.startsWith('CASE')) {
             return {
-              source: edge.getSourceCellId(),
-              target: edge.getTargetCellId(),
+              source: sourceCell.getData().id,
+              target: targetCell?.getData().id,
               label: sourcePortId,
             };
           }
           
           return {
-            source: edge.getSourceCellId(),
-            target: edge.getTargetCellId(),
+            source: sourceCell?.getData().id,
+            target: targetCell?.getData().id,
           };
         }),
       }
