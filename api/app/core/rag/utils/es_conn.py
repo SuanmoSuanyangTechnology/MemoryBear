@@ -213,7 +213,7 @@ class ESConnection(DocStoreConnection):
                           m.topn * 2,
                           query_vector=list(m.embedding_data),
                           filter=bqry.to_dict(),
-                          similarity=similarity,
+                          # similarity=similarity
                           )
 
         if bqry and rank_feature:
