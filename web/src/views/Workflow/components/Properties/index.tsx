@@ -1,7 +1,7 @@
 import { type FC, useEffect, useState, useRef, useMemo } from "react";
 import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
-import { Form, Input, Button, Select, InputNumber, Slider, Space, Divider, App } from 'antd'
+import { Form, Input, Button, Select, InputNumber, Slider, Space, Divider, App, Switch } from 'antd'
 
 import type { NodeConfig, NodeProperties, StartVariableItem, VariableEditModalRef } from '../../types'
 import Empty from '@/components/Empty';
@@ -12,6 +12,9 @@ import MessageEditor from './MessageEditor'
 import Knowledge from './Knowledge/Knowledge';
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 import VariableSelect from './VariableSelect';
+import ParamsList from './ParamsList';
+import GroupVariableList from './GroupVariableList'
+import CaseList from './CaseList'
 
 interface PropertiesProps {
   selectedNode?: Node | null; 
@@ -70,12 +73,24 @@ const Properties: FC<PropertiesProps> = ({
 
   useEffect(() => {
     if (values && selectedNode) {
-      const { id, knowledge_retrieval, ...rest } = values
-      const { knowledge_bases, ...restKnowledgeConfig } = knowledge_retrieval || {}
+      const { id, knowledge_retrieval, group, group_names, ...rest } = values
+      const { knowledge_bases = [], ...restKnowledgeConfig } = (knowledge_retrieval as any) || {}
+
+      let groupNames: Record<string, string[]> | string[] = {}
+
+      if (group && group_names?.length) {
+        group_names.forEach(vo => {
+          (groupNames as Record<string, string[]>)[vo.key] = vo.value
+        })
+      } else if (!group) {
+        groupNames = group_names?.[0]?.value || []
+      }
       let allRest = {
         ...rest,
         ...restKnowledgeConfig,
-        knowledge_bases: knowledge_bases?.map(vo => ({
+      }
+      if (knowledge_bases?.length) {
+        allRest.knowledge_bases = knowledge_bases?.map((vo: any) => ({
           id: vo.id,
           ...vo.config
         }))
@@ -134,7 +149,6 @@ const Properties: FC<PropertiesProps> = ({
     })
   }
 
-
   const variableList = useMemo(() => {
     if (!selectedNode || !graphRef?.current) return [];
     
@@ -142,6 +156,7 @@ const Properties: FC<PropertiesProps> = ({
     const graph = graphRef.current;
     const edges = graph.getEdges();
     const nodes = graph.getNodes();
+    const addedKeys = new Set<string>();
     
     // Find all connected previous nodes (recursive)
     const getAllPreviousNodes = (nodeId: string, visited = new Set<string>()): string[] => {
@@ -175,35 +190,47 @@ const Properties: FC<PropertiesProps> = ({
             ...(nodeData.config?.variables?.value ?? [])
           ]
           list.forEach((variable: any) => {
-            variableList.push({
-              key: `${nodeId}_${variable.name}`,
-              label: variable.name,
-              type: 'variable',
-              dataType: variable.type,
-              value: `{{${nodeId}.${variable.name}}}`,
-              nodeData: nodeData,
-            });
+            const key = `${nodeId}_${variable.name}`;
+            if (!addedKeys.has(key)) {
+              addedKeys.add(key);
+              variableList.push({
+                key,
+                label: variable.name,
+                type: 'variable',
+                dataType: variable.type,
+                value: `{{${nodeId}.${variable.name}}}`,
+                nodeData: nodeData,
+              });
+            }
           });
           nodeData.config?.variables?.sys.forEach((variable: any) => {
-            variableList.push({
-              key: `${nodeId}_${variable.name}`,
-              label: `sys.${variable.name}`,
-              type: 'variable',
-              dataType: variable.type,
-              value: `{{sys.${variable.name}}}`,
-              nodeData: nodeData,
-            });
+            const key = `${nodeId}_sys_${variable.name}`;
+            if (!addedKeys.has(key)) {
+              addedKeys.add(key);
+              variableList.push({
+                key,
+                label: `sys.${variable.name}`,
+                type: 'variable',
+                dataType: variable.type,
+                value: `sys.${variable.name}`,
+                nodeData: nodeData,
+              });
+            }
           });
           break
         case 'llm':
-          variableList.push({
-            key: `${nodeId}_output`,
-            label: 'output',
-            type: 'variable',
-            dataType: 'String',
-            value: `${nodeId}.output`,
-            nodeData: nodeData,
-          });
+          const llmKey = `${nodeId}_output`;
+          if (!addedKeys.has(llmKey)) {
+            addedKeys.add(llmKey);
+            variableList.push({
+              key: llmKey,
+              label: 'output',
+              type: 'variable',
+              dataType: 'String',
+              value: `${nodeId}.output`,
+              nodeData: nodeData,
+            });
+          }
           break
       }
     });
@@ -279,14 +306,14 @@ const Properties: FC<PropertiesProps> = ({
               if (selectedNode.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                 return (
                   <Form.Item key={key} name={key}>
-                    <MessageEditor selectedNode={selectedNode} graphRef={graphRef} />
+                    <MessageEditor options={variableList} />
                   </Form.Item>
                 )
               }
               if (selectedNode.data?.type === 'end' && key === 'output') {
                 return (
                   <Form.Item key={key} name={key}>
-                    <MessageEditor isArray={false} parentName={key} selectedNode={selectedNode} graphRef={graphRef} />
+                    <MessageEditor isArray={false} parentName={key} options={variableList} />
                   </Form.Item>
                 )
               }
@@ -306,11 +333,61 @@ const Properties: FC<PropertiesProps> = ({
                 )
               }
 
+              if (config.type === 'messageEditor') {
+                return (
+                  <Form.Item key={key} name={key}>
+                    <MessageEditor 
+                      title={t(`workflow.config.${selectedNode.data.type}.${key}`)}
+                      isArray={!!config.isArray} 
+                      parentName={key}
+                      options={variableList}
+                    />
+                  </Form.Item>
+                )
+              }
+
+              if (config.type === 'paramList') {
+                return (
+                  <Form.Item key={key} name={key}>
+                    <ParamsList
+                      label={t(`workflow.config.${selectedNode.data.type}.${key}`)}
+                    />
+                  </Form.Item>
+                
+                )
+              }
+              if (config.type === 'groupVariableList') {
+                return (
+                  <Form.Item key={key} name={key}>
+                    <GroupVariableList
+                      name={key}
+                      options={variableList}
+                      isCanAdd={!!values?.group}
+                    />
+                  </Form.Item>
+                
+                )
+              }
+              if (config.type === 'caseList') {
+                console.log('key', key)
+                return (
+                  <Form.Item key={key} name={key}>
+                    <CaseList
+                      name={key}
+                      options={variableList}
+                      selectedNode={selectedNode}
+                      graphRef={graphRef}
+                    />
+                  </Form.Item>
+                )
+              }
+
               return (
                 <Form.Item 
                   key={key} 
                   name={key} 
                   label={t(`workflow.config.${selectedNode.data.type}.${key}`)}
+                  layout={config.type === 'switch' ? 'horizontal' : 'vertical'}
                 >
                   {config.type === 'input'
                     ? <Input placeholder={t('common.pleaseEnter')} />
@@ -339,6 +416,8 @@ const Properties: FC<PropertiesProps> = ({
                         placeholder={t('common.pleaseSelect')}
                         options={variableList}
                       />
+                    : config.type === 'switch'
+                    ? <Switch />
                     : null
                   }
                 </Form.Item>

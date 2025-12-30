@@ -1,7 +1,8 @@
 
 import { Graph } from '@antv/x6';
+import type { KnowledgeConfig } from './components/Properties/Knowledge/types'
 export interface NodeConfig {
-  type: 'input' | 'textarea' | 'select' | 'inputNumber' | 'slider' | 'customSelect' | 'define' | 'knowledge' | 'variableList';
+  type: 'input' | 'textarea' | 'select' | 'inputNumber' | 'slider' | 'customSelect' | 'define' | 'knowledge' | 'variableList' | string;
   options?: { label: string; value: string }[];
 
   max?: number;
@@ -20,6 +21,10 @@ export interface NodeConfig {
     type: string;
     readonly: boolean;
   }>
+
+  knowledge_retrieval?: KnowledgeConfig;
+
+  group_names?: Array<{key: string, value: string[]}>
   [key: string]: unknown;
 }
 
