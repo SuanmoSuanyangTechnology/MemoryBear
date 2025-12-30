@@ -47,9 +47,9 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
         style={{ width: '12px', height: '12px', marginRight: '4px' }} 
         alt=""
       />
-      {data.nodeData?.name}
+      <span className="rb:wrap-break-word rb:line-clamp-1">{data.nodeData?.name}</span>
       <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
-      <span style={{ color: '#155EEF' }}>{data.label}</span>
+      <span className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1" style={{ color: '#155EEF' }}>{data.label}</span>
     </span>
   );
 };
