@@ -32,7 +32,6 @@
       { "path": "/api-key", "element": "ApiKeyManagement" },
       { "path": "/emotion-engine/:id", "element": "EmotionEngine" },
       { "path": "/reflection-engine/:id", "element": "SelfReflectionEngine" },
-      { "path": "/statement/:id", "element": "StatementDetail" },
       { "path": "/no-permission", "element": "NoPermission" },
       { "path": "/*", "element": "NotFound" }
     ]
@@ -42,7 +41,8 @@
     "children": [
       { "path": "/application/config/:id", "element": "ApplicationConfig" },
       { "path": "/conversation/:token", "element": "Conversation" },
-      { "path": "/user-memory/neo4j/:id", "element": "Neo4jUserMemoryDetail" }
+      { "path": "/user-memory/neo4j/:id", "element": "Neo4jUserMemoryDetail" },
+      { "path": "/statement/:id", "element": "StatementDetail" }
     ]
   },
   {

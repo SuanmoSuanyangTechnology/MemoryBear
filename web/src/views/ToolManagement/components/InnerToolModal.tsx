@@ -75,6 +75,9 @@ const InnerToolModal = forwardRef<InnerToolModalRef, InnerToolModalProps>(({
       .then(() => {
         message.success(t('tool.testConnectionSuccess'));
       })
+      .finally(() => {
+        refreshTable()
+      })
   };
 
   // 暴露给父组件的方法

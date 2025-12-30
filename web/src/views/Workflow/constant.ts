@@ -215,15 +215,82 @@ export const nodeLibrary: NodeLibrary[] = [
       }
     ]
   },
-  // {
-  //   category: "externalInteraction",
-  //   nodes: [
-  //     { type: "http_request", icon: httpRequestIcon },
-  //     { type: "tools", icon: toolsIcon },
-  //     { type: "code_execution", icon: codeExecutionIcon },
-  //     { type: "template_rendering", icon: templateRenderingIcon }
-  //   ]
-  // },
+  {
+    category: "externalInteraction",
+    nodes: [
+      { type: "http-request", icon: httpRequestIcon,
+        config: {
+          method: {
+            type: 'select',
+            options: [
+              { label: 'GET', value: 'GET' },
+              { label: 'POST', value: 'POST' },
+              { label: 'HEAD', value: 'HEAD' },
+              { label: 'PATCH', value: 'PATCH' },
+              { label: 'PUT', value: 'PUT' },
+              { label: 'DELETE', value: 'DELETE' },
+            ],
+            defaultValue: 'GET'
+          },
+          url: {
+            type: 'messageEditor',
+            isArray: false,
+          },
+          auth: {
+            type: 'define',
+            defaultValue: {
+              auth_type: 'none'
+            }
+          },
+          headers: {
+            type: 'define',
+            defaultValue: {}
+          },
+          params: {
+            type: 'define',
+            defaultValue: {}
+          },
+          body: {
+            type: 'define',
+            defaultValue: {
+              'content_type': 'none'
+            }
+          },
+          verify_ssl: {
+            type: 'switch',
+            defaultValue: false
+          },
+          timeouts: {
+            type: 'define',
+            defaultValue: {}
+          },
+          retry: {
+            type: 'define',
+          },
+          error_handle: {
+            type: 'define',
+            defaultValue: {
+              method: 'default'
+            }
+          }
+        }
+      },
+      // { type: "tools", icon: toolsIcon },
+      // { type: "code_execution", icon: codeExecutionIcon },
+      { type: "jinja-render", icon: templateRenderingIcon,
+        config: {
+          mapping: {
+            type: 'mappingList',
+            defaultValue: []
+          },
+          template: {
+            type: 'messageEditor',
+            isArray: false,
+          },
+        }
+      }
+    ]
+  },
   // {
   //   category: "safetyAndCompliance",
   //   nodes: [

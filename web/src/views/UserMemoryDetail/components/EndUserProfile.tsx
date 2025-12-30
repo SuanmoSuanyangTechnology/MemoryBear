@@ -27,7 +27,6 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onD
     getData()
   }, [id])
   
-  // 记忆洞察
   const getData = () => {
     if (!id) return
     setLoading(true)
