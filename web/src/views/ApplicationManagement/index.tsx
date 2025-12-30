@@ -32,6 +32,7 @@ const ApplicationManagement: React.FC = () => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: item.name }),
       okText: t('common.delete'),
+      cancelText: t('common.cancel'),
       okType: 'danger',
       onOk: () => {
       deleteApplication(item.id)

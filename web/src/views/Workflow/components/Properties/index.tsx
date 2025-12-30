@@ -138,6 +138,7 @@ const Properties: FC<PropertiesProps> = ({
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: vo.name }),
       okText: t('common.delete'),
+      cancelText: t('common.cancel'),
       okType: 'danger',
       onOk: () => {
         const defaultValue = selectedNode.data.config.variables.defaultValue ?? []
