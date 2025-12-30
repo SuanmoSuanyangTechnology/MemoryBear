@@ -61,14 +61,14 @@ def get_source_kb_ids_by_target_kb_id(
 ) -> list:
     """
     Query the original knowledge base ID list by sharing the knowledge base
-    Return: list[UUID] - List of knowledge base IDs
+    Return: list[(source_kb_id,source_workspace_id)] - List of knowledge base source_kb_id and source_workspace_id
     """
     db_logger.debug(
         f"Query the original knowledge base id list by sharing the knowledge base: filters_count={len(filters)}")
 
     try:
         # Only query the id field
-        query = db.query(KnowledgeShare.source_kb_id)
+        query = db.query(KnowledgeShare.source_kb_id, KnowledgeShare.source_workspace_id)
 
         # Apply filter conditions
         for filter_cond in filters:
@@ -78,8 +78,8 @@ def get_source_kb_ids_by_target_kb_id(
         items = query.all()
         db_logger.info(f"Successfully queried the original knowledge base ID list by sharing the knowledge base: count={len(items)}")
 
-        # Return the list of IDs directly. Since only the ID field is queried, the returned data is a single column
-        return [item[0] for item in items]
+        # Return the list of source_kb_id and source_workspace_id directly. Since only the source_kb_id and source_workspace_id field is queried
+        return items
     except Exception as e:
         db_logger.error(f"Failed to query the original knowledge base ID list through knowledge base sharing: {str(e)}")
         raise

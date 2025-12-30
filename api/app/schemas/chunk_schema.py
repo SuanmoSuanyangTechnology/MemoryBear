@@ -10,6 +10,7 @@ class RetrieveType(StrEnum):
     PARTICIPLE = "participle"
     SEMANTIC = "semantic"
     HYBRID = "hybrid"
+    Graph = "graph"
 
 
 class ChunkCreate(BaseModel):
