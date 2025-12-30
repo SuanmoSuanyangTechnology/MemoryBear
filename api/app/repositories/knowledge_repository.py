@@ -52,7 +52,7 @@ def get_knowledges_paginated(
         raise
 
 
-def get_chunded_knowledgeids(
+def get_chunked_knowledgeids(
         db: Session,
         filters: list
 ) -> list:
@@ -115,7 +115,9 @@ def get_knowledge_by_name(db: Session, name: str, workspace_id: uuid.UUID) -> Kn
     db_logger.debug(f"Query knowledge base based on name and workspace_id: name={name}, workspace_id={workspace_id}")
 
     try:
-        knowledge = db.query(Knowledge).filter(Knowledge.name == name).filter(Knowledge.workspace_id == workspace_id).first()
+        knowledge = db.query(Knowledge).filter(Knowledge.name == name,
+                                               Knowledge.workspace_id == workspace_id,
+                                               Knowledge.status == 1).first()
         if knowledge:
             db_logger.debug(f"knowledge base query successful: {name} (ID: {knowledge.id})")
         else:

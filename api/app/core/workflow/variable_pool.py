@@ -10,7 +10,10 @@
 """
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.core.workflow.nodes import WorkflowState
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +85,7 @@ class VariablePool:
         >>> pool.set(["conv", "user_name"], "张三")
     """
     
-    def __init__(self, state: dict[str, Any]):
+    def __init__(self, state: "WorkflowState"):
         """初始化变量池
         
         Args:
@@ -195,19 +198,22 @@ class VariablePool:
         
         namespace = selector[0]
         
-        if namespace != "conv":
-            raise ValueError("只能设置会话变量 (conv.*)")
+        if namespace != "conv" and namespace not in self.state["cycle_nodes"]:
+            raise ValueError("Only conversation or cycle variables can be assigned.")
         
         key = selector[1]
         
         # 确保 variables 结构存在
         if "variables" not in self.state:
             self.state["variables"] = {"sys": {}, "conv": {}}
-        if "conv" not in self.state["variables"]:
-            self.state["variables"]["conv"] = {}
-        
-        # 设置值
-        self.state["variables"]["conv"][key] = value
+        if namespace == "conv":
+            if "conv" not in self.state["variables"]:
+                self.state["variables"]["conv"] = {}
+
+            # 设置值
+            self.state["variables"]["conv"][key] = value
+        elif namespace in self.state["cycle_nodes"]:
+            self.state["runtime_vars"][namespace][key] = value
         
         logger.debug(f"设置变量: {'.'.join(selector)} = {value}")
     

@@ -5,15 +5,20 @@
 使用余弦相似度进行语义匹配。
 """
 
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from app.core.logging_config import get_memory_logger
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.storage_services.search.search_strategy import SearchStrategy, SearchResult
-from app.repositories.neo4j.graph_search import search_graph_by_embedding
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.memory.utils.config.config_utils import get_embedder_config
+from app.core.memory.storage_services.search.search_strategy import (
+    SearchResult,
+    SearchStrategy,
+)
 from app.core.memory.utils.config import definitions as config_defs
 from app.core.models.base import RedBearModelConfig
+from app.db import get_db_context
+from app.repositories.neo4j.graph_search import search_graph_by_embedding
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.services.memory_config_service import MemoryConfigService
 
 logger = get_memory_logger(__name__)
 
@@ -62,7 +67,9 @@ class SemanticSearchStrategy(SearchStrategy):
         """
         try:
             # 从数据库读取嵌入器配置
-            embedder_config_dict = get_embedder_config(config_defs.SELECTED_EMBEDDING_ID)
+            with get_db_context() as db:
+                config_service = MemoryConfigService(db)
+                embedder_config_dict = config_service.get_embedder_config(config_defs.SELECTED_EMBEDDING_ID)
             rb_config = RedBearModelConfig(
                 model_name=embedder_config_dict["model_name"],
                 provider=embedder_config_dict["provider"],

@@ -2,10 +2,10 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import time
 from datetime import datetime
-from typing import List, Dict, Any
-import re
+from typing import Any, Dict, List
 
 try:
     from dotenv import load_dotenv
@@ -15,6 +15,7 @@ except Exception:
 
 # 路径与模块导入保持与现有评估脚本一致
 import sys
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))
 _SRC_DIR = os.path.join(_PROJECT_ROOT, "src")
@@ -23,17 +24,27 @@ for _p in (_SRC_DIR, _PROJECT_ROOT):
         sys.path.insert(0, _p)
 
 # 对齐 locomo_test 的检索逻辑：直接使用 graph_search 与 Neo4jConnector/Embedder1
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
+from app.core.memory.evaluation.common.metrics import (
+    avg_context_tokens,
+    exact_match,
+    latency_stats,
+)
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.memory.utils.config.definitions import (
+    PROJECT_ROOT,
+    SELECTED_EMBEDDING_ID,
+    SELECTED_GROUP_ID,
+    SELECTED_LLM_ID,
+)
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.models.base import RedBearModelConfig
-from app.core.memory.utils.config_utils import get_embedder_config
+from app.db import get_db_context
+from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.services.memory_config_service import MemoryConfigService
 
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.utils.config.definitions import PROJECT_ROOT, SELECTED_GROUP_ID, SELECTED_EMBEDDING_ID, SELECTED_LLM_ID
-from app.core.memory.evaluation.common.metrics import exact_match, latency_stats, avg_context_tokens
 try:
-    from app.core.memory.evaluation.common.metrics import f1_score, bleu1, jaccard
+    from app.core.memory.evaluation.common.metrics import bleu1, f1_score, jaccard
 except Exception:
     # 兜底：简单实现（必要时）
     def f1_score(pred: str, ref: str) -> float:
@@ -226,13 +237,17 @@ async def run_memsciqa_test(
         items = all_items[start_index:start_index + sample_size]
 
     # 初始化 LLM（纯测试：不进行摄入）
-    llm = get_llm_client(SELECTED_LLM_ID)
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        llm = factory.get_llm_client(SELECTED_LLM_ID)
 
     # 初始化 Neo4j 连接与向量检索 Embedder（对齐 locomo_test）
     connector = Neo4jConnector()
     embedder = None
     if search_type in ("embedding", "hybrid"):
-        cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+            cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
         embedder = OpenAIEmbedderClient(
             model_config=RedBearModelConfig.model_validate(cfg_dict)
         )

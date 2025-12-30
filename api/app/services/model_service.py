@@ -36,7 +36,7 @@ class ModelConfigService:
         """获取模型配置列表"""
         models, total = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
         pages = math.ceil(total / query.pagesize) if total > 0 else 0
-        
+
         return PageData(
             page=PageMeta(
                 page=query.page,
@@ -72,7 +72,7 @@ class ModelConfigService:
         test_message: str = "Hello"
     ) -> Dict[str, Any]:
         """验证模型配置是否有效
-        
+
         Args:
             db: 数据库会话
             model_name: 模型名称
@@ -81,7 +81,7 @@ class ModelConfigService:
             api_base: API基础URL
             model_type: 模型类型 (llm/chat/embedding/rerank)
             test_message: 测试消息
-            
+
         Returns:
             Dict: 验证结果
         """
@@ -89,10 +89,10 @@ class ModelConfigService:
         from app.core.models.base import RedBearModelConfig
         from app.core.models.embedding import RedBearEmbeddings
         import traceback
-        
+
         try:
             start_time = time.time()
-            
+
             model_config = RedBearModelConfig(
                 model_name=model_name,
                 provider=provider,
@@ -101,16 +101,16 @@ class ModelConfigService:
                 temperature=0.7,
                 max_tokens=100
             )
-            
+
             # 根据模型类型选择不同的验证方式
             model_type_lower = model_type.lower()
-            
+
             if model_type_lower in ["llm", "chat"]:
                 # LLM/Chat 模型验证 - 统一使用字符串输入
                 llm = RedBearLLM(model_config, type=ModelType.LLM if model_type_lower == "llm" else ModelType.CHAT)
                 response = await llm.ainvoke(test_message)
                 elapsed_time = time.time() - start_time
-                
+
                 content = response.content if hasattr(response, 'content') else str(response)
                 usage = None
                 if hasattr(response, 'usage_metadata'):
@@ -119,7 +119,7 @@ class ModelConfigService:
                         "output_tokens": getattr(response.usage_metadata, 'output_tokens', 0),
                         "total_tokens": getattr(response.usage_metadata, 'total_tokens', 0)
                     }
-                
+
                 return {
                     "valid": True,
                     "message": f"{model_type.upper()} 模型配置验证成功",
@@ -128,14 +128,14 @@ class ModelConfigService:
                     "usage": usage,
                     "error": None
                 }
-                
+
             elif model_type_lower == "embedding":
                 # Embedding 模型验证（在线程中运行同步方法）
                 embedding = RedBearEmbeddings(model_config)
                 test_texts = [test_message, "测试文本"]
                 vectors = await asyncio.to_thread(embedding.embed_documents, test_texts)
                 elapsed_time = time.time() - start_time
-                
+
                 return {
                     "valid": True,
                     "message": "Embedding 模型配置验证成功",
@@ -148,7 +148,7 @@ class ModelConfigService:
                     },
                     "error": None
                 }
-                
+
             elif model_type_lower == "rerank":
                 # Rerank 模型验证（在线程中运行同步方法）
                 rerank = RedBearRerank(model_config)
@@ -156,7 +156,7 @@ class ModelConfigService:
                 documents = ["这是第一个文档", "这是第二个文档", "这是第三个文档"]
                 results = await asyncio.to_thread(rerank.rerank, query=query, documents=documents, top_n=3)
                 elapsed_time = time.time() - start_time
-                
+
                 return {
                     "valid": True,
                     "message": "Rerank 模型配置验证成功",
@@ -169,7 +169,7 @@ class ModelConfigService:
                     },
                     "error": None
                 }
-                
+
             else:
                 return {
                     "valid": False,
@@ -179,7 +179,7 @@ class ModelConfigService:
                     "usage": None,
                     "error": f"不支持的模型类型: {model_type}"
                 }
-                
+
         except Exception as e:
             # 提取详细的错误信息
             error_message = str(e)
@@ -203,12 +203,12 @@ class ModelConfigService:
                 error_message = f"无效请求: {error_message}"
             elif "model_copy" in error_message:
                 error_message = "模型消息格式错误: 请确保使用正确的模型类型（LLM/Chat）"
-            
+
             # 记录详细错误日志
             logger.error(f"模型验证失败 - 类型: {error_type}, 模型: {model_name}, 提供商: {provider}")
             logger.error(f"错误详情: {error_message}")
             logger.debug(f"完整堆栈: {traceback.format_exc()}")
-            
+
             return {
                 "valid": False,
                 "message": f"{model_type.upper()} 模型配置验证失败",
@@ -249,7 +249,7 @@ class ModelConfigService:
         model_config_data = model_data.dict(exclude={"api_keys", "skip_validation"})
         # 添加租户ID
         model_config_data["tenant_id"] = tenant_id
-        
+
         model = ModelConfigRepository.create(db, model_config_data)
         db.flush()  # 获取生成的 ID
 
@@ -259,7 +259,7 @@ class ModelConfigService:
                 **api_key_data.dict()
             )
             ModelApiKeyRepository.create(db, api_key_create_schema)
-        
+
         db.commit()
         db.refresh(model)
         return model
@@ -270,11 +270,11 @@ class ModelConfigService:
         existing_model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not existing_model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        
+
         if model_data.name and model_data.name != existing_model.name:
             if ModelConfigRepository.get_by_name(db, model_data.name, tenant_id=tenant_id):
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
-        
+
         model = ModelConfigRepository.update(db, model_id, model_data, tenant_id=tenant_id)
         db.commit()
         db.refresh(model)
@@ -285,7 +285,7 @@ class ModelConfigService:
         """删除模型配置"""
         if not ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id):
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        
+
         success = ModelConfigRepository.delete(db, model_id, tenant_id=tenant_id)
         db.commit()
         return success
@@ -316,20 +316,20 @@ class ModelApiKeyService:
         return api_key
 
     @staticmethod
-    def get_api_keys_by_model(db: Session, model_config_id: uuid.UUID, is_active: bool = True) -> List[ModelApiKey]:
+    def get_api_keys_by_model(db: Session, model_config_id: uuid.UUID, is_active: bool = True) -> list[ModelApiKey]:
         """根据模型配置ID获取API Key列表"""
         if not ModelConfigRepository.get_by_id(db, model_config_id):
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        
+
         return ModelApiKeyRepository.get_by_model_config(db, model_config_id, is_active)
 
-    @staticmethod 
+    @staticmethod
     async def create_api_key(db: Session, api_key_data: ModelApiKeyCreate) -> ModelApiKey:
         """创建API Key"""
         model_config = ModelConfigRepository.get_by_id(db, api_key_data.model_config_id)
         if not model_config:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        
+
         validation_result = await ModelConfigService.validate_model_config(
                 db=db,
                 model_name=api_key_data.model_name,
@@ -345,7 +345,7 @@ class ModelApiKeyService:
                     f"模型配置验证失败: {validation_result['error']}",
                     BizCode.INVALID_PARAMETER
                 )
-                
+
         api_key = ModelApiKeyRepository.create(db, api_key_data)
         db.commit()
         db.refresh(api_key)
@@ -357,12 +357,12 @@ class ModelApiKeyService:
         existing_api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
         if not existing_api_key:
             raise BusinessException("API Key不存在", BizCode.NOT_FOUND)
-        
+
         # 获取关联的模型配置以获取模型类型
         model_config = ModelConfigRepository.get_by_id(db, existing_api_key.model_config_id)
         if not model_config:
             raise BusinessException("关联的模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        
+
         validation_result = await ModelConfigService.validate_model_config(
                 db=db,
                 model_name=api_key_data.model_name,
@@ -378,7 +378,7 @@ class ModelApiKeyService:
                     f"模型配置验证失败: {validation_result['error']}",
                     BizCode.INVALID_PARAMETER
                 )
-                
+
         api_key = ModelApiKeyRepository.update(db, api_key_id, api_key_data)
         db.commit()
         db.refresh(api_key)
@@ -389,7 +389,7 @@ class ModelApiKeyService:
         """删除API Key"""
         if not ModelApiKeyRepository.get_by_id(db, api_key_id):
             raise BusinessException("API Key不存在", BizCode.NOT_FOUND)
-        
+
         success = ModelApiKeyRepository.delete(db, api_key_id)
         db.commit()
         return success
@@ -409,3 +409,11 @@ class ModelApiKeyService:
         if success:
             db.commit()
         return success
+
+    @staticmethod
+    def get_a_api_key(db: Session, model_config_id: uuid.UUID) -> ModelApiKey:
+
+        api_kes = ModelApiKeyService.get_api_keys_by_model(db, model_config_id)
+        if api_kes and len(api_kes) > 0:
+            return api_kes[0]
+        raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)

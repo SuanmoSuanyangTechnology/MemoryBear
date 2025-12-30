@@ -8,7 +8,9 @@ from .file_schema import File, FileCreate, FileUpdate
 from .tenant_schema import Tenant, TenantCreate, TenantUpdate
 from .chunk_schema import ChunkCreate, ChunkUpdate, ChunkRetrieve
 from .knowledgeshare_schema import KnowledgeShare, KnowledgeShareCreate
+from .order_schema import CreateOrderRequest, OrderResponse, ExternalOrderResponse
 from .app_schema import (
+    AppChatRequest,
     DraftRunRequest,
     DraftRunResponse,
     DraftRunStreamChunk,
@@ -73,6 +75,10 @@ __all__ = [
     "ChunkRetrieve",
     "KnowledgeShare",
     "KnowledgeShareCreate",
+    "CreateOrderRequest",
+    "OrderResponse",
+    "ExternalOrderResponse",
+    "AppChatRequest",
     "DraftRunRequest",
     "DraftRunResponse",
     "DraftRunStreamChunk",

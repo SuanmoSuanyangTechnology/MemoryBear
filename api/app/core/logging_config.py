@@ -326,7 +326,7 @@ def log_prompt_rendering(prompt_type: str, content: str) -> None:
     logger.info(log_message)
 
 
-def log_template_rendering(template_name: str, context: dict | None = None) -> None:
+def log_template_rendering(template_name: str, context: Optional[dict] = None) -> None:
     """Log template rendering information.
     
     Logs the template name and context keys for debugging template rendering.
@@ -573,6 +573,43 @@ def get_named_logger(name: str) -> logging.Logger:
         >>> logger.info("Agent operation started")
     """
     return get_agent_logger(name)
+
+
+def get_config_logger() -> logging.Logger:
+    """Get a specialized logger for memory configuration operations.
+    
+    Returns a logger configured specifically for configuration loading, validation,
+    and model resolution operations with:
+    - Logger name: memory.config
+    - Output: Inherits from root logger (console + file)
+    - Level: Inherits from root logger
+    - Format: Standard format with timing information
+    
+    This logger is optimized for configuration operations and includes
+    structured logging for timing, validation steps, and error context.
+    
+    Returns:
+        Logger configured for memory configuration operations
+        
+    Example:
+        >>> logger = get_config_logger()
+        >>> logger.info("Loading configuration", extra={
+        ...     "config_id": 123,
+        ...     "workspace_id": "uuid-here",
+        ...     "operation": "load_config"
+        ... })
+    """
+    # Ensure memory logging is initialized
+    if not LoggingConfig._memory_loggers_initialized:
+        LoggingConfig.setup_memory_logging()
+    
+    # Get configuration logger with memory namespace
+    logger = logging.getLogger("memory.config")
+    
+    # The logger automatically inherits handlers, formatters, and level from root logger
+    # through Python's logging hierarchy, so no additional configuration is needed
+    
+    return logger
 
 
 def get_memory_logger(name: Optional[str] = None) -> logging.Logger:

@@ -15,7 +15,7 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     from dotenv import load_dotenv
@@ -23,37 +23,38 @@ except ImportError:
     def load_dotenv():
         pass
 
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.models.base import RedBearModelConfig
-from app.core.memory.utils.config_utils import get_embedder_config
-from app.core.memory.utils.definitions import (
-    PROJECT_ROOT,
-    SELECTED_GROUP_ID,
-    SELECTED_LLM_ID,
-    SELECTED_EMBEDDING_ID
-)
-from app.core.memory.utils.llm_utils import get_llm_client
 from app.core.memory.evaluation.common.metrics import (
-    f1_score,
+    avg_context_tokens,
     bleu1,
+    f1_score,
     jaccard,
     latency_stats,
-    avg_context_tokens
 )
 from app.core.memory.evaluation.locomo.locomo_metrics import (
+    get_category_name,
     locomo_f1_score,
     locomo_multi_f1,
-    get_category_name
 )
 from app.core.memory.evaluation.locomo.locomo_utils import (
-    load_locomo_data,
     extract_conversations,
+    ingest_conversations_if_needed,
+    load_locomo_data,
     resolve_temporal_references,
-    select_and_format_information,
     retrieve_relevant_information,
-    ingest_conversations_if_needed
+    select_and_format_information,
 )
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.memory.utils.definitions import (
+    PROJECT_ROOT,
+    SELECTED_EMBEDDING_ID,
+    SELECTED_GROUP_ID,
+    SELECTED_LLM_ID,
+)
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.models.base import RedBearModelConfig
+from app.db import get_db_context
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.services.memory_config_service import MemoryConfigService
 
 
 async def run_locomo_benchmark(
@@ -160,10 +161,16 @@ async def run_locomo_benchmark(
     # Step 3: Initialize clients
     print("🔧 Initializing clients...")
     connector = Neo4jConnector()
-    llm_client = get_llm_client(SELECTED_LLM_ID)
+    
+    # Initialize LLM client with database context
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        llm_client = factory.get_llm_client(SELECTED_LLM_ID)
     
     # Initialize embedder
-    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
+    with get_db_context() as db:
+        config_service = MemoryConfigService(db)
+        cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
     embedder = OpenAIEmbedderClient(
         model_config=RedBearModelConfig.model_validate(cfg_dict)
     )

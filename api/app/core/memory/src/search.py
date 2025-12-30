@@ -1,31 +1,43 @@
 import argparse
 import asyncio
 import json
+import math
 import os
 import time
-from typing import List, Dict, Any, Optional
-from dotenv import load_dotenv
 from datetime import datetime
-import math
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from app.schemas.memory_config_schema import MemoryConfig
+
 from app.core.logging_config import get_memory_logger
-# 使用新的仓储层
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.neo4j.graph_search import (
-    search_graph_by_embedding, search_graph,
-    search_graph_by_temporal, search_graph_by_keyword_temporal,
-    search_graph_by_chunk_id
-)
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.models.config_models import TemporalSearchParams
-from app.core.memory.utils.config.config_utils import get_embedder_config, get_pipeline_config
-from app.core.memory.utils.data.time_utils import normalize_date_safe
 from app.core.memory.models.variate_config import ForgettingEngineConfig
-from app.core.memory.utils.config.definitions import CONFIG, RUNTIME_CONFIG
-from app.core.memory.storage_services.forgetting_engine.forgetting_engine import ForgettingEngine
+from app.core.memory.storage_services.forgetting_engine.forgetting_engine import (
+    ForgettingEngine,
+)
+from app.core.memory.utils.config.config_utils import (
+    get_pipeline_config,
+)
 from app.core.memory.utils.data.text_utils import extract_plain_query
-from app.core.memory.utils.config import definitions as config_defs
-from app.core.models.base import RedBearModelConfig
+from app.core.memory.utils.data.time_utils import normalize_date_safe
 from app.core.memory.utils.llm.llm_utils import get_reranker_client
+from app.core.models.base import RedBearModelConfig
+from app.db import get_db_context
+from app.repositories.neo4j.graph_search import (
+    search_graph,
+    search_graph_by_chunk_id,
+    search_graph_by_embedding,
+    search_graph_by_keyword_temporal,
+    search_graph_by_temporal,
+)
+
+# 使用新的仓储层
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.services.memory_config_service import MemoryConfigService
+from dotenv import load_dotenv
+
 load_dotenv()
 
 logger = get_memory_logger(__name__)
@@ -131,7 +143,7 @@ def rerank_hybrid_results(
 
         # Add keyword results with BM25 scores
         for item in keyword_items:
-            item_id = item.get("id") or item.get("uuid")
+            item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
             if item_id:
                 combined_items[item_id] = item.copy()
                 combined_items[item_id]["bm25_score"] = item.get("normalized_score", 0)
@@ -139,7 +151,7 @@ def rerank_hybrid_results(
 
         # Add or update with embedding results
         for item in embedding_items:
-            item_id = item.get("id") or item.get("uuid")
+            item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
             if item_id:
                 if item_id in combined_items:
                     # Update existing item with embedding score
@@ -220,7 +232,7 @@ def rerank_with_forgetting_curve(
             (keyword_items, False), (embedding_items, True)
         ):
             for item in src_items:
-                item_id = item.get("id") or item.get("uuid")
+                item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
                 if not item_id:
                     continue
                 existing = combined_items.get(item_id)
@@ -266,26 +278,25 @@ def rerank_with_forgetting_curve(
     return reranked
 
 
-def log_search_query(query_text: str, search_type: str, group_id: str | None, limit: int, include: List[str], log_file: str = "search_log.txt"):
-    """Log search query information to file"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def log_search_query(query_text: str, search_type: str, group_id: str | None, limit: int, include: List[str], log_file: str = None):
+    """Log search query information using the logger.
+    
+    Args:
+        query_text: The search query text
+        search_type: Type of search (keyword, embedding, hybrid)
+        group_id: Group identifier for filtering
+        limit: Maximum number of results
+        include: List of result types to include
+        log_file: Deprecated parameter, kept for backward compatibility
+    """
     # Ensure the query text is plain and clean before logging
     cleaned_query = extract_plain_query(query_text)
-    log_entry = {
-        "timestamp": timestamp,
-        # "query": query_text,
-        "query": cleaned_query,
-        "search_type": search_type,
-        "group_id": group_id,
-        "limit": limit,
-        "include": include
-    }
-
-    # Append to log file
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-
-    logger.info(f"Search logged: {query_text} ({search_type})")
+    
+    # Log using the standard logger
+    logger.info(
+        f"Search query: query='{cleaned_query}', type={search_type}, "
+        f"group_id={group_id}, limit={limit}, include={include}"
+    )
 
 
 def _remove_keys_recursive(obj: Any, keys_to_remove: List[str]) -> Any:
@@ -315,229 +326,229 @@ def apply_reranker_placeholder(
     If config enables reranker, annotate items with a final_score equal to combined_score
     and keep ordering. This is a no-op reranker to be replaced later.
     """
-    try:
-        rc = (RUNTIME_CONFIG.get("reranker", {}) or CONFIG.get("reranker", {}))
-    except Exception as e:
-        logger.debug(f"Failed to load reranker config: {e}")
-        rc = {}
-    if not rc or not rc.get("enabled", False):
-        return results
+    # try:
+    #     rc = (RUNTIME_CONFIG.get("reranker", {}) or CONFIG.get("reranker", {}))
+    # except Exception as e:
+    #     logger.debug(f"Failed to load reranker config: {e}")
+    #     rc = {}
+    # if not rc or not rc.get("enabled", False):
+    #     return results
 
-    top_k = int(rc.get("top_k", 100))
-    model_name = rc.get("model", "placeholder")
+    # top_k = int(rc.get("top_k", 100))
+    # model_name = rc.get("model", "placeholder")
 
-    for cat, items in results.items():
-        head = items[:top_k]
-        for it in head:
-            base = float(it.get("combined_score", it.get("score", 0.0)) or 0.0)
-            it["final_score"] = base
-            it["reranker_model"] = model_name
-        # Keep overall order by final_score if present, otherwise combined/score
-        results[cat] = sorted(
-            items,
-            key=lambda x: float(x.get("final_score", x.get("combined_score", x.get("score", 0.0)) or 0.0)),
-            reverse=True,
-        )
+    # for cat, items in results.items():
+    #     head = items[:top_k]
+    #     for it in head:
+    #         base = float(it.get("combined_score", it.get("score", 0.0)) or 0.0)
+    #         it["final_score"] = base
+    #         it["reranker_model"] = model_name
+    #     # Keep overall order by final_score if present, otherwise combined/score
+    #     results[cat] = sorted(
+    #         items,
+    #         key=lambda x: float(x.get("final_score", x.get("combined_score", x.get("score", 0.0)) or 0.0)),
+    #         reverse=True,
+    #     )
     return results
 
 
-async def apply_llm_reranker(
-    results: Dict[str, List[Dict[str, Any]]],
-    query_text: str,
-    reranker_client: Optional[Any] = None,
-    llm_weight: Optional[float] = None,
-    top_k: Optional[int] = None,
-    batch_size: Optional[int] = None,
-) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Apply LLM-based reranking to search results.
+# async def apply_llm_reranker(
+#     results: Dict[str, List[Dict[str, Any]]],
+#     query_text: str,
+#     reranker_client: Optional[Any] = None,
+#     llm_weight: Optional[float] = None,
+#     top_k: Optional[int] = None,
+#     batch_size: Optional[int] = None,
+# ) -> Dict[str, List[Dict[str, Any]]]:
+#     """
+#     Apply LLM-based reranking to search results.
     
-    Args:
-        results: Search results organized by category
-        query_text: Original search query
-        reranker_client: Optional pre-initialized reranker client
-        llm_weight: Weight for LLM score (0.0-1.0, higher favors LLM)
-        top_k: Maximum number of items to rerank per category
-        batch_size: Number of items to process concurrently
+#     Args:
+#         results: Search results organized by category
+#         query_text: Original search query
+#         reranker_client: Optional pre-initialized reranker client
+#         llm_weight: Weight for LLM score (0.0-1.0, higher favors LLM)
+#         top_k: Maximum number of items to rerank per category
+#         batch_size: Number of items to process concurrently
         
-    Returns:
-        Reranked results with final_score and reranker_model fields
-    """
-    # Load reranker configuration from runtime.json
-    try:
-        rc = RUNTIME_CONFIG.get("reranker", {}) or CONFIG.get("reranker", {})
-    except Exception as e:
-        logger.debug(f"Failed to load reranker config: {e}")
-        rc = {}
+#     Returns:
+#         Reranked results with final_score and reranker_model fields
+#     """
+#     # Load reranker configuration from runtime.json
+#     # try:
+#     #     rc = RUNTIME_CONFIG.get("reranker", {}) or CONFIG.get("reranker", {})
+#     # except Exception as e:
+#     #     logger.debug(f"Failed to load reranker config: {e}")
+#     #     rc = {}
     
-    # Check if reranking is enabled
-    enabled = rc.get("enabled", False)
-    if not enabled:
-        logger.debug("LLM reranking is disabled in configuration")
-        return results
+#     # Check if reranking is enabled
+#     enabled = rc.get("enabled", False)
+#     if not enabled:
+#         logger.debug("LLM reranking is disabled in configuration")
+#         return results
     
-    # Load configuration parameters with defaults
-    llm_weight = llm_weight if llm_weight is not None else rc.get("llm_weight", 0.5)
-    top_k = top_k if top_k is not None else rc.get("top_k", 20)
-    batch_size = batch_size if batch_size is not None else rc.get("batch_size", 5)
+#     # Load configuration parameters with defaults
+#     llm_weight = llm_weight if llm_weight is not None else rc.get("llm_weight", 0.5)
+#     top_k = top_k if top_k is not None else rc.get("top_k", 20)
+#     batch_size = batch_size if batch_size is not None else rc.get("batch_size", 5)
     
-    # Initialize reranker client if not provided
-    if reranker_client is None:
-        try:
-            reranker_client = get_reranker_client()
-        except Exception as e:
-            logger.warning(f"Failed to initialize reranker client: {e}, skipping LLM reranking")
-            return results
+#     # Initialize reranker client if not provided
+#     if reranker_client is None:
+#         try:
+#             reranker_client = get_reranker_client()
+#         except Exception as e:
+#             logger.warning(f"Failed to initialize reranker client: {e}, skipping LLM reranking")
+#             return results
     
-    # Get model name for metadata
-    model_name = getattr(reranker_client, 'model_name', 'unknown')
+#     # Get model name for metadata
+#     model_name = getattr(reranker_client, 'model_name', 'unknown')
     
-    # Process each category
-    reranked_results = {}
-    for category in ["statements", "chunks", "entities", "summaries"]:
-        items = results.get(category, [])
-        if not items:
-            reranked_results[category] = []
-            continue
+#     # Process each category
+#     reranked_results = {}
+#     for category in ["statements", "chunks", "entities", "summaries"]:
+#         items = results.get(category, [])
+#         if not items:
+#             reranked_results[category] = []
+#             continue
         
-        # Select top K items by combined_score for reranking
-        sorted_items = sorted(
-            items,
-            key=lambda x: float(x.get("combined_score", x.get("score", 0.0)) or 0.0),
-            reverse=True
-        )
+#         # Select top K items by combined_score for reranking
+#         sorted_items = sorted(
+#             items,
+#             key=lambda x: float(x.get("combined_score", x.get("score", 0.0)) or 0.0),
+#             reverse=True
+#         )
         
-        top_items = sorted_items[:top_k]
-        remaining_items = sorted_items[top_k:]
+#         top_items = sorted_items[:top_k]
+#         remaining_items = sorted_items[top_k:]
         
-        # Extract text content from each item
-        def extract_text(item: Dict[str, Any]) -> str:
-            """Extract text content from a result item."""
-            # Try different text fields based on category
-            text = item.get("text") or item.get("content") or item.get("statement") or item.get("name") or ""
-            return str(text).strip()
+#         # Extract text content from each item
+#         def extract_text(item: Dict[str, Any]) -> str:
+#             """Extract text content from a result item."""
+#             # Try different text fields based on category
+#             text = item.get("text") or item.get("content") or item.get("statement") or item.get("name") or ""
+#             return str(text).strip()
         
-        # Batch items for concurrent processing
-        batches = []
-        for i in range(0, len(top_items), batch_size):
-            batch = top_items[i:i + batch_size]
-            batches.append(batch)
+#         # Batch items for concurrent processing
+#         batches = []
+#         for i in range(0, len(top_items), batch_size):
+#             batch = top_items[i:i + batch_size]
+#             batches.append(batch)
         
-        # Process batches concurrently
-        async def process_batch(batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-            """Process a batch of items with LLM relevance scoring."""
-            scored_batch = []
+#         # Process batches concurrently
+#         async def process_batch(batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+#             """Process a batch of items with LLM relevance scoring."""
+#             scored_batch = []
             
-            for item in batch:
-                item_text = extract_text(item)
+#             for item in batch:
+#                 item_text = extract_text(item)
                 
-                # Skip items with no text
-                if not item_text:
-                    item_copy = item.copy()
-                    combined_score = float(item.get("combined_score", item.get("score", 0.0)) or 0.0)
-                    item_copy["final_score"] = combined_score
-                    item_copy["llm_relevance_score"] = 0.0
-                    item_copy["reranker_model"] = model_name
-                    scored_batch.append(item_copy)
-                    continue
+#                 # Skip items with no text
+#                 if not item_text:
+#                     item_copy = item.copy()
+#                     combined_score = float(item.get("combined_score", item.get("score", 0.0)) or 0.0)
+#                     item_copy["final_score"] = combined_score
+#                     item_copy["llm_relevance_score"] = 0.0
+#                     item_copy["reranker_model"] = model_name
+#                     scored_batch.append(item_copy)
+#                     continue
                 
-                # Create relevance scoring prompt
-                prompt = f"""Given the search query and a result item, rate the relevance of the item to the query on a scale from 0.0 to 1.0.
+#                 # Create relevance scoring prompt
+#                 prompt = f"""Given the search query and a result item, rate the relevance of the item to the query on a scale from 0.0 to 1.0.
 
-Query: {query_text}
+# Query: {query_text}
 
-Result: {item_text}
+# Result: {item_text}
 
-Respond with only a number between 0.0 and 1.0, where:
-- 0.0 means completely irrelevant
-- 1.0 means perfectly relevant
+# Respond with only a number between 0.0 and 1.0, where:
+# - 0.0 means completely irrelevant
+# - 1.0 means perfectly relevant
 
-Relevance score:"""
+# Relevance score:"""
                 
-                # Send request to LLM
-                try:
-                    messages = [{"role": "user", "content": prompt}]
-                    response = await reranker_client.chat(messages)
+#                 # Send request to LLM
+#                 try:
+#                     messages = [{"role": "user", "content": prompt}]
+#                     response = await reranker_client.chat(messages)
                     
-                    # Parse LLM response to extract relevance score
-                    response_text = str(response.content if hasattr(response, 'content') else response).strip()
+#                     # Parse LLM response to extract relevance score
+#                     response_text = str(response.content if hasattr(response, 'content') else response).strip()
                     
-                    # Try to extract a float from the response
-                    try:
-                        # Remove any non-numeric characters except decimal point
-                        import re
-                        score_match = re.search(r'(\d+\.?\d*)', response_text)
-                        if score_match:
-                            llm_score = float(score_match.group(1))
-                            # Clamp to [0.0, 1.0]
-                            llm_score = max(0.0, min(1.0, llm_score))
-                        else:
-                            raise ValueError("No numeric score found in response")
-                    except (ValueError, AttributeError) as e:
-                        logger.warning(f"Invalid LLM score format: {response_text}, using combined_score. Error: {e}")
-                        llm_score = None
+#                     # Try to extract a float from the response
+#                     try:
+#                         # Remove any non-numeric characters except decimal point
+#                         import re
+#                         score_match = re.search(r'(\d+\.?\d*)', response_text)
+#                         if score_match:
+#                             llm_score = float(score_match.group(1))
+#                             # Clamp to [0.0, 1.0]
+#                             llm_score = max(0.0, min(1.0, llm_score))
+#                         else:
+#                             raise ValueError("No numeric score found in response")
+#                     except (ValueError, AttributeError) as e:
+#                         logger.warning(f"Invalid LLM score format: {response_text}, using combined_score. Error: {e}")
+#                         llm_score = None
                     
-                    # Calculate final score
-                    item_copy = item.copy()
-                    combined_score = float(item.get("combined_score", item.get("score", 0.0)) or 0.0)
+#                     # Calculate final score
+#                     item_copy = item.copy()
+#                     combined_score = float(item.get("combined_score", item.get("score", 0.0)) or 0.0)
                     
-                    if llm_score is not None:
-                        final_score = (1 - llm_weight) * combined_score + llm_weight * llm_score
-                        item_copy["llm_relevance_score"] = llm_score
-                    else:
-                        # Use combined_score as fallback
-                        final_score = combined_score
-                        item_copy["llm_relevance_score"] = combined_score
+#                     if llm_score is not None:
+#                         final_score = (1 - llm_weight) * combined_score + llm_weight * llm_score
+#                         item_copy["llm_relevance_score"] = llm_score
+#                     else:
+#                         # Use combined_score as fallback
+#                         final_score = combined_score
+#                         item_copy["llm_relevance_score"] = combined_score
                     
-                    item_copy["final_score"] = final_score
-                    item_copy["reranker_model"] = model_name
-                    scored_batch.append(item_copy)
-                except Exception as e:
-                    logger.warning(f"Error processing item in LLM reranking: {e}, using combined_score")
-                    item_copy = item.copy()
-                    combined_score = float(item.get("combined_score", item.get("score", 0.0)) or 0.0)
-                    item_copy["final_score"] = combined_score
-                    item_copy["llm_relevance_score"] = combined_score
-                    item_copy["reranker_model"] = model_name
-                    scored_batch.append(item_copy)
+#                     item_copy["final_score"] = final_score
+#                     item_copy["reranker_model"] = model_name
+#                     scored_batch.append(item_copy)
+#                 except Exception as e:
+#                     logger.warning(f"Error processing item in LLM reranking: {e}, using combined_score")
+#                     item_copy = item.copy()
+#                     combined_score = float(item.get("combined_score", item.get("score", 0.0)) or 0.0)
+#                     item_copy["final_score"] = combined_score
+#                     item_copy["llm_relevance_score"] = combined_score
+#                     item_copy["reranker_model"] = model_name
+#                     scored_batch.append(item_copy)
             
-            return scored_batch
+#             return scored_batch
         
-        # Process all batches concurrently
-        try:
-            batch_tasks = [process_batch(batch) for batch in batches]
-            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+#         # Process all batches concurrently
+#         try:
+#             batch_tasks = [process_batch(batch) for batch in batches]
+#             batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
             
-            # Merge batch results
-            scored_items = []
-            for result in batch_results:
-                if isinstance(result, Exception):
-                    logger.warning(f"Batch processing failed: {result}")
-                    continue
-                scored_items.extend(result)
+#             # Merge batch results
+#             scored_items = []
+#             for result in batch_results:
+#                 if isinstance(result, Exception):
+#                     logger.warning(f"Batch processing failed: {result}")
+#                     continue
+#                 scored_items.extend(result)
             
-            # Add remaining items (not in top K) with their combined_score as final_score
-            for item in remaining_items:
-                item_copy = item.copy()
-                combined_score = float(item.get("combined_score", item.get("score", 0.0)) or 0.0)
-                item_copy["final_score"] = combined_score
-                item_copy["reranker_model"] = model_name
-                scored_items.append(item_copy)
+#             # Add remaining items (not in top K) with their combined_score as final_score
+#             for item in remaining_items:
+#                 item_copy = item.copy()
+#                 combined_score = float(item.get("combined_score", item.get("score", 0.0)) or 0.0)
+#                 item_copy["final_score"] = combined_score
+#                 item_copy["reranker_model"] = model_name
+#                 scored_items.append(item_copy)
             
-            # Sort all items by final_score in descending order
-            scored_items.sort(key=lambda x: float(x.get("final_score", 0.0) or 0.0), reverse=True)
-            reranked_results[category] = scored_items
+#             # Sort all items by final_score in descending order
+#             scored_items.sort(key=lambda x: float(x.get("final_score", 0.0) or 0.0), reverse=True)
+#             reranked_results[category] = scored_items
             
-        except Exception as e:
-            logger.error(f"Error in LLM reranking for category {category}: {e}, returning original results")
-            # Return original items with combined_score as final_score
-            for item in items:
-                combined_score = float(item.get("combined_score", item.get("score", 0.0)) or 0.0)
-                item["final_score"] = combined_score
-                item["reranker_model"] = model_name
-            reranked_results[category] = items
+#         except Exception as e:
+#             logger.error(f"Error in LLM reranking for category {category}: {e}, returning original results")
+#             # Return original items with combined_score as final_score
+#             for item in items:
+#                 combined_score = float(item.get("combined_score", item.get("score", 0.0)) or 0.0)
+#                 item["final_score"] = combined_score
+#                 item["reranker_model"] = model_name
+#             reranked_results[category] = items
     
-    return reranked_results
+#     return reranked_results
 
 
 async def run_hybrid_search(
@@ -547,6 +558,7 @@ async def run_hybrid_search(
     limit: int,
     include: List[str],
     output_path: str | None,
+    memory_config: "MemoryConfig",
     rerank_alpha: float = 0.6,
     use_forgetting_rerank: bool = False,
     use_llm_rerank: bool = False,
@@ -554,10 +566,14 @@ async def run_hybrid_search(
     """
 
     Run search with specified type: 'keyword', 'embedding', or 'hybrid'
+    
+    Args:
+        memory_config: MemoryConfig object containing embedding_model_id and config_id
     """
     # Start overall timing
     search_start_time = time.time()
     latency_metrics = {}
+    logger.info(f"using embedding_id:{memory_config.embedding_model_id}...")
 
     # Clean and normalize the incoming query before use/logging
     query_text = extract_plain_query(query_text)
@@ -610,7 +626,9 @@ async def run_hybrid_search(
             
             # 从数据库读取嵌入器配置（按 ID）并构建 RedBearModelConfig
             config_load_start = time.time()
-            embedder_config_dict = get_embedder_config(config_defs.SELECTED_EMBEDDING_ID)
+            with get_db_context() as db:
+                config_service = MemoryConfigService(db)
+                embedder_config_dict = config_service.get_embedder_config(str(memory_config.embedding_model_id))
             rb_config = RedBearModelConfig(
                 model_name=embedder_config_dict["model_name"],
                 provider=embedder_config_dict["provider"],
@@ -672,7 +690,7 @@ async def run_hybrid_search(
             if use_forgetting_rerank:
                 # Load forgetting parameters from pipeline config
                 try:
-                    pc = get_pipeline_config()
+                    pc = get_pipeline_config(memory_config)
                     forgetting_cfg = pc.forgetting_engine
                 except Exception as e:
                     logger.debug(f"Failed to load forgetting config, using defaults: {e}")
@@ -700,16 +718,16 @@ async def run_hybrid_search(
             
             # Apply LLM reranking if enabled
             llm_rerank_applied = False
-            if use_llm_rerank:
-                try:
-                    reranked_results = await apply_llm_reranker(
-                        results=reranked_results,
-                        query_text=query_text,
-                    )
-                    llm_rerank_applied = True
-                    logger.info("LLM reranking applied successfully")
-                except Exception as e:
-                    logger.warning(f"LLM reranking failed: {e}, using previous scores")
+            # if use_llm_rerank:
+            #     try:
+            #         reranked_results = await apply_llm_reranker(
+            #             results=reranked_results,
+            #             query_text=query_text,
+            #         )
+            #         llm_rerank_applied = True
+            #         logger.info("LLM reranking applied successfully")
+            #     except Exception as e:
+            #         logger.warning(f"LLM reranking failed: {e}, using previous scores")
             
             results["reranked_results"] = reranked_results
             results["combined_summary"] = {
@@ -759,18 +777,11 @@ async def run_hybrid_search(
         else:
             result_counts = {key: len(value) if isinstance(value, list) else 0 for key, value in results.items()}
 
-        completion_log = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "query": query_text,
-            "search_type": search_type,
-            "status": "completed",
-            "result_counts": result_counts,
-            "output_file": output_path,
-            "latency_metrics": latency_metrics
-        }
-
-        with open("search_log.txt", "a", encoding="utf-8") as f:
-            f.write(json.dumps(completion_log, ensure_ascii=False) + "\n")
+        # Log completion using the standard logger
+        logger.info(
+            f"Search completed: query='{query_text}', type={search_type}, "
+            f"result_counts={result_counts}, latency={latency_metrics}"
+        )
 
         return results
 
@@ -892,89 +903,95 @@ async def search_chunk_by_chunk_id(
     return {"chunks": chunks}
 
 
-def main():
-    """Main entry point for the hybrid graph search CLI.
+# def main():
+#     """Main entry point for the hybrid graph search CLI.
 
-    Parses command line arguments and executes search with specified parameters.
-    Supports keyword, embedding, and hybrid search modes.
-    """
-    parser = argparse.ArgumentParser(description="Hybrid graph search with keyword and embedding options")
-    parser.add_argument(
-        "--query", "-q", required=True, help="Free-text query to search"
-    )
-    parser.add_argument(
-        "--search-type",
-        "-t",
-        choices=["keyword", "embedding", "hybrid"],
-        default="hybrid",
-        help="Search type: keyword (text matching), embedding (semantic), or hybrid (both) (default: hybrid)"
-    )
-    parser.add_argument(
-        "--embedding-name",
-        "-m",
-        default="openai/nomic-embed-text:v1.5",
-        help="Embedding config name from config.json (default: openai/nomic-embed-text:v1.5)",
-    )
-    parser.add_argument(
-        "--group-id",
-        "-g",
-        default=None,
-        help="Optional group_id to filter results (default: None)",
-    )
-    parser.add_argument(
-        "--limit",
-        "-k",
-        type=int,
-        default=5,
-        help="Max number of results per type (default: 5)",
-    )
-    parser.add_argument(
-        "--include",
-        "-i",
-        nargs="+",
-        default=["statements", "chunks", "entities", "summaries"],
-        choices=["statements", "chunks", "entities", "summaries"],
-        help="Which targets to search for embedding search (default: statements chunks entities summaries)"
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        default="search_results.json",
-        help="Path to save the search results JSON (default: search_results.json)",
-    )
-    parser.add_argument(
-        "--rerank-alpha",
-        "-a",
-        type=float,
-        default=0.6,
-        help="Weight for BM25 scores in reranking (0.0-1.0, higher values favor keyword search) (default: 0.6)",
-    )
-    parser.add_argument(
-        "--forgetting-rerank",
-        action="store_true",
-        help="Apply forgetting curve during reranking for hybrid search.",
-    )
-    parser.add_argument(
-        "--llm-rerank",
-        action="store_true",
-        help="Apply LLM-based reranking for hybrid search.",
-    )
-    args = parser.parse_args()
+#     Parses command line arguments and executes search with specified parameters.
+#     Supports keyword, embedding, and hybrid search modes.
+#     """
+#     parser = argparse.ArgumentParser(description="Hybrid graph search with keyword and embedding options")
+#     parser.add_argument(
+#         "--query", "-q", required=True, help="Free-text query to search"
+#     )
+#     parser.add_argument(
+#         "--search-type",
+#         "-t",
+#         choices=["keyword", "embedding", "hybrid"],
+#         default="hybrid",
+#         help="Search type: keyword (text matching), embedding (semantic), or hybrid (both) (default: hybrid)"
+#     )
+#     parser.add_argument(
+#         "--config-id",
+#         "-c",
+#         type=int,
+#         required=True,
+#         help="Database configuration ID (required)",
+#     )
+#     parser.add_argument(
+#         "--group-id",
+#         "-g",
+#         default=None,
+#         help="Optional group_id to filter results (default: None)",
+#     )
+#     parser.add_argument(
+#         "--limit",
+#         "-k",
+#         type=int,
+#         default=5,
+#         help="Max number of results per type (default: 5)",
+#     )
+#     parser.add_argument(
+#         "--include",
+#         "-i",
+#         nargs="+",
+#         default=["statements", "chunks", "entities", "summaries"],
+#         choices=["statements", "chunks", "entities", "summaries"],
+#         help="Which targets to search for embedding search (default: statements chunks entities summaries)"
+#     )
+#     parser.add_argument(
+#         "--output",
+#         "-o",
+#         default="search_results.json",
+#         help="Path to save the search results JSON (default: search_results.json)",
+#     )
+#     parser.add_argument(
+#         "--rerank-alpha",
+#         "-a",
+#         type=float,
+#         default=0.6,
+#         help="Weight for BM25 scores in reranking (0.0-1.0, higher values favor keyword search) (default: 0.6)",
+#     )
+#     parser.add_argument(
+#         "--forgetting-rerank",
+#         action="store_true",
+#         help="Apply forgetting curve during reranking for hybrid search.",
+#     )
+#     parser.add_argument(
+#         "--llm-rerank",
+#         action="store_true",
+#         help="Apply LLM-based reranking for hybrid search.",
+#     )
+#     args = parser.parse_args()
 
-    asyncio.run(
-        run_hybrid_search(
-            query_text=args.query,
-            search_type=args.search_type,
-            group_id=args.group_id,
-            limit=args.limit,
-            include=args.include,
-            output_path=args.output,
-            rerank_alpha=args.rerank_alpha,
-            use_forgetting_rerank=args.forgetting_rerank,
-            use_llm_rerank=args.llm_rerank,
-        )
-    )
+#     # Load memory config from database
+#     from app.services.memory_config_service import MemoryConfigService
+#     memory_config = MemoryConfigService.load_memory_config(args.config_id)
+
+#     asyncio.run(
+#         run_hybrid_search(
+#             query_text=args.query,
+#             search_type=args.search_type,
+#             group_id=args.group_id,
+#             limit=args.limit,
+#             include=args.include,
+#             output_path=args.output,
+#             memory_config=memory_config,
+#             rerank_alpha=args.rerank_alpha,
+#             use_forgetting_rerank=args.forgetting_rerank,
+#             use_llm_rerank=args.llm_rerank,
+#         )
+#     )
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()

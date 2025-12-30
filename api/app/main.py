@@ -2,38 +2,10 @@ import os
 import subprocess
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, APIRouter
+from fastapi import HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.core.response_utils import fail
-from app.core.logging_config import LoggingConfig, get_logger
-from app.core.exceptions import BusinessException
-from app.core.error_codes import BizCode, HTTP_MAPPING
-from app.controllers import (
-    model_controller,
-    task_controller,
-    test_controller,
-    user_controller,
-    auth_controller,
-    workspace_controller,
-    setup_controller,
-    file_controller,
-    document_controller,
-    knowledge_controller,
-    chunk_controller,
-    knowledgeshare_controller,
-    app_controller,
-    upload_controller,
-    memory_agent_controller,
-    memory_storage_controller,
-    memory_dashboard_controller,
-    multi_agent_controller,
-)
-
-from fastapi import FastAPI, APIRouter
-
-app = FastAPI(title="Data Config API", version="1.0.0")
-router = APIRouter(prefix="/memory", tags=["Memory"])
 
 # 管理端 API (JWT 认证)
 from app.controllers import manager_router

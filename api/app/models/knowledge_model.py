@@ -56,7 +56,25 @@ class Knowledge(Base):
     chunk_num = Column(Integer, default=0, comment="chunk num")
     parser_id = Column(String, index=True, default="naive", comment="default parser ID")
     parser_config = Column(JSON, nullable=False,
-                           default={"layout_recognize": "DeepDOC", "chunk_token_num": 128, "delimiter": "\n"},
+                           default={
+                               "layout_recognize": "DeepDOC",
+                               "chunk_token_num": 128,
+                               "delimiter": "\n",
+                               "auto_keywords": 0,
+                               "auto_questions": 0,
+                               "html4excel": False,
+                               "graphrag": {
+                                    "use_graphrag": False,
+                                    "entity_types": [
+                                        "organization",
+                                        "person",
+                                        "geo",
+                                        "event",
+                                        "category"
+                                    ],
+                                    "method": "general"
+                                }
+                           },
                            comment="default parser config")
     status = Column(Integer, index=True, default=1, comment="is it validate(0: disable, 1: enable, 2:Soft-delete)")
     created_at = Column(DateTime, default=datetime.datetime.now)

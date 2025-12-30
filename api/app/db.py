@@ -23,6 +23,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
+
 # Dependency to get a DB session
 def get_db():
     db = SessionLocal()
@@ -34,6 +35,7 @@ def get_db():
                 db.rollback()
         finally:
             db.close()
+
 
 @contextmanager
 def get_db_context() -> Generator[Session, None, None]:
@@ -54,12 +56,16 @@ def get_db_context() -> Generator[Session, None, None]:
             db.rollback()
         db.close()
 
+
 @contextmanager
 def get_db_read() -> Generator[Session, None, None]:
     """只读场景专用，出上下文自动 rollback，绝不留下 idle in transaction"""
     with get_db_context() as db:
-        yield db
-        db.rollback()   # 只读任务无需 commit
+        try:
+            yield db
+        finally:
+            db.rollback()  # 只读任务无需 commit
+
 
 def get_pool_status():
     """获取连接池状态（用于监控）"""
@@ -70,5 +76,6 @@ def get_pool_status():
         "checked_out": pool.checkedout(),
         "overflow": pool.overflow(),
         "total": pool.size() + pool.overflow(),
-        "usage_percent": round(pool.checkedout() / (pool.size() + pool.overflow()) * 100, 2) if (pool.size() + pool.overflow()) > 0 else 0
+        "usage_percent": round(pool.checkedout() / (pool.size() + pool.overflow()) * 100, 2) if (
+                                                                                                            pool.size() + pool.overflow()) > 0 else 0
     }

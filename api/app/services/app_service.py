@@ -9,8 +9,9 @@
 """
 import datetime
 import uuid
-from typing import Optional, List, Dict, Any, Tuple, Type
+from typing import Optional, List, Dict, Any, Tuple, Annotated
 
+from fastapi import Depends
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,7 @@ from app.core.exceptions import (
     BusinessException,
 )
 from app.core.logging_config import get_business_logger
+from app.db import get_db
 from app.models import App, AgentConfig, AppRelease, MultiAgentConfig, WorkflowConfig
 from app.models.app_model import AppStatus, AppType
 from app.repositories.app_repository import get_apps_by_id
@@ -27,6 +29,8 @@ from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
 from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services.agent_config_converter import AgentConfigConverter
+from app.models import AppShare, Workspace
+from app.services.model_service import ModelApiKeyService
 
 # 获取业务日志器
 logger = get_business_logger()
@@ -197,34 +201,28 @@ class AppService:
                 "多智能体配置未激活，无法运行",
                 BizCode.AGENT_CONFIG_MISSING
             )
-
-        # 2. 检查主 Agent 配置
-        if not multi_agent_config.master_agent_id:
-            raise BusinessException(
-                "未配置主 Agent，无法运行",
-                BizCode.AGENT_CONFIG_MISSING
-            )
-
-        master_agent_release = self.db.get(AppRelease, multi_agent_config.master_agent_id)
-        if not master_agent_release:
-            raise BusinessException(
-                f"主 Agent 配置不存在: {multi_agent_config.master_agent_id}",
-                BizCode.AGENT_CONFIG_MISSING
-            )
-
-        # 检查主 Agent 的模型配置
-        if master_agent_release.default_model_config_id:
-            master_model = self.db.get(ModelConfig, master_agent_release.default_model_config_id)
-            if not master_model:
+        if not multi_agent_config.default_model_config_id:
+            # # 2. 检查主 Agent 配置
+            if not multi_agent_config.master_agent_id:
                 raise BusinessException(
-                    f"主 Agent 的模型配置不存在: {master_agent_release.default_model_config_id}",
-                    BizCode.MODEL_NOT_FOUND
+                    "未配置主 Agent，无法运行",
+                    BizCode.AGENT_CONFIG_MISSING
                 )
-        else:
-            raise BusinessException(
-                "主 Agent 未配置模型，无法运行",
-                BizCode.MODEL_NOT_FOUND
-            )
+
+            master_agent_release = self.db.get(AppRelease, multi_agent_config.master_agent_id)
+            if not master_agent_release:
+                raise BusinessException(
+                    f"主 Agent 配置不存在: {multi_agent_config.master_agent_id}",
+                    BizCode.AGENT_CONFIG_MISSING
+                )
+
+            # 检查主 Agent 的模型配置
+            multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
+
+        model_api_key = ModelApiKeyService.get_a_api_key(self.db, multi_agent_config.default_model_config_id)
+        if not model_api_key:
+            raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
+
 
         # 3. 检查子 Agent 配置
         if not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0:
@@ -1390,7 +1388,7 @@ class AppService:
         target_workspace_ids: List[uuid.UUID],
         user_id: uuid.UUID,
         workspace_id: Optional[uuid.UUID] = None
-    ) -> List["AppShare"]:
+    ) -> AppShare:
         """分享应用到其他工作空间
 
         Args:
@@ -1406,7 +1404,7 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用不在指定工作空间或目标工作空间无效时
         """
-        from app.models import AppShare, Workspace
+
 
         logger.info(
             "分享应用",
@@ -1548,7 +1546,7 @@ class AppService:
         *,
         app_id: uuid.UUID,
         workspace_id: Optional[uuid.UUID] = None
-    ) -> List["AppShare"]:
+    ) -> List[AppShare]:
         """列出应用的所有分享记录
 
         Args:
@@ -2094,3 +2092,14 @@ async def draft_run_stream(
         workspace_id=workspace_id
     ):
         yield event
+
+
+
+
+# ==================== 依赖注入函数 ====================
+
+def get_app_service(
+        db: Annotated[Session, Depends(get_db)]
+) -> AppService:
+    """获取工作流服务（依赖注入）"""
+    return AppService(db)

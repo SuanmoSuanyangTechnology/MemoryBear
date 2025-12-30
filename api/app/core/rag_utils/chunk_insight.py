@@ -5,14 +5,22 @@ This module provides functionality to analyze chunk content and generate insight
 """
 
 import asyncio
-from typing import List, Dict, Any
 from collections import Counter
+from typing import Any, Dict, List
+
+from app.core.logging_config import get_business_logger
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.db import get_db_context
 from pydantic import BaseModel, Field
 
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.logging_config import get_business_logger
-
 business_logger = get_business_logger()
+
+
+def _get_llm_client():
+    """Get LLM client using db context."""
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        return factory.get_llm_client(None)  # Uses default LLM
 
 
 class ChunkInsight(BaseModel):
@@ -40,7 +48,7 @@ async def classify_chunk_domain(chunk: str) -> str:
         Domain name
     """
     try:
-        llm_client = get_llm_client()
+        llm_client = _get_llm_client()
         
         prompt = f"""请将以下文本内容归类到最合适的领域中。
 
@@ -177,7 +185,7 @@ async def generate_chunk_insight(chunks: List[str], max_chunks: int = 15) -> str
         ]
         
         # 调用LLM生成洞察
-        llm_client = get_llm_client()
+        llm_client = _get_llm_client()
         response = await llm_client.chat(messages=messages)
         
         insight = response.content.strip()

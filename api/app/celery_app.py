@@ -1,9 +1,9 @@
 import os
 from datetime import timedelta
 from urllib.parse import quote
-from celery import Celery
+
 from app.core.config import settings
-from app.core.memory.utils.config.definitions import reload_configuration_from_database
+from celery import Celery
 
 # 创建 Celery 应用实例
 # broker: 任务队列（使用 Redis DB 0）
@@ -13,7 +13,6 @@ celery_app = Celery(
     broker=f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.CELERY_BROKER}",
     backend=f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.CELERY_BACKEND}",
 )
-reload_configuration_from_database(config_id=os.getenv("config_id"), force_reload=True)
 
 # 配置使用本地队列，避免与远程 worker 冲突
 celery_app.conf.task_default_queue = 'localhost_test_wyl'
@@ -22,6 +21,7 @@ celery_app.conf.task_default_routing_key = 'localhost_test_wyl'
 
 # macOS 兼容性配置
 import platform
+
 if platform.system() == 'Darwin':  # macOS
     # 设置环境变量解决 fork 问题
     os.environ.setdefault('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', 'YES')
@@ -83,17 +83,24 @@ celery_app.autodiscover_tasks(['app'])
 reflection_schedule = timedelta(seconds=settings.REFLECTION_INTERVAL_SECONDS)
 health_schedule = timedelta(seconds=settings.HEALTH_CHECK_SECONDS)
 memory_increment_schedule = timedelta(hours=settings.MEMORY_INCREMENT_INTERVAL_HOURS)
-
+memory_cache_regeneration_schedule = timedelta(hours=settings.MEMORY_CACHE_REGENERATION_HOURS)
+workspace_reflection_schedule = timedelta(seconds=30)  # 每30秒运行一次settings.REFLECTION_INTERVAL_TIME
 # 构建定时任务配置
 beat_schedule_config = {
-    "run-reflection-engine": {
-        "task": "app.core.memory.agent.reflection.timer",
-        "schedule": reflection_schedule,
+
+    # "check-read-service": {
+    #     "task": "app.core.memory.agent.health.check_read_service",
+    #     "schedule": health_schedule,
+    #     "args": (),
+    # },
+    "run-workspace-reflection": {
+        "task": "app.tasks.workspace_reflection_task",
+        "schedule": workspace_reflection_schedule,
         "args": (),
     },
-    "check-read-service": {
-        "task": "app.core.memory.agent.health.check_read_service",
-        "schedule": health_schedule,
+    "regenerate-memory-cache": {
+        "task": "app.tasks.regenerate_memory_cache",
+        "schedule": memory_cache_regeneration_schedule,
         "args": (),
     },
 }

@@ -2,11 +2,11 @@ import argparse
 import asyncio
 import json
 import os
-import time
 import re
 import statistics
+import time
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 try:
     from dotenv import load_dotenv
@@ -15,15 +15,26 @@ except Exception:
         return None
 
 # 与现有评估脚本保持一致的导入方式
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.models.base import RedBearModelConfig
-from app.core.memory.utils.config_utils import get_embedder_config
-from app.core.memory.utils.llm_utils import get_llm_client
+from app.core.memory.evaluation.common.metrics import (
+    avg_context_tokens,
+    jaccard,
+    latency_stats,
+)
+from app.core.memory.evaluation.common.metrics import f1_score as common_f1
 from app.core.memory.evaluation.dialogue_queries import SEARCH_ENTITIES_BY_NAME
-from app.core.memory.utils.config.definitions import PROJECT_ROOT, SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
-from app.core.memory.evaluation.common.metrics import f1_score as common_f1, jaccard, latency_stats, avg_context_tokens
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.memory.utils.config.definitions import (
+    PROJECT_ROOT,
+    SELECTED_EMBEDDING_ID,
+    SELECTED_LLM_ID,
+)
+from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.models.base import RedBearModelConfig
+from app.db import get_db_context
+from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.services.memory_config_service import MemoryConfigService
+
 try:
     from app.core.memory.evaluation.common.metrics import exact_match
 except Exception:
@@ -647,9 +658,13 @@ async def run_longmemeval_test(
         items = qa_list[start_index:start_index + sample_size]
 
     # 初始化组件 - 使用异步LLM客户端
-    llm_client = get_llm_client(SELECTED_LLM_ID)
+    with get_db_context() as db:
+        factory = MemoryClientFactory(db)
+        llm_client = factory.get_llm_client(SELECTED_LLM_ID)
     connector = Neo4jConnector()
-    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
+    with get_db_context() as db:
+        config_service = MemoryConfigService(db)
+        cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
     embedder = OpenAIEmbedderClient(
         model_config=RedBearModelConfig.model_validate(cfg_dict)
     )

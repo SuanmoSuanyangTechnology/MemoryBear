@@ -143,7 +143,7 @@ class ApiKeyService:
             existing = db.scalar(
                 select(ApiKey).where(
                     ApiKey.workspace_id == workspace_id,
-                    ApiKey.resource_id == data.resource_id,
+                    ApiKey.resource_id == api_key.resource_id,
                     ApiKey.name == data.name,
                     ApiKey.is_active,
                     ApiKey.id != api_key_id
@@ -257,7 +257,7 @@ class RateLimiterService:
         key = f"rate_limit:qps:{api_key_id}"
         async with self.redis.pipeline() as pipe:
             pipe.incr(key)
-            pipe.expire(key, 1)  # 1 秒过期
+            pipe.expire(key, 1, nx=True)  # 1 秒过期
             results = await pipe.execute()
 
         current = results[0]

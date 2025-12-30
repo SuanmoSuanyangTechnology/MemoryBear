@@ -1,0 +1,12 @@
+{
+  "name": "json_tool",
+  "description": "JSON工具 - 数据格式处理：提供JSON格式化、压缩、验证、格式转换",
+  "tool_type": "builtin",
+  "tool_class": "JsonTool",
+  "version": "1.0.0",
+  "enabled": true,
+  "parameters": {
+    "indent": 2
+  },
+  "tags": ["json", "data", "utility", "builtin"]
+}

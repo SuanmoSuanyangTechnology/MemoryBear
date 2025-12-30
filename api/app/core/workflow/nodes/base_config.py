@@ -14,8 +14,12 @@ class VariableType(StrEnum):
     STRING = "string"
     NUMBER = "number"
     BOOLEAN = "boolean"
-    ARRAY = "array"
     OBJECT = "object"
+
+    ARRAY_STRING = "array[string]"
+    ARRAY_NUMBER = "array[number]"
+    ARRAY_BOOLEAN = "array[boolean]"
+    ARRAY_OBJECT = "array[object]"
 
 
 class VariableDefinition(BaseModel):
@@ -48,6 +52,11 @@ class VariableDefinition(BaseModel):
     description: str | None = Field(
         default=None,
         description="变量描述"
+    )
+    
+    max_length: int = Field(
+        default=200,
+        description="只对字符串类型生效"
     )
     
     class Config:

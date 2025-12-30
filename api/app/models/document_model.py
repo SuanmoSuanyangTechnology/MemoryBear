@@ -16,7 +16,26 @@ class Document(Base):
     file_size = Column(Integer, default=0, comment="file size(byte)")
     file_meta = Column(JSON, nullable=False, default={})
     parser_id = Column(String, index=True, nullable=False, comment="default parser ID")
-    parser_config = Column(JSON, nullable=False, default={"layout_recognize": "DeepDOC", "chunk_token_num": 128, "delimiter": "\n"}, comment="default parser config")
+    parser_config = Column(JSON, nullable=False,
+                           default={
+                               "layout_recognize": "DeepDOC",
+                               "chunk_token_num": 128,
+                               "delimiter": "\n",
+                               "auto_keywords": 0,
+                               "auto_questions": 0,
+                               "html4excel": False,
+                               "graphrag": {
+                                    "use_graphrag": False,
+                                    "entity_types": [
+                                        "organization",
+                                        "person",
+                                        "geo",
+                                        "event",
+                                        "category"
+                                    ],
+                                    "method": "general"
+                                }
+                           }, comment="default parser config")
     chunk_num = Column(Integer, default=0, comment="chunk num")
     progress = Column(Float, default=0)
     progress_msg = Column(String, default="", comment="process message")

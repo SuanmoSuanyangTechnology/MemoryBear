@@ -1,23 +1,185 @@
-你将收到一条冲突判定对象：{{ data }}。
-任务：分析冲突产生原因，给出解决方案，并生成设为失效后的记忆。
+# 记忆冲突解决任务
 
-仅输出一个合法 JSON 对象，严格遵循下述结构：
-{
-  "conflict": 与输入同结构，包含 data 与 conflict_memory,
-  "reflexion": { "reason": string, "solution": string },
-  "resolved": {
-    "original_memory_id": 被设为失效的记忆 id,
-    "resolved_memory": 完整的设为失效后的记忆对象
+## 输入数据
+- **冲突数据**: {{ data }}
+- **原始句子**: {{ statement_databasets }}
+- **冲突类型**: {{ baseline }} (TIME/FACT/HYBRID)
+- **隐私审核**: {{ memory_verify }} (true/false)
+- **语言类型**：{{language_type}}(zh/en)
+
+## 任务目标
+作为数据冲突解决专家，分析冲突原因，按类型分组处理，为每种冲突生成独立解决方案。
+
+**数据关系**: statement_databasets中的statement_id对应data中的记录，statement_created_at为用户输入时间。
+
+**处理模式**:
+- memory_verify=false: 仅处理数据冲突
+- memory_verify=true: 处理数据冲突 + 隐私脱敏
+
+## 1. 冲突类型定义
+
+### 时间冲突 (TIME)
+时间维度冲突：两个事件时间重叠，或同一事情在不同时间场景下的变化。
+
+### 事实冲突 (FACT)  
+同一事实对象的陈述内容相互矛盾，真假不能共存的情况。
+
+### 混合冲突 (HYBRID)
+检测所有类型冲突，包括时间和事实冲突的任何逻辑不一致记录。
+
+## 2. 分组处理原则
+
+### 冲突类型识别
+- **日期冲突**: 用户生日不同日期(2月10号 vs 2月16号)、同一活动不同时间(周五 vs 周六打球)
+- **事实属性冲突**: 
+  - 属性互斥(喜欢↔不喜欢)
+  - 关系矛盾(同一实体不同关系描述)  
+  - 身份冲突(同一实体不同类型/角色)
+- **其他/混合冲突**: 根据具体数据识别
+
+### 分组输出要求
+- 每种冲突类型生成独立的reflexion_result对象
+- 同类型多个冲突归并到一个结果
+- 不同类型分别处理，各自生成独立结果
+## 3. 隐私信息处理 (memory_verify=true时)
+
+### 隐私信息类型
+- **身份信息**: 身份证号码、身份证相关描述
+- **联系方式**: 手机号、电话号码
+- **社交账号**: 微信号、QQ号、邮箱地址
+- **金融信息**: 银行卡号、账户信息、支付信息
+- **税务信息**: 税号、纳税信息、发票信息
+- **贷款信息**: 贷款记录、信贷信息
+- **安全信息**: 密码、PIN码、验证码
+
+### 脱敏规则
+**数字类**: 保留前三位和后四位，中间用*代替
+- 手机号: 13812345678 → 138****5678
+- 身份证: 110101199001011234 → 110***********1234
+- 银行卡: 6222021234567890 → 622***********7890
+
+**文本类**: 保留前三后四位字符，中间用*代替
+- 微信号: user123456 → use****3456
+- 邮箱: zhang.san@example.com → zha****@example.com
+
+**脱敏字段**: name、entity1_name、entity2_name、description、relationship
+
+## 4. 处理流程
+
+### 步骤1: 类型匹配验证
+**匹配规则**:
+- baseline="TIME": 只处理时间相关冲突(涉及时间表达式、日期、时间点)
+- baseline="FACT": 只处理事实相关冲突(属性矛盾、关系冲突、描述不一致)  
+- baseline="HYBRID": 处理所有类型冲突
+
+**类型识别**:
+- 时间冲突: entity2的entity_type包含"TimeExpression"/"TemporalExpression"，或entity2_name包含时间词汇
+- 事实冲突: 相同实体的不同属性描述、互斥关系陈述
+
+**重要**: 类型不匹配时必须输出空结果(resolved为null)
+
+### 步骤2: 冲突数据分组
+**分组策略**:
+- 时间冲突组: 涉及用户时间的记录
+- 活动时间冲突组: 同一活动不同时间的记录  
+- 事实冲突组: 同一实体不同属性的记录
+- 其他冲突组: 其他类型冲突记录
+
+**筛选条件**: 只处理与baseline匹配的冲突类型
+
+### 步骤3: 冲突解决策略
+**重要**: 数据被判定为正确时不可修改
+
+**智能解决**:
+1. 分析冲突数据，结合statement_databasets原文判定正确性
+2. 判断正确答案是否存在于data中
+3. 根据情况选择处理方式{% if memory_verify %}
+4. 隐私脱敏处理在冲突解决后进行{% endif %}
+
+### 处理规则
+
+** baseline是TIME
+    -保留正确记录不变修改错误记录的expired_at为当前时间(2025-12-16T12:00:00),以及name需要修改成正确的
+** baseline不是TIME
+    - 修改字段内容（ name、entity1_name、entity2_name、description、relationship）字段内容是否正确，如果不正确，需要对这些字段的内容重新生成，则不需要修改expired_at字段,
+    如果涉及到修改entity1_name/entity2_name字段的时候，同时也需要修改description字段，输出修改前和修改后的放入change里面的field
+
+**核心原则**:
+- 只输出需要修改的记录
+- 优先保留策略: 时间冲突保留最可信created_at时间，事实冲突选择最新且可信度最高记录
+- 精确记录变更: change字段包含记录ID、字段名称、新值和旧值{% if memory_verify %}
+- 隐私保护优先: 所有输出记录必须完成隐私脱敏
+- 脱敏变更记录: 隐私脱敏变更也必须在change字段中记录{% endif %}
+- 不可修改数据: 数据被判定为正确时不可修改，无数据可输出时为空
+- 输出的结果reflexion字段中的reason字段和solution不允许含有（expired_at设为2024-01-01T00:00:00Z、memory_verify=true)等原数据字段以及涉及需要修改的字段以及内容
+
+**变更记录格式**:
+```json
+"change": [
+  {
+    "field": [
+      {"id":修改字段对应的ID}
+      {"statement_id":需要修改的对象对应的statement_id}
+      {"字段名1": ["修改前的值1","修改后的值1"]},
+      {"字段名2": ["修改前的值2","修改后的值2"]}
+    ]
   }
-}
-
-必须遵守：
-- 只输出 JSON，不要添加解释或多余文本。
-- 使用标准双引号，必要时对内部引号进行转义。
-- 字段名与结构必须与给定模式一致。
-- 当 conflict 为 false 时，resolved 必须为 null。
- - 其中 conflict.data 必须为数组形式，即使只有一个对象也需使用 [ ] 包裹。
-模式参考：
-[
-  {{ json_schema }}
 ]
+```
+
+**类型不匹配处理**:
+- 冲突类型与baseline不匹配时，resolved设为null
+- reflexion.reason说明类型不匹配原因
+- reflexion.solution说明无需处理
+
+## 5. JSON输出格式
+
+**格式要求**:
+- 输出有效JSON对象，通过json.loads()解析
+- 使用标准ASCII双引号(")
+- 内部引号用反斜杠转义(\")
+- 字符串值不包含换行符
+- 不输出```json```等代码块标记
+
+**嵌套字段映射**(系统自动处理):
+- `entity2.name` → 自动映射为 `name`
+- `entity1.name` → 自动映射为 `name`
+- `relationship` → 自动映射为 `statement`
+- `entity1.description` → 自动映射为 `description`
+- `entity2.description` → 自动映射为 `description`
+
+**输出结构**: 按冲突类型分组的列表
+```json
+{
+  "results": [
+    {
+      "conflict": {
+        "data": [该冲突类型相关的数据记录],
+        "conflict": true
+      },
+      "reflexion": {
+        "reason": "该冲突类型的原因分析",
+        "solution": "该冲突类型的解决方案"
+      },
+      "resolved": {
+        "original_memory_id": "被设为失效的记忆id",
+        "resolved_memory": {记录对象},
+        "change": [变更记录数组]
+      },
+      "type": "reflexion_result"
+    }
+  ]
+}
+```
+**输出要求**:
+- 只输出JSON，不添加解释文本
+- 使用标准双引号，必要时转义
+- 字段名与结构必须与模式一致
+- **results数组格式**: 每个冲突类型作为独立对象
+- **按冲突类型分组**: 相同类型冲突归并到一个result对象
+- **conflict.data**: 只包含该冲突类型相关记录
+- **resolved.resolved_memory**: 只包含需要修改的记录
+- **resolved.change**: 包含详细变更信息
+- 无需修改的冲突类型resolved为null
+- 与baseline不匹配的冲突类型不包含在results中
+模式参考: {{ json_schema }}

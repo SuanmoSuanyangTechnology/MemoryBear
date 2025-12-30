@@ -7,9 +7,12 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, TypedDict, Annotated
 from operator import add
-from langchain_core.messages import AnyMessage, HumanMessage, AIMessage
+from typing import Any
+
+from langchain_core.messages import AnyMessage, AIMessage
+from langgraph.config import get_stream_writer
+from typing_extensions import TypedDict, Annotated
 
 from app.core.workflow.variable_pool import VariablePool
 
@@ -17,32 +20,45 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowState(TypedDict):
-    """工作流状态
-    
-    在节点间传递的状态对象，包含消息、变量、节点输出等信息。
+    """Workflow state
+
+    The state object passed between nodes in a workflow, containing messages, variables, node outputs, etc.
     """
-    # 消息列表（追加模式）
+    # List of messages (append mode)
     messages: Annotated[list[AnyMessage], add]
-    
-    # 输入变量（从配置的 variables 传入）
-    variables: dict[str, Any]
-    
-    # 节点输出（存储每个节点的执行结果，用于变量引用）
-    # 使用自定义合并函数，将新的节点输出合并到现有字典中
+
+    # Set of loop node IDs, used for assigning values in loop nodes
+    cycle_nodes: list
+    looping: bool
+
+    # Input variables (passed from configured variables)
+    # Uses a deep merge function, supporting nested dict updates (e.g., conv.xxx)
+    variables: Annotated[dict[str, Any], lambda x, y: {
+        **x,
+        **{k: {**x.get(k, {}), **v} if isinstance(v, dict) and isinstance(x.get(k), dict) else v 
+           for k, v in y.items()}
+    }]
+
+    # Node outputs (stores execution results of each node for variable references)
+    # Uses a custom merge function to combine new node outputs into the existing dictionary
     node_outputs: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
-    
-    # 运行时节点变量（简化版，只存储业务数据，供节点间快速访问）
-    # 格式：{node_id: business_result}
+
+    # Runtime node variables (simplified version, stores business data for fast access between nodes)
+    # Format: {node_id: business_result}
     runtime_vars: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
     
-    # 执行上下文
+    # Execution context
     execution_id: str
     workspace_id: str
     user_id: str
     
-    # 错误信息（用于错误边）
+    # Error information (for error edges)
     error: str | None
     error_node: str | None
+
+    # Streaming buffer (stores real-time streaming output of nodes)
+    # Format: {node_id: {"chunks": [...], "full_content": "..."}}
+    streaming_buffer: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
 
 
 class BaseNode(ABC):
@@ -158,10 +174,10 @@ class BaseNode(ABC):
         import time
         
         start_time = time.time()
+
+        timeout = self.get_timeout()
         
         try:
-            timeout = self.get_timeout()
-            
             # 调用节点的业务逻辑
             business_result = await asyncio.wait_for(
                 self.execute(state),
@@ -188,7 +204,8 @@ class BaseNode(ABC):
                 **wrapped_output,
                 "runtime_vars": {
                     self.node_id: runtime_var
-                }
+                },
+                "looping": state["looping"]
             }
             
         except TimeoutError:
@@ -201,89 +218,170 @@ class BaseNode(ABC):
             return self._wrap_error(str(e), elapsed_time, state)
     
     async def run_stream(self, state: WorkflowState):
-        """执行节点（带错误处理和输出包装，流式）
+        """Execute node with error handling and output wrapping (streaming)
         
-        这个方法由 Executor 调用，负责：
-        1. 时间统计
-        2. 调用节点的 execute_stream() 方法
-        3. 将业务数据包装成标准输出格式
-        4. 错误处理
+        This method is called by the Executor and is responsible for:
+        1. Time tracking
+        2. Calling the node's execute_stream() method
+        3. Using LangGraph's stream writer to send chunks
+        4. Updating streaming buffer in state for downstream nodes
+        5. Wrapping business data into standard output format
+        6. Error handling
+        
+        Special handling for End nodes:
+        - End nodes don't send chunks via writer (prefix and LLM content already sent)
+        - End nodes only yield suffix for final result assembly
         
         Args:
-            state: 工作流状态
+            state: Workflow state
         
         Yields:
-            标准化的流式事件
+            State updates with streaming buffer and final result
         """
         import time
         
         start_time = time.time()
+
+        timeout = self.get_timeout()
         
         try:
-            timeout = self.get_timeout()
+            # Get LangGraph's stream writer for sending custom data
+            writer = get_stream_writer()
             
-            # 累积完整结果（用于最后的包装）
+            # Check if this is an End node
+            # End nodes CAN send chunks (for suffix), but only after LLM content
+            is_end_node = self.node_type == "end"
+            
+            # Check if this node is adjacent to End node (for message type)
+            is_adjacent_to_end = getattr(self, '_is_adjacent_to_end', False)
+            
+            # Determine chunk type: "message" for End and adjacent nodes, "node_chunk" for others
+            chunk_type = "message" if (is_end_node or is_adjacent_to_end) else "node_chunk"
+            
+            logger.debug(f"节点 {self.node_id} chunk 类型: {chunk_type} (is_end={is_end_node}, adjacent={is_adjacent_to_end})")
+            
+            # Accumulate complete result (for final wrapping)
             chunks = []
             final_result = None
+            chunk_count = 0
             
-            # 使用异步生成器包装，支持超时
-            async def stream_with_timeout():
-                nonlocal final_result
-                loop_start = asyncio.get_event_loop().time()
+            # Stream chunks in real-time
+            loop_start = asyncio.get_event_loop().time()
+            
+            async for item in self.execute_stream(state):
+                # Check timeout
+                if asyncio.get_event_loop().time() - loop_start > timeout:
+                    raise TimeoutError()
                 
-                async for item in self.execute_stream(state):
-                    # 检查超时
-                    if asyncio.get_event_loop().time() - loop_start > timeout:
-                        raise TimeoutError()
+                # Check if it's a completion marker
+                if isinstance(item, dict) and item.get("__final__"):
+                    final_result = item["result"]
+                elif isinstance(item, str):
+                    # String is a chunk
+                    chunk_count += 1
+                    chunks.append(item)
+                    full_content = "".join(chunks)
                     
-                    # 检查是否是完成标记
-                    if isinstance(item, dict) and item.get("__final__"):
-                        final_result = item["result"]
-                    elif isinstance(item, str):
-                        # 字符串是 chunk
-                        chunks.append(item)
+                    # Send chunks for all nodes (including End nodes for suffix)
+                    logger.debug(f"节点 {self.node_id} 发送 chunk #{chunk_count}: {item[:50]}...")
+                    
+                    # 1. Send via stream writer (for real-time client updates)
+                    writer({
+                        "type": chunk_type,  # "message" or "node_chunk"
+                        "node_id": self.node_id,
+                        "chunk": item,
+                        "full_content": full_content,
+                        "chunk_index": chunk_count
+                    })
+                    
+                    # 2. Update streaming buffer in state (for downstream nodes)
+                    # Only non-End nodes need streaming buffer
+                    if not is_end_node:
                         yield {
-                            "type": "chunk",
-                            "node_id": self.node_id,
-                            "content": item,
-                            "full_content": "".join(chunks)
+                            "streaming_buffer": {
+                                self.node_id: {
+                                    "full_content": full_content,
+                                    "chunk_count": chunk_count,
+                                    "is_complete": False
+                                }
+                            }
                         }
-                    else:
-                        # 其他类型也当作 chunk 处理
-                        chunks.append(str(item))
+                else:
+                    # Other types are also treated as chunks
+                    chunk_count += 1
+                    chunk_str = str(item)
+                    chunks.append(chunk_str)
+                    full_content = "".join(chunks)
+                    
+                    # Send chunks for all nodes
+                    writer({
+                        "type": chunk_type,  # "message" or "node_chunk"
+                        "node_id": self.node_id,
+                        "chunk": chunk_str,
+                        "full_content": full_content,
+                        "chunk_index": chunk_count
+                    })
+                    
+                    # Only non-End nodes need streaming buffer
+                    if not is_end_node:
                         yield {
-                            "type": "chunk",
-                            "node_id": self.node_id,
-                            "content": str(item),
-                            "full_content": "".join(chunks)
+                            "streaming_buffer": {
+                                self.node_id: {
+                                    "full_content": full_content,
+                                    "chunk_count": chunk_count,
+                                    "is_complete": False
+                                }
+                            }
                         }
-            
-            async for chunk_event in stream_with_timeout():
-                yield chunk_event
             
             elapsed_time = time.time() - start_time
             
-            # 包装最终结果
+            logger.info(f"节点 {self.node_id} 流式执行完成，耗时: {elapsed_time:.2f}s, chunks: {chunk_count}")
+            
+            # Extract processed output (call subclass's _extract_output)
+            extracted_output = self._extract_output(final_result)
+            
+            # Wrap final result
             final_output = self._wrap_output(final_result, elapsed_time, state)
-            yield {
-                "type": "complete",
-                **final_output
+            
+            # Store extracted output in runtime variables (for quick access by subsequent nodes)
+            if isinstance(extracted_output, dict):
+                runtime_var = extracted_output
+            else:
+                runtime_var = {"output": extracted_output}
+            
+            # Build complete state update (including node_outputs, runtime_vars, and final streaming buffer)
+            state_update = {
+                **final_output,
+                "runtime_vars": {
+                    self.node_id: runtime_var
+                }
             }
+            
+            # Add streaming buffer for non-End nodes
+            if not is_end_node:
+                state_update["streaming_buffer"] = {
+                    self.node_id: {
+                        "full_content": "".join(chunks),
+                        "chunk_count": chunk_count,
+                        "is_complete": True  # Mark as complete
+                    }
+                }
+            
+            # Finally yield state update
+            # LangGraph will merge this into state
+            yield state_update
                 
         except TimeoutError:
             elapsed_time = time.time() - start_time
-            logger.error(f"节点 {self.node_id} 执行超时（{timeout}秒）")
-            yield {
-                "type": "error",
-                **self._wrap_error(f"节点执行超时（{timeout}秒）", elapsed_time, state)
-            }
+            logger.error(f"节点 {self.node_id} 执行超时 ({timeout}s)")
+            error_output = self._wrap_error(f"节点执行超时 ({timeout}s)", elapsed_time, state)
+            yield error_output
         except Exception as e:
             elapsed_time = time.time() - start_time
             logger.error(f"节点 {self.node_id} 执行失败: {e}", exc_info=True)
-            yield {
-                "type": "error",
-                **self._wrap_error(str(e), elapsed_time, state)
-            }
+            error_output = self._wrap_error(str(e), elapsed_time, state)
+            yield error_output
     
     def _wrap_output(
         self, 
@@ -458,9 +556,15 @@ class BaseNode(ABC):
         # 使用变量池获取变量
         pool = VariablePool(state)
         
+        # 构建完整的 variables 结构
+        variables = {
+            "sys": pool.get_all_system_vars(),
+            "conv": pool.get_all_conversation_vars()
+        }
+        
         return render_template(
             template=template,
-            variables=pool.get_all_conversation_vars(),
+            variables=variables,
             node_outputs=pool.get_all_node_outputs(),
             system_vars=pool.get_all_system_vars()
         )
@@ -489,9 +593,15 @@ class BaseNode(ABC):
         # 使用变量池获取变量
         pool = VariablePool(state)
         
+        # 构建完整的 variables 结构（包含 sys 和 conv）
+        variables = {
+            "sys": pool.get_all_system_vars(),
+            "conv": pool.get_all_conversation_vars()
+        }
+        
         return evaluate_condition(
             expression=expression,
-            variables=pool.get_all_conversation_vars(),
+            variables=variables,
             node_outputs=pool.get_all_node_outputs(),
             system_vars=pool.get_all_system_vars()
         )

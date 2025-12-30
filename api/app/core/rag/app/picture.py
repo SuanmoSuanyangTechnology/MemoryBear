@@ -24,9 +24,8 @@ def chunk(filename, binary, lang, callback=None, vision_model=None, **kwargs):
     if any(filename.lower().endswith(ext) for ext in VIDEO_EXTS):
         try:
             doc.update({"doc_type_kwd": "video"})
-            ans = vision_model.chat(system="", history=[], gen_conf={}, video_bytes=binary, filename=filename)
+            ans, ans_num_tokens = vision_model.chat(system="", history=[], gen_conf={}, video_bytes=binary, filename=filename)
             callback(0.8, "CV LLM respond: %s ..." % ans[:32])
-            ans += "\n" + ans
             tokenize(doc, ans, eng)
             return [doc]
         except Exception as e:
@@ -52,7 +51,7 @@ def chunk(filename, binary, lang, callback=None, vision_model=None, **kwargs):
             img_binary = io.BytesIO()
             img.save(img_binary, format="JPEG")
             img_binary.seek(0)
-            ans = vision_model.describe(img_binary.read())
+            ans, ans_num_tokens = vision_model.describe(img_binary.read())
             callback(0.8, "CV LLM respond: %s ..." % ans[:32])
             txt += "\n" + ans
             tokenize(doc, txt, eng)

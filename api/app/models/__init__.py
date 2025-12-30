@@ -20,7 +20,11 @@ from .data_config_model import DataConfig
 from .multi_agent_model import MultiAgentConfig, AgentInvocation
 from .workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
 from .retrieval_info import RetrievalInfo
-from .prompt_optimizer_model import PromptOptimizerModelConfig, PromptOptimizerSession, PromptOptimizerSessionHistory
+from .prompt_optimizer_model import PromptOptimizerSession, PromptOptimizerSessionHistory
+from .tool_model import (
+    ToolConfig, BuiltinToolConfig, CustomToolConfig, MCPToolConfig,
+    ToolExecution, ToolType, ToolStatus, AuthType, ExecutionStatus
+)
 
 __all__ = [
     "Tenants",
@@ -56,7 +60,16 @@ __all__ = [
     "WorkflowExecution",
     "WorkflowNodeExecution",
     "RetrievalInfo",
-    "PromptOptimizerModelConfig",
     "PromptOptimizerSession",
-    "PromptOptimizerSessionHistory"
+    "PromptOptimizerSessionHistory",
+    "RetrievalInfo",
+    "ToolConfig",
+    "BuiltinToolConfig",
+    "CustomToolConfig",
+    "MCPToolConfig",
+    "ToolExecution",
+    "ToolType",
+    "ToolStatus",
+    "AuthType",
+    "ExecutionStatus"
 ]

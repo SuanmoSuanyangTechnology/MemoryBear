@@ -5,20 +5,19 @@ This module contains MCP tools for verifying retrieved data.
 """
 import time
 
-from jinja2 import Template
-from mcp.server.fastmcp import Context
-
 from app.core.logging_config import get_agent_logger, log_time
 from app.core.memory.agent.mcp_server.mcp_instance import mcp
 from app.core.memory.agent.mcp_server.server import get_context_resource
-from app.core.memory.agent.utils.verify_tool import VerifyTool
-from app.core.memory.agent.utils.messages_tool import (
-    Verify_messages_deal,
-    Retrieve_verify_tool_messages_deal,
-    Resolve_username
-)
 from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
-
+from app.core.memory.agent.utils.messages_tool import (
+    Resolve_username,
+    Retrieve_verify_tool_messages_deal,
+    Verify_messages_deal,
+)
+from app.core.memory.agent.utils.verify_tool import VerifyTool
+from app.schemas.memory_config_schema import MemoryConfig
+from jinja2 import Template
+from mcp.server.fastmcp import Context
 
 logger = get_agent_logger(__name__)
 
@@ -30,6 +29,7 @@ async def Verify(
     usermessages: str,
     apply_id: str,
     group_id: str,
+    memory_config: MemoryConfig,
     storage_type: str = "",
     user_rag_memory_id: str = ""
 ) -> dict:
@@ -42,6 +42,7 @@ async def Verify(
         usermessages: User messages identifier
         apply_id: Application identifier
         group_id: Group identifier
+        memory_config: MemoryConfig object containing all configuration
         storage_type: Storage type for the workspace (optional)
         user_rag_memory_id: User RAG memory identifier (optional)
         
@@ -91,8 +92,12 @@ async def Verify(
 
 
         
-        # Call verification workflow
-        verify_tool = VerifyTool(system_prompt, messages)
+        # Call verification workflow with LLM model ID from memory_config
+        verify_tool = VerifyTool(
+            system_prompt=system_prompt,
+            verify_data=messages,
+            llm_model_id=str(memory_config.llm_model_id)
+        )
         verify_result = await verify_tool.verify()
         
         # Parse LLM verification result with error handling
@@ -118,7 +123,7 @@ async def Verify(
                 "history": history,
             }
         
-        logger.info(f"验证==>>:{messages_deal}")
+        logger.info(f"Verification result: {messages_deal}")
         
         # Emit intermediate output for frontend
         return {
@@ -128,7 +133,7 @@ async def Verify(
             "user_rag_memory_id": user_rag_memory_id,
             "_intermediate": {
                 "type": "verification",
-                "title": "数据验证",
+                "title": "Data Verification",
                 "result": messages_deal.get("split_result", "unknown"),
                 "reason": messages_deal.get("reason", ""),
                 "query": query,
@@ -166,4 +171,4 @@ async def Verify(
             duration = end - start
         except Exception:
             duration = 0.0
-        log_time('验证', duration)
+        log_time('Verification', duration)

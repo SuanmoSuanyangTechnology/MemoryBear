@@ -1,22 +1,21 @@
 import asyncio
 import json
-from collections import defaultdict
-from typing import TypedDict, Annotated
-import os
 import logging
-
-from jinja2 import Template
-from langchain_core.messages import AnyMessage
-from dotenv import load_dotenv
-from langgraph.graph import add_messages
-from openai import OpenAI
+import os
+from collections import defaultdict
+from typing import Annotated, TypedDict
 
 from app.core.memory.agent.utils.messages_tool import read_template_file
-from app.core.memory.utils.config.config_utils import get_picture_config, get_voice_config
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.utils.config.definitions import SELECTED_LLM_ID, SELECTED_LLM_PICTURE_NAME, SELECTED_LLM_VOICE_NAME
-from app.core.models.base import RedBearModelConfig
-from app.core.memory.llm_tools.openai_client import OpenAIClient
+from app.core.memory.utils.config.config_utils import (
+    get_picture_config,
+    get_voice_config,
+)
+
+# Removed global variable imports - use dependency injection instead
+from dotenv import load_dotenv
+from langchain_core.messages import AnyMessage
+from langgraph.graph import add_messages
+from openai import OpenAI
 
 PROJECT_ROOT_ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 logger = logging.getLogger(__name__)
@@ -44,6 +43,7 @@ class WriteState(TypedDict):
     user_id:str
     apply_id:str
     group_id:str
+    errors: list[dict]  # Track errors: [{"tool": "tool_name", "error": "message"}]
 
 class ReadState(TypedDict):
     '''
@@ -53,6 +53,7 @@ class ReadState(TypedDict):
        loop_count:Traverse times
        search_switch：type
        config_id: configuration id for filtering results
+       errors: list of errors that occurred during workflow execution
        '''
     messages: Annotated[list[AnyMessage], add_messages] #消息追加的模式增加消息
     name: str
@@ -63,6 +64,7 @@ class ReadState(TypedDict):
     apply_id: str
     group_id: str
     config_id: str
+    errors: list[dict]  # Track errors: [{"tool": "tool_name", "error": "message"}]
 
 
 class COUNTState:
@@ -109,9 +111,17 @@ def deduplicate_entries(entries):
 
 
 
-async def Picture_recognize(image_path,PROMPT_TICKET_EXTRACTION) -> str:
+async def Picture_recognize(image_path, PROMPT_TICKET_EXTRACTION, picture_model_name: str) -> str:
+    """
+    Updated to eliminate global variables in favor of explicit parameters.
+    
+    Args:
+        image_path: Path to image file
+        PROMPT_TICKET_EXTRACTION: Extraction prompt
+        picture_model_name: Picture model name (required, no longer from global variables)
+    """
     try:
-        model_config = get_picture_config(SELECTED_LLM_PICTURE_NAME)
+        model_config = get_picture_config(picture_model_name)
     except Exception as e:
             err = f"LLM配置不可用：{str(e)}。请检查 config.json 和 runtime.json。"
             logger.error(err)
@@ -147,9 +157,15 @@ async def Picture_recognize(image_path,PROMPT_TICKET_EXTRACTION) -> str:
     picture_text = json.loads(picture_text)
     return (picture_text['statement'])
 
-async def  Voice_recognize():
+async def Voice_recognize(voice_model_name: str):
+    """
+    Updated to eliminate global variables in favor of explicit parameters.
+    
+    Args:
+        voice_model_name: Voice model name (required, no longer from global variables)
+    """
     try:
-        model_config = get_voice_config(SELECTED_LLM_VOICE_NAME)
+        model_config = get_voice_config(voice_model_name)
     except Exception as e:
             err = f"LLM配置不可用：{str(e)}。请检查 config.json 和 runtime.json。"
             logger.error(err)

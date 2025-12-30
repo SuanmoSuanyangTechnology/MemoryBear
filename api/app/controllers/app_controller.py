@@ -361,7 +361,8 @@ async def draft_run(
         workspace_id=workspace_id,
         user=current_user
     )
-    if storage_type is None: storage_type = 'neo4j'
+    if storage_type is None: 
+        storage_type = 'neo4j'
     user_rag_memory_id = ''
     if workspace_id:
 
@@ -370,7 +371,8 @@ async def draft_run(
             name="USER_RAG_MERORY",
             workspace_id=workspace_id
         )
-        if knowledge: user_rag_memory_id = str(knowledge.id)
+        if knowledge: 
+            user_rag_memory_id = str(knowledge.id)
 
 
     # 提前验证和准备（在流式响应开始前完成）
@@ -421,8 +423,8 @@ async def draft_run(
         # 流式返回
         if payload.stream:
             async def event_generator():
-                
-               
+
+
                 async for event in draft_service.run_stream(
                     agent_config=agent_cfg,
                     model_config=model_config,
@@ -574,7 +576,7 @@ async def draft_run(
         # 3. 流式返回
         if payload.stream:
             logger.debug(
-                "开始多智能体流式试运行",
+                "开始工作流流式试运行",
                 extra={
                     "app_id": str(app_id),
                     "message_length": len(payload.message),
@@ -583,18 +585,27 @@ async def draft_run(
             )
 
             async def event_generator():
-                """多智能体流式事件生成器"""
-                multiservice = MultiAgentService(db)
-
-                # 调用多智能体服务的流式方法
-                async for event in multiservice.run_stream(
+                """工作流事件生成器
+                
+                将事件转换为标准 SSE 格式：
+                event: <event_type>
+                data: <json_data>
+                """
+                import json
+                
+                # 调用工作流服务的流式方法
+                async for event in workflow_service.run_stream(
                         app_id=app_id,
-                        request=multi_agent_request,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
-
+                        payload=payload,
+                        config=config
                 ):
-                    yield event
+                    # 提取事件类型和数据
+                    event_type = event.get("event", "message")
+                    event_data = event.get("data", {})
+                    
+                    # 转换为标准 SSE 格式（字符串）
+                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                    yield sse_message
 
             return StreamingResponse(
                 event_generator(),
@@ -617,7 +628,7 @@ async def draft_run(
         )
 
         result = await workflow_service.run(app_id, payload,config)
-        
+
         logger.debug(
             "工作流试运行返回结果",
             extra={
@@ -663,7 +674,8 @@ async def draft_run_compare(
         workspace_id=workspace_id,
         user=current_user
     )
-    if storage_type is None: storage_type = 'neo4j'
+    if storage_type is None: 
+        storage_type = 'neo4j'
     user_rag_memory_id = ''
     if workspace_id:
         knowledge = knowledge_repository.get_knowledge_by_name(
@@ -671,7 +683,8 @@ async def draft_run_compare(
             name="USER_RAG_MERORY",
             workspace_id=workspace_id
         )
-        if knowledge: user_rag_memory_id = str(knowledge.id)
+        if knowledge: 
+            user_rag_memory_id = str(knowledge.id)
 
     logger.info(
         "多模型对比试运行",

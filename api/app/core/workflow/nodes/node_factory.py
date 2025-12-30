@@ -5,17 +5,47 @@
 """
 
 import logging
-from typing import Any
+from typing import Any, Union
 
-from app.core.workflow.nodes.base_node import BaseNode
-from app.core.workflow.nodes.enums import NodeType
-from app.core.workflow.nodes.llm import LLMNode
 from app.core.workflow.nodes.agent import AgentNode
-from app.core.workflow.nodes.transform import TransformNode
-from app.core.workflow.nodes.start import StartNode
+from app.core.workflow.nodes.assigner import AssignerNode
+from app.core.workflow.nodes.base_node import BaseNode
+from app.core.workflow.nodes.cycle_graph.node import CycleGraphNode
 from app.core.workflow.nodes.end import EndNode
+from app.core.workflow.nodes.enums import NodeType
+from app.core.workflow.nodes.http_request import HttpRequestNode
+from app.core.workflow.nodes.if_else import IfElseNode
+from app.core.workflow.nodes.jinja_render import JinjaRenderNode
+from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
+from app.core.workflow.nodes.llm import LLMNode
+from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNode
+from app.core.workflow.nodes.start import StartNode
+from app.core.workflow.nodes.transform import TransformNode
+from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
+from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
+from app.core.workflow.nodes.breaker import BreakNode
 
 logger = logging.getLogger(__name__)
+
+WorkflowNode = Union[
+    BaseNode,
+    StartNode,
+    EndNode,
+    LLMNode,
+    IfElseNode,
+    AgentNode,
+    TransformNode,
+    AssignerNode,
+    HttpRequestNode,
+    KnowledgeRetrievalNode,
+    JinjaRenderNode,
+    VariableAggregatorNode,
+    ParameterExtractorNode,
+    CycleGraphNode,
+    BreakNode,
+    ParameterExtractorNode,
+    QuestionClassifierNode
+]
 
 
 class NodeFactory:
@@ -25,16 +55,27 @@ class NodeFactory:
     """
 
     # 节点类型注册表
-    _node_types: dict[str, type[BaseNode]] = {
+    _node_types: dict[str, type[WorkflowNode]] = {
         NodeType.START: StartNode,
         NodeType.END: EndNode,
         NodeType.LLM: LLMNode,
         NodeType.AGENT: AgentNode,
         NodeType.TRANSFORM: TransformNode,
+        NodeType.IF_ELSE: IfElseNode,
+        NodeType.KNOWLEDGE_RETRIEVAL: KnowledgeRetrievalNode,
+        NodeType.ASSIGNER: AssignerNode,
+        NodeType.HTTP_REQUEST: HttpRequestNode,
+        NodeType.JINJARENDER: JinjaRenderNode,
+        NodeType.VAR_AGGREGATOR: VariableAggregatorNode,
+        NodeType.PARAMETER_EXTRACTOR: ParameterExtractorNode,
+        NodeType.QUESTION_CLASSIFIER: QuestionClassifierNode,
+        NodeType.LOOP: CycleGraphNode,
+        NodeType.ITERATION: CycleGraphNode,
+        NodeType.BREAK: BreakNode,
     }
 
     @classmethod
-    def register_node_type(cls, node_type: str, node_class: type[BaseNode]):
+    def register_node_type(cls, node_type: str, node_class: type[WorkflowNode]):
         """注册新的节点类型
 
         Args:
@@ -52,10 +93,10 @@ class NodeFactory:
 
     @classmethod
     def create_node(
-        cls,
-        node_config: dict[str, Any],
-        workflow_config: dict[str, Any]
-    ) -> BaseNode | None:
+            cls,
+            node_config: dict[str, Any],
+            workflow_config: dict[str, Any]
+    ) -> WorkflowNode | None:
         """创建节点实例
 
         Args:
@@ -69,10 +110,6 @@ class NodeFactory:
             ValueError: 不支持的节点类型
         """
         node_type = node_config.get("type")
-
-        # 跳过条件节点（由 LangGraph 处理）
-        if node_type == "condition":
-            return None
 
         # 获取节点类
         node_class = cls._node_types.get(node_type)

@@ -1,22 +1,23 @@
 from __future__ import annotations
-import asyncio
-import httpx
-import time
-import os
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, TypeVar, Callable
-from langchain_community.document_compressors import JinaRerank
-from pydantic import BaseModel, Field
-from langchain_core.runnables import RunnableSerializable
-from langchain_core.callbacks import CallbackManagerForLLMRun
-from langchain_core.language_models import BaseLLM, BaseLanguageModel
-from langchain_core.outputs import LLMResult, Generation
-from langchain_core.embeddings import Embeddings
-from langchain_core.retrievers import BaseRetriever
 
-from app.models.models_model import ModelProvider, ModelType
-from app.core.exceptions import BusinessException
+import asyncio
+import os
+import time
+from abc import ABC, abstractmethod
+from typing import Any, Callable, Dict, List, Optional, TypeVar
+
+import httpx
 from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
+from app.models.models_model import ModelProvider, ModelType
+from langchain_community.document_compressors import JinaRerank
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.embeddings import Embeddings
+from langchain_core.language_models import BaseLanguageModel, BaseLLM
+from langchain_core.outputs import Generation, LLMResult
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.runnables import RunnableSerializable
+from pydantic import BaseModel, Field
 
 T = TypeVar("T")
 
@@ -79,8 +80,18 @@ class RedBearModelFactory:
             # Bedrock 使用 AWS 凭证
             # api_key 格式: "access_key_id:secret_access_key" 或只是 access_key_id
             # region 从 base_url 或 extra_params 获取
+            from botocore.config import Config as BotoConfig
+            max_pool_connections = int(os.getenv("BEDROCK_MAX_POOL_CONNECTIONS", "50"))
+            max_retries = int(os.getenv("BEDROCK_MAX_RETRIES", "2"))
+            # Configure with increased connection pool
+            boto_config = BotoConfig(
+                max_pool_connections=max_pool_connections,
+                retries={'max_attempts': max_retries, 'mode': 'adaptive'}
+            )
+            
             params = {
                 "model_id": config.model_name,
+                "config": boto_config,
                 **config.extra_params
             }
             

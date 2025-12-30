@@ -91,6 +91,7 @@ QUESTION_PROMPT_TEMPLATE = load_prompt("question_prompt")
 VISION_LLM_DESCRIBE_PROMPT = load_prompt("vision_llm_describe_prompt")
 VISION_LLM_FIGURE_DESCRIBE_PROMPT = load_prompt("vision_llm_figure_describe_prompt")
 STRUCTURED_OUTPUT_PROMPT = load_prompt("structured_output_prompt")
+GRAPH_ENTITY_TYPES_PROMPT_TEMPLATE = load_prompt("graph_entity_types")
 
 ANALYZE_TASK_SYSTEM = load_prompt("analyze_task_system")
 ANALYZE_TASK_USER = load_prompt("analyze_task_user")
@@ -119,7 +120,7 @@ def keyword_extraction(chat_mdl, content, topn=3):
     rendered_prompt = template.render(content=content, topn=topn)
 
     msg = [{"role": "system", "content": rendered_prompt}, {"role": "user", "content": "Output: "}]
-    _, msg = message_fit_in(msg, chat_mdl.max_length)
+    _, msg = message_fit_in(msg, getattr(chat_mdl, 'max_length', 8096))
     kwd = chat_mdl.chat(rendered_prompt, msg[1:], {"temperature": 0.2})
     if isinstance(kwd, tuple):
         kwd = kwd[0]
@@ -132,6 +133,21 @@ def keyword_extraction(chat_mdl, content, topn=3):
 def question_proposal(chat_mdl, content, topn=3):
     template = PROMPT_JINJA_ENV.from_string(QUESTION_PROMPT_TEMPLATE)
     rendered_prompt = template.render(content=content, topn=topn)
+
+    msg = [{"role": "system", "content": rendered_prompt}, {"role": "user", "content": "Output: "}]
+    _, msg = message_fit_in(msg, getattr(chat_mdl, 'max_length', 8096))
+    kwd = chat_mdl.chat(rendered_prompt, msg[1:], {"temperature": 0.2})
+    if isinstance(kwd, tuple):
+        kwd = kwd[0]
+    kwd = re.sub(r"^.*</think>", "", kwd, flags=re.DOTALL)
+    if kwd.find("**ERROR**") >= 0:
+        return ""
+    return kwd
+
+
+def graph_entity_types(chat_mdl, scenario):
+    template = PROMPT_JINJA_ENV.from_string(GRAPH_ENTITY_TYPES_PROMPT_TEMPLATE)
+    rendered_prompt = template.render(scenario=scenario)
 
     msg = [{"role": "system", "content": rendered_prompt}, {"role": "user", "content": "Output: "}]
     _, msg = message_fit_in(msg, getattr(chat_mdl, 'max_length', 8096))
@@ -194,7 +210,7 @@ def content_tagging(chat_mdl, content, all_tags, examples, topn=3):
     )
 
     msg = [{"role": "system", "content": rendered_prompt}, {"role": "user", "content": "Output: "}]
-    _, msg = message_fit_in(msg, chat_mdl.max_length)
+    _, msg = message_fit_in(msg, getattr(chat_mdl, 'max_length', 8096))
     kwd = chat_mdl.chat(rendered_prompt, msg[1:], {"temperature": 0.5})
     if isinstance(kwd, tuple):
         kwd = kwd[0]
@@ -314,7 +330,7 @@ def reflect(chat_mdl, history: list[dict], tool_call_res: list[Tuple], user_defi
         hist[-1]["content"] += user_prompt
     else:
         hist.append({"role": "user", "content": user_prompt})
-    _, msg = message_fit_in(hist, chat_mdl.max_length)
+    _, msg = message_fit_in(hist, getattr(chat_mdl, 'max_length', 8096))
     ans = chat_mdl.chat(msg[0]["content"], msg[1:])
     ans = re.sub(r"^.*</think>", "", ans, flags=re.DOTALL)
     return """
@@ -341,7 +357,7 @@ def tool_call_summary(chat_mdl, name: str, params: dict, result: str, user_defin
                            params=json.dumps(params, ensure_ascii=False, indent=2),
                            result=result)
     user_prompt = "→ Summary: "
-    _, msg = message_fit_in(form_message(system_prompt, user_prompt), chat_mdl.max_length)
+    _, msg = message_fit_in(form_message(system_prompt, user_prompt), getattr(chat_mdl, 'max_length', 8096))
     ans = chat_mdl.chat(msg[0]["content"], msg[1:])
     return re.sub(r"^.*</think>", "", ans, flags=re.DOTALL)
 
@@ -350,7 +366,7 @@ def rank_memories(chat_mdl, goal:str, sub_goal:str, tool_call_summaries: list[st
     template = PROMPT_JINJA_ENV.from_string(RANK_MEMORY)
     system_prompt = template.render(goal=goal, sub_goal=sub_goal, results=[{"i": i, "content": s} for i,s in enumerate(tool_call_summaries)])
     user_prompt = " → rank: "
-    _, msg = message_fit_in(form_message(system_prompt, user_prompt), chat_mdl.max_length)
+    _, msg = message_fit_in(form_message(system_prompt, user_prompt), getattr(chat_mdl, 'max_length', 8096))
     ans = chat_mdl.chat(msg[0]["content"], msg[1:], stop="<|stop|>")
     return re.sub(r"^.*</think>", "", ans, flags=re.DOTALL)
 
@@ -378,7 +394,7 @@ def gen_json(system_prompt:str, user_prompt:str, chat_mdl, gen_conf = None):
     cached = get_llm_cache(chat_mdl.llm_name, system_prompt, user_prompt, gen_conf)
     if cached:
         return json_repair.loads(cached)
-    _, msg = message_fit_in(form_message(system_prompt, user_prompt), chat_mdl.max_length)
+    _, msg = message_fit_in(form_message(system_prompt, user_prompt), getattr(chat_mdl, 'max_length', 8096))
     ans = chat_mdl.chat(msg[0]["content"], msg[1:],gen_conf=gen_conf)
     ans = re.sub(r"(^.*</think>|```json\n|```\n*$)", "", ans, flags=re.DOTALL)
     try:
@@ -641,7 +657,7 @@ def split_chunks(chunks, max_length: int):
 
 
 async def run_toc_from_text(chunks, chat_mdl, callback=None):
-    input_budget = int(chat_mdl.max_length * INPUT_UTILIZATION) - num_tokens_from_string(
+    input_budget = int(getattr(chat_mdl, 'max_length', 8096) * INPUT_UTILIZATION) - num_tokens_from_string(
         TOC_FROM_TEXT_USER + TOC_FROM_TEXT_SYSTEM
     )
 

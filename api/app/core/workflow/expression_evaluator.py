@@ -5,6 +5,7 @@
 """
 
 import logging
+import re
 from typing import Any
 
 from simpleeval import simple_eval, NameNotDefined, InvalidExpression
@@ -59,9 +60,10 @@ class ExpressionEvaluator:
         """
         # 移除 Jinja2 模板语法的花括号（如果存在）
         expression = expression.strip()
-        if expression.startswith("{{") and expression.endswith("}}"):
-            expression = expression[2:-2].strip()
-        
+        # "{{system.message}} == {{ user.messge }}" -> "system.message == user.message"
+        pattern = r"\{\{\s*(.*?)\s*\}\}"
+        expression = re.sub(pattern, r"\1", expression).strip()
+
         # 构建命名空间上下文
         context = {
             "var": variables,                    # 用户变量
@@ -72,6 +74,7 @@ class ExpressionEvaluator:
         # 为了向后兼容，也支持直接访问（但会在日志中警告）
         context.update(variables)
         context["nodes"] = node_outputs
+        context.update(node_outputs)
         
         try:
             # simpleeval 只支持安全的操作：
