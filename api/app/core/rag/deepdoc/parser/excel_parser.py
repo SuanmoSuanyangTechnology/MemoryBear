@@ -52,13 +52,19 @@ class RAGExcelParser:
                 raise Exception(f"pandas.read_excel error: {e_pandas}, original openpyxl error: {e}")
 
     @staticmethod
-    def _clean_dataframe(df: pd.DataFrame):
+    def _clean_dataframe(df):
         def clean_string(s):
             if isinstance(s, str):
                 return ILLEGAL_CHARACTERS_RE.sub(" ", s)
             return s
 
-        return df.apply(lambda col: col.map(clean_string))
+        # 处理单 DataFrame 或字典（多 Sheet）
+        if isinstance(df, dict):
+            return {sheet: RAGExcelParser._clean_dataframe(sheet_df) for sheet, sheet_df in df.items()}
+        elif isinstance(df, pd.DataFrame):
+            return df.apply(lambda col: col.map(clean_string))
+        else:
+            raise ValueError(f"Unsupported type for cleaning: {type(df)}")
 
     @staticmethod
     def _dataframe_to_workbook(df):
