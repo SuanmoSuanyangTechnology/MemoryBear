@@ -69,7 +69,8 @@ class RAGExcelParser:
     @staticmethod
     def _dataframe_to_workbook(df):
         # if contains multiple sheets use _dataframes_to_workbook
-        if isinstance(df, dict) and len(df) > 1:
+        # if isinstance(df, dict) and len(df) > 1:
+        if isinstance(df, dict):
             return RAGExcelParser._dataframes_to_workbook(df)
 
         df = RAGExcelParser._clean_dataframe(df)
