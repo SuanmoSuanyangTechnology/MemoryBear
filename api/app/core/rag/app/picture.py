@@ -51,7 +51,7 @@ def chunk(filename, binary, lang, callback=None, vision_model=None, **kwargs):
             img_binary = io.BytesIO()
             img.save(img_binary, format="JPEG")
             img_binary.seek(0)
-            ans = vision_model.describe(img_binary.read())
+            ans, ans_num_tokens = vision_model.describe(img_binary.read())
             callback(0.8, "CV LLM respond: %s ..." % ans[:32])
             txt += "\n" + ans
             tokenize(doc, txt, eng)

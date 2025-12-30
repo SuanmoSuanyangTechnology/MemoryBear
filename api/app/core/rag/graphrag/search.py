@@ -4,6 +4,7 @@ from collections import defaultdict
 from copy import deepcopy
 import json_repair
 import pandas as pd
+import time
 import trio
 
 from app.core.rag.common.misc_utils import get_uuid
@@ -262,21 +263,21 @@ class KGSearch(Dealer):
             relas = ""
 
         return {
-                "chunk_id": get_uuid(),
-                "content_ltks": "",
-                "page_content": ents + relas + self._community_retrieval_([n for n, _ in ents_from_query], filters, kb_ids, idxnms,
-                                                        comm_topn, max_token),
+            "page_content": ents + relas + self._community_retrieval_([n for n, _ in ents_from_query], filters, kb_ids, idxnms, comm_topn, max_token),
+            "vector": None,
+            "metadata": {
+                "doc_id": get_uuid(),
+                "file_id": "",
+                "file_name": "Related content in Knowledge Graph",
+                "file_created_at": int(time.time() * 1000),
                 "document_id": "",
-                "docnm_kwd": "Related content in Knowledge Graph",
-                "kb_id": kb_ids,
-                "important_kwd": [],
-                "image_id": "",
-                "similarity": 1.,
-                "vector_similarity": 1.,
-                "term_similarity": 0,
-                "vector": [],
-                "positions": [],
-            }
+                "knowledge_id": kb_ids,
+                "sort_id": 0,
+                "status": 1,
+                "score": 1
+            },
+            "children": None
+        }
 
     def _community_retrieval_(self, entities, condition, kb_ids, idxnms, topn, max_token):
         ## Community retrieval

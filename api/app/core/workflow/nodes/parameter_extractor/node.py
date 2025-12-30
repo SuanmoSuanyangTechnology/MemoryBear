@@ -1,4 +1,5 @@
 import os
+import logging
 
 import json_repair
 from typing import Any
@@ -14,6 +15,8 @@ from app.core.workflow.nodes.parameter_extractor.config import ParameterExtracto
 from app.db import get_db_read
 from app.models import ModelType
 from app.services.model_service import ModelConfigService
+
+logger = logging.getLogger(__name__)
 
 
 class ParameterExtractorNode(BaseNode):
@@ -114,7 +117,7 @@ class ParameterExtractorNode(BaseNode):
         """
         field_type = {}
         for param in self.typed_config.params:
-            field_type[param.name] = param.type
+            field_type[param.name] = f'{param.type}, required:{str(param.required)}'
         return field_type
 
     async def execute(self, state: WorkflowState) -> Any:
@@ -154,12 +157,12 @@ class ParameterExtractorNode(BaseNode):
 
         messages = [
             ("system", system_prompt),
+            ("user", self._render_template(self.typed_config.prompt, state)),
             ("user", rendered_user_prompt),
         ]
 
         model_resp = await llm.ainvoke(messages)
-        result = json_repair.repair_json(model_resp.content)
+        result = json_repair.repair_json(model_resp.content, return_objects=True)
+        logger.info(f"node: {self.node_id} get params:{result}")
 
-        return {
-            "output": result,
-        }
+        return result

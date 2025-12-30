@@ -215,6 +215,7 @@ class HttpRequestNode(BaseNode):
                         **self._build_content(state)
                     )
                     resp.raise_for_status()
+                    logger.info(f"Node {self.node_id}: HTTP request succeeded")
                     return HttpRequestNodeOutput(
                         body=resp.text,
                         status_code=resp.status_code,
@@ -228,12 +229,21 @@ class HttpRequestNode(BaseNode):
             else:
                 match self.typed_config.error_handle.method:
                     case HttpErrorHandle.NONE:
+                        logger.warning(
+                            f"Node {self.node_id}: HTTP request failed, returning error response"
+                        )
                         return HttpRequestNodeOutput(
                             body="",
                             status_code=resp.status_code,
                             headers=resp.headers,
                         ).model_dump()
                     case HttpErrorHandle.DEFAULT:
+                        logger.warning(
+                            f"Node {self.node_id}: HTTP request failed, returning default result"
+                        )
                         return self.typed_config.error_handle.default.model_dump()
                     case HttpErrorHandle.BRANCH:
+                        logger.warning(
+                            f"Node {self.node_id}: HTTP request failed, switching to error handling branch"
+                        )
                         return "ERROR"

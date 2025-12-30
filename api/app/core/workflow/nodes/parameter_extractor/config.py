@@ -36,6 +36,11 @@ class ParamsConfig(BaseModel):
         description="Description of the parameter"
     )
 
+    required: bool = Field(
+        ...,
+        description="Whether the parameter is required"
+    )
+
 
 class ParameterExtractorNodeConfig(BaseNodeConfig):
     model_id: uuid.UUID = Field(
@@ -51,4 +56,9 @@ class ParameterExtractorNodeConfig(BaseNodeConfig):
     params: list[ParamsConfig] = Field(
         ...,
         description="List of parameters"
+    )
+
+    prompt: str = Field(
+        ...,
+        description="User-provided supplemental prompt"
     )
