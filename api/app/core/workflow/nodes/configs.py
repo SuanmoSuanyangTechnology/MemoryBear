@@ -21,6 +21,7 @@ from app.core.workflow.nodes.transform.config import TransformNodeConfig
 from app.core.workflow.nodes.variable_aggregator.config import VariableAggregatorNodeConfig
 from app.core.workflow.nodes.parameter_extractor.config import ParameterExtractorNodeConfig
 from app.core.workflow.nodes.question_classifier.config import QuestionClassifierNodeConfig
+from app.core.workflow.nodes.tool.config import ToolNodeConfig
 
 from app.core.workflow.nodes.cycle_graph.config import LoopNodeConfig, IterationNodeConfig
 __all__ = [
@@ -45,4 +46,5 @@ __all__ = [
     "LoopNodeConfig",
     "IterationNodeConfig",
     "QuestionClassifierNodeConfig"
+    "ToolNodeConfig"
 ]
