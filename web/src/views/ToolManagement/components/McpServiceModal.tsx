@@ -303,15 +303,20 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
                   title: t('tool.requestHeaderName'),
                   dataIndex: 'key',
                   key: 'key',
+                  width: 120,
                 },
                 {
                   title: t('tool.requestHeaderValue'),
                   dataIndex: 'value',
                   key: 'value',
+                  render: (value) => {
+                    return <div className="rb:break-all">{value}</div>
+                  }
                 },
                 {
                   title: t('common.operation'),
                   key: 'action',
+                  width: 80,
                   render: (_, record, index: number) => (
                     <Space size="middle">
                       <Button
@@ -329,6 +334,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
               ]}
               initialData={requestHeaderList}
               emptySize={88}
+              scroll={{ x: 'max-content' }}
             />
           }
         </div>
