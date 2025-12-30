@@ -36,7 +36,7 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
      if (edges.length === 0) {
        nodes.forEach((node, index) => {
          const nodeData = node.getData();
-         const isSpecialNode = nodeData?.isGroup || nodeData?.type === 'condition';
+         const isSpecialNode = nodeData?.isGroup || nodeData?.type === 'if-else';
          const nodeHeight = isSpecialNode ? 220 : 50;
          const xPosition = 100;
          const yPosition = index * (nodeHeight + 100) + 100;
@@ -89,7 +89,7 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
       if (!node) return;
       
       const nodeData = node.getData();
-      const isSpecialNode = nodeData?.isGroup || nodeData?.type === 'condition';
+      const isSpecialNode = nodeData?.isGroup || nodeData?.type === 'if-else';
       const nodeWidth = isSpecialNode ? 400 : 160;
       const gap = isSpecialNode ? 150 : 100;
       
@@ -107,7 +107,7 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
       if (!node) return parentY;
       
       const nodeData = node.getData();
-      const isSpecialNode = nodeData?.isGroup || nodeData?.type === 'condition';
+      const isSpecialNode = nodeData?.isGroup || nodeData?.type === 'if-else';
       const nodeHeight = isSpecialNode ? 220 : 50;
       const verticalGap = isSpecialNode ? 80 : 40;
       const spacing = baseNodeSpacing + nodeHeight + verticalGap;
