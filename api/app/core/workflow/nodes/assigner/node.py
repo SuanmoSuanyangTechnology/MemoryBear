@@ -83,3 +83,5 @@ class AssignerNode(BaseNode):
                     operator.remove_last()
                 case _:
                     raise ValueError(f"Invalid Operator: {assignment.operation}")
+            logger.info(f"Node {self.node_id}: execution completed")
+

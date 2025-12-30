@@ -190,12 +190,12 @@ class KnowledgeRetrievalNode(BaseNode):
                 match kb_config.retrieve_type:
                     case RetrieveType.PARTICIPLE:
                         rs.extend(vector_service.search_by_full_text(query=query, top_k=kb_config.top_k,
-                                                                indices=indices,
-                                                                score_threshold=kb_config.similarity_threshold))
+                                                                     indices=indices,
+                                                                     score_threshold=kb_config.similarity_threshold))
                     case RetrieveType.SEMANTIC:
                         rs.extend(vector_service.search_by_vector(query=query, top_k=kb_config.top_k,
-                                                             indices=indices,
-                                                             score_threshold=kb_config.vector_similarity_weight))
+                                                                  indices=indices,
+                                                                  score_threshold=kb_config.vector_similarity_weight))
                     case RetrieveType.HYBRID:
                         rs1 = vector_service.search_by_vector(query=query, top_k=kb_config.top_k,
                                                               indices=indices,
@@ -209,5 +209,9 @@ class KnowledgeRetrievalNode(BaseNode):
                         rs.extend(vector_service.rerank(query=query, docs=unique_rs, top_k=kb_config.top_k))
                     case _:
                         raise RuntimeError("Unknown retrieval type")
-            final_rs = vector_service.rerank(query=query, docs=rs, top_k=kb_config.top_k)
+            vector_service.reranker = self.get_reranker_model()
+            final_rs = vector_service.rerank(query=query, docs=rs, top_k=self.typed_config.reranker_top_k)
+            logger.info(
+                f"Node {self.node_id}: knowledge base retrieval completed, results count: {len(final_rs)}"
+            )
             return [chunk.model_dump() for chunk in final_rs]

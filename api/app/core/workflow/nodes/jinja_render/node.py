@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 from app.core.workflow.nodes import WorkflowState
@@ -5,6 +6,7 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.jinja_render.config import JinjaRenderNodeConfig
 from app.core.workflow.template_renderer import TemplateRenderer
 
+logger = logging.getLogger(__name__)
 
 class JinjaRenderNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
@@ -41,5 +43,5 @@ class JinjaRenderNode(BaseNode):
             res = render.env.from_string(self.typed_config.template).render(**context)
         except Exception as e:
             raise RuntimeError(f"JinjaRender Node {self.node_name} render failed: {e}") from e
-
+        logger.info(f"Node {self.node_id}: Jinja template rendering completed")
         return res

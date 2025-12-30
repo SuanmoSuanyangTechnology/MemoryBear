@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import logging
 import re
 from typing import Any
 
@@ -8,6 +9,8 @@ from langgraph.graph.state import CompiledStateGraph
 from app.core.workflow.nodes import WorkflowState
 from app.core.workflow.nodes.cycle_graph import IterationNodeConfig
 from app.core.workflow.variable_pool import VariablePool
+
+logger = logging.getLogger(__name__)
 
 
 class IterationRuntime:
@@ -127,12 +130,15 @@ class IterationRuntime:
             # Execute iterations in parallel batches
             while idx < len(array_obj) and self.looping:
                 tasks = self._create_iteration_tasks(array_obj, idx)
+                logger.info(f"Iteration node {self.node_id}: running, concurrency {len(tasks)}")
                 idx += self.typed_config.parallel_count
                 await asyncio.gather(*tasks)
+            logger.info(f"Iteration node {self.node_id}: execution completed")
             return self.result
         else:
             # Execute iterations sequentially
             while idx < len(array_obj) and self.looping:
+                logger.info(f"Iteration node {self.node_id}: running")
                 item = array_obj[idx]
                 result = await self.graph.ainvoke(self._init_iteration_state(item, idx))
                 output = VariablePool(result).get(self.output_value)
@@ -143,4 +149,6 @@ class IterationRuntime:
                 if not result["looping"]:
                     self.looping = False
                 idx += 1
+
+            logger.info(f"Iteration node {self.node_id}: execution completed")
             return self.result
