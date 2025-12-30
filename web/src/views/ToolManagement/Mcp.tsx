@@ -56,6 +56,8 @@ const Mcp: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getSta
     testConnection(item.id)
       .then(() => {
         message.success(t('tool.testConnectionSuccess'));
+      })
+      .finally(() => {
         getData()
       })
   };
