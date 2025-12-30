@@ -32,6 +32,7 @@ class KnowledgeRetrievalConfig(BaseModel):
     )
     reranker_id: Optional[str] = Field(default=None, description="多知识库结果融合的模型ID")
     reranker_top_k: int = Field(default=10, ge=0, le=1024, description="多知识库结果融合的模型参数")
+    use_graph: bool = Field(default=False, description="是否使用图搜索")
 
 
 class ToolConfig(BaseModel):
