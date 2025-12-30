@@ -10,7 +10,7 @@ const NodeLibrary: FC = () => {
   console.log('nodeLibrary', nodeLibrary)
 
   return (
-    <div className="rb:w-80 rb:fixed rb:h-screen rb:left-0 rb:py-5 rb:px-5.5 rb:overflow-y-auto">
+    <div className="rb:w-80 rb:fixed rb:h-[calc(100%-64px)] rb:left-0 rb:py-5 rb:px-5.5 rb:overflow-y-auto">
       <Space size={12} direction="vertical" className="rb:w-full">
         {nodeLibrary.map(category => (
           <Card

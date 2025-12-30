@@ -171,9 +171,13 @@ export const useWorkflowGraph = ({
           
           let sourcePort = sourcePorts.find((port: any) => port.group === 'right')?.id || 'right';
           
-          // 如果是if-else节点且有label，使用label作为源端口
+          // 如果是if-else节点且有label，根据label匹配对应的端口
           if (sourceCell.getData()?.type === 'if-else' && label) {
-            sourcePort = label;
+            // 查找匹配的端口ID
+            const matchingPort = sourcePorts.find((port: any) => port.id === label);
+            if (matchingPort) {
+              sourcePort = label;
+            }
           }
           
           const edgeConfig = {
