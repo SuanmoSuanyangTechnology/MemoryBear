@@ -27,7 +27,7 @@ class DateTimeTool(BuiltinTool):
                 type=ParameterType.STRING,
                 description="操作类型",
                 required=True,
-                enum=["format", "convert_timezone", "timestamp_to_datetime", "datetime_to_timestamp", "calculate", "now"]
+                enum=["format", "convert_timezone", "timestamp_to_datetime", "now"]
             ),
             ToolParameter(
                 name="input_value",

@@ -29,8 +29,7 @@ class JsonTool(BuiltinTool):
                 type=ParameterType.STRING,
                 description="操作类型",
                 required=True,
-                enum=["format", "minify", "validate", "convert", "to_yaml", "from_yaml", "to_xml", "from_xml", "merge",
-                      "extract", "insert", "replace", "delete", "parse"]
+                enum=["insert", "replace", "delete", "parse"]
             ),
             ToolParameter(
                 name="input_data",
