@@ -37,7 +37,7 @@ const Neo4j: FC = () => {
           memoryInsightRef.current?.getData()
         }
         if (response.summary_success) {
-          memoryInsightRef.current?.getData()
+          aboutMeRef.current?.getData()
         }
       })
       .finally(() => {

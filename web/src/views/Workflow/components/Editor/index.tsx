@@ -20,7 +20,7 @@ interface LexicalEditorProps {
   placeholder?: string;
   value?: string;
   onChange?: (value: string) => void;
-  suggestions: Suggestion[];
+  options: Suggestion[];
 }
 
 const theme = {
@@ -35,7 +35,7 @@ const Editor: FC<LexicalEditorProps> =({
   placeholder = "请输入内容...",
   value = "",
   onChange,
-  suggestions,
+  options,
 }) => {
   const [_count, setCount] = useState(0);
   const initialConfig = {
@@ -91,9 +91,9 @@ const Editor: FC<LexicalEditorProps> =({
         />
         <HistoryPlugin />
         <CommandPlugin />
-        <AutocompletePlugin suggestions={suggestions} />
+        <AutocompletePlugin options={options} />
         <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
-        <InitialValuePlugin value={value} suggestions={suggestions} />
+        <InitialValuePlugin value={value} options={options} />
       </div>
     </LexicalComposer>
   );

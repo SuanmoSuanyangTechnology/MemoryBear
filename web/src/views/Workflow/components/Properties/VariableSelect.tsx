@@ -1,4 +1,5 @@
 import { type FC } from 'react'
+import clsx from 'clsx';
 import { Select, type SelectProps } from 'antd'
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 type LabelRender = SelectProps['labelRender'];
@@ -7,13 +8,17 @@ interface VariableSelectProps extends SelectProps {
   options: Suggestion[];
   value?: string;
   onChange?: (value: string) => void;
+  allowClear?: boolean;
 }
 
 const VariableSelect: FC<VariableSelectProps> = ({
   placeholder,
   options,
   value,
+  allowClear = true,
   onChange,
+  size,
+  ...resetPorps
 }) => {
 
   const handleChange = (value: string) => {
@@ -26,7 +31,10 @@ const VariableSelect: FC<VariableSelectProps> = ({
     if (filterOption) {
       return (
         <span
-          className="rb:border rb:border-[#DFE4ED] rb:rounded-md rb:bg-white rb:leading-5.5! rb:text-[12px] rb:inline-flex rb:items-center rb:px-1.5 rb:cursor-pointer"
+          className={clsx("rb:w-full rb:wrap-break-word rb:line-clamp-1 rb:border rb:border-[#DFE4ED] rb:rounded-md rb:bg-white rb:text-[12px] rb:inline-flex rb:items-center rb:px-1.5 rb:cursor-pointer", {
+            'rb:leading-5.5!': size !== 'small',
+            'rb:leading-4!': size === 'small'
+          })}
           contentEditable={false}
         >
           <img
@@ -59,6 +67,8 @@ const VariableSelect: FC<VariableSelectProps> = ({
   
   return (
     <Select
+      {...resetPorps}
+      size={size}
       placeholder={placeholder}
       value={value}
       style={{ width: '100%' }}
@@ -66,6 +76,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
       labelRender={labelRender}
       onChange={handleChange}
       showSearch
+      allowClear={allowClear}
       filterOption={(input, option) => {
         if (option?.options) {
           return option.label?.toLowerCase().includes(input.toLowerCase()) ||

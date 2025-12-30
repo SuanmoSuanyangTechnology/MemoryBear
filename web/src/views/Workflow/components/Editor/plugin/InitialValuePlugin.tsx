@@ -7,10 +7,10 @@ import { type Suggestion } from '../plugin/AutocompletePlugin'
 
 interface InitialValuePluginProps {
   value: string;
-  suggestions?: Suggestion[];
+  options?: Suggestion[];
 }
 
-const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, suggestions = [] }) => {
+const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [] }) => {
   const [editor] = useLexicalComposerContext();
   const initializedRef = useRef(false);
 
@@ -29,7 +29,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, suggesti
           if (match) {
             const [_, nodeId, label] = match;
 
-            const suggestion = suggestions.find(s => {
+            const suggestion = options.find(s => {
               if (nodeId === 'sys') {
                 return s.nodeData.type === 'start' && s.label === `sys.${label}`
               }
@@ -51,7 +51,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, suggesti
       
       initializedRef.current = true;
     }
-  }, [suggestions]);
+  }, [options]);
 
   return null;
 };
