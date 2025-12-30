@@ -65,6 +65,7 @@ class Knowledge(Base):
                                "html4excel": False,
                                "graphrag": {
                                     "use_graphrag": False,
+                                    "scene_name": "",
                                     "entity_types": [
                                         "organization",
                                         "person",
@@ -72,7 +73,9 @@ class Knowledge(Base):
                                         "event",
                                         "category"
                                     ],
-                                    "method": "general"
+                                    "method": "general",
+                                    "resolution": True,
+                                    "community": True
                                 }
                            },
                            comment="default parser config")
