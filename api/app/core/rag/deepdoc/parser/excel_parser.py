@@ -42,35 +42,31 @@ class RAGExcelParser:
                 file_like_object.seek(0)
                 try:
                     dfs = pd.read_excel(file_like_object, sheet_name=None)
+                    if isinstance(dfs, dict):
+                        dfs = next(iter(dfs.values()))
                     return RAGExcelParser._dataframe_to_workbook(dfs)
                 except Exception as ex:
                     logging.info(f"pandas with default engine load error: {ex}, try calamine instead")
                     file_like_object.seek(0)
                     df = pd.read_excel(file_like_object, engine="calamine")
+                    print(df)
                     return RAGExcelParser._dataframe_to_workbook(df)
             except Exception as e_pandas:
                 raise Exception(f"pandas.read_excel error: {e_pandas}, original openpyxl error: {e}")
 
     @staticmethod
-    def _clean_dataframe(df):
+    def _clean_dataframe(df: pd.DataFrame):
         def clean_string(s):
             if isinstance(s, str):
                 return ILLEGAL_CHARACTERS_RE.sub(" ", s)
             return s
 
-        # 处理单 DataFrame 或字典（多 Sheet）
-        if isinstance(df, dict):
-            return {sheet: RAGExcelParser._clean_dataframe(sheet_df) for sheet, sheet_df in df.items()}
-        elif isinstance(df, pd.DataFrame):
-            return df.apply(lambda col: col.map(clean_string))
-        else:
-            raise ValueError(f"Unsupported type for cleaning: {type(df)}")
+        return df.apply(lambda col: col.map(clean_string))
 
     @staticmethod
     def _dataframe_to_workbook(df):
         # if contains multiple sheets use _dataframes_to_workbook
-        # if isinstance(df, dict) and len(df) > 1:
-        if isinstance(df, dict):
+        if isinstance(df, dict) and len(df) > 1:
             return RAGExcelParser._dataframes_to_workbook(df)
 
         df = RAGExcelParser._clean_dataframe(df)
