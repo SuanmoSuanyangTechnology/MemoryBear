@@ -8,6 +8,7 @@ import { register } from '@antv/x6-react-shape';
 import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary } from '../constant';
 import type { WorkflowConfig, NodeProperties } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
+import type { PortMetadata } from '@antv/x6/lib/model/port';
 
 export interface UseWorkflowGraphProps {
   containerRef: React.RefObject<HTMLDivElement>;
@@ -35,7 +36,7 @@ export interface UseWorkflowGraphReturn {
   handleSave: (flag?: boolean) => Promise<unknown>;
 }
 
-const edge_color = '#155EEF';
+export const edge_color = '#155EEF';
 const edge_selected_color = '#4DA8FF'
 
 export const useWorkflowGraph = ({
@@ -88,7 +89,13 @@ export const useWorkflowGraph = ({
               nodeLibraryConfig.config[key].defaultValue = {
                 ...rest
               }
-              console.log(type, config, nodeLibraryConfig)
+            } else if (key === 'group_names' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+              const { group_names, group } = config
+              nodeLibraryConfig.config[key].defaultValue = group
+                ? Object.entries(group_names as Record<string, any>).map(([key, value]) => ({ key, value }))
+                : [{ key: 'Group1', value: group_names }]
+
+              console.log('group_names', nodeLibraryConfig.config)
             } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && config[key]) {
               nodeLibraryConfig.config[key].defaultValue = config[key]
             }
@@ -102,13 +109,59 @@ export const useWorkflowGraph = ({
           data: { ...node, ...nodeLibraryConfig},
           ...position,
         }
+        
+        // 如果是if-else节点，根据cases动态生成端口
+        if (type === 'if-else' && config.cases && Array.isArray(config.cases)) {
+          const caseCount = config.cases.length;
+          const totalPorts = caseCount + 1; // IF/ELIF + ELSE
+          const baseHeight = 88;
+          const newHeight = baseHeight + (totalPorts - 2) * 30;
+          
+          const portAttrs = {
+            circle: {
+              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
+            },
+          };
+          
+          const portItems: PortMetadata[] = [
+            { group: 'left' },
+            { group: 'right', id: 'CASE1', args: { dy: 24 }, attrs: { text: { text: 'IF', fontSize: 12, fill: '#5B6167' }} }
+          ];
+          
+          // 添加 ELIF 端口
+          for (let i = 1; i < caseCount; i++) {
+            portItems.push({
+              group: 'right',
+              id: `CASE${i + 1}`,
+              attrs: { text: { text: 'ELIF', fontSize: 12, fill: '#5B6167' }}
+            });
+          }
+          
+          // 添加 ELSE 端口
+          portItems.push({
+            group: 'right',
+            id: `CASE${caseCount + 1}`,
+            attrs: { text: { text: 'ELSE', fontSize: 12, fill: '#5B6167' }}
+          });
+          
+          nodeConfig.ports = {
+            groups: {
+              right: { position: 'right', attrs: portAttrs },
+              left: { position: 'left', attrs: portAttrs },
+            },
+            items: portItems
+          };
+          
+          nodeConfig.height = newHeight;
+        }
+        
         return nodeConfig
       })
       graphRef.current?.addNodes(nodeList)
     }
     if (edges.length) {
       const edgeList = edges.map(edge => {
-        const { source, target } = edge
+        const { source, target, label } = edge
         const sourceCell = graphRef.current?.getCellById(source)
         const targetCell = graphRef.current?.getCellById(target)
         
@@ -116,16 +169,22 @@ export const useWorkflowGraph = ({
           const sourcePorts = (sourceCell as Node).getPorts()
           const targetPorts = (targetCell as Node).getPorts()
           
+          let sourcePort = sourcePorts.find((port: any) => port.group === 'right')?.id || 'right';
+          
+          // 如果是if-else节点且有label，使用label作为源端口
+          if (sourceCell.getData()?.type === 'if-else' && label) {
+            sourcePort = label;
+          }
+          
           const edgeConfig = {
             source: {
               cell: sourceCell.id,
-              port: sourcePorts.find((port: any) => port.group === 'right')?.id || 'right'
+              port: sourcePort
             },
             target: {
               cell: targetCell.id,
               port: targetPorts.find((port: any) => port.group === 'left')?.id || 'left'
             },
-            // label,
             attrs: {
               line: {
                 stroke: edge_color,
@@ -646,13 +705,13 @@ export const useWorkflowGraph = ({
         y: point.y - 100,
         data: { ...cleanNodeData, isGroup: true },
       });
-    } else if (dragData.type === 'condition') {
+    } else if (dragData.type === 'if-else') {
       // 创建条件节点
       graphRef.current.addNode({
         ...graphNodeLibrary[dragData.type],
         x: point.x - 100,
         y: point.y - 60,
-        data: { ...cleanNodeData, elifCount: 0 },
+        data: { ...cleanNodeData },
       });
     } else {
       // 检查是否放置在群组内
@@ -719,10 +778,21 @@ export const useWorkflowGraph = ({
           };
         }),
         edges: edges.map((edge: Edge) => {
+          const sourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
+          const sourcePortId = edge.getSourcePortId();
+          
+          // 如果是if-else节点的右侧端口连线，添加label
+          if (sourceCell?.getData()?.type === 'if-else' && sourcePortId?.startsWith('CASE')) {
+            return {
+              source: edge.getSourceCellId(),
+              target: edge.getTargetCellId(),
+              label: sourcePortId,
+            };
+          }
+          
           return {
             source: edge.getSourceCellId(),
             target: edge.getTargetCellId(),
-            // label: edge.getAttrs()?.label?.text,
           };
         }),
       }

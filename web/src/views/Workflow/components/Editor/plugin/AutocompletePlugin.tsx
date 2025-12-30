@@ -14,7 +14,7 @@ export interface Suggestion {
   nodeData: NodeProperties
 }
 
-const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) => {
+const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
   const [editor] = useLexicalComposerContext();
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -73,8 +73,8 @@ const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) 
 
   if (!showSuggestions) return null;
 
-  // Group suggestions by node id
-  const groupedSuggestions = suggestions.reduce((groups: Record<string, any[]>, suggestion) => {
+  // Group options by node id
+  const groupedSuggestions = options.reduce((groups: Record<string, any[]>, suggestion) => {
     const { nodeData } = suggestion
     const nodeId = nodeData.id as string;
     if (!groups[nodeId]) {
@@ -84,6 +84,9 @@ const AutocompletePlugin: FC<{ suggestions: Suggestion[] }> = ({ suggestions }) 
     return groups;
   }, {});
 
+  if (Object.entries(groupedSuggestions).length === 0) {
+    return null
+  }
   return (
     <div
       style={{

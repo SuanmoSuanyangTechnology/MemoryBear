@@ -142,61 +142,102 @@ export const nodeLibrary: NodeLibrary[] = [
         }
       },
       // { type: "classification", icon: classificationIcon },
-      // { type: "parameter_extraction", icon: parameterExtractionIcon }
+      { type: "parameter-extractor", icon: parameterExtractionIcon,
+        config: {
+          model_id: {
+            type: 'customSelect',
+            url: getModelListUrl,
+            params: { type: 'llm,chat' }, // llm/chat
+            valueKey: 'id',
+            labelKey: 'name',
+          },
+          text: {
+            type: 'variableList',
+          },
+          params: {
+            type: 'paramList',
+          },
+          prompt: {
+            type: 'messageEditor',
+            isArray: false,
+          },
+        }
+      }
     ]
   },
-  /*
-  {
-    category: "cognitiveUpgrading",
-    nodes: [
-      { type: "task_planning", icon: taskPlanningIcon },
-      { type: "reasoning_control", icon: reasoningControlIcon },
-      { type: "self_reflection", icon: selfReflectionIcon },
-      { type: "memory_enhancement", icon: memoryEnhancementIcon }
-    ]
-  },
-  {
-    category: "agentCollaborationNode",
-    nodes: [
-      { type: "agent_scheduling", icon: agentSchedulingIcon },
-      { type: "agent_collaboration", icon: agentCollaborationIcon },
-      { type: "agent_arbitration", icon: agentArbitrationIcon }
-    ]
-  },
+  // {
+  //   category: "cognitiveUpgrading",
+  //   nodes: [
+  //     { type: "task_planning", icon: taskPlanningIcon },
+  //     { type: "reasoning_control", icon: reasoningControlIcon },
+  //     { type: "self_reflection", icon: selfReflectionIcon },
+  //     { type: "memory_enhancement", icon: memoryEnhancementIcon }
+  //   ]
+  // },
+  // {
+  //   category: "agentCollaborationNode",
+  //   nodes: [
+  //     { type: "agent_scheduling", icon: agentSchedulingIcon },
+  //     { type: "agent_collaboration", icon: agentCollaborationIcon },
+  //     { type: "agent_arbitration", icon: agentArbitrationIcon }
+  //   ]
+  // },
   {
     category: "flowControl",
     nodes: [
-      { type: "condition", icon: conditionIcon },
-      { type: "iteration", icon: iterationIcon },
-      { type: "loop", icon: loopIcon },
-      { type: "parallel", icon: parallelIcon },
-      { type: "aggregator", icon: aggregatorIcon }
+      { type: "if-else", icon: conditionIcon,
+        config: {
+          cases: {
+            type: 'caseList',
+            defaultValue: [
+              {
+                logical_operator: 'and',
+                expressions: []
+              }
+            ]
+          }
+        }
+      },
+      // { type: "iteration", icon: iterationIcon },
+      // { type: "loop", icon: loopIcon },
+      // { type: "parallel", icon: parallelIcon },
+      { type: "var-aggregator", icon: aggregatorIcon,
+        config: {
+          group: {
+            type: 'switch',
+            defaultValue: false
+          },
+          group_names: {
+            type: 'groupVariableList',
+            defaultValue: [{ key: 'Group1', value: []}]
+          }
+        }
+      }
     ]
   },
-  {
-    category: "externalInteraction",
-    nodes: [
-      { type: "http_request", icon: httpRequestIcon },
-      { type: "tools", icon: toolsIcon },
-      { type: "code_execution", icon: codeExecutionIcon },
-      { type: "template_rendering", icon: templateRenderingIcon }
-    ]
-  },
-  {
-    category: "safetyAndCompliance",
-    nodes: [
-      { type: "sensitive_detection", icon: sensitiveDetectionIcon },
-      { type: "output_audit", icon: outputAuditIcon }
-    ]
-  },
-  {
-    category: "evolutionAndGovernance",
-    nodes: [
-      { type: "self_optimization", icon: selfOptimizationIcon },
-      { type: "process_evolution", icon: processEvolutionIcon }
-    ]
-  },
-  */
+  // {
+  //   category: "externalInteraction",
+  //   nodes: [
+  //     { type: "http_request", icon: httpRequestIcon },
+  //     { type: "tools", icon: toolsIcon },
+  //     { type: "code_execution", icon: codeExecutionIcon },
+  //     { type: "template_rendering", icon: templateRenderingIcon }
+  //   ]
+  // },
+  // {
+  //   category: "safetyAndCompliance",
+  //   nodes: [
+  //     { type: "sensitive_detection", icon: sensitiveDetectionIcon },
+  //     { type: "output_audit", icon: outputAuditIcon }
+  //   ]
+  // },
+  // {
+  //   category: "evolutionAndGovernance",
+  //   nodes: [
+  //     { type: "self_optimization", icon: selfOptimizationIcon },
+  //     { type: "process_evolution", icon: processEvolutionIcon }
+  //   ]
+  // },
 ];
 
 // 节点注册库
@@ -221,8 +262,8 @@ export const nodeRegisterLibrary: ReactShapeConfig[] = [
   },
   {
     shape: 'condition-node',
-    width: 200,
-    height: 100,
+    width: 240,
+    height: 88,
     component: ConditionNode,
   },
   {
@@ -253,7 +294,7 @@ interface NodeConfig {
 
 const portAttrs = {
   circle: {
-    r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', 
+    r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
   },
 }
 const defaultPortGroups = {
@@ -287,16 +328,16 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       items: defaultPortItems,
     },
   },
-  condition: {
+  'if-else': {
     width: 240,
-    height: 200,
+    height: 88,
     shape: 'condition-node',
     ports: {
       groups: defaultPortGroups,
       items: [
         { group: 'left' },
-        { group: 'right', id: 'if_1', attrs: {text: { text: 'IF' }} },
-        { group: 'right', id: 'else_2', attrs: {text: { text: 'ELSE' }} }
+        { group: 'right', id: 'CASE1', args: { dy: 24 }, attrs: { text: { text: 'IF', fontSize: 12, color: '#5B6167' }} },
+        { group: 'right', id: 'CASE2', attrs: { text: { text: 'ELSE', fontSize: 12, color: '#5B6167' }} }
       ],
     },
   },
