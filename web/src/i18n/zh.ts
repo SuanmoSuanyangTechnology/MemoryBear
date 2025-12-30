@@ -1162,7 +1162,9 @@ export const zh = {
       memoryContent: '记忆内容',
       created_at: '创建时间',
       updated_at: '最后更新时间',
-      fullScreen: '全屏'
+      fullScreen: '全屏',
+
+      memoryWindow: "{{name}}的记忆之窗"
     },
     space: {
       createSpace: '创建空间',
