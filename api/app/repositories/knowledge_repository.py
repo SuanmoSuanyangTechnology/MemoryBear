@@ -52,19 +52,19 @@ def get_knowledges_paginated(
         raise
 
 
-def get_chunked_knowledgeids(
+def get_chunded_knowledgeids(
         db: Session,
         filters: list
 ) -> list:
     """
     Query the list of vectorized knowledge base IDs
-    Return: list[UUID] - List of knowledge base IDs
+    Return: list[(id,workspace_id)] - List of knowledge base id and workspace_id
     """
     db_logger.debug(f"Query the list of vectorized knowledge base IDs: filters_count={len(filters)}")
 
     try:
         # Only query the id field
-        query = db.query(Knowledge.id)
+        query = db.query(Knowledge.id, Knowledge.workspace_id)
 
         # Apply filter conditions
         for filter_cond in filters:
@@ -74,8 +74,8 @@ def get_chunked_knowledgeids(
         items = query.all()
         db_logger.info(f"Querying the vectorized knowledge base id list succeeded: count={len(items)}")
 
-        # Return the list of IDs directly. Since only the ID field is queried, the returned data is a single column
-        return [item[0] for item in items]
+        # Return the list of ID and workspace_id directly. Since only the ID and workspace_id field is queried
+        return items
     except Exception as e:
         db_logger.error(f"Querying the vectorized knowledge base id list failed: {str(e)}")
         raise
