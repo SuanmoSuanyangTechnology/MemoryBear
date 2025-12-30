@@ -94,5 +94,6 @@ class IfElseNode(BaseNode):
         for i in range(len(expressions)):
             logger.info(expressions[i])
             if self._evaluate_condition(expressions[i], state):
+                logger.info(f"Node {self.node_id}: switched to branch CASE {i + 1}")
                 return f'CASE{i + 1}'
         return f'CASE{len(expressions)}'

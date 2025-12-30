@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 from langgraph.graph.state import CompiledStateGraph
@@ -7,6 +8,8 @@ from app.core.workflow.nodes import WorkflowState
 from app.core.workflow.nodes.cycle_graph import LoopNodeConfig
 from app.core.workflow.nodes.operators import ConditionExpressionBuilder
 from app.core.workflow.variable_pool import VariablePool
+
+logger = logging.getLogger(__name__)
 
 
 class LoopRuntime:
@@ -119,6 +122,9 @@ class LoopRuntime:
                 node_outputs=loop_variable_pool.get_all_node_outputs(),
                 system_vars=loop_variable_pool.get_all_system_vars(),
         ) and loopstate["looping"] and loop_time > 0:
+            logger.info(f"loop node {self.node_id}: running")
             await self.graph.ainvoke(loopstate)
             loop_time -= 1
+
+        logger.info(f"loop node {self.node_id}: execution completed")
         return loopstate["runtime_vars"][self.node_id]

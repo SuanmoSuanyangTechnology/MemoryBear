@@ -65,7 +65,10 @@ class CycleGraphNode(BaseNode):
 
             # Raise error if cycle nodes are connected with external nodes
             if source_in ^ target_in:
-                raise ValueError(f"循环节点与外部节点存在连接,soruce: {edge.get("source")}, target:{edge.get("target")}")
+                raise ValueError(
+                    f"Cycle node is connected to external node, "
+                    f"source: {edge.get('source')}, target: {edge.get('target')}"
+                )
 
             if source_in and target_in:
                 cycle_edges.append(edge)
@@ -220,4 +223,4 @@ class CycleGraphNode(BaseNode):
                 config=self.config,
                 state=state,
             ).run()
-        raise RuntimeError("未知循环节点类型")
+        raise RuntimeError("Unknown cycle node type")

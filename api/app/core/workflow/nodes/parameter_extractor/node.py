@@ -163,6 +163,6 @@ class ParameterExtractorNode(BaseNode):
 
         model_resp = await llm.ainvoke(messages)
         result = json_repair.repair_json(model_resp.content, return_objects=True)
-        logger.info(f"get prarms:{result}")
+        logger.info(f"node: {self.node_id} get params:{result}")
 
         return result

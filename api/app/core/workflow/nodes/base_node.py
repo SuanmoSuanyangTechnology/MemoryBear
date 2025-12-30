@@ -78,6 +78,7 @@ class BaseNode(ABC):
         self.workflow_config = workflow_config
         self.node_id = node_config["id"]
         self.node_type = node_config["type"]
+        self.cycle = node_config.get("cycle")
         self.node_name = node_config.get("name", self.node_id)
         # 使用 or 运算符处理 None 值
         self.config = node_config.get("config") or {}
