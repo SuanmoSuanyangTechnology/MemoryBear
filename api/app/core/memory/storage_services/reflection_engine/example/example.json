@@ -2,52 +2,39 @@
   "memory_verify": {
     "source_data": [
       {
-        "statement_name": "用户是2023年春天去北京工作的。",
-        "statement_id": "62beac695b1346f4871740a45db88782"
+        "statement_name": "我是 2023 年春天去北京工作的，后来基本一直都在北京上班，也没怎么换过城市。不过后来公司调整，2024 年上半年我被调到上海待了差不多半年，那段时间每天都是在上海办公室打卡。当时入职资料用的还是我之前的身份信息，身份证号是 11010119950308123X，银行卡是 6222023847595898，这些一直没变。对了，其实我 从 2023 年开始就一直在北京生活，从来没有长期离开过北京，上海那段更多算是远程配合。"
       },
       {
-        "statement_name": "用户后来基本一直都在北京上班。",
-        "statement_id": "4cba5ac08b674d7fb1e2ae634d2b8f0b"
+        "statement_name": "用户后来基本一直都在北京上班。"
       },
       {
-        "statement_name": "用户从2023年开始就一直在北京生活。",
-        "statement_id": "e612a44da4db483993c350df7c97a1a1"
+        "statement_name": "用户从2023年开始就一直在北京生活。"
       },
       {
-        "statement_name": "用户从来没有长期离开过北京。",
-        "statement_id": "b3c787a2e33c49f7981accabbbb4538a"
+        "statement_name": "用户从来没有长期离开过北京。"
       },
       {
-        "statement_name": "由于公司调整，用户在2024年上半年被调到上海待了差不多半年。",
-        "statement_id": "64cde4230cb24a4da726e7db9e7aa616"
+        "statement_name": "由于公司调整，用户在2024年上半年被调到上海待了差不多半年。"
       },
       {
-        "statement_name": "用户在被调到上海期间每天都是在上海办公室打卡。",
-        "statement_id": "8b1b12e23b844b8088dfeb67da6ad669"
+        "statement_name": "用户在被调到上海期间每天都是在上海办公室打卡。"
       },
       {
-        "statement_name": "用户在入职时使用的身份信息是之前的，身份证号为11010119950308123X。",
-        "statement_id": "030afd362e9b4110b139e68e5d3e7143"
+        "statement_name": "用户在入职时使用的身份信息是之前的，身份证号为11010119950308123X。"
       },
       {
-        "statement_name": "用户的银行卡号是6222023847595898。",
-        "statement_id": "6c7567cd1f3c478bb42d1b65383e6f2f"
+        "statement_name": "用户的银行卡号是6222023847595898。"
       },
       {
-        "statement_name": "用户的身份信息和银行卡信息一直没变。",
-        "statement_id": "b3ca618e1e204b83bebd70e75cf2073f"
+        "statement_name": "用户的身份信息和银行卡信息一直没变。"
       },
       {
-        "statement_name": "用户认为在上海的那段时间更多算是远程配合。",
-        "statement_id": "150af89d2c154e6eb41ff1a91e37f962"
+        "statement_name": "用户认为在上海的那段时间更多算是远程配合。"
       }
     ],
     "databasets": [
       {
         "entity1_name": "Person",
-        "description": "表示人类个体的通用类型",
-        "statement_id": "62beac695b1346f4871740a45db88782",
-        "entity2_name": "用户",
         "entity2": {
           "description": "叙述者，讲述个人工作与生活经历的个体",
           "name": "用户"
@@ -55,9 +42,6 @@
       },
       {
         "entity1_name": "用户",
-        "description": "叙述者，讲述个人工作与生活经历的个体",
-        "statement_id": "62beac695b1346f4871740a45db88782",
-        "entity2_name": "身份信息",
         "entity2": {
           "description": "用于个人身份识别的数据",
           "name": "身份信息"
@@ -65,9 +49,6 @@
       },
       {
         "entity1_name": "用户",
-        "description": "叙述者，讲述个人工作与生活经历的个体",
-        "statement_id": "62beac695b1346f4871740a45db88782",
-        "entity2_name": "6222023847595898",
         "entity2": {
           "description": "用户的银行卡号码",
           "name": "6222023847595898"
@@ -76,33 +57,24 @@
       {
         "entity1_name": "用户",
         "description": "叙述者，讲述个人工作与生活经历的个体",
-        "statement_id": "62beac695b1346f4871740a45db88782",
-        "entity2_name": "上海办公室",
         "entity2": {
           "entity_idx": 1,
           "aliases": ["上海办"],
-          "description": "位于上海的工作办公场所",
           "name": "上海办公室"
         }
       },
       {
         "entity1_name": "用户",
         "description": "叙述者，讲述个人工作与生活经历的个体",
-        "statement_id": "62beac695b1346f4871740a45db88782",
-        "entity2_name": "北京",
         "entity2": {
           "aliases": ["京", "京城", "北平"],
-          "description": "中国的首都城市，用户主要工作和生活所在地",
           "name": "北京"
         }
       },
       {
         "entity1_name": "11010119950308123X",
         "description": "具体的身份证号码值",
-        "statement_id": "030afd362e9b4110b139e68e5d3e7143",
-        "entity2_name": "身份证号",
         "entity2": {
-          "description": "中华人民共和国公民的身份号码",
           "name": "身份证号"
         }
       }
