@@ -50,6 +50,7 @@ class VariableAggregatorNode(BaseNode):
                     continue
 
                 if value is not None:
+                    logger.info(f"Node: {self.node_id} variable aggregation result: {value}")
                     return value
 
             logger.info("No variable found in non-group mode; returning empty string.")
@@ -59,7 +60,7 @@ class VariableAggregatorNode(BaseNode):
         # Group mode
         # --------------------------
         result = {}
-        for group_name, variables in zip(self.typed_config.group_names, self.typed_config.group_variables):
+        for group_name, variables in self.typed_config.group_variables.items():
             for variable in variables:
                 var_express = self._get_express(variable)
                 try:
@@ -74,5 +75,5 @@ class VariableAggregatorNode(BaseNode):
             else:
                 result[group_name] = ""
                 logger.info(f"No variable found for group '{group_name}'; set empty string.")
-
+        logger.info(f"Node: {self.node_id} variable aggregation result: {result}")
         return result

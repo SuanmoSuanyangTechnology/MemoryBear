@@ -42,7 +42,7 @@ nodes:
             - 适当使用格式化（如列表、段落）提高可读性
         
         - role: user
-          content: "{{ sys.message }}"
+          content: "{{sys.message}}"
       
       model_id: null
       temperature: 0.7
@@ -55,7 +55,7 @@ nodes:
     type: end
     name: 结束
     config:
-      output: "{{ llm_qa.output }}"
+      output: "{{llm_qa.output}}"
     position:
       x: 900
       y: 100
