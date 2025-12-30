@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next'
 import clsx from 'clsx';
 import { Dropdown } from 'antd';
 import { SmallDashOutlined } from '@ant-design/icons';
@@ -15,7 +16,8 @@ interface NodeData {
 }
 
 const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
-  const data = node.getData() as NodeData;
+  const data = node.getData() || {};
+  const { t } = useTranslation()
 
   useEffect(() => {
     initNodes()
@@ -53,46 +55,29 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     node.addChild(childNode1)
     node.addChild(childNode2)
   }
-  
-  return (
-    <div className={clsx('rb:group rb:border-2 rb:border-dashed rb:rounded-[12px] rb:relative rb:min-w-[300px] rb:min-h-[200px] rb:p-4', {
-      'rb:border-orange-500 rb:border-[3px] rb:bg-white rb:text-gray-700': data?.isSelected,
-      'rb:border-[#d1d5db] rb:bg-white rb:text-[#374151]': !data?.isSelected
-    })}>
-      {/* 标题区域 */}
-      <div className="rb:absolute rb:-top-3 rb:left-4 rb:bg-[#10b981] rb:rounded-[20px] rb:p-[8px_16px] rb:flex rb:items-center rb:gap-2 rb:text-white rb:text-[14px] rb:font-bold rb:z-10">
-        <div className="rb:w-5 rb:h-5 rb:bg-[#FFFFFF] rb:rounded-sm rb:flex rb:items-center rb:justify-center rb:text-[12px] rb:text-[#10b981]">
-          ♻️
+
+    return (
+      <div className={clsx('rb:cursor-pointer rb:group rb:relative rb:h-16 rb:w-60 rb:p-2.5 rb:border rb:rounded-xl rb:bg-white rb:hover:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.12)]', {
+        'rb:border-[#155EEF]': data.isSelected,
+        'rb:border-[#DFE4ED]': !data.isSelected
+      })}>
+        <div className="rb:flex rb:items-center rb:justify-between">
+          <div className="rb:flex rb:items-center rb:gap-2 rb:flex-1">
+            <img src={data.icon} className="rb:w-5 rb:h-5" />
+            <div className="rb:wrap-break-word rb:line-clamp-1">{data.name ?? t(`workflow.${data.type}`)}</div>
+          </div>
+          
+          <div 
+            className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
+            onClick={(e) => {
+              e.stopPropagation()
+              node.remove()
+            }}
+          ></div>
         </div>
-        循环
+        <div className="rb:mt-6 rb:min-h-37.5 rb:w-full rb:bg-[radial-gradient(circle,#e5e7eb_1px,transparent_1px)] rb:bg-size-[12px_12px]"></div>
       </div>
-      <Dropdown
-        menu={{items: [
-          {
-            key: '1',
-            label: '删除',
-          },
-          {
-            key: '2',
-            label: '复制',
-          },
-          {
-            key: '3',
-            label: '删除',
-          }
-        ]}}
-      >
-        <SmallDashOutlined 
-          className={clsx("rb:cursor-pointer rb:right-1 rb:top-1 rb:invisible rb:absolute rb:group-hover:visible", {
-            'rb:visible': data.isSelected
-          })}
-        />
-      </Dropdown>
-      
-      {/* 画布内容区域 */}
-      <div className="rb:mt-6 rb:min-h-[150px] rb:w-full rb:bg-[radial-gradient(circle,#e5e7eb_1px,transparent_1px)] rb:bg-size-[12px_12px]"></div>
-    </div>
-  );
+    );
 };
 
 export default LoopNode;

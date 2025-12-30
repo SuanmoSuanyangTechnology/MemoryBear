@@ -21,6 +21,8 @@ interface LexicalEditorProps {
   value?: string;
   onChange?: (value: string) => void;
   options: Suggestion[];
+  variant?: 'outlined' | 'borderless';
+  height?: number;
 }
 
 const theme = {
@@ -36,6 +38,8 @@ const Editor: FC<LexicalEditorProps> =({
   value = "",
   onChange,
   options,
+  variant = 'borderless',
+  height = 60,
 }) => {
   const [_count, setCount] = useState(0);
   const initialConfig = {
@@ -62,9 +66,10 @@ const Editor: FC<LexicalEditorProps> =({
           contentEditable={
             <ContentEditable
               style={{
-                minHeight: '60px',
-                padding: '0',
-                border: 'none',
+                minHeight: `${height}px`,
+                padding: variant === 'borderless' ? '0' : '4px 11px',
+                border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
+                borderRadius: '6px',
                 outline: 'none',
                 resize: 'none',
                 fontSize: '14px',
@@ -76,8 +81,8 @@ const Editor: FC<LexicalEditorProps> =({
             <div
               style={{
                 position: 'absolute',
-                top: '0',
-                left: '0',
+                top: variant === 'borderless' ? '0' : '6px',
+                left: variant === 'borderless' ? '0' : '11px',
                 color: '#5B6167',
                 fontSize: '14px',
                 lineHeight: '20px',
