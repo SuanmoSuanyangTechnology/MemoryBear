@@ -148,6 +148,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                     value: type,
                     label: t(`application.${type}`),
                     labelDesc: t(`application.${type}Desc`),
+                    disabled: type === 'handoffs'
                   }))}
                   allowClear={false}
                 />
