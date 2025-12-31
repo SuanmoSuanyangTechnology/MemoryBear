@@ -16,6 +16,7 @@ import KnowledgeListModal from './KnowledgeListModal'
 import KnowledgeConfigModal from './KnowledgeConfigModal'
 import KnowledgeGlobalConfigModal from './KnowledgeGlobalConfigModal'
 import Tag from '@/components/Tag'
+import { getKnowledgeBaseList } from '@/api/knowledgeBase'
 
 const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfig) => void}> = ({value = {knowledge_bases: []}, onChange}) => {
   const { t } = useTranslation()
@@ -29,7 +30,26 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
     if (value && JSON.stringify(value) !== JSON.stringify(editConfig)) {
       setEditConfig({ ...(value || {}) })
       const knowledge_bases = [...(value.knowledge_bases || [])]
-      setKnowledgeList(knowledge_bases)
+      
+      // 检查是否有knowledge_bases缺少name字段
+      const basesWithoutName = knowledge_bases.filter(base => !base.name)
+      if (basesWithoutName.length > 0) {
+        // 调用接口获取完整的知识库信息
+        getKnowledgeBaseList().then(res => {
+          const fullBases = knowledge_bases.map(base => {
+            if (!base.name) {
+              const fullBase = res.items.find((item: any) => item.id === base.kb_id)
+              return fullBase ? { ...base, ...fullBase } : base
+            }
+            return base
+          })
+          setKnowledgeList(fullBases)
+        }).catch(() => {
+          setKnowledgeList(knowledge_bases)
+        })
+      } else {
+        setKnowledgeList(knowledge_bases)
+      }
     }
   }, [value])
 
