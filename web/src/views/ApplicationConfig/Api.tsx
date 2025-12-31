@@ -77,6 +77,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
         title: t('common.confirmDeleteDesc', { name: vo.name }),
         content: t('application.apiKeyDeleteContent'),
         okText: t('common.delete'),
+        cancelText: t('common.cancel'),
         okType: 'danger',
         onOk: () => {
           deleteApiKey(vo.id)

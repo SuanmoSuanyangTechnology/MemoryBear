@@ -9,7 +9,7 @@ import { getOrderDetail } from '@/api/order'
 import { STATUS } from '../index';
 
 
-const OrderDetail = forwardRef<OrderDetailRef>((_props, ref) => {
+const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) => void; }>(({ getProductType }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [data, setData] = useState({})
@@ -38,7 +38,7 @@ const OrderDetail = forwardRef<OrderDetailRef>((_props, ref) => {
           : key === 'status' && value
             ? t(`pricing.${STATUS[value as keyof typeof STATUS].key}`)
             : key === 'product_type' && value
-              ? t(`pricing.${value.toLowerCase()}.type`)
+              ? t(`pricing.${getProductType(value)}.type`)
               : value
       }
     })

@@ -1,7 +1,7 @@
 import { type FC } from 'react';
 import { useTranslation } from 'react-i18next'
 import { Input, Form, Space, Button, Row, Col, Select, type FormListOperation } from 'antd';
-import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { MinusCircleOutlined } from '@ant-design/icons';
 import Editor from '../Editor'
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 
@@ -48,7 +48,7 @@ const MessageEditor: FC<TextareaProps> = ({
           {(fields, { add, remove }) => (
             <Space size={12} direction="vertical" className="rb:w-full">
               {fields.map(({ key, name, ...restField }) => {
-                const currentRole = values[parentName]?.[key].role || 'USER'
+                const currentRole = (values[parentName]?.[key].role || 'USER').toUpperCase()
                 
                 return (
                   <Space key={key} size={12} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5 rb:bg-white">
@@ -86,7 +86,7 @@ const MessageEditor: FC<TextareaProps> = ({
                 )
               })}
               <Form.Item>
-                <Button type="dashed" onClick={() => handleAdd(add)} block icon={<PlusOutlined />}>
+                <Button type="dashed" onClick={() => handleAdd(add)} block>
                   +{t('workflow.addMessage')}
                 </Button>
               </Form.Item>
