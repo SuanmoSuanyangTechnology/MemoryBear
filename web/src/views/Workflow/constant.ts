@@ -121,7 +121,7 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'define',
             defaultValue: [
               {
-                role: 'system',
+                role: 'SYSTEM',
                 content: undefined,
                 readonly: true
               },

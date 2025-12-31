@@ -762,9 +762,11 @@ export const useWorkflowGraph = ({
               if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
                 itemConfig[key] = data.config[key].defaultValue
               } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
+                const { knowledge_bases } = data.config[key].defaultValue
                 itemConfig = {
                   ...itemConfig,
-                  ...data.config[key].defaultValue
+                  ...data.config[key].defaultValue,
+                  knowledge_bases: knowledge_bases.map((vo: any) => ({ kb_id: vo.id, ...vo.config }))
                 }
               }
             })
