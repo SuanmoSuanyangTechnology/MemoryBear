@@ -290,12 +290,22 @@ class MultiAgentService:
         else:
             execution_config_data = convert_uuids_to_str(data.execution_config.model_dump())
 
+        # 处理 model_parameters（可能是 None、字典或 Pydantic 模型）
+        if data.model_parameters is None:
+            model_parameters_data = None
+        elif isinstance(data.model_parameters, dict):
+            # 过滤掉值为 None 的字段
+            model_parameters_data = {k: v for k, v in data.model_parameters.items() if v is not None}
+        else:
+            # 过滤掉值为 None 的字段
+            model_parameters_data = {k: v for k, v in data.model_parameters.model_dump().items() if v is not None}
+
         config = MultiAgentConfig(
                 app_id=app_id,
                 master_agent_id=data.master_agent_id,
                 master_agent_name=data.master_agent_name,
                 default_model_config_id=data.default_model_config_id,
-                model_parameters=data.model_parameters,
+                model_parameters=model_parameters_data,
                 orchestration_mode=data.orchestration_mode,
                 sub_agents=sub_agents_data,
                 # routing_rules=routing_rules_data,
