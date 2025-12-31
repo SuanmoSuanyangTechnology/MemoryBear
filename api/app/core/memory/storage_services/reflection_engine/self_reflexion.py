@@ -387,7 +387,7 @@ class ReflectionEngine:
         result_data['memory_verifies'] = memory_verifies
         result_data['quality_assessments'] = quality_assessments
         conflicts_found=''
-
+        REMOVE_KEYS = {"created_at", "expired_at","relationship","predicate","statement_id","id","statement_id","relationship_statement_id"}
         # Clearn conflict_data，And memory_verify和quality_assessment
         cleaned_conflict_data = []
         for item in conflict_data:
@@ -396,7 +396,23 @@ class ReflectionEngine:
                 'conflict': item['conflict']
             }
             cleaned_conflict_data.append(cleaned_item)
-
+        cleaned_conflict_data_=[]
+        for item in conflict_data:
+            cleaned_data = []
+            for row in item.get("data", []):
+                # 删除 created_at / expired_at
+                cleaned_row = {
+                    k: v
+                    for k, v in row.items()
+                    if k not in REMOVE_KEYS
+                }
+                cleaned_data.append(cleaned_row)
+            cleaned_item = {
+                "data": cleaned_data,
+                "conflict": item.get("conflict"),
+            }
+            cleaned_conflict_data_.append(cleaned_item)
+        print(cleaned_conflict_data_)
         # 3. 解决冲突
         solved_data = await self._resolve_conflicts(cleaned_conflict_data, source_data)
         if not solved_data:
