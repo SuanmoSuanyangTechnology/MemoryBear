@@ -17,7 +17,8 @@ import type {
   KnowledgeConfig,
   Variable,
   MemoryConfig,
-  AiPromptModalRef
+  AiPromptModalRef,
+  Source
 } from './types'
 import type { Model } from '@/views/ModelManagement/types'
 import { getModelList } from '@/api/models';
@@ -200,7 +201,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
       })
   }
 
-  const refresh = (vo: ModelConfig, type: 'model' | 'chat') => {
+  const refresh = (vo: ModelConfig, type: Source) => {
     if (type === 'model') {
       const { default_model_config_id, ...rest } = vo
       form.setFieldsValue({
@@ -445,7 +446,6 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
       <ModelConfigModal
         modelList={modelList}
         data={formData as Config}
-        chatList={chatList}
         ref={modelConfigModalRef}
         refresh={refresh}
       />

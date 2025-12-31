@@ -16,7 +16,7 @@ interface ChatProps {
   chatList: ChatData[];
   data: Config;
   updateChatList: React.Dispatch<React.SetStateAction<ChatData[]>>;
-  handleSave: (flag?: boolean) => Promise<any>;
+  handleSave: (flag?: boolean) => Promise<unknown>;
   source?: 'multi_agent' | 'agent';
 }
 const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, source = 'agent' }) => {
@@ -74,7 +74,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
         const curModelChat = modelChatList[targetIndex]
         const curChatMsgList = curModelChat.list || []
         const lastMsg = curChatMsgList[curChatMsgList.length - 1]
-        if (lastMsg.role === 'assistant') {
+        if (lastMsg && lastMsg.role === 'assistant') {
           modelChatList[targetIndex] = {
             ...modelChatList[targetIndex],
             conversation_id: conversation_id,
@@ -128,7 +128,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       .then(() => {
         const message = form.getFieldValue('message')
         if (!message?.trim()) return
-        
+
         addUserMessage(message)
         form.setFieldsValue({ message: undefined })
         addAssistantMessage()
@@ -139,7 +139,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
           data.map(item => {
             const { model_config_id, conversation_id, content, message_length } = item.data as { model_config_id: string; conversation_id: string; content: string; message_length: number };
 
-            switch(item.event) {
+            switch (item.event) {
               case 'model_message':
                 updateAssistantMessage(content, model_config_id, conversation_id)
                 break;

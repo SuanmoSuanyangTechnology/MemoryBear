@@ -4,10 +4,11 @@ import {
   $createParagraphNode,
   $createTextNode,
   $getRoot,
+  $getSelection,
   $setSelection,
   $createRangeSelection,
-  $isParagraphNode,
   $isTextNode,
+  $isRangeSelection,
 } from 'lexical';
 
 import { $createVariableNode } from '../nodes/VariableNode';
@@ -26,64 +27,45 @@ const CommandPlugin = () => {
       INSERT_VARIABLE_COMMAND,
       (payload: InsertVariableCommandPayload) => {
         editor.update(() => {
-          const root = $getRoot();
-          const text = root.getTextContent();
-          const lastSlashIndex = text.lastIndexOf('/');
+          const selection = $getSelection();
+          if (!selection || !$isRangeSelection(selection)) return;
           
-          // Find the paragraph and the position to insert
-          const paragraph = root.getFirstChild();
-          if (!paragraph || !$isParagraphNode(paragraph)) return;
+          const anchorNode = selection.anchor.getNode();
+          const anchorOffset = selection.anchor.offset;
           
-          const children = paragraph.getChildren();
-          let insertPosition = 0;
-          let currentTextLength = 0;
-          
-          // Find where to insert the new tag
-          for (let i = 0; i < children.length; i++) {
-            const child = children[i];
-            const childText = child.getTextContent();
+          if ($isTextNode(anchorNode)) {
+            const nodeText = anchorNode.getTextContent();
+            const textBeforeCursor = nodeText.substring(0, anchorOffset);
+            const textAfterCursor = nodeText.substring(anchorOffset);
             
-            if (currentTextLength + childText.length > lastSlashIndex) {
-              // Split this text node if needed
-              if ($isTextNode(child)) {
-                const beforeSlash = childText.substring(0, lastSlashIndex - currentTextLength);
-                const afterSlash = childText.substring(lastSlashIndex - currentTextLength + 1);
-                
-                if (beforeSlash) {
-                  child.setTextContent(beforeSlash);
-                  insertPosition = i + 1;
-                } else {
-                  insertPosition = i;
-                  child.remove();
-                }
-                
-                // Insert tag and space
-                const tagNode = $createVariableNode(payload.data);
-                const spaceNode = $createTextNode(' ');
-                
-                if (insertPosition < paragraph.getChildrenSize()) {
-                  paragraph.getChildAtIndex(insertPosition)?.insertBefore(tagNode);
-                  tagNode.insertAfter(spaceNode);
-                } else {
-                  paragraph.append(tagNode);
-                  paragraph.append(spaceNode);
-                }
-                
-                if (afterSlash) {
-                  spaceNode.insertAfter($createTextNode(afterSlash));
-                }
-                
-                // Set cursor after space
-                const selection = $createRangeSelection();
-                selection.anchor.set(spaceNode.getKey(), 1, 'text');
-                selection.focus.set(spaceNode.getKey(), 1, 'text');
-                $setSelection(selection);
+            // Find the last '/' position
+            const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
+            
+            if (lastSlashIndex !== -1) {
+              // Split the text: before slash, insert variable, after cursor
+              const beforeSlash = textBeforeCursor.substring(0, lastSlashIndex);
+              
+              // Update the current text node with text before slash
+              anchorNode.setTextContent(beforeSlash);
+              
+              // Create and insert the variable node
+              const tagNode = $createVariableNode(payload.data);
+              const spaceNode = $createTextNode(' ');
+              
+              anchorNode.insertAfter(tagNode);
+              tagNode.insertAfter(spaceNode);
+              
+              // Add remaining text if any
+              if (textAfterCursor) {
+                spaceNode.insertAfter($createTextNode(textAfterCursor));
               }
-              break;
+              
+              // Set cursor after space
+              const newSelection = $createRangeSelection();
+              newSelection.anchor.set(spaceNode.getKey(), 1, 'text');
+              newSelection.focus.set(spaceNode.getKey(), 1, 'text');
+              $setSelection(newSelection);
             }
-            
-            currentTextLength += childText.length;
-            insertPosition = i + 1;
           }
         });
         return true;
