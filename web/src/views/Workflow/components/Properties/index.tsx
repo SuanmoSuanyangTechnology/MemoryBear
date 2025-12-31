@@ -318,7 +318,7 @@ const Properties: FC<PropertiesProps> = ({
                 if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                   return (
                     <Form.Item key={key} name={key}>
-                      <MessageEditor options={variableList} />
+                      <MessageEditor options={variableList} parentName={key} />
                     </Form.Item>
                   )
                 }
