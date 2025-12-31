@@ -197,6 +197,10 @@ def validate_embedding_model(
         embedding_id, "embedding", db, tenant_id, required=True,
         config_id=config_id, workspace_id=workspace_id
     )
+    print(100*'-')
+    print(embedding_uuid)
+    print(_)
+    print(100*'-')
     
     if embedding_uuid is None:
         raise InvalidConfigError(
