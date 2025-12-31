@@ -61,7 +61,7 @@ class EndNode(BaseNode):
             引用的节点 ID 列表
         """
         # 匹配 {{node_id.xxx}} 格式
-        pattern = r'\{\{([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+\}\}'
+        pattern = r'\{\{([a-zA-Z0-9_-]+)\.[a-zA-Z0-9_]+\}\}'
         matches = re.findall(pattern, template)
         return list(set(matches))  # 去重
 
