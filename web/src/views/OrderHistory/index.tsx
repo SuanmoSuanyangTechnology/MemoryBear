@@ -51,10 +51,10 @@ const OrderHistory: React.FC = () => {
   ]
   const productTypeOptions = [
     { label: t('pricing.allType'), value: null },
-    ...PRICE_LIST.map(vo => ({
-      label: t(`pricing.${vo.type}.type`),
-      value: vo.type
-    }))
+    { label: t('pricing.personal.type'), value: 'FREE' },
+    { label: t('pricing.team.type'), value: 'TEAM' },
+    { label: t('pricing.biz.type'), value: 'ENTERPRISE' },
+    { label: t('pricing.commerce.type'), value: 'OEM' },
   ]
 
   const handleView = (order: Order) => {
@@ -128,6 +128,16 @@ const OrderHistory: React.FC = () => {
       end_time
     }))
   }
+
+  const getProductType = (type: string) => {
+    const typeMap: Record<string, string> = {
+      'FREE': 'personal',
+      'TEAM': 'team',
+      'ENTERPRISE': 'biz',
+      'OEM': 'commerce'
+    };
+    return typeMap[type] || 'ENTERPRISE';
+  };
   // 表格列配置
   const columns: ColumnsType = [
     {
@@ -140,7 +150,7 @@ const OrderHistory: React.FC = () => {
       title: t('pricing.product_type'),
       dataIndex: 'product_type',
       key: 'product_type',
-      render: (type) => t(`pricing.${type.toLowerCase()}.type`)
+      render: (type) => t(`pricing.${getProductType(type)}.type`)
     },
     {
       title: t('pricing.payable_amount'),
@@ -219,7 +229,7 @@ const OrderHistory: React.FC = () => {
         isScroll={true}
       />
 
-      <OrderDetail ref={orderDetailRef} />
+      <OrderDetail ref={orderDetailRef} getProductType={getProductType} />
     </div>
   );
 };
