@@ -1,6 +1,6 @@
 import { useEffect, useState, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getRoot, $getSelection } from 'lexical';
+import { $getSelection, $isRangeSelection } from 'lexical';
 
 import { INSERT_VARIABLE_COMMAND } from '../commands';
 import type { NodeProperties } from '../../../types'
@@ -23,43 +23,55 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
   useEffect(() => {
     return editor.registerUpdateListener(({ editorState }) => {
       editorState.read(() => {
-        const root = $getRoot();
-        const text = root.getTextContent();
-        const shouldShow = text.includes('/');
+        const selection = $getSelection();
+        
+        if (!selection || !$isRangeSelection(selection)) {
+          setShowSuggestions(false);
+          return;
+        }
+
+        const anchorNode = selection.anchor.getNode();
+        const anchorOffset = selection.anchor.offset;
+        
+        // Get the text content of the current node
+        const nodeText = anchorNode.getTextContent();
+        
+        // Check if we have a '/' at the current position or after line break
+        const textBeforeCursor = nodeText.substring(0, anchorOffset);
+        const shouldShow = textBeforeCursor.endsWith('/') || 
+                          (textBeforeCursor === '/' && anchorOffset === 1);
+        
         setShowSuggestions(shouldShow);
 
         if (shouldShow) {
-          const selection = $getSelection();
-          if (selection) {
-            const domSelection = window.getSelection();
-            if (domSelection && domSelection.rangeCount > 0) {
-              const range = domSelection.getRangeAt(0);
-              const rect = range.getBoundingClientRect();
+          const domSelection = window.getSelection();
+          if (domSelection && domSelection.rangeCount > 0) {
+            const range = domSelection.getRangeAt(0);
+            const rect = range.getBoundingClientRect();
 
-              const popupWidth = 280;
-              const popupHeight = 200;
-              const viewportWidth = window.innerWidth;
-              const viewportHeight = window.innerHeight;
+            const popupWidth = 280;
+            const popupHeight = 200;
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
 
-              let left = rect.left;
-              let top = rect.top - 10;
+            let left = rect.left;
+            let top = rect.top - 10;
 
-              if (left + popupWidth > viewportWidth) {
-                left = viewportWidth - popupWidth - 10;
-              }
-              if (left < 10) {
-                left = 10;
-              }
-
-              if (top - popupHeight < 10) {
-                top = rect.bottom + 10;
-                if (top + popupHeight > viewportHeight) {
-                  top = viewportHeight - popupHeight - 10;
-                }
-              }
-
-              setPopupPosition({ top, left });
+            if (left + popupWidth > viewportWidth) {
+              left = viewportWidth - popupWidth - 10;
             }
+            if (left < 10) {
+              left = 10;
+            }
+
+            if (top - popupHeight < 10) {
+              top = rect.bottom + 10;
+              if (top + popupHeight > viewportHeight) {
+                top = viewportHeight - popupHeight - 10;
+              }
+            }
+
+            setPopupPosition({ top, left });
           }
         }
       });
@@ -112,7 +124,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
             <div style={{ padding: '4px 12px', fontSize: '12px', color: '#999', fontWeight: 'bold' }}>
               {nodeName}
             </div>
-            {nodeOptions.map((option, index) => {
+            {nodeOptions.map((option) => {
               const globalIndex = Object.values(groupedSuggestions).flat().indexOf(option);
               return (
                 <div

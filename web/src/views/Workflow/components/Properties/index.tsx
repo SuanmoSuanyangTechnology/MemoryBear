@@ -237,6 +237,20 @@ const Properties: FC<PropertiesProps> = ({
             });
           }
           break
+        case 'knowledge-retrieval':
+          const knowledgeKey = `${nodeId}_message`;
+          if (!addedKeys.has(knowledgeKey)) {
+            addedKeys.add(knowledgeKey);
+            variableList.push({
+              key: knowledgeKey,
+              label: 'message',
+              type: 'variable',
+              dataType: 'String',
+              value: `${nodeId}.message`,
+              nodeData: nodeData,
+            });
+          }
+          break
       }
     });
 
