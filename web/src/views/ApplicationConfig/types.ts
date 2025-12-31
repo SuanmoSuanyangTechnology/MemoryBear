@@ -93,18 +93,15 @@ export interface Config extends MultiAgentConfig {
 export interface MultiAgentConfig {
   id: string;
   app_id: string;
-  // system_prompt: string;
-  // default_model_config_id?: string;
-  // model_parameters: ModelConfig;
-  // knowledge_retrieval: KnowledgeConfig | null;
-  // memory?: MemoryConfig;
-  // variables: Variable[];
-  // tools: Record<string, string>;
-  // is_active: boolean;
-  // created_at: number;
-  // updated_at: number;
-  master_agent_id?: string;
+  default_model_config_id?: string;
+  model_parameters: ModelConfig;
+  orchestration_mode: 'conditional' | 'sequential' | 'parallel';
   sub_agents?: SubAgentItem[];
+  routing_rules: null;
+  execution_config: {
+    routing_mode: 'master' | 'handoffs'
+  };
+  aggregation_strategy: 'merge' | 'vote' | 'priority'
 }
 
 // 创建表单数据类型
@@ -116,21 +113,22 @@ export interface ApplicationModalData {
 
 // 定义组件暴露的方法接口
 export interface AgentRef {
-  handleSave: (flag?: boolean) => Promise<any>;
+  handleSave: (flag?: boolean) => Promise<unknown>;
 }
 export interface ClusterRef {
-  handleSave: (flag?: boolean) => Promise<any>;
+  handleSave: (flag?: boolean) => Promise<unknown>;
 }
 export interface WorkflowRef {
-  handleSave: (flag?: boolean) => Promise<any>;
+  handleSave: (flag?: boolean) => Promise<unknown>;
   handleRun: () => void;
   graphRef: GraphRef
 }
 export interface ApplicationModalRef {
   handleOpen: (application?: Config) => void;
 }
+export type Source = 'chat' | 'model' | 'multi_agent'
 export interface ModelConfigModalRef {
-  handleOpen: (source: 'chat' | 'model') => void;
+  handleOpen: (source: Source, model?: any) => void;
 }
 export interface ModelConfigModalData {
   model: string;
