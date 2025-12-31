@@ -121,7 +121,7 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'define',
             defaultValue: [
               {
-                role: 'system',
+                role: 'SYSTEM',
                 content: undefined,
                 readonly: true
               },
@@ -142,27 +142,27 @@ export const nodeLibrary: NodeLibrary[] = [
         }
       },
       // { type: "classification", icon: classificationIcon },
-      { type: "parameter-extractor", icon: parameterExtractionIcon,
-        config: {
-          model_id: {
-            type: 'customSelect',
-            url: getModelListUrl,
-            params: { type: 'llm,chat' }, // llm/chat
-            valueKey: 'id',
-            labelKey: 'name',
-          },
-          text: {
-            type: 'variableList',
-          },
-          params: {
-            type: 'paramList',
-          },
-          prompt: {
-            type: 'messageEditor',
-            isArray: false,
-          },
-        }
-      }
+      // { type: "parameter-extractor", icon: parameterExtractionIcon,
+      //   config: {
+      //     model_id: {
+      //       type: 'customSelect',
+      //       url: getModelListUrl,
+      //       params: { type: 'llm,chat' }, // llm/chat
+      //       valueKey: 'id',
+      //       labelKey: 'name',
+      //     },
+      //     text: {
+      //       type: 'variableList',
+      //     },
+      //     params: {
+      //       type: 'paramList',
+      //     },
+      //     prompt: {
+      //       type: 'messageEditor',
+      //       isArray: false,
+      //     },
+      //   }
+      // }
     ]
   },
   // {
@@ -182,115 +182,115 @@ export const nodeLibrary: NodeLibrary[] = [
   //     { type: "agent_arbitration", icon: agentArbitrationIcon }
   //   ]
   // },
-  {
-    category: "flowControl",
-    nodes: [
-      { type: "if-else", icon: conditionIcon,
-        config: {
-          cases: {
-            type: 'caseList',
-            defaultValue: [
-              {
-                logical_operator: 'and',
-                expressions: []
-              }
-            ]
-          }
-        }
-      },
-      // { type: "iteration", icon: iterationIcon },
-      // { type: "loop", icon: loopIcon },
-      // { type: "parallel", icon: parallelIcon },
-      { type: "var-aggregator", icon: aggregatorIcon,
-        config: {
-          group: {
-            type: 'switch',
-            defaultValue: false
-          },
-          group_names: {
-            type: 'groupVariableList',
-            defaultValue: [{ key: 'Group1', value: []}]
-          }
-        }
-      }
-    ]
-  },
-  {
-    category: "externalInteraction",
-    nodes: [
-      { type: "http-request", icon: httpRequestIcon,
-        config: {
-          method: {
-            type: 'select',
-            options: [
-              { label: 'GET', value: 'GET' },
-              { label: 'POST', value: 'POST' },
-              { label: 'HEAD', value: 'HEAD' },
-              { label: 'PATCH', value: 'PATCH' },
-              { label: 'PUT', value: 'PUT' },
-              { label: 'DELETE', value: 'DELETE' },
-            ],
-            defaultValue: 'GET'
-          },
-          url: {
-            type: 'messageEditor',
-            isArray: false,
-          },
-          auth: {
-            type: 'define',
-            defaultValue: {
-              auth_type: 'none'
-            }
-          },
-          headers: {
-            type: 'define',
-            defaultValue: {}
-          },
-          params: {
-            type: 'define',
-            defaultValue: {}
-          },
-          body: {
-            type: 'define',
-            defaultValue: {
-              'content_type': 'none'
-            }
-          },
-          verify_ssl: {
-            type: 'switch',
-            defaultValue: false
-          },
-          timeouts: {
-            type: 'define',
-            defaultValue: {}
-          },
-          retry: {
-            type: 'define',
-          },
-          error_handle: {
-            type: 'define',
-            defaultValue: {
-              method: 'default'
-            }
-          }
-        }
-      },
-      // { type: "tools", icon: toolsIcon },
-      // { type: "code_execution", icon: codeExecutionIcon },
-      { type: "jinja-render", icon: templateRenderingIcon,
-        config: {
-          mapping: {
-            type: 'mappingList',
-            defaultValue: []
-          },
-          template: {
-            type: 'messageEditor',
-            isArray: false,
-          },
-        }
-      }
-    ]
-  },
+  // {
+  //   category: "flowControl",
+  //   nodes: [
+  //     { type: "if-else", icon: conditionIcon,
+  //       config: {
+  //         cases: {
+  //           type: 'caseList',
+  //           defaultValue: [
+  //             {
+  //               logical_operator: 'and',
+  //               expressions: []
+  //             }
+  //           ]
+  //         }
+  //       }
+  //     },
+  //     // { type: "iteration", icon: iterationIcon },
+  //     { type: "loop", icon: loopIcon },
+  //     // { type: "parallel", icon: parallelIcon },
+  //     { type: "var-aggregator", icon: aggregatorIcon,
+  //       config: {
+  //         group: {
+  //           type: 'switch',
+  //           defaultValue: false
+  //         },
+  //         group_names: {
+  //           type: 'groupVariableList',
+  //           defaultValue: [{ key: 'Group1', value: []}]
+  //         }
+  //       }
+  //     }
+  //   ]
+  // },
+  // {
+  //   category: "externalInteraction",
+  //   nodes: [
+  //     { type: "http-request", icon: httpRequestIcon,
+  //       config: {
+  //         method: {
+  //           type: 'select',
+  //           options: [
+  //             { label: 'GET', value: 'GET' },
+  //             { label: 'POST', value: 'POST' },
+  //             { label: 'HEAD', value: 'HEAD' },
+  //             { label: 'PATCH', value: 'PATCH' },
+  //             { label: 'PUT', value: 'PUT' },
+  //             { label: 'DELETE', value: 'DELETE' },
+  //           ],
+  //           defaultValue: 'GET'
+  //         },
+  //         url: {
+  //           type: 'messageEditor',
+  //           isArray: false,
+  //         },
+  //         auth: {
+  //           type: 'define',
+  //           defaultValue: {
+  //             auth_type: 'none'
+  //           }
+  //         },
+  //         headers: {
+  //           type: 'define',
+  //           defaultValue: {}
+  //         },
+  //         params: {
+  //           type: 'define',
+  //           defaultValue: {}
+  //         },
+  //         body: {
+  //           type: 'define',
+  //           defaultValue: {
+  //             'content_type': 'none'
+  //           }
+  //         },
+  //         verify_ssl: {
+  //           type: 'switch',
+  //           defaultValue: false
+  //         },
+  //         timeouts: {
+  //           type: 'define',
+  //           defaultValue: {}
+  //         },
+  //         retry: {
+  //           type: 'define',
+  //         },
+  //         error_handle: {
+  //           type: 'define',
+  //           defaultValue: {
+  //             method: 'default'
+  //           }
+  //         }
+  //       }
+  //     },
+  //     // { type: "tools", icon: toolsIcon },
+  //     // { type: "code_execution", icon: codeExecutionIcon },
+  //     { type: "jinja-render", icon: templateRenderingIcon,
+  //       config: {
+  //         mapping: {
+  //           type: 'mappingList',
+  //           defaultValue: []
+  //         },
+  //         template: {
+  //           type: 'messageEditor',
+  //           isArray: false,
+  //         },
+  //       }
+  //     }
+  //   ]
+  // },
   // {
   //   category: "safetyAndCompliance",
   //   nodes: [
@@ -311,8 +311,8 @@ export const nodeLibrary: NodeLibrary[] = [
 export const nodeRegisterLibrary: ReactShapeConfig[] = [
   {
     shape: 'loop-node',
-    width: 200,
-    height: 200,
+    width: 240,
+    height: 80,
     component: LoopNode,
   },
   {
@@ -335,8 +335,8 @@ export const nodeRegisterLibrary: ReactShapeConfig[] = [
   },
   {
     shape: 'group-start-node',
-    width: 120,
-    height: 40,
+    width: 44,
+    height: 44,
     component: GroupStartNode,
   },
   {
@@ -388,7 +388,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
   },
   loop: {
     width: 240,
-    height: 200,
+    height: 120,
     shape: 'loop-node',
     ports: {
       groups: defaultPortGroups,
