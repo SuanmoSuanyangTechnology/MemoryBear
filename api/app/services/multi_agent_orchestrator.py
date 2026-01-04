@@ -890,13 +890,13 @@ class MultiAgentOrchestrator:
                 )
 
                 # 发送整合后的结果
-                yield self._format_sse_event("merge_complete", {
+                yield self._format_sse_event("message", {
                     "content": final_response
                 })
             except Exception as e:
                 logger.error(f"Master Agent 整合失败，降级到 smart 模式: {str(e)}")
                 final_response = self._smart_merge_results(results, collaboration_strategy)
-                yield self._format_sse_event("merge_complete", {
+                yield self._format_sse_event("message", {
                     "content": final_response
                 })
         else:
@@ -912,7 +912,7 @@ class MultiAgentOrchestrator:
 
             # 只有在需要时才发送整合结果
             if final_response and final_response != "":
-                yield self._format_sse_event("merge_complete", {
+                yield self._format_sse_event("message", {
                     "content": final_response
                 })
 
