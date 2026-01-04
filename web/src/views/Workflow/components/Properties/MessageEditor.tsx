@@ -1,4 +1,4 @@
-import { type FC } from 'react';
+import { type FC, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
 import { Input, Form, Space, Button, Row, Col, Select, type FormListOperation } from 'antd';
 import { MinusCircleOutlined } from '@ant-design/icons';
@@ -30,6 +30,24 @@ const MessageEditor: FC<TextareaProps> = ({
   const { t } = useTranslation()
   const form = Form.useFormInstance();
   const values = form.getFieldsValue()
+
+  // 检查是否已经使用了context变量，将已使用的context设置为disabled
+  const processedOptions = useMemo(() => {
+    if (!isArray || !values[parentName]) return options;
+    
+    // 获取所有消息内容
+    const allContents = values[parentName]
+      .map((msg: any) => msg.content || '')
+      .join(' ');
+    
+    // 将已使用的context变量标记为disabled
+    return options.map(opt => {
+      if (opt.isContext && allContents.includes(opt.value)) {
+        return { ...opt, disabled: true };
+      }
+      return opt;
+    });
+  }, [options, values, parentName, isArray]);
 
   const handleAdd = (add: FormListOperation['add']) => {
     const list = values[parentName];
@@ -80,7 +98,7 @@ const MessageEditor: FC<TextareaProps> = ({
                       name={[name, 'content']}
                       noStyle
                     >
-                      <Editor placeholder={placeholder} options={options} />
+                      <Editor placeholder={placeholder} options={processedOptions} />
                     </Form.Item>
                   </Space>
                 )
@@ -104,7 +122,7 @@ const MessageEditor: FC<TextareaProps> = ({
             name={parentName}
             noStyle
           >
-            <Editor placeholder={placeholder} options={options} />
+            <Editor placeholder={placeholder} options={processedOptions} />
           </Form.Item>
         </Space>
         }

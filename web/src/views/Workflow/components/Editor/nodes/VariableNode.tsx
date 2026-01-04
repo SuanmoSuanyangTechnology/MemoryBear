@@ -42,13 +42,21 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
       })}
       contentEditable={false}
     >
-      <img 
-        src={data.nodeData?.icon} 
-        style={{ width: '12px', height: '12px', marginRight: '4px' }} 
-        alt=""
-      />
-      <span className="rb:wrap-break-word rb:line-clamp-1">{data.nodeData?.name}</span>
-      <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
+      {data.isContext ? (
+        <span style={{ fontSize: '12px', marginRight: '4px' }}>📄</span>
+      ) : (
+        <img 
+          src={data.nodeData?.icon} 
+          style={{ width: '12px', height: '12px', marginRight: '4px' }} 
+          alt=""
+        />
+      )}
+      {!data.isContext && (
+        <>
+          <span className="rb:wrap-break-word rb:line-clamp-1">{data.nodeData?.name}</span>
+          <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
+        </>
+      )}
       <span className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1" style={{ color: '#155EEF' }}>{data.label}</span>
     </span>
   );

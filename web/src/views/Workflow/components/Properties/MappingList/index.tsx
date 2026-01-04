@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next'
-import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { MinusCircleOutlined } from '@ant-design/icons';
 import { Button, Form, Input, Space } from 'antd';
 
 interface MappingListProps {
@@ -33,8 +33,8 @@ const MappingList: React.FC<MappingListProps> = ({ name }) => {
               </Space>
             ))}
             <Form.Item>
-              <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                Add field
+              <Button type="dashed" onClick={() => add()} block>
+                + {t('common.add')}
               </Button>
             </Form.Item>
           </>
