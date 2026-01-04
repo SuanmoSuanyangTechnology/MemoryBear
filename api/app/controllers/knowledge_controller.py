@@ -1,26 +1,28 @@
-from typing import Optional
 import datetime
 import json
+from typing import Optional
 import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.celery_app import celery_app
+from app.core.logging_config import get_api_logger
+from app.core.rag.common import settings
+from app.core.rag.llm.chat_model import Base
+from app.core.rag.nlp import rag_tokenizer, search
+from app.core.rag.prompts.generator import graph_entity_types
+from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.models import knowledge_model, document_model, file_model
 from app.schemas import knowledge_schema
 from app.schemas.response_schema import ApiResponse
-from app.core.response_utils import success
 from app.services import knowledge_service, document_service
-from app.core.rag.llm.chat_model import Base
-from app.core.rag.prompts.generator import graph_entity_types
-from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
-from app.core.logging_config import get_api_logger
-from app.core.rag.nlp import rag_tokenizer, search
-from app.core.rag.common import settings
-from app.celery_app import celery_app
+from app.services.model_service import ModelConfigService
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -45,6 +47,45 @@ def get_permission_types():
 @router.get("/parsertype", response_model=ApiResponse)
 def get_parser_types():
     return success(msg="Successfully obtained the knowledge parser type", data=list(knowledge_model.ParserType))
+
+
+@router.get("/knowledge_graph_entity_types", response_model=ApiResponse)
+async def get_knowledge_graph_entity_types(
+        llm_id: uuid.UUID,
+        scenario: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    get knowledge graph entity types based on llm_id
+    """
+    api_logger.info(f"Obtain details of the knowledge graph: llm_id={llm_id}, username: {current_user.username}")
+
+    try:
+        # 1. Check whether the model exists
+        api_logger.debug(f"Check whether the model exists: {llm_id}")
+        config = ModelConfigService.get_model_by_id(db=db, model_id=llm_id)
+
+        if not config:
+            api_logger.warning(
+                f"The model does not exist or you do not have permission to access it: llm_id={llm_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The model does not exist or you do not have permission to access it"
+            )
+        # 2. Prepare to configure chat_mdl information
+        chat_model = Base(
+            key=config.api_keys[0].api_key,
+            model_name=config.api_keys[0].model_name,
+            base_url=config.api_keys[0].api_base
+        )
+        response = graph_entity_types(chat_model, scenario)
+        return success(data=response, msg="Successfully obtained knowledge graph entity types")
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"get knowledge graph entity types failed: llm_id={llm_id} - {str(e)}")
+        raise
 
 
 @router.get("/knowledges", response_model=ApiResponse)
@@ -379,7 +420,7 @@ async def delete_knowledge_graph(
         current_user: User = Depends(get_current_user)
 ):
     """
-    Soft-delete knowledge graph
+    delete knowledge graph
     """
     api_logger.info(f"Request to delete knowledge graph: knowledge_id={knowledge_id}, username: {current_user.username}")
 
@@ -441,43 +482,4 @@ async def rebuild_knowledge_graph(
         return success(data=result, msg="Task accepted. rebuild knowledge graph is being processed in the background.")
     except Exception as e:
         api_logger.error(f"Failed to rebuild knowledge graph: knowledge_id={knowledge_id} - {str(e)}")
-        raise
-
-
-@router.get("/{knowledge_id}/knowledge_graph_entity_types", response_model=ApiResponse)
-async def get_knowledge_graph_entity_types(
-        knowledge_id: uuid.UUID,
-        scenario: str,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
-):
-    """
-    get knowledge graph entity types based on knowledge_id
-    """
-    api_logger.info(f"Obtain details of the knowledge graph: knowledge_id={knowledge_id}, username: {current_user.username}")
-
-    try:
-        # 1. Check whether the knowledge base exists
-        api_logger.debug(f"Check whether the knowledge base exists: {knowledge_id}")
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
-
-        if not db_knowledge:
-            api_logger.warning(
-                f"The knowledge base does not exist or you do not have permission to access it: knowledge_id={knowledge_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="The knowledge base does not exist or you do not have permission to access it"
-            )
-        # 2. Prepare to configure chat_mdl information
-        chat_model = Base(
-            key=db_knowledge.llm.api_keys[0].api_key,
-            model_name=db_knowledge.llm.api_keys[0].model_name,
-            base_url=db_knowledge.llm.api_keys[0].api_base
-        )
-        response = graph_entity_types(chat_model, scenario)
-        return success(data=response, msg="Successfully obtained knowledge graph entity types")
-    except HTTPException:
-        raise
-    except Exception as e:
-        api_logger.error(f"get knowledge graph entity types failed: knowledge_id={knowledge_id} - {str(e)}")
         raise

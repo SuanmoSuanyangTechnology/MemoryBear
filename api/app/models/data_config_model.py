@@ -51,8 +51,8 @@ class DataConfig(Base):
     # 自我反思配置
     enable_self_reflexion = Column(Boolean, default=False, comment="是否启用自我反思")
     iteration_period = Column(String, default="3", comment="反思迭代周期")
-    reflexion_range = Column(String, default="retrieval", comment="反思范围：部分/全部")
-    baseline = Column(String, default="time", comment="基线：时间/事实/时间和事实")
+    reflexion_range = Column(String, default="partial", comment="反思范围：部分/全部")
+    baseline = Column(String, default="TIME", comment="基线：时间/事实/时间和事实")
     reflection_model_id = Column(String, nullable=True, comment="反思模型ID")
     memory_verify = Column(Boolean, default=True, comment="记忆验证")
     quality_assessment = Column(Boolean, default=True, comment="质量评估")
