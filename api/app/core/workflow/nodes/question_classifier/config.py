@@ -26,4 +26,3 @@ class QuestionClassifierNodeConfig(BaseNodeConfig):
         default="问题：{question}\n\n可选分类：{categories}\n\n补充指令：{supplement_prompt}\n\n请选择最合适的分类。",
         description="用户提示词模板"
     )
-    output_variable: str = Field(default="class_name", description="输出分类结果的变量名")
