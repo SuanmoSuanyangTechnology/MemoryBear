@@ -1172,7 +1172,11 @@ export const zh = {
       updated_at: '最后更新时间',
       fullScreen: '全屏',
 
-      memoryWindow: "{{name}}的记忆之窗"
+      memoryWindow: "{{name}}的记忆之窗",
+      memory_insight: '总体概述',
+      key_findings: '关键发现',
+      behavior_pattern: '行为模式',
+      growth_trajectory: '成长轨迹',
     },
     space: {
       createSpace: '创建空间',
@@ -1657,6 +1661,8 @@ export const zh = {
       'question-classifier': '问题分类器',
       iteration: '迭代 (Iteration)',
       loop: '循环 (Loop)',
+      'cycle-start': '',
+      'cycle-end': '退出循环',
       parallel: '并行执行',
       'var-aggregator': '变量聚合器',
       externalInteraction: '外部交互',
@@ -1802,9 +1808,14 @@ export const zh = {
           class_name: '分类',
           addClassName: '添加分类'
         },
+        loop: {
+          cycle_vars: '循环变量',
+          condition: '循环终止条件',
+        },
         name: '键',
         type: '类型',
         value: '值',
+        addCase: '添加条件',
       },
 
       clear: '清空',

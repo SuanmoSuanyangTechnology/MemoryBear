@@ -1090,7 +1090,11 @@ export const en = {
       memoryContent: 'Memory Content',
       created_at: 'Created At',
 
-      memoryWindow: "{{name}}'s Window of Memory"
+      memoryWindow: "{{name}}'s Window of Memory",
+      memory_insight: 'Overall Overview',
+      key_findings: 'Key Findings',
+      behavior_pattern: 'Behavior Pattern',
+      growth_trajectory: 'Growth Trajectory',
     },
     space: {
       createSpace: 'Create Space',
