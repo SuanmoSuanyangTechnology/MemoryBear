@@ -1654,6 +1654,7 @@ export const zh = {
       'parameter-extractor': '参数提取',
       flowControl: '流程控制',
       'if-else': '条件分支',
+      'question-classifier': '问题分类器',
       iteration: '迭代 (Iteration)',
       loop: '循环 (Loop)',
       parallel: '并行执行',
@@ -1792,6 +1793,14 @@ export const zh = {
         'jinja-render': {
           template: '代码',
           mapping: '输入变量'
+        },
+        'question-classifier': {
+          model_id: '模型',
+          input_variable: '输入变量',
+          categories: '分类',
+          user_supplement_prompt: '指令',
+          class_name: '分类',
+          addClassName: '添加分类'
         },
         name: '键',
         type: '类型',

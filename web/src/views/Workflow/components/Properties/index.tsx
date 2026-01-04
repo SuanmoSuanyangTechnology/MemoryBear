@@ -17,6 +17,7 @@ import GroupVariableList from './GroupVariableList'
 import CaseList from './CaseList'
 import HttpRequest from './HttpRequest';
 import MappingList from './MappingList'
+import CategoryList from './CategoryList'
 
 interface PropertiesProps {
   selectedNode?: Node | null; 
@@ -472,10 +473,15 @@ const Properties: FC<PropertiesProps> = ({
                       : config.type === 'variableList'
                       ? <VariableSelect
                           placeholder={t('common.pleaseSelect')}
-                          options={variableList}
+                          options={variableList.map(vo => ({
+                            ...vo,
+                            value: `{{${vo.value}}}`
+                          }))}
                         />
                       : config.type === 'switch'
                       ? <Switch />
+                      : config.type === 'categoryList'
+                      ? <CategoryList parentName={key} />
                       : null
                     }
                   </Form.Item>
