@@ -1616,6 +1616,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           model_id: 'Model',
           temperature: 'Temperature',
           max_tokens: 'Max Tokens',
+          context: 'Context',
         },
         start: {
           variables: 'Input Fields',

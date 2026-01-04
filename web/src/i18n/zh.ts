@@ -1716,6 +1716,7 @@ export const zh = {
           model_id: '模型',
           temperature: '温度',
           max_tokens: '最大令牌数',
+          context: '上下文',
         },
         start: {
           variables: '输入字段',

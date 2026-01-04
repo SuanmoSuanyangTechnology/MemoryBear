@@ -25,7 +25,20 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
 
         parts.forEach(part => {
           const match = part.match(/^\{\{([^.]+)\.([^}]+)\}\}$/);
+          const contextMatch = part.match(/^\{\{context\}\}$/);
 
+          // 匹配{{context}}格式
+          if (contextMatch) {
+            const contextSuggestion = options.find(s => s.isContext && s.label === 'context');
+            if (contextSuggestion) {
+              paragraph.append($createVariableNode(contextSuggestion));
+            } else {
+              paragraph.append($createTextNode(part));
+            }
+            return
+          }
+          
+          // 匹配普通变量{{nodeId.label}}格式
           if (match) {
             const [_, nodeId, label] = match;
 
