@@ -9,9 +9,7 @@
 
 ## 任务目标
 作为数据冲突解决专家，分析冲突原因，按类型分组处理，为每种冲突生成独立解决方案。
-
 **数据关系**: statement_databasets中的statement_id对应data中的记录，statement_created_at为用户输入时间。
-
 **处理模式**:
 - memory_verify=false: 仅处理数据冲突
 - memory_verify=true: 处理数据冲突 + 隐私脱敏
@@ -111,7 +109,8 @@
 - 隐私保护优先: 所有输出记录必须完成隐私脱敏
 - 脱敏变更记录: 隐私脱敏变更也必须在change字段中记录{% endif %}
 - 不可修改数据: 数据被判定为正确时不可修改，无数据可输出时为空
-- 输出的结果reflexion字段中的reason字段和solution不允许含有（expired_at设为2024-01-01T00:00:00Z、memory_verify=true)等原数据字段以及涉及需要修改的字段以及内容
+- 输出的结果reflexion字段中的reason字段和solution不允许含有（expired_at设为2024-01-01T00:00:00Z、memory_verify=true、memory_verify=false)等原数据字段以及涉及需要修改的字段以及内容，
+    ，如果是FACT，只记录事实冲突相关的数据；如果是TIME，只记录时间冲突相关的数据；如果是HYBRID，则记录所有冲突相关的数据
 
 **变更记录格式**:
 ```json
@@ -158,8 +157,9 @@
         "conflict": true
       },
       "reflexion": {
-        "reason": "该冲突类型的原因分析",
-        "solution": "该冲突类型的解决方案"
+        "reason": "该冲突类型的原因分析，如果是FACT就是存在事实冲突，分析该冲突原因，如果是TIME就是存在时间冲突，分析该冲突原因，如果是HYBRID，可以输出存在时间与事实的混合冲突再添加上原因分析，
+        不可以随意分配冲突类型以及原因，不允许输出字段比如（statement、description、entity1_name、entity2_name、name、memory_verify、expired_at、conflict）等类似这种",
+        "solution": "该冲突类型的解决方案（不允许输出字段比如（statement、description、entity1_name、entity2_name、name、memory_verify、expired_at、conflict）等类似这种）"
       },
       "resolved": {
         "original_memory_id": "被设为失效的记忆id",
@@ -183,3 +183,4 @@
 - 无需修改的冲突类型resolved为null
 - 与baseline不匹配的冲突类型不包含在results中
 模式参考: {{ json_schema }}
+
