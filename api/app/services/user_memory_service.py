@@ -4,12 +4,12 @@ User Memory Service
 处理用户记忆相关的业务逻辑，包括记忆洞察、用户摘要、节点统计和图数据等。
 """
 
+import os
 import uuid
 from typing import Any, Dict, List, Optional
 
 from app.core.logging_config import get_logger
 from app.core.memory.analytics.memory_insight import MemoryInsight
-from app.core.memory.analytics.user_summary import generate_user_summary
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from sqlalchemy.orm import Session
@@ -284,7 +284,8 @@ class UserMemoryService:
             # 使用 end_user_id 调用分析函数
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成用户摘要")
-                summary = await generate_user_summary(end_user_id)
+                result = await analytics_user_summary(end_user_id)
+                summary = result.get("summary", "")
                 
                 if not summary:
                     logger.warning(f"end_user_id {end_user_id} 的用户摘要生成结果为空")
@@ -434,6 +435,11 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
     """
     生成记忆洞察报告
     
+    这个函数包含完整的业务逻辑：
+    1. 使用 MemoryInsight 工具类获取基础数据（领域分布、活跃时段、社交关联）
+    2. 构建提示词
+    3. 调用 LLM 生成自然语言报告
+    
     Args:
         end_user_id: 可选的终端用户ID
         
@@ -441,15 +447,104 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
         包含报告的字典
     """
     insight = MemoryInsight(end_user_id)
-    report = await insight.generate_insight_report()
-    await insight.close()
-    data = {"report": report}
-    return data
+    
+    try:
+        # 1. 并行获取三个维度的数据
+        import asyncio
+        domain_dist, active_periods, social_conn = await asyncio.gather(
+            insight.get_domain_distribution(),
+            insight.get_active_periods(),
+            insight.get_social_connections(),
+        )
+        
+        # 2. 构建提示词要点
+        prompt_parts = []
+        
+        if domain_dist:
+            top_domains = ", ".join([f"{k}({v:.0%})" for k, v in list(domain_dist.items())[:3]])
+            prompt_parts.append(f"- 核心领域: 用户的记忆主要集中在 {top_domains}。")
+        
+        if active_periods:
+            months_str = " 和 ".join(map(str, active_periods))
+            prompt_parts.append(f"- 活跃时段: 用户在每年的 {months_str} 月最为活跃。")
+        
+        if social_conn:
+            prompt_parts.append(
+                f"- 社交关联: 与用户\"{social_conn['user_id']}\"拥有最多共同记忆({social_conn['common_memories_count']}条)，时间范围主要在 {social_conn['time_range']}。"
+            )
+        
+        # 3. 如果没有足够数据，返回默认消息
+        if not prompt_parts:
+            return {"report": "暂无足够数据生成洞察报告。"}
+        
+        # 4. 构建 LLM 提示词
+        system_prompt = '''你是一位资深的个人记忆分析师。你的任务是根据我提供的要点，为用户生成一段简洁、自然、个性化的记忆洞察报告。
+
+重要规则：
+1. 报告需要将所有要点流畅地串联成一个段落
+2. 语言风格要亲切、易于理解，就像和朋友聊天一样
+3. 不要添加任何额外的解释或标题，直接输出报告内容
+4. 只使用我提供的要点，不要编造或推测任何信息
+5. 如果某个维度没有数据（如没有活跃时段信息），就不要在报告中提及该维度
+
+例如，如果输入是：
+- 核心领域: 用户的记忆主要集中在 旅行(38%), 工作(24%), 家庭(21%)。
+- 活跃时段: 用户在每年的 4 和 10 月最为活跃。
+- 社交关联: 与用户"张明"拥有最多共同记忆(47条)，时间范围主要在 2017-2020。
+
+你的输出应该是：
+"您的记忆集中在旅行(38%)、工作(24%)和家庭(21%)三大领域。每年4月和10月是您最活跃的记录期，可能与春秋季旅行计划相关。您与'张明'共同拥有最多记忆(47条)，主要集中在2017-2020年间。"
+
+如果输入只有：
+- 核心领域: 用户的记忆主要集中在 教育(65%), 学习(25%)。
+
+你的输出应该是：
+"您的记忆主要集中在教育(65%)和学习(25%)两大领域，显示出您对知识和成长的持续关注。"'''
+        
+        user_prompt = "\n".join(prompt_parts)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        # 5. 调用 LLM 生成报告
+        response = await insight.llm_client.chat(messages=messages)
+        
+        # 6. 处理 LLM 响应，确保返回字符串类型
+        content = response.content
+        if isinstance(content, list):
+            # 如果是列表格式（如 [{'type': 'text', 'text': '...'}]），提取文本
+            if len(content) > 0:
+                if isinstance(content[0], dict):
+                    # 尝试提取 'text' 字段
+                    text = content[0].get('text', content[0].get('content', str(content[0])))
+                    report = str(text)
+                else:
+                    report = str(content[0])
+            else:
+                report = ""
+        elif isinstance(content, dict):
+            # 如果是字典格式，提取 text 字段
+            report = str(content.get('text', content.get('content', str(content))))
+        else:
+            # 已经是字符串或其他类型，转为字符串
+            report = str(content) if content is not None else ""
+        
+        return {"report": report}
+        
+    finally:
+        # 确保关闭连接
+        await insight.close()
 
 
 async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     生成用户摘要
+    
+    这个函数包含完整的业务逻辑：
+    1. 使用 UserSummary 工具类获取基础数据（实体、语句）
+    2. 构建提示词
+    3. 调用 LLM 生成自然语言摘要
     
     Args:
         end_user_id: 可选的终端用户ID
@@ -457,9 +552,69 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
     Returns:
         包含摘要的字典
     """
-    summary = await generate_user_summary(end_user_id)
-    data = {"summary": summary}
-    return data
+    from app.core.memory.analytics.user_summary import UserSummary
+    
+    # 创建 UserSummary 实例
+    user_summary = UserSummary(end_user_id or os.getenv("SELECTED_GROUP_ID", "group_123"))
+    
+    try:
+        # 1) 收集上下文数据
+        entities = await user_summary._get_top_entities(limit=40)
+        statements = await user_summary._get_recent_statements(limit=100)
+
+        entity_lines = [f"{name} ({freq})" for name, freq in entities][:20]
+        statement_samples = [s.statement.strip() for s in statements if (s.statement or '').strip()][:20]
+
+        # 2) 构建提示词
+        system_prompt = (
+            "你是一位中文信息压缩助手。请基于提供的实体与语句，"
+            "生成非常简洁的用户摘要，禁止臆测或虚构。要求：\n"
+            "- 3–4 句，总字数不超过 120；\n"
+            "- 先交代身份/城市，其次长期兴趣或习惯，最后给一两项代表性经历；\n"
+            "- 避免形容词堆砌与空话，不用项目符号，不分段；\n"
+            "- 使用客观的第三人称描述，语气克制、中立。"
+        )
+
+        user_content_parts = [
+            f"用户ID: {user_summary.user_id}",
+            "核心实体与频次: " + (", ".join(entity_lines) if entity_lines else "(空)"),
+            "代表性语句样本: " + (" | ".join(statement_samples) if statement_samples else "(空)"),
+        ]
+        user_prompt = "\n".join(user_content_parts)
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        # 3) 调用 LLM 生成摘要
+        response = await user_summary.llm.chat(messages=messages)
+        
+        # 4) 处理 LLM 响应，确保返回字符串类型
+        content = response.content
+        if isinstance(content, list):
+            # 如果是列表格式（如 [{'type': 'text', 'text': '...'}]），提取文本
+            if len(content) > 0:
+                if isinstance(content[0], dict):
+                    # 尝试提取 'text' 字段
+                    text = content[0].get('text', content[0].get('content', str(content[0])))
+                    summary = str(text)
+                else:
+                    summary = str(content[0])
+            else:
+                summary = ""
+        elif isinstance(content, dict):
+            # 如果是字典格式，提取 text 字段
+            summary = str(content.get('text', content.get('content', str(content))))
+        else:
+            # 已经是字符串或其他类型，转为字符串
+            summary = str(content) if content is not None else ""
+        
+        return {"summary": summary}
+        
+    finally:
+        # 确保关闭连接
+        await user_summary.close()
 
 
 async def analytics_node_statistics(
