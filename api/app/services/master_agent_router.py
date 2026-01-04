@@ -361,14 +361,14 @@ class MasterAgentRouter:
                     "model_name": api_key_config.model_name
                 }
             )
-            temperature = 0.3  # 决策任务使用较低温度
-            max_tokens = 1000            
-            if self.model_parameters:
-                temperature = self.model_parameters.temperature
-                max_tokens = self.model_parameters.max_tokens
+            # temperature = 0.3  # 决策任务使用较低温度
+            # max_tokens = 1000            
+            # if self.model_parameters:
+            #     temperature = self.model_parameters["temperature"]
+            #     max_tokens = self.model_parameters["max_tokens"]
                 
-            extra_params = {"temperature": temperature,
-                                "max_tokens":max_tokens
+            extra_params = {"temperature": self.model_parameters.get("temperature", 0.3),
+                                "max_tokens":self.model_parameters.get("max_tokens", 1000)
                                 }
             # 创建 RedBearModelConfig
             model_config = RedBearModelConfig(
