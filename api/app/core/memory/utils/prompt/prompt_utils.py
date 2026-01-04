@@ -351,3 +351,38 @@ async def render_user_summary_prompt(
     })
     
     return rendered_prompt
+
+
+async def render_memory_insight_prompt(
+    domain_distribution: str = None,
+    active_periods: str = None,
+    social_connections: str = None
+) -> str:
+    """
+    Renders the memory insight prompt using the memory_insight.jinja2 template.
+
+    Args:
+        domain_distribution: 核心领域分布信息
+        active_periods: 活跃时段信息
+        social_connections: 社交关联信息
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("memory_insight.jinja2")
+    rendered_prompt = template.render(
+        domain_distribution=domain_distribution,
+        active_periods=active_periods,
+        social_connections=social_connections
+    )
+    
+    # 记录渲染结果到提示日志
+    log_prompt_rendering('memory insight', rendered_prompt)
+    # 可选：记录模板渲染信息
+    log_template_rendering('memory_insight.jinja2', {
+        'has_domain_distribution': bool(domain_distribution),
+        'has_active_periods': bool(active_periods),
+        'has_social_connections': bool(social_connections)
+    })
+    
+    return rendered_prompt

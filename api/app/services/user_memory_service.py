@@ -32,7 +32,7 @@ class UserMemoryService:
         end_user_id: str
     ) -> Dict[str, Any]:
         """
-        从数据库获取缓存的记忆洞察
+        从数据库获取缓存的记忆洞察（四个维度）
         
         Args:
             db: 数据库会话
@@ -40,7 +40,10 @@ class UserMemoryService:
             
         Returns:
             {
-                "report": str,
+                "memory_insight": str,           # 总体概述
+                "behavior_pattern": str,   # 行为模式
+                "key_findings": str,       # 关键发现
+                "growth_trajectory": str,  # 成长轨迹
                 "updated_at": datetime,
                 "is_cached": bool
             }
@@ -54,24 +57,40 @@ class UserMemoryService:
             if not end_user:
                 logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
                 return {
-                    "report": None,
+                    "memory_insight": None,
+                    "behavior_pattern": None,
+                    "key_findings": None,
+                    "growth_trajectory": None,
                     "updated_at": None,
                     "is_cached": False,
                     "message": "用户不存在"
                 }
             
-            # 检查是否有缓存数据
-            if end_user.memory_insight:
-                logger.info(f"成功获取 end_user_id {end_user_id} 的缓存记忆洞察")
+            # 检查是否有缓存数据（至少有一个字段不为空）
+            has_cache = any([
+                end_user.memory_insight,
+                end_user.behavior_pattern,
+                end_user.key_findings,
+                end_user.growth_trajectory
+            ])
+            
+            if has_cache:
+                logger.info(f"成功获取 end_user_id {end_user_id} 的缓存记忆洞察（四维度）")
                 return {
-                    "report": end_user.memory_insight,
+                    "memory_insight": end_user.memory_insight,  # 总体概述存储在 memory_insight
+                    "behavior_pattern": end_user.behavior_pattern,
+                    "key_findings": end_user.key_findings,
+                    "growth_trajectory": end_user.growth_trajectory,
                     "updated_at": end_user.memory_insight_updated_at,
                     "is_cached": True
                 }
             else:
                 logger.info(f"end_user_id {end_user_id} 的记忆洞察缓存为空")
                 return {
-                    "report": None,
+                    "memory_insight": None,
+                    "behavior_pattern": None,
+                    "key_findings": None,
+                    "growth_trajectory": None,
                     "updated_at": None,
                     "is_cached": False,
                     "message": "数据尚未生成，请稍后重试或联系管理员"
@@ -80,7 +99,10 @@ class UserMemoryService:
         except ValueError:
             logger.error(f"无效的 end_user_id 格式: {end_user_id}")
             return {
-                "report": None,
+                "memory_insight": None,
+                "behavior_pattern": None,
+                "key_findings": None,
+                "growth_trajectory": None,
                 "updated_at": None,
                 "is_cached": False,
                 "message": "无效的用户ID格式"
@@ -103,7 +125,7 @@ class UserMemoryService:
             
         Returns:
             {
-                "basic_intro": str,
+                "user_summary": str,
                 "personality": str,
                 "core_values": str,
                 "one_sentence": str,
@@ -120,7 +142,7 @@ class UserMemoryService:
             if not end_user:
                 logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
                 return {
-                    "basic_intro": None,
+                    "user_summary": None,
                     "personality": None,
                     "core_values": None,
                     "one_sentence": None,
@@ -131,7 +153,7 @@ class UserMemoryService:
             
             # 检查是否有缓存数据（至少有一个字段不为空）
             has_cache = any([
-                end_user.memory_insight,
+                end_user.user_summary,
                 end_user.personality_traits,
                 end_user.core_values,
                 end_user.one_sentence_summary
@@ -140,7 +162,7 @@ class UserMemoryService:
             if has_cache:
                 logger.info(f"成功获取 end_user_id {end_user_id} 的缓存用户摘要")
                 return {
-                    "basic_intro": end_user.memory_insight,
+                    "user_summary": end_user.user_summary,
                     "personality": end_user.personality_traits,
                     "core_values": end_user.core_values,
                     "one_sentence": end_user.one_sentence_summary,
@@ -150,7 +172,7 @@ class UserMemoryService:
             else:
                 logger.info(f"end_user_id {end_user_id} 的用户摘要缓存为空")
                 return {
-                    "basic_intro": None,
+                    "user_summary": None,
                     "personality": None,
                     "core_values": None,
                     "one_sentence": None,
@@ -162,7 +184,7 @@ class UserMemoryService:
         except ValueError:
             logger.error(f"无效的 end_user_id 格式: {end_user_id}")
             return {
-                "basic_intro": None,
+                "user_summary": None,
                 "personality": None,
                 "core_values": None,
                 "one_sentence": None,
@@ -207,7 +229,10 @@ class UserMemoryService:
                 logger.error(f"end_user_id {end_user_id} 不存在")
                 return {
                     "success": False,
-                    "report": None,
+                    "memory_insight": None,
+                    "behavior_pattern": None,
+                    "key_findings": None,
+                    "growth_trajectory": None,
                     "error": "用户不存在"
                 }
             
@@ -215,31 +240,50 @@ class UserMemoryService:
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成记忆洞察")
                 result = await analytics_memory_insight_report(end_user_id)
-                report = result.get("report", "")
                 
-                if not report:
+                memory_insight = result.get("memory_insight", "")
+                behavior_pattern = result.get("behavior_pattern", "")
+                key_findings = result.get("key_findings", "")
+                growth_trajectory = result.get("growth_trajectory", "")
+                
+                if not any([memory_insight, behavior_pattern, key_findings, growth_trajectory]):
                     logger.warning(f"end_user_id {end_user_id} 的记忆洞察生成结果为空")
                     return {
                         "success": False,
-                        "report": None,
+                        "memory_insight": None,
+                        "behavior_pattern": None,
+                        "key_findings": None,
+                        "growth_trajectory": None,
                         "error": "生成的洞察报告为空,可能Neo4j中没有该用户的数据"
                     }
                 
-                # 更新数据库缓存
-                success = repo.update_memory_insight(user_uuid, report)
+                # 更新数据库缓存（四个维度）
+                success = repo.update_memory_insight(
+                    user_uuid, 
+                    memory_insight, 
+                    behavior_pattern, 
+                    key_findings, 
+                    growth_trajectory
+                )
                 
                 if success:
-                    logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存记忆洞察")
+                    logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存记忆洞察（四维度）")
                     return {
                         "success": True,
-                        "report": report,
+                        "memory_insight": memory_insight,
+                        "behavior_pattern": behavior_pattern,
+                        "key_findings": key_findings,
+                        "growth_trajectory": growth_trajectory,
                         "error": None
                     }
                 else:
                     logger.error(f"更新 end_user_id {end_user_id} 的记忆洞察缓存失败")
                     return {
                         "success": False,
-                        "report": report,
+                        "memory_insight": memory_insight,
+                        "behavior_pattern": behavior_pattern,
+                        "key_findings": key_findings,
+                        "growth_trajectory": growth_trajectory,
                         "error": "数据库更新失败"
                     }
                     
@@ -247,7 +291,10 @@ class UserMemoryService:
                 logger.error(f"调用分析函数生成记忆洞察时出错: {str(e)}")
                 return {
                     "success": False,
-                    "report": None,
+                    "memory_insight": None,
+                    "behavior_pattern": None,
+                    "key_findings": None,
+                    "growth_trajectory": None,
                     "error": f"Neo4j或LLM服务不可用: {str(e)}"
                 }
                 
@@ -255,14 +302,20 @@ class UserMemoryService:
             logger.error(f"无效的 end_user_id 格式: {end_user_id}")
             return {
                 "success": False,
-                "report": None,
+                "memory_insight": None,
+                "behavior_pattern": None,
+                "key_findings": None,
+                "growth_trajectory": None,
                 "error": "无效的用户ID格式"
             }
         except Exception as e:
             logger.error(f"生成并缓存记忆洞察时出错: {str(e)}")
             return {
                 "success": False,
-                "report": None,
+                "memory_insight": None,
+                "behavior_pattern": None,
+                "key_findings": None,
+                "growth_trajectory": None,
                 "error": str(e)
             }
     
@@ -283,7 +336,7 @@ class UserMemoryService:
         Returns:
             {
                 "success": bool,
-                "basic_intro": str,
+                "user_summary": str,
                 "personality": str,
                 "core_values": str,
                 "one_sentence": str,
@@ -302,7 +355,7 @@ class UserMemoryService:
                 logger.error(f"end_user_id {end_user_id} 不存在")
                 return {
                     "success": False,
-                    "basic_intro": None,
+                    "user_summary": None,
                     "personality": None,
                     "core_values": None,
                     "one_sentence": None,
@@ -314,16 +367,16 @@ class UserMemoryService:
                 logger.info(f"使用 end_user_id={end_user_id} 生成用户摘要")
                 result = await analytics_user_summary(end_user_id)
                 
-                basic_intro = result.get("basic_intro", "")
+                user_summary = result.get("user_summary", "")
                 personality = result.get("personality", "")
                 core_values = result.get("core_values", "")
                 one_sentence = result.get("one_sentence", "")
                 
-                if not any([basic_intro, personality, core_values, one_sentence]):
+                if not any([user_summary, personality, core_values, one_sentence]):
                     logger.warning(f"end_user_id {end_user_id} 的用户摘要生成结果为空")
                     return {
                         "success": False,
-                        "basic_intro": None,
+                        "user_summary": None,
                         "personality": None,
                         "core_values": None,
                         "one_sentence": None,
@@ -333,7 +386,7 @@ class UserMemoryService:
                 # 更新数据库缓存
                 success = repo.update_user_summary(
                     user_uuid, 
-                    basic_intro, 
+                    user_summary, 
                     personality, 
                     core_values, 
                     one_sentence
@@ -343,7 +396,7 @@ class UserMemoryService:
                     logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存用户摘要")
                     return {
                         "success": True,
-                        "basic_intro": basic_intro,
+                        "user_summary": user_summary,
                         "personality": personality,
                         "core_values": core_values,
                         "one_sentence": one_sentence,
@@ -353,7 +406,7 @@ class UserMemoryService:
                     logger.error(f"更新 end_user_id {end_user_id} 的用户摘要缓存失败")
                     return {
                         "success": False,
-                        "basic_intro": basic_intro,
+                        "user_summary": user_summary,
                         "personality": personality,
                         "core_values": core_values,
                         "one_sentence": one_sentence,
@@ -364,7 +417,7 @@ class UserMemoryService:
                 logger.error(f"调用分析函数生成用户摘要时出错: {str(e)}")
                 return {
                     "success": False,
-                    "basic_intro": None,
+                    "user_summary": None,
                     "personality": None,
                     "core_values": None,
                     "one_sentence": None,
@@ -375,7 +428,7 @@ class UserMemoryService:
             logger.error(f"无效的 end_user_id 格式: {end_user_id}")
             return {
                 "success": False,
-                "basic_intro": None,
+                "user_summary": None,
                 "personality": None,
                 "core_values": None,
                 "one_sentence": None,
@@ -385,7 +438,7 @@ class UserMemoryService:
             logger.error(f"生成并缓存用户摘要时出错: {str(e)}")
             return {
                 "success": False,
-                "basic_intro": None,
+                "user_summary": None,
                 "personality": None,
                 "core_values": None,
                 "one_sentence": None,
@@ -489,19 +542,28 @@ class UserMemoryService:
 
 async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    生成记忆洞察报告
+    生成记忆洞察报告（四个维度）
     
     这个函数包含完整的业务逻辑：
     1. 使用 MemoryInsight 工具类获取基础数据（领域分布、活跃时段、社交关联）
-    2. 构建提示词
-    3. 调用 LLM 生成自然语言报告
+    2. 使用 Jinja2 模板渲染提示词
+    3. 调用 LLM 生成四个维度的自然语言报告
+    4. 解析并返回四个部分
     
     Args:
         end_user_id: 可选的终端用户ID
         
     Returns:
-        包含报告的字典
+        包含四个维度报告的字典: {
+            "memory_insight": str,           # 总体概述
+            "behavior_pattern": str,   # 行为模式
+            "key_findings": str,       # 关键发现
+            "growth_trajectory": str   # 成长轨迹
+        }
     """
+    from app.core.memory.utils.prompt.prompt_utils import render_memory_insight_prompt
+    import re
+    
     insight = MemoryInsight(end_user_id)
     
     try:
@@ -513,53 +575,38 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
             insight.get_social_connections(),
         )
         
-        # 2. 构建提示词要点
-        prompt_parts = []
-        
+        # 2. 构建数据字符串
+        domain_distribution_str = None
         if domain_dist:
             top_domains = ", ".join([f"{k}({v:.0%})" for k, v in list(domain_dist.items())[:3]])
-            prompt_parts.append(f"- 核心领域: 用户的记忆主要集中在 {top_domains}。")
+            domain_distribution_str = f"用户的记忆主要集中在 {top_domains}"
         
+        active_periods_str = None
         if active_periods:
             months_str = " 和 ".join(map(str, active_periods))
-            prompt_parts.append(f"- 活跃时段: 用户在每年的 {months_str} 月最为活跃。")
+            active_periods_str = f"用户在每年的 {months_str} 月最为活跃"
         
+        social_connections_str = None
         if social_conn:
-            prompt_parts.append(
-                f"- 社交关联: 与用户\"{social_conn['user_id']}\"拥有最多共同记忆({social_conn['common_memories_count']}条)，时间范围主要在 {social_conn['time_range']}。"
-            )
+            social_connections_str = f"与用户\"{social_conn['user_id']}\"拥有最多共同记忆({social_conn['common_memories_count']}条)，时间范围主要在 {social_conn['time_range']}"
         
         # 3. 如果没有足够数据，返回默认消息
-        if not prompt_parts:
-            return {"report": "暂无足够数据生成洞察报告。"}
+        if not any([domain_distribution_str, active_periods_str, social_connections_str]):
+            return {
+                "memory_insight": "暂无足够数据生成洞察报告。",
+                "behavior_pattern": "",
+                "key_findings": "",
+                "growth_trajectory": ""
+            }
         
-        # 4. 构建 LLM 提示词
-        system_prompt = '''你是一位资深的个人记忆分析师。你的任务是根据我提供的要点，为用户生成一段简洁、自然、个性化的记忆洞察报告。
-
-重要规则：
-1. 报告需要将所有要点流畅地串联成一个段落
-2. 语言风格要亲切、易于理解，就像和朋友聊天一样
-3. 不要添加任何额外的解释或标题，直接输出报告内容
-4. 只使用我提供的要点，不要编造或推测任何信息
-5. 如果某个维度没有数据（如没有活跃时段信息），就不要在报告中提及该维度
-
-例如，如果输入是：
-- 核心领域: 用户的记忆主要集中在 旅行(38%), 工作(24%), 家庭(21%)。
-- 活跃时段: 用户在每年的 4 和 10 月最为活跃。
-- 社交关联: 与用户"张明"拥有最多共同记忆(47条)，时间范围主要在 2017-2020。
-
-你的输出应该是：
-"您的记忆集中在旅行(38%)、工作(24%)和家庭(21%)三大领域。每年4月和10月是您最活跃的记录期，可能与春秋季旅行计划相关。您与'张明'共同拥有最多记忆(47条)，主要集中在2017-2020年间。"
-
-如果输入只有：
-- 核心领域: 用户的记忆主要集中在 教育(65%), 学习(25%)。
-
-你的输出应该是：
-"您的记忆主要集中在教育(65%)和学习(25%)两大领域，显示出您对知识和成长的持续关注。"'''
+        # 4. 使用 Jinja2 模板渲染提示词
+        user_prompt = await render_memory_insight_prompt(
+            domain_distribution=domain_distribution_str,
+            active_periods=active_periods_str,
+            social_connections=social_connections_str
+        )
         
-        user_prompt = "\n".join(prompt_parts)
         messages = [
-            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
         
@@ -569,24 +616,37 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
         # 6. 处理 LLM 响应，确保返回字符串类型
         content = response.content
         if isinstance(content, list):
-            # 如果是列表格式（如 [{'type': 'text', 'text': '...'}]），提取文本
             if len(content) > 0:
                 if isinstance(content[0], dict):
-                    # 尝试提取 'text' 字段
                     text = content[0].get('text', content[0].get('content', str(content[0])))
-                    report = str(text)
+                    full_response = str(text)
                 else:
-                    report = str(content[0])
+                    full_response = str(content[0])
             else:
-                report = ""
+                full_response = ""
         elif isinstance(content, dict):
-            # 如果是字典格式，提取 text 字段
-            report = str(content.get('text', content.get('content', str(content))))
+            full_response = str(content.get('text', content.get('content', str(content))))
         else:
-            # 已经是字符串或其他类型，转为字符串
-            report = str(content) if content is not None else ""
+            full_response = str(content) if content is not None else ""
         
-        return {"report": report}
+        # 7. 解析四个部分
+        # 使用正则表达式提取四个部分
+        memory_insight_match = re.search(r'【总体概述】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        behavior_match = re.search(r'【行为模式】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        findings_match = re.search(r'【关键发现】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        trajectory_match = re.search(r'【成长轨迹】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        
+        memory_insight = memory_insight_match.group(1).strip() if memory_insight_match else ""
+        behavior_pattern = behavior_match.group(1).strip() if behavior_match else ""
+        key_findings = findings_match.group(1).strip() if findings_match else ""
+        growth_trajectory = trajectory_match.group(1).strip() if trajectory_match else ""
+        
+        return {
+            "memory_insight": memory_insight,
+            "behavior_pattern": behavior_pattern,
+            "key_findings": key_findings,
+            "growth_trajectory": growth_trajectory
+        }
         
     finally:
         # 确保关闭连接
@@ -607,7 +667,7 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         
     Returns:
         包含四部分摘要的字典: {
-            "basic_intro": str,
+            "user_summary": str,
             "personality": str,
             "core_values": str,
             "one_sentence": str
@@ -660,18 +720,18 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         
         # 5) 解析四个部分
         # 使用正则表达式提取四个部分
-        basic_intro_match = re.search(r'【基本介绍】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        user_summary_match = re.search(r'【基本介绍】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
         personality_match = re.search(r'【性格特点】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
         core_values_match = re.search(r'【核心价值观】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
         one_sentence_match = re.search(r'【一句话总结】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
         
-        basic_intro = basic_intro_match.group(1).strip() if basic_intro_match else ""
+        user_summary = user_summary_match.group(1).strip() if user_summary_match else ""
         personality = personality_match.group(1).strip() if personality_match else ""
         core_values = core_values_match.group(1).strip() if core_values_match else ""
         one_sentence = one_sentence_match.group(1).strip() if one_sentence_match else ""
         
         return {
-            "basic_intro": basic_intro,
+            "user_summary": user_summary,
             "personality": personality,
             "core_values": core_values,
             "one_sentence": one_sentence
