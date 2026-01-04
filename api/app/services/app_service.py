@@ -1203,11 +1203,11 @@ class AppService:
             self._check_multi_agent_config(app_id)
 
             # 3. 获取主 Agent 的模型配置 ID
-            master_agent = self.db.get(AgentConfig, multi_agent_cfg.master_agent_id)
-            default_model_config_id = master_agent.default_model_config_id if master_agent else None
+            default_model_config_id = multi_agent_cfg.default_model_config_id
 
             # 4. 构建配置快照
             config = {
+                "model_parameters":multi_agent_cfg.model_parameters,
                 "master_agent_id": str(multi_agent_cfg.master_agent_id),
                 "orchestration_mode": multi_agent_cfg.orchestration_mode,
                 "sub_agents": multi_agent_cfg.sub_agents,
@@ -1220,7 +1220,7 @@ class AppService:
                 "多智能体应用发布配置准备完成",
                 extra={
                     "app_id": str(app_id),
-                    "master_agent_id": str(multi_agent_cfg.master_agent_id),
+                    "default_model_config_id": str(default_model_config_id),
                     "sub_agent_count": len(multi_agent_cfg.sub_agents) if multi_agent_cfg.sub_agents else 0,
                     "orchestration_mode": multi_agent_cfg.orchestration_mode
                 }
