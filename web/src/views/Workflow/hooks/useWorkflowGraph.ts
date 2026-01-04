@@ -160,7 +160,12 @@ export const useWorkflowGraph = ({
       graphRef.current?.addNodes(nodeList)
     }
     if (edges.length) {
-      const edgeList = edges.map(edge => {
+      // 去重处理：相同节点之间的连线仅连一次
+      const uniqueEdges = edges.filter((edge, index, arr) => {
+        return arr.findIndex(e => e.source === edge.source && e.target === edge.target) === index;
+      });
+      
+      const edgeList = uniqueEdges.map(edge => {
         const { source, target, label } = edge
         const sourceCell = graphRef.current?.getCellById(source)
         const targetCell = graphRef.current?.getCellById(target)
@@ -788,6 +793,11 @@ export const useWorkflowGraph = ({
           const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
           const sourcePortId = edge.getSourcePortId();
           
+          // 过滤无效连线：源节点或目标节点不存在
+          if (!sourceCell?.getData()?.id || !targetCell?.getData()?.id) {
+            return null;
+          }
+          
           // 如果是if-else节点的右侧端口连线，添加label
           if (sourceCell?.getData()?.type === 'if-else' && sourcePortId?.startsWith('CASE')) {
             return {
@@ -801,6 +811,11 @@ export const useWorkflowGraph = ({
             source: sourceCell?.getData().id,
             target: targetCell?.getData().id,
           };
+        })
+        .filter(edge => edge !== null)
+        .filter((edge, index, arr) => {
+          // 去重：相同节点之间的连线仅保留一次
+          return arr.findIndex(e => e && e.source === edge?.source && e.target === edge?.target) === index;
         }),
       }
       saveWorkflowConfig(config.app_id, params as WorkflowConfig)
