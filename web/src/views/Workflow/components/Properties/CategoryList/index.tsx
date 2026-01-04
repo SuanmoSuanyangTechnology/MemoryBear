@@ -24,7 +24,7 @@ const CategoryList: FC<CategoryListProps> = ({ parentName }) => {
             return (
             <div key={key} className="rb:border rb:border-[#DFE4ED] rb:rounded-md rb:p-3 rb:bg-[#F8F9FB]">
               <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
-                  <div>{t('workflow.config.question-classifier.class_name')} {index + 1}</div>
+                <div>{t('workflow.config.question-classifier.class_name')} {index + 1}</div>
                 <div className="rb:flex rb:items-center rb:gap-1">
                   <span className="rb:text-xs rb:text-gray-500">{contentLength}</span>
                   <Button

@@ -4,20 +4,24 @@ import clsx from 'clsx';
 import NodeLibrary from './components/NodeLibrary'
 import Properties from './components/Properties';
 import CanvasToolbar from './components/CanvasToolbar';
+import PortClickHandler from './components/PortClickHandler';
 import { useWorkflowGraph } from './hooks/useWorkflowGraph';
 import type { WorkflowRef } from '@/views/ApplicationConfig/types'
 import Chat from './components/Chat/Chat';
-import type { ChatRef } from './types'
+import type { ChatRef, AddChatVariableRef, ChatVariable } from './types'
 import arrowIcon from '@/assets/images/workflow/arrow.png'
+import AddChatVariable from './components/AddChatVariable';
 
 const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const miniMapRef = useRef<HTMLDivElement>(null);
+  const addChatVariableRef = useRef<AddChatVariableRef>(null)
   const chatRef = useRef<ChatRef>(null)
   const [collapsed, setCollapsed] = useState(false)
   // 使用自定义Hook初始化工作流图
   const {
     config,
+    setConfig,
     graphRef,
     selectedNode,
     setSelectedNode,
@@ -33,7 +37,7 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
     deleteEvent,
     copyEvent,
     parseEvent,
-    handleSave
+    handleSave,
   } = useWorkflowGraph({ containerRef, miniMapRef });
 
   const onDragOver = (event: React.DragEvent) => {
@@ -45,11 +49,24 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
   const handleToggle = () => {
     setCollapsed(prev => !prev)
   }
+  const addVariable = () => {
+    addChatVariableRef.current?.handleOpen()
+  }
+  const handleUpdateChatVariable = (variables: ChatVariable[]) => {
+    setConfig(prev => {
+      if (!prev) return null
+      return {
+        ...prev,
+        variables
+      }
+    })
+  }
 
   useImperativeHandle(ref, () => ({
     handleSave,
     handleRun,
-    graphRef
+    graphRef,
+    addVariable
   }))
   return (
     <div className="rb:h-[calc(100vh-64px)] rb:relative">
@@ -97,11 +114,19 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
         deleteEvent={deleteEvent}
         copyEvent={copyEvent}
         parseEvent={parseEvent}
+        config={config}
       />
       <Chat
         ref={chatRef}
         graphRef={graphRef}
         appId={config?.app_id as string}
+      />
+      <PortClickHandler graph={graphRef.current} />
+
+      <AddChatVariable
+        ref={addChatVariableRef}
+        variables={config?.variables}
+        onChange={handleUpdateChatVariable}
       />
     </div>
   );

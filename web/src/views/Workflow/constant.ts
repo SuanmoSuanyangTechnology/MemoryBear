@@ -1,5 +1,4 @@
 import LoopNode from './components/Nodes/LoopNode';
-import IterationNode from './components/Nodes/IterationNode';
 import NormalNode from './components/Nodes/NormalNode';
 import ConditionNode from './components/Nodes/ConditionNode';
 import GroupStartNode from './components/Nodes/GroupStartNode';
@@ -38,6 +37,7 @@ import outputAuditIcon from '@/assets/images/workflow/output_audit.png';
 import selfOptimizationIcon from '@/assets/images/workflow/self_optimization.png';
 import processEvolutionIcon from '@/assets/images/workflow/process_evolution.png';
 import questionClassifierIcon from '@/assets/images/workflow/question-classifier.png'
+import breakIcon from '@/assets/images/workflow/break.png'
 
 import { getModelListUrl } from '@/api/models'
 import type { NodeLibrary } from './types'
@@ -225,7 +225,23 @@ export const nodeLibrary: NodeLibrary[] = [
         }
       },
       // { type: "iteration", icon: iterationIcon },
-      // { type: "loop", icon: loopIcon },
+      { type: "loop", icon: loopIcon,
+        config: {
+          cycle_vars: {
+            type: 'cycleVarsList',
+          },
+          condition: {
+            type: 'conditionList',
+            showLabel: true,
+            defaultValue: {
+              logical_operator: 'and',
+              expressions: []
+            }
+          },
+        }
+      },
+      { type: "cycle-start", icon: loopIcon },
+      { type: "break", icon: breakIcon },
       // { type: "parallel", icon: parallelIcon },
       { type: "var-aggregator", icon: aggregatorIcon,
         config: {
@@ -345,7 +361,7 @@ export const nodeRegisterLibrary: ReactShapeConfig[] = [
     shape: 'iteration-node',
     width: 200,
     height: 200,
-    component: IterationNode,
+    component: LoopNode,
   },
   {
     shape: 'normal-node',
@@ -360,15 +376,15 @@ export const nodeRegisterLibrary: ReactShapeConfig[] = [
     component: ConditionNode,
   },
   {
-    shape: 'group-start-node',
+    shape: 'cycle-start',
     width: 44,
     height: 44,
     component: GroupStartNode,
   },
   {
     shape: 'add-node',
-    width: 120,
-    height: 40,
+    width: 88,
+    height: 44,
     component: AddNode,
   },
 ];
@@ -452,6 +468,24 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       items: [{ group: 'left' }],
     },
   },
+  'cycle-start': {
+    width: 44,
+    height: 44,
+    shape: 'cycle-start',
+    ports: {
+      groups: {right: { position: 'right', attrs: portAttrs }},
+      items: [{ group: 'right' }],
+    },
+  },
+  'add-node': {
+    width: 88,
+    height: 44,
+    shape: 'add-node',
+    ports: {
+      groups: {left: { position: 'left', attrs: portAttrs }},
+      items: [{ group: 'left' }],
+    },
+  },
   default: {
     width: 240,
     height: 64,
@@ -461,18 +495,18 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       items: defaultPortItems,
     },
   },
-  groupStart: {
-    width: 80,
-    height: 40,
-    shape: 'group-start-node',
+  cycleStart: {
+    width: 44,
+    height: 44,
+    shape: 'cycle-start',
     ports: {
       groups: {right: { position: 'right', attrs: portAttrs }},
       items: [{ group: 'right' }],
     },
   },
   addStart: {
-    width: 80,
-    height: 40,
+    width: 88,
+    height: 44,
     shape: 'add-node',
     ports: {
       groups: {left: { position: 'left', attrs: portAttrs }},

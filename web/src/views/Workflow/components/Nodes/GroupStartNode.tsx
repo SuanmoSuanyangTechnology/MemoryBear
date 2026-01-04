@@ -1,17 +1,11 @@
 import clsx from 'clsx';
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
+import startIcon from '@/assets/images/workflow/start.png';
 
-const GroupStartNode: ReactShapeConfig['component'] = ({ node }) => {
-  const data = node?.getData() || {}
-
+const GroupStartNode: ReactShapeConfig['component'] = () => {
   return (
-    <div className={clsx('rb:group rb:relative rb:h-10 rb:w-20 rb:border rb:rounded-xl rb:flex rb:items-center rb:justify-center rb:text-[12px] rb:p-1 rb:box-border', {
-      'rb:border-orange-500 rb:border-[3px] rb:bg-white rb:text-gray-700': data.isSelected,
-      'rb:border-[#d1d5db] rb:bg-white rb:text-[#374151]': !data.isSelected
-    })}>
-      <span className="rb:overflow-hidden rb:whitespace-nowrap rb:text-ellipsis">
-        {data.icon} {data.label}
-      </span>
+    <div className={clsx('rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:p-2.5 rb:border rb:rounded-xl rb:bg-white rb:hover:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.12)] rb:border-[#DFE4ED]')}>
+      <img src={startIcon} className="rb:w-6 rb:h-6" />
     </div>
   );
 };
