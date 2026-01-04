@@ -24,7 +24,8 @@ export interface NodeConfig {
 
   knowledge_retrieval?: KnowledgeConfig;
 
-  group_names?: Array<{key: string, value: string[]}>
+  group_names?: Array<{ key: string, value: string[] }>
+  cycle?: string;
   [key: string]: unknown;
 }
 
@@ -34,6 +35,7 @@ export interface NodeProperties {
   name?: string;
   id?: string;
   config?: Record<string, NodeConfig>;
+  hidden?: boolean;
 }
 
 export interface NodeLibrary {
@@ -53,6 +55,8 @@ export interface NodeItem {
   config: {
     [key: string]: unknown;
   };
+
+  cycle?: string;
 }
 export interface EdgesItem {
   source: string;
@@ -102,4 +106,15 @@ export interface ChatRef {
 export type GraphRef = React.MutableRefObject<Graph | undefined>
 export interface VariableConfigModalRef {
   handleOpen: (values: StartVariableItem[]) => void;
+}
+
+export interface ChatVariable {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+  default: string;
+}
+export interface AddChatVariableRef {
+  handleOpen: (value?: ChatVariable) => void;
 }

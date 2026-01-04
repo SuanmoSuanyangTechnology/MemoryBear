@@ -18,6 +18,8 @@ import CaseList from './CaseList'
 import HttpRequest from './HttpRequest';
 import MappingList from './MappingList'
 import CategoryList from './CategoryList'
+import ConditionList from './ConditionList'
+import CycleVarsList from './CycleVarsList'
 
 interface PropertiesProps {
   selectedNode?: Node | null; 
@@ -27,10 +29,12 @@ interface PropertiesProps {
   deleteEvent: () => void;
   copyEvent: () => void;
   parseEvent: () => void;
+  config?: any;
 }
 const Properties: FC<PropertiesProps> = ({
   selectedNode,
   graphRef,
+  config,
 }) => {
   const { t } = useTranslation()
   const { modal } = App.useApp()
@@ -255,6 +259,25 @@ const Properties: FC<PropertiesProps> = ({
       }
     });
 
+    // Add conversation variables from global config
+    const conversationVariables = config?.variables || [];
+    
+    conversationVariables.forEach((variable: any) => {
+      const key = `CONVERSATION_${variable.name}`;
+      if (!addedKeys.has(key)) {
+        addedKeys.add(key);
+        variableList.push({
+          key,
+          label: variable.name,
+          type: 'variable',
+          dataType: variable.type,
+          value: `conversation.${variable.name}`,
+          nodeData: { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' },
+          group: 'CONVERSATION'
+        });
+      }
+    });
+
     return variableList;
   }, [selectedNode, graphRef]);
 
@@ -417,7 +440,6 @@ const Properties: FC<PropertiesProps> = ({
                   )
                 }
                 if (config.type === 'caseList') {
-                  console.log('key', key)
                   return (
                     <Form.Item key={key} name={key}>
                       <CaseList
@@ -438,6 +460,16 @@ const Properties: FC<PropertiesProps> = ({
                       <MappingList name={key} />
                     </Form.Item>
                   
+                  )
+                }
+                if (config.type === 'cycleVarsList') {
+                  return (
+                    <Form.Item key={key} name={key}>
+                      <CycleVarsList
+                        parentName={key}
+                        options={variableList}
+                      />
+                    </Form.Item>
                   )
                 }
 
@@ -473,15 +505,20 @@ const Properties: FC<PropertiesProps> = ({
                       : config.type === 'variableList'
                       ? <VariableSelect
                           placeholder={t('common.pleaseSelect')}
-                          options={variableList.map(vo => ({
-                            ...vo,
-                            value: `{{${vo.value}}}`
-                          }))}
+                          options={variableList}
                         />
                       : config.type === 'switch'
                       ? <Switch />
                       : config.type === 'categoryList'
                       ? <CategoryList parentName={key} />
+                      : config.type === 'conditionList'
+                      ? <ConditionList
+                        parentName={key}
+                        options={variableList}
+                        selectedNode={selectedNode}
+                        graphRef={graphRef}
+                        addBtnText={t('workflow.config.addCase')}
+                      />
                       : null
                     }
                   </Form.Item>

@@ -1662,7 +1662,7 @@ export const zh = {
       iteration: '迭代 (Iteration)',
       loop: '循环 (Loop)',
       'cycle-start': '',
-      'cycle-end': '退出循环',
+      break: '退出循环',
       parallel: '并行执行',
       'var-aggregator': '变量聚合器',
       externalInteraction: '外部交互',
@@ -1690,7 +1690,9 @@ export const zh = {
       nodeProperties: '节点属性',
       empty: "Emmm…盒子是空的，这里什么都没有～",
       nodeName: '节点名称',
-
+      addvariable: '会话变量',
+      addChatVariable: '添加会话变量',
+      editChatVariable: '编辑会话变量',
 
       config: {
         llm: {
@@ -1743,6 +1745,7 @@ export const zh = {
           type: '类型',
           desc: '描述',
           required: '必填',
+          default: '默认值',
 
           'string': 'String',
           'number': 'Number',
