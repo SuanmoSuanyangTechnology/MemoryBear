@@ -26,6 +26,58 @@ class UserMemoryService:
     def __init__(self):
         logger.info("UserMemoryService initialized")
     
+    @staticmethod
+    def _datetime_to_timestamp(dt: Optional[Any]) -> Optional[int]:
+        """
+        将 DateTime 对象转换为时间戳（毫秒）
+        
+        Args:
+            dt: DateTime 对象或 None
+            
+        Returns:
+            时间戳（毫秒）或 None
+        """
+        if dt is None:
+            return None
+        if hasattr(dt, 'timestamp'):
+            return int(dt.timestamp() * 1000)
+        return None
+    
+    @staticmethod
+    def convert_profile_to_dict_with_timestamp(profile_data: Any) -> dict:
+        """
+        将 EndUserProfileResponse 转换为字典，DateTime 字段转换为时间戳（毫秒）
+        
+        Args:
+            profile_data: EndUserProfileResponse 对象
+            
+        Returns:
+            包含时间戳的字典
+        """
+        data = profile_data.model_dump()
+        # 转换 DateTime 字段为时间戳
+        if data.get('hire_date') is not None:
+            data['hire_date'] = UserMemoryService._datetime_to_timestamp(profile_data.hire_date)
+        if data.get('updatetime_profile') is not None:
+            data['updatetime_profile'] = UserMemoryService._datetime_to_timestamp(profile_data.updatetime_profile)
+        return data
+    
+    @staticmethod
+    def timestamp_to_datetime(timestamp_ms: Optional[int]) -> Optional[Any]:
+        """
+        将时间戳（毫秒）转换为 DateTime 对象
+        
+        Args:
+            timestamp_ms: 时间戳（毫秒）
+            
+        Returns:
+            DateTime 对象或 None
+        """
+        if timestamp_ms is None:
+            return None
+        import datetime
+        return datetime.datetime.fromtimestamp(timestamp_ms / 1000)
+    
     async def get_cached_memory_insight(
         self, 
         db: Session, 
@@ -41,10 +93,10 @@ class UserMemoryService:
         Returns:
             {
                 "memory_insight": str,           # 总体概述
-                "behavior_pattern": str,   # 行为模式
-                "key_findings": str,       # 关键发现
-                "growth_trajectory": str,  # 成长轨迹
-                "updated_at": datetime,
+                "behavior_pattern": str,         # 行为模式
+                "key_findings": List[str],       # 关键发现（数组）
+                "growth_trajectory": str,        # 成长轨迹
+                "updated_at": int,               # 时间戳（毫秒）
                 "is_cached": bool
             }
         """
@@ -75,13 +127,25 @@ class UserMemoryService:
             ])
             
             if has_cache:
+                # 反序列化 key_findings（从 JSON 字符串转为数组）
+                key_findings_value = end_user.key_findings
+                if key_findings_value:
+                    try:
+                        import json
+                        key_findings_array = json.loads(key_findings_value)
+                    except (json.JSONDecodeError, TypeError):
+                        # 如果解析失败，尝试按 • 分割（兼容旧数据）
+                        key_findings_array = [item.strip() for item in key_findings_value.split('•') if item.strip()]
+                else:
+                    key_findings_array = []
+                
                 logger.info(f"成功获取 end_user_id {end_user_id} 的缓存记忆洞察（四维度）")
                 return {
                     "memory_insight": end_user.memory_insight,  # 总体概述存储在 memory_insight
                     "behavior_pattern": end_user.behavior_pattern,
-                    "key_findings": end_user.key_findings,
+                    "key_findings": key_findings_array,  # 返回数组
                     "growth_trajectory": end_user.growth_trajectory,
-                    "updated_at": end_user.memory_insight_updated_at,
+                    "updated_at": self._datetime_to_timestamp(end_user.memory_insight_updated_at),
                     "is_cached": True
                 }
             else:
@@ -166,7 +230,7 @@ class UserMemoryService:
                     "personality": end_user.personality_traits,
                     "core_values": end_user.core_values,
                     "one_sentence": end_user.one_sentence_summary,
-                    "updated_at": end_user.user_summary_updated_at,
+                    "updated_at": self._datetime_to_timestamp(end_user.user_summary_updated_at),
                     "is_cached": True
                 }
             else:
@@ -213,7 +277,10 @@ class UserMemoryService:
         Returns:
             {
                 "success": bool,
-                "report": str,
+                "memory_insight": str,
+                "behavior_pattern": str,
+                "key_findings": List[str],  # 数组格式
+                "growth_trajectory": str,
                 "error": Optional[str]
             }
         """
@@ -243,10 +310,14 @@ class UserMemoryService:
                 
                 memory_insight = result.get("memory_insight", "")
                 behavior_pattern = result.get("behavior_pattern", "")
-                key_findings = result.get("key_findings", "")
+                key_findings_array = result.get("key_findings", [])  # 现在是数组
                 growth_trajectory = result.get("growth_trajectory", "")
                 
-                if not any([memory_insight, behavior_pattern, key_findings, growth_trajectory]):
+                # 将 key_findings 数组序列化为 JSON 字符串以存储到数据库
+                import json
+                key_findings_json = json.dumps(key_findings_array, ensure_ascii=False) if key_findings_array else ""
+                
+                if not any([memory_insight, behavior_pattern, key_findings_array, growth_trajectory]):
                     logger.warning(f"end_user_id {end_user_id} 的记忆洞察生成结果为空")
                     return {
                         "success": False,
@@ -258,11 +329,12 @@ class UserMemoryService:
                     }
                 
                 # 更新数据库缓存（四个维度）
+                # 注意：key_findings 存储为 JSON 字符串
                 success = repo.update_memory_insight(
                     user_uuid, 
                     memory_insight, 
                     behavior_pattern, 
-                    key_findings, 
+                    key_findings_json,  # 存储 JSON 字符串
                     growth_trajectory
                 )
                 
@@ -272,7 +344,7 @@ class UserMemoryService:
                         "success": True,
                         "memory_insight": memory_insight,
                         "behavior_pattern": behavior_pattern,
-                        "key_findings": key_findings,
+                        "key_findings": key_findings_array,  # 返回数组
                         "growth_trajectory": growth_trajectory,
                         "error": None
                     }
@@ -282,7 +354,7 @@ class UserMemoryService:
                         "success": False,
                         "memory_insight": memory_insight,
                         "behavior_pattern": behavior_pattern,
-                        "key_findings": key_findings,
+                        "key_findings": key_findings_array,  # 返回数组
                         "growth_trajectory": growth_trajectory,
                         "error": "数据库更新失败"
                     }
@@ -556,9 +628,9 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
     Returns:
         包含四个维度报告的字典: {
             "memory_insight": str,           # 总体概述
-            "behavior_pattern": str,   # 行为模式
-            "key_findings": str,       # 关键发现
-            "growth_trajectory": str   # 成长轨迹
+            "behavior_pattern": str,         # 行为模式
+            "key_findings": List[str],       # 关键发现（数组）
+            "growth_trajectory": str         # 成长轨迹
         }
     """
     from app.core.memory.utils.prompt.prompt_utils import render_memory_insight_prompt
@@ -638,13 +710,21 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
         
         memory_insight = memory_insight_match.group(1).strip() if memory_insight_match else ""
         behavior_pattern = behavior_match.group(1).strip() if behavior_match else ""
-        key_findings = findings_match.group(1).strip() if findings_match else ""
+        key_findings_text = findings_match.group(1).strip() if findings_match else ""
         growth_trajectory = trajectory_match.group(1).strip() if trajectory_match else ""
+        
+        # 将 key_findings 从文本转换为数组
+        # 按 • 符号分割，并清理每个条目
+        key_findings_array = []
+        if key_findings_text:
+            # 分割并清理每个条目
+            items = [item.strip() for item in key_findings_text.split('•') if item.strip()]
+            key_findings_array = items
         
         return {
             "memory_insight": memory_insight,
             "behavior_pattern": behavior_pattern,
-            "key_findings": key_findings,
+            "key_findings": key_findings_array,  # 返回数组而不是字符串
             "growth_trajectory": growth_trajectory
         }
         
@@ -678,19 +758,19 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
     import re
     
     # 创建 UserSummary 实例
-    user_summary = UserSummary(end_user_id or os.getenv("SELECTED_GROUP_ID", "group_123"))
+    user_summary_tool = UserSummary(end_user_id or os.getenv("SELECTED_GROUP_ID", "group_123"))
     
     try:
         # 1) 收集上下文数据
-        entities = await user_summary._get_top_entities(limit=40)
-        statements = await user_summary._get_recent_statements(limit=100)
+        entities = await user_summary_tool._get_top_entities(limit=40)
+        statements = await user_summary_tool._get_recent_statements(limit=100)
 
         entity_lines = [f"{name} ({freq})" for name, freq in entities][:20]
         statement_samples = [s.statement.strip() for s in statements if (s.statement or '').strip()][:20]
 
         # 2) 使用 prompt_utils 渲染提示词
         user_prompt = await render_user_summary_prompt(
-            user_id=user_summary.user_id,
+            user_id=user_summary_tool.user_id,
             entities=", ".join(entity_lines) if entity_lines else "(空)",
             statements=" | ".join(statement_samples) if statement_samples else "(空)"
         )
@@ -700,7 +780,7 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         ]
 
         # 3) 调用 LLM 生成摘要
-        response = await user_summary.llm.chat(messages=messages)
+        response = await user_summary_tool.llm.chat(messages=messages)
         
         # 4) 处理 LLM 响应，确保返回字符串类型
         content = response.content
@@ -739,7 +819,7 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         
     finally:
         # 确保关闭连接
-        await user_summary.close()
+        await user_summary_tool.close()
 
 
 async def analytics_node_statistics(

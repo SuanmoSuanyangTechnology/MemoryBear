@@ -302,7 +302,7 @@ async def get_end_user_profile(
         )
         
         api_logger.info(f"成功获取用户信息: end_user_id={end_user_id}")
-        return success(data=profile_data.model_dump(), msg="查询成功")
+        return success(data=UserMemoryService.convert_profile_to_dict_with_timestamp(profile_data), msg="查询成功")
         
     except Exception as e:
         api_logger.error(f"用户信息查询失败: end_user_id={end_user_id}, error={str(e)}")
@@ -346,15 +346,22 @@ async def update_end_user_profile(
         # 更新字段（只更新提供的字段，排除 end_user_id）
         # 允许 None 值来重置字段（如 hire_date）
         update_data = profile_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
+        
+        # 特殊处理 hire_date：如果提供了时间戳，转换为 DateTime
+        if 'hire_date' in update_data:
+            hire_date_timestamp = update_data['hire_date']
+            if hire_date_timestamp is not None:
+                update_data['hire_date'] = UserMemoryService.timestamp_to_datetime(hire_date_timestamp)
+            # 如果是 None，保持 None（允许清空）
+        
         for field, value in update_data.items():
             setattr(end_user, field, value)
         
         # 更新 updated_at 时间戳
         end_user.updated_at = datetime.datetime.now()
         
-        # 更新 updatetime_profile 为当前时间戳（毫秒）
-        current_timestamp = int(datetime.datetime.now().timestamp() * 1000)
-        end_user.updatetime_profile = current_timestamp
+        # 更新 updatetime_profile 为当前时间
+        end_user.updatetime_profile = datetime.datetime.now()
         
         # 提交更改
         db.commit()
@@ -372,8 +379,8 @@ async def update_end_user_profile(
             updatetime_profile=end_user.updatetime_profile
         )
         
-        api_logger.info(f"成功更新用户信息: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}, updatetime_profile={current_timestamp}")
-        return success(data=profile_data.model_dump(), msg="更新成功")
+        api_logger.info(f"成功更新用户信息: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
+        return success(data=UserMemoryService.convert_profile_to_dict_with_timestamp(profile_data), msg="更新成功")
         
     except Exception as e:
         db.rollback()

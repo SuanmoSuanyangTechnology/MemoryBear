@@ -23,8 +23,8 @@ class EndUser(Base):
     department = Column(String, nullable=True, comment="部门")
     contact = Column(String, nullable=True, comment="联系方式")
     phone = Column(String, nullable=True, comment="电话")
-    hire_date = Column(BigInteger, nullable=True, comment="入职日期（时间戳，毫秒）")
-    updatetime_profile = Column(BigInteger, nullable=True, comment="核心档案信息最后更新时间（时间戳，毫秒）")
+    hire_date = Column(DateTime, nullable=True, comment="入职日期")
+    updatetime_profile = Column(DateTime, nullable=True, comment="核心档案信息最后更新时间")
     
     # 用户摘要四个维度 - User Summary Four Dimensions
     user_summary = Column(Text, nullable=True, comment="缓存的用户摘要（基本介绍）")

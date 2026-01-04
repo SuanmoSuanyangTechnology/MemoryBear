@@ -22,8 +22,12 @@ class EndUser(BaseModel):
     department: Optional[str] = Field(description="部门", default=None)
     contact: Optional[str] = Field(description="联系方式", default=None)
     phone: Optional[str] = Field(description="电话", default=None)
-    hire_date: Optional[int] = Field(description="入职日期（时间戳，毫秒）", default=None)
-    updatetime_profile: Optional[int] = Field(description="核心档案信息最后更新时间（时间戳，毫秒）", default=None)
+    hire_date: Optional[datetime.datetime] = Field(description="入职日期", default=None)
+    updatetime_profile: Optional[datetime.datetime] = Field(description="核心档案信息最后更新时间", default=None)
+    
+    # 用户摘要和洞察更新时间
+    user_summary_updated_at: Optional[datetime.datetime] = Field(description="用户摘要最后更新时间", default=None)
+    memory_insight_updated_at: Optional[datetime.datetime] = Field(description="洞察报告最后更新时间", default=None)
 
 
 class EndUserProfileResponse(BaseModel):
@@ -36,8 +40,8 @@ class EndUserProfileResponse(BaseModel):
     department: Optional[str] = Field(description="部门", default=None)
     contact: Optional[str] = Field(description="联系方式", default=None)
     phone: Optional[str] = Field(description="电话", default=None)
-    hire_date: Optional[int] = Field(description="入职日期（时间戳，毫秒）", default=None)
-    updatetime_profile: Optional[int] = Field(description="核心档案信息最后更新时间（时间戳，毫秒）", default=None)
+    hire_date: Optional[datetime.datetime] = Field(description="入职日期", default=None)
+    updatetime_profile: Optional[datetime.datetime] = Field(description="核心档案信息最后更新时间", default=None)
 
 
 class EndUserProfileUpdate(BaseModel):
