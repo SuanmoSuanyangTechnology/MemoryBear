@@ -1553,6 +1553,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       'parameter-extractor': 'Parameter Extraction',
       flowControl: 'Flow Control',
       'if-else': 'Conditional Branch',
+      'question-classifier': 'Question Classifier',
       iteration: 'Iteration',
       loop: 'Loop',
       parallel: 'Parallel Execution',
@@ -1664,7 +1665,18 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           "gt": '>',
           "ge": '>=',
           else_desc: 'Used to define the logic that should be executed when the if condition is not met.'
-        }
+        },
+        'question-classifier': {
+          model_id: 'Model',
+          input_variable: 'Input Variable',
+          categories: 'Categories',
+          user_supplement_prompt: 'Instruction',
+          class_name: 'Category',
+          addClassName: 'Add Category'
+        },
+        name: 'Key',
+        type: 'Type',
+        value: 'Value',
       },
 
       clear: 'Clear',

@@ -771,7 +771,7 @@ export const useWorkflowGraph = ({
                 itemConfig = {
                   ...itemConfig,
                   ...data.config[key].defaultValue,
-                  knowledge_bases: knowledge_bases.map((vo: any) => ({ kb_id: vo.id, ...vo.config }))
+                  knowledge_bases: knowledge_bases?.map((vo: any) => ({ kb_id: vo.id, ...vo.config }))
                 }
               }
             })

@@ -37,6 +37,7 @@ import sensitiveDetectionIcon from '@/assets/images/workflow/sensitive_detection
 import outputAuditIcon from '@/assets/images/workflow/output_audit.png';
 import selfOptimizationIcon from '@/assets/images/workflow/self_optimization.png';
 import processEvolutionIcon from '@/assets/images/workflow/process_evolution.png';
+import questionClassifierIcon from '@/assets/images/workflow/question-classifier.png'
 
 import { getModelListUrl } from '@/api/models'
 import type { NodeLibrary } from './types'
@@ -198,6 +199,28 @@ export const nodeLibrary: NodeLibrary[] = [
                 expressions: []
               }
             ]
+          }
+        }
+      },
+      {
+        type: "question-classifier", icon: questionClassifierIcon,
+        config: {
+          model_id: {
+            type: 'customSelect',
+            url: getModelListUrl,
+            params: { type: 'llm,chat' }, // llm/chat
+            valueKey: 'id',
+            labelKey: 'name',
+          },
+          input_variable: {
+            type: 'variableList',
+          },
+          categories: {
+            type: 'categoryList'
+          },
+          user_supplement_prompt: {
+            type: 'messageEditor',
+            isArray: false
           }
         }
       },
