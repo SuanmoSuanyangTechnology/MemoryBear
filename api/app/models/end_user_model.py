@@ -27,7 +27,10 @@ class EndUser(Base):
     updatetime_profile = Column(BigInteger, nullable=True, comment="核心档案信息最后更新时间（时间戳，毫秒）")
     
     # 缓存字段 - Cache fields for pre-computed analytics
-    memory_insight = Column(Text, nullable=True, comment="缓存的记忆洞察报告")
+    memory_insight = Column(Text, nullable=True, comment="缓存的记忆洞察报告（基本介绍）")
+    personality_traits = Column(Text, nullable=True, comment="性格特点")
+    core_values = Column(Text, nullable=True, comment="核心价值观")
+    one_sentence_summary = Column(Text, nullable=True, comment="一句话总结")
     user_summary = Column(Text, nullable=True, comment="缓存的用户摘要")
     memory_insight_updated_at = Column(DateTime, nullable=True, comment="洞察报告最后更新时间")
     user_summary_updated_at = Column(DateTime, nullable=True, comment="用户摘要最后更新时间")
