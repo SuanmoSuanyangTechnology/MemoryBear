@@ -95,7 +95,7 @@ class UserMemoryService:
         end_user_id: str
     ) -> Dict[str, Any]:
         """
-        从数据库获取缓存的用户摘要
+        从数据库获取缓存的用户摘要（四个部分）
         
         Args:
             db: 数据库会话
@@ -103,7 +103,10 @@ class UserMemoryService:
             
         Returns:
             {
-                "summary": str,
+                "basic_intro": str,
+                "personality": str,
+                "core_values": str,
+                "one_sentence": str,
                 "updated_at": datetime,
                 "is_cached": bool
             }
@@ -117,24 +120,40 @@ class UserMemoryService:
             if not end_user:
                 logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
                 return {
-                    "summary": None,
+                    "basic_intro": None,
+                    "personality": None,
+                    "core_values": None,
+                    "one_sentence": None,
                     "updated_at": None,
                     "is_cached": False,
                     "message": "用户不存在"
                 }
             
-            # 检查是否有缓存数据
-            if end_user.user_summary:
+            # 检查是否有缓存数据（至少有一个字段不为空）
+            has_cache = any([
+                end_user.memory_insight,
+                end_user.personality_traits,
+                end_user.core_values,
+                end_user.one_sentence_summary
+            ])
+            
+            if has_cache:
                 logger.info(f"成功获取 end_user_id {end_user_id} 的缓存用户摘要")
                 return {
-                    "summary": end_user.user_summary,
+                    "basic_intro": end_user.memory_insight,
+                    "personality": end_user.personality_traits,
+                    "core_values": end_user.core_values,
+                    "one_sentence": end_user.one_sentence_summary,
                     "updated_at": end_user.user_summary_updated_at,
                     "is_cached": True
                 }
             else:
                 logger.info(f"end_user_id {end_user_id} 的用户摘要缓存为空")
                 return {
-                    "summary": None,
+                    "basic_intro": None,
+                    "personality": None,
+                    "core_values": None,
+                    "one_sentence": None,
                     "updated_at": None,
                     "is_cached": False,
                     "message": "数据尚未生成，请稍后重试或联系管理员"
@@ -143,7 +162,10 @@ class UserMemoryService:
         except ValueError:
             logger.error(f"无效的 end_user_id 格式: {end_user_id}")
             return {
-                "summary": None,
+                "basic_intro": None,
+                "personality": None,
+                "core_values": None,
+                "one_sentence": None,
                 "updated_at": None,
                 "is_cached": False,
                 "message": "无效的用户ID格式"
@@ -251,7 +273,7 @@ class UserMemoryService:
         workspace_id: Optional[uuid.UUID] = None
     ) -> Dict[str, Any]:
         """
-        生成并缓存用户摘要
+        生成并缓存用户摘要（四个部分）
         
         Args:
             db: 数据库会话
@@ -261,7 +283,10 @@ class UserMemoryService:
         Returns:
             {
                 "success": bool,
-                "summary": str,
+                "basic_intro": str,
+                "personality": str,
+                "core_values": str,
+                "one_sentence": str,
                 "error": Optional[str]
             }
         """
@@ -277,7 +302,10 @@ class UserMemoryService:
                 logger.error(f"end_user_id {end_user_id} 不存在")
                 return {
                     "success": False,
-                    "summary": None,
+                    "basic_intro": None,
+                    "personality": None,
+                    "core_values": None,
+                    "one_sentence": None,
                     "error": "用户不存在"
                 }
             
@@ -285,31 +313,50 @@ class UserMemoryService:
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成用户摘要")
                 result = await analytics_user_summary(end_user_id)
-                summary = result.get("summary", "")
                 
-                if not summary:
+                basic_intro = result.get("basic_intro", "")
+                personality = result.get("personality", "")
+                core_values = result.get("core_values", "")
+                one_sentence = result.get("one_sentence", "")
+                
+                if not any([basic_intro, personality, core_values, one_sentence]):
                     logger.warning(f"end_user_id {end_user_id} 的用户摘要生成结果为空")
                     return {
                         "success": False,
-                        "summary": None,
+                        "basic_intro": None,
+                        "personality": None,
+                        "core_values": None,
+                        "one_sentence": None,
                         "error": "生成的用户摘要为空,可能Neo4j中没有该用户的数据"
                     }
                 
                 # 更新数据库缓存
-                success = repo.update_user_summary(user_uuid, summary)
+                success = repo.update_user_summary(
+                    user_uuid, 
+                    basic_intro, 
+                    personality, 
+                    core_values, 
+                    one_sentence
+                )
                 
                 if success:
                     logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存用户摘要")
                     return {
                         "success": True,
-                        "summary": summary,
+                        "basic_intro": basic_intro,
+                        "personality": personality,
+                        "core_values": core_values,
+                        "one_sentence": one_sentence,
                         "error": None
                     }
                 else:
                     logger.error(f"更新 end_user_id {end_user_id} 的用户摘要缓存失败")
                     return {
                         "success": False,
-                        "summary": summary,
+                        "basic_intro": basic_intro,
+                        "personality": personality,
+                        "core_values": core_values,
+                        "one_sentence": one_sentence,
                         "error": "数据库更新失败"
                     }
                     
@@ -317,7 +364,10 @@ class UserMemoryService:
                 logger.error(f"调用分析函数生成用户摘要时出错: {str(e)}")
                 return {
                     "success": False,
-                    "summary": None,
+                    "basic_intro": None,
+                    "personality": None,
+                    "core_values": None,
+                    "one_sentence": None,
                     "error": f"Neo4j或LLM服务不可用: {str(e)}"
                 }
                 
@@ -325,14 +375,20 @@ class UserMemoryService:
             logger.error(f"无效的 end_user_id 格式: {end_user_id}")
             return {
                 "success": False,
-                "summary": None,
+                "basic_intro": None,
+                "personality": None,
+                "core_values": None,
+                "one_sentence": None,
                 "error": "无效的用户ID格式"
             }
         except Exception as e:
             logger.error(f"生成并缓存用户摘要时出错: {str(e)}")
             return {
                 "success": False,
-                "summary": None,
+                "basic_intro": None,
+                "personality": None,
+                "core_values": None,
+                "one_sentence": None,
                 "error": str(e)
             }
     
@@ -539,20 +595,27 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
 
 async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    生成用户摘要
+    生成用户摘要（包含四个部分）
     
     这个函数包含完整的业务逻辑：
     1. 使用 UserSummary 工具类获取基础数据（实体、语句）
-    2. 构建提示词
-    3. 调用 LLM 生成自然语言摘要
+    2. 使用 prompt_utils 渲染提示词
+    3. 调用 LLM 生成四部分内容：基本介绍、性格特点、核心价值观、一句话总结
     
     Args:
         end_user_id: 可选的终端用户ID
         
     Returns:
-        包含摘要的字典
+        包含四部分摘要的字典: {
+            "basic_intro": str,
+            "personality": str,
+            "core_values": str,
+            "one_sentence": str
+        }
     """
     from app.core.memory.analytics.user_summary import UserSummary
+    from app.core.memory.utils.prompt.prompt_utils import render_user_summary_prompt
+    import re
     
     # 创建 UserSummary 实例
     user_summary = UserSummary(end_user_id or os.getenv("SELECTED_GROUP_ID", "group_123"))
@@ -565,25 +628,14 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         entity_lines = [f"{name} ({freq})" for name, freq in entities][:20]
         statement_samples = [s.statement.strip() for s in statements if (s.statement or '').strip()][:20]
 
-        # 2) 构建提示词
-        system_prompt = (
-            "你是一位中文信息压缩助手。请基于提供的实体与语句，"
-            "生成非常简洁的用户摘要，禁止臆测或虚构。要求：\n"
-            "- 3–4 句，总字数不超过 120；\n"
-            "- 先交代身份/城市，其次长期兴趣或习惯，最后给一两项代表性经历；\n"
-            "- 避免形容词堆砌与空话，不用项目符号，不分段；\n"
-            "- 使用客观的第三人称描述，语气克制、中立。"
+        # 2) 使用 prompt_utils 渲染提示词
+        user_prompt = await render_user_summary_prompt(
+            user_id=user_summary.user_id,
+            entities=", ".join(entity_lines) if entity_lines else "(空)",
+            statements=" | ".join(statement_samples) if statement_samples else "(空)"
         )
 
-        user_content_parts = [
-            f"用户ID: {user_summary.user_id}",
-            "核心实体与频次: " + (", ".join(entity_lines) if entity_lines else "(空)"),
-            "代表性语句样本: " + (" | ".join(statement_samples) if statement_samples else "(空)"),
-        ]
-        user_prompt = "\n".join(user_content_parts)
-
         messages = [
-            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
@@ -593,24 +645,37 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         # 4) 处理 LLM 响应，确保返回字符串类型
         content = response.content
         if isinstance(content, list):
-            # 如果是列表格式（如 [{'type': 'text', 'text': '...'}]），提取文本
             if len(content) > 0:
                 if isinstance(content[0], dict):
-                    # 尝试提取 'text' 字段
                     text = content[0].get('text', content[0].get('content', str(content[0])))
-                    summary = str(text)
+                    full_response = str(text)
                 else:
-                    summary = str(content[0])
+                    full_response = str(content[0])
             else:
-                summary = ""
+                full_response = ""
         elif isinstance(content, dict):
-            # 如果是字典格式，提取 text 字段
-            summary = str(content.get('text', content.get('content', str(content))))
+            full_response = str(content.get('text', content.get('content', str(content))))
         else:
-            # 已经是字符串或其他类型，转为字符串
-            summary = str(content) if content is not None else ""
+            full_response = str(content) if content is not None else ""
         
-        return {"summary": summary}
+        # 5) 解析四个部分
+        # 使用正则表达式提取四个部分
+        basic_intro_match = re.search(r'【基本介绍】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        personality_match = re.search(r'【性格特点】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        core_values_match = re.search(r'【核心价值观】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        one_sentence_match = re.search(r'【一句话总结】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        
+        basic_intro = basic_intro_match.group(1).strip() if basic_intro_match else ""
+        personality = personality_match.group(1).strip() if personality_match else ""
+        core_values = core_values_match.group(1).strip() if core_values_match else ""
+        one_sentence = one_sentence_match.group(1).strip() if one_sentence_match else ""
+        
+        return {
+            "basic_intro": basic_intro,
+            "personality": personality,
+            "core_values": core_values,
+            "one_sentence": one_sentence
+        }
         
     finally:
         # 确保关闭连接

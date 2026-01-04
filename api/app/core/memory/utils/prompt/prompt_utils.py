@@ -316,3 +316,38 @@ async def render_emotion_suggestions_prompt(
     })
     
     return rendered_prompt
+
+
+async def render_user_summary_prompt(
+    user_id: str,
+    entities: str,
+    statements: str
+) -> str:
+    """
+    Renders the user summary prompt using the user_summary.jinja2 template.
+
+    Args:
+        user_id: User identifier
+        entities: Core entities with frequency information
+        statements: Representative statement samples
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("user_summary.jinja2")
+    rendered_prompt = template.render(
+        user_id=user_id,
+        entities=entities,
+        statements=statements
+    )
+    
+    # 记录渲染结果到提示日志
+    log_prompt_rendering('user summary', rendered_prompt)
+    # 可选：记录模板渲染信息
+    log_template_rendering('user_summary.jinja2', {
+        'user_id': user_id,
+        'entities_len': len(entities),
+        'statements_len': len(statements)
+    })
+    
+    return rendered_prompt
