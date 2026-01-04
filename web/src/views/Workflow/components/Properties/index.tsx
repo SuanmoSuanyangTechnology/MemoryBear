@@ -330,9 +330,30 @@ const Properties: FC<PropertiesProps> = ({
                 }
 
                 if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
+                  // 为llm节点且isArray=true时添加context变量支持
+                  let contextVariableList = [...variableList];
+                  const isArrayMode = config.isArray !== false; // 默认为true
+                  
+                  if (isArrayMode) {
+                    const contextKey = `${selectedNode.id}_context`;
+                    const hasContextVariable = contextVariableList.some(v => v.key === contextKey);
+                    
+                    if (!hasContextVariable) {
+                      contextVariableList.unshift({
+                        key: contextKey,
+                        label: 'context',
+                        type: 'variable',
+                        dataType: 'String',
+                        value: `{{context}}`,
+                        nodeData: selectedNode.getData(),
+                        isContext: true,
+                      });
+                    }
+                  }
+                  
                   return (
                     <Form.Item key={key} name={key}>
-                      <MessageEditor options={variableList} parentName={key} />
+                      <MessageEditor options={contextVariableList} parentName={key} />
                     </Form.Item>
                   )
                 }

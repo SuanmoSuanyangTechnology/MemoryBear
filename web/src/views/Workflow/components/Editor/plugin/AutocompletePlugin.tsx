@@ -11,7 +11,9 @@ export interface Suggestion {
   type: string;
   dataType: string;
   value: string;
-  nodeData: NodeProperties
+  nodeData: NodeProperties;
+  isContext?: boolean; // 标记是否为context变量
+  disabled?: boolean; // 标记是否禁用
 }
 
 const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
@@ -131,19 +133,20 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                   key={option.key}
                   style={{
                     padding: '8px 12px',
-                    cursor: 'pointer',
+                    cursor: option.disabled ? 'not-allowed' : 'pointer',
                     background: selectedIndex === globalIndex ? '#f0f8ff' : 'white',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
+                    opacity: option.disabled ? 0.5 : 1,
                   }}
-                  onClick={() => insertMention(option)}
+                  onClick={() => !option.disabled && insertMention(option)}
                   onMouseEnter={() => setSelectedIndex(globalIndex)}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span
                       style={{
-                        background: option.type === 'context' ? '#722ed1' :
+                        background: option.isContext ? '#722ed1' :
                           option.type === 'system' ? '#1890ff' : '#52c41a',
                         color: 'white',
                         padding: '2px 6px',
@@ -153,7 +156,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                         textAlign: 'center',
                       }}
                     >
-                      {option.type === 'context' ? '📄' :
+                      {option.isContext ? '📄' :
                         option.type === 'system' ? 'x' : 'x'}
                     </span>
                     <span style={{ fontSize: '14px' }}>{option.label}</span>
