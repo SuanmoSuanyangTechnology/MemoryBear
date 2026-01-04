@@ -137,10 +137,10 @@ async def chat(
 
     if app_type == AppType.AGENT:
 
-        print("="*50)
-        print(app.current_release.default_model_config_id)
+        # print("="*50)
+        # print(app.current_release.default_model_config_id)
         agent_config = agent_config_4_app_release(app.current_release)
-        print(agent_config.default_model_config_id)
+        # print(agent_config.default_model_config_id)
         # 流式返回
         if payload.stream:
             async def event_generator():
