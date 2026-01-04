@@ -157,11 +157,11 @@ export const deleteMemoryConfig = (config_id: number) => {
 }
 // 遗忘引擎-获取配置
 export const getMemoryForgetConfig = (config_id: number | string) => {
-  return request.get('/memory-storage/read_config_forget', { config_id })
+  return request.get('/memory/forget/read_config', { config_id })
 }
 // 遗忘引擎-更新配置
 export const updateMemoryForgetConfig = (values: ForgetConfigForm) => {
-  return request.post('/memory-storage/update_config_forget', values)
+  return request.post('/memory/forget/update_config', values)
 }
 // 记忆萃取引擎-获取配置
 export const getMemoryExtractionConfig = (config_id: number | string) => {

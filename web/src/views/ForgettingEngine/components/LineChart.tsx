@@ -3,6 +3,39 @@ import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react';
 import type { ConfigForm } from '../types'
 
+// 定义当前数据类型
+type CurrentDataItem = {
+  name: string;
+  data: number[];
+  config: ConfigForm | {};
+  type: string;
+  smooth: boolean;
+  lineStyle: { width: number };
+  showSymbol: boolean;
+  label: { show: boolean; position: string };
+  emphasis: { focus: string };
+};
+
+// 定义图表系列数据类型
+type SeriesDataItem = {
+  name: string;
+  data: number[];
+  config: ChartConfig;
+  type: string;
+  smooth: boolean;
+  lineStyle: { width: number };
+  showSymbol: boolean;
+  label: { show: boolean; position: string };
+  emphasis: { focus: string };
+};
+
+// 定义简化的配置类型，只包含图表计算需要的属性
+interface ChartConfig {
+  lambda_mem: number;
+  lambda_time: number;
+  offset: number;
+}
+
 interface LineCardProps {
   config: ConfigForm
 }
@@ -29,14 +62,14 @@ const Colors = ['#155EEF', '#4DA8FF', '#FFB048']
 const LineChart: FC<LineCardProps> = ({ config }) => {
   const { t } = useTranslation()
   const chartRef = useRef<ReactEcharts>(null);
-  const debounceRef = useRef()
+  const debounceRef = useRef<number>()
   const resizeScheduledRef = useRef(false)
   const xAxisData = [1, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60]
-  const [initialData, setInitialData] = useState([])
-  const [currentData, setCurrentData] = useState({
+  const [initialData, setInitialData] = useState<SeriesDataItem[]>([])
+  const [currentData, setCurrentData] = useState<CurrentDataItem>({
       ...SeriesConfig,
       name: `${t('forgettingEngine.currentConfig')}(λ_time=${config?.lambda_mem})`,
-      data: [],
+      data: [] as number[],
       config: {}
   })
   const seriesData = useMemo(() => [
@@ -44,19 +77,26 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
       ...SeriesConfig,
       name: `${t('forgettingEngine.quicklyForget')}(λ_time=0.3)`,
       data: [],
-      config: {lambda_mem: 0.3, lambda_time: 1, offset: 0.05}
+      config: {lambda_mem: 0.3, lambda_time: 1, offset: 0.05} as ChartConfig
     },
     {
       ...SeriesConfig,
       name: `${t('forgettingEngine.slowForgetting')}(λ_time=1)`,
       data: [],
-      config: {lambda_mem: 1, lambda_time: 0.3, offset: 0.2}
+      config: {lambda_mem: 1, lambda_time: 0.3, offset: 0.2} as ChartConfig
     }
   ], [t])
 
   useEffect(() => {
     getInitData()
-  }, [])
+  }, [t])
+
+  useEffect(() => {
+    // 语言切换时重新生成数据
+    if (config) {
+      getCaculateData(config)
+    }
+  }, [t, config])
 
   useEffect(() => {
     const handleResize = () => {
@@ -101,14 +141,14 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
     setInitialData(list)
   }, [seriesData])
   
-  const calculateSeriesData = useCallback((days: number, data: ConfigForm) => {
+  const calculateSeriesData = useCallback((days: number, data: ChartConfig | ConfigForm) => {
     const offset = Number(data.offset)
     const lambda_time = Number(data.lambda_time)
     const lambda_mem = Number(data.lambda_mem)
     // R = offset + (1 - offset) × e^(-λtime × t / (λmem × S))
     return +(offset + (1 - offset) * Math.exp(-lambda_time * days / lambda_mem)).toFixed(4)
   }, [])
-  const formatData = useCallback((data: ConfigForm) => {
+  const formatData = useCallback((data: ChartConfig | ConfigForm) => {
     return xAxisData.map(days => Number(calculateSeriesData(days, data)))
   }, [calculateSeriesData])
 
