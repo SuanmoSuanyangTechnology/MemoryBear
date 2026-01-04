@@ -80,7 +80,7 @@ class UserSummary:
     async def close(self):
         await self.connector.close()
 
-    async def _get_recent_statements(self, limit: int = 80) -> List[StatementRecord]:
+    async def _get_recent_statements(self, limit: int = 80) -> List[StatementRecord]: # TODO Used by user_memory_service
         """Fetch recent statements authored by the user/group for context."""
         query = (
             "MATCH (s:Statement) "
@@ -100,70 +100,25 @@ class UserSummary:
     async def _get_top_entities(self, limit: int = 30) -> List[Tuple[str, int]]:
         """Reuse hot tag logic to get meaningful entities and their frequencies."""
         # get_hot_memory_tags internally filters out non-meaningful nouns with LLM
-        return await get_hot_memory_tags(self.user_id, limit=limit)
+        return await get_hot_memory_tags(self.user_id, limit=limit) # TODO Used by user_memory_service
 
-    async def generate(self) -> str:
-        """Generate a Chinese '关于我' style summary using the LLM."""
-        # 1) Collect context
-        entities = await self._get_top_entities(limit=40)
-        statements = await self._get_recent_statements(limit=100)
 
-        entity_lines = [f"{name} ({freq})" for name, freq in entities][:20]
-        statement_samples = [s.statement.strip() for s in statements if (s.statement or '').strip()][:20]
-
-        # 2) Compose prompt
-        system_prompt = (
-            "你是一位中文信息压缩助手。请基于提供的实体与语句，"
-            "生成非常简洁的用户摘要，禁止臆测或虚构。要求：\n"
-            "- 3–4 句，总字数不超过 120；\n"
-            "- 先交代身份/城市，其次长期兴趣或习惯，最后给一两项代表性经历；\n"
-            "- 避免形容词堆砌与空话，不用项目符号，不分段；\n"
-            "- 使用客观的第三人称描述，语气克制、中立。"
-        )
-
-        user_content_parts = [
-            f"用户ID: {self.user_id}",
-            "核心实体与频次: " + (", ".join(entity_lines) if entity_lines else "(空)"),
-            "代表性语句样本: " + (" | ".join(statement_samples) if statement_samples else "(空)"),
-        ]
-        user_prompt = "\n".join(user_content_parts)
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        # 3) Call LLM
-        response = await self.llm.chat(messages=messages)
+async def generate_user_summary(user_id: str | None = None) -> str: # TODO useless
+    """
+    生成用户摘要的便捷函数
+    
+    Args:
+        user_id: 可选的用户ID
         
-        # 确保返回字符串类型
-        content = response.content
-        if isinstance(content, list):
-            # 如果是列表格式（如 [{'type': 'text', 'text': '...'}]），提取文本
-            if len(content) > 0:
-                if isinstance(content[0], dict):
-                    # 尝试提取 'text' 字段
-                    text = content[0].get('text', content[0].get('content', str(content[0])))
-                    return str(text)
-                else:
-                    return str(content[0])
-            return ""
-        elif isinstance(content, dict):
-            # 如果是字典格式，提取 text 字段
-            return str(content.get('text', content.get('content', str(content))))
-        else:
-            # 已经是字符串或其他类型，转为字符串
-            return str(content) if content is not None else ""
-
-
-async def generate_user_summary(user_id: str | None = None) -> str:
-    # 默认从环境变量读取
-    effective_group_id = user_id or DEFAULT_GROUP_ID
-    svc = UserSummary(effective_group_id)
-    try:
-        return await svc.generate()
-    finally:
-        await svc.close()
+    Returns:
+        用户摘要字符串
+    """
+    # 导入服务层函数
+    from app.services.user_memory_service import analytics_user_summary
+    
+    # 调用服务层函数
+    result = await analytics_user_summary(user_id)
+    return result.get("summary", "")
 
 
 if __name__ == "__main__":
