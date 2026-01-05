@@ -6,7 +6,6 @@ pipeline. Only MemoryConfig is needed - clients are constructed internally.
 """
 import time
 from datetime import datetime
-# from typing import List, Dict, Optional
 
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
@@ -53,7 +52,6 @@ async def write(
         memory_config: MemoryConfig object containing all configuration
         ref_id: Reference ID, defaults to "wyl20251027"
     """
-    
     # Extract config values
     embedding_model_id = str(memory_config.embedding_model_id)
     chunker_strategy = memory_config.chunker_strategy

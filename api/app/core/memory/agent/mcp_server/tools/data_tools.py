@@ -137,7 +137,6 @@ async def Data_write(
             group_id=group_id,
             memory_config=memory_config,
         )
-        
         logger.info(f"Write completed successfully! Config: {memory_config.config_name}")
 
         return {
