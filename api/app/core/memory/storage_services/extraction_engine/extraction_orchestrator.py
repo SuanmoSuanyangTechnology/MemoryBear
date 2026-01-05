@@ -550,8 +550,6 @@ class ExtractionOrchestrator:
         self, dialog_data_list: List[DialogData]
     ) -> List[Dict[str, Any]]:
         """
-        从对话中提取情绪信息（优化版：全局陈述句级并行）
-        
         只对 speaker_role 为 "用户" 的陈述句进行情绪提取
 
         Args:
