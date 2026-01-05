@@ -1198,7 +1198,11 @@ export const zh = {
       updated_at: '最后更新时间',
       fullScreen: '全屏',
 
-      memoryWindow: "{{name}}的记忆之窗"
+      memoryWindow: "{{name}}的记忆之窗",
+      memory_insight: '总体概述',
+      key_findings: '关键发现',
+      behavior_pattern: '行为模式',
+      growth_trajectory: '成长轨迹',
     },
     space: {
       createSpace: '创建空间',
@@ -1680,16 +1684,22 @@ export const zh = {
       'parameter-extractor': '参数提取',
       flowControl: '流程控制',
       'if-else': '条件分支',
+      'question-classifier': '问题分类器',
       iteration: '迭代 (Iteration)',
       loop: '循环 (Loop)',
+      'cycle-start': '',
+      break: '退出循环',
+      assigner: '变量赋值',
       parallel: '并行执行',
       'var-aggregator': '变量聚合器',
       externalInteraction: '外部交互',
       "http-request": 'HTTP请求',
-      tools: '工具 (Tools)',
+      tool: '工具 (Tool)',
       code_execution: '代码执行',
       "jinja-render": '模板渲染',
       cognitiveUpgrading: '认知升级（创新）',
+      'memory-read': '记忆提取',
+      'memory-write': '记忆储存',
       task_planning: '任务规划',
       reasoning_control: '推理控制',
       self_reflection: '自我反思',
@@ -1709,7 +1719,9 @@ export const zh = {
       nodeProperties: '节点属性',
       empty: "Emmm…盒子是空的，这里什么都没有～",
       nodeName: '节点名称',
-
+      addvariable: '会话变量',
+      addChatVariable: '添加会话变量',
+      editChatVariable: '编辑会话变量',
 
       config: {
         llm: {
@@ -1762,6 +1774,7 @@ export const zh = {
           type: '类型',
           desc: '描述',
           required: '必填',
+          default: '默认值',
 
           'string': 'String',
           'number': 'Number',
@@ -1819,9 +1832,48 @@ export const zh = {
           template: '代码',
           mapping: '输入变量'
         },
+        'question-classifier': {
+          model_id: '模型',
+          input_variable: '输入变量',
+          categories: '分类',
+          user_supplement_prompt: '指令',
+          class_name: '分类',
+          addClassName: '添加分类'
+        },
+        loop: {
+          cycle_vars: '循环变量',
+          condition: '循环终止条件',
+        },
+        assigner: {
+          assignments: '变量',
+          cover: '覆盖',
+          assign: '设置',
+          clear: '清空'
+        },
+        iteration: {
+          input: '输入变量',
+          output: '输出变量',
+          parallel: '并行模式',
+          parallel_count: '最大并行度',
+          flatten: '扁平化输出',
+        },
+        tool: {
+          tool_id: '工具',
+        },
+        'memory-read': {
+          message: '消息',
+          config_id: '记忆配置',
+          search_switch: '检索模式',
+        },
+        'memory-write': {
+          message: '消息',
+          config_id: '记忆配置',
+          search_switch: '检索模式',
+        },
         name: '键',
         type: '类型',
         value: '值',
+        addCase: '添加条件',
       },
 
       clear: '清空',

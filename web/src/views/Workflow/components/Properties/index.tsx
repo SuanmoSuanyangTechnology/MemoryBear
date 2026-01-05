@@ -17,6 +17,11 @@ import GroupVariableList from './GroupVariableList'
 import CaseList from './CaseList'
 import HttpRequest from './HttpRequest';
 import MappingList from './MappingList'
+import CategoryList from './CategoryList'
+import ConditionList from './ConditionList'
+import CycleVarsList from './CycleVarsList'
+import AssignmentList from './AssignmentList'
+import ToolConfig from './ToolConfig'
 
 interface PropertiesProps {
   selectedNode?: Node | null; 
@@ -26,10 +31,12 @@ interface PropertiesProps {
   deleteEvent: () => void;
   copyEvent: () => void;
   parseEvent: () => void;
+  config?: any;
 }
 const Properties: FC<PropertiesProps> = ({
   selectedNode,
   graphRef,
+  config,
 }) => {
   const { t } = useTranslation()
   const { modal } = App.useApp()
@@ -178,9 +185,19 @@ const Properties: FC<PropertiesProps> = ({
       return allPrevious;
     };
     
-    const allPreviousNodeIds = getAllPreviousNodes(selectedNode.id);
+    // Find child nodes (nodes whose cycle field equals current node's ID)
+    const getChildNodes = (nodeId: string): string[] => {
+      return nodes
+        .filter(node => node.getData()?.cycle === nodeId)
+        .map(node => node.id);
+    };
     
-    allPreviousNodeIds.forEach(nodeId => {
+    const allPreviousNodeIds = getAllPreviousNodes(selectedNode.id);
+    const childNodeIds = getChildNodes(selectedNode.id);
+    console.log('childNodeIds', childNodeIds)
+    const allRelevantNodeIds = [...allPreviousNodeIds, ...childNodeIds];
+    
+    allRelevantNodeIds.forEach(nodeId => {
       const node = nodes.find(n => n.id === nodeId);
       if (!node) return;
       
@@ -245,7 +262,7 @@ const Properties: FC<PropertiesProps> = ({
               key: knowledgeKey,
               label: 'message',
               type: 'variable',
-              dataType: 'String',
+              dataType: 'array[object]',
               value: `${nodeId}.message`,
               nodeData: nodeData,
             });
@@ -254,10 +271,30 @@ const Properties: FC<PropertiesProps> = ({
       }
     });
 
+    // Add conversation variables from global config
+    const conversationVariables = config?.variables || [];
+    
+    conversationVariables.forEach((variable: any) => {
+      const key = `CONVERSATION_${variable.name}`;
+      if (!addedKeys.has(key)) {
+        addedKeys.add(key);
+        variableList.push({
+          key,
+          label: variable.name,
+          type: 'variable',
+          dataType: variable.type,
+          value: `conversation.${variable.name}`,
+          nodeData: { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' },
+          group: 'CONVERSATION'
+        });
+      }
+    });
+
     return variableList;
   }, [selectedNode, graphRef]);
 
   console.log('values', values)
+  console.log('variableList', variableList, selectedNode?.data)
 
   return (
     <div className="rb:w-75 rb:fixed rb:right-0 rb:top-16 rb:bottom-0 rb:p-3">
@@ -278,11 +315,17 @@ const Properties: FC<PropertiesProps> = ({
             </Form.Item>
             
             {selectedNode?.data?.type === 'http-request'
-            ? <HttpRequest 
-                options={variableList} 
-              />
+              ? <HttpRequest 
+                  options={variableList} 
+                />
+              : selectedNode?.data?.type === 'tool'
+              ? <ToolConfig options={variableList} />
               : configs && Object.keys(configs).length > 0 && Object.keys(configs).map((key) => {
                 const config = configs[key] || {}
+
+                if (config.dependsOn && (values as any)?.[config.dependsOn as string] !== config.dependsOnValue) {
+                  return null
+                }
 
                 if (selectedNode?.data?.type === 'start' && key === 'variables' && config.type === 'define') {
                   return (
@@ -409,14 +452,13 @@ const Properties: FC<PropertiesProps> = ({
                       <GroupVariableList
                         name={key}
                         options={variableList}
-                        isCanAdd={!!values?.group}
+                        isCanAdd={!!(values as any)?.group}
                       />
                     </Form.Item>
                   
                   )
                 }
                 if (config.type === 'caseList') {
-                  console.log('key', key)
                   return (
                     <Form.Item key={key} name={key}>
                       <CaseList
@@ -439,6 +481,94 @@ const Properties: FC<PropertiesProps> = ({
                   
                   )
                 }
+                if (config.type === 'cycleVarsList') {
+                  return (
+                    <Form.Item key={key} name={key}>
+                      <CycleVarsList
+                        parentName={key}
+                        options={variableList}
+                      />
+                    </Form.Item>
+                  )
+                }
+                if (config.type === 'assignmentList') {
+                  return (
+                    <Form.Item key={key} name={key}>
+                      <AssignmentList
+                        parentName={key}
+                        options={(() => {
+                          if (config.filterLoopIterationVars) {
+                            // Add loop cycle variables and iteration item/index variables
+                            const loopIterationVars: Suggestion[] = [];
+                            const graph = graphRef.current;
+                            if (graph && selectedNode) {
+                              const nodes = graph.getNodes();
+                              
+                              // Find parent loop/iteration nodes
+                              const findParentLoopIteration = (nodeId: string): string[] => {
+                                const node = nodes.find(n => n.id === nodeId);
+                                if (!node) return [];
+                                
+                                const nodeData = node.getData();
+                                const cycle = nodeData?.cycle;
+                                
+                                if (cycle) {
+                                  const parentNode = nodes.find(n => n.getData().id === cycle);
+                                  if (parentNode) {
+                                    const parentData = parentNode.getData();
+                                    if (parentData?.type === 'loop') {
+                                      console.log('parentData', parentData)
+                                      // Add cycle variables from loop node
+                                      const cycleVars = parentData.cycle_vars || [];
+                                      cycleVars.forEach((cycleVar: any) => {
+                                        loopIterationVars.push({
+                                          key: `${cycle}_cycle_${cycleVar.name}`,
+                                          label: cycleVar.name,
+                                          type: 'variable',
+                                          dataType: 'String',
+                                          value: `${cycle}.${cycleVar.name}`,
+                                          nodeData: parentData,
+                                        });
+                                      });
+                                    } else if (parentData?.type === 'iteration') {
+                                      // Add item and index variables from iteration node
+                                      loopIterationVars.push(
+                                        {
+                                          key: `${cycle}_item`,
+                                          label: 'item',
+                                          type: 'variable',
+                                          dataType: 'Object',
+                                          value: `${cycle}.item`,
+                                          nodeData: parentData,
+                                        },
+                                        {
+                                          key: `${cycle}_index`,
+                                          label: 'index',
+                                          type: 'variable',
+                                          dataType: 'Number',
+                                          value: `${cycle}.index`,
+                                          nodeData: parentData,
+                                        }
+                                      );
+                                    }
+                                    return [cycle, ...findParentLoopIteration(cycle)];
+                                  }
+                                }
+                                return [];
+                              };
+                              
+                              findParentLoopIteration(selectedNode.id);
+                            }
+                            
+                            return [...variableList, ...loopIterationVars];
+                          }
+                          return variableList;
+                        })()
+                      }
+                    />
+                    </Form.Item>
+                  )
+                }
 
                 return (
                   <Form.Item 
@@ -453,7 +583,7 @@ const Properties: FC<PropertiesProps> = ({
                       ? <Input.TextArea placeholder={t('common.pleaseEnter')} />
                       : config.type === 'select'
                       ? <Select
-                        options={config.options}
+                            options={config.needTranslation ? config.options?.map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
                         placeholder={t('common.pleaseSelect')}
                       />
                       : config.type === 'inputNumber'
@@ -472,10 +602,50 @@ const Properties: FC<PropertiesProps> = ({
                       : config.type === 'variableList'
                       ? <VariableSelect
                           placeholder={t('common.pleaseSelect')}
-                          options={variableList}
+                          options={(() => {
+                            // Apply filtering if specified in config
+                            if (config.filterNodeTypes || config.filterVariableNames) {
+                              return variableList.filter(variable => {
+                                const nodeTypeMatch = !config.filterNodeTypes || 
+                                  (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
+                                const variableNameMatch = !config.filterVariableNames || 
+                                  (Array.isArray(config.filterVariableNames) && config.filterVariableNames.includes(variable.label));
+                                return nodeTypeMatch && variableNameMatch;
+                              });
+                            }
+                            // Filter child nodes for iteration output
+                            if (config.filterChildNodes && selectedNode) {
+                              const graph = graphRef.current;
+                              if (!graph) return [];
+                              
+                              const nodes = graph.getNodes();
+                              
+                              // Find child nodes whose cycle field equals parent node's ID
+                              const childNodes = nodes.filter(node => {
+                                const nodeData = node.getData();
+                                return nodeData?.cycle === selectedNode.id;
+                              });
+                              
+                              return variableList.filter(variable => 
+                                childNodes.some(node => node.id === variable.nodeData?.id)
+                              );
+                            }
+                            return variableList;
+                          })()
+                        }
                         />
                       : config.type === 'switch'
                       ? <Switch />
+                      : config.type === 'categoryList'
+                      ? <CategoryList parentName={key} selectedNode={selectedNode} graphRef={graphRef} />
+                      : config.type === 'conditionList'
+                      ? <ConditionList
+                        parentName={key}
+                        options={variableList}
+                        selectedNode={selectedNode}
+                        graphRef={graphRef}
+                        addBtnText={t('workflow.config.addCase')}
+                      />
                       : null
                     }
                   </Form.Item>

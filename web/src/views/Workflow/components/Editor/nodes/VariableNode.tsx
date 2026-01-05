@@ -44,14 +44,14 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
     >
       {data.isContext ? (
         <span style={{ fontSize: '12px', marginRight: '4px' }}>📄</span>
-      ) : (
+      ) : data.group !== 'CONVERSATION' ? (
         <img 
           src={data.nodeData?.icon} 
           style={{ width: '12px', height: '12px', marginRight: '4px' }} 
           alt=""
         />
-      )}
-      {!data.isContext && (
+      ) : null}
+      {!data.isContext && data.group !== 'CONVERSATION' && (
         <>
           <span className="rb:wrap-break-word rb:line-clamp-1">{data.nodeData?.name}</span>
           <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>

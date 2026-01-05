@@ -26,7 +26,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   }
   const labelRender: LabelRender = (props) => {
     const { value } = props
-    const filterOption = options.find(vo => vo.value === value)
+    const filterOption = options.find(vo => `{{${vo.value}}}` === value)
 
     if (filterOption) {
       return (
@@ -37,13 +37,17 @@ const VariableSelect: FC<VariableSelectProps> = ({
           })}
           contentEditable={false}
         >
-          <img
-            src={filterOption.nodeData?.icon}
-            style={{ width: '12px', height: '12px', marginRight: '4px' }}
-            alt=""
-          />
-          {filterOption.nodeData?.name}
-          <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>
+          {filterOption.nodeData?.icon && filterOption.nodeData?.name && (
+            <>
+              <img
+                src={filterOption.nodeData.icon}
+                style={{ width: '12px', height: '12px', marginRight: '4px' }}
+                alt=""
+              />
+              {filterOption.nodeData.name}
+              <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>
+            </>
+          )}
           <span className="rb:text-[#155EEF]">{filterOption.label}</span>
         </span>
       )
@@ -62,8 +66,10 @@ const VariableSelect: FC<VariableSelectProps> = ({
 
   const groupedOptions = Object.entries(groupedSuggestions).map(([nodeId, suggestions]) => ({
     label: suggestions[0].nodeData.name,
-    options: suggestions.map(s => ({ label: s.label, value: s.value }))
+    options: suggestions.map(s => ({ label: s.label, value: `{{${s.value}}}` }))
   }));
+
+  console.log('groupedOptions', groupedOptions)
   
   return (
     <Select

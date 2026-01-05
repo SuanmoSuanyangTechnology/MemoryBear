@@ -1117,7 +1117,11 @@ export const en = {
       memoryContent: 'Memory Content',
       created_at: 'Created At',
 
-      memoryWindow: "{{name}}'s Window of Memory"
+      memoryWindow: "{{name}}'s Window of Memory",
+      memory_insight: 'Overall Overview',
+      key_findings: 'Key Findings',
+      behavior_pattern: 'Behavior Pattern',
+      growth_trajectory: 'Growth Trajectory',
     },
     space: {
       createSpace: 'Create Space',
@@ -1580,16 +1584,22 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       'parameter-extractor': 'Parameter Extraction',
       flowControl: 'Flow Control',
       'if-else': 'Conditional Branch',
+      'question-classifier': 'Question Classifier',
       iteration: 'Iteration',
       loop: 'Loop',
+      'cycle-start': '',
+      break: 'Break Loop',
+      assigner: 'Variable Assignment',
       parallel: 'Parallel Execution',
       'var-aggregator': 'Variable Aggregator',
       externalInteraction: 'External Interaction',
       "http-request": 'HTTP Request',
-      tools: 'Tools',
+      tool: 'Tools',
       code_execution: 'Code Execution',
       "jinja-render": 'Template Rendering',
       cognitiveUpgrading: 'Cognitive Upgrading (Innovation)',
+      'memory-read': 'Memory Retrieval',
+      'memory-write': 'Memory Storage',
       task_planning: 'Task Planning',
       reasoning_control: 'Reasoning Control',
       self_reflection: 'Self Reflection',
@@ -1607,9 +1617,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
 
       clickToConfigure: 'Click to configure node parameters',
       nodeProperties: 'Node Properties',
-      empty: "Emmm... The box is empty, nothing here~",
+      empty: "Emmm…The box is empty, there's nothing here～",
       nodeName: 'Node Name',
-
+      addvariable: 'Chat Variables',
+      addChatVariable: 'Add Chat Variable',
+      editChatVariable: 'Edit Chat Variable',
 
       config: {
         llm: {
@@ -1631,7 +1643,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           editVariable: 'Edit Variable',
           variableType: 'Variable Type',
           variableName: 'Variable Name',
-          invalidVariableName: 'Variable name must start with a letter and contain only letters, numbers, and underscores',
+          invalidVariableName: 'Variable name can only start with English letters and contain English letters, numbers, and underscores',
           description: 'Display Name',
           default: 'Default Value',
           required: 'Required',
@@ -1658,10 +1670,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           editParam: 'Edit Extract Parameter',
 
           name: 'Name',
-          invalidParamName: 'Parameter name must start with a letter and contain only letters, numbers, and underscores',
+          invalidParamName: 'Extract parameter name can only start with English letters and contain English letters, numbers, and underscores',
           type: 'Type',
           desc: 'Description',
           required: 'Required',
+          default: 'Default Value',
 
           'string': 'String',
           'number': 'Number',
@@ -1673,7 +1686,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         },
         'var-aggregator': {
           group: 'Aggregation Group',
-          invalidVariableName: 'Variable name must start with a letter and contain only letters, numbers, and underscores',
+          invalidVariableName: 'Variable name can only start with English letters and contain English letters, numbers, and underscores',
           addGroup: 'Add Group',
           variable: 'Variable Assignment'
         },
@@ -1691,7 +1704,76 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           "gt": '>',
           "ge": '>=',
           else_desc: 'Used to define the logic that should be executed when the if condition is not met.'
-        }
+        },
+        'http-request': {
+          auth: 'Authentication',
+          authType: 'Auth Type',
+          apiKey: 'API Key',
+          basic: 'Basic',
+          bearer: 'Bearer',
+          custom: 'Custom',
+          header: 'Header',
+          api_key: 'API Key',
+          timeouts: 'Timeout Settings',
+          "connect_timeout": 'Connection Timeout (seconds)',
+          "read_timeout": 'Read Timeout (seconds)',
+          "write_timeout": 'Write Timeout (seconds)',
+          retry: 'Retry on Failure',
+          error_handle: 'Error Handling',
+          verify_ssl: 'Verify SSL Certificate',
+          none: 'None',
+          default: 'Default Value',
+          branch: 'Error Branch',
+          status_code: 'Status Code',
+          max_attempts: 'Max Retry Attempts',
+          retry_interval: 'Retry Interval',
+        },
+        'jinja-render': {
+          template: 'Code',
+          mapping: 'Input Variables'
+        },
+        'question-classifier': {
+          model_id: 'Model',
+          input_variable: 'Input Variable',
+          categories: 'Categories',
+          user_supplement_prompt: 'Instruction',
+          class_name: 'Classification',
+          addClassName: 'Add Classification'
+        },
+        loop: {
+          cycle_vars: 'Loop Variables',
+          condition: 'Loop Termination Condition',
+        },
+        assigner: {
+          assignments: 'Variables',
+          cover: 'Overwrite',
+          assign: 'Set',
+          clear: 'Clear'
+        },
+        iteration: {
+          input: 'Input Variable',
+          output: 'Output Variable',
+          parallel: 'Parallel Mode',
+          parallel_count: 'Max Parallelism',
+          flatten: 'Flatten Output',
+        },
+        tool: {
+          tool_id: 'Tool',
+        },
+        'memory-read': {
+          message: 'Message',
+          config_id: 'Memory Configuration',
+          search_switch: 'Search Mode',
+        },
+        'memory-write': {
+          message: 'Message',
+          config_id: 'Memory Configuration',
+          search_switch: 'Search Mode',
+        },
+        name: 'Key',
+        type: 'Type',
+        value: 'Value',
+        addCase: 'Add Condition',
       },
 
       clear: 'Clear',

@@ -23,7 +23,9 @@ const NodeLibrary: FC = () => {
             }}
           >
             <Space size={8} direction="vertical" className="rb:w-full">
-              {category.nodes.map((node, nodeIndex) => (
+              {category.nodes
+                .filter(node => node.type !== 'cycle-start' && node.type !== 'break')
+                .map((node, nodeIndex) => (
                 <div
                   key={nodeIndex}
                   className="rb:bg-white rb:rounded-lg rb:p-2 rb:border rb:border-[#DFE4ED] rb:cursor-pointer rb:flex rb:items-center rb:gap-2 rb:hover:border-[#155EEF] rb:hover:shadow-[0px_2px_4px_0px_rgba(33,35,50,0.15)]"

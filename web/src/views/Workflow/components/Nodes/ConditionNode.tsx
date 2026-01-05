@@ -7,7 +7,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
   const { t } = useTranslation()
 
   return (
-    <div className={clsx('rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-60 rb:p-2.5 rb:border rb:rounded-xl rb:bg-white rb:hover:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.12)]', {
+    <div className={clsx('rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:p-2.5 rb:border rb:rounded-xl rb:bg-white rb:hover:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.12)]', {
       'rb:border-[#155EEF]': data.isSelected,
       'rb:border-[#DFE4ED]': !data.isSelected
     })}>

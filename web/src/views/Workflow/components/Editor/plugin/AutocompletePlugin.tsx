@@ -11,6 +11,7 @@ export interface Suggestion {
   type: string;
   dataType: string;
   value: string;
+  group?: string
   nodeData: NodeProperties;
   isContext?: boolean; // 标记是否为context变量
   disabled?: boolean; // 标记是否禁用
