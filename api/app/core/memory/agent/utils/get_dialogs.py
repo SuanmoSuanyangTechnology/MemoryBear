@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List, Dict
+from typing import List
 from datetime import datetime
 
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import DialogueChunker
@@ -12,29 +12,28 @@ async def get_chunked_dialogs(
         group_id: str = "group_1",
         user_id: str = "user1",
         apply_id: str = "applyid",
-        messages_list: List[Dict[str, str]] = None,
+        content: str = "这是用户的输入",
         ref_id: str = "wyl_20251027",
         config_id: str = None
 ) -> List[DialogData]:
-    """Generate chunks from all test data entries using the specified chunker strategy.
+    """Generate chunks from message string with role markers.
 
     Args:
         chunker_strategy: The chunking strategy to use (default: RecursiveChunker)
         group_id: Group identifier
         user_id: User identifier
         apply_id: Application identifier
-        messages_list: List of messages with role info [{"role": "user", "content": "..."}, ...]
+        content: Dialog content
         ref_id: Reference identifier
         config_id: Configuration ID for processing
 
     Returns:
-        List of DialogData objects with generated chunks for each test entry
+        List of DialogData objects with generated chunks
         
     Note:
-        - role 映射: "user" -> "用户", "assistant" -> "AI助手"
+        - 解析格式: "user: 内容\\nassistant: 内容"
+        - role 映射: "user" -> "用户", "assistant" -> "AI助手", "system" -> "系统"
     """
-    if not messages_list:
-        raise ValueError("必须提供 messages_list 参数")
     
     dialog_data_list = []
     messages = []
@@ -46,16 +45,28 @@ async def get_chunked_dialogs(
         "system": "系统"
     }
 
-    for msg in messages_list:
-        role = msg.get("role", "user")
-        content_text = msg.get("content", "")
-        # 映射角色名称
-        mapped_role = role_mapping.get(role, role)
-        messages.append(ConversationMessage(role=mapped_role, msg=content_text))
+    # 解析 content 字符串，提取角色和内容
+    # 支持格式: "user: 内容\nassistant: 内容" 或 "user：内容\nassistant：内容"
+    import re
+    
+    # 匹配模式: 角色标记(user/assistant/system) + 冒号 + 内容
+    pattern = r'(user|assistant|system)\s*[:：]\s*([^\n]*(?:\n(?!user|assistant|system\s*[:：])[^\n]*)*)'
+    matches = re.findall(pattern, content, re.IGNORECASE | re.MULTILINE)
+    
+    if not matches:
+        # 如果没有匹配到角色标记，将整个 content 作为用户消息
+        messages.append(ConversationMessage(role="用户", msg=content))
+    else:
+        for role, content_text in matches:
+            role_lower = role.lower()
+            # 映射角色名称
+            mapped_role = role_mapping.get(role_lower, "用户")
+            content_clean = content_text.strip()
+            if content_clean:  # 只添加非空内容
+                messages.append(ConversationMessage(role=mapped_role, msg=content_clean))
 
     # Create DialogData
     conversation_context = ConversationContext(msgs=messages)
-    # Create DialogData with group_id based on the entry's id for uniqueness
     dialog_data = DialogData(
         context=conversation_context,
         ref_id=ref_id,
@@ -71,18 +82,6 @@ async def get_chunked_dialogs(
 
     dialog_data_list.append(dialog_data)
 
-    # Convert to dict with datetime serialized
-    def serialize_datetime(obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
-
-    combined_output = [dd.model_dump() for dd in dialog_data_list]
-
     print(dialog_data_list)
-
-    # with open(os.path.join(os.path.dirname(__file__), "chunker_test_output.txt"), "w", encoding="utf-8") as f:
-    #     json.dump(combined_output, f, ensure_ascii=False, indent=4, default=serialize_datetime)
-
 
     return dialog_data_list

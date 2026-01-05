@@ -472,19 +472,12 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True)
-def write_message_task(
-    self, 
-    group_id: str, 
-    messages_list: list,
-    config_id: str = None,
-    storage_type: str = None,
-    user_rag_memory_id: str = None
-) -> Dict[str, Any]:
+def write_message_task(self, group_id: str, message: str, config_id: str,storage_type:str,user_rag_memory_id:str) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     
     Args:
         group_id: Group ID for the memory agent (also used as end_user_id)
-        messages_list: List of messages with role info [{"role": "user", "content": "..."}, ...]
+        message: Message string with role markers (e.g., "user: hello\\nassistant: hi")
         config_id: Optional configuration ID
         storage_type: Storage type (neo4j or rag)
         user_rag_memory_id: User RAG memory ID
@@ -516,14 +509,7 @@ def write_message_task(
         db = next(get_db())
         try:
             service = MemoryAgentService()
-            return await service.write_memory(
-                group_id=group_id,
-                messages_list=messages_list,
-                config_id=actual_config_id,
-                db=db,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id
-            )
+            return await service.write_memory(group_id, message, actual_config_id, db, storage_type, user_rag_memory_id)
         finally:
             db.close()
 
