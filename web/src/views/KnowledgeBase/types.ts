@@ -14,6 +14,15 @@ export interface KnowledgeBaseFormData {
   parent_id?: string; // 父ID
   type?: string; // 知识库类型
   status?: number; // 状态
+  parser_config: ParserConfig; // 解析器配置
+}
+export interface GraphragConfig{
+  use_graphrag:boolean; // 是否启用图谱
+  scene_name: string; // 场景名称
+  entity_types: Array<string>; // 实体类型
+  method: string; // 方法
+  resolution: boolean; // 实体归一化
+  community: boolean; /// 是否生成社区报告
 }
 export interface KnowledgeBase {
   id: string;
@@ -86,6 +95,8 @@ export interface ParserConfig {
   auto_keywords?: number; // 自动关键词
   auto_questions?: number; // 自动问题
   html4excel?: boolean; // 是否为Excel文件
+  graphrag:GraphragConfig; // 知识图谱生成
+
 }
 // 文件数据
 export interface KnowledgeBaseDocumentData { // 知识库文档数据

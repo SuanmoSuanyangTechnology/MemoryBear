@@ -1,6 +1,19 @@
 {
   "manage": [
     {
+      "id": 999,
+      "parent": 0,
+      "code": "dashboard",
+      "label": "首页",
+      "i18nKey": "menu.home",
+      "path": "/index",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "subs": []
+    },
+    {
       "id": 1,
       "parent": 0,
       "code": "model",
