@@ -366,10 +366,26 @@ class MasterAgentRouter:
             # if self.model_parameters:
             #     temperature = self.model_parameters["temperature"]
             #     max_tokens = self.model_parameters["max_tokens"]
-                
-            extra_params = {"temperature": self.model_parameters.get("temperature", 0.3),
-                                "max_tokens":self.model_parameters.get("max_tokens", 1000)
-                                }
+            if self.model_parameters:
+                if hasattr(self.model_parameters, 'temperature'):
+                    # Pydantic 模型
+                    temperature = self.model_parameters.temperature
+                    max_tokens = getattr(self.model_parameters, 'max_tokens', 1000)
+                elif isinstance(self.model_parameters, dict):
+                    # 字典
+                    temperature = self.model_parameters.get("temperature", 0.3)
+                    max_tokens = self.model_parameters.get("max_tokens", 1000)
+                else:
+                    temperature = 0.3
+                    max_tokens = 1000
+            else:
+                temperature = 0.3
+                max_tokens = 1000
+            # extra_params = {"temperature": self.model_parameters.get("temperature", 0.3),
+            #                     "max_tokens":self.model_parameters.get("max_tokens", 1000)
+            #                     }
+            extra_params = {"temperature": temperature, "max_tokens": max_tokens}
+
             # 创建 RedBearModelConfig
             model_config = RedBearModelConfig(
                 model_name=api_key_config.model_name,

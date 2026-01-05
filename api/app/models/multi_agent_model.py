@@ -3,11 +3,14 @@ import datetime
 import uuid
 from enum import StrEnum
 
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float, Text, ForeignKey
+from pydantic import BaseModel
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float, Text, ForeignKey, TypeDecorator
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 
 from app.db import Base
+from app.schemas import ModelParameters
+
 
 class OrchestrationMode(StrEnum):
     """图标类型枚举"""
@@ -20,6 +23,28 @@ class AggregationStrategy(StrEnum):
     MERGE = "merge"
     VOTE = "vote"
     PRIORITY = "priority"
+
+class PydanticType(TypeDecorator):
+    impl = JSON
+
+    def __init__(self, pydantic_model: type[BaseModel]):
+        super().__init__()
+        self.model = pydantic_model
+
+    def process_bind_param(self, value, dialect):
+        # 入库：Model -> dict
+        if value is None:
+            return None
+        if isinstance(value, self.model):
+            return value.dict()
+        return value   # 已经是 dict 也放行
+
+    def process_result_value(self, value, dialect):
+        # 出库：dict -> Model
+        if value is None:
+            return None
+        # return self.model.parse_obj(value)  # pydantic v1
+        return self.model.model_validate(value)  # pydantic v2
 
 class MultiAgentConfig(Base):
     """多 Agent 配置表"""
@@ -36,7 +61,7 @@ class MultiAgentConfig(Base):
 
     default_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id", name="multi_agent_configs_default_model_config_id_fkey"), nullable=True, index=True, comment="默认模型配置ID")
     # 结构化配置（直接存储 JSON）
-    model_parameters = Column(JSON, nullable=True, comment="模型参数配置（temperature、max_tokens等）")
+    model_parameters = Column(PydanticType(ModelParameters), nullable=True, comment="模型参数配置（temperature、max_tokens等）")
     # 协作模式
     orchestration_mode = Column(
         String(20),
