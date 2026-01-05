@@ -83,22 +83,41 @@ class StatementExtractor:
         Returns:
             Speaker role (用户/AI助手/系统) or None if cannot be determined
         """
+        import re
+        
         # 优先使用 chunk.text (原始消息列表)
         if not hasattr(chunk, 'text') or not chunk.text:
             return None
         
         statement_clean = statement_text.strip()
         
-        # 遍历原始消息列表,找到包含该 statement 的消息
-        best_match_role = None
-        best_match_similarity = 0
-        
+        # 预处理：为每条消息创建字符集缓存
+        message_cache = []
         for msg in chunk.text:
             if not hasattr(msg, 'role') or not hasattr(msg, 'msg'):
                 continue
             
             message_content = msg.msg.strip()
             role = msg.role
+            message_chars = set(re.sub(r'[^\w]', '', message_content))
+            
+            message_cache.append({
+                'role': role,
+                'content': message_content,
+                'chars': message_chars
+            })
+        
+        # 预处理 statement 的字符集
+        statement_chars = set(re.sub(r'[^\w]', '', statement_clean))
+        
+        # 遍历缓存的消息列表,找到包含该 statement 的消息
+        best_match_role = None
+        best_match_similarity = 0
+        
+        for msg_data in message_cache:
+            message_content = msg_data['content']
+            role = msg_data['role']
+            message_chars = msg_data['chars']
             
             # 策略1: 精确匹配 - statement 在消息中
             if statement_clean in message_content:
@@ -109,10 +128,6 @@ class StatementExtractor:
                 return role
             
             # 策略3: 字符级模糊匹配 - 计算共同字符的比例
-            import re
-            statement_chars = set(re.sub(r'[^\w]', '', statement_clean))
-            message_chars = set(re.sub(r'[^\w]', '', message_content))
-            
             if statement_chars and message_chars:
                 intersection = statement_chars & message_chars
                 similarity = len(intersection) / min(len(statement_chars), len(message_chars))
