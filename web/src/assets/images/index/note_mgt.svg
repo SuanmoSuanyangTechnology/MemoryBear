@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="40px" height="40px" viewBox="0 0 40 40" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 20</title>
+    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="首页" transform="translate(-1152, -772)">
+            <g id="快捷操作" transform="translate(1120, 502)">
+                <g id="编组-11" transform="translate(2, 38)">
+                    <g id="编组-20" transform="translate(30, 232)">
+                        <rect id="矩形" stroke="#DFE4ED" fill="#FFFFFF" x="0.5" y="0.5" width="39" height="39" rx="8"></rect>
+                        <g id="消息提醒" transform="translate(12, 11)" stroke="#212332" stroke-width="1.7">
+                            <path d="M2,14.0377426 L2,7.71071968 C2,4.39701118 4.6862915,1.71071968 8,1.71071968 C11.3137085,1.71071968 14,4.39701118 14,7.71071968 L14,14.0377426 L14,14.0377426" id="路径"></path>
+                            <line x1="1.08244944e-14" y1="14.5" x2="16" y2="14.5" id="路径-14" stroke-linecap="round" stroke-linejoin="round"></line>
+                            <line x1="8" y1="-5.46307465e-14" x2="8" y2="1.43460647" id="路径-15" stroke-linecap="round" stroke-linejoin="round"></line>
+                            <line x1="6.5" y1="17.5" x2="9.5" y2="17.5" id="路径-16" stroke-linecap="round" stroke-linejoin="round"></line>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

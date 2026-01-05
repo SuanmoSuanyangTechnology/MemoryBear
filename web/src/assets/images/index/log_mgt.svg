@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="40px" height="40px" viewBox="0 0 40 40" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 21</title>
+    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="首页" transform="translate(-1352, -664)">
+            <g id="快捷操作" transform="translate(1120, 502)">
+                <g id="编组-11" transform="translate(2, 38)">
+                    <g id="编组-21" transform="translate(230, 124)">
+                        <rect id="矩形" stroke="#DFE4ED" fill="#FFFFFF" x="0.5" y="0.5" width="39" height="39" rx="8"></rect>
+                        <g id="编组-15" transform="translate(12, 11)" stroke="#212332" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7">
+                            <path d="M6.98059242,17 L2,17 C0.8954305,17 -8.8817842e-16,16.1045695 -8.8817842e-16,15 L0,2 C0,0.8954305 0.8954305,2.22044605e-16 2,0 L14,0 C15.1045695,0 16,0.8954305 16,2 L16,6.06912749 L16,6.06912749" id="路径"></path>
+                            <line x1="3" y1="4.5" x2="12.8160264" y2="4.5" id="路径-17"></line>
+                            <line x1="3" y1="10.0001" x2="6.37326888" y2="10.0001" id="路径-18"></line>
+                            <circle id="椭圆形" cx="13" cy="13" r="4"></circle>
+                            <line x1="16" y1="16" x2="18" y2="18" id="路径-20"></line>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

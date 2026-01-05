@@ -17,6 +17,7 @@ export interface UseWorkflowGraphProps {
 
 export interface UseWorkflowGraphReturn {
   config: WorkflowConfig | null;
+  setConfig: React.Dispatch<React.SetStateAction<WorkflowConfig | null>>;
   graphRef: React.MutableRefObject<Graph | undefined>;
   selectedNode: Node | null;
   setSelectedNode: React.Dispatch<React.SetStateAction<Node | null>>;
@@ -155,9 +156,99 @@ export const useWorkflowGraph = ({
           nodeConfig.height = newHeight;
         }
         
+        // 如果是question-classifier节点，根据categories动态生成端口
+        if (type === 'question-classifier' && config.categories && Array.isArray(config.categories)) {
+          const categoryCount = config.categories.length;
+          const baseHeight = 88;
+          const newHeight = baseHeight + (categoryCount - 1) * 30;
+          
+          const portAttrs = {
+            circle: {
+              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
+            },
+          };
+          
+          const portItems: PortMetadata[] = [
+            { group: 'left' }
+          ];
+          
+          // 添加分类端口
+          config.categories.forEach((category: any, index: number) => {
+            portItems.push({
+              group: 'right',
+              id: `CASE${index + 1}`,
+              args: index === 0 ? { dy: 24 } : undefined,
+              attrs: { text: { text: category.class_name || `分类${index + 1}`, fontSize: 12, fill: '#5B6167' }}
+            });
+          });
+          
+          nodeConfig.ports = {
+            groups: {
+              right: { position: 'right', attrs: portAttrs },
+              left: { position: 'left', attrs: portAttrs },
+            },
+            items: portItems
+          };
+          
+          nodeConfig.height = newHeight;
+        }
+        
         return nodeConfig
       })
-      graphRef.current?.addNodes(nodeList)
+      
+      // 分离父节点和子节点
+      const parentNodes = nodeList.filter(node => !node.data.cycle)
+      const childNodes = nodeList.filter(node => node.data.cycle)
+      
+      // 先添加父节点
+      graphRef.current?.addNodes(parentNodes)
+      
+      // 然后处理子节点，使用addChild添加到对应的父节点
+      childNodes.forEach(childNode => {
+        const cycleId = childNode.data.cycle
+        if (cycleId) {
+          const parentNode = graphRef.current?.getCellById(cycleId)
+          if (parentNode) {
+            const addedChild = graphRef.current?.addNode(childNode)
+            if (addedChild) {
+              parentNode.addChild(addedChild)
+            }
+          }
+        }
+      })
+      
+      // 调整父节点大小以适应子节点
+      setTimeout(() => {
+        const parentNodesWithChildren = parentNodes.filter(parentNode => {
+          const parentId = parentNode.data.id
+          return childNodes.some(child => child.data.cycle === parentId)
+        })
+        
+        parentNodesWithChildren.forEach(parentNodeConfig => {
+          const parentNode = graphRef.current?.getCellById(parentNodeConfig.data.id)
+          if (parentNode) {
+            const children = parentNode.getChildren()
+            if (children && children.length > 0) {
+              const childBounds = children.map(child => child.getBBox())
+              const minX = Math.min(...childBounds.map(b => b.x))
+              const minY = Math.min(...childBounds.map(b => b.y))
+              const maxX = Math.max(...childBounds.map(b => b.x + b.width))
+              const maxY = Math.max(...childBounds.map(b => b.y + b.height))
+              
+              const padding = 24
+              const headerHeight = 50
+              const parentBBox = parentNode.getBBox()
+              
+              const newWidth = Math.max(parentBBox.width, maxX - minX + padding * 2)
+              const newHeight = Math.max(parentBBox.height, maxY - minY + padding * 2 + headerHeight)
+
+              console.log('newWidth', newHeight, newWidth)
+              
+              parentNode.prop('size', { width: newWidth, height: newHeight })
+            }
+          }
+        })
+      }, 100)
     }
     if (edges.length) {
       // 去重处理：相同节点之间的连线仅连一次
@@ -179,6 +270,14 @@ export const useWorkflowGraph = ({
           // 如果是if-else节点且有label，根据label匹配对应的端口
           if (sourceCell.getData()?.type === 'if-else' && label) {
             // 查找匹配的端口ID
+            const matchingPort = sourcePorts.find((port: any) => port.id === label);
+            if (matchingPort) {
+              sourcePort = label;
+            }
+          }
+          
+          // 如果是question-classifier节点且有label，根据label匹配对应的端口
+          if (sourceCell.getData()?.type === 'question-classifier' && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
               sourcePort = label;
@@ -304,6 +403,12 @@ export const useWorkflowGraph = ({
   };
   // 节点选择事件
   const nodeClick = ({ node }: { node: Node }) => {
+    // 忽略 add-node 类型的节点点击
+    if (node.getData()?.type === 'add-node' || node.getData().type === 'break' || node.getData().type === 'cycle-start') {
+      setSelectedNode(null)
+      return;
+    }
+    
     const nodes = graphRef.current?.getNodes();
 
     nodes?.forEach(vo => {
@@ -360,9 +465,9 @@ export const useWorkflowGraph = ({
   };
   // 节点移动事件
   const nodeMoved = ({ node }: { node: Node }) => {
-    const parentId = node.getData()?.parentId;
-    if (parentId) {
-      const parentNode = graphRef.current!.getNodes().find(n => n.id === parentId);
+    const cycle = node.getData()?.cycle;
+    if (cycle) {
+      const parentNode = graphRef.current!.getNodes().find(n => n.id === cycle);
       if (parentNode?.getData()?.isGroup) {
         // 获取父节点和子节点的边界框
         const parentBBox = parentNode.getBBox();
@@ -465,21 +570,23 @@ export const useWorkflowGraph = ({
       nodesToDelete.forEach(nodeToDelete => {
         // 检查是否为子节点
         const nodeData = nodeToDelete.getData();
-        if (nodeData.parentId) {
+        if (nodeData.cycle) {
           // 找到对应的父节点
-          const parentNode = nodes?.find(n => n.id === nodeData.parentId);
+          const parentNode = nodes?.find(n => n.id === nodeData.cycle);
           if (parentNode) {
             // 使用removeChild方法删除子节点
             parentNode.removeChild(nodeToDelete);
             parentNodesToUpdate.push(parentNode);
           }
+          // 将子节点添加到删除列表
+          cells.push(nodeToDelete);
         } 
         // 检查是否为 LoopNode、IterationNode 或 SubGraphNode
         else if (nodeToDelete.shape === 'loop-node' || nodeToDelete.shape === 'iteration-node' || nodeToDelete.shape === 'subgraph-node') {
-          // 查找所有 parentId 为当前节点 id 的子节点
+          // 查找所有 cycle 为当前节点 id 的子节点
           nodes?.forEach(node => {
             const data = node.getData();
-            if (data.parentId === nodeToDelete.id) {
+            if (data.cycle === nodeToDelete.id || data.cycle === nodeToDelete.getData()?.id) {
               cells.push(node);
             }
           });
@@ -582,13 +689,14 @@ export const useWorkflowGraph = ({
           if (sourceType === 'end') return false;
           
           // 获取源节点和目标节点的父节点ID
-          const sourceParentId = sourceCell?.getData()?.parentId;
-          const targetParentId = targetCell?.getData()?.parentId;
+          const sourceParentId = sourceCell?.getData()?.cycle;
+          const targetParentId = targetCell?.getData()?.cycle;
           
           // 验证父子节点关系：
           // 1. 如果两个节点都有父节点ID，必须相同才能连线
-          // 2. 如果一个有父节点ID，另一个没有，不能连线
-          // 3. 如果两个都没有父节点ID，可以正常连线
+          // 2. 如果两个都没有父节点ID，可以正常连线
+          // 3. 如果一个有父节点，一个没有，不能连线
+          console.log('sourceParentId', sourceParentId, targetParentId)
           if (sourceParentId && targetParentId) {
             // 同一父节点下的子节点可以互相连线
             return sourceParentId === targetParentId;
@@ -635,6 +743,28 @@ export const useWorkflowGraph = ({
     graphRef.current.on('node:click', nodeClick);
     // 监听连线选择事件
     graphRef.current.on('edge:click', edgeClick);
+    // 监听连接桩点击事件
+    graphRef.current.on('node:port:click', ({ e, node, port }: { e: MouseEvent, node: Node, port: string }) => {
+      e.stopPropagation();
+      const portElement = e.target as HTMLElement;
+      const rect = portElement.getBoundingClientRect();
+      
+      // 创建临时的popover触发元素
+      const tempDiv = document.createElement('div');
+      tempDiv.style.position = 'fixed';
+      tempDiv.style.left = rect.left + 'px';
+      tempDiv.style.top = rect.top + 'px';
+      tempDiv.style.width = '1px';
+      tempDiv.style.height = '1px';
+      tempDiv.style.zIndex = '9999';
+      document.body.appendChild(tempDiv);
+      
+      // 触发自定义事件来显示节点选择popover
+      const customEvent = new CustomEvent('port:click', {
+        detail: { node, port, element: tempDiv, rect }
+      });
+      window.dispatchEvent(customEvent);
+    });
     // 监听画布点击事件，取消选择
     graphRef.current.on('blank:click', blankClick);
     // 监听缩放事件
@@ -723,36 +853,23 @@ export const useWorkflowGraph = ({
         data: { ...cleanNodeData },
       });
     } else {
-      // 检查是否放置在群组内
-      const groups = graphRef.current.getNodes().filter(node => {
-        const shape = node.shape;
-        return shape === 'loop-node' || shape === 'iteration-node' || shape === 'subgraph-node';
-      });
-      let parentGroup = null;
-      
-      for (const group of groups) {
-        const bbox = group.getBBox();
-        if (point.x >= bbox.x && point.x <= bbox.x + bbox.width &&
-            point.y >= bbox.y && point.y <= bbox.y + bbox.height) {
-          parentGroup = group;
-          break;
-        }
-      }
-      
-      const childNode = graphRef.current.addNode({
+      // 普通节点创建，不支持拖拽到循环节点内
+      graphRef.current.addNode({
         ...(graphNodeLibrary[dragData.type] || graphNodeLibrary.default),
         x: point.x - 60,
         y: point.y - 20,
-        data: { ...cleanNodeData, parentId: parentGroup?.id },
+        data: { ...cleanNodeData },
       });
-      parentGroup?.addChild(childNode);
     }
   };
   // 保存workflow配置
   const handleSave = (flag = true) => {
     if (!graphRef.current || !config) return Promise.resolve()
     return new Promise((resolve, reject) => {
-      const nodes = graphRef.current?.getNodes() || [];
+      const nodes = graphRef.current?.getNodes().filter((node: Node) => {
+        const nodeData = node.getData();
+        return nodeData?.type !== 'add-node';
+      }) || [];
       const edges = graphRef.current?.getEdges() || []
 
       const params = {
@@ -771,7 +888,7 @@ export const useWorkflowGraph = ({
                 itemConfig = {
                   ...itemConfig,
                   ...data.config[key].defaultValue,
-                  knowledge_bases: knowledge_bases.map((vo: any) => ({ kb_id: vo.id, ...vo.config }))
+                  knowledge_bases: knowledge_bases?.map((vo: any) => ({ kb_id: vo.id, ...vo.config }))
                 }
               }
             })
@@ -781,6 +898,7 @@ export const useWorkflowGraph = ({
             id: data.id || node.id,
             type: data.type,
             name: data.name,
+            cycle: data.cycle, // 保存cycle参数
             position: {
               x: position.x,
               y: position.y,
@@ -793,13 +911,23 @@ export const useWorkflowGraph = ({
           const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
           const sourcePortId = edge.getSourcePortId();
           
-          // 过滤无效连线：源节点或目标节点不存在
-          if (!sourceCell?.getData()?.id || !targetCell?.getData()?.id) {
+          // 过滤无效连线：源节点或目标节点不存在，或者是add-node类型
+          if (!sourceCell?.getData()?.id || !targetCell?.getData()?.id || 
+              sourceCell?.getData()?.type === 'add-node' || targetCell?.getData()?.type === 'add-node') {
             return null;
           }
           
           // 如果是if-else节点的右侧端口连线，添加label
           if (sourceCell?.getData()?.type === 'if-else' && sourcePortId?.startsWith('CASE')) {
+            return {
+              source: sourceCell.getData().id,
+              target: targetCell?.getData().id,
+              label: sourcePortId,
+            };
+          }
+          
+          // 如果是question-classifier节点的右侧端口连线，添加label
+          if (sourceCell?.getData()?.type === 'question-classifier' && sourcePortId?.startsWith('CASE')) {
             return {
               source: sourceCell.getData().id,
               target: targetCell?.getData().id,
@@ -832,6 +960,7 @@ export const useWorkflowGraph = ({
 
   return {
     config,
+    setConfig,
     graphRef,
     selectedNode,
     setSelectedNode,
@@ -848,6 +977,6 @@ export const useWorkflowGraph = ({
     deleteEvent,
     copyEvent,
     parseEvent,
-    handleSave
+    handleSave,
   };
 };

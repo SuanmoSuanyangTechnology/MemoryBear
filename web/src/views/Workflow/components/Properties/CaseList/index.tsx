@@ -9,8 +9,8 @@ import VariableSelect from '../VariableSelect'
 import Editor from '../../Editor'
 
 interface CaseListProps {
-  value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; operator: string; right: string; }[] }>;
-  onChange?: (value: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; operator: string; right: string; }[] }>) => void;
+  value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; comparison_operator: string; right: string; }[] }>;
+  onChange?: (value: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; comparison_operator: string; right: string; }[] }>) => void;
   options: Suggestion[];
   name: string;
   selectedNode?: any;
@@ -221,7 +221,7 @@ const CaseList: FC<CaseListProps> = ({
                               onClick={() => addCondition()}
                               size="small"
                             >
-                              + 添加条件
+                              + {t('workflow.config.addCase')}
                             </Button>
                             {caseFields.length > 1 && <DeleteOutlined
                               className="rb:text-[12px]"
@@ -229,7 +229,8 @@ const CaseList: FC<CaseListProps> = ({
                             />}
                           </Space>
                         </div>
-                        {conditionFields?.length > 1 && <>
+                        {conditionFields?.length > 1 &&
+                        <>
                           <div className="rb:absolute rb:w-3 rb:left-2 rb:top-15 rb:bottom-6 rb:z-10 rb:border rb:border-[#DFE4ED] rb:rounded-l-md rb:border-r-0"></div>
                           <div className="rb:absolute rb:z-10 rb:left-0 rb:top-[50%] rb:transform-[translateY(-50%)]]">
                             <Form.Item name={[caseField.name, 'logical_operator']} noStyle >
@@ -238,50 +239,56 @@ const CaseList: FC<CaseListProps> = ({
                           </div>
                         </>
                         }
-                        {conditionFields.map((conditionField, conditionIndex) => (
-                          <div key={conditionField.key} className={clsx({
-                            "rb:mb-3": conditionIndex !== conditionFields.length - 1
-                          })}>
-                            <div className="rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5 rb:bg-white">
-                              <Row gutter={12} className="rb:mb-1">
-                                <Col span={14}>
-                                  <Form.Item name={[conditionField.name, 'left']} noStyle>
-                                    <VariableSelect
-                                      placeholder={t('common.pleaseSelect')}
-                                      options={options}
-                                      size="small"
-                                      allowClear={false}
-                                      popupMatchSelectWidth={false}
+                        {conditionFields.map((conditionField, conditionIndex) => {
+                          const currentOperator = value?.[caseIndex]?.expressions?.[conditionIndex]?.comparison_operator;
+                          const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty';
+                          
+                          return (
+                            <div key={conditionField.key} className={clsx({
+                              "rb:mb-3": conditionIndex !== conditionFields.length - 1
+                            })}>
+                              <div className="rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5 rb:bg-white">
+                                <Row gutter={12} className="rb:mb-1">
+                                  <Col span={14}>
+                                    <Form.Item name={[conditionField.name, 'left']} noStyle>
+                                      <VariableSelect
+                                        placeholder={t('common.pleaseSelect')}
+                                        options={options}
+                                        size="small"
+                                        allowClear={false}
+                                        popupMatchSelectWidth={false}
+                                      />
+                                    </Form.Item>
+                                  </Col>
+                                  <Col span={8}>
+                                    <Form.Item name={[conditionField.name, 'comparison_operator']} noStyle>
+                                      <Select
+                                        options={operatorList.map(key => ({
+                                          value: key,
+                                          label: t(`workflow.config.if-else.${key}`)
+                                        }))}
+                                        size="small"
+                                        popupMatchSelectWidth={false}
+                                      />
+                                    </Form.Item>
+                                  </Col>
+                                  <Col span={2}>
+                                    <DeleteOutlined
+                                      className="rb:text-[12px]"
+                                      onClick={() => removeCondition(conditionField.name)}
                                     />
+                                  </Col>
+                                </Row>
+                                
+                                {!hideRightField && (
+                                  <Form.Item name={[conditionField.name, 'right']} noStyle>
+                                    <Editor options={options} />
                                   </Form.Item>
-                                </Col>
-                                <Col span={8}>
-                                  <Form.Item name={[conditionField.name, 'operator']} noStyle>
-                                    <Select
-                                      placeholder="包含"
-                                      options={operatorList.map(key => ({
-                                        value: key,
-                                        label: t(`workflow.config.if-else.${key}`)
-                                      }))}
-                                      size="small"
-                                      popupMatchSelectWidth={false}
-                                    />
-                                  </Form.Item>
-                                </Col>
-                                <Col span={2}>
-                                  <DeleteOutlined
-                                    className="rb:text-[12px]"
-                                    onClick={() => removeCondition(conditionField.name)}
-                                  />
-                                </Col>
-                              </Row>
-                              
-                              <Form.Item name={[conditionField.name, 'right']} noStyle>
-                                <Editor options={options} />
-                              </Form.Item>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     )
                   }}

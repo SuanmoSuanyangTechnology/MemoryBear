@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="32px" height="32px" viewBox="0 0 32 32" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 14</title>
+    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="首页" transform="translate(-408, -232)">
+            <g id="核心数据" transform="translate(256, 216)">
+                <g id="编组-14" transform="translate(152, 16)">
+                    <rect id="矩形" fill="#155EEF" x="0" y="0" width="32" height="32" rx="8"></rect>
+                    <g id="模型管理" transform="translate(8, 7)" fill="#FFFFFF" fill-rule="nonzero">
+                        <polygon id="路径" points="7.4583178 17.9990012 0 13.715998 0 4.56667222 7.9512983 0 15.9025966 4.56567338 15.9025966 11.1380057 13.914772 11.1380057 13.914772 5.72631929 7.9512983 2.30131513 1.98782457 5.72731813 1.98782457 12.5573498 8.44427879 16.266023 7.4583178 18"></polygon>
+                        <polygon id="路径" points="14.6105106 3.99533877 15.6044229 5.72631929 8.37371102 9.921425 8.33594235 9.98634926 0.993912287 5.72631929 1.98782457 3.99533877 8.2991676 7.65606792"></polygon>
+                        <polygon id="路径" points="7.2555597 11.9860163 9.24338427 12.984851 9.24338427 8.98951224 7.2555597 8.98951224 7.2555597 11.9860163"></polygon>
+                        <polygon id="路径" points="14.5091316 12.4854337 16 15.0804062 14.5091316 17.6753787 11.5273947 17.6753787 10.0365263 15.0804062 11.5273947 12.4854337"></polygon>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
