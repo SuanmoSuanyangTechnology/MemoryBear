@@ -258,7 +258,7 @@ class MemoryAgentService:
     async def write_memory(
         self, 
         group_id: str, 
-        messages_list: List[Dict[str, str]] = None,
+        messages_list: List[Dict[str, str]],
         config_id: Optional[str] = None, 
         db: Session = None, 
         storage_type: str = None, 
@@ -281,8 +281,6 @@ class MemoryAgentService:
         Raises:
             ValueError: If config loading fails or write operation fails
         """
-        if not messages_list:
-            raise ValueError("必须提供 messages_list 参数")
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
             try:
@@ -330,6 +328,7 @@ class MemoryAgentService:
                 logger.debug("Connected to MCP Server: data_flow")
                 tools = await load_mcp_tools(session)
                 workflow_errors = []  # Track errors from workflow
+                messages_result: Optional[Any] = None  # Initialize to avoid UnboundLocalError
 
                 # Pass memory_config to the graph workflow
                 async with make_write_graph(group_id, tools, group_id, group_id, memory_config=memory_config) as graph:
@@ -364,6 +363,24 @@ class MemoryAgentService:
                     )
                 
                 raise ValueError(f"Write workflow failed: {error_details}")
+            
+            # Check if messages_result was set
+            if messages_result is None:
+                error_msg = "Write workflow did not produce any messages"
+                logger.error(error_msg)
+                
+                if audit_logger:
+                    duration = time.time() - start_time
+                    audit_logger.log_operation(
+                        operation="WRITE",
+                        config_id=config_id,
+                        group_id=group_id,
+                        success=False,
+                        duration=duration,
+                        error=error_msg
+                    )
+                
+                raise ValueError(error_msg)
             
             return self.writer_messages_deal(messages_result, start_time, group_id, config_id, str(messages_list))
     
