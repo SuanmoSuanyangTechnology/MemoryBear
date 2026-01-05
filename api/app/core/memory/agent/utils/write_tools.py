@@ -6,7 +6,7 @@ pipeline. Only MemoryConfig is needed - clients are constructed internally.
 """
 import time
 from datetime import datetime
-from typing import List, Dict, Optional
+# from typing import List, Dict, Optional
 
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
@@ -32,11 +32,11 @@ logger = get_agent_logger(__name__)
 
 
 async def write(
-    messages_list: List[Dict[str, str]],
-    user_id: str = None,
-    apply_id: str = None,
-    group_id: str = None,
-    memory_config: MemoryConfig = None,
+    content: str,
+    user_id: str,
+    apply_id: str,
+    group_id: str,
+    memory_config: MemoryConfig,
     ref_id: str = "wyl20251027",
 ) -> None:
     """
@@ -94,7 +94,7 @@ async def write(
         group_id=group_id,
         user_id=user_id,
         apply_id=apply_id,
-        messages_list=messages_list,
+        content=content,
         ref_id=ref_id,
         config_id=config_id,
     )
