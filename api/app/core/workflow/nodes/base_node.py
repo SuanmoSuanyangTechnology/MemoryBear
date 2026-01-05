@@ -356,7 +356,8 @@ class BaseNode(ABC):
                 **final_output,
                 "runtime_vars": {
                     self.node_id: runtime_var
-                }
+                },
+                "looping": state["looping"]
             }
             
             # Add streaming buffer for non-End nodes

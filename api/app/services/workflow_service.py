@@ -410,7 +410,8 @@ class WorkflowService:
             self,
             app_id: uuid.UUID,
             payload: DraftRunRequest,
-            config: WorkflowConfig
+            config: WorkflowConfig,
+            workspace_id: uuid.UUID,
     ):
         """运行工作流
 
@@ -484,7 +485,7 @@ class WorkflowService:
                 workflow_config=workflow_config_dict,
                 input_data=input_data,
                 execution_id=execution.execution_id,
-                workspace_id="",
+                workspace_id=str(workspace_id),
                 user_id=payload.user_id
             )
 
@@ -530,7 +531,8 @@ class WorkflowService:
             self,
             app_id: uuid.UUID,
             payload: DraftRunRequest,
-            config: WorkflowConfig
+            config: WorkflowConfig,
+            workspace_id: uuid.UUID,
     ):
         """运行工作流（流式）
 
@@ -603,7 +605,7 @@ class WorkflowService:
                     workflow_config=workflow_config_dict,
                     input_data=input_data,
                     execution_id=execution.execution_id,
-                    workspace_id="",
+                    workspace_id=str(workspace_id),
                     user_id=payload.user_id
             ):
                 # 直接转发 executor 的事件（已经是正确的格式）
