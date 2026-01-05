@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="12px" height="12px" viewBox="0 0 12 12" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 30</title>
+    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="首页" transform="translate(-1006, -326)" stroke="#FF5D34" stroke-width="1.2">
+            <g id="核心数据" transform="translate(256, 216)">
+                <g id="编组-19备份-3" transform="translate(648, 0)">
+                    <g id="编组-30" transform="translate(108, 116) scale(1, -1) translate(-108, -116)translate(102, 110)">
+                        <g id="编组-31" transform="translate(2.5, 2.5)">
+                            <polyline id="路径" points="0 3 3.5 0 7 3"></polyline>
+                            <polyline id="路径备份" points="0 7 3.5 4 7 7"></polyline>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

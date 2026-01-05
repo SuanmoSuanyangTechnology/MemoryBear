@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 5</title>
+    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="首页" transform="translate(-1229, -446)" stroke="#212332">
+            <g id="编组-13" transform="translate(1120, 300)">
+                <g id="编组-6" transform="translate(16, 138)">
+                    <g id="编组-5" transform="translate(93, 8)">
+                        <polyline id="路径" points="10 6 12 8 10 10"></polyline>
+                        <line x1="12" y1="8" x2="2" y2="8" id="路径-2"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
