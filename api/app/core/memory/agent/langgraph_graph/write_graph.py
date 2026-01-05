@@ -1,3 +1,4 @@
+
 import asyncio
 import json
 import sys
@@ -61,14 +62,12 @@ async def make_write_graph(user_id, tools, apply_id, group_id, memory_config: Me
             "user_id": user_id,
             "memory_config": memory_config,
         }
-        
         write_result = await data_write_tool.ainvoke(write_params)
 
         if isinstance(write_result, dict):
             result_content = write_result.get("data", str(write_result))
         else:
-            result_content = str(write_result)
-        
+            result_content = str(write_result)      
         logger.info("Write content: %s", result_content)
         return {"messages": [AIMessage(content=result_content)]}
 
