@@ -160,18 +160,17 @@ async def write_server(
             api_logger.warning("workspace_id 为空，无法使用 rag 存储，将使用 neo4j 存储")
             storage_type = 'neo4j'
     
-    # 准备消息列表
-    messages_list = [{"role": msg.role, "content": msg.content} for msg in user_input.messages]
-    api_logger.info(f"Write service: group={user_input.group_id}, messages_count={len(messages_list)}, storage_type={storage_type}")
+    # 直接使用 message 字符串
+    api_logger.info(f"Write service requested for group {user_input.group_id}, storage_type: {storage_type}, user_rag_memory_id: {user_rag_memory_id}")
     
     try:
         result = await memory_agent_service.write_memory(
-            group_id=user_input.group_id,
-            messages_list=messages_list,
-            config_id=config_id,
-            db=db,
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id
+            user_input.group_id, 
+            user_input.message, 
+            config_id,
+            db,
+            storage_type, 
+            user_rag_memory_id
         )
         return success(data=result, msg="写入成功")
     except BaseException as e:
@@ -196,7 +195,7 @@ async def write_server_async(
     Async write service endpoint - enqueues write processing to Celery 
 
     Args:
-        user_input: Write request containing messages and group_id
+        user_input: Write request containing message and group_id
     
     Returns:
         Task ID for tracking async operation
@@ -227,13 +226,7 @@ async def write_server_async(
     try:
         task = celery_app.send_task(
             "app.core.memory.agent.write_message",
-            kwargs={
-                "group_id": user_input.group_id,
-                "messages_list": messages_list,
-                "config_id": config_id,
-                "storage_type": storage_type,
-                "user_rag_memory_id": user_rag_memory_id
-            }
+            args=[user_input.group_id, user_input.message, config_id, storage_type, user_rag_memory_id]
         )
         api_logger.info(f"Write task queued: {task.id}")
         
