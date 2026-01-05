@@ -1,10 +1,11 @@
 import logging
+import re
 from typing import Any
 
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
+from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator
 from app.core.workflow.nodes.if_else import IfElseNodeConfig
-from app.core.workflow.nodes.if_else.config import ConditionDetail
-from app.core.workflow.nodes.operators import ConditionExpressionBuilder
+from app.core.workflow.nodes.operators import ConditionExpressionResolver, CompareOperatorInstance
 
 logger = logging.getLogger(__name__)
 
@@ -15,30 +16,36 @@ class IfElseNode(BaseNode):
         self.typed_config = IfElseNodeConfig(**self.config)
 
     @staticmethod
-    def _build_condition_expression(
-            condition: ConditionDetail,
-    ) -> str:
-        """
-        Build a single boolean condition expression string.
+    def _evaluate(operator, instance: CompareOperatorInstance) -> Any:
+        match operator:
+            case ComparisonOperator.EMPTY:
+                return instance.empty()
+            case ComparisonOperator.NOT_EMPTY:
+                return instance.not_empty()
+            case ComparisonOperator.CONTAINS:
+                return instance.contains()
+            case ComparisonOperator.NOT_CONTAINS:
+                return instance.not_contains()
+            case ComparisonOperator.START_WITH:
+                return instance.startswith()
+            case ComparisonOperator.END_WITH:
+                return instance.endswith()
+            case ComparisonOperator.EQ:
+                return instance.eq()
+            case ComparisonOperator.NE:
+                return instance.ne()
+            case ComparisonOperator.LT:
+                return instance.lt()
+            case ComparisonOperator.LE:
+                return instance.le()
+            case ComparisonOperator.GT:
+                return instance.gt()
+            case ComparisonOperator.GE:
+                return instance.ge()
+            case _:
+                raise ValueError(f"Invalid condition: {operator}")
 
-        This method does NOT evaluate the condition.
-        It only generates a valid Python boolean expression string
-        (e.g. "x > 10", "'a' in name") that can later be used
-        in a conditional edge or evaluated by the workflow engine.
-
-        Args:
-            condition (ConditionDetail): Definition of a single comparison condition.
-
-        Returns:
-            str: A Python boolean expression string.
-        """
-        return ConditionExpressionBuilder(
-            left=condition.left,
-            operator=condition.comparison_operator,
-            right=condition.right
-        ).build()
-
-    def build_conditional_edge_expressions(self) -> list[str]:
+    def evaluate_conditional_edge_expressions(self, state) -> list[bool]:
         """
         Build conditional edge expressions for the If-Else node.
 
@@ -60,19 +67,28 @@ class IfElseNode(BaseNode):
 
         for case_branch in self.typed_config.cases:
             branch_index += 1
-
-            branch_conditions = [
-                self._build_condition_expression(condition)
-                for condition in case_branch.expressions
-            ]
-            if len(branch_conditions) > 1:
-                combined_condition = f' {case_branch.logical_operator} '.join(branch_conditions)
+            branch_result = []
+            for expression in case_branch.expressions:
+                pattern = r"\{\{\s*(.*?)\s*\}\}"
+                left_string = re.sub(pattern, r"\1", expression.left).strip()
+                left_value = self.get_variable(left_string, state)
+                evaluator = ConditionExpressionResolver.resolve_by_value(left_value)(
+                    self.get_variable_pool(state),
+                    expression.left,
+                    expression.right,
+                    expression.input_type
+                )
+                branch_result.append(self._evaluate(expression.operator, evaluator))
+            if case_branch.logical_operator == LogicOperator.AND:
+                conditions.append(all(branch_result))
             else:
-                combined_condition = branch_conditions[0]
-            conditions.append(combined_condition)
+                condition_res = any(branch_result)
+                conditions.append(condition_res)
+                if condition_res:
+                    return conditions
 
         # Default fallback branch
-        conditions.append("True")
+        conditions.append(True)
 
         return conditions
 
@@ -90,10 +106,10 @@ class IfElseNode(BaseNode):
         Returns:
             str: The matched branch identifier, e.g., 'CASE1', 'CASE2', ..., used for node transitions.
         """
-        expressions = self.build_conditional_edge_expressions()
+        expressions = self.evaluate_conditional_edge_expressions(state)
+        # TODO: 变量类型及文本类型解析
         for i in range(len(expressions)):
-            logger.info(expressions[i])
-            if self._evaluate_condition(expressions[i], state):
+            if expressions[i]:
                 logger.info(f"Node {self.node_id}: switched to branch CASE {i + 1}")
                 return f'CASE{i + 1}'
         return f'CASE{len(expressions)}'

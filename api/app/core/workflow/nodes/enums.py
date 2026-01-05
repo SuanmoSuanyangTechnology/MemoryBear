@@ -45,7 +45,8 @@ class LogicOperator(StrEnum):
 
 
 class AssignmentOperator(StrEnum):
-    ASSIGN = "assign"
+    COVER = "cover"  # 覆盖
+    ASSIGN = "assign"  # 设置
     CLEAR = "clear"
 
     ADD = "add"  # +=
@@ -87,3 +88,8 @@ class HttpErrorHandle(StrEnum):
     NONE = "none"
     DEFAULT = "default"
     BRANCH = "branch"
+
+
+class ValueInputType(StrEnum):
+    VARIABLE = "Variable"
+    CONSTANT = "Constant"
