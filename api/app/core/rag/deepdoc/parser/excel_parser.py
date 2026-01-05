@@ -48,7 +48,6 @@ class RAGExcelParser:
                     logging.info(f"pandas with default engine load error: {ex}, try calamine instead")
                     file_like_object.seek(0)
                     df = pd.read_excel(file_like_object, engine="calamine")
-                    print("lxc1")
                     return RAGExcelParser._dataframe_to_workbook(df)
             except Exception as e_pandas:
                 raise Exception(f"pandas.read_excel error: {e_pandas}, original openpyxl error: {e}")
@@ -215,19 +214,35 @@ class RAGExcelParser:
                 continue
             if not rows:
                 continue
+            # 获取表头
             ti = list(rows[0])
-            for r in list(rows[1:]):
-                fields = []
-                for i, c in enumerate(r):
-                    if not c.value:
-                        continue
-                    t = str(ti[i].value) if i < len(ti) else ""
-                    t += ("：" if t else "") + str(c.value)
-                    fields.append(t)
-                line = "; ".join(fields)
-                if sheetname.lower().find("sheet") < 0:
-                    line += " ——" + sheetname
-                res.append(line)
+            header_fields = []
+            for cell in ti:
+                if cell.value:  # 只添加有值的表头
+                    header_fields.append(str(cell.value))
+
+            # 如果有数据行，处理数据行；否则只处理表头
+            data_rows = rows[1:]
+            if data_rows:
+                for r in data_rows:
+                    fields = []
+                    for i, c in enumerate(r):
+                        if not c.value:
+                            continue
+                        t = str(ti[i].value) if i < len(ti) else ""
+                        t += ("：" if t else "") + str(c.value)
+                        fields.append(t)
+                    line = "; ".join(fields)
+                    if sheetname.lower().find("sheet") < 0:
+                        line += " ——" + sheetname
+                    res.append(line)
+            else:
+                # 只有表头的情况
+                if header_fields:
+                    line = "; ".join(header_fields)
+                    if sheetname.lower().find("sheet") < 0:
+                        line += " ——" + sheetname
+                    res.append(line)
         return res
 
     @staticmethod

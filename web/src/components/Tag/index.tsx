@@ -1,6 +1,6 @@
 import { type FC, type ReactNode } from 'react'
 
-interface TagProps {
+export interface TagProps {
   color?: 'processing' | 'error' | 'success' | 'warning' | 'default',
   children: ReactNode;
   className?: string;
@@ -16,7 +16,7 @@ const colors = {
 
 const Tag: FC<TagProps> = ({ color = 'processing', children, className }) => {
   return (
-    <span className={`rb:inline-block rb:px-[4px] rb:py-[2px] rb:rounded-[4px] rb:text-[12px] rb:font-regular! rb:leading-[16px] rb:border-[1px] ${colors[color]} ${className || ''}`}>
+    <span className={`rb:inline-block rb:px-1 rb:py-0.5 rb:rounded-sm rb:text-[12px] rb:font-regular! rb:leading-4 rb:border ${colors[color]} ${className || ''}`}>
       {children}
     </span>
   )

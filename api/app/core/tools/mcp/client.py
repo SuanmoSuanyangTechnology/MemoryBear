@@ -204,7 +204,7 @@ class MCPClient:
             )
             
             init_response = json.loads(response)
-            if "error" in init_response:
+            if init_response.get("error", None) is not None:
                 raise MCPProtocolError(f"初始化失败: {init_response['error']}")
             
             return True
@@ -325,7 +325,7 @@ class MCPClient:
         try:
             response = await self._send_request(request_data, timeout)
             
-            if "error" in response:
+            if response.get("error", None) is not None:
                 error = response["error"]
                 raise MCPProtocolError(f"工具调用失败: {error.get('message', '未知错误')}")
             

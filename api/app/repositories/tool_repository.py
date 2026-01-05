@@ -1,10 +1,9 @@
 """工具数据访问层"""
 import uuid
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func
 
-from app.repositories.base_repository import BaseRepository
 from app.models.tool_model import (
     ToolConfig, BuiltinToolConfig, CustomToolConfig, MCPToolConfig,
     ToolExecution, ToolType, ToolStatus
@@ -13,6 +12,31 @@ from app.models.tool_model import (
 
 class ToolRepository:
     """工具仓储类"""
+
+    @staticmethod
+    def get_tenant_id_by_workflow_id(db: Session, workflow_id: uuid.UUID) -> Optional[uuid.UUID]:
+        """根据工作流ID获取tenant_id
+        
+        Args:
+            db: 数据库会话
+            workflow_id: 工作流配置ID
+        
+        Returns:
+            tenant_id或None
+        """
+        from app.models.app_model import App
+        from app.models.workflow_model import WorkflowConfig
+        from app.models.workspace_model import Workspace
+        
+        result = db.query(Workspace.tenant_id).join(
+            App, App.workspace_id == Workspace.id
+        ).join(
+            WorkflowConfig, WorkflowConfig.app_id == App.id
+        ).filter(
+            WorkflowConfig.id == workflow_id
+        ).first()
+        
+        return result[0] if result else None
 
     @staticmethod
     def find_by_tenant(

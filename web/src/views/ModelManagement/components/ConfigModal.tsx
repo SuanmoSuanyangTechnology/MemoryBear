@@ -123,7 +123,7 @@ const ConfigModal = forwardRef<ConfigModalRef, ConfigModalProps>(({
               <CustomSelect
                 url={modelTypeUrl}
                 hasAll={false}
-                format={(items) => items.map((item) => ({ label: item, value: item }))}
+                format={(items) => items.map((item) => ({ label: t(`model.${item}`), value: item }))}
               />
             </Form.Item>
           </>
@@ -138,10 +138,9 @@ const ConfigModal = forwardRef<ConfigModalRef, ConfigModalProps>(({
           <CustomSelect
             url={modelProviderUrl}
             hasAll={false}
-            format={(items) => items.map((item) => ({ label: item, value: item }))}
+            format={(items) => items.map((item) => ({ label: t(`model.${item}`), value: item }))}
           />
         </Form.Item>
-        {/* TODO:改成模型名称 */}
         <Form.Item
           name="model_name"
           label={t('model.modelName')}

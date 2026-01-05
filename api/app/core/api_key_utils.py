@@ -3,7 +3,7 @@ import secrets
 from typing import Optional, Union
 from datetime import datetime
 
-from app.schemas.api_key_schema import ApiKeyType
+from app.models.api_key_model import ApiKeyType
 from fastapi import Response
 from fastapi.responses import JSONResponse
 

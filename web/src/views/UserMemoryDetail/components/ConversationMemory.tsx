@@ -47,7 +47,7 @@ const ConversationMemory:FC = () => {
               <List.Item>
                 <div
                   key={index}
-                  className="rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:px-4 rb:py-3 rb:bg-[#F0F3F8] rb:rounded-lg rb:mt-2 rb:text-gray-800 rb:text-sm"
+                  className="rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:px-4 rb:py-3 rb:bg-[#F0F3F8] rb:mt-2 rb:text-gray-800 rb:text-sm"
                 >
                   <Markdown content={item} />
                 </div>

@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2025-11-18 16:19:58
  * @LastEditors: yujiangping
- * @LastEditTime: 2025-11-29 19:08:40
+ * @LastEditTime: 2025-12-22 13:47:53
  */
 import { FileOutlined, FieldTimeOutlined, EditOutlined } from '@ant-design/icons';
 import { Skeleton } from 'antd';
@@ -24,6 +24,7 @@ interface RecallTestResultProps {
   scrollableTarget?: string;
   editable?: boolean; // 是否可编辑
   onItemClick?: (item: RecallTestData, index: number) => void; // 点击项的回调
+  parserMode?: number; // 解析模式，1 表示 QA 格式
 }
 
 const RecallTestResult = ({ 
@@ -35,8 +36,30 @@ const RecallTestResult = ({
   scrollableTarget,
   editable = false,
   onItemClick,
+  parserMode = 0,
 }: RecallTestResultProps) => {
   const { t } = useTranslation();
+
+  // 解析 QA 格式内容
+  const parseQAContent = (content: string) => {
+    if (!content || parserMode !== 1) return null;
+    
+    const qaRegex = /question:\s*(.*?)\s*answer:\s*(.*?)$/s;
+    const match = content.match(qaRegex);
+    
+    if (match) {
+      const question = match[1]?.trim() || '';
+      const answer = match[2]?.trim() || '';
+      return { question, answer };
+    }
+    
+    return null;
+  };
+
+  // 格式化 QA 内容为显示格式
+  const formatQAContent = (question: string, answer: string) => {
+    return `**${t('knowledgeBase.question')}:** ${question}\n**${t('knowledgeBase.answer')}:** ${answer}`;
+  };
 
   const handleItemClick = (e: React.MouseEvent, item: RecallTestData, index: number) => {
     // 检查点击的是否是图片或图片相关元素
@@ -126,7 +149,14 @@ const RecallTestResult = ({
             </div>
             <div className='rb:flex rb:text-left rb:px-4 rb:py-3 rb:bg-[#F0F3F8] rb:rounded-lg rb:mt-2'>
               <div className='rb:text-gray-800 rb:text-sm rb:whitespace-pre-wrap rb:break-words rb:w-full'>
-                <RbMarkdown content={item.page_content} showHtmlComments={true} />
+                {(() => {
+                  const qaContent = parseQAContent(item.page_content);
+                  if (qaContent) {
+                    const formattedContent = formatQAContent(qaContent.question, qaContent.answer);
+                    return <RbMarkdown content={formattedContent} showHtmlComments={true} />;
+                  }
+                  return <RbMarkdown content={item.page_content} showHtmlComments={true} />;
+                })()}
               </div>
             </div>
             {item.metadata?.file_created_at && (

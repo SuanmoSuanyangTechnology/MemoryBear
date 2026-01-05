@@ -27,7 +27,7 @@ const  Empty: FC<EmptyProps> = ({
     <div className={`rb:flex rb:items-center rb:justify-center rb:flex-col ${className}`}>
       <img src={url || emptyIcon} alt="404" style={{ width: `${width}px`, height: `${height}px` }} />
       {title && <div className="rb:mt-2 rb:leading-5">{title}</div>}
-      {curSubTitle && <div className={`rb:mt-[${url ? 8 : 5}px] rb:leading-4 rb:text-[12px] rb:text-[#A8A9AA]`}>{subTitle}</div>}
+      {curSubTitle && <div className={`rb:mt-[${url ? 8 : 5}px] rb:leading-4 rb:text-[12px] rb:text-[#A8A9AA]`}>{curSubTitle}</div>}
     </div>
   );
 }
