@@ -13,7 +13,7 @@ const { Content } = Layout;
 
 // 认证布局组件，使用useRouteGuard hook进行路由鉴权
 const AuthLayout: FC = () => {
-  const { getUserInfo } = useUser();
+  const { getUserInfo, getStorageType } = useUser();
   // 使用路由守卫hook处理认证和权限检查
   useRouteGuard('manage');
   // 自动更新面包屑导航
@@ -24,6 +24,7 @@ const AuthLayout: FC = () => {
       window.location.href = `/#/login`;
     } else {
       getUserInfo()
+      getStorageType()
     }
   }, []);
 

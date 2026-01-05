@@ -5,6 +5,10 @@
       { "path": "/user-management", "element": "UserManagement" },
       { "path": "/model", "element": "ModelManagement" },
       { "path": "/space", "element": "SpaceManagement" },
+      { "path": "/tool", "element": "ToolManagement" },
+      { "path": "/pricing", "element": "Pricing" },
+      { "path": "/order-pay", "element": "OrderPayment" },
+      { "path": "/orders", "element": "OrderHistory" },
       { "path": "/no-permission", "element": "NoPermission" }
     ]
   },
@@ -25,6 +29,9 @@
       { "path": "/knowledge-base/:knowledgeBaseId/share", "element": "Share" },
       { "path": "/knowledge-base/:knowledgeBaseId/create-dataset", "element": "CreateDataset" },
       { "path": "/knowledge-base/:knowledgeBaseId/DocumentDetails", "element": "DocumentDetails" },
+      { "path": "/api-key", "element": "ApiKeyManagement" },
+      { "path": "/emotion-engine/:id", "element": "EmotionEngine" },
+      { "path": "/reflection-engine/:id", "element": "SelfReflectionEngine" },
       { "path": "/no-permission", "element": "NoPermission" },
       { "path": "/*", "element": "NotFound" }
     ]
@@ -33,7 +40,9 @@
     "element": "BasicLayout",
     "children": [
       { "path": "/application/config/:id", "element": "ApplicationConfig" },
-      { "path": "/conversation/:token", "element": "Conversation" }
+      { "path": "/conversation/:token", "element": "Conversation" },
+      { "path": "/user-memory/neo4j/:id", "element": "Neo4jUserMemoryDetail" },
+      { "path": "/statement/:id", "element": "StatementDetail" }
     ]
   },
   {

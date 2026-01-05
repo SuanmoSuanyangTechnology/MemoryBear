@@ -69,7 +69,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
         const response = editVo?.id ? updateApplication(editVo.id, {
           ...editVo,
           ...values,
-        } as Application) : addApplication(values as Application)
+        }) : addApplication(values)
         response.then(() => {
           refresh()
           handleClose()
@@ -127,7 +127,6 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
               label: t(`application.${type}`),
               labelDesc: t(`application.${type}Desc`),
               icon: typeIcons[type],
-              disabled: editVo?.id || type === 'workflow'
             }))}
           />
         </FormItem>

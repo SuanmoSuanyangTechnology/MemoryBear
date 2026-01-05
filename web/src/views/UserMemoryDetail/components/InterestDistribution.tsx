@@ -1,18 +1,24 @@
 import { type FC, useRef, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import ReactEcharts from 'echarts-for-react';
+import { Space } from 'antd'
+
 import { getHotMemoryTagsByUser } from '@/api/memory';
 import Empty from '@/components/Empty';
 import Loading from '@/components/Empty/Loading';
+import RbCard from '@/components/RbCard/Card';
 
 const Colors = ['#155EEF', '#4DA8FF', '#03BDFF', '#31E8FF', '#AD88FF', '#FFB048']
 
-const PieCard: FC = () => {
+const InterestDistribution: FC = () => {
+  const { t } = useTranslation()
   const { id } = useParams()
   const chartRef = useRef<ReactEcharts>(null);
   const resizeScheduledRef = useRef(false)
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<Array<Record<string, string | number>>>([])
+  const totalValue = data.reduce((sum, item) => sum + Number(item.value), 0)
 
   useEffect(() => {
     getData()
@@ -55,12 +61,14 @@ const PieCard: FC = () => {
   }, [data])
 
   return (
-    <>
+    <RbCard
+      title={t('userMemory.interestDistribution')}
+    >
       {loading
       ? <Loading size={249} />
       : !data || data.length === 0
-      ? <Empty size={88} className="rb:mt-[48px] rb:mb-[81px]" />
-      : data && data.length > 0 &&
+      ? <Empty size={88} className="rb:mt-12 rb:mb-20.25" />
+      : data && data.length > 0 && <>
         <ReactEcharts
           option={{
             color: Colors,
@@ -80,19 +88,7 @@ const PieCard: FC = () => {
               extraCssText: 'width: 36px; height: 36px; box-shadow: 0px 2px 4px 0px rgba(33,35,50,0.12);border-radius: 36px;'
             },
             legend: {
-              type: data.length > 8 ? 'scroll' : 'plain',
-              bottom: 0,
-              left: 16,
-              padding: 0,
-              itemWidth: 12,
-              itemHeight: 12,
-              borderRadius: 2,
-              // orient: 'horizontal',
-              textStyle: {
-                color: '#5B6167',
-                fontFamily: 'PingFangSC, PingFang SC',
-                lineHeight: 16,
-              }
+              show: false
             },
             series: [
               {
@@ -102,9 +98,9 @@ const PieCard: FC = () => {
                 avoidLabelOverlap: false,
                 percentPrecision: 0,
                 padAngle: 0,
-                width: 220,
-                height: 220,
-                top: 32,
+                width: 200,
+                height: 200,
+                top: 18,
                 left: 'center',
                 itemStyle: {
                   borderRadius: 0
@@ -129,13 +125,27 @@ const PieCard: FC = () => {
               }
             ]
           }}
-          style={{ height: '340px', width: '100%' }}
+          style={{ height: '250px', width: '100%' }}
           notMerge={true}
           lazyUpdate={true}
         />
-      }
-    </>
+        <Space size={12} direction="vertical" className="rb:w-full">
+          {data.map((item, index) => (
+            <div key={index} className="rb:relative rb:flex rb:items-center rb:justify-between rb:px-4 rb:py-2.5 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:font-regular rb:leading-5 rb:rounded-md">
+              <div className="rb:pl-3.5 rb:relative">
+                <span 
+                  className="rb:absolute rb:left-0 rb:top-[calc(50%-4px)] rb:w-2 rb:h-2 rb:rounded-full"
+                  style={{ backgroundColor: Colors[index % Colors.length] }}
+                />
+                {item.name}
+              </div>
+              <div className="rb:font-medium">{totalValue > 0 ? Math.round((Number(item.value) / totalValue) * 100) : 0}%</div>
+            </div>
+          ))}
+        </Space>
+      </>}
+    </RbCard>
   )
 }
 
-export default PieCard
+export default InterestDistribution

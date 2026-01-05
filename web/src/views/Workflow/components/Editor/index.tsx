@@ -1,0 +1,107 @@
+import { type FC, useState } from 'react';
+import { LexicalComposer } from '@lexical/react/LexicalComposer';
+import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
+import { ContentEditable } from '@lexical/react/LexicalContentEditable';
+import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
+// import { AutoFocusPlugin } from '@lexical/react/LexicalAutoFocusPlugin';
+import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
+// import { HeadingNode, QuoteNode } from '@lexical/rich-text';
+// import { ListItemNode, ListNode } from '@lexical/list';
+// import { LinkNode } from '@lexical/link';
+// import { CodeNode } from '@lexical/code';
+
+import AutocompletePlugin, { type Suggestion } from './plugin/AutocompletePlugin'
+import CharacterCountPlugin from './plugin/CharacterCountPlugin'
+import InitialValuePlugin from './plugin/InitialValuePlugin';
+import CommandPlugin from './plugin/CommandPlugin';
+import { VariableNode } from './nodes/VariableNode'
+
+interface LexicalEditorProps {
+  placeholder?: string;
+  value?: string;
+  onChange?: (value: string) => void;
+  options: Suggestion[];
+  variant?: 'outlined' | 'borderless';
+  height?: number;
+}
+
+const theme = {
+  paragraph: 'editor-paragraph',
+  text: {
+    bold: 'editor-text-bold',
+    italic: 'editor-text-italic',
+  },
+};
+
+const Editor: FC<LexicalEditorProps> =({
+  placeholder = "请输入内容...",
+  value = "",
+  onChange,
+  options,
+  variant = 'borderless',
+  height = 60,
+}) => {
+  const [_count, setCount] = useState(0);
+  const initialConfig = {
+    namespace: 'AutocompleteEditor',
+    theme,
+    nodes: [
+      // HeadingNode,
+      // QuoteNode,
+      // ListItemNode,
+      // ListNode,
+      // LinkNode,
+      // CodeNode,
+      VariableNode
+    ],
+    onError: (error: Error) => {
+      console.error(error);
+    },
+  };
+
+  return (
+    <LexicalComposer initialConfig={initialConfig}>
+      <div style={{ position: 'relative' }}>
+        <RichTextPlugin
+          contentEditable={
+            <ContentEditable
+              style={{
+                minHeight: `${height}px`,
+                padding: variant === 'borderless' ? '0' : '4px 11px',
+                border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
+                borderRadius: '6px',
+                outline: 'none',
+                resize: 'none',
+                fontSize: '14px',
+                lineHeight: '20px',
+              }}
+            />
+          }
+          placeholder={
+            <div
+              style={{
+                position: 'absolute',
+                top: variant === 'borderless' ? '0' : '6px',
+                left: variant === 'borderless' ? '0' : '11px',
+                color: '#5B6167',
+                fontSize: '14px',
+                lineHeight: '20px',
+                pointerEvents: 'none',
+              }}
+            >
+              {placeholder}
+            </div>
+          }
+          ErrorBoundary={LexicalErrorBoundary}
+        />
+        <HistoryPlugin />
+        <CommandPlugin />
+        <AutocompletePlugin options={options} />
+        <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
+        <InitialValuePlugin value={value} options={options} />
+      </div>
+    </LexicalComposer>
+  );
+};
+
+export default Editor;

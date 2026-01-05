@@ -60,6 +60,8 @@ interface FolderTreeProps {
   onRootLoad?: (nodes: TreeNodeData[] | null) => void;
   onFolderPathChange?: (path: Array<{ id: string; name: string }>) => void;
   selectedKeys?: React.Key[];
+  // 新增：自动展开到指定路径
+  autoExpandPath?: Array<{ id: string; name: string }>;
 }
 
 const renderIcon = (icon?: string) => {
@@ -275,8 +277,11 @@ const FolderTree: FC<FolderTreeProps> = ({
   onRootLoad,
   onFolderPathChange,
   selectedKeys,
+  autoExpandPath,
 }) => {
   const [treeData, setTreeData] = useState<TreeNodeData[]>([]);
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [autoExpandInProgress, setAutoExpandInProgress] = useState(false);
 
   // 更新树节点数据的辅助函数
   const updateTreeData = (nodes: TreeNodeData[], key: Key, children: TreeNodeData[]): TreeNodeData[] => {
@@ -304,9 +309,13 @@ const FolderTree: FC<FolderTreeProps> = ({
     const load = async () => {
       if (!knowledgeBaseId) {
         setTreeData([]);
+        setExpandedKeys([]); // 重置展开状态
         return;
       }
       try {
+        // 重置展开状态，确保从根目录开始
+        setExpandedKeys([]);
+        
         const nodes = await buildTreeNodes(knowledgeBaseId, knowledgeBaseId);
         if (!cancelled) {
           setTreeData(nodes);
@@ -370,6 +379,109 @@ const FolderTree: FC<FolderTreeProps> = ({
     return null;
   };
 
+  // 查找节点的辅助函数
+  const findNodeInTree = (nodes: TreeNodeData[], key: string): TreeNodeData | null => {
+    for (const node of nodes) {
+      if (String(node.key) === key) {
+        return node;
+      }
+      if (node.children) {
+        const found = findNodeInTree(node.children, key);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // 渐进式自动展开到指定路径
+  useEffect(() => {
+    if (!autoExpandPath || autoExpandPath.length === 0 || autoExpandInProgress || treeData.length === 0) {
+      return;
+    }
+
+    const expandToPath = async () => {
+      setAutoExpandInProgress(true);
+      
+      try {
+        const keysToExpand: React.Key[] = [];
+        let currentTreeData = treeData;
+        
+        // 逐级展开，从第一级开始（跳过根节点，因为根节点已经加载）
+        for (let i = 0; i < autoExpandPath.length - 1; i++) {
+          const nodeKey = autoExpandPath[i].id;
+          keysToExpand.push(nodeKey);
+          
+          // 查找当前节点
+          const targetNode = findNodeInTree(currentTreeData, nodeKey);
+          
+          if (targetNode && targetNode.children === undefined) {
+            // 如果子节点未加载，先加载
+            try {
+              console.log(`自动展开：加载节点 ${nodeKey} 的子节点`);
+              const children = await buildTreeNodes(knowledgeBaseId, nodeKey);
+              
+              // 更新树数据
+              setTreeData((prevData) => {
+                const newData = updateTreeData(prevData, nodeKey, children);
+                currentTreeData = newData; // 更新当前引用
+                return newData;
+              });
+              
+              // 等待状态更新完成
+              await new Promise(resolve => setTimeout(resolve, 150));
+              
+            } catch (error) {
+              console.error(`自动展开时加载节点 ${nodeKey} 失败:`, error);
+              // 加载失败时停止展开
+              break;
+            }
+          }
+        }
+        
+        // 设置展开的节点
+        setExpandedKeys(keysToExpand);
+        
+        // 选中最后一个节点（目标文件夹）
+        const targetKey = autoExpandPath[autoExpandPath.length - 1]?.id;
+        if (targetKey) {
+          console.log(`自动展开：选中目标节点 ${targetKey}`);
+          // 延迟选中，确保展开动画完成
+          setTimeout(() => {
+            if (onSelect) {
+              onSelect([targetKey], {
+                selected: true,
+                selectedNodes: [],
+                node: {} as any,
+                event: 'select',
+                nativeEvent: new MouseEvent('click')
+              });
+            }
+          }, 200);
+        }
+        
+      } catch (error) {
+        console.error('自动展开路径失败:', error);
+      } finally {
+        // 延迟重置标志，确保展开过程完全完成
+        setTimeout(() => {
+          setAutoExpandInProgress(false);
+        }, 500);
+      }
+    };
+
+    // 延迟执行，确保树数据已经加载完成
+    const timer = setTimeout(expandToPath, 300);
+    return () => clearTimeout(timer);
+  }, [autoExpandPath, treeData.length, knowledgeBaseId, onSelect, autoExpandInProgress]);
+
+  // 处理展开事件
+  const handleExpand: TreeProps['onExpand'] = (expandedKeys, info) => {
+    setExpandedKeys(expandedKeys);
+    if (onExpand) {
+      onExpand(expandedKeys, info);
+    }
+  };
+
   // 处理选择事件，计算并传递路径
   const handleSelect: TreeProps['onSelect'] = (selectedKeys, info) => {
     if (selectedKeys.length > 0) {
@@ -391,11 +503,13 @@ const FolderTree: FC<FolderTreeProps> = ({
 
   return (
     <DirectoryTree
+      key={refreshKey} // 添加key确保refreshKey变化时重新渲染整个组件
       multiple={multiple}
       className={className}
       style={style}
       onSelect={handleSelect}
-      onExpand={onExpand}
+      onExpand={handleExpand}
+      expandedKeys={expandedKeys}
       loadData={onLoadData}
       treeData={treeNodes}
       selectedKeys={selectedKeys}

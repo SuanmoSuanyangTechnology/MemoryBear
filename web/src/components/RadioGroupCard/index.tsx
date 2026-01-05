@@ -15,6 +15,7 @@ interface RadioCardProps extends Omit<RadioGroupProps, 'onChange'> {
   onValueChange?: (value: string | null | undefined, option?: RadioCardOption) => void;
   onChange?: (value: string | null | undefined, option?: RadioCardOption) => void;
   itemRender?: (option: RadioCardOption) => ReactNode;
+  allowClear?: boolean;
 }
 
 const RadioGroupCard: FC<RadioCardProps> = ({
@@ -22,7 +23,8 @@ const RadioGroupCard: FC<RadioCardProps> = ({
   value,
   onValueChange,
   onChange,
-  itemRender
+  itemRender,
+  allowClear = true
 }) => {
   // 监听value变化
   useEffect(() => {
@@ -34,23 +36,27 @@ const RadioGroupCard: FC<RadioCardProps> = ({
   const handleChange = (option: RadioCardOption) => {
     if (option.disabled) return
     if (onChange) {
-      onChange(value === option.value ? null : String(option.value), value === option.value ? undefined : option);
+      if (allowClear && value === option.value) {
+        onChange(null, undefined);
+      } else {
+        onChange(String(option.value), option);
+      }
     }
   }
   
   return (
-    <div className={`rb:grid rb:grid-cols-${options.length} rb:gap-[12px]`}>
+    <div className={`rb:grid rb:grid-cols-${options.length} rb:gap-3`}>
       {options.map(option => (
-          <div key={String(option.value)} className={clsx("rb:border rb:rounded-[8px] rb:w-full rb:p-[20px_12px] rb:text-center rb:cursor-pointer", {
+          <div key={String(option.value)} className={clsx("rb:border rb:rounded-lg rb:w-full rb:p-[20px_12px] rb:text-center rb:cursor-pointer", {
             'rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF]': option.value === value,
             'rb:border-[#EBEBEB] rb:bg-[#ffffff]': option.value !== value,
             'rb:opacity-[0.75]': option.disabled
           })} onClick={() => handleChange(option)}>
             {itemRender ? itemRender(option) : (
               <>
-                {option.icon && <img src={option.icon} className="rb:w-[40px] rb:h-[40px] rb:mb-[12px] rb:m-[0_auto]" />}
+                {option.icon && <img src={option.icon} className="rb:w-10 rb:h-10 rb:mb-3 rb:m-[0_auto]" />}
                 <div className="rb:text-[14px] rb:font-medium">{option.label}</div>
-                <div className="rb:mt-[6px] rb:text-[#5B6167] rb:text-[12px] rb:font-regular">{option.labelDesc}</div>
+                <div className="rb:mt-1.5 rb:text-[#5B6167] rb:text-[12px] rb:font-regular">{option.labelDesc}</div>
               </>
             )}
           </div>

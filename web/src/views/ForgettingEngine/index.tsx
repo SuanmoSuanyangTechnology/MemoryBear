@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Form, Slider, Button, Space, message } from 'antd';
+import { Row, Col, Form, Slider, Button, Space, message, Switch } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import RbCard from '@/components/RbCard/Card';
@@ -18,19 +18,72 @@ const configList = [
   {
     key: 'forgettingRate',
     name: 'lambda_mem',
-    range: [0, 1],
+    range: [0.01, 1],
     type: 'decimal',
   },
   {
     key: 'offset',
     name: 'offset',
+    range: [0, 1],
     type: 'decimal',
-  }
+  },
+  {
+    key: 'decay_constant',
+    name: 'decay_constant',
+    range: [0, 1],
+    type: 'decimal',
+    hiddenDesc: true,
+  },
+  {
+    key: 'max_history_length',
+    name: 'max_history_length',
+    type: 'decimal',
+    step: 1,
+    range: [10, 1000],
+    hiddenDesc: true,
+  },
+  {
+    key: 'forgetting_threshold',
+    name: 'forgetting_threshold',
+    type: 'decimal',
+    range: [0, 1],
+    hiddenDesc: true,
+  },
+  {
+    key: 'min_days_since_access',
+    name: 'min_days_since_access',
+    type: 'decimal',
+    step: 1,
+    range: [1, 365],
+    hiddenDesc: true,
+  },
+  {
+    key: 'enable_llm_summary',
+    name: 'enable_llm_summary',
+    type: 'button',
+    hiddenDesc: true,
+  },
+  {
+    key: 'max_merge_batch_size',
+    name: 'max_merge_batch_size',
+    type: 'decimal',
+    step: 1,
+    range: [1, 1000],
+    hiddenDesc: true,
+  },
+  {
+    key: 'forgetting_interval_hours',
+    name: 'forgetting_interval_hours',
+    type: 'decimal',
+    step: 1,
+    range: [1, 168],
+    hiddenDesc: true,
+  },
 ]
 
 const ForgettingEngine: React.FC = () => {
   const { t } = useTranslation();
-  const params = useParams();
+  const { id } = useParams();
   const [configData, setConfigData] = useState<ConfigForm>();
   const [form] = Form.useForm<ConfigForm>();
   const [messageApi, contextHolder] = message.useMessage();
@@ -43,7 +96,7 @@ const ForgettingEngine: React.FC = () => {
   }, [])
 
   const getConfigData = () => {
-    getMemoryForgetConfig(params.id)
+    getMemoryForgetConfig(id as string)
       .then((res) => {
         const response = res as ConfigForm
         const initialValues = {
@@ -60,12 +113,12 @@ const ForgettingEngine: React.FC = () => {
       })
   }
   const handleReset = () => {
-    form.setFieldsValue(configData);
+    form.setFieldsValue(configData || {});
   }
   const handleSave = () => {
     setLoading(true)
     updateMemoryForgetConfig({
-      config_id: params.id,
+      config_id: id,
       ...values
     })
       .then(() => {
@@ -83,7 +136,7 @@ const ForgettingEngine: React.FC = () => {
         <RbCard 
           title={
             <div className="rb:flex rb:items-center">
-              <img src={strategyImpactSimulator} className="rb:w-[20px] rb:h-[20px] rb:mr-[8px]" />
+              <img src={strategyImpactSimulator} className="rb:w-5 rb:h-5 rb:mr-2" />
               {t('forgettingEngine.forgettingEngineConfigParams')}
             </div>
           }
@@ -99,28 +152,60 @@ const ForgettingEngine: React.FC = () => {
             }}
           >
             <Space size={24} direction="vertical" style={{ width: '100%' }}>
-              {configList.map(config => (
-                <div key={config.key}>
-                  <div className="rb:text-[14px] rb:font-medium rb:leading-[20px] rb:mb-[8px]">
-                    {t(`forgettingEngine.${config.key}`)}
+              {configList.map(config => {
+                if (config.type === 'button') {
+                  return (
+                    <div key={config.key} className="rb:mb-2">
+                      <div className="rb:flex rb:items-center rb:justify-between">
+                        <div>
+                          <span className="rb:text-[14px] rb:font-medium rb:leading-5">{t(`forgettingEngine.${config.key}`)}</span>
+                        </div>
+                        <Form.Item
+                          name={config.name}
+                          valuePropName="checked"
+                          className="rb:ml-2 rb:mb-0!"
+                        >
+                          <Switch />
+                        </Form.Item>
+                      </div>
+                      <div className="rb:flex rb:text-[12px] rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5">
+                        <Space size={4}>
+                          {config.range && <span>{t(`forgettingEngine.range`)}: {config.range?.join('-')}</span>}
+                          {config.type && <span>{t(`forgettingEngine.type`)}: {config.type}</span>}
+                        </Space>
+                      </div>
+                    </div>
+                  )
+                }
+                return (
+                  <div key={config.key}>
+                    <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mb-2">
+                      {t(`forgettingEngine.${config.key}`)}
+                    </div>
+                    {!config.hiddenDesc && <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 ">
+                      {t(`forgettingEngine.${config.key}Desc`)}
+                    </div>}
+                    
+                    <Form.Item
+                      name={config.name}
+                    >
+                      {config.type === 'decimal'
+                        ? <Slider tooltip={{ open: false }} max={config.range?.[1] || 1} min={config.range?.[0] || 0} step={config.step ?? 0.01} style={{ margin: '0' }} />
+                        : config.type === 'button'
+                        ? <Switch />
+                        : null
+                      }
+                    </Form.Item>
+                    <div className="rb:flex rb:text-[12px] rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
+                      <Space size={4}>
+                        {config.range && <span>{t(`forgettingEngine.range`)}: {config.range?.join('-')}</span>}
+                        {config.type && <span>{t(`forgettingEngine.type`)}: {config.type}</span>}
+                      </Space>
+                      <>{t('forgettingEngine.CurrentValue')}: {values?.[config.name] || 0}</>
+                    </div>
                   </div>
-                  <div className="rb:mt-[4px] rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-[16px] ">
-                    {t(`forgettingEngine.${config.key}Desc`)}
-                  </div>
-                  <Form.Item
-                    name={config.name}
-                  >
-                    <Slider tooltip={{open: false}} max={config.range?.[1] || 1} min={config.range?.[0] || 0} step={0.01} style={{ margin: '0' }} />
-                  </Form.Item>
-                  <div className="rb:flex rb:text-[12px] rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-[20px] rb:mt-[-26px]">
-                    <Space size={4}>
-                      {config.range && <span>{t(`forgettingEngine.range`)}: {config.range?.join('-')}</span>}
-                      {config.type && <span>{t(`forgettingEngine.type`)}: {config.type}</span>}
-                    </Space>
-                    <>{t('forgettingEngine.CurrentValue')}: {values?.[config.name] || 0}</>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
               <Row gutter={16}>
                 <Col span={12}>
                   <Button block onClick={handleReset}>{t('common.reset')}</Button>
@@ -135,7 +220,6 @@ const ForgettingEngine: React.FC = () => {
       </Col>
       <Col span={15}>
         <RbCard
-          className='rb:h-full!'
         >
           <LineChart
             config={values}

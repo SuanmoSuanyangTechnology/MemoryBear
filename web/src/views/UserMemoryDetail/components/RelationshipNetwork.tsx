@@ -1,24 +1,19 @@
-import React, { type FC, useEffect, useState, useRef } from 'react'
+import React, { type FC, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Col } from 'antd'
+import { Col, Row } from 'antd'
+import dayjs from 'dayjs'
+
 import RbCard from '@/components/RbCard/Card'
 import ReactEcharts from 'echarts-for-react'
-import zoom from '@/assets/images/userMemory/zoom.svg'
-import drag from '@/assets/images/userMemory/drag.svg'
-import pointer from '@/assets/images/userMemory/pointer.svg'
-import empty from '@/assets/images/userMemory/empty.svg'
-import type { EdgeData, Node, Edge } from '../types'
+import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
+import type { Node, Edge, GraphData } from '../types'
 import {
   getMemorySearchEdges,
 } from '@/api/memory'
 import Empty from '@/components/Empty'
 
-const operations = [
-  { name: 'click', icon: pointer },
-  { name: 'drag', icon: drag },
-  { name: 'zoom', icon: zoom },
-]
+const colors = ['#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
 const RelationshipNetwork:FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
@@ -28,62 +23,90 @@ const RelationshipNetwork:FC = () => {
   const [links, setLinks] = useState<Edge[]>([])
   const [categories, setCategories] = useState<{ name: string }[]>([])
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
+  // const [fullScreen, setFullScreen] = useState<boolean>(false)
 
+  console.log('categories', categories)
+  // 关系网络
+  const getEdgeData = useCallback(() => {
+    if (!id) return
+    setSelectedNode(null)
+    getMemorySearchEdges(id).then((res) => {
+      const { nodes, edges, statistics } = res as GraphData
+      const curNodes: Node[] = []
+      const curEdges: Edge[] = []
+      const curNodeTypes = Object.keys(statistics.node_types).filter(vo => vo !== 'Dialogue')
+      
+      // 计算每个节点的连接数
+      const connectionCount: Record<string, number> = {}
+      edges.forEach(edge => {
+        connectionCount[edge.source] = (connectionCount[edge.source] || 0) + 1
+        connectionCount[edge.target] = (connectionCount[edge.target] || 0) + 1
+      })
+      
+      // 处理节点数据
+      nodes.filter(vo => vo.label !== 'Dialogue').forEach(node => {
+        const connections = connectionCount[node.id] || 0
+        const categoryIndex = curNodeTypes.indexOf(node.label)
+        
+        // 根据节点类型获取显示名称
+        let displayName = ''
+        switch (node.label) {
+          // case 'Statement':
+          //   displayName = 'statement' in node.properties ? node.properties.statement?.slice(0, 5) || '' : ''
+          //   break
+          case 'ExtractedEntity':
+            displayName = 'name' in node.properties ? node.properties.name || '' : ''
+            break
+          // default:
+          //   displayName = 'content' in node.properties ? node.properties.content?.slice(0, 5) || '' : ''
+          //   break
+        }
+        let symbolSize = 0
+        if (connections <= 1) {
+          symbolSize = 5
+        } else if (connections <= 10) {
+          symbolSize = 10
+        } else if (connections <= 15) {
+          symbolSize = 15
+        } else if (connections <= 20) {
+          symbolSize = 25
+        } else {
+          symbolSize = 35
+        }
+        
+        curNodes.push({
+          ...node,
+          name: displayName,
+          category: categoryIndex >= 0 ? categoryIndex : 0,
+          symbolSize: symbolSize, // 根据连接数调整节点大小
+          itemStyle: {
+            color: colors[categoryIndex % 8]
+          }
+        })
+      })
+      
+      // 处理边数据
+      edges.forEach(edge => {
+        curEdges.push({
+          ...edge,
+          source: edge.source,
+          target: edge.target,
+          value: edge.weight || 1
+        })
+      })
+      
+      // 设置分类
+      const curCategories = curNodeTypes.map(type => ({ name: type }))
+      
+      setNodes(curNodes)
+      setLinks(curEdges)
+      setCategories(curCategories)
+    })
+  }, [id])
   useEffect(() => {
     if (!id) return
     getEdgeData()
   }, [id])
-
-  // 关系网络
-  const getEdgeData = () => {
-    if (!id) return
-    setSelectedNode(null)
-    getMemorySearchEdges(id).then((res) => {
-      const list = (res as { detials?: EdgeData[] }).detials || []
-      const nodes: Node[] = [];
-      const links: Edge[] = [];
-      const categories: { name: string }[] = []
-      
-      list.forEach(item => {
-        if (item.edge) {
-          links.push({
-            ...item.edge,
-            target: item.edge?.target_id,
-            source: item.edge?.source_id,
-          })
-        }
-        if (item.sourceNode) {
-          nodes.push(item.sourceNode)
-          categories.push({name: item.sourceNode.entity_type})
-        }
-        if (item.targetNode) {
-          nodes.push(item.targetNode)
-          categories.push({name: item.targetNode.entity_type})
-        }
-      })
-      
-      // 根据ID字段去重节点
-      const uniqueNodes = nodes.filter((node, index, self) =>
-        index === self.findIndex((n) => n.id === node.id && n.name === node.name)
-      )
-      const uniqueLinks = links.filter((node, index, self) =>
-        index === self.findIndex((n) => n.target === node.target && n.source === node.source)
-      )
-      const uniqueCategories = categories.filter((node, index, self) =>
-        index === self.findIndex((n) => n.name === node.name)
-      )
-    
-      setLinks(uniqueLinks)
-      setCategories(uniqueCategories)
-
-      uniqueNodes.map(item => {
-        const index = uniqueCategories.findIndex((n) => n.name === item.entity_type)
-        item.category = index
-        item.symbolSize = index < 10 ? 5 : index <100 ? 8 : 10
-      })
-      setNodes(uniqueNodes)
-    })
-  }
   
   useEffect(() => {
     const handleResize = () => {
@@ -95,7 +118,7 @@ const RelationshipNetwork:FC = () => {
         });
       }
     }
-    
+
     const resizeObserver = new ResizeObserver(handleResize)
     const chartElement = chartRef.current?.getEchartsInstance().getDom().parentElement
     if (chartElement) {
@@ -106,24 +129,43 @@ const RelationshipNetwork:FC = () => {
       resizeObserver.disconnect()
     }
   }, [nodes])
+
+  // const handleFullScreen = () => {
+  //   setFullScreen(prev => !prev)
+  // }
+
+  console.log('selectedNode', selectedNode)
+
   return (
-    <>
+    <Row gutter={16}>
       {/* 关系网络 */}
-      <Col span={24}>
+      <Col span={16}>
         <RbCard 
           title={t('userMemory.relationshipNetwork')}
           headerType="borderless"
-          headerClassName="rb:text-[18px]! rb:leading-[24px]"
+          // extra={
+          //   <div
+          //     onClick={handleFullScreen}
+          //     className="rb:group rb:cursor-pointer rb:hover:text-[#212332] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:flex rb:items-center rb:gap-1"
+          //   >
+          //     <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/fullScreen.svg')] rb:hover:bg-[url('@/assets/images/fullScreen_hover.svg')]"></div>
+          //     {t('userMemory.fullScreen')}
+          //   </div>
+          // }
         >
-          <div className="rb:h-[496px]">
+          <div className="rb:h-129.5 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-sm">
             {nodes.length === 0 ? (
               <Empty className="rb:h-full" />
             ) : (
               <ReactEcharts
                 option={{
-                  colors: ['#155EEF', '4DA8FF', '#9C6FFF', '#8BAEF7', '#369F21', '#FF5D34', '#FF8A4C', '#FFB048'],
+                  colors: colors,
                   tooltip: {
                     show: false
+                  },
+                  legend: {
+                    show: true,
+                    bottom: 12,
                   },
                   series: [
                     {
@@ -131,10 +173,17 @@ const RelationshipNetwork:FC = () => {
                       layout: 'force',
                       data: nodes || [],
                       links: links || [],
-                      categories: categories || [],
+                      categories: categories.map(vo => ({
+                        name: t(`userMemory.${vo.name}`)
+                      })) || [],
                       roam: true,
+                      label: {
+                        show: true,
+                        position: 'right',
+                        formatter: '{b}',
+                      },
                       lineStyle: {
-                        color: 'source',
+                        color: '#5B6167',
                         curveness: 0.3
                       },
                       force: {
@@ -166,70 +215,69 @@ const RelationshipNetwork:FC = () => {
                     }
                   ]
                 }}
-                style={{ height: '496px', width: '100%' }}
+                style={{ height: '518px', width: '100%' }}
                 notMerge={false}
                 lazyUpdate={true}
                 onEvents={{
                   // 节点点击事件处理
-                  click: (params: { dataType: string; data: Node }) => {
+                  click: (params: { dataType: string; data: Node; name: string }) => {
                     if (params.dataType === 'node') {
                       // 处理节点点击事件
                       console.log('Node clicked:', params.data);
+                      // 使用函数式更新避免状态依赖问题
                       setSelectedNode(params.data)
-                      if (selectedNode?.id === params.data.id) {
-                        setSelectedNode(null)
-                      } else {
-                        setSelectedNode(params.data)
-                      }
                     }
                   }
                 }}
               />
             )}
           </div>
-          <div className="rb:bg-[#F0F3F8] rb:flex rb:items-center rb:gap-[24px] rb:rounded-[0px_0px_12px_12px] rb:p-[14px_40px] rb:m-[0_-20px_-16px_-16px]">
-            {operations.map((item) => (
-              <div key={item.name} className="rb:flex rb:items-center rb:text-[#5B6167] rb:leading-[20px]">
-                <img src={item.icon} className="rb:w-[20px] rb:h-[20px] rb:mr-[4px]" />
-                {t(`userMemory.${item.name}`)}
-              </div>
-            ))}
-          </div>
         </RbCard>
       </Col>
       {/* 记忆详情 */}
-      <Col span={24}>
+      <Col span={8}>
         <RbCard 
           title={t('userMemory.memoryDetails')}
           headerType="borderless"
-          headerClassName="rb:text-[18px]! rb:leading-[24px]"
+          bodyClassName='rb:p-0!'
         >
-          {(!selectedNode || (!selectedNode?.description && !selectedNode?.entity_type))
-            ? <Empty 
-              url={empty}
-              title={t('userMemory.memoryDetailEmpty')}
-              subTitle={t('userMemory.memoryDetailEmptyDesc')}
-              className="rb:mb-[12px]"
-              size={88}
-            />
-            : <>
-              {selectedNode?.description &&
-                <div className="rb:font-medium rb:mb-[8px]">
-                  {t('userMemory.description')}
-                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-[8px]"> {selectedNode.description}</div>
+          <div className="rb:h-133.5">
+            {!selectedNode
+              ? <Empty 
+                url={detailEmpty}
+                subTitle={t('userMemory.memoryDetailEmptyDesc')}
+                className="rb:h-full rb:mx-10 rb:text-center"
+                size={90}
+              />
+              : <>
+                <div className="rb:bg-[#F6F8FC] rb:border-t rb:border-b rb:border-[#DFE4ED] rb:font-medium rb:py-2 rb:px-4 rb:h-10">{selectedNode.name}</div>
+                <div className="rb:p-4">
+                  <>
+                    <div className="rb:font-medium rb:leading-5">{t('userMemory.memoryContent')}</div>
+                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                      {['Chunk', 'Dialogue', 'MemorySummary'].includes(selectedNode.label) && 'content' in selectedNode.properties
+                        ? selectedNode.properties.content
+                        : selectedNode.label === 'ExtractedEntity' && 'description' in selectedNode.properties
+                        ? selectedNode.properties.description
+                        : selectedNode.label === 'Statement' && 'statement' in selectedNode.properties
+                        ? selectedNode.properties.statement
+                        : ''
+                      }
+                    </div>
+                  </>
+                  <div className="rb:font-medium rb:mb-2 rb:mt-4">
+                    <div className="rb:font-medium rb:leading-5">{t('userMemory.created_at')}</div>
+                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4">
+                      {dayjs(selectedNode?.properties.created_at).format('YYYY-MM-DD HH:mm:ss')}
+                    </div>
+                  </div>
                 </div>
-              }
-              {selectedNode?.entity_type &&
-                <div className="rb:font-medium rb:mb-[8px]">
-                  {t('userMemory.entityType')}
-                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-[8px]"> {selectedNode.entity_type}</div>
-                </div>
-              }
-            </>
-          }
+              </>
+            }
+          </div>
         </RbCard>
       </Col>
-    </>
+    </Row>
   )
 }
 // 使用React.memo包装组件，避免不必要的渲染

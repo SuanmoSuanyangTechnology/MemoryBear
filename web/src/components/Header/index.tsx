@@ -3,6 +3,7 @@ import { Layout, Dropdown, Space, Breadcrumb } from 'antd';
 import type { MenuProps, BreadcrumbProps } from 'antd';
 import { UserOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import { useUser } from '@/store/user';
 import { useMenu } from '@/store/menu';
 import styles from './index.module.css'
@@ -12,12 +13,35 @@ const { Header } = Layout;
 
 const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
   const { t } = useTranslation();
+  const location = useLocation();
   const settingModalRef = useRef<SettingModalRef>(null)
   const userInfoModalRef = useRef<UserInfoModalRef>(null)
 
   const { user, logout } = useUser();
   const { allBreadcrumbs } = useMenu();
-  const breadcrumbs = allBreadcrumbs[source] || [];
+  
+  // 根据当前路由动态选择面包屑源
+  const getBreadcrumbSource = () => {
+    const pathname = location.pathname;
+    
+    // 知识库列表页面使用默认的 space 面包屑
+    if (pathname === '/knowledge-base') {
+      return 'space';
+    }
+    
+    // 知识库详情相关页面使用独立的面包屑
+    if (pathname.includes('/knowledge-base/') && pathname !== '/knowledge-base') {
+      return 'space-detail';
+    }
+    
+    // 其他页面使用传入的 source
+    return source;
+  };
+  
+  const breadcrumbSource = getBreadcrumbSource();
+  const breadcrumbs = allBreadcrumbs[breadcrumbSource] || [];
+  
+
 
   // 处理退出登录
   const handleLogout = () => {
