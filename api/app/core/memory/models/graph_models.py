@@ -224,6 +224,7 @@ class StatementNode(Node):
         chunk_id: ID of the parent chunk this statement belongs to
         stmt_type: Type of the statement (from ontology)
         statement: The actual statement text content
+        speaker_role: Speaker role (用户/AI助手/系统)
         emotion_intensity: Optional emotion intensity (0.0-1.0) - displayed on node
         emotion_target: Optional emotion target (person or object name)
         emotion_subject: Optional emotion subject (self/other/object)
@@ -248,6 +249,7 @@ class StatementNode(Node):
     chunk_id: str = Field(..., description="ID of the parent chunk")
     stmt_type: str = Field(..., description="Type of the statement")
     statement: str = Field(..., description="The statement text content")
+    speaker_role: Optional[str] = Field(None, description="Speaker role: 用户/AI助手/系统")
     
     # Emotion fields (ordered as requested, emotion_intensity first for display)
     emotion_intensity: Optional[float] = Field(
