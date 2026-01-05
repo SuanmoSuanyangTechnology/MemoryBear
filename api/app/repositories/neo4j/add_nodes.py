@@ -90,6 +90,7 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
                 "stmt_type": statement.stmt_type,
                 "temporal_info": statement.temporal_info.value,
                 "statement": statement.statement,
+                "speaker_role": statement.speaker_role if hasattr(statement, 'speaker_role') else None,
                 "connect_strength": statement.connect_strength,
                 "chunk_embedding": statement.chunk_embedding if statement.chunk_embedding else None,
                 # "temporal_validity_valid_at": statement.temporal_validity_valid_at.isoformat() if statement.temporal_validity_valid_at else None,

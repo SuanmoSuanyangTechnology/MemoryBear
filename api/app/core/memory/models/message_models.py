@@ -64,6 +64,7 @@ class Statement(BaseModel):
         connect_strength: Optional connection strength ('Strong' or 'Weak')
         temporal_validity: Optional temporal validity range
         triplet_extraction_info: Optional triplet extraction results
+        speaker_role: Speaker role (用户/AI助手/系统)
         emotion_type: Optional emotion type (joy/sadness/anger/fear/surprise/neutral)
         emotion_intensity: Optional emotion intensity (0.0-1.0)
         emotion_keywords: Optional list of emotion keywords
@@ -85,6 +86,8 @@ class Statement(BaseModel):
     triplet_extraction_info: Optional[TripletExtractionResponse] = Field(
         None, description="The triplet extraction information of the statement."
     )
+    # Speaker role field
+    speaker_role: Optional[str] = Field(None, description="Speaker role: 用户/AI助手/系统")
     # Emotion fields
     emotion_type: Optional[str] = Field(None, description="Emotion type: joy/sadness/anger/fear/surprise/neutral")
     emotion_intensity: Optional[float] = Field(None, ge=0.0, le=1.0, description="Emotion intensity: 0.0-1.0")

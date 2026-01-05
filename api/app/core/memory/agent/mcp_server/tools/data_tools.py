@@ -104,18 +104,18 @@ async def Data_type_differentiation(
 @mcp.tool()
 async def Data_write(
     ctx: Context,
-    content: str,
-    user_id: str,
-    apply_id: str,
-    group_id: str,
-    memory_config: MemoryConfig,
+    messages_list: list = None,
+    user_id: str = None,
+    apply_id: str = None,
+    group_id: str = None,
+    memory_config: MemoryConfig = None,
 ) -> dict:
     """
     Write data to the database/file system.
     
     Args:
         ctx: FastMCP context for dependency injection
-        content: Data content to write
+        messages_list: List of messages with role info [{"role": "user", "content": "..."}, ...]
         user_id: User identifier
         apply_id: Application identifier
         group_id: Group identifier
@@ -125,24 +125,28 @@ async def Data_write(
         dict: Contains 'status', 'saved_to', and 'data' fields
     """
     try:
+        if not messages_list:
+            raise ValueError("必须提供 messages_list 参数")
+        
         # Ensure output directory exists
         os.makedirs("data_output", exist_ok=True)
         file_path = os.path.join("data_output", "user_data.csv")
 
         # Write data - clients are constructed inside write() from memory_config
         await write(
-            content=content,
+            messages_list=messages_list,
             user_id=user_id,
             apply_id=apply_id,
             group_id=group_id,
             memory_config=memory_config,
         )
-        logger.info(f"Write completed successfully! Config: {memory_config.config_name}")
+        
+        logger.info(f"Write completed successfully with {len(messages_list)} messages! Config: {memory_config.config_name}")
 
         return {
             "status": "success",
             "saved_to": file_path,
-            "data": content,
+            "data": f"{len(messages_list)} messages",
             "config_id": memory_config.config_id,
             "config_name": memory_config.config_name,
         }
