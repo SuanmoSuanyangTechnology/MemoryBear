@@ -10,11 +10,10 @@ import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage
-from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 
-from app.core.workflow.expression_evaluator import evaluate_condition
-from app.core.workflow.nodes import WorkflowState, NodeFactory
+from app.core.workflow.graph_builder import GraphBuilder
+from app.core.workflow.nodes import WorkflowState
 from app.core.workflow.nodes.enums import NodeType
 
 # from app.core.tools.registry import ToolRegistry
@@ -191,155 +190,10 @@ class WorkflowExecutor:
             编译后的状态图
         """
         logger.info(f"开始构建工作流图: execution_id={self.execution_id}")
-
-        # 分析 End 节点的前缀配置和相邻且被引用的节点
-        end_prefixes, adjacent_and_referenced = self._analyze_end_node_prefixes() if stream else ({}, set())
-
-        # 1. 创建状态图
-        workflow = StateGraph(WorkflowState)
-
-        # 2. 添加所有节点（包括 start 和 end）
-        start_node_id = None
-        end_node_ids = []
-
-        for node in self.nodes:
-            node_type = node.get("type")
-            node_id = node.get("id")
-            cycle_node = node.get("cycle")
-            if cycle_node:
-                # 处于循环子图中的节点由 CycleGraphNode 进行构建处理
-                continue
-
-            # 记录 start 和 end 节点 ID
-            if node_type == NodeType.START:
-                start_node_id = node_id
-            elif node_type == NodeType.END:
-                end_node_ids.append(node_id)
-
-            # 创建节点实例（现在 start 和 end 也会被创建）
-            node_instance = NodeFactory.create_node(node, self.workflow_config)
-
-            if node_type in [NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER]:
-
-                # Find all edges whose source is the current node
-                related_edge = [edge for edge in self.edges if edge.get("source") == node_id]
-
-                # Iterate over each branch
-                for idx in range(len(related_edge)):
-                    # Generate a condition expression for each edge
-                    # Used later to determine which branch to take based on the node's output
-                    # Assumes node output `node.<node_id>.output` matches the edge's label
-                    # For example, if node.123.output == 'CASE1', take the branch labeled 'CASE1'
-                    related_edge[idx]['condition'] = f"node.{node_id}.output == '{related_edge[idx]['label']}'"
-
-            if node_instance:
-                # 如果是流式模式，且节点有 End 前缀配置，注入配置
-                if stream and node_id in end_prefixes:
-                    # 将 End 前缀配置注入到节点实例
-                    node_instance._end_node_prefix = end_prefixes[node_id]
-                    logger.info(f"为节点 {node_id} 注入 End 前缀配置")
-
-                # 如果是流式模式，标记节点是否与 End 相邻且被引用
-                if stream:
-                    node_instance._is_adjacent_to_end = node_id in adjacent_and_referenced
-                    if node_id in adjacent_and_referenced:
-                        logger.info(f"节点 {node_id} 标记为与 End 相邻且被引用")
-
-                # 包装节点的 run 方法
-                # 使用函数工厂避免闭包问题
-                if stream:
-                    # 流式模式：创建 async generator 函数
-                    # LangGraph 会收集所有 yield 的值，最后一个 yield 的字典会被合并到 state
-                    def make_stream_func(inst):
-                        async def node_func(state: WorkflowState):
-                            # logger.debug(f"流式执行节点: {inst.node_id}, 支持流式: {inst.supports_streaming()}")
-                            async for item in inst.run_stream(state):
-                                yield item
-
-                        return node_func
-
-                    workflow.add_node(node_id, make_stream_func(node_instance))
-                else:
-                    # 非流式模式：创建 async function
-                    def make_func(inst):
-                        async def node_func(state: WorkflowState):
-                            return await inst.run(state)
-
-                        return node_func
-
-                    workflow.add_node(node_id, make_func(node_instance))
-
-                logger.debug(f"添加节点: {node_id} (type={node_type}, stream={stream})")
-
-        # 3. 添加边
-        # 从 START 连接到 start 节点
-        if start_node_id:
-            workflow.add_edge(START, start_node_id)
-            logger.debug(f"添加边: START -> {start_node_id}")
-
-        for edge in self.workflow_config.get("edges", []):
-            source = edge.get("source")
-            target = edge.get("target")
-            edge_type = edge.get("type")
-            condition = edge.get("condition")
-
-            # 跳过从 start 节点出发的边（因为已经从 START 连接到 start）
-            if source == start_node_id:
-                # 但要连接 start 到下一个节点
-                workflow.add_edge(source, target)
-                logger.debug(f"添加边: {source} -> {target}")
-                continue
-
-            # # 处理到 end 节点的边
-            # if target in end_node_ids:
-            #     # 连接到 end 节点
-            #     workflow.add_edge(source, target)
-            #     logger.debug(f"添加边: {source} -> {target}")
-            #     continue
-
-            # 跳过错误边（在节点内部处理）
-            if edge_type == "error":
-                continue
-
-            if condition:
-                # 条件边
-                def make_router(cond, tgt):
-                    """Dynamically generate a conditional router function to ensure each branch has a unique name."""
-
-
-                    def router_fn(state: WorkflowState):
-                        if evaluate_condition(
-                                cond,
-                                state.get("variables", {}),
-                                state.get("node_outputs", {}),
-                                {
-                                    "execution_id": state.get("execution_id"),
-                                    "workspace_id": state.get("workspace_id"),
-                                    "user_id": state.get("user_id")
-                                }
-                        ):
-                            return tgt
-                        return END
-
-                    # 动态修改函数名，避免重复
-                    router_fn.__name__ = f"router_{tgt}"
-                    return router_fn
-
-                router_fn = make_router(condition, target)
-                workflow.add_conditional_edges(source, router_fn)
-                logger.debug(f"添加条件边: {source} -> {target} (condition={condition})")
-            else:
-                # 普通边
-                workflow.add_edge(source, target)
-                logger.debug(f"添加边: {source} -> {target}")
-
-        # 从 end 节点连接到 END
-        for end_node_id in end_node_ids:
-            workflow.add_edge(end_node_id, END)
-            logger.debug(f"添加边: {end_node_id} -> END")
-
-        # 4. 编译图
-        graph = workflow.compile()
+        graph = GraphBuilder(
+            self.workflow_config,
+            stream=stream,
+        ).build()
         logger.info(f"工作流图构建完成: execution_id={self.execution_id}")
 
         return graph

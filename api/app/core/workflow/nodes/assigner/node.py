@@ -2,7 +2,6 @@ import logging
 import re
 from typing import Any
 
-from app.core.workflow.expression_evaluator import ExpressionEvaluator
 from app.core.workflow.nodes.assigner.config import AssignerNodeConfig
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.enums import AssignmentOperator
@@ -29,6 +28,7 @@ class AssignerNode(BaseNode):
             None or the result of the assignment operation.
         """
         # Initialize a variable pool for accessing conversation, node, and system variables
+        logger.info(f"节点 {self.node_id} 开始执行")
         pool = VariablePool(state)
         for assignment in self.typed_config.assignments:
             # Get the target variable selector (e.g., "conv.test")
@@ -45,14 +45,13 @@ class AssignerNode(BaseNode):
 
             # Get the value or expression to assign
             value = assignment.value
-            if isinstance(value, list):
-                value = '.'.join(value)
-            value = ExpressionEvaluator.evaluate(
-                expression=value,
-                variables=pool.get_all_conversation_vars(),
-                node_outputs=pool.get_all_node_outputs(),
-                system_vars=pool.get_all_system_vars(),
-            )
+            pattern = r"\{\{\s*(.*?)\s*\}\}"
+            if isinstance(value, str):
+                expression = re.match(pattern, value)
+                if expression:
+                    expression = expression.group(1)
+                    expression = re.sub(pattern, r"\1", expression).strip()
+                    value = self.get_variable(expression, state)
 
             # Select the appropriate assignment operator instance based on the target variable type
             operator: AssignmentOperatorInstance = AssignmentOperatorResolver.resolve_by_value(
@@ -63,6 +62,8 @@ class AssignerNode(BaseNode):
 
             # Execute the configured assignment operation
             match assignment.operation:
+                case AssignmentOperator.COVER:
+                    operator.assign()
                 case AssignmentOperator.ASSIGN:
                     operator.assign()
                 case AssignmentOperator.CLEAR:

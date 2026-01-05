@@ -1,12 +1,13 @@
 """Condition Configuration"""
+from typing import Any
 from pydantic import Field, BaseModel, field_validator
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
-from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator
+from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType
 
 
 class ConditionDetail(BaseModel):
-    comparison_operator: ComparisonOperator = Field(
+    operator: ComparisonOperator = Field(
         ...,
         description="Comparison operator used to evaluate the condition"
     )
@@ -16,9 +17,14 @@ class ConditionDetail(BaseModel):
         description="Value to compare against"
     )
 
-    right: str = Field(
+    right: Any = Field(
         ...,
         description="Value to compare with"
+    )
+
+    input_type: ValueInputType = Field(
+        ...,
+        description="Value input type for comparison"
     )
 
 
@@ -26,7 +32,7 @@ class ConditionBranchConfig(BaseModel):
     """Configuration for a conditional branch"""
 
     logical_operator: LogicOperator = Field(
-        default=LogicOperator.AND.value,
+        default=LogicOperator.AND,
         description="Logical operator used to combine multiple condition expressions"
     )
 
