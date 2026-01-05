@@ -12,36 +12,40 @@ class HomePageService:
         """获取首页统计数据"""
         # 计算时间范围
         now = datetime.now()
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         week_start = now - timedelta(days=now.weekday())
         week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
         
         # 获取各项统计数据
-        total_models, new_models_this_month = HomePageRepository.get_model_statistics(
-            db, tenant_id, month_start
+        total_models, total_llm, total_embedding, model_week_growth_rate = HomePageRepository.get_model_statistics(
+            db, tenant_id, week_start
         )
         
-        active_workspaces, new_workspaces_this_month = HomePageRepository.get_workspace_statistics(
-            db, tenant_id, month_start
+        active_workspaces, new_workspaces_this_week, workspace_week_growth_rate = HomePageRepository.get_workspace_statistics(
+            db, tenant_id, week_start
         )
         
-        total_users, new_users_this_month = HomePageRepository.get_user_statistics(
-            db, tenant_id, month_start
+        total_users, new_users_this_week, user_week_growth_rate = HomePageRepository.get_user_statistics(
+            db, tenant_id, week_start
         )
         
-        running_apps, new_apps_this_week = HomePageRepository.get_app_statistics(
+        running_apps, new_apps_this_week, app_week_growth_rate = HomePageRepository.get_app_statistics(
             db, tenant_id, week_start
         )
         
         return HomeStatistics(
             total_models=total_models,
-            new_models_this_month=new_models_this_month,
+            total_llm=total_llm,
+            total_embedding=total_embedding,
+            model_week_growth_rate=model_week_growth_rate,
             active_workspaces=active_workspaces,
-            new_workspaces_this_month=new_workspaces_this_month,
+            new_workspaces_this_week=new_workspaces_this_week,
+            workspace_week_growth_rate=workspace_week_growth_rate,
             total_users=total_users,
-            new_users_this_month=new_users_this_month,
+            new_users_this_week=new_users_this_week,
+            user_week_growth_rate=user_week_growth_rate,
             running_apps=running_apps,
-            new_apps_this_week=new_apps_this_week
+            new_apps_this_week=new_apps_this_week,
+            app_week_growth_rate=app_week_growth_rate
         )
     
     @staticmethod
