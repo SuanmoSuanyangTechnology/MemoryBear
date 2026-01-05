@@ -42,7 +42,6 @@ from app.core.memory.storage_services.extraction_engine.deduplication.two_stage_
 )
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.embedding_generation import (
     embedding_generation,
-    embedding_generation_all,
     generate_entity_embeddings_from_triplets,
 )
 
@@ -179,7 +178,7 @@ class ExtractionOrchestrator:
             for dialog in dialog_data_list:
                 for chunk in dialog.chunks:
                     all_statements_list.extend(chunk.statements)
-            total_statements = len(all_statements_list)
+            len(all_statements_list)
 
             # 步骤 2: 并行执行三元组提取、时间信息提取、情绪提取和基础嵌入生成
             logger.info("步骤 2/6: 并行执行三元组提取、时间信息提取、情绪提取和嵌入生成")
@@ -201,9 +200,9 @@ class ExtractionOrchestrator:
                         all_entities_list.extend(triplet_info.entities)
                         all_triplets_list.extend(triplet_info.triplets)
             
-            total_entities = len(all_entities_list)
-            total_triplets = len(all_triplets_list)
-            total_temporal = sum(len(temporal_map) for temporal_map in temporal_maps)
+            len(all_entities_list)
+            len(all_triplets_list)
+            sum(len(temporal_map) for temporal_map in temporal_maps)
 
             # 步骤 3: 生成实体嵌入（依赖三元组提取结果）
             logger.info("步骤 3/6: 生成实体嵌入")
@@ -385,7 +384,7 @@ class ExtractionOrchestrator:
         
         # 用于跟踪已完成的陈述句数量
         completed_statements = 0
-        total_statements = len(all_statements)
+        len(all_statements)
 
         # 全局并行处理所有陈述句
         async def extract_for_statement(stmt_data, stmt_index):
@@ -497,7 +496,7 @@ class ExtractionOrchestrator:
         
         # 用于跟踪已完成的时间提取数量
         completed_temporal = 0
-        total_temporal_statements = len(all_statements)
+        len(all_statements)
 
         # 全局并行处理所有陈述句
         async def extract_for_statement(stmt_data, stmt_index):
@@ -552,6 +551,8 @@ class ExtractionOrchestrator:
     ) -> List[Dict[str, Any]]:
         """
         从对话中提取情绪信息（优化版：全局陈述句级并行）
+        
+        只对 speaker_role 为 "用户" 的陈述句进行情绪提取
 
         Args:
             dialog_data_list: 对话数据列表
@@ -599,14 +600,26 @@ class ExtractionOrchestrator:
             logger.info("情绪提取未启用，跳过")
             return [{} for _ in dialog_data_list]
         
-        # 收集所有陈述句
+        # 收集所有陈述句（只收集 speaker_role 为 "用户" 的）
+        total_statements = 0
+        filtered_statements = 0
+        
         for d_idx, dialog in enumerate(dialog_data_list):
             for chunk in dialog.chunks:
                 for statement in chunk.statements:
-                    all_statements.append((statement, data_config))
-                    statement_metadata.append((d_idx, statement.id))
+                    total_statements += 1
+                    # 只处理用户的陈述句
+                    if hasattr(statement, 'speaker_role') and statement.speaker_role == "用户":
+                        all_statements.append((statement, data_config))
+                        statement_metadata.append((d_idx, statement.id))
+                        filtered_statements += 1
 
-        logger.info(f"收集到 {len(all_statements)} 个陈述句，开始全局并行提取情绪")
+        logger.info(f"总陈述句: {total_statements}, 用户陈述句: {filtered_statements}, 开始全局并行提取情绪")
+
+        # 如果没有用户陈述句，直接返回空映射
+        if not all_statements:
+            logger.info("没有用户陈述句，跳过情绪提取")
+            return [{} for _ in dialog_data_list]
 
         # 初始化情绪提取服务
         from app.services.emotion_extraction_service import EmotionExtractionService
@@ -641,7 +654,7 @@ class ExtractionOrchestrator:
                     successful_extractions += 1
 
         # 统计提取结果
-        logger.info(f"情绪信息提取完成，共成功提取 {successful_extractions}/{len(all_statements)} 个情绪")
+        logger.info(f"情绪信息提取完成，共成功提取 {successful_extractions}/{len(all_statements)} 个用户情绪")
 
         return emotion_maps
 
