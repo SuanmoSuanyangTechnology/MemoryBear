@@ -5,7 +5,7 @@ from typing import List
 import pytz
 
 from app.schemas.tool_schema import ToolParameter, ToolResult, ParameterType
-from .base import BuiltinTool
+from app.core.tools.builtin.base import BuiltinTool
 
 
 class DateTimeTool(BuiltinTool):
@@ -27,7 +27,7 @@ class DateTimeTool(BuiltinTool):
                 type=ParameterType.STRING,
                 description="操作类型",
                 required=True,
-                enum=["format", "convert_timezone", "timestamp_to_datetime", "datetime_to_timestamp", "calculate", "now"]
+                enum=["format", "convert_timezone", "timestamp_to_datetime", "now"]
             ),
             ToolParameter(
                 name="input_value",
