@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2025-11-10 18:52:55
  * @LastEditors: yujiangping
- * @LastEditTime: 2025-11-24 11:23:33
+ * @LastEditTime: 2025-12-29 16:09:13
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import type { RadioChangeEvent } from 'antd';
@@ -51,10 +51,10 @@ const CreateDatasetModal = forwardRef<CreateDatasetModalRef,CreateDatasetModalRe
     //   title: t('knowledgeBase.webLink'),
     //   description: t('knowledgeBase.readStaticWebPage')
     // },
-    // {
-    //   title: t('knowledgeBase.customText'),
-    //   description: t('knowledgeBase.manuallyInputText')
-    // },
+    {
+      title: t('knowledgeBase.customText'),
+      description: t('knowledgeBase.manuallyInputText')
+    },
   ]
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
@@ -111,7 +111,7 @@ const CreateDatasetModal = forwardRef<CreateDatasetModalRef,CreateDatasetModalRe
 
   return (
     <RbModal
-      title={t('knowledgeBase.createA') + ' ' + t('knowledgeBase.text') + ' ' + t('knowledgeBase.dataset')}
+      title={t('knowledgeBase.createA') + ' ' + t('knowledgeBase.dataset')}
       open={visible}
       onCancel={handleClose}
       okText={t('common.create')}
@@ -133,13 +133,13 @@ const CreateDatasetModal = forwardRef<CreateDatasetModalRef,CreateDatasetModalRe
                     <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[1].title}</span>
                     <span className='rb:text-xs rb:text-gray-500'>{items[1].description}</span>
                   </Flex>
-                </Radio>
+                </Radio> */}
                 <Radio value={2} style={getActiveRadioStyle(value === 2)} className='rb:w-full'>
                   <Flex gap="small" align='start' justify='start' vertical>
-                    <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[2].title}</span>
-                    <span className='rb:text-xs rb:text-gray-500'>{items[2].description}</span>
+                    <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[1].title}</span>
+                    <span className='rb:text-xs rb:text-gray-500'>{items[1].description}</span>
                   </Flex>
-                </Radio> */}
+                </Radio> 
               </Radio.Group>
             </div>
         </div>

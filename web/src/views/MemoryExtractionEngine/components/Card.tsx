@@ -12,6 +12,7 @@ interface CardProps {
   expanded?: boolean;
   handleExpand?: (type: string) => void;
   className?: string;
+  headerClassName?: string;
   bodyClassName?: string;
 }
 
@@ -23,6 +24,7 @@ const Card: FC<CardProps> = ({
   expanded,
   handleExpand,
   className,
+  headerClassName,
   bodyClassName,
 }) => {
   const { t } = useTranslation()
@@ -37,12 +39,13 @@ const Card: FC<CardProps> = ({
           onClick={() => handleExpand(type)}
         >
           {expanded ? t('common.foldUp') : t('common.expanded')}
-          <img src={down} className={clsx("rb:w-[16px] rb:h-[16px] rb:ml-[4px]", {
+          <img src={down} className={clsx("rb:w-4 rb:h-4 rb:ml-1", {
             'rb:rotate-180': !expanded,
           })} />
         </div>
       )}
       className={className}
+      headerClassName={headerClassName}
       bodyClassName={bodyClassName}
     >
       {(expanded || !(type && handleExpand)) && children}

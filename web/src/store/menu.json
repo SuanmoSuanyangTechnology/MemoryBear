@@ -27,6 +27,59 @@
       "subs": []
     },
     {
+      "id": 7,
+      "parent": 0,
+      "code": "tool",
+      "label": "工具管理",
+      "i18nKey": "menu.toolManagement",
+      "path": "/tool",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "subs": []
+    },
+    {
+      "id": 6,
+      "parent": 0,
+      "code": "pricing",
+      "label": "收费管理",
+      "i18nKey": "menu.pricing",
+      "path": "/pricing",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "subs": [
+        {
+          "id": 61,
+          "parent": 6,
+          "code": "order",
+          "label": "订单支付",
+          "i18nKey": "menu.orderPayment",
+          "path": "/order-pay",
+          "enable": true,
+          "display": false,
+          "level": 1,
+          "sort": 0,
+          "subs": []
+        },
+        {
+          "id": 62,
+          "parent": 6,
+          "code": "orderHistory",
+          "label": "订单记录",
+          "i18nKey": "menu.orderHistory",
+          "path": "/orders",
+          "enable": true,
+          "display": false,
+          "level": 1,
+          "sort": 0,
+          "subs": []
+        }
+      ]
+    },
+    {
       "id": 3,
       "parent": 0,
       "code": "user",
@@ -183,6 +236,32 @@
           "level": 1,
           "sort": 0,
           "subs": null
+        },
+        {
+          "id": 72,
+          "parent": 7,
+          "code": "emotionEngine",
+          "label": "情感引擎",
+          "i18nKey": "menu.emotionEngine",
+          "path": "/emotion-engine/:id",
+          "enable": true,
+          "display": false,
+          "level": 1,
+          "sort": 0,
+          "subs": null
+        },
+        {
+          "id": 72,
+          "parent": 7,
+          "code": "selfReflectionEngine",
+          "label": "反思引擎",
+          "i18nKey": "menu.selfReflectionEngine",
+          "path": "/reflection-engine/:id",
+          "enable": true,
+          "display": false,
+          "level": 1,
+          "sort": 0,
+          "subs": null
         }
       ]
     },
@@ -205,12 +284,38 @@
           "code": "userMemoryDetail",
           "label": "记忆详情",
           "i18nKey": "menu.userMemoryDetail",
-          "path": "/user-memory/:id",
+          "path": "/user-memory/neo4j/:id",
           "enable": true,
           "display": false,
           "level": 2,
           "sort": 0,
-          "subs": null
+          "subs": [
+            {
+              "id": 811,
+              "parent": 81,
+              "code": "statementDetail",
+              "label": "记忆详情",
+              "i18nKey": "menu.statementDetail",
+              "path": "/statement/:id",
+              "enable": true,
+              "display": false,
+              "level": 3,
+              "sort": 0,
+              "subs": null
+            }
+          ]
+        },
+        {
+          "id": 81,
+          "parent": 8,
+          "code": "userMemoryDetail",
+          "label": "记忆详情",
+          "i18nKey": "menu.userMemoryDetail",
+          "path": "/user-memory/:id",
+          "enable": true,
+          "display": false,
+          "level": 2,
+          "sort": 0
         }
       ]
     },
@@ -236,6 +341,21 @@
       "label": "记忆验证",
       "i18nKey": "menu.memoryConversation",
       "path": "/memory-conversation",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "icon": null,
+      "iconActive": null,
+      "subs": null
+    },
+    {
+      "id": 11,
+      "parent": 0,
+      "code": "apiKey",
+      "label": "API KEY管理",
+      "i18nKey": "menu.apiKeyManagement",
+      "path": "/api-key",
       "enable": true,
       "display": true,
       "level": 1,

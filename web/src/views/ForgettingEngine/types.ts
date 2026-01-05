@@ -40,11 +40,17 @@ export interface CurveRecord {
 
 export interface ConfigForm {
   config_id?: string;
-  statement_granularity?: string;
-  include_dialogue_context?: boolean;
-  max_context?: string;
   lambda_time: string | number;
   lambda_mem: string | number;
   offset: string | number;
+  
+  decay_constant: string | number;
+  max_history_length: string | number;
+  forgetting_threshold: string | number;
+  min_days_since_access: string | number;
+  enable_llm_summary: boolean;
+  max_merge_batch_size: string | number;
+  forgetting_interval_hours: string | number;
+
   [key: string]: any;
 }

@@ -146,11 +146,19 @@ export interface CreateFolderModalRefProps{
   refreshTable?: () => void;
 }
 
-//他建图片数据集
-export interface CreateImageModalRef{
-  handleOpen: (kb_id:string,parent_id:string) => void;
+//创建图片数据集 / 创建自定义文本数据集
+export interface CreateSetModalRef{
+  handleOpen: (kb_id:string, parent_id:string) => void;
 }
-export interface CreateImageMoealRefProps{
+export interface CreateSetMoealRefProps{
+  refreshTable?: () => void;
+}
+
+// 创建内容
+export interface CreateContentModalRef {
+  handleOpen: (kb_id: string, parent_id: string) => void;
+}
+export interface CreateContentModalRefProps {
   refreshTable?: () => void;
 }
 
