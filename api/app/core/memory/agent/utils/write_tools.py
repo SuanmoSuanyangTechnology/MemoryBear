@@ -32,7 +32,7 @@ logger = get_agent_logger(__name__)
 
 
 async def write(
-    messages_list: List[Dict[str, str]] = None,
+    messages_list: List[Dict[str, str]],
     user_id: str = None,
     apply_id: str = None,
     group_id: str = None,
@@ -53,8 +53,6 @@ async def write(
         memory_config: MemoryConfig object containing all configuration
         ref_id: Reference ID, defaults to "wyl20251027"
     """
-    if not messages_list:
-        raise ValueError("必须提供 messages_list 参数")
     
     # Extract config values
     embedding_model_id = str(memory_config.embedding_model_id)
