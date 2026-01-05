@@ -208,8 +208,14 @@ class ChunkerClient:
                 if isinstance(chunk_text, str) and len(chunk_text.strip()) >= (self.min_characters_per_chunk or 50):
                     valid_chunks.append(c)
 
+            # 获取原始消息列表
+            original_messages = []
+            if hasattr(dialogue, 'context') and hasattr(dialogue.context, 'msgs'):
+                original_messages = dialogue.context.msgs
+
             dialogue.chunks = [
                 Chunk(
+                    text=original_messages,  # 保留原始消息列表(包含 role 信息)
                     content=c.text if hasattr(c, 'text') else str(c),
                     metadata={
                         "start_index": getattr(c, "start_index", None),

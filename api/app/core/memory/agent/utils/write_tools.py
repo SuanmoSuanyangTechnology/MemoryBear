@@ -6,6 +6,7 @@ pipeline. Only MemoryConfig is needed - clients are constructed internally.
 """
 import time
 from datetime import datetime
+from typing import List, Dict, Optional
 
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
@@ -31,11 +32,11 @@ logger = get_agent_logger(__name__)
 
 
 async def write(
-    content: str,
-    user_id: str,
-    apply_id: str,
-    group_id: str,
-    memory_config: MemoryConfig,
+    messages_list: List[Dict[str, str]] = None,
+    user_id: str = None,
+    apply_id: str = None,
+    group_id: str = None,
+    memory_config: MemoryConfig = None,
     ref_id: str = "wyl20251027",
 ) -> None:
     """
@@ -45,13 +46,16 @@ async def write(
     internally from the config.
 
     Args:
-        content: Dialogue content to process
+        messages_list: List of messages with role info [{"role": "user", "content": "..."}, ...]
         user_id: User identifier
         apply_id: Application identifier
         group_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
         ref_id: Reference ID, defaults to "wyl20251027"
     """
+    if not messages_list:
+        raise ValueError("必须提供 messages_list 参数")
+    
     # Extract config values
     embedding_model_id = str(memory_config.embedding_model_id)
     chunker_strategy = memory_config.chunker_strategy
@@ -64,6 +68,7 @@ async def write(
     logger.info(f"Embedding model: {memory_config.embedding_model_name}")
     logger.info(f"Chunker strategy: {chunker_strategy}")
     logger.info(f"Group ID: {group_id}")
+    logger.info(f"Processing {len(messages_list)} messages with role information")
 
     # Construct clients from memory_config using factory pattern with db session
     with get_db_context() as db:
@@ -91,7 +96,7 @@ async def write(
         group_id=group_id,
         user_id=user_id,
         apply_id=apply_id,
-        content=content,
+        messages_list=messages_list,
         ref_id=ref_id,
         config_id=config_id,
     )

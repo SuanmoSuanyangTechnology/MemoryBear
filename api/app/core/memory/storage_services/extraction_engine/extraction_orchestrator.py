@@ -1034,6 +1034,7 @@ class ExtractionOrchestrator:
                         apply_id=dialog_data.apply_id,
                         run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                         statement=statement.statement,
+                        speaker_role=getattr(statement, 'speaker_role', None),  # 添加 speaker_role 字段
                         statement_embedding=statement.statement_embedding,
                         valid_at=statement.temporal_validity.valid_at if hasattr(statement, 'temporal_validity') and statement.temporal_validity else None,
                         invalid_at=statement.temporal_validity.invalid_at if hasattr(statement, 'temporal_validity') and statement.temporal_validity else None,

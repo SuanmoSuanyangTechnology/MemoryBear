@@ -71,6 +71,63 @@ class StatementExtractor:
         self.llm_client = llm_client
         self.config = config or StatementExtractionConfig()
 
+    def _infer_speaker_role(self, statement_text: str, chunk) -> Optional[str]:
+        """从 chunk.text (原始消息列表) 中获取 speaker role。
+        
+        直接使用原始请求中的 role 信息,通过匹配 statement 所属的消息来确定角色。
+        
+        Args:
+            statement_text: The statement text to match
+            chunk: The chunk containing original messages with role info
+            
+        Returns:
+            Speaker role (用户/AI助手/系统) or None if cannot be determined
+        """
+        # 优先使用 chunk.text (原始消息列表)
+        if not hasattr(chunk, 'text') or not chunk.text:
+            return None
+        
+        statement_clean = statement_text.strip()
+        
+        # 遍历原始消息列表,找到包含该 statement 的消息
+        best_match_role = None
+        best_match_similarity = 0
+        
+        for msg in chunk.text:
+            if not hasattr(msg, 'role') or not hasattr(msg, 'msg'):
+                continue
+            
+            message_content = msg.msg.strip()
+            role = msg.role
+            
+            # 策略1: 精确匹配 - statement 在消息中
+            if statement_clean in message_content:
+                return role
+            
+            # 策略2: 反向匹配 - 消息在 statement 中 (LLM 可能总结了消息)
+            if message_content in statement_clean:
+                return role
+            
+            # 策略3: 字符级模糊匹配 - 计算共同字符的比例
+            import re
+            statement_chars = set(re.sub(r'[^\w]', '', statement_clean))
+            message_chars = set(re.sub(r'[^\w]', '', message_content))
+            
+            if statement_chars and message_chars:
+                intersection = statement_chars & message_chars
+                similarity = len(intersection) / min(len(statement_chars), len(message_chars))
+                
+                # 记录最佳匹配
+                if similarity > best_match_similarity:
+                    best_match_similarity = similarity
+                    best_match_role = role
+        
+        # 如果字符级匹配的相似度足够高 (>= 30%),使用该角色
+        if best_match_role and best_match_similarity >= 0.3:
+            return best_match_role
+        
+        return None
+    
     async def _extract_statements(self, chunk, group_id: Optional[str] = None, dialogue_content: str = None) -> List[Statement]:
         """Process a single chunk and return extracted statements
 
@@ -137,6 +194,9 @@ class StatementExtractor:
                 except (KeyError, ValueError):
                     relevence_info = RelevenceInfo.RELEVANT
 
+                # 推断 speaker role
+                speaker_role = self._infer_speaker_role(extracted_stmt.statement, chunk)
+                
                 chunk_statement = Statement(
                     statement=extracted_stmt.statement,
                     stmt_type=stmt_type,
@@ -144,6 +204,7 @@ class StatementExtractor:
                     relevence_info=relevence_info,
                     chunk_id=chunk.id,
                     group_id=group_id,
+                    speaker_role=speaker_role,
                 )
                 chunk_statements.append(chunk_statement)
 
