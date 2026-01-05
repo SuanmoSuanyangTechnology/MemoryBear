@@ -255,21 +255,13 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
     
-    async def write_memory(
-        self, 
-        group_id: str, 
-        messages_list: List[Dict[str, str]],
-        config_id: Optional[str] = None, 
-        db: Session = None, 
-        storage_type: str = None, 
-        user_rag_memory_id: str = None
-    ) -> str:
+    async def write_memory(self, group_id: str, message: str, config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
         """
         Process write operation with config_id
         
         Args:
             group_id: Group identifier (also used as end_user_id)
-            messages_list: List of messages with role info [{"role": "user", "content": "..."}, ...]
+            message: Message string with role markers (e.g., "user: hello\\nassistant: hi")
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -316,36 +308,30 @@ class MemoryAgentService:
             
             raise ValueError(error_msg)
         
-        logger.info(f"Writing {len(messages_list)} messages with role information for group {group_id}")
+        logger.info(f"Writing message with role markers for group {group_id}")
         
         mcp_config = get_mcp_server_config()
         client = MultiServerMCPClient(mcp_config)
 
         if storage_type == "rag":
-            # Combine messages for RAG storage
-            combined_message = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages_list])
-            result = await write_rag(group_id, combined_message, user_rag_memory_id)
+            # Use message directly for RAG storage
+            result = await write_rag(group_id, message, user_rag_memory_id)
             return result
         else:
             async with client.session("data_flow") as session:
                 logger.debug("Connected to MCP Server: data_flow")
                 tools = await load_mcp_tools(session)
                 workflow_errors = []  # Track errors from workflow
-                messages_result: Optional[Any] = None  # Initialize to avoid UnboundLocalError
 
                 # Pass memory_config to the graph workflow
                 async with make_write_graph(group_id, tools, group_id, group_id, memory_config=memory_config) as graph:
                     logger.debug("Write graph created successfully")
 
                     config = {"configurable": {"thread_id": group_id}}
-
+                    
+                    messages_result = None
                     async for event in graph.astream(
-                            {
-                                "messages": [],  # 空列表，因为我们使用 raw_messages
-                                "raw_messages": messages_list,  # 原始消息列表
-                                "memory_config": memory_config, 
-                                "errors": []
-                            },
+                           {"content": message, "memory_config": memory_config, "errors": []},
                             stream_mode="values",
                             config=config
                     ):
@@ -390,7 +376,7 @@ class MemoryAgentService:
                 
                 raise ValueError(error_msg)
             
-            return self.writer_messages_deal(messages_result, start_time, group_id, config_id, str(messages_list))
+            return self.writer_messages_deal(messages_result, start_time, group_id, config_id, message)
     
     async def read_memory(
         self,
