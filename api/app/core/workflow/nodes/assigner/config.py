@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import Field, BaseModel
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
@@ -19,7 +21,7 @@ class AssignmentItem(BaseModel):
         description="Assignment operator",
     )
 
-    value: str | list[str] = Field(
+    value: Any = Field(
         ...,
         description="Value(s) to assign to the variable(s)",
     )
