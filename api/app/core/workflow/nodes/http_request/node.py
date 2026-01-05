@@ -165,24 +165,6 @@ class HttpRequestNode(BaseNode):
             case _:
                 raise RuntimeError(f"HttpRequest method not supported: {self.typed_config.method}")
 
-    def build_conditional_edge_expressions(self):
-        """
-        Build conditional edge expressions for workflow branching.
-
-        When the HTTP error handling strategy is set to `BRANCH`,
-        this node exposes a single conditional output labeled "ERROR".
-        The workflow engine uses this output to create an explicit
-        error-handling branch for downstream nodes.
-
-        Returns:
-            list[str]:
-                - ["ERROR"] if error handling strategy is BRANCH
-                - An empty list if no conditional branching is required
-        """
-        if self.typed_config.error_handle.method == HttpErrorHandle.BRANCH:
-            return ["ERROR"]
-        return []
-
     async def execute(self, state: WorkflowState) -> dict | str:
         """
         Execute the HTTP request node.
