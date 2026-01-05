@@ -255,15 +255,7 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
     
-    async def write_memory(
-        self, 
-        group_id: str, 
-        messages_list: List[Dict[str, str]],
-        config_id: Optional[str] = None, 
-        db: Session = None, 
-        storage_type: str = None, 
-        user_rag_memory_id: str = None
-    ) -> str:
+    async def write_memory(self, group_id: str, message: str, config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
         """
         Process write operation with config_id
         
@@ -328,7 +320,6 @@ class MemoryAgentService:
                 logger.debug("Connected to MCP Server: data_flow")
                 tools = await load_mcp_tools(session)
                 workflow_errors = []  # Track errors from workflow
-                messages_result: Optional[Any] = None  # Initialize to avoid UnboundLocalError
 
                 # Pass memory_config to the graph workflow
                 async with make_write_graph(group_id, tools, group_id, group_id, memory_config=memory_config) as graph:
@@ -382,7 +373,7 @@ class MemoryAgentService:
                 
                 raise ValueError(error_msg)
             
-            return self.writer_messages_deal(messages_result, start_time, group_id, config_id, str(messages_list))
+            return self.writer_messages_deal(messages_result, start_time, group_id, config_id, message)
     
     async def read_memory(
         self,
