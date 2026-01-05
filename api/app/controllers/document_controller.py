@@ -1,23 +1,26 @@
+import datetime
 import os
 from typing import Optional
-import datetime
 import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
+from app.celery_app import celery_app
+from app.controllers import file_controller
 from app.core.config import settings
+from app.core.logging_config import get_api_logger
+from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
-from app.models.user_model import User
 from app.models import document_model
+from app.models.user_model import User
 from app.schemas import document_schema
 from app.schemas.response_schema import ApiResponse
-from app.core.response_utils import success
 from app.services import document_service, file_service, knowledge_service
-from app.controllers import file_controller
-from app.celery_app import celery_app
-from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
-from app.core.logging_config import get_api_logger
+
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -106,7 +109,7 @@ async def get_documents(
             "has_next": True if page * pagesize < total else False
         }
     }
-    return success(data=result, msg="Query of document list succeeded")
+    return success(data=jsonable_encoder(result), msg="Query of document list succeeded")
 
 
 @router.post("/document", response_model=ApiResponse)
@@ -124,7 +127,7 @@ async def create_document(
         api_logger.debug(f"Start creating a document: {create_data.file_name}")
         db_document = document_service.create_document(db=db, document=create_data, current_user=current_user)
         api_logger.info(f"Document created successfully: {db_document.file_name} (ID: {db_document.id})")
-        return success(data=document_schema.Document.model_validate(db_document), msg="Document creation successful")
+        return success(data=jsonable_encoder(document_schema.Document.model_validate(db_document)), msg="Document creation successful")
     except Exception as e:
         api_logger.error(f"Document creation failed: {create_data.file_name} - {str(e)}")
         raise
@@ -153,7 +156,7 @@ async def get_document(
             )
 
         api_logger.info(f"Document query successful: {db_document.file_name} (ID: {db_document.id})")
-        return success(data=document_schema.Document.model_validate(db_document), msg="Successfully obtained document information")
+        return success(data=jsonable_encoder(document_schema.Document.model_validate(db_document)), msg="Successfully obtained document information")
     except HTTPException:
         raise
     except Exception as e:
@@ -221,7 +224,7 @@ async def update_document(
         )
 
     # 5. Return the updated document
-    return success(data=document_schema.Document.model_validate(db_document), msg="Document information updated successfully")
+    return success(data=jsonable_encoder(document_schema.Document.model_validate(db_document)), msg="Document information updated successfully")
 
 
 @router.delete("/{document_id}", response_model=ApiResponse)

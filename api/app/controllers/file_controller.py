@@ -1,22 +1,25 @@
 import os
-from typing import Any, Optional
 from pathlib import Path
 import shutil
+from typing import Any, Optional
 import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.logging_config import get_api_logger
+from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
-from app.models.user_model import User
 from app.models import file_model
+from app.models.user_model import User
 from app.schemas import file_schema, document_schema
 from app.schemas.response_schema import ApiResponse
-from app.core.response_utils import success
 from app.services import file_service, document_service
-from app.core.logging_config import get_api_logger
+
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -93,11 +96,11 @@ async def get_files(
             "has_next": True if page * pagesize < total else False
         }
     }
-    return success(data=result, msg="Query of file list succeeded")
+    return success(data=jsonable_encoder(result), msg="Query of file list succeeded")
 
 
 @router.post("/folder", response_model=ApiResponse)
-def create_folder(
+async def create_folder(
         kb_id: uuid.UUID,
         parent_id: uuid.UUID,
         folder_name: str = '/',
@@ -121,7 +124,7 @@ def create_folder(
         )
         db_file = file_service.create_file(db=db, file=create_folder, current_user=current_user)
         api_logger.info(f"Folder created successfully: {db_file.file_name} (ID: {db_file.id})")
-        return success(data=file_schema.File.model_validate(db_file), msg="Folder creation successful")
+        return success(data=jsonable_encoder(file_schema.File.model_validate(db_file)), msg="Folder creation successful")
     except Exception as e:
         api_logger.error(f"Folder creation failed: {folder_name} - {str(e)}")
         raise
@@ -207,7 +210,7 @@ async def upload_file(
     db_document = document_service.create_document(db=db, document=create_data, current_user=current_user)
 
     api_logger.info(f"File upload successfully: {file.filename} (file_id: {db_file.id}, document_id: {db_document.id})")
-    return success(data=document_schema.Document.model_validate(db_document), msg="File upload successful")
+    return success(data=jsonable_encoder(document_schema.Document.model_validate(db_document)), msg="File upload successful")
 
 
 @router.post("/customtext", response_model=ApiResponse)
@@ -288,7 +291,7 @@ async def custom_text(
     db_document = document_service.create_document(db=db, document=create_document_data, current_user=current_user)
 
     api_logger.info(f"custom text upload successfully: {create_data.title} (file_id: {db_file.id}, document_id: {db_document.id})")
-    return success(data=document_schema.Document.model_validate(db_document), msg="custom text upload successful")
+    return success(data=jsonable_encoder(document_schema.Document.model_validate(db_document)), msg="custom text upload successful")
 
 
 @router.get("/{file_id}", response_model=Any)
@@ -362,7 +365,7 @@ async def update_file(
     # 2. Update fields (only update non-null fields)
     api_logger.debug(f"Start updating the file fields: {file_id}")
     updated_fields = []
-    for field, value in update_data.items():
+    for field, value in update_data.dict(exclude_unset=True).items():
         if hasattr(db_file, field):
             old_value = getattr(db_file, field)
             if old_value != value:
@@ -387,7 +390,7 @@ async def update_file(
         )
 
     # 4. Return the updated file
-    return success(data=file_schema.File.model_validate(db_file), msg="File information updated successfully")
+    return success(data=jsonable_encoder(file_schema.File.model_validate(db_file)), msg="File information updated successfully")
 
 
 @router.delete("/{file_id}", response_model=ApiResponse)

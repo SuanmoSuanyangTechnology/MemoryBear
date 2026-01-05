@@ -1,27 +1,28 @@
 import os
 from typing import Any, Optional
 import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.core.config import settings
-from app.db import get_db
-from app.core.rag.llm.cv_model import QWenCV
-from app.dependencies import get_current_user
-from app.models.user_model import User
-from app.models.document_model import Document
-from app.models import knowledge_model, knowledgeshare_model
-from app.core.rag.models.chunk import DocumentChunk
-from app.schemas import chunk_schema
-from app.schemas.response_schema import ApiResponse
-from app.core.response_utils import success
-from app.services import knowledge_service, document_service, file_service, knowledgeshare_service
-from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.logging_config import get_api_logger
 from app.core.rag.common.settings import kg_retriever
 from app.core.rag.llm.chat_model import Base
+from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.llm.embedding_model import OpenAIEmbed
-from app.core.logging_config import get_api_logger
+from app.core.rag.models.chunk import DocumentChunk
+from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.response_utils import success
+from app.db import get_db
+from app.dependencies import get_current_user
+from app.models import knowledge_model, knowledgeshare_model
+from app.models.document_model import Document
+from app.models.user_model import User
+from app.schemas import chunk_schema
+from app.schemas.response_schema import ApiResponse
+from app.services import knowledge_service, document_service, file_service, knowledgeshare_service
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -144,7 +145,7 @@ async def get_preview_chunks(
         }
     }
     api_logger.info(f"Querying the document block preview list successful: total={total}, returned={len(chunks)} records")
-    return success(data=result, msg="Querying the document block preview list succeeded")
+    return success(data=jsonable_encoder(result), msg="Querying the document block preview list succeeded")
 
 
 @router.get("/{kb_id}/{document_id}/chunks", response_model=ApiResponse)
@@ -202,7 +203,7 @@ async def get_chunks(
             "has_next": True if page * pagesize < total else False
         }
     }
-    return success(data=result, msg="Query of document chunk list succeeded")
+    return success(data=jsonable_encoder(result), msg="Query of document chunk list succeeded")
 
 
 @router.post("/{kb_id}/{document_id}/chunk", response_model=ApiResponse)
@@ -263,7 +264,7 @@ async def create_chunk(
     db_document.chunk_num += 1
     db.commit()
 
-    return success(data=chunk, msg="Document chunk creation successful")
+    return success(data=jsonable_encoder(chunk), msg="Document chunk creation successful")
 
 
 @router.get("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
@@ -290,7 +291,7 @@ async def get_chunk(
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
     total, items = vector_service.get_by_segment(doc_id=doc_id)
     if total:
-        return success(data=items[0], msg="Document chunk query successful")
+        return success(data=jsonable_encoder(items[0]), msg="Document chunk query successful")
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -327,7 +328,7 @@ async def update_chunk(
         chunk = items[0]
         chunk.page_content = content
         vector_service.update_by_segment(chunk)
-        return success(data=chunk, msg="The document chunk has been successfully updated")
+        return success(data=jsonable_encoder(chunk), msg="The document chunk has been successfully updated")
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -392,7 +393,7 @@ async def retrieve_chunks(
         knowledge_model.Knowledge.chunk_num > 0,
         knowledge_model.Knowledge.status == 1
     ]
-    private_items = knowledge_service.get_chunded_knowledgeids(
+    private_items = knowledge_service.get_chunked_knowledgeids(
         db=db,
         filters=filters,
         current_user=current_user
@@ -405,7 +406,7 @@ async def retrieve_chunks(
         knowledge_model.Knowledge.chunk_num > 0,
         knowledge_model.Knowledge.status == 1
     ]
-    items = knowledge_service.get_chunded_knowledgeids(
+    items = knowledge_service.get_chunked_knowledgeids(
         db=db,
         filters=filters,
         current_user=current_user
@@ -473,4 +474,4 @@ async def retrieve_chunks(
                 doc = kg_retriever.retrieval(question=retrieve_data.query, workspace_ids=workspace_ids, kb_ids= kb_ids, emb_mdl=embedding_model, llm=chat_model)
                 if doc:
                     rs.insert(0, doc)
-            return success(data=rs, msg="retrieval successful")
+            return success(data=jsonable_encoder(rs), msg="retrieval successful")
