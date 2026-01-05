@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List
+from typing import List, Dict
 from datetime import datetime
 
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import DialogueChunker
@@ -12,7 +12,7 @@ async def get_chunked_dialogs(
         group_id: str = "group_1",
         user_id: str = "user1",
         apply_id: str = "applyid",
-        content: str = "这是用户的输入",
+        messages_list: List[Dict[str, str]] = None,
         ref_id: str = "wyl_20251027",
         config_id: str = None
 ) -> List[DialogData]:
@@ -23,7 +23,7 @@ async def get_chunked_dialogs(
         group_id: Group identifier
         user_id: User identifier
         apply_id: Application identifier
-        content: Dialog content
+        messages_list: List of messages with role info [{"role": "user", "content": "..."}, ...]
         ref_id: Reference identifier
         config_id: Configuration ID for processing
 
