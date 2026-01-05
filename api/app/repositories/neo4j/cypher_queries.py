@@ -27,6 +27,7 @@ SET s += {
     apply_id: statement.apply_id,
     stmt_type: statement.stmt_type,
     statement: statement.statement,
+    speaker_role: statement.speaker_role,
     emotion_intensity: statement.emotion_intensity,
     emotion_target: statement.emotion_target,
     emotion_subject: statement.emotion_subject,
