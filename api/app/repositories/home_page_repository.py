@@ -13,39 +13,73 @@ from app.models.app_model import App
 class HomePageRepository:
     
     @staticmethod
-    def get_model_statistics(db: Session, tenant_id: UUID, month_start: datetime) -> tuple[int, int]:
+    def get_model_statistics(db: Session, tenant_id: UUID, week_start: datetime) -> tuple[int, int, int, float]:
         """获取模型统计数据"""
         total_models = db.query(ModelConfig).filter(
             ModelConfig.tenant_id == tenant_id,
             ModelConfig.is_active == True
         ).count()
-        
-        new_models_this_month = db.query(ModelConfig).filter(
+
+        total_llm = db.query(ModelConfig).filter(
             ModelConfig.tenant_id == tenant_id,
             ModelConfig.is_active == True,
-            ModelConfig.created_at >= month_start
+            ModelConfig.type == "llm"
+        ).count()
+
+        total_embedding = db.query(ModelConfig).filter(
+            ModelConfig.tenant_id == tenant_id,
+            ModelConfig.is_active == True,
+            ModelConfig.type == "embedding"
         ).count()
         
-        return total_models, new_models_this_month
+        new_models_this_week = db.query(ModelConfig).filter(
+            ModelConfig.tenant_id == tenant_id,
+            ModelConfig.is_active == True,
+            ModelConfig.created_at >= week_start
+        ).count()
+
+        if total_models == 0:
+            growth_rate = 0.0
+        elif new_models_this_week == 0:
+            growth_rate = 0.0
+        else:
+            last_week_total = total_models - new_models_this_week
+            if last_week_total == 0:
+                growth_rate = 100.0
+            else:
+                growth_rate = round((new_models_this_week / last_week_total) * 100, 2)
+        
+        return total_models, total_llm, total_embedding, growth_rate
     
     @staticmethod
-    def get_workspace_statistics(db: Session, tenant_id: UUID, month_start: datetime) -> tuple[int, int]:
+    def get_workspace_statistics(db: Session, tenant_id: UUID, week_start: datetime) -> tuple[int, int, float]:
         """获取工作空间统计数据"""
         active_workspaces = db.query(Workspace).filter(
             Workspace.tenant_id == tenant_id,
             Workspace.is_active == True
         ).count()
         
-        new_workspaces_this_month = db.query(Workspace).filter(
+        new_workspaces_this_week = db.query(Workspace).filter(
             Workspace.tenant_id == tenant_id,
             Workspace.is_active == True,
-            Workspace.created_at >= month_start
+            Workspace.created_at >= week_start
         ).count()
+
+        if active_workspaces == 0:
+            growth_rate = 0.0
+        elif new_workspaces_this_week == 0:
+            growth_rate = 0.0
+        else:
+            last_week_workspaces = active_workspaces - new_workspaces_this_week
+            if last_week_workspaces == 0:
+                growth_rate = 100.0
+            else:
+                growth_rate = round((new_workspaces_this_week / last_week_workspaces) * 100, 2)
         
-        return active_workspaces, new_workspaces_this_month
+        return active_workspaces, new_workspaces_this_week, growth_rate
     
     @staticmethod
-    def get_user_statistics(db: Session, tenant_id: UUID, month_start: datetime) -> tuple[int, int]:
+    def get_user_statistics(db: Session, tenant_id: UUID, week_start: datetime) -> tuple[int, int, float]:
         """获取用户统计数据"""
         workspace_ids = db.query(Workspace.id).filter(
             Workspace.tenant_id == tenant_id,
@@ -61,20 +95,31 @@ class HomePageRepository:
             App.status == "active"
         ).count()
 
-        new_users_this_month = db.query(EndUser).join(
+        new_users_this_week = db.query(EndUser).join(
             App,
             EndUser.app_id == App.id
         ).filter(
             App.workspace_id.in_(workspace_ids),
             App.is_active == True,
             App.status == "active",
-            EndUser.created_at >= month_start
+            EndUser.created_at >= week_start
         ).count()
+
+        if total_users == 0:
+            growth_rate = 0.0
+        elif new_users_this_week == 0:
+            growth_rate = 0.0
+        else:
+            last_week_users = total_users - new_users_this_week
+            if last_week_users == 0:
+                growth_rate = 100.0
+            else:
+                growth_rate = round((new_users_this_week / last_week_users) * 100, 2)
         
-        return total_users, new_users_this_month
+        return total_users, new_users_this_week, growth_rate
     
     @staticmethod
-    def get_app_statistics(db: Session, tenant_id: UUID, week_start: datetime) -> tuple[int, int]:
+    def get_app_statistics(db: Session, tenant_id: UUID, week_start: datetime) -> tuple[int, int, float]:
         """获取应用统计数据"""
         workspace_ids = db.query(Workspace.id).filter(
             Workspace.tenant_id == tenant_id,
@@ -93,8 +138,19 @@ class HomePageRepository:
             App.status == "active",
             App.created_at >= week_start
         ).count()
+
+        if running_apps == 0:
+            growth_rate = 0.0
+        elif new_apps_this_week == 0:
+            growth_rate = 0.0
+        else:
+            last_week_apps = running_apps - new_apps_this_week
+            if last_week_apps == 0:
+                growth_rate = 100.0
+            else:
+                growth_rate = round((new_apps_this_week / last_week_apps) * 100, 2)
         
-        return running_apps, new_apps_this_week
+        return running_apps, new_apps_this_week, growth_rate
     
     @staticmethod
     def get_workspaces_with_counts(db: Session, tenant_id: UUID) -> tuple[list[Workspace], Dict[UUID, int], Dict[UUID, int]]:
