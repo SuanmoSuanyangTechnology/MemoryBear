@@ -122,10 +122,8 @@ async def write_server(
     """
     Write service endpoint - processes write operations synchronously
     
-    使用多条消息模式，可以区分用户和模型的消息
-    
     Args:
-        user_input: Write request containing messages and group_id
+        user_input: Write request containing message and group_id
     
     Returns:
         Response with write operation status
@@ -160,9 +158,7 @@ async def write_server(
             api_logger.warning("workspace_id 为空，无法使用 rag 存储，将使用 neo4j 存储")
             storage_type = 'neo4j'
     
-    # 直接使用 message 字符串
     api_logger.info(f"Write service requested for group {user_input.group_id}, storage_type: {storage_type}, user_rag_memory_id: {user_rag_memory_id}")
-    
     try:
         result = await memory_agent_service.write_memory(
             user_input.group_id, 
