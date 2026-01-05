@@ -255,13 +255,21 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
     
-    async def write_memory(self, group_id: str, message: str, config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
+    async def write_memory(
+        self, 
+        group_id: str, 
+        messages_list: List[Dict[str, str]] = None,
+        config_id: Optional[str] = None, 
+        db: Session = None, 
+        storage_type: str = None, 
+        user_rag_memory_id: str = None
+    ) -> str:
         """
         Process write operation with config_id
         
         Args:
             group_id: Group identifier (also used as end_user_id)
-            message: Message to write
+            messages_list: List of messages with role info [{"role": "user", "content": "..."}, ...]
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -273,6 +281,8 @@ class MemoryAgentService:
         Raises:
             ValueError: If config loading fails or write operation fails
         """
+        if not messages_list:
+            raise ValueError("必须提供 messages_list 参数")
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
             try:
@@ -307,11 +317,16 @@ class MemoryAgentService:
                 audit_logger.log_operation(operation="WRITE", config_id=config_id, group_id=group_id, success=False, duration=duration, error=error_msg)
             
             raise ValueError(error_msg)
+        
+        logger.info(f"Writing {len(messages_list)} messages with role information for group {group_id}")
+        
         mcp_config = get_mcp_server_config()
         client = MultiServerMCPClient(mcp_config)
 
         if storage_type == "rag":
-            result = await write_rag(group_id, message, user_rag_memory_id)
+            # Combine messages for RAG storage
+            combined_message = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages_list])
+            result = await write_rag(group_id, combined_message, user_rag_memory_id)
             return result
         else:
             async with client.session("data_flow") as session:
@@ -326,11 +341,16 @@ class MemoryAgentService:
                     config = {"configurable": {"thread_id": group_id}}
 
                     async for event in graph.astream(
-                            {"messages": message, "memory_config": memory_config, "errors": []},
+                            {
+                                "messages": [],  # 空列表，因为我们使用 raw_messages
+                                "raw_messages": messages_list,  # 原始消息列表
+                                "memory_config": memory_config, 
+                                "errors": []
+                            },
                             stream_mode="values",
                             config=config
                     ):
-                        messages = event.get('messages')
+                        messages_result = event.get('messages')
                         # Capture any errors from the state
                         if event.get('errors'):
                             workflow_errors.extend(event.get('errors', []))
@@ -353,7 +373,7 @@ class MemoryAgentService:
                 
                 raise ValueError(f"Write workflow failed: {error_details}")
             
-            return self.writer_messages_deal(messages, start_time, group_id, config_id, message)
+            return self.writer_messages_deal(messages_result, start_time, group_id, config_id, str(messages_list))
     
     async def read_memory(
         self,
