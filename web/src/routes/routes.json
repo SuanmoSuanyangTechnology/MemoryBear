@@ -2,6 +2,7 @@
   {
     "element": "AuthLayout",
     "children": [
+      { "path": "/index", "element": "Index" },
       { "path": "/user-management", "element": "UserManagement" },
       { "path": "/model", "element": "ModelManagement" },
       { "path": "/space", "element": "SpaceManagement" },
