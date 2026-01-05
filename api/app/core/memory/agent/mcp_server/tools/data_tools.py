@@ -104,7 +104,7 @@ async def Data_type_differentiation(
 @mcp.tool()
 async def Data_write(
     ctx: Context,
-    messages_list: list = None,
+    messages_list: list,
     user_id: str = None,
     apply_id: str = None,
     group_id: str = None,
@@ -125,8 +125,6 @@ async def Data_write(
         dict: Contains 'status', 'saved_to', and 'data' fields
     """
     try:
-        if not messages_list:
-            raise ValueError("必须提供 messages_list 参数")
         
         # Ensure output directory exists
         os.makedirs("data_output", exist_ok=True)
