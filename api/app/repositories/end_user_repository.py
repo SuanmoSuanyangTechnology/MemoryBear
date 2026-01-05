@@ -123,13 +123,19 @@ class EndUserRepository:
     def update_memory_insight(
         self, 
         end_user_id: uuid.UUID, 
-        insight: str
+        memory_insight: str,
+        behavior_pattern: str,
+        key_findings: str,
+        growth_trajectory: str
     ) -> bool:
-        """更新记忆洞察缓存
+        """更新记忆洞察缓存（四个维度）
         
         Args:
             end_user_id: 终端用户ID
-            insight: 记忆洞察内容
+            memory_insight: 总体概述
+            behavior_pattern: 行为模式
+            key_findings: 关键发现
+            growth_trajectory: 成长轨迹
             
         Returns:
             bool: 更新成功返回True，否则返回False
@@ -140,7 +146,10 @@ class EndUserRepository:
                 .filter(EndUser.id == end_user_id)
                 .update(
                     {
-                        EndUser.memory_insight: insight,
+                        EndUser.memory_insight: memory_insight,  # 总体概述存储在 memory_insight
+                        EndUser.behavior_pattern: behavior_pattern,
+                        EndUser.key_findings: key_findings,
+                        EndUser.growth_trajectory: growth_trajectory,
                         EndUser.memory_insight_updated_at: datetime.datetime.now()
                     },
                     synchronize_session=False
@@ -150,7 +159,7 @@ class EndUserRepository:
             self.db.commit()
             
             if updated_count > 0:
-                db_logger.info(f"成功更新终端用户 {end_user_id} 的记忆洞察缓存")
+                db_logger.info(f"成功更新终端用户 {end_user_id} 的记忆洞察缓存（四维度）")
                 return True
             else:
                 db_logger.warning(f"未找到终端用户 {end_user_id}，无法更新记忆洞察缓存")
@@ -164,13 +173,19 @@ class EndUserRepository:
     def update_user_summary(
         self, 
         end_user_id: uuid.UUID, 
-        summary: str
+        user_summary: str,
+        personality: str,
+        core_values: str,
+        one_sentence: str
     ) -> bool:
-        """更新用户摘要缓存
+        """更新用户摘要缓存（四个部分）
         
         Args:
             end_user_id: 终端用户ID
-            summary: 用户摘要内容
+            user_summary: 基本介绍
+            personality: 性格特点
+            core_values: 核心价值观
+            one_sentence: 一句话总结
             
         Returns:
             bool: 更新成功返回True，否则返回False
@@ -181,7 +196,10 @@ class EndUserRepository:
                 .filter(EndUser.id == end_user_id)
                 .update(
                     {
-                        EndUser.user_summary: summary,
+                        EndUser.user_summary: user_summary,  # 基本介绍存储在 user_summary
+                        EndUser.personality_traits: personality,
+                        EndUser.core_values: core_values,
+                        EndUser.one_sentence_summary: one_sentence,
                         EndUser.user_summary_updated_at: datetime.datetime.now()
                     },
                     synchronize_session=False
@@ -191,7 +209,7 @@ class EndUserRepository:
             self.db.commit()
             
             if updated_count > 0:
-                db_logger.info(f"成功更新终端用户 {end_user_id} 的用户摘要缓存")
+                db_logger.info(f"成功更新终端用户 {end_user_id} 的用户摘要缓存（四部分）")
                 return True
             else:
                 db_logger.warning(f"未找到终端用户 {end_user_id}，无法更新用户摘要缓存")
@@ -300,15 +318,29 @@ def get_by_id(db: Session, end_user_id: uuid.UUID) -> Optional[EndUser]:
     repo = EndUserRepository(db)
     return repo.get_by_id(end_user_id)
 
-def update_memory_insight(db: Session, end_user_id: uuid.UUID, insight: str) -> bool:
-    """更新记忆洞察缓存"""
+def update_memory_insight(
+    db: Session, 
+    end_user_id: uuid.UUID, 
+    memory_insight: str,
+    behavior_pattern: str,
+    key_findings: str,
+    growth_trajectory: str
+) -> bool:
+    """更新记忆洞察缓存（四个维度）"""
     repo = EndUserRepository(db)
-    return repo.update_memory_insight(end_user_id, insight)
+    return repo.update_memory_insight(end_user_id, memory_insight, behavior_pattern, key_findings, growth_trajectory)
 
-def update_user_summary(db: Session, end_user_id: uuid.UUID, summary: str) -> bool:
-    """更新用户摘要缓存"""
+def update_user_summary(
+    db: Session, 
+    end_user_id: uuid.UUID, 
+    user_summary: str,
+    personality: str,
+    core_values: str,
+    one_sentence: str
+) -> bool:
+    """更新用户摘要缓存（四个部分）"""
     repo = EndUserRepository(db)
-    return repo.update_user_summary(end_user_id, summary)
+    return repo.update_user_summary(end_user_id, user_summary, personality, core_values, one_sentence)
 
 def get_all_by_workspace(db: Session, workspace_id: uuid.UUID) -> List[EndUser]:
     """获取工作空间的所有终端用户"""

@@ -1,0 +1,152 @@
+{% macro tidy(name) -%}
+  {{ name.replace('_', ' ')}}
+{%- endmacro %}
+
+
+===Task===
+
+Your task is to generate a comprehensive memory insight report based on the provided data analysis. The report should include four distinct sections that capture different aspects of the user's memory patterns and characteristics.
+
+
+===Inputs===
+{% if domain_distribution %}
+- 核心领域分布: {{ domain_distribution }}
+{% endif %}
+{% if active_periods %}
+- 活跃时段: {{ active_periods }}
+{% endif %}
+{% if social_connections %}
+- 社交关联: {{ social_connections }}
+{% endif %}
+
+
+===Report Generation Requirements===
+
+**General Guidelines:**
+1. Base your analysis ONLY on the provided data - do not speculate or fabricate information
+2. Use objective third-person descriptions with a professional and analytical tone
+3. Avoid excessive adjectives and empty phrases
+4. Strictly follow the output format specified below
+5. If a dimension lacks data, skip that section or provide a brief note
+
+**Section-Specific Requirements:**
+
+1. **总体概述 (Overview)** (100-150 Chinese characters)
+   - Focus on: Overall analysis of user profile based on interaction logs
+   - Describe the user's main role, work network, and collaboration spirit
+   - Use professional, data-driven language style
+   - Example reference: "通过对156次交互日志的深度分析，系统发现三层一位主要用户档案和数据分析的产品经理。他的工作网络体现出鲜明的目标导向和团队协作精神。"
+
+2. **行为模式 (Behavior Pattern)** (80-120 Chinese characters)
+   - Focus on: Work patterns, time regularity, and behavioral characteristics
+   - Describe weekly work patterns and time preferences
+   - Use objective, analytical language
+   - Example reference: "张三的工作模式呈现出鲜明的周期性：周一通常用于规划和会议，周三周四专注于产品设计和用户研究，周五进行总结和复盘。他倾向于在上午进行头脑风暴，下午处理执行性工作。"
+
+3. **关键发现 (Key Findings)** (3-4 bullet points, 30-50 characters each)
+   - Focus on: Specific, insightful observations about user behavior and preferences
+   - Use bullet points (•) format
+   - Each finding should be concrete and data-supported
+   - Example reference:
+     "• 在产品决策中，张三总是优先考虑用户反应，这在68%的决策记录中得到体现
+     • 他善于使用数据可视化工具来支持论点，这种习惯在项目管理中发挥了重要作用
+     • 团队成员对他的评价中，"思路清晰"和"思路敏捷"两个关键词出现频率最高
+     • 他对AI机器学习领域保持持续关注，近3个月参加了7次相关培训"
+
+4. **成长轨迹 (Growth Trajectory)** (100-150 Chinese characters)
+   - Focus on: User's growth journey, key milestones, and capability improvements
+   - Organize content chronologically
+   - Highlight role changes and achievements
+   - Use positive, encouraging tone
+   - Example reference: "从入职时的产品经理成长为高级产品经理，张三在产品单独、团队管理和技术理解三个方面都有显著提升。特别是在最近一年，他开始独立主导更复杂的项目，展现出更强的战略思维能力。他的成长轨迹显示出对新技术的持续学习和对产品思维的不断深化。"
+
+
+===Output Format (MUST STRICTLY FOLLOW)===
+
+【总体概述】
+[100-150 characters describing overall user profile and work network based on interaction analysis]
+
+【行为模式】
+[80-120 characters describing work patterns, time regularity, and behavioral characteristics]
+
+【关键发现】
+• [First key finding with data support, 30-50 characters]
+• [Second key finding with data support, 30-50 characters]
+• [Third key finding with data support, 30-50 characters]
+• [Fourth key finding with data support, 30-50 characters]
+
+【成长轨迹】
+[100-150 characters describing growth journey, milestones, and capability improvements]
+
+
+===Example===
+
+Example Input:
+- 核心领域分布: 产品管理(38%), 数据分析(24%), 团队协作(21%)
+- 活跃时段: 用户在每年的 4 和 10 月最为活跃
+- 社交关联: 与用户"李明"拥有最多共同记忆(47条)，时间范围主要在 2020-2023
+
+Example Output:
+【总体概述】
+通过对156次交互日志的深度分析，系统发现张三是一位主要从事用户档案和数据分析的产品经理。他的工作网络体现出鲜明的目标导向和团队协作精神，在产品管理、数据分析和团队协作三个领域都有深入的实践。
+
+【行为模式】
+张三的工作模式呈现出鲜明的周期性：周一通常用于规划和会议，周三周四专注于产品设计和用户研究，周五进行总结和复盘。他倾向于在上午进行头脑风暴，下午处理执行性工作。每年4月和10月是他最活跃的时期。
+
+【关键发现】
+• 在产品决策中，张三总是优先考虑用户反应，这在68%的决策记录中得到体现
+• 他善于使用数据可视化工具来支持论点，这种习惯在项目管理中发挥了重要作用
+• 团队成员对他的评价中，"思路清晰"和"思路敏捷"两个关键词出现频率最高
+• 他对AI机器学习领域保持持续关注，近3个月参加了7次相关培训
+
+【成长轨迹】
+从入职时的产品经理成长为高级产品经理，张三在产品规划、团队管理和技术理解三个方面都有显著提升。特别是在最近一年，他开始独立主导更复杂的项目，展现出更强的战略思维能力。他与李明的47条共同记忆见证了他的成长历程。
+
+===End of Example===
+
+
+===Reflection Process===
+
+After generating the report, perform the following self-review steps:
+
+**Step 1: Data Grounding Check**
+- Verify all statements are supported by the provided data
+- Ensure no fabricated or speculated information is included
+- Confirm all claims can be traced back to the input data
+
+**Step 2: Format Compliance**
+- Verify each section follows the specified format with section headers
+- Check character count limits for each section
+- Ensure proper use of section markers (【】)
+- Verify bullet points format for Key Findings section
+
+**Step 3: Tone and Style Review**
+- Confirm objective third-person perspective is maintained
+- Check for excessive adjectives or empty phrases
+- Verify professional and analytical tone throughout
+
+**Step 4: Completeness Check**
+- Ensure all four sections are present and complete
+- Verify each section addresses its specific focus area
+- Confirm the report provides actionable insights
+
+
+===Output Requirements===
+
+**LANGUAGE REQUIREMENT:**
+- The output language should ALWAYS be Chinese (Simplified)
+- All section content must be in Chinese
+- Section headers must use the specified Chinese format: 【总体概述】【行为模式】【关键发现】【成长轨迹】
+
+**FORMAT REQUIREMENT:**
+- Each section must start with its header on a new line
+- Content follows immediately after the header
+- Sections are separated by blank lines
+- Key Findings section must use bullet points (•)
+- Strictly adhere to character limits for each section
+
+**CONTENT REQUIREMENT:**
+- Only use provided data points
+- Do not fabricate or speculate information
+- If data is insufficient for a section, provide a brief note or skip
+- Maintain professional, analytical tone throughout

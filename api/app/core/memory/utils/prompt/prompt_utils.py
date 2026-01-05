@@ -316,3 +316,73 @@ async def render_emotion_suggestions_prompt(
     })
     
     return rendered_prompt
+
+
+async def render_user_summary_prompt(
+    user_id: str,
+    entities: str,
+    statements: str
+) -> str:
+    """
+    Renders the user summary prompt using the user_summary.jinja2 template.
+
+    Args:
+        user_id: User identifier
+        entities: Core entities with frequency information
+        statements: Representative statement samples
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("user_summary.jinja2")
+    rendered_prompt = template.render(
+        user_id=user_id,
+        entities=entities,
+        statements=statements
+    )
+    
+    # 记录渲染结果到提示日志
+    log_prompt_rendering('user summary', rendered_prompt)
+    # 可选：记录模板渲染信息
+    log_template_rendering('user_summary.jinja2', {
+        'user_id': user_id,
+        'entities_len': len(entities),
+        'statements_len': len(statements)
+    })
+    
+    return rendered_prompt
+
+
+async def render_memory_insight_prompt(
+    domain_distribution: str = None,
+    active_periods: str = None,
+    social_connections: str = None
+) -> str:
+    """
+    Renders the memory insight prompt using the memory_insight.jinja2 template.
+
+    Args:
+        domain_distribution: 核心领域分布信息
+        active_periods: 活跃时段信息
+        social_connections: 社交关联信息
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("memory_insight.jinja2")
+    rendered_prompt = template.render(
+        domain_distribution=domain_distribution,
+        active_periods=active_periods,
+        social_connections=social_connections
+    )
+    
+    # 记录渲染结果到提示日志
+    log_prompt_rendering('memory insight', rendered_prompt)
+    # 可选：记录模板渲染信息
+    log_template_rendering('memory_insight.jinja2', {
+        'has_domain_distribution': bool(domain_distribution),
+        'has_active_periods': bool(active_periods),
+        'has_social_connections': bool(social_connections)
+    })
+    
+    return rendered_prompt

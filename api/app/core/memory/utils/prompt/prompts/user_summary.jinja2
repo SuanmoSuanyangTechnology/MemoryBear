@@ -1,0 +1,124 @@
+{% macro tidy(name) -%}
+  {{ name.replace('_', ' ')}}
+{%- endmacro %}
+
+
+===Task===
+
+Your task is to generate a comprehensive user profile based on the provided entities and statements. The profile should include four distinct sections that capture different aspects of the user's identity and characteristics.
+
+
+===Inputs===
+{% if user_id %}
+- User ID: {{ user_id }}
+{% endif %}
+{% if entities %}
+- Core Entities & Frequency: {{ entities }}
+{% endif %}
+{% if statements %}
+- Representative Statement Samples: {{ statements }}
+{% endif %}
+
+
+===Profile Generation Requirements===
+
+**General Guidelines:**
+1. Base your analysis ONLY on the provided data - do not speculate or fabricate information
+2. Use objective third-person descriptions with a restrained and neutral tone
+3. Avoid excessive adjectives and empty phrases
+4. Strictly follow the output format specified below
+
+**Section-Specific Requirements:**
+
+1. **Basic Introduction** (4-5 sentences, max 150 Chinese characters)
+   - Focus on: identity, occupation, location, and other basic demographic information
+   - Provide factual background about who the user is
+
+2. **Personality Traits** (2-3 sentences, max 80 Chinese characters)
+   - Focus on: personality characteristics, behavioral habits, communication style
+   - Describe observable patterns in how the user interacts and behaves
+
+3. **Core Values** (1-2 sentences, max 50 Chinese characters)
+   - Focus on: values, beliefs, goals, and aspirations
+   - Capture what matters most to the user and what drives their decisions
+
+4. **One-Sentence Summary** (1 sentence, max 40 Chinese characters)
+   - Provide a highly condensed characterization of the user's core traits
+   - Similar to a personal tagline or motto that captures their essence
+
+
+===Output Format (MUST STRICTLY FOLLOW)===
+
+【基本介绍】
+[4-5 sentences describing the user's basic identity, occupation, and location]
+
+【性格特点】
+[2-3 sentences describing the user's personality traits, behavioral habits, and communication style]
+
+【核心价值观】
+[1-2 sentences describing the user's values, beliefs, and goals]
+
+【一句话总结】
+[1 sentence providing a highly condensed summary of the user's core characteristics]
+
+
+===Example===
+
+Example Input:
+- User ID: user_12345
+- Core Entities & Frequency: 产品经理 (15), AI (12), 深圳 (10), 数据分析 (8), 团队协作 (7)
+- Representative Statement Samples: 我在深圳从事产品经理工作已经5年了 | 我相信好的产品源于对用户需求的深刻理解 | 我喜欢在团队中起到协调作用 | 数据驱动决策是我的工作原则
+
+Example Output:
+【基本介绍】
+我是张三，一名充满热情的高级产品经理。在过去的5年里，我专注于AI和数据驱动的产品设计，致力于创造能够真正改善用户生活的产品。我相信好的产品源于对用户需求的深刻理解和对技术可能性的不断探索。
+
+【性格特点】
+性格开朗，善于沟通，注重细节。喜欢在团队中起到协调作用，帮助大家达成共识。面对挑战时保持乐观，相信每个问题都有解决方案。
+
+【核心价值观】
+用户至上、数据驱动、持续学习、团队协作
+
+【一句话总结】
+"让每一个产品决策都充满温度。"
+
+===End of Example===
+
+
+===Reflection Process===
+
+After generating the profile, perform the following self-review steps:
+
+**Step 1: Data Grounding Check**
+- Verify all statements are supported by the provided entities and statements
+- Ensure no fabricated or speculated information is included
+- Confirm all claims can be traced back to the input data
+
+**Step 2: Format Compliance**
+- Verify each section follows the specified format with section headers
+- Check character count limits for each section
+- Ensure proper use of section markers (【】)
+
+**Step 3: Tone and Style Review**
+- Confirm objective third-person perspective is maintained
+- Check for excessive adjectives or empty phrases
+- Verify neutral and restrained tone throughout
+
+**Step 4: Completeness Check**
+- Ensure all four sections are present and complete
+- Verify each section addresses its specific focus area
+- Confirm the one-sentence summary effectively captures the user's essence
+
+
+===Output Requirements===
+
+**LANGUAGE REQUIREMENT:**
+- The output language should ALWAYS be Chinese (Simplified)
+- All section content must be in Chinese
+- Section headers must use the specified Chinese format: 【基本介绍】【性格特点】【核心价值观】【一句话总结】
+
+**FORMAT REQUIREMENT:**
+- Each section must start with its header on a new line
+- Content follows immediately after the header
+- Sections are separated by blank lines
+- Strictly adhere to character limits for each section

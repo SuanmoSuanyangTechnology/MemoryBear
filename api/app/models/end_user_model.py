@@ -23,14 +23,22 @@ class EndUser(Base):
     department = Column(String, nullable=True, comment="部门")
     contact = Column(String, nullable=True, comment="联系方式")
     phone = Column(String, nullable=True, comment="电话")
-    hire_date = Column(BigInteger, nullable=True, comment="入职日期（时间戳，毫秒）")
-    updatetime_profile = Column(BigInteger, nullable=True, comment="核心档案信息最后更新时间（时间戳，毫秒）")
+    hire_date = Column(DateTime, nullable=True, comment="入职日期")
+    updatetime_profile = Column(DateTime, nullable=True, comment="核心档案信息最后更新时间")
     
-    # 缓存字段 - Cache fields for pre-computed analytics
-    memory_insight = Column(Text, nullable=True, comment="缓存的记忆洞察报告")
-    user_summary = Column(Text, nullable=True, comment="缓存的用户摘要")
-    memory_insight_updated_at = Column(DateTime, nullable=True, comment="洞察报告最后更新时间")
+    # 用户摘要四个维度 - User Summary Four Dimensions
+    user_summary = Column(Text, nullable=True, comment="缓存的用户摘要（基本介绍）")
+    personality_traits = Column(Text, nullable=True, comment="性格特点")
+    core_values = Column(Text, nullable=True, comment="核心价值观")
+    one_sentence_summary = Column(Text, nullable=True, comment="一句话总结")
     user_summary_updated_at = Column(DateTime, nullable=True, comment="用户摘要最后更新时间")
+    
+    # 记忆洞察四个维度 - Memory Insight Four Dimensions
+    memory_insight = Column(Text, nullable=True, comment="缓存的记忆洞察报告（总体概述）")
+    behavior_pattern = Column(Text, nullable=True, comment="行为模式")
+    key_findings = Column(Text, nullable=True, comment="关键发现")
+    growth_trajectory = Column(Text, nullable=True, comment="成长轨迹")
+    memory_insight_updated_at = Column(DateTime, nullable=True, comment="洞察报告最后更新时间")
 
     # 与 App 的反向关系
     app = relationship(
