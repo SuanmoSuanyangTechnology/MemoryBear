@@ -8,13 +8,18 @@ from app.core.api_key_utils import datetime_to_timestamp
 class HomeStatistics(BaseModel):
     """首页统计数据"""
     total_models: int
-    new_models_this_month: int
+    total_llm: int
+    total_embedding: int
+    model_week_growth_rate: float
     active_workspaces: int
-    new_workspaces_this_month: int
+    new_workspaces_this_week: int
+    workspace_week_growth_rate: float
     total_users: int
-    new_users_this_month: int
+    new_users_this_week: int
+    user_week_growth_rate: float
     running_apps: int
     new_apps_this_week: int
+    app_week_growth_rate: float
 
 class WorkspaceInfo(BaseModel):
     """工作空间信息"""
