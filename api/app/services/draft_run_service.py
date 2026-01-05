@@ -454,7 +454,8 @@ class DraftRunService:
         storage_type: Optional[str] = None,
         user_rag_memory_id: Optional[str] = None,
         web_search: bool = True,  # 布尔类型默认值
-        memory: bool = True  # 布尔类型默认值
+        memory: bool = True,  # 布尔类型默认值
+        sub_agent: bool = False # 是否是作为子Agent运行
 
     ) -> AsyncGenerator[str, None]:
         """执行试运行（流式返回，使用 LangChain Agent）
@@ -619,7 +620,7 @@ class DraftRunService:
             elapsed_time = time.time() - start_time
 
             # 10. 保存会话消息
-            if agent_config.memory and agent_config.memory.get("enabled"):
+            if not sub_agent and agent_config.memory and agent_config.memory.get("enabled"):
                 await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
