@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="40px" height="40px" viewBox="0 0 40 40" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 26</title>
+    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="首页" transform="translate(-1254, -556)">
+            <g id="快捷操作" transform="translate(1120, 502)">
+                <g id="编组-11" transform="translate(2, 38)">
+                    <g id="编组-26" transform="translate(132, 16)">
+                        <rect id="矩形" stroke="#DFE4ED" fill="#FFFFFF" x="0.5" y="0.5" width="39" height="39" rx="8"></rect>
+                        <g id="空间管理" transform="translate(11, 10)" stroke="#212332" stroke-linejoin="round" stroke-width="1.7">
+                            <polygon id="路径" points="0 5 9 0 18 5 18 15 9 20 0 15"></polygon>
+                            <polygon id="路径-8" points="9.00139153 1 1 15 17 15"></polygon>
+                            <polygon id="路径-8" transform="translate(9, 11) scale(1, -1) translate(-9, -11)" points="9.00065228 8 5.25 14 12.75 14"></polygon>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

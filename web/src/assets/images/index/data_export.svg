@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="40px" height="40px" viewBox="0 0 40 40" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 23</title>
+    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="首页" transform="translate(-1252, -664)">
+            <g id="快捷操作" transform="translate(1120, 502)">
+                <g id="编组-11" transform="translate(2, 38)">
+                    <g id="编组-23" transform="translate(130, 124)">
+                        <rect id="矩形" stroke="#DFE4ED" fill="#FFFFFF" x="0.5" y="0.5" width="39" height="39" rx="8"></rect>
+                        <g id="编组-12" transform="translate(11.5, 11)" stroke="#212332" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7">
+                            <path d="M17,7.30064813 L17,14 C17,15.6568542 15.6568542,17 14,17 L3,17 C1.34314575,17 8.8817842e-16,15.6568542 8.8817842e-16,14 L-4.4408921e-16,5.42857143 C-4.4408921e-16,3.77171718 1.34314575,2.42857143 3,2.42857143 L12.7248521,2.42857143 L12.7248521,2.42857143" id="路径"></path>
+                            <polyline id="路径" points="10.9285714 0 13.3571429 2.42857143 10.9285714 4.85714286"></polyline>
+                            <line x1="4.86821714" y1="9.71428571" x2="4.86821714" y2="13.3571429" id="路径-13"></line>
+                            <line x1="12.1428571" y1="9.71428571" x2="12.1428571" y2="13.3571429" id="路径-13"></line>
+                            <line x1="8.51107429" y1="7.29747399" x2="8.51107429" y2="13.3689026" id="路径-13备份"></line>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

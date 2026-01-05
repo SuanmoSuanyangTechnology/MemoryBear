@@ -121,7 +121,8 @@ export interface ClusterRef {
 export interface WorkflowRef {
   handleSave: (flag?: boolean) => Promise<unknown>;
   handleRun: () => void;
-  graphRef: GraphRef
+  graphRef: GraphRef;
+  addVariable: () => void;
 }
 export interface ApplicationModalRef {
   handleOpen: (application?: Config) => void;
