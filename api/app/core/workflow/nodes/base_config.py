@@ -4,13 +4,16 @@
 """
 
 from enum import StrEnum
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+
+VARIABLE_PATTERN = r"\{\{\s*(.*?)\s*\}\}"
 
 
 class VariableType(StrEnum):
     """变量类型枚举"""
-    
+
     STRING = "string"
     NUMBER = "number"
     BOOLEAN = "boolean"
@@ -22,43 +25,94 @@ class VariableType(StrEnum):
     ARRAY_OBJECT = "array[object]"
 
 
+class TypedVariable(BaseModel):
+    """
+    TODO: 强类型限制
+    Strongly typed variable that validates value on assignment.
+    """
+
+    value: Any = Field(..., description="Variable value")
+    type: VariableType = Field(..., description="Declared type of the variable")
+
+    model_config = ConfigDict(
+        validate_assignment=True
+    )
+
+    def __setattr__(self, name, value):
+        if name == "value":
+            self._validate_value(value)
+        if name == "type":
+            raise RuntimeError("Cannot modify variable type at runtime")
+        super().__setattr__(name, value)
+
+    def _validate_value(self, v: Any):
+        t = self.type
+        match t:
+            case VariableType.STRING:
+                if not isinstance(v, str):
+                    raise TypeError("Variable value does not match type STRING")
+            case VariableType.BOOLEAN:
+                if not isinstance(v, bool):
+                    raise TypeError("Variable value does not match type BOOLEAN")
+            case VariableType.NUMBER:
+                if not isinstance(v, (int, float)):
+                    raise TypeError("Variable value does not match type NUMBER")
+            case VariableType.OBJECT:
+                if not isinstance(v, dict):
+                    raise TypeError("Variable value does not match type OBJECT")
+            case VariableType.ARRAY_STRING:
+                if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+                    raise TypeError("Variable value does not match type ARRAY_STRING")
+            case VariableType.ARRAY_NUMBER:
+                if not isinstance(v, list) or not all(isinstance(i, (int, float)) for i in v):
+                    raise TypeError("Variable value does not match type ARRAY_NUMBER")
+            case VariableType.ARRAY_BOOLEAN:
+                if not isinstance(v, list) or not all(isinstance(i, bool) for i in v):
+                    raise TypeError("Variable value does not match type ARRAY_BOOLEAN")
+            case VariableType.ARRAY_OBJECT:
+                if not isinstance(v, list) or not all(isinstance(i, dict) for i in v):
+                    raise TypeError("Variable value does not match type ARRAY_OBJECT")
+            case _:
+                raise TypeError(f"Unknown variable type: {t}")
+
+
 class VariableDefinition(BaseModel):
     """变量定义
     
     定义工作流或节点的输入/输出变量。
     这是一个通用的数据结构，可以在多个地方使用。
     """
-    
+
     name: str = Field(
         ...,
         description="变量名称"
     )
-    
+
     type: VariableType = Field(
         default=VariableType.STRING,
         description="变量类型"
     )
-    
+
     required: bool = Field(
         default=False,
         description="是否必需"
     )
-    
+
     default: str | int | float | bool | list | dict | None = Field(
         default=None,
         description="默认值"
     )
-    
+
     description: str | None = Field(
         default=None,
         description="变量描述"
     )
-    
+
     max_length: int = Field(
         default=200,
         description="只对字符串类型生效"
     )
-    
+
     class Config:
         json_schema_extra = {
             "examples": [
@@ -96,22 +150,22 @@ class BaseNodeConfig(BaseModel):
     - description: 节点描述
     - tags: 节点标签（用于分类和搜索）
     """
-    
+
     name: str | None = Field(
         default=None,
         description="节点名称（显示名称），如果不设置则使用节点 ID"
     )
-    
+
     description: str | None = Field(
         default=None,
         description="节点描述，说明节点的作用"
     )
-    
+
     tags: list[str] = Field(
         default_factory=list,
         description="节点标签，用于分类和搜索"
     )
-    
+
     class Config:
         """Pydantic 配置"""
         # 允许额外字段（向后兼容）
