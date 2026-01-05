@@ -7,6 +7,9 @@ import RbModal from '@/components/RbModal'
 const { TextArea } = Input;
 const { confirm } = Modal
 
+// 全局模型数据常量
+let models: any = null;
+
 const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ 
   refreshTable
 }, ref) => {
@@ -46,20 +49,26 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   };
 
   const fetchModelLists = async (types: string[]) => {
-    // 如果 types 中包含 'llm'，也需要获取 'chat' 的数据
-    const typesToFetch = types.includes('llm') ? [...types, 'chat'] : types;
-    
-    const entries = await Promise.all(typesToFetch.map(async (tp) => {
+    // 如果还没有获取过全部模型数据，则获取一次
+    if (!models) {
       try {
-        const res = await getModelList(tp === 'image2text' ? 'chat' : tp, { page: 1, pagesize: 100 });
-        const options = (res?.items || []).map((m: any) => ({ label: m.name, value: m.id }));
-        return [tp, options] as [string, { label: string; value: string }[]];
-      } catch {
-        return [tp, []] as [string, { label: string; value: string }[]];
+        models = await getModelList({ page: 1, pagesize: 100 });
+      } catch (error) {
+        console.error('Failed to fetch models:', error);
+        models = { items: [] };
       }
-    }));
+    }
+
+    // 从全部模型数据中过滤出需要的类型
+    const typesToFetch = types.includes('llm') ? [...types, 'chat'] : types;
     const next: Record<string, { label: string; value: string }[]> = {};
-    entries.forEach(([k, v]) => { next[k] = v; });
+    
+    typesToFetch.forEach((tp) => {
+      const targetType = tp === 'image2text' ? 'chat' : tp;
+      const filteredModels = (models?.items || []).filter((m: any) => m.type === targetType);
+      next[tp] = filteredModels.map((m: any) => ({ label: m.name, value: m.id }));
+    });
+    
     setModelOptionsByType(next);
   };
 
@@ -157,7 +166,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         console.log('Validation failed:', err)
       });
   }
-  const handleChange = (value: string, tp: string) => {
+  const handleChange = (_value: string, tp: string) => {
     // 只在编辑模式且类型为 embedding 时触发提示
     if (datasets?.id && tp.toLowerCase() === 'embedding') {
       const fieldKey = typeToFieldKey(tp);

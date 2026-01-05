@@ -4,11 +4,12 @@
  * @Author: yujiangping
  * @Date: 2025-11-15 16:13:47
  * @LastEditors: yujiangping
- * @LastEditTime: 2025-11-29 19:46:46
+ * @LastEditTime: 2025-12-19 20:19:59
  */
 import { useEffect, useState, useRef, type FC } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import { Button, Spin, message, Switch } from 'antd';
 import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk } from '@/api/knowledgeBase';
 import type { KnowledgeBaseDocumentData, RecallTestData } from '@/views/KnowledgeBase/types';
@@ -25,7 +26,18 @@ const DocumentDetails: FC = () => {
   const navigate = useNavigate();
   const { knowledgeBaseId } = useParams<{ knowledgeBaseId: string }>();
   const location = useLocation();
-  const { documentId, parentId: locationParentId } = location.state as { documentId: string; parentId?: string };
+  const { updateBreadcrumbs } = useBreadcrumbManager({
+    breadcrumbType: 'detail'
+  });
+  const { 
+    documentId, 
+    parentId: locationParentId, 
+    breadcrumbPath 
+  } = location.state as { 
+    documentId: string; 
+    parentId?: string; 
+    breadcrumbPath?: BreadcrumbPath;
+  };
   const [loading, setLoading] = useState(false);
   const [document, setDocument] = useState<KnowledgeBaseDocumentData | null>(null);
   const [chunkList, setChunkList] = useState<RecallTestData[]>([]);
@@ -35,6 +47,7 @@ const DocumentDetails: FC = () => {
   const [chunkLoading, setChunkLoading] = useState(false);
   const [keywords, setKeywords] = useState('');
   const [fileUrl, setFileUrl] = useState('');
+  const [parserMode, setParserMode] = useState(0);
   const insertModalRef = useRef<InsertModalRef>(null);
   const isManualRefreshRef = useRef(false);
   
@@ -43,6 +56,13 @@ const DocumentDetails: FC = () => {
       fetchDocumentDetail();
     }
   }, [documentId]);
+
+  // 更新面包屑
+  useEffect(() => {
+    if (breadcrumbPath) {
+      updateBreadcrumbs(breadcrumbPath);
+    }
+  }, [breadcrumbPath, updateBreadcrumbs]);
 
   // 当文档加载完成且 progress === 1 时，加载分块列表
   useEffect(() => {
@@ -108,6 +128,7 @@ const DocumentDetails: FC = () => {
       setInfoItems(formatDocumentInfo(response));
       const url = `${imagePath}/api/files/${response.file_id}`
       setFileUrl(url);
+      setParserMode(response?.parser_config?.auto_questions || 0)
       // ChunkList 会在 useEffect 中根据 document.progress 自动调用
     } catch (error) {
       console.error('获取文档详情失败:', error);
@@ -179,7 +200,18 @@ const DocumentDetails: FC = () => {
   };
 
   const handleBack = () => {
-    if (knowledgeBaseId) {
+    if (knowledgeBaseId && breadcrumbPath) {
+      // 返回到知识库详情页，并传递面包屑信息以恢复状态
+      const navigationState = {
+        fromKnowledgeBaseList: true,
+        knowledgeBaseFolderPath: breadcrumbPath.knowledgeBaseFolderPath,
+        navigateToDocumentFolder: locationParentId,
+        documentFolderPath: breadcrumbPath.documentFolderPath,
+        timestamp: Date.now(), // 添加时间戳确保状态变化
+      };
+      navigate(`/knowledge-base/${knowledgeBaseId}/private`, { state: navigationState });
+    } else if (knowledgeBaseId) {
+      // 降级处理：直接跳转到知识库详情页
       navigate(`/knowledge-base/${knowledgeBaseId}/private`);
     }
   };
@@ -358,6 +390,7 @@ const DocumentDetails: FC = () => {
             {t('knowledgeBase.chunkList') || '分块列表'}
           </h2>
           <RecallTestResult 
+            
             data={chunkList} 
             showEmpty={false}
             hasMore={hasMore}
@@ -366,6 +399,7 @@ const DocumentDetails: FC = () => {
             scrollableTarget="chunkScrollableDiv"
             editable={true}
             onItemClick={handleChunkClick}
+            parserMode={parserMode}
           />
         </div>
       </div>

@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Form, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { ModelConfig, ModelConfigModalRef, Config, ChatData } from '../types'
+import type { ModelConfig, ModelConfigModalRef, Config, Source } from '../types'
 import type { Model } from '@/views/ModelManagement/types'
 import RbModal from '@/components/RbModal'
 import RbSlider from '@/components/RbSlider'
@@ -10,10 +10,9 @@ import RbSlider from '@/components/RbSlider'
 const FormItem = Form.Item;
 
 interface ModelConfigModalProps {
-  modelList: Model[];
-  refresh: (values: ModelConfig, type: 'model') => void;
+  modelList?: Model[];
+  refresh: (values: ModelConfig, type: Source) => void;
   data: Config;
-  chatList: ChatData[]
 }
 
 const configFields = [
@@ -28,12 +27,12 @@ const configFields = [
 const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(({
   refresh,
   data,
-  modelList
+  modelList = []
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<ModelConfig>();
-  const [source, setSource] = useState<'chat' | 'model'>('model')
+  const [source, setSource] = useState<Source>('model')
 
   const values = Form.useWatch([], form);
 
@@ -43,14 +42,14 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
     form.resetFields();
   };
 
-  const handleOpen = (source: 'chat' | 'model', model) => {
+  const handleOpen = (source: Source, model?: any) => {
     setSource(source)
     if (source === 'model') {
       form.setFieldsValue({
         ...(data?.model_parameters || {}),
         default_model_config_id: data.default_model_config_id || ''
       })
-    } else if (source === 'chat') {
+    } else if (source === 'chat' || source === 'multi_agent') {
       if (model) {
         form.setFieldsValue({
           ...(model?.model_parameters || {}),
@@ -77,9 +76,9 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         console.log('err', err)
       });
   }
-  const handleChange = (value: string, option: Model) => {
+  const handleChange = (_value: string, option: Model | Model[] | undefined) => {
     if (source === 'chat') {
-      form.setFieldValue('label', option.name)
+      form.setFieldValue('label', (option as Model).name)
     }
   }
 
@@ -104,14 +103,15 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
       <Form
         form={form}
         layout="vertical"
-        className="rb:ml-[7px]!"
+        className="rb:ml-1.75!"
       >
         <FormItem
           name="default_model_config_id"
           label={t('application.currentModel')}
-          rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          rules={[{ required: source !== 'multi_agent', message: t('common.pleaseSelect') }]}
+          hidden={source === 'multi_agent'}
         >
-          <Select
+          {source !== 'multi_agent' && <Select
             placeholder={t('common.pleaseSelect')}
             fieldNames={{
               label: 'name',
@@ -119,11 +119,11 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
             }}
             options={modelList}
             onChange={handleChange}
-          />
+          />}
         </FormItem>
         {source === 'chat' && <FormItem name="label" hidden />}
 
-        <div className="rb:text-[14px] rb:font-medium rb:text-[#5B6167] rb:mb-[16px]">{t('application.parameterConfig')}</div>
+        <div className="rb:text-[14px] rb:font-medium rb:text-[#5B6167] rb:mb-4">{t('application.parameterConfig')}</div>
 
         {configFields.map(item => (
           <FormItem

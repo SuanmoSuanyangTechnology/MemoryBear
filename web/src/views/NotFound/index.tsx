@@ -8,6 +8,7 @@ const NotFound = () => {
   return (
     <Empty
       url={notFoundImg}
+      size={[328, 146]}
       title={t('empty.notFound')}
       subTitle={t('empty.notFoundDesc')}
       className="rb:h-[calc(100vh-84px)]"

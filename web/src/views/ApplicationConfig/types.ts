@@ -1,4 +1,7 @@
 import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types'
+import type { ChatItem } from '@/components/Chat/types'
+import type { GraphRef } from '@/views/Workflow/types';
+import type { ApiKey } from '@/views/ApiKeyManagement/types'
 
 export interface ModelConfig {
   label?: string;
@@ -90,18 +93,15 @@ export interface Config extends MultiAgentConfig {
 export interface MultiAgentConfig {
   id: string;
   app_id: string;
-  // system_prompt: string;
-  // default_model_config_id?: string;
-  // model_parameters: ModelConfig;
-  // knowledge_retrieval: KnowledgeConfig | null;
-  // memory?: MemoryConfig;
-  // variables: Variable[];
-  // tools: Record<string, string>;
-  // is_active: boolean;
-  // created_at: number;
-  // updated_at: number;
-  master_agent_id?: string;
+  default_model_config_id?: string;
+  model_parameters: ModelConfig;
+  orchestration_mode: 'conditional' | 'sequential' | 'parallel';
   sub_agents?: SubAgentItem[];
+  routing_rules: null;
+  execution_config: {
+    routing_mode: 'master' | 'handoffs'
+  };
+  aggregation_strategy: 'merge' | 'vote' | 'priority'
 }
 
 // 创建表单数据类型
@@ -113,20 +113,29 @@ export interface ApplicationModalData {
 
 // 定义组件暴露的方法接口
 export interface AgentRef {
-  handleSave: (flag?: boolean) => Promise<any>;
+  handleSave: (flag?: boolean) => Promise<unknown>;
+}
+export interface ClusterRef {
+  handleSave: (flag?: boolean) => Promise<unknown>;
+}
+export interface WorkflowRef {
+  handleSave: (flag?: boolean) => Promise<unknown>;
+  handleRun: () => void;
+  graphRef: GraphRef
 }
 export interface ApplicationModalRef {
   handleOpen: (application?: Config) => void;
 }
+export type Source = 'chat' | 'model' | 'multi_agent'
 export interface ModelConfigModalRef {
-  handleOpen: (source: 'chat' | 'model') => void;
+  handleOpen: (source: Source, model?: any) => void;
 }
 export interface ModelConfigModalData {
   model: string;
   [key: string]: string;
 }
 export interface AiPromptModalRef {
-  handleOpen: (application?: Config) => void;
+  handleOpen: () => void;
 }
 export interface KnowledgeModalRef {
   handleOpen: (config?: KnowledgeConfig[]) => void;
@@ -138,11 +147,6 @@ export interface ApiExtensionModalData {
 }
 export interface ApiExtensionModalRef {
   handleOpen: () => void;
-}
-export interface ChatItem { 
-  role: 'answer' | 'question'; 
-  content?: string; 
-  time: number; 
 }
 export interface ChatData {
   label?: string;
@@ -191,4 +195,19 @@ export interface SubAgentItem {
 }
 export interface SubAgentModalRef {
   handleOpen: (agent?: SubAgentItem) => void;
+}
+export interface ApiKeyModalRef {
+  handleOpen: () => void;
+}
+export interface ApiKeyConfigModalRef {
+  handleOpen: (apiKey: ApiKey) => void;
+}
+export interface AiPromptVariableModalRef {
+  handleOpen: () => void;
+}
+
+export interface AiPromptForm {
+  model_id?: string;
+  message?: string;
+  current_prompt?: string;
 }

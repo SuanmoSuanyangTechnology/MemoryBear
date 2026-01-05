@@ -34,12 +34,12 @@ const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
   }
   
   return (
-    <div className={clsx("rb:flex rb:items-center rb:border rb:rounded-[8px] rb:px-[8px] rb:text-[12px] rb:h-[24px] rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
+    <div className={clsx("rb:flex rb:items-center rb:border rb:rounded-lg rb:px-2 rb:text-[12px] rb:h-6 rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
       "rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF] rb:text-[#155EEF]": checked,
       "rb:border-[#DFE4ED] rb:text-[#212332]": !checked,
     })} onClick={handleChange}>
-      {icon && !checked && <img src={icon} className="rb:w-[16px] rb:h-[16px] rb:mr-[4px]" />}
-      {checkedIcon && checked && <img src={checkedIcon} className="rb:w-[16px] rb:h-[16px] rb:mr-[4px]" />}
+      {icon && !checked && <img src={icon} className="rb:w-4 rb:h-4 rb:mr-1" />}
+      {checkedIcon && checked && <img src={checkedIcon} className="rb:w-4 rb:h-4 rb:mr-1" />}
       {children}
     </div>
   );
