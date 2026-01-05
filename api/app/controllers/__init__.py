@@ -33,6 +33,7 @@ from . import (
     emotion_config_controller,
     prompt_optimizer_controller,
     tool_controller,
+    home_page_controller,
 )
 from . import user_memory_controllers
 
@@ -70,5 +71,6 @@ manager_router.include_router(emotion_config_controller.router)
 manager_router.include_router(prompt_optimizer_controller.router)
 manager_router.include_router(memory_reflection_controller.router)
 manager_router.include_router(tool_controller.router)
+manager_router.include_router(home_page_controller.router)
 
 __all__ = ["manager_router"]

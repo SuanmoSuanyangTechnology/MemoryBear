@@ -10,11 +10,11 @@ interface CardProps {
 
 const Card: FC<CardProps> = ({ title, children, theme = 'default', className }) => {
   return (
-    <div className={clsx('rb:h-full rb:border rb:rounded-[12px] rb:p-[16px] rb:border-[#DFE4ED]', {
+    <div className={clsx('rb:h-full rb:border rb:rounded-xl rb:p-4 rb:border-[#DFE4ED]', {
       'rb:bg-[#FBFDFF]': theme === 'default',
-      'rb:bg-[linear-gradient(180deg,_#F1F9FE_0%,_#FBFCFF_100%)]': theme === 'custom',
+      'rb:bg-[linear-gradient(180deg,#F1F9FE_0%,#FBFCFF_100%)]': theme === 'custom',
     }, className)}>
-      {title && <div className="rb:text-[18px] rb:font-semibold rb:leading-[25px] rb:pb-[16px]">{title}</div>}
+      {title && <div className="rb:text-[18px] rb:font-semibold rb:leading-6.25 rb:pb-4">{title}</div>}
       {children}
     </div>
   )

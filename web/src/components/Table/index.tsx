@@ -19,6 +19,7 @@ interface TableComponentProps extends Omit<TableProps, 'pagination'> {
   isScroll?: boolean;
   scrollX?: number | string | true; // 支持自定义横向滚动宽度
   scrollY?: number | string; // 支持自定义纵向滚动高度
+  currentPageKey?: string;
 }
 export interface TableRef {
   loadData: () => void;
@@ -48,6 +49,7 @@ const TableComponent = forwardRef<TableRef, TableComponentProps>(({
   isScroll = false,
   scrollX,
   scrollY,
+  currentPageKey = 'page',
   ...props
 }, ref) => {
   const { t } = useTranslation();
@@ -86,7 +88,7 @@ const TableComponent = forwardRef<TableRef, TableComponentProps>(({
         ...currentPagination,
         ...pageData,
       })
-      params = {...params, ...pageData}
+      params = { ...params, ...pageData, [currentPageKey]: pageData.page}
     }
     setLoading(true)
     // 构建查询参数并调用API
@@ -95,7 +97,7 @@ const TableComponent = forwardRef<TableRef, TableComponentProps>(({
         // 支持两种响应格式：直接返回 total 或在 page 对象中返回
         const totalCount = res.page?.total ?? res.total ?? 0;
         setTotal(totalCount)
-        setData(Array.isArray(res.items) ? res.items : Array.isArray(res.hosts) ? res.hosts : res || [])
+        setData(Array.isArray(res.items) ? res.items : Array.isArray(res.hosts) ? res.hosts : Array.isArray(res.list) ? res.list : res || [])
         setLoading(false)
       })
       .catch(err => {

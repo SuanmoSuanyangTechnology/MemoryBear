@@ -1,3 +1,5 @@
+import type { Dayjs } from "dayjs";
+
 export interface Data {
   id: string | number
   name: string;
@@ -39,30 +41,103 @@ export interface Data {
   }[];
   [key: string]: unknown;
 }
+export interface BaseProperties {
+  content: string;
+  created_at: number;
+}
+export interface StatementNodeProperties {
+  temporal_info: string;
+  stmt_type: string;
+  statement: string;
+  valid_at: string;
+  created_at: number;
+}
+export interface ExtractedEntityNodeProperties {
+  description: string;
+  name: string;
+  entity_type: string;
+  created_at: number;
+}
+export interface MemorySummaryNode {
+  id: string;
+  label: 'MemorySummary';
+  category: number;
+  symbolSize: number;
+  itemStyle: {
+    color: string;
+  }
+  name: string;
+  properties: {
+    content: string;
+    created_at: number;
+  }
+  caption: string;
+
+}
 
 export interface Node {
   id: string;
-  description?: string;
+  label: 'Dialogue' | 'ExtractedEntity' | 'Chunk' | 'MemorySummary' | 'Statement';
+  category: number;
+  symbolSize: number;
   name: string;
-  connect_strength?: string;
-  entity_idx: number;
-  entity_type?: string;
-  fact_summary?: string[];
-  category?: number;
-  symbolSize?: number;
+  itemStyle: {
+    color: string;
+  }
+  properties: BaseProperties | StatementNodeProperties | ExtractedEntityNodeProperties
+  caption: string;
 }
 export interface Edge {
-  statement: string;
-  rel_id: string;
-  source_id: string;
-  predicate: string;
-  target_id: string;
-  statement_id: string;
-  target?: string;
-  source?: string;
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  properties: {
+    run_id: string;
+    group_id: string;
+    created_at: string;
+    expired_at: string;
+  }
+  caption: string;
+  value: number;
+  weight: number;
 }
-export interface EdgeData {
-  sourceNode: Node;
-  edge: Edge;
-  targetNode: Node;
+export interface GraphData {
+  nodes: Node[];
+  edges: Edge[];
+  statistics: {
+    total_nodes: number;
+    total_edges: number;
+    node_types: Record<string, number>;
+    edge_types: Record<string, number>;
+  }
+}
+
+export interface NodeStatisticsItem {
+  type: string;
+  count: number;
+  percentage: number;
+}
+export interface EndUser {
+  end_user_id: string;
+  id: string;
+  other_name: string;
+  position: string;
+  department: string;
+  contact: string;
+  phone: string;
+  hire_date: string | number | Dayjs | null;
+  updatetime_profile?: number;
+}
+export interface EndUserProfileModalRef {
+  handleOpen: (vo: EndUser) => void;
+}
+export interface MemoryInsightRef {
+  getData: () => void
+}
+export interface AboutMeRef {
+  getData: () => void
+}
+export interface EndUserProfileRef {
+  data: EndUser | null
 }

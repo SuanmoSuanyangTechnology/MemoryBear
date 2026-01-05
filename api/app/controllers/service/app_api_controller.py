@@ -21,7 +21,7 @@ from app.schemas.api_key_schema import ApiKeyAuth
 from app.services import workspace_service
 from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.conversation_service import ConversationService, get_conversation_service
-from app.utils.app_config_utils import dict_to_multi_agent_config, dict_to_workflow_config, agent_config_4_app_release
+from app.utils.app_config_utils import dict_to_multi_agent_config, dict_to_workflow_config, agent_config_4_app_release, multi_agent_config_4_app_release
 from app.services.app_service import get_app_service, AppService
 
 router = APIRouter(prefix="/app", tags=["V1 - App API"])
@@ -137,10 +137,10 @@ async def chat(
 
     if app_type == AppType.AGENT:
 
-        print("="*50)
-        print(app.current_release.default_model_config_id)
+        # print("="*50)
+        # print(app.current_release.default_model_config_id)
         agent_config = agent_config_4_app_release(app.current_release)
-        print(agent_config.default_model_config_id)
+        # print(agent_config.default_model_config_id)
         # 流式返回
         if payload.stream:
             async def event_generator():
@@ -182,7 +182,7 @@ async def chat(
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
         # 多 Agent 流式返回
-        config = dict_to_multi_agent_config(app.current_release.config,app.id)
+        config = multi_agent_config_4_app_release(app.current_release)
         if payload.stream:
             async def event_generator():
                 async for event in app_chat_service.multi_agent_chat_stream(

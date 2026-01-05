@@ -38,6 +38,8 @@ interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
   maxCount?: number;
   /** 是否支持拖拽上传，默认为false */
   isCanDrag?: boolean;
+  /** 自定义移除文件回调 */
+  onRemove?: (file: UploadFile) => boolean | void | Promise<boolean | void>;
 }
 const ALL_FILE_TYPE: {
   [key: string]: string;
@@ -77,6 +79,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   isAutoUpload = true,
   maxCount = 1,
   isCanDrag = false,
+  onRemove: customOnRemove,
   ...props
 }, ref) => {
   const { t } = useTranslation();
@@ -86,11 +89,20 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
 
   // 处理文件移除
   const handleRemove = (file: UploadFile) => {
+    // 如果有自定义的 onRemove 回调，先执行它
+    if (customOnRemove) {
+      const result = customOnRemove(file);
+      // 如果返回 false，阻止移除
+      if (result === false) {
+        return false;
+      }
+    }
+    
     confirm({
-      title: '确定要删除此文件吗？',
-      okText: '确定',
+      title: `${t('common.confirmRemoveFile')}`,
+      okText: `${t('common.confirm')}`,
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: `${t('common.cancel')}`,
       onOk: () => {
         const newFileList = fileList.filter((item) => item.uid !== file.uid);
         setFileList(newFileList);
@@ -236,7 +248,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
         <div key={file.uid} className="rb:relative rb:w-full rb:pt-[8px] rb:pl-[10px] rb:pr-[10px] rb-pb-[10px] rb:border-1 rb:border-[#EBEBEB] rb:rounded rb:p-2 rb:mt-2 rb:bg-white">
           <div className="rb:text-[12px] rb:flex rb:items-center rb:justify-between rb:mb-[2px]">
             {file.name}
-            <span className="rb:text-[#5B6167]" onClick={() => actions?.remove()}>Cancel</span>
+            <span className="rb:text-[#5B6167] rb:cursor-pointer" onClick={() => actions?.remove()}>Cancel</span>
           </div>
           <Progress percent={file.percent || 0} strokeColor={file.status === 'error' ? '#FF5D34' : '#155EEF'} size="small" showInfo={false} />
         </div>

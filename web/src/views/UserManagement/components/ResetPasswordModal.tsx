@@ -51,6 +51,7 @@ const ResetPasswordModal = forwardRef<ResetPasswordModalRef, { source?: 'resetPa
                   <br />
                   【{password}】
                 </>,
+                cancelText: t('common.cancel'),
                 okText: t('common.copy'),
                 okType: 'danger',
                 onOk: () => {

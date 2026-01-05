@@ -1,7 +1,7 @@
 """工具管理核心模块"""
 
-from .base import BaseTool, ToolResult, ToolParameter
-from .langchain_adapter import LangchainAdapter
+from app.core.tools.base import BaseTool, ToolResult, ToolParameter
+from app.core.tools.langchain_adapter import LangchainAdapter
 
 # 可选导入，避免导入错误
 try:

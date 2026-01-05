@@ -24,6 +24,7 @@ from app.core.workflow.nodes.transform import TransformNode
 from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
 from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
 from app.core.workflow.nodes.breaker import BreakNode
+from app.core.workflow.nodes.tool import ToolNode
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,8 @@ WorkflowNode = Union[
     CycleGraphNode,
     BreakNode,
     ParameterExtractorNode,
-    QuestionClassifierNode
+    QuestionClassifierNode,
+    ToolNode
 ]
 
 
@@ -73,6 +75,7 @@ class NodeFactory:
         NodeType.ITERATION: CycleGraphNode,
         NodeType.BREAK: BreakNode,
         NodeType.CYCLE_START: StartNode,
+        NodeType.TOOL: ToolNode,
     }
 
     @classmethod

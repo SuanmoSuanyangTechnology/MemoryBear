@@ -21,11 +21,11 @@ import modelActiveIcon from '@/assets/images/menu/model_active.svg';
 import memoryIcon from '@/assets/images/menu/memory.svg';
 import memoryActiveIcon from '@/assets/images/menu/memory_active.svg';
 import spaceIcon from '@/assets/images/menu/space.svg';
-import spaceActiveIcon from '@/assets/images/menu/space_acitve.svg';
+import spaceActiveIcon from '@/assets/images/menu/space_active.svg';
 import userIcon from '@/assets/images/menu/user.svg';
 import userActiveIcon from '@/assets/images/menu/user_active.svg';
 import userMemoryIcon from '@/assets/images/menu/userMemory.svg';
-import userMemoryActiveIcon from '@/assets/images/menu/userMemory_acitve.svg';
+import userMemoryActiveIcon from '@/assets/images/menu/userMemory_active.svg';
 import applicationIcon from '@/assets/images/menu/application.svg';
 import applicationActiveIcon from '@/assets/images/menu/application_active.svg';
 import knowledgeIcon from '@/assets/images/menu/knowledge.svg';
@@ -34,6 +34,12 @@ import memoryConversationIcon from '@/assets/images/menu/memoryConversation.svg'
 import memoryConversationActiveIcon from '@/assets/images/menu/memoryConversation_active.svg';
 import memberIcon from '@/assets/images/menu/member.svg';
 import memberActiveIcon from '@/assets/images/menu/member_active.svg';
+import toolIcon from '@/assets/images/menu/tool.png';
+import toolActiveIcon from '@/assets/images/menu/tool_active.png';
+import apiKeyIcon from '@/assets/images/menu/apiKey.png';
+import apiKeyActiveIcon from '@/assets/images/menu/apiKey_active.png';
+import pricingIcon from '@/assets/images/menu/pricing.svg'
+import pricingActiveIcon from '@/assets/images/menu/pricing_active.svg'
 
 // 图标路径映射表
 const iconPathMap: Record<string, string> = {
@@ -57,6 +63,12 @@ const iconPathMap: Record<string, string> = {
   'memoryConversationActive': memoryConversationActiveIcon,
   'member': memberIcon,
   'memberActive': memberActiveIcon,
+  'tool': toolIcon,
+  'toolActive': toolActiveIcon,
+  'apiKey': apiKeyIcon,
+  'apiKeyActive': apiKeyActiveIcon,
+  'pricing': pricingIcon,
+  'pricingActive': pricingActiveIcon
 };
 
 const { Sider } = Layout;

@@ -1,10 +1,9 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Input, message, Tabs } from 'antd';
+import { message, Tabs } from 'antd';
 import { useTranslation } from 'react-i18next';
 import RbModal from '@/components/RbModal';
 import RbMarkdown from '@/components/Markdown';
-
-const { TextArea } = Input;
+import './index.css'
 
 export interface InsertModalRef {
   handleOpen: (documentId: string, initialContent?: string, chunkId?: string) => void;
@@ -24,11 +23,14 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
   const [content, setContent] = useState<string>('');
   const [chunkId, setChunkId] = useState<string | undefined>(undefined);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>('edit');
+  const [activeTab, setActiveTab] = useState<string>('normalMode');
+  const [mode, setMode] = useState(0); // 0: 普通模式, 1: QA模式
+  const [question, setQuestion] = useState<string>('');
+  const [answer, setAnswer] = useState<string>('');
 
   const handleOpen = (docId: string, initialContent?: string, chunkIdParam?: string) => {
     setDocumentId(docId);
-    setContent(initialContent || '');
+    handleContent(initialContent || '')
     setChunkId(chunkIdParam);
     setIsEditMode(!!initialContent);
     setVisible(true);
@@ -40,11 +42,63 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
     setDocumentId('');
     setChunkId(undefined);
     setIsEditMode(false);
-    setActiveTab('edit');
+    setActiveTab('normalMode');
+    setMode(0);
+    setQuestion('');
+    setAnswer('');
+  };
+
+  // 解析 QA 格式内容
+  const parseQAContent = (content: string) => {
+    if (!content) return null;
+    
+    const qaRegex = /question:\s*(.*?)\s*answer:\s*(.*?)$/s;
+    const match = content.match(qaRegex);
+    
+    if (match) {
+      const question = match[1]?.trim() || '';
+      const answer = match[2]?.trim() || '';
+      return { question, answer };
+    }
+    
+    return null;
+  };
+
+  const handleContent = (value: string) => {
+    if (value === '') return;
+    const qaContent = parseQAContent(value);
+    if (qaContent) {
+      setMode(1); // 1 表示 QA 模式
+      setQuestion(qaContent.question);
+      setAnswer(qaContent.answer);
+      setContent(qaContent.answer); // 保持原始内容用于提交
+      setActiveTab('qaMode')
+    } else {
+      setMode(0);
+      setAnswer(value)
+      setContent(value);
+      setActiveTab('normalMode')
+    }
+  };
+  const handleTabsChange = (key: string) => {
+    if(key === 'qaMode'){
+      setMode(1);
+    }else{
+      setMode(0);
+    }
+    setActiveTab(key);
+  };
+  // 获取当前要提交的内容
+  const getCurrentContent = () => {
+    if (mode === 1) {
+      return `question: ${question}\n answer: ${answer}`;
+    }
+    return content;
   };
 
   const handleOk = async () => {
-    if (!content.trim()) {
+    const currentContent = getCurrentContent();
+    if (!currentContent.trim()) {
       message.warning(t('knowledgeBase.pleaseEnterContent') || '请输入内容');
       return;
     }
@@ -57,7 +111,7 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
     setLoading(true);
     try {
       if (onInsert) {
-        const success = await onInsert(documentId, content.trim(), chunkId);
+        const success = await onInsert(documentId, currentContent.trim(), chunkId);
         if (success) {
           const successMsg = isEditMode 
             ? (t('knowledgeBase.updateSuccess') || '更新成功')
@@ -86,47 +140,70 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
     }
   };
 
-  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setContent(e.target.value);
-  };
-
   // 暴露给父组件的方法
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose,
   }));
 
-  // 构建标签页项目，content 为空或新增时不显示预览
+  // 构建标签页项目
   const tabItems = [
-    {
-      key: 'edit',
-      label: t('knowledgeBase.edit') || '编辑',
+      {
+      key: 'normalMode',
+      label: t('knowledgeBase.normalMode'),
       children: (
-        <TextArea
-          value={content}
-          onChange={handleContentChange}
-          placeholder={t('knowledgeBase.insertContentPlaceholder') || '请输入内容...'}
-          rows={10}
-          maxLength={10000}
-          showCount
-          autoFocus
-        />
+        // <div className='rb:border rb:border-[#D9D9D9] rb:rounded rb:p-4 rb:min-h-[280px] rb:max-h-[400px] rb:overflow-y-auto rb:bg-white'>
+          <RbMarkdown 
+            content={content} 
+            showHtmlComments={true} 
+            editable={true}
+            onContentChange={setContent}
+            onSave={(newContent) => {
+              setContent(newContent);
+            }}
+          />
+        // </div>
       ),
     },
-  ];
-
-  // 只有在编辑模式且有内容时才显示预览标签页
-  if (isEditMode && content) {
-    tabItems.push({
-      key: 'preview',
-      label: t('knowledgeBase.preview') || '预览',
+    {
+      key: 'qaMode',
+      label: t('knowledgeBase.qaMode'),
       children: (
-        <div className='rb:border rb:border-[#D9D9D9] rb:rounded rb:p-4 rb:min-h-[280px] rb:max-h-[400px] rb:overflow-y-auto rb:bg-white'>
-          <RbMarkdown content={content} showHtmlComments={true} />
+        // QA 模式的编辑界面
+        <div className='rb:flex rb:flex-col rb:gap-4'>
+          <div>
+            <div className='rb:w-full rb:font-medium rb:leading-8 rb:mb-2'>{t('knowledgeBase.question') || '问题'}</div>
+            {/* <div className='rb:border rb:border-[#D9D9D9] rb:rounded rb:p-4 rb:min-h-[120px] rb:max-h-[200px] rb:overflow-y-auto rb:bg-white'> */}
+              <RbMarkdown 
+                content={question} 
+                showHtmlComments={true} 
+                editable={true}
+                onContentChange={setQuestion}
+                onSave={(newContent) => {
+                  setQuestion(newContent);
+                }}
+              />
+            {/* </div> */}
+          </div>
+          <div>
+            <div className='rb:w-full rb:font-medium rb:leading-8 rb:mb-2'>{t('knowledgeBase.answer') || '答案'}</div>
+            {/* <div className='rb:border rb:border-[#D9D9D9] rb:rounded rb:p-4 rb:min-h-[120px] rb:max-h-[200px] rb:overflow-y-auto rb:bg-white'> */}
+              <RbMarkdown 
+                content={answer} 
+                showHtmlComments={true} 
+                editable={true}
+                onContentChange={setAnswer}
+                onSave={(newContent) => {
+                  setAnswer(newContent);
+                }}
+              />
+            {/* </div> */}
+          </div>
         </div>
-      ),
-    });
-  }
+      ) 
+    }
+
+  ];
 
   return (
     <RbModal
@@ -141,11 +218,12 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
       okText={t('common.confirm') || '确认'}
       cancelText={t('common.cancel') || '取消'}
       width={600}
+      className='rb:h-[800px]'
     >
       <div className='rb:flex rb:flex-col rb:gap-4'>
         <Tabs
           activeKey={activeTab}
-          onChange={setActiveTab}
+          onChange={handleTabsChange}
           items={tabItems}
         />
       </div>
