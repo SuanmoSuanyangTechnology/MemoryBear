@@ -3,7 +3,7 @@ import { type FC, type ReactNode } from 'react'
 interface RbAlertProps {
   color?: 'blue' | 'green' | 'orange' | 'purple',
   children: ReactNode | string;
-  icon: ReactNode;
+  icon?: ReactNode;
   className?: string;
 }
 
@@ -16,8 +16,8 @@ const colors = {
 
 const RbAlert: FC<RbAlertProps> = ({ color = 'blue', icon, className, children }) => {
   return (
-    <div className={`${colors[color]} ${className} rb:p-[6px_9px] rb:flex rb:items-center rb:text-[12px] rb:font-regular rb:leading-[16px] rb:border-[1px] rb:rounded-[6px]`}>
-      {icon && <span className="rb:text-[16px] rb:mr-[9px]">{icon}</span>}
+    <div className={`${colors[color]} ${className} rb:p-[6px_9px] rb:flex rb:items-center rb:text-[12px] rb:font-regular rb:leading-4 rb:border rb:rounded-md`}>
+      {icon && <span className="rb:text-[16px] rb:mr-2.25">{icon}</span>}
       {children}
     </div>
   )

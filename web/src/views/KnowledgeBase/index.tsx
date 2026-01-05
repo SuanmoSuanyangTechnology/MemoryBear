@@ -1,8 +1,8 @@
-import { useEffect, useState, useRef, useMemo, type FC } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback, type FC } from 'react';
 import { Row, Col, Button, Dropdown, Modal, message, Tooltip } from 'antd'
 import type { MenuProps } from 'antd';
 import { EllipsisOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
@@ -18,7 +18,8 @@ import Empty from '@/components/Empty'
 import { getKnowledgeBaseList, getModelList, getModelTypeList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
 const { confirm } = Modal;
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { useMenu } from '@/store/menu';
+
+import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 
 type ModelMenuInfo = {
   menu: NonNullable<MenuProps['items']>;
@@ -28,6 +29,7 @@ type ModelMenuInfo = {
 const KnowledgeBaseManagement: FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<KnowledgeBaseListItem[]>([])
   const [page, setPage] = useState(1)
@@ -42,10 +44,29 @@ const KnowledgeBaseManagement: FC = () => {
   const modelListCache = useRef<Record<string, string>>({});
   const modalRef = useRef<CreateModalRef>(null)
   const [messageApi, contextHolder] = message.useMessage();
+  const processedStateRef = useRef<any>(null);
   
-  // 使用 menu store 管理面包屑
-  const { allBreadcrumbs, setCustomBreadcrumbs } = useMenu();
-  const [folderPath, setFolderPath] = useState<Array<{ id: string; name: string }>>([]);
+  // 使用面包屑管理 Hook
+  const { updateBreadcrumbs } = useBreadcrumbManager({
+    breadcrumbType: 'list',
+    onKnowledgeBaseMenuClick: useCallback(() => {
+      // 返回根目录
+      setFolderPath([]);
+      setQuery((prev) => ({
+        ...prev,
+        parent_id: undefined,
+      }));
+    }, []),
+    onKnowledgeBaseFolderClick: useCallback((folderId: string, folderPath: Array<{ id: string; name: string }>) => {
+      // 直接更新文件夹路径和查询状态
+      setFolderPath(folderPath);
+      setQuery((prev) => ({
+        ...prev,
+        parent_id: folderId,
+      }));
+    }, [])
+  });
+  const [folderPath, setFolderPath] = useState<BreadcrumbItem[]>([]);
   
 
   // 生成下拉菜单项（根据当前 item）
@@ -53,7 +74,8 @@ const KnowledgeBaseManagement: FC = () => {
     const items: NonNullable<MenuProps['items']> = [];
 
     // 当权限为 share 时，不显示编辑按钮
-    if (item.permission_id !== 'share') {
+    const permissionId = (item.permission_id || '').toLowerCase();
+    if (permissionId !== 'share') {
       items.push({
         key: '1',
         label: t('knowledgeBase.edit'),
@@ -110,7 +132,7 @@ const KnowledgeBaseManagement: FC = () => {
   };
 
   // 处理创建
-  const handleCreate = (type?: string) => {
+  const handleCreate = useCallback((type?: string) => {
     // 如果在文件夹内，使用 folderPath 的最后一项作为 parent_id
     // 这样更可靠，因为 folderPath 是直接管理的状态
     const currentParentId = folderPath.length > 0 
@@ -121,8 +143,17 @@ const KnowledgeBaseManagement: FC = () => {
       parent_id: currentParentId as string,
     } as KnowledgeBaseListItem : null;
     
+    console.log('handleCreate called:', {
+      type,
+      folderPath,
+      folderPathLength: folderPath.length,
+      queryParentId: query.parent_id,
+      currentParentId,
+      record
+    });
+    
     modalRef?.current?.handleOpen(record, type)
-  }
+  }, [folderPath, query.parent_id])
 
   // 动态生成 createItems
   const createItems: MenuProps['items'] = useMemo(() => {
@@ -134,7 +165,7 @@ const KnowledgeBaseManagement: FC = () => {
         handleCreate(type);
       },
     }));
-  }, [knowledgeBaseTypes, t, folderPath, query]);
+  }, [knowledgeBaseTypes, t, handleCreate]);
   const typeToFieldKey = (type: string) => {
     const normalized = (type || '').toLowerCase();
     switch (normalized) {
@@ -159,7 +190,7 @@ const KnowledgeBaseManagement: FC = () => {
       key,
       label: t(`knowledgeBase.${key}`),
       children: key === 'permission_id' 
-        ? (data[key] === 'Private' || data[key] === 'private' ? t('knowledgeBase.private') : t('knowledgeBase.share'))
+        ? ((data[key] || '').toLowerCase() === 'private' ? t('knowledgeBase.private') : t('knowledgeBase.share'))
         : String(data[key] || '-'),
     }))
   }
@@ -262,7 +293,15 @@ const KnowledgeBaseManagement: FC = () => {
   const fetchData = async (pageNum: number = 1, isLoadMore: boolean = false) => {
     if (!modelTypes.length) return;
     if (loading) return;
-    console.log('fetchData called, pageNum:', pageNum, 'isLoadMore:', isLoadMore);
+    
+    console.log('fetchData called:', {
+      pageNum,
+      isLoadMore,
+      currentQuery: query,
+      currentFolderPath: folderPath,
+      folderPathLastId: folderPath.length > 0 ? folderPath[folderPath.length - 1].id : 'none'
+    });
+    
     setLoading(true);
     try {
       const params = {
@@ -272,6 +311,8 @@ const KnowledgeBaseManagement: FC = () => {
         orderby:'created_at',
         desc:true,
       }
+      
+      console.log('API params:', params);
       const res = await getKnowledgeBaseList(undefined, params);
       const response = res as KnowledgeBaseListResponse & { items?: KnowledgeBaseListItem[] };
       console.log('API response:', response);
@@ -352,10 +393,21 @@ const KnowledgeBaseManagement: FC = () => {
     });
   };
   // 处理跳转详情
-  const handleToDetail = (knowledgeBase: KnowledgeBaseListItem) => {
+  const handleToDetail = useCallback((knowledgeBase: KnowledgeBaseListItem) => {
+    // 统一处理类型判断，忽略大小写
+    const itemType = (knowledgeBase.type || '').toLowerCase();
+    
+    console.log('handleToDetail called with:', {
+      id: knowledgeBase.id,
+      name: knowledgeBase.name,
+      type: itemType,
+      currentFolderPath: folderPath,
+      currentQuery: query
+    });
+    
     // 如果是 Folder 类型，刷新当前页面，显示该文件夹下的知识库列表
-    if (knowledgeBase.type === 'Folder' || knowledgeBase.type === 'folder') {
-      // 添加到文件夹路径
+    if (itemType === 'folder') {
+      // 计算新的文件夹路径
       const newFolderPath = [
         ...folderPath,
         {
@@ -363,98 +415,95 @@ const KnowledgeBaseManagement: FC = () => {
           name: knowledgeBase.name,
         },
       ];
-      setFolderPath(newFolderPath);
       
+      console.log('Folder clicked:', {
+        folderId: knowledgeBase.id,
+        folderName: knowledgeBase.name,
+        currentFolderPath: folderPath,
+        newFolderPath: newFolderPath
+      });
+      
+      // 同步更新状态，保持与面包屑逻辑一致
+      setFolderPath(newFolderPath);
       setQuery((prev) => ({
         ...prev,
         parent_id: knowledgeBase.id,
       }));
+      
       return;
     }
     
+    // 统一处理权限判断，忽略大小写
+    const permissionId = (knowledgeBase.permission_id || '').toLowerCase();
+    const isPrivate = permissionId === 'private';
+    
     // 根据权限类型跳转到不同的详情页
-    if (knowledgeBase.permission_id === 'Private' || knowledgeBase.permission_id === 'private') {
-      navigate(`/knowledge-base/${knowledgeBase.id}/private`)
+    const targetPath = isPrivate 
+      ? `/knowledge-base/${knowledgeBase.id}/private`
+      : `/knowledge-base/${knowledgeBase.id}/share`;
+    
+    // 跳转时传递当前的文件夹路径信息
+    const navigationState = {
+      fromKnowledgeBaseList: true,
+      knowledgeBaseFolderPath: folderPath,
+      parentId: query.parent_id,
+      timestamp: Date.now(), // 添加时间戳确保每次跳转状态都不同
+    };
+    
+    // 检查是否是相同路径跳转
+    const currentPath = location.pathname;
+    
+    if (currentPath === targetPath) {
+      // 如果是相同路径，使用replace并强制刷新状态
+      navigate(targetPath, { 
+        state: navigationState, 
+        replace: true 
+      });
     } else {
-      navigate(`/knowledge-base/${knowledgeBase.id}/share`)
+      // 不同路径，正常跳转
+      navigate(targetPath, { state: navigationState });
     }
-  }
-  // 更新面包屑的函数
-  const updateBreadcrumbs = () => {
-    const baseBreadcrumbs = allBreadcrumbs['space'] || [];
-    // 只保留知识库菜单项之前的面包屑
-    const knowledgeBaseMenuIndex = baseBreadcrumbs.findIndex(item => item.path === '/knowledge-base');
-    const filteredBaseBreadcrumbs = knowledgeBaseMenuIndex >= 0 
-      ? baseBreadcrumbs.slice(0, knowledgeBaseMenuIndex + 1)
-      : baseBreadcrumbs;
-    
-    // 给"知识库管理"添加点击事件，返回根目录
-    const breadcrumbsWithClick = filteredBaseBreadcrumbs.map((item) => {
-      if (item.path === '/knowledge-base') {
-        return {
-          ...item,
-          onClick: (e?: React.MouseEvent) => {
-            e?.preventDefault();
-            e?.stopPropagation();
-            // 返回根目录
-            setFolderPath([]);
-            setQuery((prev) => ({
-              ...prev,
-              parent_id: undefined,
-            }));
-            return false;
-          },
-        };
-      }
-      return item;
-    });
-    
-    const customBreadcrumbs = [
-      ...breadcrumbsWithClick,
-      ...folderPath.map((folder, index) => ({
-        id: 0,
-        parent: 0,
-        code: null,
-        label: folder.name,
-        i18nKey: null,
-        path: null,
-        enable: true,
-        display: true,
-        level: 0,
-        sort: 0,
-        icon: null,
-        iconActive: null,
-        menuDesc: null,
-        deleted: null,
-        updateTime: 0,
-        new_: null,
-        keepAlive: false,
-        master: null,
-        disposable: false,
-        appSystem: null,
-        subs: [],
-        onClick: (e?: React.MouseEvent) => {
-          e?.preventDefault();
-          e?.stopPropagation();
-          // 点击文件夹，回到该文件夹层级
-          const newFolderPath = folderPath.slice(0, index + 1);
-          setFolderPath(newFolderPath);
-          setQuery((prev) => ({
-            ...prev,
-            parent_id: folder.id,
-          }));
-          return false;
-        },
-      })),
-    ];
-
-    setCustomBreadcrumbs(customBreadcrumbs, 'space');
-  };
-
+  }, [folderPath, query, location.pathname, navigate])
   // 更新面包屑
   useEffect(() => {
-    updateBreadcrumbs();
-  }, [folderPath]);
+    updateBreadcrumbs({
+      knowledgeBaseFolderPath: folderPath,
+      documentFolderPath: [],
+    });
+  }, [folderPath, updateBreadcrumbs]);
+
+  // 处理从详情页返回的导航
+  useEffect(() => {
+    const state = location.state as {
+      navigateToFolder?: string;
+      folderPath?: Array<{ id: string; name: string }>;
+      resetToRoot?: boolean;
+    } | null;
+    
+    // 避免重复处理相同的状态
+    if (state && state !== processedStateRef.current) {
+      processedStateRef.current = state;
+      
+      if (state.resetToRoot) {
+        // 重置到根目录
+        setFolderPath([]);
+        setQuery((prev) => ({
+          ...prev,
+          parent_id: undefined,
+        }));
+      } else if (state?.navigateToFolder && state?.folderPath) {
+        // 恢复文件夹路径和查询状态
+        setFolderPath(state.folderPath);
+        setQuery((prev) => ({
+          ...prev,
+          parent_id: state.navigateToFolder,
+        }));
+      }
+      
+      // 不清除 state，避免干扰后续导航
+      // 使用 processedStateRef 来避免重复处理相同的 state
+    }
+  }, [location.state, navigate]);
 
   useEffect(() => {
     fetchModelTypes();
@@ -465,7 +514,7 @@ const KnowledgeBaseManagement: FC = () => {
     if (modelTypes.length) {
       fetchData(1, false);
     }
-  }, [modelTypes, query])
+  }, [modelTypes, query.parent_id, query.keywords, query.orderby, query.desc])
 
   return (
     <>

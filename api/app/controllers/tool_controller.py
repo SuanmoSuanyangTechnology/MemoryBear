@@ -60,6 +60,22 @@ async def list_tools(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{tool_id}/methods", response_model=ApiResponse)
+async def get_tool_methods(
+        tool_id: str,
+        current_user: User = Depends(get_current_user),
+        service: ToolService = Depends(get_tool_service)
+):
+    """获取工具的所有方法"""
+    try:
+        methods = await service.get_tool_methods(tool_id, current_user.tenant_id)
+        if methods is None:
+            raise HTTPException(status_code=404, detail="工具不存在")
+        return success(data=methods, msg="获取工具方法成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{tool_id}", response_model=ApiResponse)
 async def get_tool(
         tool_id: str,
@@ -159,7 +175,8 @@ async def execute_tool(
             workspace_id=current_user.current_workspace_id,
             timeout=request.timeout
         )
-
+        if not result.success:
+            raise HTTPException(status_code=400, detail=result["error"])
         return success(
             data={
                 "success": result.success,

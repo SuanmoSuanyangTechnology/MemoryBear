@@ -2,16 +2,24 @@ import { type FC, useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Flex, Skeleton } from 'antd'
+import { Flex, Skeleton, Form } from 'antd'
 import clsx from 'clsx'
-import Chat, { type ChatItem } from '@/views/MemoryConversation/components/Chat'
 import AnalysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.svg'
 import { getConversationHistory, sendConversation, getConversationDetail, getShareToken } from '@/api/application'
-import type { HistoryItem } from './types'
+import type { HistoryItem, QueryParams } from './types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import { randomString } from '@/utils/common'
 import BgImg from '@/assets/images/conversation/bg.png'
+import Chat from '@/components/Chat'
+import type { ChatItem } from '@/components/Chat/types'
+import ButtonCheckbox from '@/components/ButtonCheckbox'
+import MemoryFunctionIcon from '@/assets/images/conversation/memoryFunction.svg'
+import OnlineIcon from '@/assets/images/conversation/online.svg'
+import OnlineCheckedIcon from '@/assets/images/conversation/onlineChecked.svg'
+import MemoryFunctionCheckedIcon from '@/assets/images/conversation/memoryFunctionChecked.svg'
+import dayjs from 'dayjs'
+import { type SSEMessage } from '@/utils/stream'
 
 const Conversation: FC = () => {
   const { t } = useTranslation()
@@ -20,13 +28,8 @@ const Conversation: FC = () => {
   const searchParams = new URLSearchParams(location.search)
   const userId = searchParams.get('user_id')
   const [loading, setLoading] = useState(false)
-  const [chatLoading, setChatLoading] = useState(false)
-  const [query, setQuery] = useState<{
-    message?: string;
-    web_search?: boolean;
-    memory?: boolean;
-    conversation_id?: string;
-  }>({})
+  const [streamLoading, setStreamLoading] = useState(false)
+  const [message, setMessage] = useState<string>('')
   const [conversation_id, setConversationId] = useState<string | null>(null)
   const [historyList, setHistoryList] = useState<HistoryItem[]>([])
   const [groupHistoryList, setGroupHistoryList] = useState<Record<string, HistoryItem[]>>({})
@@ -36,14 +39,18 @@ const Conversation: FC = () => {
   const [hasMore, setHasMore] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [shareToken, setShareToken] = useState<string | null>(localStorage.getItem(`shareToken_${token}`))
+
+  const [form] = Form.useForm<QueryParams>()
+  const queryValues = Form.useWatch<QueryParams>([], form)
   useEffect(() => {
     const shareToken = localStorage.getItem(`shareToken_${token}`)
     setShareToken(shareToken)
     if (shareToken && shareToken !== '') return
     getShareToken(token as string, userId || randomString(12, false))
       .then(res => {
-        localStorage.setItem(`shareToken_${token}`, res?.access_token || '')
-        setShareToken(res?.access_token || '')
+        const response = res as { access_token: string  } || {}
+        localStorage.setItem(`shareToken_${token}`, response.access_token ?? '')
+        setShareToken(response.access_token ?? '')
       })
   }, [token])
 
@@ -73,7 +80,7 @@ const Conversation: FC = () => {
     setPageLoading(true);
     getConversationHistory(token, { page: flag ? 1 : page, pagesize: 20 })
       .then(res => {
-        const response = res as { items: HistoryItem[], page: { hasnext: boolean } }
+        const response = res as { items: HistoryItem[], page: { hasnext: boolean; page: number; pagesize: number; total: number } }
         const results = response?.items || []
         let list = []
         if (flag) {
@@ -101,7 +108,7 @@ const Conversation: FC = () => {
       setConversationId(id)
     }
     if (!id) {
-      setQuery({})
+      setMessage('')
     }
   }
   useEffect(() => {
@@ -116,72 +123,81 @@ const Conversation: FC = () => {
     }
   }, [conversation_id])
 
+  const addUserMessage = (message: string = '') => {
+    const newUserMessage: ChatItem = {
+      conversation_id,
+      role: 'user',
+      content: message,
+      created_at: Date.now()
+    };
+    setChatList(prev => [...prev, newUserMessage])
+  }
+  const addAssistantMessage = () => {
+    const newAssistantMessage: ChatItem = {
+      created_at: Date.now(),
+      role: 'assistant',
+      content: '',
+    }
+    setChatList(prev => [...prev, newAssistantMessage])
+  }
+  const updateAssistantMessage = (content: string = '') => {
+    if (!content) return
+    if (streamLoading) {
+      setStreamLoading(false)
+    }
+
+    setChatList(prev => {
+      const lastList = [...prev]
+      const lastIndex = lastList.length - 1
+      const lastMsg = lastList[lastIndex]
+      if (lastMsg?.role === 'assistant') {
+        return [
+          ...lastList.slice(0, lastList.length - 1),
+          {
+            ...lastMsg,
+            content: lastMsg.content + content
+          }
+        ]
+      }
+      return prev
+    })
+  }
+
   const handleSend = () => {
     if (!token || !shareToken) {
       return
     }
-    // 添加必需的id和conversation_id属性
-    const newUserMessage: ChatItem = {
-      conversation_id,
-      role: 'user',
-      content: query?.message || '',
-      created_at: Date.now()
-    };
-    setChatList(prev => [...prev, newUserMessage])
-    
     setLoading(true)
-    setChatLoading(true)
-    setChatList(prev => [...prev, {
-      created_at: Date.now(),
-      role: 'assistant',
-      content: '',
-    }])
-    let currentConversationId: string | null = null
-    const handleStreamMessage = (data: string) => {
-      setChatLoading(false)
-      try {
-        const lines = data.split('\n');
-        let currentEvent = '';
+    setStreamLoading(true)
+    addUserMessage(message)
+    addAssistantMessage()
 
-        
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].trim();
-          
-          if (line.startsWith('event:')) {
-            currentEvent = line.substring(6).trim();
-          } else if (line.startsWith('data:') && currentEvent === 'message') {
-            const jsonData = line.substring(5).trim();
-            const parsed = JSON.parse(jsonData);
-            
-            if (parsed.content) {
-              setChatList(prev => prev.map((msg, msgIndex) => {
-                if (msgIndex === prev!.length - 1 && msg.role === 'assistant') {
-                  return { ...msg, content: msg.content + parsed.content };
-                }
-                return msg;
-              }))
-            }
-          } else if (line.startsWith('data:') && currentEvent === 'start') {
-            const jsonData = line.substring(5).trim();
-            const parsed = JSON.parse(jsonData);
-            currentConversationId = parsed.conversation_id
-          } else if (currentEvent === 'end') {
-            setLoading(false);
+    let currentConversationId: string | null = null
+    const handleStreamMessage = (data: SSEMessage[]) => {
+      data.forEach((item) => {
+        switch(item.event) {
+          case 'start':
+            const { conversation_id: newId } = item.data as { conversation_id: string  }
+            currentConversationId = newId
+            break
+          case 'message':
+            const { content } = item.data as { content: string  }
+            updateAssistantMessage(content)
+            break
+          case 'end':
+            setLoading(false)
             if (currentConversationId && currentConversationId !== conversation_id) {
               setConversationId(currentConversationId)
-              getHistory(true)
             }
-          }
+            getHistory(true)
+            break
         }
-      } catch (e) {
-        console.error('Parse stream data error:', e);
-      }
+      })
     };
     
-    sendConversation(token as string, {
-      message: query?.message || '',
-      web_search: query?.web_search || false,
-      memory: query?.memory || false,
+    sendConversation({
+      ...queryValues,
+      message: message || '',
       stream: true,
       conversation_id: conversation_id || null,
     }, handleStreamMessage, shareToken)
@@ -192,12 +208,12 @@ const Conversation: FC = () => {
 
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
-      <div className="rb:w-[345px] rb:h-[100vh] rb:overflow-hidden rb:border-r rb:border-[#EAECEE] rb:p-[12px]">
-        <div className="rb:group rb:flex rb:items-center rb:justify-center rb:font-regular rb:cursor-pointer rb:mb-[20px] rb:border rb:border-[#DFE4ED] rb:hover:border-[#155EEF] rb:hover:text-[#155EEF] rb:rounded-[8px] rb:py-[10px]"
+      <div className="rb:w-86.25 rb:h-screen rb:overflow-hidden rb:border-r rb:border-[#EAECEE] rb:p-3">
+        <div className="rb:group rb:flex rb:items-center rb:justify-center rb:font-regular rb:cursor-pointer rb:mb-5 rb:border rb:border-[#DFE4ED] rb:hover:border-[#155EEF] rb:hover:text-[#155EEF] rb:rounded-lg rb:py-2.5"
           onClick={() => handleChangeHistory(null)}
         >
           <div 
-            className="rb:w-[20px] rb:h-[20px] rb:cursor-pointer rb:mr-[8px] rb:bg-cover rb:bg-[url('@/assets/images/conversation/conversation.svg')] rb:group-hover:bg-[url('@/assets/images/conversation/conversation_hover.svg')]" 
+            className="rb:w-5 rb:h-5 rb:cursor-pointer rb:mr-2 rb:bg-cover rb:bg-[url('@/assets/images/conversation/conversation.svg')] rb:group-hover:bg-[url('@/assets/images/conversation/conversation_hover.svg')]" 
           ></div>
           {t('memoryConversation.startANewConversation')}
         </div>
@@ -216,11 +232,11 @@ const Conversation: FC = () => {
               scrollableTarget="scrollableDiv"
             >
               {Object.entries(groupHistoryList).map(([date, items]) => (
-                <div key={date} className="rb:mt-[24px] rb:first:mt-0">
-                  <div className="rb:leading-[20px] rb:text-[#5B6167] rb:mb-[8px] rb:pl-[4px] rb:font-regular">{date.replace(/\u200e|\u200f/g, '')}</div>
+                <div key={date} className="rb:mt-6 rb:first:mt-0">
+                  <div className="rb:leading-5 rb:text-[#5B6167] rb:mb-2 rb:pl-1 rb:font-regular">{date.replace(/\u200e|\u200f/g, '')}</div>
                   {items.map(item => (
-                    <div key={item.updated_at} className="rb:mb-[12px]">
-                      <div className={clsx("rb:p-[8px_13px] rb:rounded-[8px] rb:leading-[20px] rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
+                    <div key={item.updated_at} className="rb:mb-3">
+                      <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
                           'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === conversation_id,
                         })}
                         onClick={() => handleChangeHistory(item.id)}
@@ -234,21 +250,41 @@ const Conversation: FC = () => {
             </InfiniteScroll>
           </div>
         }
-        <img src={BgImg} className="rb:absolute rb:bottom-0 rb:left-0 rb:w-[345px]" />
+        <img src={BgImg} className="rb:absolute rb:bottom-0 rb:left-0 rb:w-86.25" />
       </div>
 
-      <div className="rb:relative rb:h-[100vh] rb:px-[16px] rb:flex-[1_1_auto]">
+      <div className="rb:relative rb:h-screen rb:px-4 rb:flex-[1_1_auto]">
         <Chat
-          source="conversation"
-          empty={
-            <Empty url={AnalysisEmptyIcon} subTitle={t('memoryConversation.emptyDesc')} />
-          }
-          query={query}
+          empty={<Empty url={AnalysisEmptyIcon} className="rb:h-full" subTitle={t('memoryConversation.emptyDesc')} />}
+          contentClassName="rb:h-[calc(100%-152px)]"
           data={chatList}
+          streamLoading={streamLoading}
           loading={loading}
-          onChange={setQuery}
+          onChange={setMessage}
           onSend={handleSend}
-        />
+          labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+        >
+          <Form form={form} initialValues={{ memory: false, web_search: false}}>
+            <Flex gap={8}>
+              <Form.Item name="web_search" valuePropName="checked" className="rb:mb-0!">
+                <ButtonCheckbox
+                  icon={OnlineIcon}
+                  checkedIcon={OnlineCheckedIcon}
+                >
+                  {t(`memoryConversation.web_search`)}
+                </ButtonCheckbox>
+              </Form.Item>
+              <Form.Item name="memory" valuePropName="checked" className="rb:mb-0!">
+                <ButtonCheckbox
+                  icon={MemoryFunctionIcon}
+                  checkedIcon={MemoryFunctionCheckedIcon}
+                >
+                  {t(`memoryConversation.memory`)}
+                </ButtonCheckbox>
+              </Form.Item>
+            </Flex>
+          </Form>
+        </Chat>
       </div>
     </Flex>
   )

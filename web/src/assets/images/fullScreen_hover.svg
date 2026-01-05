@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>全屏</title>
+    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="红熊空间-记忆管理-个人记忆" transform="translate(-967, -349)" stroke="#212332">
+            <g id="图谱" transform="translate(432, 334)">
+                <g id="编组-18" transform="translate(535, 13)">
+                    <g id="全屏" transform="translate(0, 2)">
+                        <g id="编组-6" transform="translate(2, 2)">
+                            <polyline id="路径" points="0 3 0 0 3 0"></polyline>
+                            <polyline id="路径" transform="translate(10.5, 1.5) scale(-1, 1) translate(-10.5, -1.5)" points="9 3 9 0 12 0"></polyline>
+                            <polyline id="路径" transform="translate(1.5, 10.5) scale(1, -1) translate(-1.5, -10.5)" points="0 12 0 9 3 9"></polyline>
+                            <polyline id="路径" transform="translate(10.5, 10.5) scale(-1, -1) translate(-10.5, -10.5)" points="9 12 9 9 12 9"></polyline>
+                            <line x1="5.30274338e-05" y1="0" x2="4.00960414" y2="4.02323899" id="路径-3"></line>
+                            <line x1="12" y1="0" x2="8.01466597" y2="4.01783837" id="路径-4"></line>
+                            <line x1="0" y1="11.9995998" x2="4.00871245" y2="8.01746225" id="路径-5"></line>
+                            <line x1="11.9977093" y1="12" x2="8.01643138" y2="8.01746225" id="路径-7"></line>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

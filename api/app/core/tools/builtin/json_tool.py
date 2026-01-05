@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
 from app.core.tools.base import ToolParameter, ToolResult, ParameterType
-from .base import BuiltinTool
+from app.core.tools.builtin.base import BuiltinTool
 
 
 class JsonTool(BuiltinTool):
@@ -29,8 +29,7 @@ class JsonTool(BuiltinTool):
                 type=ParameterType.STRING,
                 description="操作类型",
                 required=True,
-                enum=["format", "minify", "validate", "convert", "to_yaml", "from_yaml", "to_xml", "from_xml", "merge",
-                      "extract", "insert", "replace", "delete", "parse"]
+                enum=["insert", "replace", "delete", "parse"]
             ),
             ToolParameter(
                 name="input_data",

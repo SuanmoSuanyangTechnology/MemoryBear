@@ -302,6 +302,10 @@ export const request = {
 // 获取父级域名
 const getParentDomain = () => {
   const hostname = window.location.hostname
+  // 检查是否为IP地址
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+    return hostname
+  }
   const parts = hostname.split('.')
   return parts.length > 2 ? `.${parts.slice(-2).join('.')}` : hostname
 }

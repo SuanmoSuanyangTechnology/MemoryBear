@@ -81,6 +81,7 @@ const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
                 title: t('member.inviteLinkTip'),
                 content: <a href={inviteLink} target="_blank" rel="noopener noreferrer">{inviteLink}</a>,
                 okText: t('common.copy'),
+                cancelText: t('common.cancel'),
                 okType: 'danger',
                 onOk: () => {
                   copy(inviteLink)
@@ -132,7 +133,7 @@ const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
           label={t('member.email')}
           rules={[{ required: true, message: t('common.pleaseEnter') }]}
         >
-          <Input placeholder={t('common.inputPlaceholder', { title: t('member.email') })} disabled={!!editingUser} />
+          <Input placeholder={t('common.enterPlaceholder', { title: t('member.email') })} disabled={!!editingUser} />
         </FormItem>
         
         <FormItem

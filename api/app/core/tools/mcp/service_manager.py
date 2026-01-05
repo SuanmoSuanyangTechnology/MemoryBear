@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models.tool_model import MCPToolConfig, ToolConfig, ToolType, ToolStatus
 from app.core.logging_config import get_business_logger
-from .client import MCPClient, MCPConnectionPool
+from app.core.tools.mcp.client import MCPClient, MCPConnectionPool
 
 logger = get_business_logger()
 

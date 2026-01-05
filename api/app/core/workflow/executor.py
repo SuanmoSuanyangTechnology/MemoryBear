@@ -219,17 +219,13 @@ class WorkflowExecutor:
             # 创建节点实例（现在 start 和 end 也会被创建）
             node_instance = NodeFactory.create_node(node, self.workflow_config)
 
-            if node_type in [NodeType.IF_ELSE, NodeType.HTTP_REQUEST]:
-                expressions = node_instance.build_conditional_edge_expressions()
-
-                # Number of branches, usually matches the number of conditional expressions
-                branch_number = len(expressions)
+            if node_type in [NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER]:
 
                 # Find all edges whose source is the current node
                 related_edge = [edge for edge in self.edges if edge.get("source") == node_id]
 
                 # Iterate over each branch
-                for idx in range(branch_number):
+                for idx in range(len(related_edge)):
                     # Generate a condition expression for each edge
                     # Used later to determine which branch to take based on the node's output
                     # Assumes node output `node.<node_id>.output` matches the edge's label

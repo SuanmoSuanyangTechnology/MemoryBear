@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>菜单-收费管理</title>
+    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="首页-弹窗" transform="translate(-904, -514)" stroke="#5F6266">
+            <g id="编组-7" transform="translate(904, 314)">
+                <g id="菜单-收费管理" transform="translate(0, 200)">
+                    <g id="编组-8" transform="translate(2, 2)">
+                        <polyline id="路径" points="7.5 5.80029489 6 7.30029489 4.5 5.80029489"></polyline>
+                        <path d="M9.5,2 L10.5,2 C11.3284271,2 12,2.67157288 12,3.5 L12,10.5 C12,11.3284271 11.3284271,12 10.5,12 L1.5,12 C0.671572875,12 0,11.3284271 0,10.5 L0,3.5 C0,2.67157288 0.671572875,2 1.5,2 L2.5,2 L2.5,2" id="路径"></path>
+                        <path d="M2.5,2.5 L2.5,1 C2.5,0.44771525 2.94771525,1.11022302e-16 3.5,0 L8.5,0 C9.05228475,0 9.5,0.44771525 9.5,1 L9.5,2.5 L9.5,2.5" id="路径"></path>
+                        <line x1="0" y1="4.01402447" x2="12" y2="4.01402447" id="路径-4"></line>
+                        <line x1="4.01045351" y1="1.8" x2="8.01045351" y2="1.8" id="路径-5"></line>
+                        <line x1="6" y1="7.22565966" x2="6" y2="10.0211794" id="路径-6"></line>
+                        <line x1="4.5" y1="7.70544887" x2="7.5" y2="7.70544887" id="路径-7"></line>
+                        <line x1="4.5" y1="9.20544887" x2="7.5" y2="9.20544887" id="路径-7"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

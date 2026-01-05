@@ -11,3 +11,11 @@ export interface HistoryItem {
   created_at: number;
   updated_at: number;
 }
+
+export interface QueryParams {
+  message?: string;
+  web_search?: boolean;
+  memory?: boolean;
+  stream: boolean;
+  conversation_id?: string | null;
+}

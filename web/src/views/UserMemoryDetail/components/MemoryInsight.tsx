@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState } from 'react'
+import { type FC, useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton } from 'antd';
@@ -7,8 +7,9 @@ import Empty from '@/components/Empty';
 import {
   getMemoryInsightReport,
 } from '@/api/memory'
+import type { MemoryInsightRef } from '../types'
 
-const MemoryInsight:FC = () => {
+const MemoryInsight = forwardRef<MemoryInsightRef>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
@@ -16,11 +17,11 @@ const MemoryInsight:FC = () => {
 
   useEffect(() => {
     if (!id) return
-    getInsightReport()
+    getData()
   }, [id])
   
   // 记忆洞察
-  const getInsightReport = () => {
+  const getData = () => {
     if (!id) return
     setLoading(true)
     getMemoryInsightReport(id).then((res) => {
@@ -31,25 +32,24 @@ const MemoryInsight:FC = () => {
       setLoading(false)
     })
   }
+  // 暴露给父组件的方法
+  useImperativeHandle(ref, () => ({
+    getData,
+  }));
   return (
     <RbCard 
       title={t('userMemory.memoryInsight')} 
       headerType="borderless"
-      headerClassName="rb:text-[18px]! rb:leading-[24px]"
-      bgColor="linear-gradient(180deg,#F1F9FE 0%, #FBFCFF 100%)"
-      height="100%"
     >
       {loading
         ? <Skeleton />
         : report
-        ? <div className="rb:flex rb:flex-wrap rb:justify-between rb:h-full">
-          <div className="rb:leading-[22px]">
-            {report|| '-'}
-          </div>
+          ? <div className="rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:py-3 rb:px-4 rb:text-[#5B6167] rb:leading-5">
+            {report || '-'}
         </div>
         : <Empty size={80} />
       }
     </RbCard>
   )
-}
+})
 export default MemoryInsight

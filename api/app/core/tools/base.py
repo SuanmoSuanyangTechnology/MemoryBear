@@ -193,7 +193,7 @@ class BaseTool(ABC):
     
     def to_langchain_tool(self):
         """转换为Langchain工具格式"""
-        from .langchain_adapter import LangchainAdapter
+        from app.core.tools.langchain_adapter import LangchainAdapter
         return LangchainAdapter.convert_tool(self)
     
     def __repr__(self):
