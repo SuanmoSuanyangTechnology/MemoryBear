@@ -6,7 +6,7 @@ This service validates inputs and delegates to MemoryAgentService for core memor
 """
 
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
@@ -103,7 +103,7 @@ class MemoryAPIService:
         self,
         workspace_id: uuid.UUID,
         end_user_id: str,
-        messages_list: List[Dict[str, str]] = None,
+        message: str,
         config_id: Optional[str] = None,
         storage_type: str = "neo4j",
         user_rag_memory_id: Optional[str] = None,
@@ -140,7 +140,7 @@ class MemoryAPIService:
             # Delegate to MemoryAgentService
             result = await MemoryAgentService().write_memory(
                 group_id=group_id,
-                messages_list=messages_list,
+                message=message,
                 config_id=config_id,
                 db=self.db,
                 storage_type=storage_type,
