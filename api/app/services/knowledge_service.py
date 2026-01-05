@@ -37,7 +37,7 @@ def get_knowledges_paginated(
         raise
 
 
-def get_chunded_knowledgeids(
+def get_chunked_knowledgeids(
         db: Session,
         current_user: User,
         filters: list

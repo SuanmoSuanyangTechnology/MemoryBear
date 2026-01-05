@@ -4,6 +4,7 @@ from typing import Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -17,8 +18,8 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVec
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
+from app.models import knowledge_model
 from app.models.user_model import User
-from app.models import knowledge_model, document_model, file_model
 from app.schemas import knowledge_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
@@ -171,7 +172,7 @@ async def get_knowledges(
             "has_next": True if page*pagesize < total else False
         }
     }
-    return success(data=result, msg="Query of knowledge base list successful")
+    return success(data=jsonable_encoder(result), msg="Query of knowledge base list successful")
 
 
 @router.post("/knowledge", response_model=ApiResponse)
@@ -197,7 +198,7 @@ async def create_knowledge(
             )
         db_knowledge = knowledge_service.create_knowledge(db=db, knowledge=create_data, current_user=current_user)
         api_logger.info(f"The knowledge base has been successfully created: {db_knowledge.name} (ID: {db_knowledge.id})")
-        return success(data=knowledge_schema.Knowledge.model_validate(db_knowledge), msg="The knowledge base has been successfully created")
+        return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="The knowledge base has been successfully created")
     except Exception as e:
         api_logger.error(f"The creation of the knowledge base failed: {create_data.name} - {str(e)}")
         raise
@@ -226,7 +227,7 @@ async def get_knowledge(
             )
         
         api_logger.info(f"Knowledge base query successful: {db_knowledge.name} (ID: {db_knowledge.id})")
-        return success(data=knowledge_schema.Knowledge.model_validate(db_knowledge), msg="Successfully obtained knowledge base information")
+        return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="Successfully obtained knowledge base information")
     except HTTPException:
         raise
     except Exception as e:
@@ -243,7 +244,7 @@ async def update_knowledge(
 ):
     api_logger.info(f"Update knowledge base request: knowledge_id={knowledge_id}, username: {current_user.username}")
     db_knowledge = await _update_knowledge(knowledge_id=knowledge_id, update_data=update_data, db=db, current_user=current_user)
-    return success(data=knowledge_schema.Knowledge.model_validate(db_knowledge), msg="The knowledge base information has been successfully updated")
+    return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="The knowledge base information has been successfully updated")
 
 
 async def _update_knowledge(
