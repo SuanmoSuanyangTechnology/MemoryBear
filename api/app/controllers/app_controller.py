@@ -29,9 +29,9 @@ logger = get_business_logger()
 @router.post("", summary="创建应用（可选创建 Agent 配置）")
 @cur_workspace_access_guard()
 def create_app(
-    payload: app_schema.AppCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        payload: app_schema.AppCreate,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     workspace_id = current_user.current_workspace_id
     app = app_service.create_app(db, user_id=current_user.id, workspace_id=workspace_id, data=payload)
@@ -41,15 +41,15 @@ def create_app(
 @router.get("", summary="应用列表（分页）")
 @cur_workspace_access_guard()
 def list_apps(
-    type: str | None = None,
-    visibility: str | None = None,
-    status: str | None = None,
-    search: str | None = None,
-    include_shared: bool = True,
-    page: int = 1,
-    pagesize: int = 10,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        type: str | None = None,
+        visibility: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
+        include_shared: bool = True,
+        page: int = 1,
+        pagesize: int = 10,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     """列出应用
 
@@ -75,12 +75,13 @@ def list_apps(
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
     return success(data=PageData(page=meta, items=items))
 
+
 @router.get("/{app_id}", summary="获取应用详情")
 @cur_workspace_access_guard()
 def get_app(
-    app_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     """获取应用详细信息
 
@@ -99,10 +100,10 @@ def get_app(
 @router.put("/{app_id}", summary="更新应用基本信息")
 @cur_workspace_access_guard()
 def update_app(
-    app_id: uuid.UUID,
-    payload: app_schema.AppUpdate,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        payload: app_schema.AppUpdate,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     workspace_id = current_user.current_workspace_id
     app = app_service.update_app(db, app_id=app_id, data=payload, workspace_id=workspace_id)
@@ -112,9 +113,9 @@ def update_app(
 @router.delete("/{app_id}", summary="删除应用")
 @cur_workspace_access_guard()
 def delete_app(
-    app_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     """删除应用
 
@@ -141,10 +142,10 @@ def delete_app(
 @router.post("/{app_id}/copy", summary="复制应用")
 @cur_workspace_access_guard()
 def copy_app(
-    app_id: uuid.UUID,
-    new_name: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        new_name: Optional[str] = None,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     """复制应用（包括基础信息和配置）
 
@@ -178,10 +179,10 @@ def copy_app(
 @router.put("/{app_id}/config", summary="更新 Agent 配置")
 @cur_workspace_access_guard()
 def update_agent_config(
-    app_id: uuid.UUID,
-    payload: app_schema.AgentConfigUpdate,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        payload: app_schema.AgentConfigUpdate,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     workspace_id = current_user.current_workspace_id
     cfg = app_service.update_agent_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
@@ -192,9 +193,9 @@ def update_agent_config(
 @router.get("/{app_id}/config", summary="获取 Agent 配置")
 @cur_workspace_access_guard()
 def get_agent_config(
-    app_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     workspace_id = current_user.current_workspace_id
     cfg = app_service.get_agent_config(db, app_id=app_id, workspace_id=workspace_id)
@@ -206,10 +207,10 @@ def get_agent_config(
 @router.post("/{app_id}/publish", summary="发布应用（生成不可变快照）")
 @cur_workspace_access_guard()
 def publish_app(
-    app_id: uuid.UUID,
-    payload: app_schema.PublishRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        payload: app_schema.PublishRequest,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     workspace_id = current_user.current_workspace_id
     release = app_service.publish(
@@ -217,7 +218,7 @@ def publish_app(
         app_id=app_id,
         publisher_id=current_user.id,
         workspace_id=workspace_id,
-        version_name = payload.version_name,
+        version_name=payload.version_name,
         release_notes=payload.release_notes
     )
     return success(data=app_schema.AppRelease.model_validate(release))
@@ -226,9 +227,9 @@ def publish_app(
 @router.get("/{app_id}/release", summary="获取当前发布版本")
 @cur_workspace_access_guard()
 def get_current_release(
-    app_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     workspace_id = current_user.current_workspace_id
     release = app_service.get_current_release(db, app_id=app_id, workspace_id=workspace_id)
@@ -240,9 +241,9 @@ def get_current_release(
 @router.get("/{app_id}/releases", summary="列出历史发布版本（倒序）")
 @cur_workspace_access_guard()
 def list_releases(
-    app_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     workspace_id = current_user.current_workspace_id
     releases = app_service.list_releases(db, app_id=app_id, workspace_id=workspace_id)
@@ -253,10 +254,10 @@ def list_releases(
 @router.post("/{app_id}/rollback/{version}", summary="回滚到指定版本")
 @cur_workspace_access_guard()
 def rollback(
-    app_id: uuid.UUID,
-    version: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        version: int,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     workspace_id = current_user.current_workspace_id
     release = app_service.rollback(db, app_id=app_id, version=version, workspace_id=workspace_id)
@@ -266,10 +267,10 @@ def rollback(
 @router.post("/{app_id}/share", summary="分享应用到其他工作空间")
 @cur_workspace_access_guard()
 def share_app(
-    app_id: uuid.UUID,
-    payload: app_schema.AppShareCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        payload: app_schema.AppShareCreate,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     """分享应用到其他工作空间
 
@@ -294,10 +295,10 @@ def share_app(
 @router.delete("/{app_id}/share/{target_workspace_id}", summary="取消应用分享")
 @cur_workspace_access_guard()
 def unshare_app(
-    app_id: uuid.UUID,
-    target_workspace_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        target_workspace_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     """取消应用分享
 
@@ -318,9 +319,9 @@ def unshare_app(
 @router.get("/{app_id}/shares", summary="列出应用的分享记录")
 @cur_workspace_access_guard()
 def list_app_shares(
-    app_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     """列出应用的所有分享记录
 
@@ -337,14 +338,15 @@ def list_app_shares(
     data = [app_schema.AppShare.model_validate(s) for s in shares]
     return success(data=data)
 
+
 @router.post("/{app_id}/draft/run", summary="试运行 Agent（使用当前草稿配置）")
 @cur_workspace_access_guard()
 async def draft_run(
-    app_id: uuid.UUID,
-    payload: app_schema.DraftRunRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-    workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None
+        app_id: uuid.UUID,
+        payload: app_schema.DraftRunRequest,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+        workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None
 ):
     """
     试运行 Agent，使用当前的草稿配置（未发布的配置）
@@ -361,7 +363,7 @@ async def draft_run(
         workspace_id=workspace_id,
         user=current_user
     )
-    if storage_type is None: 
+    if storage_type is None:
         storage_type = 'neo4j'
     user_rag_memory_id = ''
     if workspace_id:
@@ -371,9 +373,8 @@ async def draft_run(
             name="USER_RAG_MERORY",
             workspace_id=workspace_id
         )
-        if knowledge: 
+        if knowledge:
             user_rag_memory_id = str(knowledge.id)
-
 
     # 提前验证和准备（在流式响应开始前完成）
     from app.services.app_service import AppService
@@ -396,11 +397,11 @@ async def draft_run(
 
     # 处理会话ID（创建或验证）
     conversation_id = await draft_service._ensure_conversation(
-                conversation_id=payload.conversation_id,
-                app_id=app_id,
-                workspace_id=workspace_id,
-                user_id=payload.user_id
-            )
+        conversation_id=payload.conversation_id,
+        app_id=app_id,
+        workspace_id=workspace_id,
+        user_id=payload.user_id
+    )
     payload.conversation_id = conversation_id
 
     if app.type == AppType.AGENT:
@@ -424,17 +425,16 @@ async def draft_run(
         if payload.stream:
             async def event_generator():
 
-
                 async for event in draft_service.run_stream(
-                    agent_config=agent_cfg,
-                    model_config=model_config,
-                    message=payload.message,
-                    workspace_id=workspace_id,
-                    conversation_id=payload.conversation_id,
-                    user_id=payload.user_id or str(current_user.id),
-                    variables=payload.variables,
-                    storage_type=storage_type,
-                     user_rag_memory_id=user_rag_memory_id
+                        agent_config=agent_cfg,
+                        model_config=model_config,
+                        message=payload.message,
+                        workspace_id=workspace_id,
+                        conversation_id=payload.conversation_id,
+                        user_id=payload.user_id or str(current_user.id),
+                        variables=payload.variables,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id
                 ):
                     yield event
 
@@ -528,10 +528,10 @@ async def draft_run(
 
                 # 调用多智能体服务的流式方法
                 async for event in multiservice.run_stream(
-                    app_id=app_id,
-                    request=multi_agent_request,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+                        app_id=app_id,
+                        request=multi_agent_request,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id
 
                 ):
                     yield event
@@ -571,7 +571,7 @@ async def draft_run(
             data=result,
             msg="多 Agent 任务执行成功"
         )
-    elif app.type == AppType.WORKFLOW: #工作流
+    elif app.type == AppType.WORKFLOW:  # 工作流
         config = workflow_service.check_config(app_id)
         # 3. 流式返回
         if payload.stream:
@@ -592,7 +592,7 @@ async def draft_run(
                 data: <json_data>
                 """
                 import json
-                
+
                 # 调用工作流服务的流式方法
                 async for event in workflow_service.run_stream(
                         app_id=app_id,
@@ -603,7 +603,7 @@ async def draft_run(
                     # 提取事件类型和数据
                     event_type = event.get("event", "message")
                     event_data = event.get("data", {})
-                    
+
                     # 转换为标准 SSE 格式（字符串）
                     sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
                     yield sse_message
@@ -643,14 +643,13 @@ async def draft_run(
         )
 
 
-
 @router.post("/{app_id}/draft/run/compare", summary="多模型对比试运行")
 @cur_workspace_access_guard()
 async def draft_run_compare(
-    app_id: uuid.UUID,
-    payload: app_schema.DraftRunCompareRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        app_id: uuid.UUID,
+        payload: app_schema.DraftRunCompareRequest,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     """
     多模型对比试运行
@@ -675,7 +674,7 @@ async def draft_run_compare(
         workspace_id=workspace_id,
         user=current_user
     )
-    if storage_type is None: 
+    if storage_type is None:
         storage_type = 'neo4j'
     user_rag_memory_id = ''
     if workspace_id:
@@ -684,7 +683,7 @@ async def draft_run_compare(
             name="USER_RAG_MERORY",
             workspace_id=workspace_id
         )
-        if knowledge: 
+        if knowledge:
             user_rag_memory_id = str(knowledge.id)
 
     logger.info(
@@ -748,19 +747,19 @@ async def draft_run_compare(
             from app.services.draft_run_service import DraftRunService
             draft_service = DraftRunService(db)
             async for event in draft_service.run_compare_stream(
-                agent_config=agent_cfg,
-                models=model_configs,
-                message=payload.message,
-                workspace_id=workspace_id,
-                conversation_id=payload.conversation_id,
-                user_id=payload.user_id or str(current_user.id),
-                variables=payload.variables,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
-                web_search=True,
-                memory=True,
-                parallel=payload.parallel,
-                timeout=payload.timeout or 60
+                    agent_config=agent_cfg,
+                    models=model_configs,
+                    message=payload.message,
+                    workspace_id=workspace_id,
+                    conversation_id=payload.conversation_id,
+                    user_id=payload.user_id or str(current_user.id),
+                    variables=payload.variables,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id,
+                    web_search=True,
+                    memory=True,
+                    parallel=payload.parallel,
+                    timeout=payload.timeout or 60
             ):
                 yield event
 
@@ -822,15 +821,15 @@ async def get_workflow_config(
     # 配置总是存在（不存在时返回默认模板）
     return success(data=WorkflowConfigSchema.model_validate(cfg))
 
+
 @router.put("/{app_id}/workflow", summary="更新 Workflow 配置")
 @cur_workspace_access_guard()
 async def update_workflow_config(
-    app_id: uuid.UUID,
-    payload: WorkflowConfigUpdate,
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)]
+        app_id: uuid.UUID,
+        payload: WorkflowConfigUpdate,
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)]
 ):
     workspace_id = current_user.current_workspace_id
     cfg = app_service.update_workflow_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
     return success(data=WorkflowConfigSchema.model_validate(cfg))
-

@@ -22,6 +22,7 @@ from app.core.workflow.nodes.variable_aggregator.config import VariableAggregato
 from app.core.workflow.nodes.parameter_extractor.config import ParameterExtractorNodeConfig
 from app.core.workflow.nodes.question_classifier.config import QuestionClassifierNodeConfig
 from app.core.workflow.nodes.tool.config import ToolNodeConfig
+from app.core.workflow.nodes.memory.config import MemoryReadNodeConfig, MemoryWriteNodeConfig
 
 from app.core.workflow.nodes.cycle_graph.config import LoopNodeConfig, IterationNodeConfig
 __all__ = [
@@ -45,6 +46,8 @@ __all__ = [
     "ParameterExtractorNodeConfig",
     "LoopNodeConfig",
     "IterationNodeConfig",
-    "QuestionClassifierNodeConfig"
-    "ToolNodeConfig"
+    "QuestionClassifierNodeConfig",
+    "ToolNodeConfig",
+    "MemoryReadNodeConfig",
+    "MemoryWriteNodeConfig"
 ]
