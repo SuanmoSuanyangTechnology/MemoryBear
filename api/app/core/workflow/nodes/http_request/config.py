@@ -63,7 +63,7 @@ class HttpContentTypeConfig(BaseModel):
     )
 
     data: list[HttpFormData] | dict | str = Field(
-        ...,
+        default="",
         description="Data of the HTTP request body; type depends on content_type",
     )
 
@@ -98,6 +98,10 @@ class HttpTimeOutConfig(BaseModel):
 
 
 class HttpRetryConfig(BaseModel):
+    enable: bool = Field(
+        ...,
+        description="Enable/disable retry logic",
+    )
     max_attempts: int = Field(
         default=1,
         description="Maximum number of retry attempts for failed requests",
@@ -124,6 +128,11 @@ class HttpErrorDefaultTamplete(BaseModel):
         description="Default HTTP headers returned on error",
     )
 
+    output: str = Field(
+        default="SUCCESS",
+        description="HTTP response body",
+    )
+
 
 class HttpErrorHandleConfig(BaseModel):
     method: HttpErrorHandle = Field(
@@ -131,8 +140,8 @@ class HttpErrorHandleConfig(BaseModel):
         description="Error handling strategy: 'none', 'default', or 'branch'",
     )
 
-    default: HttpErrorDefaultTamplete = Field(
-        ...,
+    default: HttpErrorDefaultTamplete | None = Field(
+        default=None,
         description="Default response template for error handling",
     )
 
