@@ -1,7 +1,9 @@
 import uuid
+import json
 
 from fastapi import APIRouter, Depends, Path
 from sqlalchemy.orm import Session
+from starlette.responses import StreamingResponse
 
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
@@ -70,12 +72,12 @@ def get_prompt_session(
         SessionMessage(role=role, content=content)
         for role, content in history
     ]
-    
+
     result = SessionHistoryResponse(
         session_id=session_id,
         messages=messages
     )
-    
+
     return success(data=result)
 
 
@@ -104,35 +106,25 @@ async def get_prompt_opt(
         ApiResponse: Contains the optimized prompt, description, and a list of variables.
     """
     service = PromptOptimizerService(db)
-    service.create_message(
-        tenant_id=current_user.tenant_id,
-        session_id=session_id,
-        user_id=current_user.id,
-        role=RoleType.USER,
-        content=data.message
-    )
-    opt_result = await service.optimize_prompt(
-        tenant_id=current_user.tenant_id,
-        model_id=data.model_id,
-        session_id=session_id,
-        user_id=current_user.id,
-        current_prompt=data.current_prompt,
-        user_require=data.message
-    )
-    service.create_message(
-        tenant_id=current_user.tenant_id,
-        session_id=session_id,
-        user_id=current_user.id,
-        role=RoleType.ASSISTANT,
-        content=opt_result.desc
-    )
-    variables = service.parser_prompt_variables(opt_result.prompt)
-    result = {
-        "prompt": opt_result.prompt,
-        "desc": opt_result.desc,
-        "variables": variables
-    }
-    result_schema = OptimizePromptResponse.model_validate(result)
-    return success(data=result_schema)
 
+    async def event_generator():
+        async for chunk in service.optimize_prompt(
+                tenant_id=current_user.tenant_id,
+                model_id=data.model_id,
+                session_id=session_id,
+                user_id=current_user.id,
+                current_prompt=data.current_prompt,
+                user_require=data.message
+        ):
+            # chunk 是 prompt 的增量内容
+            yield f"event:'message'\ndata: {json.dumps(chunk)}\n\n"
 
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
