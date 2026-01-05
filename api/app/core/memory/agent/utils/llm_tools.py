@@ -40,7 +40,7 @@ class WriteState(TypedDict):
     Langgrapg Writing TypedDict
     '''
     messages: Annotated[list[AnyMessage], add_messages]
-    raw_messages: list[dict]  # 原始消息列表 [{"role": "user", "content": "..."}, ...]
+    content: str  # 消息字符串，包含角色标记 (e.g., "user: hello\nassistant: hi")
     user_id:str
     apply_id:str
     group_id:str

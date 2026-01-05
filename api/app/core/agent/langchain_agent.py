@@ -171,15 +171,7 @@ class LangChainAgent:
             await write_rag(end_user_id, message, user_rag_memory_id)
             logger.info(f'RAG_Agent:{end_user_id};{user_rag_memory_id}')
         else:
-            # 修复：将 content 转换为消息列表格式，支持 speaker_role
-            messages_list = [{"role": "user", "content": content}]
-            write_id = write_message_task.delay(
-                actual_end_user_id, 
-                messages_list,  # 使用消息列表而不是单个字符串
-                actual_config_id, 
-                storage_type,
-                user_rag_memory_id
-            )
+            write_id = write_message_task.delay(actual_end_user_id, content, actual_config_id, storage_type,user_rag_memory_id)
             write_status = get_task_memory_write_result(str(write_id))
             logger.info(f'Agent:{actual_end_user_id};{write_status}')
 
