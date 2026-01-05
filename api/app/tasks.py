@@ -412,7 +412,7 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
                 actual_config_id = connected_config.get("memory_config_id")
             finally:
                 db.close()
-        except Exception as e:
+        except Exception:
             # Log but continue - will fail later with proper error
             pass
     
@@ -499,7 +499,7 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
                 actual_config_id = connected_config.get("memory_config_id")
             finally:
                 db.close()
-        except Exception as e:
+        except Exception:
             # Log but continue - will fail later with proper error
             pass
     
@@ -1065,3 +1065,73 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
+
+
+
+@celery_app.task(name="app.tasks.run_forgetting_cycle_task", bind=True)
+def run_forgetting_cycle_task(self, config_id: Optional[int] = None) -> Dict[str, Any]:
+    """定时任务：运行遗忘周期
+    
+    定期执行遗忘周期，识别并融合低激活值的知识节点。
+    
+    Args:
+        config_id: 配置ID（可选，如果为None则使用默认配置）
+    
+    Returns:
+        包含任务执行结果的字典
+    """
+    start_time = time.time()
+    
+    async def _run() -> Dict[str, Any]:
+        from app.core.logging_config import get_api_logger
+        from app.services.memory_forget_service import MemoryForgetService
+        
+        api_logger = get_api_logger()
+        
+        with get_db_context() as db:
+            try:
+                api_logger.info(f"开始执行遗忘周期定时任务，config_id: {config_id}")
+                
+                forget_service = MemoryForgetService()
+                
+                # 运行遗忘周期
+                report = await forget_service.trigger_forgetting(
+                    db=db,
+                    group_id=None,  # 处理所有组
+                    config_id=config_id
+                )
+                
+                duration = time.time() - start_time
+                
+                api_logger.info(
+                    f"遗忘周期定时任务完成: "
+                    f"融合 {report['merged_count']} 对节点, "
+                    f"失败 {report['failed_count']} 对, "
+                    f"耗时 {duration:.2f} 秒"
+                )
+                
+                return {
+                    "status": "SUCCESS",
+                    "message": "遗忘周期执行成功",
+                    "report": report,
+                    "duration_seconds": duration
+                }
+                
+            except Exception as e:
+                duration = time.time() - start_time
+                api_logger.error(f"遗忘周期定时任务失败: {str(e)}", exc_info=True)
+                
+                return {
+                    "status": "FAILED",
+                    "message": f"遗忘周期执行失败: {str(e)}",
+                    "duration_seconds": duration
+                }
+    
+    # 运行异步函数
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(_run())
+        return result
+    finally:
+        loop.close()

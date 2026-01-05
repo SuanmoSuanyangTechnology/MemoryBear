@@ -69,6 +69,12 @@ def normalize_scores(results: List[Dict[str, Any]], score_field: str = "score") 
     for item in results:
         if score_field in item:
             score = item.get(score_field)
+            # 对于 activation_value，None 值保持为 None，不使用回退值
+            # 这样可以区分有激活值和无激活值的节点
+            if score_field == "activation_value" and score is None:
+                scores.append(None)  # 保持 None，稍后特殊处理
+                continue
+            
             if score is not None and isinstance(score, (int, float)):
                 scores.append(float(score))
             else:
@@ -76,205 +82,433 @@ def normalize_scores(results: List[Dict[str, Any]], score_field: str = "score") 
 
     if not scores:
         return results
-
-    if len(scores) == 1:
-        # Single score, set to 1.0
+    
+    # 过滤掉 None 值，只对有效分数进行归一化
+    valid_scores = [s for s in scores if s is not None]
+    
+    if not valid_scores:
+        # 所有分数都是 None，不进行归一化
         for item in results:
-            if score_field in item:
-                item[f"normalized_{score_field}"] = 1.0
+            if score_field in item or score_field == "activation_value":
+                item[f"normalized_{score_field}"] = None
         return results
 
-    # Calculate mean and standard deviation
-    mean_score = sum(scores) / len(scores)
-    variance = sum((score - mean_score) ** 2 for score in scores) / len(scores)
+    if len(valid_scores) == 1:        # Single valid score, set to 1.0
+        for item, score in zip(results, scores):
+            if score_field in item or score_field == "activation_value":
+                if score is None:
+                    item[f"normalized_{score_field}"] = None
+                else:
+                    item[f"normalized_{score_field}"] = 1.0
+        return results
+
+    # Calculate mean and standard deviation (only for valid scores)
+    mean_score = sum(valid_scores) / len(valid_scores)
+    variance = sum((score - mean_score) ** 2 for score in valid_scores) / len(valid_scores)
     std_dev = math.sqrt(variance)
 
     if std_dev == 0:
-        # All scores are the same, set them to 1.0
-        for item in results:
-            if score_field in item:
-                item[f"normalized_{score_field}"] = 1.0
+        # All valid scores are the same, set them to 1.0
+        for item, score in zip(results, scores):
+            if score_field in item or score_field == "activation_value":
+                if score is None:
+                    item[f"normalized_{score_field}"] = None
+                else:
+                    item[f"normalized_{score_field}"] = 1.0
     else:
-        for item in results:
-            if score_field in item:
-                score = item[score_field]
-                # Handle None or non-numeric scores
-                if score is None or not isinstance(score, (int, float)):
-                    score = 0.0
-                # Calculate z-score
-                z_score = (score - mean_score) / std_dev
-                # Transform to positive range using sigmoid function
-                normalized = 1 / (1 + math.exp(-z_score))
-                item[f"normalized_{score_field}"] = normalized
+        for item, score in zip(results, scores):
+            if score_field in item or score_field == "activation_value":
+                if score is None:
+                    # 保持 None，不进行归一化
+                    item[f"normalized_{score_field}"] = None
+                else:
+                    # Calculate z-score
+                    z_score = (score - mean_score) / std_dev
+                    # Transform to positive range using sigmoid function
+                    normalized = 1 / (1 + math.exp(-z_score))
+                    item[f"normalized_{score_field}"] = normalized
 
     return results
 
 
-def rerank_hybrid_results(
-    keyword_results: Dict[str, List[Dict[str, Any]]],
-    embedding_results: Dict[str, List[Dict[str, Any]]],
-    alpha: float = 0.6,
-    limit: int = 10
-) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Rerank hybrid search results by combining BM25 and embedding scores.
+# ============================================================================
+# 以下函数已被 rerank_with_activation 替代，暂时保留以供参考
+# ============================================================================
 
-    Args:
-        keyword_results: Results from keyword/BM25 search
-        embedding_results: Results from embedding search
-        alpha: Weight for BM25 scores (1-alpha for embedding scores)
-        limit: Maximum number of results to return per category
+# def rerank_hybrid_results(
+#     keyword_results: Dict[str, List[Dict[str, Any]]],
+#     embedding_results: Dict[str, List[Dict[str, Any]]],
+#     alpha: float = 0.6,
+#     limit: int = 10
+# ) -> Dict[str, List[Dict[str, Any]]]:
+#     """
+#     Rerank hybrid search results by combining BM25 and embedding scores.
+#     
+#     已废弃：此函数功能已被 rerank_with_activation 完全替代
+#
+#     Args:
+#         keyword_results: Results from keyword/BM25 search
+#         embedding_results: Results from embedding search
+#         alpha: Weight for BM25 scores (1-alpha for embedding scores)
+#         limit: Maximum number of results to return per category
+#
+#     Returns:
+#         Reranked results with combined scores
+#     """
+#     reranked = {}
+#
+#     for category in ["statements", "chunks", "entities","summaries"]:
+#         keyword_items = keyword_results.get(category, [])
+#         embedding_items = embedding_results.get(category, [])
+#
+#         # Normalize scores within each search type
+#         keyword_items = normalize_scores(keyword_items, "score")
+#         embedding_items = normalize_scores(embedding_items, "score")
+#
+#         # Create a combined pool of unique items
+#         combined_items = {}
+#
+#         # Add keyword results with BM25 scores
+#         for item in keyword_items:
+#             item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
+#             if item_id:
+#                 combined_items[item_id] = item.copy()
+#                 combined_items[item_id]["bm25_score"] = item.get("normalized_score", 0)
+#                 combined_items[item_id]["embedding_score"] = 0  # Default
+#
+#         # Add or update with embedding results
+#         for item in embedding_items:
+#             item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
+#             if item_id:
+#                 if item_id in combined_items:
+#                     # Update existing item with embedding score
+#                     combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
+#                 else:
+#                     # New item from embedding search only
+#                     combined_items[item_id] = item.copy()
+#                     combined_items[item_id]["bm25_score"] = 0  # Default
+#                     combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
+#
+#         # Calculate combined scores and rank
+#         for item_id, item in combined_items.items():
+#             bm25_score = item.get("bm25_score", 0)
+#             embedding_score = item.get("embedding_score", 0)
+#
+#             # Combined score: weighted average of normalized scores
+#             combined_score = alpha * bm25_score + (1 - alpha) * embedding_score
+#             item["combined_score"] = combined_score
+#
+#             # Keep original score for reference
+#             if "score" not in item and bm25_score > 0:
+#                 item["score"] = bm25_score
+#             elif "score" not in item and embedding_score > 0:
+#                 item["score"] = embedding_score
+#
+#         # Sort by combined score and limit results
+#         sorted_items = sorted(
+#             combined_items.values(),
+#             key=lambda x: x.get("combined_score", 0),
+#             reverse=True
+#         )[:limit]
+#
+#         reranked[category] = sorted_items
+#
+#     return reranked
 
-    Returns:
-        Reranked results with combined scores
-    """
-    reranked = {}
+# def rerank_with_forgetting_curve(
+#     keyword_results: Dict[str, List[Dict[str, Any]]],
+#     embedding_results: Dict[str, List[Dict[str, Any]]],
+#     alpha: float = 0.6,
+#     limit: int = 10,
+#     forgetting_config: ForgettingEngineConfig | None = None,
+#     now: datetime | None = None,
+# ) -> Dict[str, List[Dict[str, Any]]]:
+#     """
+#     Rerank hybrid results with a forgetting curve applied to combined scores.
+#     
+#     已废弃：此函数功能已被 rerank_with_activation 完全替代
+#     rerank_with_activation 提供了更完整的遗忘曲线支持（结合激活度）
+#
+#     The forgetting curve reduces scores for older memories or weaker connections.
+#
+#     Args:
+#         keyword_results: Results from keyword/BM25 search
+#         embedding_results: Results from embedding search
+#         alpha: Weight for BM25 scores (1-alpha for embedding scores)
+#         limit: Maximum number of results to return per category
+#         forgetting_config: Configuration for the forgetting engine
+#         now: Optional current time override for testing
+#
+#     Returns:
+#         Reranked results with combined and final scores (after forgetting)
+#     """
+#     engine = ForgettingEngine(forgetting_config or ForgettingEngineConfig())
+#     now_dt = now or datetime.now()
+#
+#     reranked: Dict[str, List[Dict[str, Any]]] = {}
+#
+#     for category in ["statements", "chunks", "entities","summaries"]:
+#         keyword_items = keyword_results.get(category, [])
+#         embedding_items = embedding_results.get(category, [])
+#
+#         # Normalize scores within each search type
+#         keyword_items = normalize_scores(keyword_items, "score")
+#         embedding_items = normalize_scores(embedding_items, "score")
+#
+#         combined_items: Dict[str, Dict[str, Any]] = {}
+#
+#         # Combine two result sets by ID
+#         for src_items, is_embedding in (
+#             (keyword_items, False), (embedding_items, True)
+#         ):
+#             for item in src_items:
+#                 item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
+#                 if not item_id:
+#                     continue
+#                 existing = combined_items.get(item_id)
+#                 if not existing:
+#                     combined_items[item_id] = item.copy()
+#                     combined_items[item_id]["bm25_score"] = 0
+#                     combined_items[item_id]["embedding_score"] = 0
+#                 # Update normalized score from the right source
+#                 if is_embedding:
+#                     combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
+#                 else:
+#                     combined_items[item_id]["bm25_score"] = item.get("normalized_score", 0)
+#
+#         # Calculate scores and apply forgetting weights
+#         for item_id, item in combined_items.items():
+#             bm25_score = float(item.get("bm25_score", 0) or 0)
+#             embedding_score = float(item.get("embedding_score", 0) or 0)
+#             combined_score = alpha * bm25_score + (1 - alpha) * embedding_score
+#
+#             # Estimate time elapsed in days
+#             dt = _parse_datetime(item.get("created_at"))
+#             if dt is None:
+#                 time_elapsed_days = 0.0
+#             else:
+#                 time_elapsed_days = max(0.0, (now_dt - dt).total_seconds() / 86400.0)
+#
+#             # Memory strength (currently set to default value)
+#             memory_strength = 1.0
+#             forgetting_weight = engine.calculate_weight(
+#                 time_elapsed=time_elapsed_days, memory_strength=memory_strength
+#             )
+#             final_score = combined_score * forgetting_weight
+#             item["combined_score"] = final_score
+#
+#         sorted_items = sorted(
+#             combined_items.values(), key=lambda x: x.get("combined_score", 0), reverse=True
+#         )[:limit]
+#
+#         reranked[category] = sorted_items
+#
+#     return reranked
 
-    for category in ["statements", "chunks", "entities","summaries"]:
-        keyword_items = keyword_results.get(category, [])
-        embedding_items = embedding_results.get(category, [])
 
-        # Normalize scores within each search type
-        keyword_items = normalize_scores(keyword_items, "score")
-        embedding_items = normalize_scores(embedding_items, "score")
-
-        # Create a combined pool of unique items
-        combined_items = {}
-
-        # Add keyword results with BM25 scores
-        for item in keyword_items:
-            item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
-            if item_id:
-                combined_items[item_id] = item.copy()
-                combined_items[item_id]["bm25_score"] = item.get("normalized_score", 0)
-                combined_items[item_id]["embedding_score"] = 0  # Default
-
-        # Add or update with embedding results
-        for item in embedding_items:
-            item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
-            if item_id:
-                if item_id in combined_items:
-                    # Update existing item with embedding score
-                    combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
-                else:
-                    # New item from embedding search only
-                    combined_items[item_id] = item.copy()
-                    combined_items[item_id]["bm25_score"] = 0  # Default
-                    combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
-
-        # Calculate combined scores and rank
-        for item_id, item in combined_items.items():
-            bm25_score = item.get("bm25_score", 0)
-            embedding_score = item.get("embedding_score", 0)
-
-            # Combined score: weighted average of normalized scores
-            combined_score = alpha * bm25_score + (1 - alpha) * embedding_score
-            item["combined_score"] = combined_score
-
-            # Keep original score for reference
-            if "score" not in item and bm25_score > 0:
-                item["score"] = bm25_score
-            elif "score" not in item and embedding_score > 0:
-                item["score"] = embedding_score
-
-        # Sort by combined score and limit results
-        sorted_items = sorted(
-            combined_items.values(),
-            key=lambda x: x.get("combined_score", 0),
-            reverse=True
-        )[:limit]
-
-        reranked[category] = sorted_items
-
-    return reranked
-
-def rerank_with_forgetting_curve(
+def rerank_with_activation(
     keyword_results: Dict[str, List[Dict[str, Any]]],
     embedding_results: Dict[str, List[Dict[str, Any]]],
     alpha: float = 0.6,
     limit: int = 10,
     forgetting_config: ForgettingEngineConfig | None = None,
+    activation_boost_factor: float = 0.8,
     now: datetime | None = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Rerank hybrid results with a forgetting curve applied to combined scores.
-
-    The forgetting curve reduces scores for older memories or weaker connections.
-
-    Args:
-        keyword_results: Results from keyword/BM25 search
-        embedding_results: Results from embedding search
-        alpha: Weight for BM25 scores (1-alpha for embedding scores)
-        limit: Maximum number of results to return per category
-        forgetting_config: Configuration for the forgetting engine
-        now: Optional current time override for testing
-
-    Returns:
-        Reranked results with combined and final scores (after forgetting)
+    两阶段排序：先按内容相关性筛选，再按激活值排序。
+    
+    阶段1: content_score = alpha*BM25 + (1-alpha)*Embedding，取 Top-(limit*3)
+    阶段2: 在候选中按 activation_score 排序，取 Top-limit
+           无激活值的节点用于补充不足
+    
+    返回结果中的评分字段说明：
+        - bm25_score: BM25 归一化分数
+        - embedding_score: Embedding 归一化分数
+        - content_score: 内容相关性 = alpha*bm25 + (1-alpha)*embedding
+        - activation_score: ACTR 激活值归一化分数
+        - base_score: 第一阶段基础分数（等于 content_score）
+        - final_score: 最终排序依据
+            * 有激活值的节点：final_score = activation_score
+            * 无激活值的节点：final_score = base_score
+    
+    参数:
+        keyword_results: BM25 检索结果
+        embedding_results: 向量嵌入检索结果
+        alpha: BM25 权重 (默认: 0.6)
+        limit: 每类最大结果数
+        forgetting_config: 遗忘引擎配置（当前未使用）
+        activation_boost_factor: 激活度对记忆强度的影响系数 (默认: 0.8)
+        now: 当前时间（用于遗忘计算）
+        
+    返回:
+        带评分元数据的重排序结果，按 final_score 排序
     """
-    engine = ForgettingEngine(forgetting_config or ForgettingEngineConfig())
+    # 验证权重范围
+    if not (0 <= alpha <= 1):
+        raise ValueError(f"alpha 必须在 [0, 1] 范围内，当前值: {alpha}")
+    
+    # 初始化遗忘引擎（如果需要）
+    engine = None
+    if forgetting_config:
+        engine = ForgettingEngine(forgetting_config)
     now_dt = now or datetime.now()
-
+    
     reranked: Dict[str, List[Dict[str, Any]]] = {}
-
-    for category in ["statements", "chunks", "entities","summaries"]:
+    
+    for category in ["statements", "chunks", "entities", "summaries"]:
         keyword_items = keyword_results.get(category, [])
         embedding_items = embedding_results.get(category, [])
-
-        # Normalize scores within each search type
+        
+        # 步骤 1: 归一化分数
         keyword_items = normalize_scores(keyword_items, "score")
         embedding_items = normalize_scores(embedding_items, "score")
-
+        
+        # 步骤 2: 按 ID 合并结果
         combined_items: Dict[str, Dict[str, Any]] = {}
-
-        # Combine two result sets by ID
-        for src_items, is_embedding in (
-            (keyword_items, False), (embedding_items, True)
-        ):
-            for item in src_items:
-                item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
-                if not item_id:
-                    continue
-                existing = combined_items.get(item_id)
-                if not existing:
-                    combined_items[item_id] = item.copy()
-                    combined_items[item_id]["bm25_score"] = 0
-                    combined_items[item_id]["embedding_score"] = 0
-                # Update normalized score from the right source
-                if is_embedding:
-                    combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
-                else:
-                    combined_items[item_id]["bm25_score"] = item.get("normalized_score", 0)
-
-        # Calculate scores and apply forgetting weights
-        for item_id, item in combined_items.items():
-            bm25_score = float(item.get("bm25_score", 0) or 0)
-            embedding_score = float(item.get("embedding_score", 0) or 0)
-            combined_score = alpha * bm25_score + (1 - alpha) * embedding_score
-
-            # Estimate time elapsed in days
-            dt = _parse_datetime(item.get("created_at"))
-            if dt is None:
-                time_elapsed_days = 0.0
+        
+        # 添加关键词结果
+        for item in keyword_items:
+            item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
+            if not item_id:
+                continue
+            combined_items[item_id] = item.copy()
+            combined_items[item_id]["bm25_score"] = item.get("normalized_score", 0)
+            combined_items[item_id]["embedding_score"] = 0  # 默认值
+        
+        # 添加或更新向量嵌入结果
+        for item in embedding_items:
+            item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
+            if not item_id:
+                continue
+            if item_id in combined_items:
+                # 更新现有项的嵌入分数
+                combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
             else:
-                time_elapsed_days = max(0.0, (now_dt - dt).total_seconds() / 86400.0)
-
-            # Memory strength (currently set to default value)
-            memory_strength = 1.0
-            forgetting_weight = engine.calculate_weight(
-                time_elapsed=time_elapsed_days, memory_strength=memory_strength
-            )
-            # print(f"Forgetting weight for {item_id}: {forgetting_weight}")
-            # print(f"Time elapsed days for {item_id}: {time_elapsed_days}")
-            final_score = combined_score * forgetting_weight
-            item["combined_score"] = final_score
-
-        sorted_items = sorted(
-            combined_items.values(), key=lambda x: x.get("combined_score", 0), reverse=True
-        )[:limit]
-
+                # 仅来自嵌入搜索的新项
+                combined_items[item_id] = item.copy()
+                combined_items[item_id]["bm25_score"] = 0  # 默认值
+                combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
+        
+        # 步骤 3: 归一化激活度分数
+        # 为所有项准备激活度值列表
+        items_list = list(combined_items.values())
+        items_list = normalize_scores(items_list, "activation_value")
+        
+        # 更新 combined_items 中的归一化激活度分数
+        for item in items_list:
+            item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
+            if item_id and item_id in combined_items:
+                combined_items[item_id]["normalized_activation_value"] = item.get("normalized_activation_value", 0)
+        
+        # 步骤 4: 计算基础分数和最终分数
+        for item_id, item in combined_items.items():
+            bm25_norm = float(item.get("bm25_score", 0) or 0)
+            emb_norm = float(item.get("embedding_score", 0) or 0)
+            act_norm = float(item.get("normalized_activation_value", 0) or 0)
+            
+            # 第一阶段：只考虑内容相关性（BM25 + Embedding）
+            # alpha 控制 BM25 权重，(1-alpha) 控制 Embedding 权重
+            content_score = alpha * bm25_norm + (1 - alpha) * emb_norm
+            base_score = content_score  # 第一阶段用内容分数
+            
+            # 存储激活度分数供第二阶段使用
+            item["activation_score"] = act_norm
+            item["content_score"] = content_score
+            item["base_score"] = base_score
+            
+            # 步骤 5: 应用遗忘曲线（可选）
+            if engine:
+                # 计算受激活度影响的记忆强度
+                importance = float(item.get("importance_score", 0.5) or 0.5)
+                
+                # 获取 activation_value
+                activation_val = item.get("activation_value")
+                
+                # 只对有激活值的节点应用遗忘曲线
+                if activation_val is not None and isinstance(activation_val, (int, float)):
+                    activation_val = float(activation_val)
+                    
+                    # 计算记忆强度：importance_score × (1 + activation_value × boost_factor)
+                    memory_strength = importance * (1 + activation_val * activation_boost_factor)
+                    
+                    # 计算经过的时间（天数）
+                    dt = _parse_datetime(item.get("created_at"))
+                    if dt is None:
+                        time_elapsed_days = 0.0
+                    else:
+                        time_elapsed_days = max(0.0, (now_dt - dt).total_seconds() / 86400.0)
+                    
+                    # 获取遗忘权重
+                    forgetting_weight = engine.calculate_weight(
+                        time_elapsed=time_elapsed_days,
+                        memory_strength=memory_strength
+                    )
+                    
+                    # 应用到基础分数
+                    item["forgetting_weight"] = forgetting_weight
+                    item["final_score"] = base_score * forgetting_weight
+                else:
+                    # 无激活值的节点不应用遗忘曲线，保持原始分数
+                    item["final_score"] = base_score
+            else:
+                # 不使用遗忘曲线
+                item["final_score"] = base_score
+        
+        # 步骤 6: 两阶段排序和限制
+        # 第一阶段：按内容相关性（base_score）排序，取 Top-K
+        first_stage_limit = limit * 3  # 可配置，取3倍候选
+        first_stage_sorted = sorted(
+            combined_items.values(),
+            key=lambda x: float(x.get("base_score", 0) or 0),  # 按内容分数排序
+            reverse=True
+        )[:first_stage_limit]
+        
+        # 第二阶段：分离有激活值和无激活值的节点
+        items_with_activation = []
+        items_without_activation = []
+        
+        for item in first_stage_sorted:
+            activation_score = item.get("activation_score")
+            # 检查是否有有效的激活值（不是 None）
+            if activation_score is not None and isinstance(activation_score, (int, float)):
+                items_with_activation.append(item)
+            else:
+                items_without_activation.append(item)
+        
+        # 优先按激活值排序有激活值的节点
+        sorted_with_activation = sorted(
+            items_with_activation,
+            key=lambda x: float(x.get("activation_score", 0) or 0),
+            reverse=True
+        )
+        
+        # 如果有激活值的节点不足 limit，用无激活值的节点补充
+        if len(sorted_with_activation) < limit:
+            needed = limit - len(sorted_with_activation)
+            # 无激活值的节点保持第一阶段的内容相关性排序
+            sorted_items = sorted_with_activation + items_without_activation[:needed]
+        else:
+            sorted_items = sorted_with_activation[:limit]
+        
+        # 两阶段排序完成，更新 final_score 以反映实际排序依据
+        # Stage 1: 按 content_score 筛选候选（已完成）
+        # Stage 2: 按 activation_score 排序（已完成）
+        # 
+        # final_score 语义：反映节点在最终结果中的排序依据
+        #   - 有激活值的节点：final_score = activation_score（第二阶段排序依据）
+        #   - 无激活值的节点：final_score = base_score（保持内容相关性分数）
+        for item in sorted_items:
+            activation_score = item.get("activation_score")
+            if activation_score is not None and isinstance(activation_score, (int, float)):
+                # 有激活值：使用激活度作为最终分数
+                item["final_score"] = activation_score
+            else:
+                # 无激活值：使用内容相关性分数
+                item["final_score"] = item.get("base_score", 0)
+        
         reranked[category] = sorted_items
-
+    
     return reranked
 
 
@@ -560,6 +794,7 @@ async def run_hybrid_search(
     output_path: str | None,
     memory_config: "MemoryConfig",
     rerank_alpha: float = 0.6,
+    activation_boost_factor: float = 0.8,
     use_forgetting_rerank: bool = False,
     use_llm_rerank: bool = False,
 ):
@@ -685,30 +920,28 @@ async def run_hybrid_search(
                 "search_timestamp": datetime.now().isoformat()
             }
 
-            # Apply reranking (optionally with forgetting curve)
+            # Apply two-stage reranking with ACTR activation calculation
             rerank_start = time.time()
-            if use_forgetting_rerank:
-                # Load forgetting parameters from pipeline config
-                try:
-                    pc = get_pipeline_config(memory_config)
-                    forgetting_cfg = pc.forgetting_engine
-                except Exception as e:
-                    logger.debug(f"Failed to load forgetting config, using defaults: {e}")
-                    forgetting_cfg = ForgettingEngineConfig()
-                reranked_results = rerank_with_forgetting_curve(
-                    keyword_results=keyword_results,
-                    embedding_results=embedding_results,
-                    alpha=rerank_alpha,
-                    limit=limit,
-                    forgetting_config=forgetting_cfg,
-                )
-            else:
-                reranked_results = rerank_hybrid_results(
-                    keyword_results=keyword_results,
-                    embedding_results=embedding_results,
-                    alpha=rerank_alpha,  # Configurable weight for BM25 vs embedding
-                    limit=limit
-                )
+            logger.info("Using two-stage reranking with ACTR activation")
+            
+            # 加载遗忘引擎配置
+            try:
+                pc = get_pipeline_config(memory_config)
+                forgetting_cfg = pc.forgetting_engine
+            except Exception as e:
+                logger.debug(f"Failed to load forgetting config, using defaults: {e}")
+                forgetting_cfg = ForgettingEngineConfig()
+            
+            # 统一使用激活度重排序（两阶段：检索 + ACTR计算）
+            reranked_results = rerank_with_activation(
+                keyword_results=keyword_results,
+                embedding_results=embedding_results,
+                alpha=rerank_alpha,
+                limit=limit,
+                forgetting_config=forgetting_cfg,
+                activation_boost_factor=activation_boost_factor,
+            )
+            
             rerank_latency = time.time() - rerank_start
             latency_metrics["reranking_latency"] = round(rerank_latency, 4)
             logger.info(f"Reranking completed in {rerank_latency:.4f}s")
@@ -737,6 +970,7 @@ async def run_hybrid_search(
                 "search_query": query_text,
                 "search_timestamp": datetime.now().isoformat(),
                 "reranking_alpha": rerank_alpha,
+                "activation_boost_factor": activation_boost_factor,
                 "forgetting_rerank": use_forgetting_rerank,
                 "llm_rerank": llm_rerank_applied,
             }

@@ -399,3 +399,104 @@ class GenerateCacheRequest(BaseModel):
         None, 
         description="终端用户ID（UUID格式）。如果提供，只为该用户生成；如果不提供，为当前工作空间的所有用户生成"
     )
+
+
+# ============================================================================
+# 遗忘引擎相关 Schema
+# ============================================================================
+
+class ForgettingTriggerRequest(BaseModel):
+    """手动触发遗忘周期请求模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    group_id: Optional[str] = Field(None, description="组ID（可选，用于过滤特定组的节点）")
+    max_merge_batch_size: int = Field(100, ge=1, le=1000, description="单次最大融合节点对数（默认100）")
+    min_days_since_access: int = Field(30, ge=1, le=365, description="最小未访问天数（默认30天）")
+    config_id: Optional[int] = Field(None, description="配置ID（可选，用于指定遗忘引擎配置）") # TODO 后续group_id更换成enduser_id，自动与config_id关联 ，要删除此行
+
+
+class ForgettingConfigResponse(BaseModel):
+    """遗忘引擎配置响应模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    config_id: int = Field(..., description="配置ID")
+    decay_constant: float = Field(..., description="衰减常数 d")
+    lambda_time: float = Field(..., description="时间衰减参数")
+    lambda_mem: float = Field(..., description="记忆衰减参数")
+    forgetting_rate: float = Field(..., description="遗忘速率（根据 lambda_time / lambda_mem 计算得出）")
+    offset: float = Field(..., description="偏移量")
+    max_history_length: int = Field(..., description="访问历史最大长度")
+    forgetting_threshold: float = Field(..., description="遗忘阈值")
+    min_days_since_access: int = Field(..., description="最小未访问天数")
+    enable_llm_summary: bool = Field(..., description="是否使用 LLM 生成摘要")
+    max_merge_batch_size: int = Field(..., description="单次最大融合节点对数")
+    forgetting_interval_hours: int = Field(..., description="遗忘周期间隔（小时）")
+
+
+class ForgettingConfigUpdateRequest(BaseModel):
+    """遗忘引擎配置更新请求模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    config_id: int = Field(..., description="配置ID")
+    decay_constant: Optional[float] = Field(None, ge=0.0, le=1.0, description="衰减常数 d")
+    lambda_time: Optional[float] = Field(None, ge=0.0, le=1.0, description="时间衰减参数")
+    lambda_mem: Optional[float] = Field(None, ge=0.0, le=1.0, description="记忆衰减参数")
+    offset: Optional[float] = Field(None, ge=0.0, le=1.0, description="偏移量")
+    max_history_length: Optional[int] = Field(None, ge=10, le=1000, description="访问历史最大长度")
+    forgetting_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="遗忘阈值")
+    min_days_since_access: Optional[int] = Field(None, ge=1, le=365, description="最小未访问天数")
+    enable_llm_summary: Optional[bool] = Field(None, description="是否使用 LLM 生成摘要")
+    max_merge_batch_size: Optional[int] = Field(None, ge=1, le=1000, description="单次最大融合节点对数")
+    forgetting_interval_hours: Optional[int] = Field(None, ge=1, le=168, description="遗忘周期间隔（小时）")
+
+
+class ForgettingStatsResponse(BaseModel):
+    """遗忘引擎统计信息响应模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    activation_metrics: Dict[str, Any] = Field(..., description="激活值相关指标")
+    node_distribution: Dict[str, int] = Field(..., description="节点类型分布")
+    consistency_check: Optional[Dict[str, Any]] = Field(None, description="数据一致性检查结果")
+    nodes_merged_total: int = Field(..., description="累计融合节点对数")
+    recent_cycles: List[Dict[str, Any]] = Field(..., description="最近的遗忘周期记录")
+    timestamp: str = Field(..., description="统计时间（ISO格式）")
+
+
+class ForgettingReportResponse(BaseModel):
+    """遗忘周期报告响应模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    merged_count: int = Field(..., description="融合的节点对数量")
+    nodes_before: int = Field(..., description="遗忘前的节点总数")
+    nodes_after: int = Field(..., description="遗忘后的节点总数")
+    reduction_rate: float = Field(..., description="节点减少率（0-1）")
+    duration_seconds: float = Field(..., description="执行耗时（秒）")
+    start_time: str = Field(..., description="开始时间（ISO格式）")
+    end_time: str = Field(..., description="结束时间（ISO格式）")
+    failed_count: int = Field(..., description="失败的融合数量")
+    success_rate: float = Field(..., description="成功率（0-1）")
+
+
+class ForgettingCurvePoint(BaseModel):
+    """遗忘曲线数据点模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    day: int = Field(..., description="天数")
+    activation: float = Field(..., description="激活值")
+    retention_rate: float = Field(..., description="保持率（与激活值相同）")
+
+
+class ForgettingCurveRequest(BaseModel):
+    """遗忘曲线请求模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    importance_score: float = Field(0.5, ge=0.0, le=1.0, description="重要性分数（0-1）")
+    days: int = Field(60, ge=1, le=365, description="模拟天数（默认60天）")
+    config_id: Optional[int] = Field(None, description="配置ID（可选，如果为None则使用默认配置）")
+
+
+class ForgettingCurveResponse(BaseModel):
+    """遗忘曲线响应模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    curve_data: List[ForgettingCurvePoint] = Field(..., description="遗忘曲线数据点列表")
+    config: Dict[str, Any] = Field(..., description="使用的配置参数")

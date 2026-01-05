@@ -65,6 +65,15 @@ class DataConfig(Base):
     lambda_mem = Column("lambda_mem", Float, default=0.5, comment="遗忘率，0-1 小数")
     offset = Column("offset", Float, default=0.0, comment="偏移度，0-1 小数")
     
+    # ACT-R 遗忘引擎配置
+    decay_constant = Column(Float, default=0.5, comment="ACT-R衰减常数d，默认0.5")
+    forgetting_threshold = Column(Float, default=0.3, comment="遗忘阈值，默认0.3")
+    forgetting_interval_hours = Column(Integer, default=24, comment="遗忘周期间隔（小时），默认24")
+    enable_llm_summary = Column(Boolean, default=True, comment="是否使用LLM生成摘要，默认True")
+    max_merge_batch_size = Column(Integer, default=100, comment="单次最大融合节点对数，默认100")
+    max_history_length = Column(Integer, default=100, comment="访问历史最大长度，默认100")
+    min_days_since_access = Column(Integer, default=30, comment="最小未访问天数，默认30")
+    
     # 情绪引擎配置
     emotion_enabled = Column(Boolean, default=True, comment="是否启用情绪提取")
     emotion_model_id = Column(String, nullable=True, comment="情绪分析专用模型ID")

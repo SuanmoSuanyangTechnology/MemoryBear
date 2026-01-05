@@ -8,7 +8,6 @@ Classes:
     Neo4jConnector: Neo4j数据库连接器，提供异步查询接口
 """
 
-import os
 from typing import Any, List, Dict
 
 from neo4j import AsyncGraphDatabase, basic_auth
@@ -84,6 +83,63 @@ class Neo4jConnector:
         )
         records, summary, keys = result
         return [record.data() for record in records]
+    
+    async def execute_write_transaction(self, transaction_func, **kwargs: Any) -> Any:
+        """在写事务中执行操作
+        
+        提供显式事务支持，确保操作的原子性。
+        如果事务函数抛出异常，所有更改将自动回滚。
+        
+        Args:
+            transaction_func: 事务函数，接收 tx 参数并执行查询
+            **kwargs: 传递给事务函数的额外参数
+            
+        Returns:
+            Any: 事务函数的返回值
+            
+        Example:
+            >>> async def create_node(tx, name):
+            ...     result = await tx.run(
+            ...         "CREATE (n:Person {name: $name}) RETURN n",
+            ...         name=name
+            ...     )
+            ...     return await result.single()
+            >>> 
+            >>> connector = Neo4jConnector()
+            >>> result = await connector.execute_write_transaction(
+            ...     create_node, name="Alice"
+            ... )
+        """
+        async with self.driver.session(database="neo4j") as session:
+            return await session.execute_write(transaction_func, **kwargs)
+    
+    async def execute_read_transaction(self, transaction_func, **kwargs: Any) -> Any:
+        """在读事务中执行操作
+        
+        提供显式事务支持用于读操作。
+        
+        Args:
+            transaction_func: 事务函数，接收 tx 参数并执行查询
+            **kwargs: 传递给事务函数的额外参数
+            
+        Returns:
+            Any: 事务函数的返回值
+            
+        Example:
+            >>> async def get_node(tx, name):
+            ...     result = await tx.run(
+            ...         "MATCH (n:Person {name: $name}) RETURN n",
+            ...         name=name
+            ...     )
+            ...     return await result.single()
+            >>> 
+            >>> connector = Neo4jConnector()
+            >>> result = await connector.execute_read_transaction(
+            ...     get_node, name="Alice"
+            ... )
+        """
+        async with self.driver.session(database="neo4j") as session:
+            return await session.execute_read(transaction_func, **kwargs)
     
     async def delete_group(self, group_id: str):
         """删除指定组的所有数据

@@ -228,6 +228,13 @@ class StatementNode(Node):
         chunk_embedding: Optional embedding vector for the parent chunk
         connect_strength: Classification of connection strength ('Strong' or 'Weak')
         config_id: Configuration ID used to process this statement
+        
+        # ACT-R Memory Activation Properties
+        importance_score: Importance score for memory activation (0.0-1.0), default 0.5
+        activation_value: Current activation value calculated by ACT-R engine (0.0-1.0)
+        access_history: List of ISO timestamp strings recording each access
+        last_access_time: ISO timestamp of the most recent access
+        access_count: Total number of times this node has been accessed
     """
     # Core fields (ordered as requested)
     chunk_id: str = Field(..., description="ID of the parent chunk")
@@ -268,6 +275,33 @@ class StatementNode(Node):
     chunk_embedding: Optional[List[float]] = Field(None, description="Chunk embedding vector")
     connect_strength: str = Field(..., description="Strong VS Weak classification of this statement")
     config_id: Optional[int | str] = Field(None, description="Configuration ID used to process this statement (integer or string)")
+    
+    # ACT-R Memory Activation Properties
+    importance_score: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Importance score for memory activation (0.0-1.0), default 0.5"
+    )
+    activation_value: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Current activation value calculated by ACT-R engine (0.0-1.0)"
+    )
+    access_history: List[str] = Field(
+        default_factory=list,
+        description="List of ISO timestamp strings recording each access"
+    )
+    last_access_time: Optional[str] = Field(
+        None,
+        description="ISO timestamp of the most recent access"
+    )
+    access_count: int = Field(
+        default=0,
+        ge=0,
+        description="Total number of times this node has been accessed"
+    )
     
     @field_validator('valid_at', 'invalid_at', mode='before')
     @classmethod
@@ -351,6 +385,13 @@ class ExtractedEntityNode(Node):
         fact_summary: Summary of facts about this entity
         connect_strength: Classification of connection strength ('Strong', 'Weak', or 'Both')
         config_id: Configuration ID used to process this entity (integer or string)
+        
+        # ACT-R Memory Activation Properties
+        importance_score: Importance score for memory activation (0.0-1.0), default 0.5
+        activation_value: Current activation value calculated by ACT-R engine (0.0-1.0)
+        access_history: List of ISO timestamp strings recording each access
+        last_access_time: ISO timestamp of the most recent access
+        access_count: Total number of times this node has been accessed
     """
     entity_idx: int = Field(..., description="Unique identifier for the entity")
     statement_id: str = Field(..., description="Statement this entity was extracted from")
@@ -364,6 +405,33 @@ class ExtractedEntityNode(Node):
     fact_summary: str = Field(default="", description="Summary of the fact about this entity")
     connect_strength: str = Field(..., description="Strong VS Weak about this entity")
     config_id: Optional[int | str] = Field(None, description="Configuration ID used to process this entity (integer or string)")
+    
+    # ACT-R Memory Activation Properties
+    importance_score: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Importance score for memory activation (0.0-1.0), default 0.5"
+    )
+    activation_value: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Current activation value calculated by ACT-R engine (0.0-1.0)"
+    )
+    access_history: List[str] = Field(
+        default_factory=list,
+        description="List of ISO timestamp strings recording each access"
+    )
+    last_access_time: Optional[str] = Field(
+        None,
+        description="ISO timestamp of the most recent access"
+    )
+    access_count: int = Field(
+        default=0,
+        ge=0,
+        description="Total number of times this node has been accessed"
+    )
     
     @field_validator('aliases', mode='before')
     @classmethod
@@ -401,6 +469,16 @@ class MemorySummaryNode(Node):
         summary_embedding: Optional embedding vector for the summary
         metadata: Additional metadata for the summary
         config_id: Configuration ID used to process this summary
+        original_statement_id: ID of the original statement that was merged (for ACT-R forgetting)
+        original_entity_id: ID of the original entity that was merged (for ACT-R forgetting)
+        merged_at: Timestamp when the nodes were merged
+        
+        # ACT-R Memory Activation Properties
+        importance_score: Importance score for memory activation (0.0-1.0), inherited from merged nodes
+        activation_value: Current activation value calculated by ACT-R engine (0.0-1.0), inherited from merged nodes
+        access_history: List of ISO timestamp strings recording each access (reset on creation)
+        last_access_time: ISO timestamp of the most recent access (set to creation time)
+        access_count: Total number of times this node has been accessed (reset to 1 on creation)
     """
     summary_id: str = Field(default_factory=lambda: uuid4().hex, description="Unique identifier for the summary")
     dialog_id: str = Field(..., description="ID of the parent dialog")
@@ -409,3 +487,44 @@ class MemorySummaryNode(Node):
     summary_embedding: Optional[List[float]] = Field(None, description="Embedding vector for the summary")
     metadata: dict = Field(default_factory=dict, description="Additional metadata for the summary")
     config_id: Optional[int | str] = Field(None, description="Configuration ID used to process this summary (integer or string)")
+    
+    # ACT-R Forgetting Engine Properties
+    original_statement_id: Optional[str] = Field(
+        None,
+        description="ID of the original statement that was merged (for traceability)"
+    )
+    original_entity_id: Optional[str] = Field(
+        None,
+        description="ID of the original entity that was merged (for traceability)"
+    )
+    merged_at: Optional[datetime] = Field(
+        None,
+        description="Timestamp when the nodes were merged"
+    )
+    
+    # ACT-R Memory Activation Properties
+    importance_score: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Importance score for memory activation (0.0-1.0), inherited from merged nodes"
+    )
+    activation_value: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Current activation value calculated by ACT-R engine (0.0-1.0), inherited from merged nodes"
+    )
+    access_history: List[str] = Field(
+        default_factory=list,
+        description="List of ISO timestamp strings recording each access (reset on creation)"
+    )
+    last_access_time: Optional[str] = Field(
+        None,
+        description="ISO timestamp of the most recent access (set to creation time)"
+    )
+    access_count: int = Field(
+        default=1,
+        ge=0,
+        description="Total number of times this node has been accessed (reset to 1 on creation)"
+    )

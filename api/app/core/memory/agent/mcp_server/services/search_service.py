@@ -106,28 +106,32 @@ class SearchService:
         limit: int = 15,
         search_type: str = "hybrid",
         include: Optional[List[str]] = None,
-        rerank_alpha: float = 0.4,
+        rerank_alpha: float = 0.6,
+        activation_boost_factor: float = 0.8,
         output_path: str = "search_results.json",
         return_raw_results: bool = False,
         memory_config: "MemoryConfig" = None,
     ) -> Tuple[str, str, Optional[dict]]:
         """
-        Execute hybrid search and return clean content.
+        Execute hybrid search with two-stage ranking.
+        
+        Stage 1: Filter by content relevance (BM25 + Embedding)
+        Stage 2: Rerank by activation values (ACTR)
         
         Args:
-            group_id: Group identifier for filtering results
+            group_id: Group identifier for filtering
             question: Search query text
-            limit: Maximum number of results to return (default: 5)
-            search_type: Type of search - "hybrid", "keyword", or "embedding" (default: "hybrid")
-            include: List of result types to include (default: ["statements", "chunks", "entities", "summaries"])
-            rerank_alpha: Weight for BM25 scores in reranking (default: 0.4)
-            output_path: Path to save search results (default: "search_results.json")
-            return_raw_results: If True, also return the raw search results as third element (default: False)
-            memory_config: MemoryConfig object for embedding model. Falls back to self.memory_config if not provided.
+            limit: Max results per category (default: 15)
+            search_type: "hybrid", "keyword", or "embedding" (default: "hybrid")
+            include: Result types (default: ["statements", "chunks", "entities", "summaries"])
+            rerank_alpha: BM25 weight (default: 0.6)
+            activation_boost_factor: Activation impact on memory strength (default: 0.8)
+            output_path: JSON output path (default: "search_results.json")
+            return_raw_results: Return full metadata (default: False)
+            memory_config: MemoryConfig for embedding model
         
         Returns:
-            Tuple of (clean_content, cleaned_query, raw_results)
-            raw_results is None if return_raw_results=False
+            Tuple[str, str, Optional[dict]]: (clean_content, cleaned_query, raw_results)
         """
         if include is None:
             include = ["statements", "chunks", "entities", "summaries"]
@@ -151,6 +155,7 @@ class SearchService:
                 output_path=output_path,
                 memory_config=config,
                 rerank_alpha=rerank_alpha,
+                activation_boost_factor=activation_boost_factor,
             )
             
             # Extract results based on search type and include parameter

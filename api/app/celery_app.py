@@ -85,6 +85,8 @@ health_schedule = timedelta(seconds=settings.HEALTH_CHECK_SECONDS)
 memory_increment_schedule = timedelta(hours=settings.MEMORY_INCREMENT_INTERVAL_HOURS)
 memory_cache_regeneration_schedule = timedelta(hours=settings.MEMORY_CACHE_REGENERATION_HOURS)
 workspace_reflection_schedule = timedelta(seconds=30)  # 每30秒运行一次settings.REFLECTION_INTERVAL_TIME
+forgetting_cycle_schedule = timedelta(hours=24)  # 每24小时运行一次遗忘周期
+
 # 构建定时任务配置
 beat_schedule_config = {
 
@@ -102,6 +104,13 @@ beat_schedule_config = {
         "task": "app.tasks.regenerate_memory_cache",
         "schedule": memory_cache_regeneration_schedule,
         "args": (),
+    },
+    "run-forgetting-cycle": {
+        "task": "app.tasks.run_forgetting_cycle_task",
+        "schedule": forgetting_cycle_schedule,
+        "kwargs": {
+            "config_id": None,  # 使用默认配置，可以通过环境变量配置
+        },
     },
 }
 

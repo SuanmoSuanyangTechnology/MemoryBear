@@ -106,7 +106,13 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
                 "emotion_intensity": statement.emotion_intensity,
                 "emotion_keywords": statement.emotion_keywords if statement.emotion_keywords else [],
                 "emotion_subject": statement.emotion_subject,
-                "emotion_target": statement.emotion_target
+                "emotion_target": statement.emotion_target,
+                # 添加 ACT-R 记忆激活属性
+                "importance_score": statement.importance_score,
+                "activation_value": statement.activation_value,
+                "access_history": statement.access_history if statement.access_history else [],
+                "last_access_time": statement.last_access_time,
+                "access_count": statement.access_count
             }
             flattened_statements.append(flattened_statement)
 
