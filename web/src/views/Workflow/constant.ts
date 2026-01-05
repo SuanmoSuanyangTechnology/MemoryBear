@@ -39,6 +39,9 @@ import processEvolutionIcon from '@/assets/images/workflow/process_evolution.png
 import questionClassifierIcon from '@/assets/images/workflow/question-classifier.png'
 import breakIcon from '@/assets/images/workflow/break.png'
 import assignerIcon from '@/assets/images/workflow/assigner.png'
+import memoryReadIcon from '@/assets/images/workflow/memory-read.png'
+import memoryWriteIcon from '@/assets/images/workflow/memory-write.png'
+
 import { memoryConfigListUrl } from '@/api/memory'
 
 import { getModelListUrl } from '@/api/models'
@@ -174,8 +177,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "cognitiveUpgrading",
     nodes: [
-      {
-        type: "memory-read", icon: memoryEnhancementIcon,
+      { type: "memory-read", icon: memoryReadIcon,
         config: {
           message: {
             type: 'messageEditor',
@@ -198,7 +200,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "memory-write", icon: memoryEnhancementIcon,
+      { type: "memory-write", icon: memoryWriteIcon,
         config: {
           message: {
             type: 'messageEditor',
