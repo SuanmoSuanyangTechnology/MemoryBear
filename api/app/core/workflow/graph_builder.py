@@ -128,7 +128,7 @@ class GraphBuilder:
             # NOTE:Loop node creation automatically removes the nodes and edges of the subgraph from the current graph
             node_instance = NodeFactory.create_node(node, self.workflow_config)
 
-            if node_type in [NodeType.IF_ELSE, NodeType.HTTP_REQUEST]:
+            if node_type in [NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER]:
 
                 # Find all edges whose source is the current node
                 related_edge = [edge for edge in self.edges if edge.get("source") == node_id]
