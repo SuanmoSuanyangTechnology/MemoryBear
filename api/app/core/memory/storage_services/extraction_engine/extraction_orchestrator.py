@@ -178,7 +178,7 @@ class ExtractionOrchestrator:
             for dialog in dialog_data_list:
                 for chunk in dialog.chunks:
                     all_statements_list.extend(chunk.statements)
-            len(all_statements_list)
+            total_statements = len(all_statements_list)
 
             # 步骤 2: 并行执行三元组提取、时间信息提取、情绪提取和基础嵌入生成
             logger.info("步骤 2/6: 并行执行三元组提取、时间信息提取、情绪提取和嵌入生成")
@@ -200,9 +200,9 @@ class ExtractionOrchestrator:
                         all_entities_list.extend(triplet_info.entities)
                         all_triplets_list.extend(triplet_info.triplets)
             
-            len(all_entities_list)
-            len(all_triplets_list)
-            sum(len(temporal_map) for temporal_map in temporal_maps)
+            total_entities = len(all_entities_list)
+            total_triplets = len(all_triplets_list)
+            total_temporal = sum(len(temporal_map) for temporal_map in temporal_maps)
 
             # 步骤 3: 生成实体嵌入（依赖三元组提取结果）
             logger.info("步骤 3/6: 生成实体嵌入")
@@ -384,7 +384,7 @@ class ExtractionOrchestrator:
         
         # 用于跟踪已完成的陈述句数量
         completed_statements = 0
-        len(all_statements)
+        total_statements = len(all_statements)
 
         # 全局并行处理所有陈述句
         async def extract_for_statement(stmt_data, stmt_index):
