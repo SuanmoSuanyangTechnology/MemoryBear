@@ -257,7 +257,15 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
     
-    async def write_memory(self, group_id: str, message: str, config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
+    async def write_memory(
+        self, 
+        group_id: str, 
+        messages_list: List[Dict[str, str]] = None,
+        config_id: Optional[str] = None, 
+        db: Session = None, 
+        storage_type: str = None, 
+        user_rag_memory_id: str = None
+    ) -> str:
         """
         Process write operation with config_id
         
@@ -275,6 +283,8 @@ class MemoryAgentService:
         Raises:
             ValueError: If config loading fails or write operation fails
         """
+        if not messages_list:
+            raise ValueError("必须提供 messages_list 参数")
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
             try:
@@ -334,7 +344,7 @@ class MemoryAgentService:
                             stream_mode="values",
                             config=config
                     ):
-                        messages = event.get('messages')
+                        messages_result = event.get('messages')
                         # Capture any errors from the state
                         if event.get('errors'):
                             workflow_errors.extend(event.get('errors', []))
@@ -357,7 +367,7 @@ class MemoryAgentService:
                 
                 raise ValueError(f"Write workflow failed: {error_details}")
             
-            return self.writer_messages_deal(messages, start_time, group_id, config_id, message)
+            return self.writer_messages_deal(messages_result, start_time, group_id, config_id, str(messages_list))
     
     async def read_memory(
         self,
