@@ -18,6 +18,7 @@ from app.core.workflow.nodes.if_else import IfElseNode
 from app.core.workflow.nodes.jinja_render import JinjaRenderNode
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
 from app.core.workflow.nodes.llm import LLMNode
+from app.core.workflow.nodes.memory import MemoryReadNode, MemoryWriteNode
 from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNode
 from app.core.workflow.nodes.start import StartNode
 from app.core.workflow.nodes.transform import TransformNode
@@ -46,7 +47,9 @@ WorkflowNode = Union[
     BreakNode,
     ParameterExtractorNode,
     QuestionClassifierNode,
-    ToolNode
+    ToolNode,
+    MemoryReadNode,
+    MemoryWriteNode
 ]
 
 
@@ -76,6 +79,8 @@ class NodeFactory:
         NodeType.BREAK: BreakNode,
         NodeType.CYCLE_START: StartNode,
         NodeType.TOOL: ToolNode,
+        NodeType.MEMORY_READ: MemoryReadNode,
+        NodeType.MEMORY_WRITE: MemoryWriteNode,
     }
 
     @classmethod
