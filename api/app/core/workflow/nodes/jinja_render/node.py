@@ -8,6 +8,7 @@ from app.core.workflow.template_renderer import TemplateRenderer
 
 logger = logging.getLogger(__name__)
 
+
 class JinjaRenderNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
