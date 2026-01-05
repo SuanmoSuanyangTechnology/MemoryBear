@@ -1267,7 +1267,8 @@ class MultiAgentOrchestrator:
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
             web_search=web_search,
-            memory=memory
+            memory=memory,
+            sub_agent=True
         ):
             yield event
 
