@@ -87,7 +87,7 @@ class WorkflowValidator:
         return graphs
 
     @classmethod
-    def validate(cls, workflow_config: Union[dict[str, Any], Any]) -> tuple[bool, list[str]]:
+    def validate(cls, workflow_config: Union[dict[str, Any], Any], publish=False) -> tuple[bool, list[str]]:
         """验证工作流配置
         
         Args:
@@ -159,15 +159,17 @@ class WorkflowValidator:
                 elif target not in node_id_set:
                     errors.append(f"边 #{i} 的 target 节点不存在: {target}")
 
-            # 6. 验证所有节点可达（从 start 节点出发）
-            if start_nodes and not errors:  # 只有在前面验证通过时才检查可达性
-                reachable = WorkflowValidator._get_reachable_nodes(
-                    start_nodes[0]["id"],
-                    edges
-                )
-                unreachable = node_id_set - reachable
-                if unreachable:
-                    errors.append(f"以下节点无法从 start 节点到达: {unreachable}")
+            if publish:
+                # 仅在发布时验证所有节点可达
+                # 6. 验证所有节点可达（从 start 节点出发）
+                if start_nodes and not errors:  # 只有在前面验证通过时才检查可达性
+                    reachable = WorkflowValidator._get_reachable_nodes(
+                        start_nodes[0]["id"],
+                        edges
+                    )
+                    unreachable = node_id_set - reachable
+                    if unreachable:
+                        errors.append(f"以下节点无法从 start 节点到达: {unreachable}")
 
             # 7. 检测循环依赖（非 loop 节点）
             if not errors:  # 只有在前面验证通过时才检查循环
@@ -288,7 +290,7 @@ class WorkflowValidator:
             (is_valid, errors): 是否有效和错误列表
         """
         # 先执行基础验证
-        is_valid, errors = WorkflowValidator.validate(workflow_config)
+        is_valid, errors = WorkflowValidator.validate(workflow_config, publish=True)
 
         if not is_valid:
             return False, errors
