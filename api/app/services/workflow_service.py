@@ -14,8 +14,9 @@ from sqlalchemy.orm import Session
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.workflow.validator import validate_workflow_config
-from app.db import get_db
+from app.db import get_db, get_db_context
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
+from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
@@ -480,13 +481,21 @@ class WorkflowService:
         try:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
+            with get_db_context() as db:
+                end_user_repo = EndUserRepository(db)
+                new_end_user = end_user_repo.get_or_create_end_user(
+                    app_id=app_id,
+                    other_id=payload.user_id,
+                    original_user_id=payload.user_id  # Save original user_id to other_id
+                )
+                end_user_id = str(new_end_user.id)
 
             result = await execute_workflow(
                 workflow_config=workflow_config_dict,
                 input_data=input_data,
                 execution_id=execution.execution_id,
                 workspace_id=str(workspace_id),
-                user_id=payload.user_id
+                user_id=end_user_id
             )
 
             # 更新执行结果
@@ -599,6 +608,14 @@ class WorkflowService:
         try:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
+            with get_db_context() as db:
+                end_user_repo = EndUserRepository(db)
+                new_end_user = end_user_repo.get_or_create_end_user(
+                    app_id=app_id,
+                    other_id=payload.user_id,
+                    original_user_id=payload.user_id  # Save original user_id to other_id
+                )
+                end_user_id = str(new_end_user.id)
 
             # 调用流式执行（executor 会发送 workflow_start 和 workflow_end 事件）
             async for event in self._run_workflow_stream(
@@ -606,7 +623,7 @@ class WorkflowService:
                     input_data=input_data,
                     execution_id=execution.execution_id,
                     workspace_id=str(workspace_id),
-                    user_id=payload.user_id
+                    user_id=end_user_id
             ):
                 # 直接转发 executor 的事件（已经是正确的格式）
                 yield event
