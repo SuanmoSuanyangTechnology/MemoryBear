@@ -1,7 +1,9 @@
+from typing import Any
+
 from pydantic import Field, BaseModel
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableType
-from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator
+from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType
 
 
 class CycleVariable(BaseNodeConfig):
@@ -9,18 +11,25 @@ class CycleVariable(BaseNodeConfig):
         ...,
         description="Name of the loop variable"
     )
+
     type: VariableType = Field(
         ...,
         description="Data type of the loop variable"
     )
-    value: str = Field(
+
+    input_type: ValueInputType = Field(
+        ...,
+        description="Input type of the loop variable"
+    )
+
+    value: Any = Field(
         ...,
         description="Initial or current value of the loop variable"
     )
 
 
 class ConditionDetail(BaseModel):
-    comparison_operator: ComparisonOperator = Field(
+    operator: ComparisonOperator = Field(
         ...,
         description="Operator used to compare the left and right operands"
     )
@@ -30,9 +39,14 @@ class ConditionDetail(BaseModel):
         description="Left-hand operand of the comparison expression"
     )
 
-    right: str = Field(
+    right: Any = Field(
         ...,
         description="Right-hand operand of the comparison expression"
+    )
+
+    input_type: ValueInputType = Field(
+        ...,
+        description="Input type of the loop variable"
     )
 
 

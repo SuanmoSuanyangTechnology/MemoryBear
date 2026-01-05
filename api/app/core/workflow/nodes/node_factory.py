@@ -72,6 +72,7 @@ class NodeFactory:
         NodeType.LOOP: CycleGraphNode,
         NodeType.ITERATION: CycleGraphNode,
         NodeType.BREAK: BreakNode,
+        NodeType.CYCLE_START: StartNode,
     }
 
     @classmethod
