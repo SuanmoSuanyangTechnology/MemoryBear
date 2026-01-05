@@ -334,7 +334,7 @@ class MemoryAgentService:
                             stream_mode="values",
                             config=config
                     ):
-                        messages_result = event.get('messages')
+                        messages = event.get('messages')
                         # Capture any errors from the state
                         if event.get('errors'):
                             workflow_errors.extend(event.get('errors', []))
@@ -357,25 +357,7 @@ class MemoryAgentService:
                 
                 raise ValueError(f"Write workflow failed: {error_details}")
             
-            # Check if messages_result was set
-            if messages_result is None:
-                error_msg = "Write workflow did not produce any messages"
-                logger.error(error_msg)
-                
-                if audit_logger:
-                    duration = time.time() - start_time
-                    audit_logger.log_operation(
-                        operation="WRITE",
-                        config_id=config_id,
-                        group_id=group_id,
-                        success=False,
-                        duration=duration,
-                        error=error_msg
-                    )
-                
-                raise ValueError(error_msg)
-            
-            return self.writer_messages_deal(messages_result, start_time, group_id, config_id, message)
+            return self.writer_messages_deal(messages, start_time, group_id, config_id, message)
     
     async def read_memory(
         self,
