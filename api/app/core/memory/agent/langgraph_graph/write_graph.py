@@ -44,27 +44,27 @@ async def make_write_graph(user_id, tools, apply_id, group_id, memory_config: Me
     write_node = ToolNode([data_write_tool])
 
     async def call_model(state):
-        messages = state["messages"]
-        last_message = messages[-1]
-        content = last_message[1] if isinstance(last_message, tuple) else last_message.content
+        """处理写入请求，从 state 中获取消息列表并调用 Data_write 工具"""
+        messages_list = state.get("raw_messages")
+        
+        logger.info(f"Writing {len(messages_list)} messages with role information to memory")
 
-        # Call Data_write directly with memory_config
         write_params = {
-            "content": content,
+            "messages_list": messages_list,
             "apply_id": apply_id,
             "group_id": group_id,
             "user_id": user_id,
             "memory_config": memory_config,
         }
-        logger.debug(f"Passing memory_config to Data_write: {memory_config.config_id}")
-
+        
         write_result = await data_write_tool.ainvoke(write_params)
 
         if isinstance(write_result, dict):
             result_content = write_result.get("data", str(write_result))
         else:
             result_content = str(write_result)
-        logger.info("Write content: %s", result_content)
+        
+        logger.info(f"Write completed: {result_content}")
         return {"messages": [AIMessage(content=result_content)]}
 
     workflow = StateGraph(WriteState)

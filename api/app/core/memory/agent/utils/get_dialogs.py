@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List
+from typing import List, Dict
 from datetime import datetime
 
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import DialogueChunker
@@ -12,7 +12,7 @@ async def get_chunked_dialogs(
         group_id: str = "group_1",
         user_id: str = "user1",
         apply_id: str = "applyid",
-        content: str = "这是用户的输入",
+        messages_list: List[Dict[str, str]] = None,
         ref_id: str = "wyl_20251027",
         config_id: str = None
 ) -> List[DialogData]:
@@ -23,17 +23,35 @@ async def get_chunked_dialogs(
         group_id: Group identifier
         user_id: User identifier
         apply_id: Application identifier
-        content: Dialog content
+        messages_list: List of messages with role info [{"role": "user", "content": "..."}, ...]
         ref_id: Reference identifier
         config_id: Configuration ID for processing
 
     Returns:
         List of DialogData objects with generated chunks for each test entry
+        
+    Note:
+        - role 映射: "user" -> "用户", "assistant" -> "AI助手"
     """
+    if not messages_list:
+        raise ValueError("必须提供 messages_list 参数")
+    
     dialog_data_list = []
     messages = []
 
-    messages.append(ConversationMessage(role="用户", msg=content))
+    # 角色映射字典
+    role_mapping = {
+        "user": "用户",
+        "assistant": "AI助手",
+        "system": "系统"
+    }
+
+    for msg in messages_list:
+        role = msg.get("role", "user")
+        content_text = msg.get("content", "")
+        # 映射角色名称
+        mapped_role = role_mapping.get(role, role)
+        messages.append(ConversationMessage(role=mapped_role, msg=content_text))
 
     # Create DialogData
     conversation_context = ConversationContext(msgs=messages)
