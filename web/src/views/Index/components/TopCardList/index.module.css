@@ -1,0 +1,99 @@
+.card {
+  border-radius: 12px;
+  border: 1px solid #DFE4ED;
+  padding: 16px;
+}
+.header {
+  line-height: 16px;
+  font-family: PingFangSC, PingFang SC;
+  font-weight: 400;
+  font-size: 12px;
+  color: #212332;
+  font-style: normal;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.headerTitle {
+  /* Add your header title styles here */
+}
+.avatar {
+  width: 32px;
+  height: 32px;
+  background: #FFFFFF;
+  box-shadow: 0px 2px 6px 0px rgba(33, 35, 50, 0.1);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* margin-right: 12px; */
+}
+.avatar img {
+  width: 32px;
+  height: 32px;
+}
+.content {
+  padding: 24px 24px 8px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: Gilroy, Gilroy;
+  font-weight: 800;
+  font-size: 28px;
+  color: #212332;
+  text-align: left;
+  font-style: normal;
+}
+.content-right {
+  text-align: right;
+  font-family: PingFangSC, PingFang SC;
+  font-weight: 400;
+  font-size: 12px;
+  color: #5F6266;
+  line-height: 16px;
+  font-style: normal;
+  row-gap: 4px;
+}
+.trend {
+  font-family: PingFangSC, PingFang SC;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 16px;
+  font-style: normal;
+  padding-left: 15px;
+  position: relative;
+  margin-bottom: 4px;
+  display: inline-block;
+}
+.trend::before {
+  width: 14px;
+  height: 14px;
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 1px;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+.trend.up {
+  color: #369F21;
+}
+.trend.up::before {
+  background-image: url('@/assets/images/home/arrow_up_success.svg');
+}
+.trend.down {
+  color: #FF5D34;
+}
+.trend.down::before {
+  background-image: url('@/assets/images/home/arrow_down.png');
+}
+
+.trend-desc {
+  font-family: PingFangSC, PingFang SC;
+    font-weight: 500;
+    font-size: 14px;
+    color: #155EEF;
+    line-height: 16px;
+    text-align: left;
+    font-style: normal;
+}

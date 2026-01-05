@@ -2,18 +2,18 @@
 import { useEffect, useState, useRef, useCallback, type FC } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Switch, Button, Dropdown, Space, Modal, message } from 'antd';
+import { Switch, Button, Dropdown, Space, Modal, message, Radio } from 'antd';
 import type { MenuProps } from 'antd';
 import SearchInput from '@/components/SearchInput'
 import Table, { type TableRef } from '@/components/Table'
 import type { ColumnsType } from 'antd/es/table';
 import type { AnyObject } from 'antd/es/_util/type';
-import { MoreOutlined } from '@ant-design/icons';
+import { MoreOutlined, DeploymentUnitOutlined, BarsOutlined } from '@ant-design/icons';
 import folderIcon from '@/assets/images/knowledgeBase/folder.png';
 import textIcon from '@/assets/images/knowledgeBase/text.png';
 import editIcon from '@/assets/images/knowledgeBase/edit.png';
-import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
-import imageIcon from '@/assets/images/knowledgeBase/image.png'
+// import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
+// import imageIcon from '@/assets/images/knowledgeBase/image.png'
 import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase } from '@/api/knowledgeBase';
 import { 
   type CreateModalRef, 
@@ -22,8 +22,10 @@ import {
   type CreateFolderModalRef, 
   type CreateSetModalRef,
   type ShareModalRef,
-  type CreateDatasetModalRef,type FolderFormData, 
-  type KnowledgeBaseDocumentData, 
+  type CreateDatasetModalRef,
+  type FolderFormData, 
+  type KnowledgeBaseDocumentData,
+  type KnowledgeBaseFormData,
 } from '@/views/KnowledgeBase/types';
 import RecallTestDrawer from '../components/RecallTestDrawer';
 import CreateFolderModal from '../components/CreateFolderModal';
@@ -34,7 +36,7 @@ import CreateDatasetModal from '../components/CreateDatasetModal';
 import CreateImageDataset from '../components/CreateImageDataset';
 import FolderTree, { type TreeNodeData } from '../components/FolderTree';
 import { formatDateTime } from '@/utils/format';
-
+import KnowledgeGraphCard from '../components/KnowledgeGraphCard';
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 import './Private.css'
 const { confirm } = Modal
@@ -68,7 +70,7 @@ const Private: FC = () => {
   const datasetModalRef = useRef<CreateDatasetModalRef>(null);
   const [folderTreeRefreshKey, setFolderTreeRefreshKey] = useState(0);
   const [autoExpandPath, setAutoExpandPath] = useState<Array<{ id: string; name: string }>>([]);
-
+  const [isGraph, setIsGraph] = useState(false);
   const { updateBreadcrumbs } = useBreadcrumbManager({
     breadcrumbType: 'detail',
     // 不提供 onKnowledgeBaseMenuClick，让它使用默认的导航行为（返回列表页面）
@@ -376,9 +378,37 @@ const Private: FC = () => {
   
   // 处理开关
   const onChange = (checked: boolean) => {
-    updateKnowledgeBase(knowledgeBaseId || '', {
+    if (!knowledgeBase) return;
+    
+    // 构造完整的更新数据，保留现有配置
+    const updateData: KnowledgeBaseFormData = {
+      name: knowledgeBase.name,
+      description: knowledgeBase.description,
+      embedding_id: knowledgeBase.embedding_id,
+      llm_id: knowledgeBase.llm_id,
+      image2text_id: knowledgeBase.image2text_id,
+      reranker_id: knowledgeBase.reranker_id,
+      permission_id: knowledgeBase.permission_id,
+      type: knowledgeBase.type,
       status: checked ? 1 : 0,
-    });
+      parser_config: knowledgeBase.parser_config || {
+        chunk_token_num: 512,
+        delimiter: '\n',
+        auto_keywords: 0,
+        auto_questions: 0,
+        html4excel: false,
+        graphrag: {
+          use_graphrag: false,
+          scene_name: '',
+          entity_types: '',
+          method: '',
+          resolution: false,
+          community: false
+        }
+      }
+    };
+    
+    updateKnowledgeBase(knowledgeBaseId || '', updateData);
     console.log(`switch to ${checked}`);
   };
   // 处理搜索
@@ -626,17 +656,15 @@ const Private: FC = () => {
   }
 
   const handleRefreshTable = () => {
-    debugger
     // 刷新表格数据
     tableRef.current?.loadData();
   }
-  
   return (
     <>
     {contextHolder}
     <div className="rb:flex rb:h-full rb:gap-4">
       {folder && (
-        <div className="rb:w-80 rb:flex-shrink-0 rb:h-[calc(100%+40px)] rb:mt-[-16px] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">
+        <div className="rb:w-64 rb:flex-shrink-0 rb:h-[calc(100%+40px)] rb:mt-[-16px] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">
             <FolderTree
               multiple
               className="customTree"
@@ -678,6 +706,14 @@ const Private: FC = () => {
         <div className='rb:flex rb:items-center rb:justify-between rb:mb-4'>
           <SearchInput placeholder={t('knowledgeBase.search')} onSearch={handleSearch} />
           <div className='rb:flex-1 rb:flex rb:items-center rb:justify-end rb:gap-2.5'>
+            <Radio.Group value={isGraph} onChange={(e) => setIsGraph(e.target.value)}>
+              <Radio.Button value={false} >
+                  <BarsOutlined />
+              </Radio.Button>
+              <Radio.Button value={true} >
+                  <DeploymentUnitOutlined />
+              </Radio.Button>
+            </Radio.Group>
             <Button onClick={handleShare}>{t('knowledgeBase.share')}</Button>
             <Button onClick={handleRecallTest}>{t('knowledgeBase.recallTest')}</Button>
             <Button onClick={handleSetting}>{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.setting')}</Button>
@@ -688,14 +724,18 @@ const Private: FC = () => {
           </div>
         </div>
         <div className="rb:rounded rb:max-h-[calc(100%-100px)] rb:overflow-y-auto">
-          <Table
-            ref={tableRef}
-            apiUrl={tableApi}
-            apiParams={query as Record<string, unknown>}
-            columns={columns}
-            rowKey="id"
-            scrollX={1500}
-          />
+          {isGraph ? (
+            <KnowledgeGraphCard knowledgeBaseId={knowledgeBase.id} />
+          ) : (
+            <Table
+              ref={tableRef}
+              apiUrl={tableApi}
+              apiParams={query as Record<string, unknown>}
+              columns={columns}
+              rowKey="id"
+              scrollX={1500}
+            />
+          )}
         </div>
       </div>
       <RecallTestDrawer 

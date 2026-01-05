@@ -285,3 +285,14 @@ export const getRetrievalModeType = async () => {
   const response = await request.get(`${apiPrefix}/chunks/retrieve_type`);
   return response as any;
 };
+
+// 获取知识库图谱
+export const getKnowledgeGraph = async (kb_id: string) => {
+  const response = await request.get(`${apiPrefix}/knowledges/${kb_id}/knowledge_graph`);
+  return response;
+};
+// 获取知识库图谱实体类型
+export const getKnowledgeGraphEntityTypes = async (query: any) => {
+  const response = await request.get(`${apiPrefix}/knowledges/knowledge_graph_entity_types`,query);
+  return response ;
+};
