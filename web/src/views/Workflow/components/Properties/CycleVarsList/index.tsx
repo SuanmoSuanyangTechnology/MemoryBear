@@ -80,14 +80,14 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
 
   return (
     <div>
-      <div className="rb:flex rb:items-center rb:justify-between rb:mb-3">
-        <span className="rb:text-sm rb:font-medium">循环变量</span>
-        <PlusOutlined className="rb:text-gray-400 rb:cursor-pointer rb:hover:text-blue-500" />
-      </div>
       
       <Form.List name={parentName}>
         {(fields, { add, remove }) => (
           <>
+            <div className="rb:flex rb:items-center rb:justify-between rb:mb-3">
+              <span className="rb:text-sm rb:font-medium">循环变量</span>
+              <PlusOutlined className="rb:text-gray-400 rb:cursor-pointer rb:hover:text-blue-500" onClick={() => add({ name: '', type: 'string', input_type: 'constant', value: '' })} />
+            </div>
             {fields.map(({ key, name, ...field }, index) => {
               const currentInputType = value?.[index]?.input_type;
               
@@ -96,7 +96,7 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
                   <Row gutter={8} align="middle" className="rb:mb-2">
                     <Col span={8}>
                       <Form.Item name={[name, 'name']} noStyle>
-                        <Input placeholder="变量名" size="small" />
+                        <Input size="small" />
                       </Form.Item>
                     </Col>
                     <Col span={6}>
@@ -153,15 +153,6 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
                 </div>
               )
             })}
-            
-            <Button
-              type="dashed"
-              onClick={() => add({ name: '', type: 'string', input_type: 'constant', value: '' })}
-              className="rb:w-full"
-              icon={<PlusOutlined />}
-            >
-              添加变量
-            </Button>
           </>
         )}
       </Form.List>

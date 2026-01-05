@@ -37,13 +37,17 @@ const VariableSelect: FC<VariableSelectProps> = ({
           })}
           contentEditable={false}
         >
-          <img
-            src={filterOption.nodeData?.icon}
-            style={{ width: '12px', height: '12px', marginRight: '4px' }}
-            alt=""
-          />
-          {filterOption.nodeData?.name}
-          <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>
+          {filterOption.nodeData?.icon && filterOption.nodeData?.name && (
+            <>
+              <img
+                src={filterOption.nodeData.icon}
+                style={{ width: '12px', height: '12px', marginRight: '4px' }}
+                alt=""
+              />
+              {filterOption.nodeData.name}
+              <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>
+            </>
+          )}
           <span className="rb:text-[#155EEF]">{filterOption.label}</span>
         </span>
       )

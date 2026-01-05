@@ -145,16 +145,18 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       {nodeLibrary.map((category, categoryIndex) => {
         const sourceNodeData = sourceNode?.getData();
         const isChildOfLoop = sourceNodeData?.cycle && graph?.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle && n.getData()?.type === 'loop');
+        const isChildOfIteration = sourceNodeData?.cycle && graph?.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle && n.getData()?.type === 'iteration');
         
         let filteredNodes;
         if (isChildOfLoop) {
           // Use same filtering as AddNode for child nodes of loop
-          filteredNodes = category.nodes.filter(nodeType =>
-            nodeType.type !== 'start' && nodeType.type !== 'end' && nodeType.type !== 'loop' && nodeType.type !== 'cycle-start'
-          );
-
+          filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'loop', 'cycle-start', 'iteration'].includes(nodeType.type));
+        } else if (isChildOfIteration) {
+          // Filter out loop and iteration nodes for children of iteration nodes
+          filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'loop', 'break', 'cycle-start', 'iteration'].includes(nodeType.type));
         } else {
           // Original filtering for non-loop child nodes
+          filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'break', 'cycle-start'].includes(nodeType.type));
           filteredNodes = category.nodes.filter(nodeType =>
             nodeType.type !== 'start' && nodeType.type !== 'end' && nodeType.type !== 'cycle-start' && nodeType.type !== 'break'
           );

@@ -156,6 +156,43 @@ export const useWorkflowGraph = ({
           nodeConfig.height = newHeight;
         }
         
+        // 如果是question-classifier节点，根据categories动态生成端口
+        if (type === 'question-classifier' && config.categories && Array.isArray(config.categories)) {
+          const categoryCount = config.categories.length;
+          const baseHeight = 88;
+          const newHeight = baseHeight + (categoryCount - 1) * 30;
+          
+          const portAttrs = {
+            circle: {
+              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
+            },
+          };
+          
+          const portItems: PortMetadata[] = [
+            { group: 'left' }
+          ];
+          
+          // 添加分类端口
+          config.categories.forEach((category: any, index: number) => {
+            portItems.push({
+              group: 'right',
+              id: `CASE${index + 1}`,
+              args: index === 0 ? { dy: 24 } : undefined,
+              attrs: { text: { text: category.class_name || `分类${index + 1}`, fontSize: 12, fill: '#5B6167' }}
+            });
+          });
+          
+          nodeConfig.ports = {
+            groups: {
+              right: { position: 'right', attrs: portAttrs },
+              left: { position: 'left', attrs: portAttrs },
+            },
+            items: portItems
+          };
+          
+          nodeConfig.height = newHeight;
+        }
+        
         return nodeConfig
       })
       
@@ -233,6 +270,14 @@ export const useWorkflowGraph = ({
           // 如果是if-else节点且有label，根据label匹配对应的端口
           if (sourceCell.getData()?.type === 'if-else' && label) {
             // 查找匹配的端口ID
+            const matchingPort = sourcePorts.find((port: any) => port.id === label);
+            if (matchingPort) {
+              sourcePort = label;
+            }
+          }
+          
+          // 如果是question-classifier节点且有label，根据label匹配对应的端口
+          if (sourceCell.getData()?.type === 'question-classifier' && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
               sourcePort = label;
@@ -874,6 +919,15 @@ export const useWorkflowGraph = ({
           
           // 如果是if-else节点的右侧端口连线，添加label
           if (sourceCell?.getData()?.type === 'if-else' && sourcePortId?.startsWith('CASE')) {
+            return {
+              source: sourceCell.getData().id,
+              target: targetCell?.getData().id,
+              label: sourcePortId,
+            };
+          }
+          
+          // 如果是question-classifier节点的右侧端口连线，添加label
+          if (sourceCell?.getData()?.type === 'question-classifier' && sourcePortId?.startsWith('CASE')) {
             return {
               source: sourceCell.getData().id,
               target: targetCell?.getData().id,

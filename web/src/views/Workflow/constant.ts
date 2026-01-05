@@ -38,6 +38,8 @@ import selfOptimizationIcon from '@/assets/images/workflow/self_optimization.png
 import processEvolutionIcon from '@/assets/images/workflow/process_evolution.png';
 import questionClassifierIcon from '@/assets/images/workflow/question-classifier.png'
 import breakIcon from '@/assets/images/workflow/break.png'
+import assignerIcon from '@/assets/images/workflow/assigner.png'
+import { memoryConfigListUrl } from '@/api/memory'
 
 import { getModelListUrl } from '@/api/models'
 import type { NodeLibrary } from './types'
@@ -169,15 +171,49 @@ export const nodeLibrary: NodeLibrary[] = [
       }
     ]
   },
-  // {
-  //   category: "cognitiveUpgrading",
-  //   nodes: [
-  //     { type: "task_planning", icon: taskPlanningIcon },
-  //     { type: "reasoning_control", icon: reasoningControlIcon },
-  //     { type: "self_reflection", icon: selfReflectionIcon },
-  //     { type: "memory_enhancement", icon: memoryEnhancementIcon }
-  //   ]
-  // },
+  {
+    category: "cognitiveUpgrading",
+    nodes: [
+      {
+        type: "memory-read", icon: memoryEnhancementIcon,
+        config: {
+          message: {
+            type: 'messageEditor',
+            isArray: false
+          },
+          config_id: {
+            type: 'customSelect',
+            url: memoryConfigListUrl,
+            valueKey: 'config_id',
+            labelKey: 'config_name'
+          },
+          search_switch: {
+            type: 'select',
+            options: [
+              { value: '0', label: 'memoryConversation.deepThinking' },
+              { value: '1', label: 'memoryConversation.normalReply' },
+              { value: '2', label: 'memoryConversation.quickReply' },
+            ],
+            needTranslation: true
+          }
+        }
+      },
+      { type: "memory-write", icon: memoryEnhancementIcon,
+        config: {
+          message: {
+            type: 'messageEditor',
+            isArray: false
+          },
+          config_id: {
+            type: 'customSelect',
+            url: memoryConfigListUrl,
+            valueKey: 'config_id',
+            labelKey: 'config_name'
+          }
+        }
+      },
+    ]
+  },
   // {
   //   category: "agentCollaborationNode",
   //   nodes: [
@@ -202,8 +238,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      {
-        type: "question-classifier", icon: questionClassifierIcon,
+      { type: "question-classifier", icon: questionClassifierIcon,
         config: {
           model_id: {
             type: 'customSelect',
@@ -216,7 +251,11 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'variableList',
           },
           categories: {
-            type: 'categoryList'
+            type: 'categoryList',
+            defaultValue: [
+              {},
+              {}
+            ]
           },
           user_supplement_prompt: {
             type: 'messageEditor',
@@ -224,7 +263,34 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      // { type: "iteration", icon: iterationIcon },
+      { type: "iteration", icon: iterationIcon,
+        config: {
+          input: {
+            type: 'variableList',
+            filterNodeTypes: ['knowledge-retrieval'],
+            filterVariableNames: ['message']
+          },
+          parallel: {
+            type: 'switch',
+          },
+          parallel_count: {
+            type: 'slider',
+            min: 1,
+            max: 10,
+            step: 1,
+            defaultValue: 10,
+            dependsOn: 'parallel',
+            dependsOnValue: true
+          },
+          flatten: { // 扁平化输出
+            type: 'switch',
+          },
+          output: {
+            type: 'variableList',
+            filterChildNodes: true
+          }
+        },
+      },
       { type: "loop", icon: loopIcon,
         config: {
           cycle_vars: {
@@ -254,7 +320,16 @@ export const nodeLibrary: NodeLibrary[] = [
             defaultValue: [{ key: 'Group1', value: []}]
           }
         }
-      }
+      },
+      {
+        type: "assigner", icon: assignerIcon,
+        config: {
+          assignments: {
+            type: 'assignmentList',
+            filterLoopIterationVars: true
+          }
+        }
+      },
     ]
   },
   {
@@ -317,7 +392,16 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      // { type: "tools", icon: toolsIcon },
+      { type: "tool", icon: toolsIcon, 
+        config: {
+          tool_id: {
+            type: 'cascader'
+          },
+          tool_parameters: {
+            type: 'define'
+          }
+        }
+      },
       // { type: "code_execution", icon: codeExecutionIcon },
       { type: "jinja-render", icon: templateRenderingIcon,
         config: {
@@ -354,13 +438,13 @@ export const nodeRegisterLibrary: ReactShapeConfig[] = [
   {
     shape: 'loop-node',
     width: 240,
-    height: 80,
+    height: 120,
     component: LoopNode,
   },
   {
     shape: 'iteration-node',
-    width: 200,
-    height: 200,
+    width: 240,
+    height: 120,
     component: LoopNode,
   },
   {
@@ -421,7 +505,7 @@ const defaultPortItems = [
 export const graphNodeLibrary: Record<string, NodeConfig> = {
   iteration: {
     width: 240,
-    height: 200,
+    height: 120,
     shape: 'iteration-node',
     ports: {
       groups: defaultPortGroups,
@@ -447,6 +531,19 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
         { group: 'left' },
         { group: 'right', id: 'CASE1', args: { dy: 24 }, attrs: { text: { text: 'IF', fontSize: 12, color: '#5B6167' }} },
         { group: 'right', id: 'CASE2', attrs: { text: { text: 'ELSE', fontSize: 12, color: '#5B6167' }} }
+      ],
+    },
+  },
+  'question-classifier': {
+    width: 240,
+    height: 88,
+    shape: 'condition-node',
+    ports: {
+      groups: defaultPortGroups,
+      items: [
+        { group: 'left' },
+        { group: 'right', id: 'CASE1', args: { dy: 24 }, attrs: { text: { text: '分类1', fontSize: 12, color: '#5B6167' } } },
+        { group: 'right', id: 'CASE2', attrs: { text: { text: '分类2', fontSize: 12, color: '#5B6167' } } }
       ],
     },
   },
