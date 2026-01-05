@@ -75,6 +75,13 @@ class StatementRepository(BaseNeo4jRepository[StatementNode]):
         n['emotion_subject'] = n.get('emotion_subject')
         n['emotion_target'] = n.get('emotion_target')
         
+        # 处理 ACT-R 属性 - 确保字段存在且有默认值
+        n['importance_score'] = n.get('importance_score', 0.5)
+        n['activation_value'] = n.get('activation_value')
+        n['access_history'] = n.get('access_history', [])
+        n['last_access_time'] = n.get('last_access_time')
+        n['access_count'] = n.get('access_count', 0)
+        
         return StatementNode(**n)
     
     async def find_by_chunk_id(self, chunk_id: str) -> List[StatementNode]:

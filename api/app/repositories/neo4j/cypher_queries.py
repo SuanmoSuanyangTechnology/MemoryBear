@@ -38,7 +38,12 @@ SET s += {
     valid_at: statement.valid_at,
     invalid_at: statement.invalid_at,
     statement_embedding: statement.statement_embedding,
-    relevence_info: statement.relevence_info
+    relevence_info: statement.relevence_info,
+    importance_score: statement.importance_score,
+    activation_value: statement.activation_value,
+    access_history: statement.access_history,
+    last_access_time: statement.last_access_time,
+    access_count: statement.access_count
 }
 RETURN s.id AS uuid
 """
@@ -111,7 +116,12 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
             WHEN e.connect_strength IS NULL OR e.connect_strength = '' THEN entity.connect_strength
             ELSE e.connect_strength
         END
-    END
+    END,
+    e.importance_score = CASE WHEN entity.importance_score IS NOT NULL THEN entity.importance_score ELSE coalesce(e.importance_score, 0.5) END,
+    e.activation_value = CASE WHEN entity.activation_value IS NOT NULL THEN entity.activation_value ELSE e.activation_value END,
+    e.access_history = CASE WHEN entity.access_history IS NOT NULL THEN entity.access_history ELSE coalesce(e.access_history, []) END,
+    e.last_access_time = CASE WHEN entity.last_access_time IS NOT NULL THEN entity.last_access_time ELSE e.last_access_time END,
+    e.access_count = CASE WHEN entity.access_count IS NOT NULL THEN entity.access_count ELSE coalesce(e.access_count, 0) END
 RETURN e.id AS uuid
 """
 
@@ -225,6 +235,10 @@ RETURN e.id AS id,
        e.name AS name,
        e.group_id AS group_id,
        e.entity_type AS entity_type,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
@@ -243,6 +257,10 @@ RETURN s.id AS id,
        s.expired_at AS expired_at,
        s.valid_at AS valid_at,
        s.invalid_at AS invalid_at,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       s.last_access_time AS last_access_time,
+       COALESCE(s.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
@@ -258,6 +276,9 @@ RETURN c.id AS chunk_id,
        c.group_id AS group_id,
        c.content AS content,
        c.dialog_id AS dialog_id,
+       COALESCE(c.activation_value, 0.5) AS activation_value,
+       c.last_access_time AS last_access_time,
+       COALESCE(c.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
@@ -278,6 +299,10 @@ RETURN s.id AS id,
        s.invalid_at AS invalid_at,
        c.id AS chunk_id_from_rel,
        collect(DISTINCT e.id) AS entity_ids,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       s.last_access_time AS last_access_time,
+       COALESCE(s.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
@@ -305,6 +330,10 @@ RETURN e.id AS id,
        e.connect_strength AS connect_strength,
        collect(DISTINCT s.id) AS statement_ids,
        collect(DISTINCT c.id) AS chunk_ids,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
@@ -322,6 +351,9 @@ RETURN c.id AS chunk_id,
        c.sequence_number AS sequence_number,
        collect(DISTINCT s.id) AS statement_ids,
        collect(DISTINCT e.id) AS entity_ids,
+       COALESCE(c.activation_value, 0.5) AS activation_value,
+       c.last_access_time AS last_access_time,
+       COALESCE(c.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
@@ -419,7 +451,11 @@ RETURN s.id AS id,
        s.created_at AS created_at,
        s.valid_at AS valid_at,
        s.invalid_at AS invalid_at,
-       collect(DISTINCT s.id) AS statement_ids
+       collect(DISTINCT s.id) AS statement_ids,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       s.last_access_time AS last_access_time,
+       COALESCE(s.access_count, 0) AS access_count
 ORDER BY datetime(s.created_at) DESC
 LIMIT $limit
 """
@@ -446,6 +482,10 @@ RETURN s.id AS id,
        s.invalid_at AS invalid_at,
        c.id AS chunk_id_from_rel,
        collect(DISTINCT e.id) AS entity_ids,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       s.last_access_time AS last_access_time,
+       COALESCE(s.access_count, 0) AS access_count,
        score
 ORDER BY s.created_at DESC, score DESC
 LIMIT $limit
@@ -635,6 +675,10 @@ RETURN m.id AS id,
        m.chunk_ids AS chunk_ids,
        m.content AS content,
        m.created_at AS created_at,
+       COALESCE(m.activation_value, m.importance_score, 0.5) AS activation_value,
+       COALESCE(m.importance_score, 0.5) AS importance_score,
+       m.last_access_time AS last_access_time,
+       COALESCE(m.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
@@ -653,6 +697,10 @@ RETURN m.id AS id,
        m.chunk_ids AS chunk_ids,
        m.content AS content,
        m.created_at AS created_at,
+       COALESCE(m.activation_value, m.importance_score, 0.5) AS activation_value,
+       COALESCE(m.importance_score, 0.5) AS importance_score,
+       m.last_access_time AS last_access_time,
+       COALESCE(m.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit

@@ -8,7 +8,6 @@ import asyncio
 import json
 import os
 import time
-import uuid
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -26,7 +25,6 @@ from app.schemas.memory_storage_schema import (
     ConfigPilotRun,
     ConfigUpdate,
     ConfigUpdateExtracted,
-    ConfigUpdateForget,
 )
 from app.services.memory_config_service import MemoryConfigService
 from app.utils.sse_utils import format_sse_message
@@ -159,21 +157,12 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
         return {"affected": 1}
 
     # --- Forget config params ---
-    def update_forget(self, update: ConfigUpdateForget) -> Dict[str, Any]: # 保存遗忘引擎的配置
-        config = DataConfigRepository.update_forget(self.db, update)
-        if not config:
-            raise ValueError("未找到配置")
-        return {"affected": 1}
+    # 遗忘引擎配置方法已迁移到 memory_forget_service.py
+    # 使用新方法: MemoryForgetService.read_forgetting_config() 和 MemoryForgetService.update_forgetting_config()
 
     # --- Read ---
     def get_extracted(self, key: ConfigKey) -> Dict[str, Any]: # 获取萃取配置参数
         result = DataConfigRepository.get_extracted_config(self.db, key.config_id)
-        if not result:
-            raise ValueError("未找到配置")
-        return result
-
-    def get_forget(self, key: ConfigKey) -> Dict[str, Any]: # 获取遗忘配置参数
-        result = DataConfigRepository.get_forget_config(self.db, key.config_id)
         if not result:
             raise ValueError("未找到配置")
         return result

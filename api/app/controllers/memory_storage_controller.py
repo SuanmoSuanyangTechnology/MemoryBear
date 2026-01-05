@@ -1,4 +1,3 @@
-import datetime
 import os
 import uuid
 from typing import Optional
@@ -9,12 +8,7 @@ from app.core.memory.utils.self_reflexion_utils import self_reflexion
 from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user
-from app.models.end_user_model import EndUser
 from app.models.user_model import User
-from app.schemas.end_user_schema import (
-    EndUserProfileResponse,
-    EndUserProfileUpdate,
-)
 from app.schemas.memory_storage_schema import (
     ConfigKey,
     ConfigParamsCreate,
@@ -22,8 +16,6 @@ from app.schemas.memory_storage_schema import (
     ConfigPilotRun,
     ConfigUpdate,
     ConfigUpdateExtracted,
-    ConfigUpdateForget,
-    GenerateCacheRequest,
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_storage_service import (
@@ -238,28 +230,8 @@ def update_config_extracted(
 
 
 # --- Forget config params ---
-@router.post("/update_config_forget", response_model=ApiResponse) # 更新遗忘引擎配置参数（固定路径）
-def update_config_forget(
-    payload: ConfigUpdateForget,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    ) -> dict:
-    workspace_id = current_user.current_workspace_id
-    
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试更新遗忘引擎配置但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
-    api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新遗忘引擎配置: {payload.config_id}")
-    try:
-        svc = DataConfigService(db)
-        result = svc.update_forget(payload)
-        return success(data=result, msg="更新成功")
-    except Exception as e:
-        api_logger.error(f"Update config forget failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "更新遗忘引擎配置失败", str(e))
-
+# 遗忘引擎配置接口已迁移到 memory_forget_controller.py
+# 使用新接口: /api/memory/forget/read_config 和 /api/memory/forget/update_config
 
 @router.get("/read_config_extracted", response_model=ApiResponse) # 通过查询参数读取某条配置（固定路径） 没有意义的话就删除
 def read_config_extracted(
@@ -282,28 +254,6 @@ def read_config_extracted(
     except Exception as e:
         api_logger.error(f"Read config extracted failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "查询配置失败", str(e))
-
-@router.get("/read_config_forget", response_model=ApiResponse) # 通过查询参数读取某条配置（固定路径） 没有意义的话就删除
-def read_config_forget(
-    config_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    ) -> dict:
-    workspace_id = current_user.current_workspace_id
-    
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试读取遗忘引擎配置但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
-    api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取遗忘引擎配置: {config_id}")
-    try:
-        svc = DataConfigService(db)
-        result = svc.get_forget(ConfigKey(config_id=config_id))
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Read config forget failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "查询遗忘引擎配置失败", str(e))
 
 @router.get("/read_all_config", response_model=ApiResponse) # 读取所有配置文件列表
 def read_all_config(
