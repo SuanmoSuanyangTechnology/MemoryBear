@@ -30,6 +30,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('basic');
   const [generatingEntityTypes, setGeneratingEntityTypes] = useState(false);
+  const [isRebuildMode, setIsRebuildMode] = useState(false);
   
   // 监听 parser_config.graphrag 相关字段的变化
   const parserConfig = Form.useWatch('parser_config', form);
@@ -45,6 +46,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     form.resetFields();
     setLoading(false);
     setActiveTab('basic');
+    setIsRebuildMode(false); // 重置重建模式标识
     setVisible(false);
   };
 
@@ -224,6 +226,15 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     setDatasets(record || null);
     const nextType = type || currentType;
     setCurrentType(nextType as any);
+    setIsRebuildMode(type === 'rebuild'); // 设置重建模式标识
+    
+    // 如果是重建模式，默认切换到知识图谱标签页
+    if (type === 'rebuild') {
+      setActiveTab('knowledgeGraph');
+    } else {
+      setActiveTab('basic');
+    }
+    
     setBaseFields(record || null, nextType);
     getTypeList(record || null);
     setVisible(true);
@@ -320,6 +331,9 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
 
   // 根据 type 获取标题
   const getTitle = () => {
+    if (isRebuildMode) {
+      return t('knowledgeBase.rebuildGraph') + ' - ' + (datasets?.name || '');
+    }
     if (datasets?.id) {
       return t('knowledgeBase.edit') + ' ' + datasets.name;
     }

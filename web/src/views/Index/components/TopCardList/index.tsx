@@ -9,7 +9,7 @@ import arrowDownDb from '@/assets/images/index/arrow_down_d.svg'
 import arrowUp from '@/assets/images/index/arrow_up.svg'
 import arrowDown from '@/assets/images/index/arrow_down.svg'
 import styles from './index.module.css'
-import type { DashboardData } from '../../types'
+import  { type DataResponse } from '@/api/common'
 
 const list = [
   {
@@ -46,7 +46,7 @@ const list = [
     background: 'linear-gradient( 136deg, rgba(77,168,255,0.06) 0%, rgba(251,253,255,0) 100%)',
   },
   {
-    key: 'apps_runs',
+    key: 'running_apps',
     icon: totalApps,
     value: '12.8k',
     trendValue: '98.7%',
@@ -57,7 +57,7 @@ const list = [
     background: 'linear-gradient( 136deg, rgba(156,111,255,0.06) 0%, rgba(251,253,255,0) 100%)',
   },
 ]
-const TopCardList: FC<{data?: DashboardData}> = ({ data }) => {
+const TopCardList: FC<{data?: DataResponse}> = ({ data }) => {
   const { t } = useTranslation()
   return (
     <div className="rb:grid rb:grid-cols-4 rb:gap-[16px]">
@@ -76,30 +76,53 @@ const TopCardList: FC<{data?: DashboardData}> = ({ data }) => {
             </div>
 
             <div className={styles.content}>
-              {data?.[`total_${item.key}` as keyof DashboardData] || item.value || 0}
+              {item.key === 'spaces' && String(data?.active_workspaces)}
+              {item.key !== 'spaces' && String(data?.[`total_${item.key}` as keyof DataResponse] || item.value || 0)}
             </div>
             <div className='rb:flex rb:flex-col rb:items-start'>
                 {item.key === 'models' ? (
                   <div className='rb:text-xs rb:leading-4 rb:text-[#5F6266] rb:w-[130px]'>
-                   {t(`dashboard.${'desc_' + item.key}`, { account: 18, nums: 6 })}
+                   {t(`dashboard.${'desc_' + item.key}`, { account: data?.total_llm, nums: data?.total_embedding })}
                   </div>
                 ) : (<>                  
                   <div className='rb:flex rb:items-center rb:text-xs rb:leading-4 rb:gap-1'> 
-                    <img src={item.trend === 'up' ? arrowUpDb : arrowDownDb} className='rb:size-3'/>
-                    <span className={item.trend === 'up' ? 'rb:text-[#369F21]' : 'rb:text-[#FF5D34]'}>{item.trendValue}</span>
+                    {item.key === 'spaces' && (<>
+                        <img src={Number(data?.new_workspaces_this_week || 0) >= 0 ? arrowUpDb : arrowDownDb} className='rb:size-3'/>
+                        <span className={Number(data?.new_workspaces_this_week || 0) >= 0 ? 'rb:text-[#369F21]' : 'rb:text-[#FF5D34]'}>{Number(data?.new_workspaces_this_week || 0) >= 0 ? '+' : '-'}{Math.abs(Number(data?.new_workspaces_this_week || 0))}</span>
+                    </>)}
+                    {item.key === 'users' && (<>
+                        <img src={Number(data?.new_users_this_week || 0) >= 0 ? arrowUpDb : arrowDownDb} className='rb:size-3'/>
+                        <span className={Number(data?.new_users_this_week || 0) >= 0 ? 'rb:text-[#369F21]' : 'rb:text-[#FF5D34]'}>{Number(data?.new_users_this_week || 0) >= 0 ? '+' : '-'}{Math.abs(Number(data?.new_users_this_week || 0))}</span>
+                    </>)}
+                    {item.key === 'running_apps' && (<>
+                        <img src={Number(data?.new_apps_this_week || 0) >= 0 ? arrowUpDb : arrowDownDb} className='rb:size-3'/>
+                        <span className={Number(data?.new_apps_this_week || 0) >= 0 ? 'rb:text-[#369F21]' : 'rb:text-[#FF5D34]'}>{Number(data?.new_apps_this_week || 0) >= 0 ? '+' : '-'}{Math.abs(Number(data?.new_apps_this_week || 0))}</span>
+                    </>)}
+                    
                   </div>
                   <div className='rb:text-xs rb:leading-4 rb:text-[#5F6266]'>
                     {t(`dashboard.${'desc_' + item.key}`)}
                   </div>
                 </>)}
             </div>
-            <div className={`rb:flex rb:max-w-40 rb:text-xs rb:mt-2 rb:items-center rb:gap-1 rb:border-1 rb:rounded rb:px-2 rb:py-0.5 ${item.rate === 'up' ? 'rb:text-[#369F21] rb:border-[#369F21] rb:bg-[rgba(54, 159, 33, 0.25)]' : 'rb:text-[#FF5D34] rb:border-[#FF5D34] rb:bg-[rgba(255, 93, 52, 0.25)]'}`}>
-               <img src={item.rate === 'up' ? arrowUp : arrowDown} className='rb:size-3'/>  
-               <span> {item.rateValue} </span>
-               {(item.key === 'models' || item.key === 'users') && (<span>{t('dashboard.thisWeek')}</span>)}
-               {item.key === 'apps_runs' && (<span>{t('dashboard.failureRate')}</span>)}
-               {item.key === 'spaces' && (<span>{t('dashboard.thisDay')}</span>)}
-            </div>
+            
+            {item.key === 'models' && (<div className={`rb:flex rb:max-w-40 rb:text-xs rb:mt-2 rb:items-center rb:gap-1 rb:border-1 rb:rounded rb:px-2 rb:py-0.5 ${Number(data?.model_week_growth_rate || 0) >= 0 ? 'rb:text-[#369F21] rb:border-[#369F21] rb:bg-[rgba(54, 159, 33, 0.25)]' : 'rb:text-[#FF5D34] rb:border-[#FF5D34] rb:bg-[rgba(255, 93, 52, 0.25)]'}`}>
+              <img src={Number(data?.model_week_growth_rate || 0) >= 0 ? arrowUp : arrowDown} className='rb:size-3'/>  
+              <span>{Math.abs(Number(data?.model_week_growth_rate || 0))}% {t('dashboard.thisWeek')}</span>
+            </div>)}
+            {item.key === 'spaces' && (<div className={`rb:flex rb:max-w-40 rb:text-xs rb:mt-2 rb:items-center rb:gap-1 rb:border-1 rb:rounded rb:px-2 rb:py-0.5 ${Number(data?.workspace_week_growth_rate || 0) >= 0 ? 'rb:text-[#369F21] rb:border-[#369F21] rb:bg-[rgba(54, 159, 33, 0.25)]' : 'rb:text-[#FF5D34] rb:border-[#FF5D34] rb:bg-[rgba(255, 93, 52, 0.25)]'}`}>
+              <img src={Number(data?.workspace_week_growth_rate || 0) >= 0 ? arrowUp : arrowDown} className='rb:size-3'/>  
+              <span>{Math.abs(Number(data?.workspace_week_growth_rate || 0))}% {t('dashboard.thisWeek')}</span>
+            </div>)}
+            {item.key === 'users' && (<div className={`rb:flex rb:max-w-40 rb:text-xs rb:mt-2 rb:items-center rb:gap-1 rb:border-1 rb:rounded rb:px-2 rb:py-0.5 ${Number(data?.user_week_growth_rate || 0) >= 0 ? 'rb:text-[#369F21] rb:border-[#369F21] rb:bg-[rgba(54, 159, 33, 0.25)]' : 'rb:text-[#FF5D34] rb:border-[#FF5D34] rb:bg-[rgba(255, 93, 52, 0.25)]'}`}>
+              <img src={Number(data?.user_week_growth_rate || 0) >= 0 ? arrowUp : arrowDown} className='rb:size-3'/>  
+              <span>{Math.abs(Number(data?.user_week_growth_rate || 0))}% {t('dashboard.thisWeek')}</span>
+            </div>)}
+            {item.key === 'running_apps' && (<div className={`rb:flex rb:max-w-40 rb:text-xs rb:mt-2 rb:items-center rb:gap-1 rb:border-1 rb:rounded rb:px-2 rb:py-0.5 ${Number(data?.app_week_growth_rate || 0) >= 0 ? 'rb:text-[#369F21] rb:border-[#369F21] rb:bg-[rgba(54, 159, 33, 0.25)]' : 'rb:text-[#FF5D34] rb:border-[#FF5D34] rb:bg-[rgba(255, 93, 52, 0.25)]'}`}>
+              <img src={Number(data?.app_week_growth_rate || 0) >= 0 ? arrowUp : arrowDown} className='rb:size-3'/>  
+              <span>{Math.abs(Number(data?.app_week_growth_rate || 0))}% {t('dashboard.thisWeek')}</span>
+            </div>)}
+            
           </div>
         )
       })}

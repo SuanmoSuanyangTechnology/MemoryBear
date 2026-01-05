@@ -1,51 +1,71 @@
 import { useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { Row, Col, Space, Button } from 'antd';
 import TopCardList from './components/TopCardList';
 import GuideCard from './components/GuideCard';
 import VersionCard from './components/VersionCard';
 import QuickActions from './components/QuickActions';
 import bgImg from '@/assets/images/index/index_bg@2x.png'
-import type { DashboardData } from './types';
 import Table, { type TableRef } from '@/components/Table'
 import type { ColumnsType } from 'antd/es/table';
 import { formatDateTime } from '@/utils/format';
+import { 
+  getDashboardData,
+  getDashboardStatistics,
+  type DataResponse } from '@/api/common';
+import { switchWorkspace } from '@/api/workspaces'
 const Index = () => {
   const { t } = useTranslation();
-  const [dashboardData, setDashboardData] = useState<DashboardData>({
-    total_models: 24,
-    total_spaces: 156,
-    total_users: 1248,
-    total_apps_runs: '12.8k',
-  });
+  const navigate = useNavigate()
+  const [dashboardData, setDashboardData] = useState<DataResponse>();
   const tableRef = useRef<TableRef>(null);
-  const tableApi = '/workspaces';
-  const [loading, setLoading] = useState({
-    knowledgeTypeDistribution: true,
-  });
-  const [knowledgeTypeDistribution, setKnowledgeTypeDistribution] = useState<Array<{ name: string; value: number }>>([]);
-  const [memoryIncrement, setMemoryIncrement] = useState<Array<{ updated_at: string; total_num: number; }>>([]);
-  const [limit, setLimit] = useState(7);
+  const tableApi = getDashboardData;
+  const getDashboardCount = async () => {
+      try{
+        const res = await getDashboardStatistics();
+        setDashboardData(res);
+      }catch(e) {
+        console.log(e)
+      }
+  }
+  const handleJump = (id: string) => {
+    switchWorkspace(id)
+      .then(() => {
+        localStorage.removeItem('user')
+        navigate('/')
+      })
+  }
   const columns: ColumnsType = [
     {
       title: t('space.spaceName'),
       dataIndex: 'name',
       key: 'name',
     },
-    // {
-    //   title: t('space.associated') + ' ' + t('memorySummary.user'),
-    //   dataIndex: 'name',
-    //   key: 'name',
-    // },
+
     {
       title: t('space.spaceIcon'),
       dataIndex: 'icon',
       key: 'icon',
-      render:(value:string) => {
-        return(
+      render:(value: string, record: any) => {
+        return value ? (
           <img src={value} alt="icon" className='rb:w-[24px] rb:h-[24px]' />
+        ) : (
+          <div className='rb:w-[24px] rb:h-[24px] rb:bg-blue-500 rb:text-white rb:rounded rb:flex rb:items-center rb:justify-center rb:text-xs rb:font-medium'>
+            {record.name?.charAt(0)?.toUpperCase() || '?'}
+          </div>
         )
       }
+    },
+    {
+      title: t('index.appCount'),
+      dataIndex: 'app_count',
+      key: 'app_count',
+    },
+    {
+      title: t('index.userCount'),
+      dataIndex: 'user_count',
+      key: 'user_count',
     },
     {
       title: t('apiKey.createdAt'),
@@ -53,7 +73,7 @@ const Index = () => {
       key: 'created_at',
       render:(value:string) => {
         return(
-          <span>{formatDateTime(Number(value) * 1000 ,'YYYY-MM-DD HH:mm:ss')}</span>
+          <span>{formatDateTime(Number(value) ,'YYYY-MM-DD HH:mm:ss')}</span>
         )
       }
     },
@@ -64,16 +84,18 @@ const Index = () => {
       width: 100,
       render: (_, record) => (
         <Space size="middle">
-          <Button color="primary" variant="text">{t('space.enterSpace')}</Button>
+          <Button onClick={() => handleJump(record.id)} color="primary" variant="text">{t('space.enterSpace')}</Button>
         </Space>
       ),
     },
   ]
-  // 模拟API获取数据
+  
   useEffect(() => {
     tableRef.current?.loadData();
   }, [tableApi]);
-
+  useEffect(() => {
+    getDashboardCount();
+  }, [])
 
 
   return (
