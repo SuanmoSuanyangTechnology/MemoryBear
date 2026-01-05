@@ -22,6 +22,8 @@ class NodeType(StrEnum):
     ITERATION = "iteration"
     CYCLE_START = "cycle-start"
     BREAK = "break"
+    MEMORY_READ = "memory-read"
+    MEMORY_WRITE = "memory-write"
 
 
 class ComparisonOperator(StrEnum):
