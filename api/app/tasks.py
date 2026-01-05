@@ -475,7 +475,7 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
 def write_message_task(
     self, 
     group_id: str, 
-    messages_list: list = None,
+    messages_list: list,
     config_id: str = None,
     storage_type: str = None,
     user_rag_memory_id: str = None
