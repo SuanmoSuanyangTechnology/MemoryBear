@@ -400,7 +400,7 @@ const Private: FC = () => {
         graphrag: {
           use_graphrag: false,
           scene_name: '',
-          entity_types: '',
+          entity_types: [],
           method: '',
           resolution: false,
           community: false
@@ -725,7 +725,10 @@ const Private: FC = () => {
         </div>
         <div className="rb:rounded rb:max-h-[calc(100%-100px)] rb:overflow-y-auto">
           {isGraph ? (
-            <KnowledgeGraphCard knowledgeBaseId={knowledgeBase.id} />
+            <KnowledgeGraphCard 
+              knowledgeBase={knowledgeBase} 
+              onRebuildGraph={() => modalRef.current?.handleOpen(knowledgeBase, 'rebuild')}
+            />
           ) : (
             <Table
               ref={tableRef}
