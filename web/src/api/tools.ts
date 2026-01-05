@@ -27,5 +27,10 @@ export const execute = (data: ExecuteData) => {
 }
 export const parseSchema = (data: Record<string, any>) => {
   return request.post(`/tools/parse_schema`, data)
-
+}
+export const getToolDetail = (tool_id: string) => {
+  return request.get(`/tools/${tool_id}`)
+}
+export const getToolMethods = (tool_id: string) => {
+  return request.get(`/tools/${tool_id}/methods`)
 }

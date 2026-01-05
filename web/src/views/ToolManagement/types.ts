@@ -1,4 +1,4 @@
-type ToolType = 'mcp' | 'builtin' | 'custom'
+export type ToolType = 'mcp' | 'builtin' | 'custom'
 export interface Query {
   name?: string;
   tool_type: ToolType

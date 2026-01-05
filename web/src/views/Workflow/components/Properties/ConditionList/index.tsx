@@ -78,7 +78,6 @@ const ConditionList: FC<CaseListProps> = ({
                       <Col span={14}>
                         <Form.Item name={[field.name, 'left']} noStyle>
                           <VariableSelect
-                            placeholder="输入值"
                             options={options}
                             size="small"
                             allowClear={false}
@@ -90,7 +89,6 @@ const ConditionList: FC<CaseListProps> = ({
                       <Col span={8}>
                         <Form.Item name={[field.name, 'comparison_operator']} noStyle>
                           <Select
-                            placeholder="包含"
                             options={operatorList.map(key => ({
                               value: key,
                               label: t(`workflow.config.if-else.${key}`)
