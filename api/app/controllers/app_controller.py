@@ -597,7 +597,8 @@ async def draft_run(
                 async for event in workflow_service.run_stream(
                         app_id=app_id,
                         payload=payload,
-                        config=config
+                        config=config,
+                        workspace_id=current_user.current_workspace_id
                 ):
                     # 提取事件类型和数据
                     event_type = event.get("event", "message")
@@ -627,7 +628,7 @@ async def draft_run(
             }
         )
 
-        result = await workflow_service.run(app_id, payload,config)
+        result = await workflow_service.run(app_id, payload, config, current_user.current_workspace_id)
 
         logger.debug(
             "工作流试运行返回结果",
