@@ -101,6 +101,9 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   const clear = () => {
     workflowRef?.current?.graphRef?.current?.clearCells()
   }
+  const addvariable = () => {
+    workflowRef?.current?.addVariable()
+  }
   return (
     <>
       <Header className="rb:w-full rb:h-16 rb:grid rb:grid-cols-3 rb:p-[16px_16px_16px_24px]! rb:border-b rb:border-[#EAECEE] rb:leading-8">
@@ -132,6 +135,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         {application?.type === 'workflow'
         ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
             <Button onClick={clear}>{t('workflow.clear')}</Button>
+            <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>
             <Button onClick={run}>{t('workflow.run')}</Button>
             <Button type="primary" onClick={save}>{t('workflow.save')}</Button>
             {/* <Button type="primary">{t('workflow.export')}</Button> */}
