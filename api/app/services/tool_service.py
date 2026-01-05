@@ -297,6 +297,165 @@ class ToolService:
         self.db.commit()
         logger.info(f"租户 {tenant_id} 内置工具初始化完成")
 
+    async def get_tool_methods(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[List[Dict[str, Any]]]:
+        """获取工具的所有方法
+        
+        Args:
+            tool_id: 工具ID
+            tenant_id: 租户ID
+            
+        Returns:
+            方法列表或None
+        """
+        config = self._get_tool_config(tool_id, tenant_id)
+        if not config:
+            return None
+        
+        try:
+            if config.tool_type == ToolType.BUILTIN.value:
+                return await self._get_builtin_tool_methods(config)
+            elif config.tool_type == ToolType.CUSTOM.value:
+                return await self._get_custom_tool_methods(config)
+            elif config.tool_type == ToolType.MCP.value:
+                return await self._get_mcp_tool_methods(config)
+            else:
+                return []
+                
+        except Exception as e:
+            logger.error(f"获取工具方法失败: {tool_id}, {e}")
+            return []
+
+    async def _get_builtin_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
+        """获取内置工具的方法"""
+        builtin_config = self.builtin_repo.find_by_tool_id(self.db, config.id)
+        if not builtin_config or builtin_config.tool_class not in BUILTIN_TOOLS:
+            return []
+        
+        # 获取工具实例
+        tool_instance = self._get_tool_instance(str(config.id), config.tenant_id)
+        if not tool_instance:
+            return []
+        
+        # 检查是否有operation参数
+        operation_param = None
+        for param in tool_instance.parameters:
+            if param.name == "operation" and param.enum:
+                operation_param = param
+                break
+        
+        if operation_param:
+            # 有多个操作
+            methods = []
+            for operation in operation_param.enum:
+                methods.append({
+                    "method_id": f"{config.name}_{operation}",
+                    "name": operation,
+                    "description": f"{config.description} - {operation}",
+                    "parameters": [p for p in tool_instance.parameters if p.name != "operation"]
+                })
+            return methods
+        else:
+            # 只有一个方法
+            return [{
+                "method_id": config.name,
+                "name": config.name,
+                "description": config.description,
+                "parameters": [p for p in tool_instance.parameters if p.name != "operation"]
+            }]
+
+    async def _get_custom_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
+        """获取自定义工具的方法"""
+        custom_config = self.custom_repo.find_by_tool_id(self.db, config.id)
+        if not custom_config:
+            return []
+        
+        try:
+            from app.core.tools.custom.schema_parser import OpenAPISchemaParser
+            parser = OpenAPISchemaParser()
+            
+            # 解析schema
+            if custom_config.schema_content:
+                success, schema, error = parser.parse_from_content(custom_config.schema_content, "application/json")
+            elif custom_config.schema_url:
+                success, schema, error = await parser.parse_from_url(custom_config.schema_url)
+            else:
+                return []
+            
+            if not success:
+                return []
+            
+            # 提取操作
+            tool_info = parser.extract_tool_info(schema)
+            operations = tool_info.get("operations", {})
+            
+            methods = []
+            for operation_id, operation in operations.items():
+                # 生成参数列表
+                parameters = []
+                
+                # 路径和查询参数
+                for param_name, param_info in operation.get("parameters", {}).items():
+                    parameters.append({
+                        "name": param_name,
+                        "type": param_info.get("type", "string"),
+                        "description": param_info.get("description", ""),
+                        "required": param_info.get("required", False),
+                        "enum": param_info.get("enum"),
+                        "default": param_info.get("default")
+                    })
+                
+                # 请求体参数
+                request_body = operation.get("request_body")
+                if request_body:
+                    schema_props = request_body.get("schema", {}).get("properties", {})
+                    required_props = request_body.get("schema", {}).get("required", [])
+                    
+                    for prop_name, prop_schema in schema_props.items():
+                        parameters.append({
+                            "name": prop_name,
+                            "type": prop_schema.get("type", "string"),
+                            "description": prop_schema.get("description", ""),
+                            "required": prop_name in required_props,
+                            "enum": prop_schema.get("enum"),
+                            "default": prop_schema.get("default")
+                        })
+                
+                methods.append({
+                    "method_id": operation_id,
+                    "name": operation.get("summary", operation_id),
+                    "description": operation.get("description", ""),
+                    "method": operation.get("method", "GET"),
+                    "path": operation.get("path", "/"),
+                    "parameters": parameters
+                })
+            
+            return methods
+            
+        except Exception as e:
+            logger.error(f"解析自定义工具schema失败: {e}")
+            return []
+
+    async def _get_mcp_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
+        """获取MCP工具的方法"""
+        mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
+        if not mcp_config:
+            return []
+        
+        available_tools = mcp_config.available_tools or []
+        if not available_tools:
+            return []
+        
+        methods = []
+        for tool_name in available_tools:
+            methods.append({
+                "method_id": tool_name,
+                "name": tool_name,
+                "description": f"MCP工具: {tool_name}",
+                "parameters": []  # MCP工具参数需要动态获取
+            })
+        
+        return methods
+
     def get_tool_statistics(self, tenant_id: uuid.UUID) -> Dict[str, Any]:
         """获取工具统计信息"""
         try:
