@@ -1,7 +1,14 @@
 """
 This module provides the MemoryInsight class for analyzing user memory data.
 
-This script can be executed directly to generate a memory insight report for a test user.
+MemoryInsight 是一个工具类，提供基础的数据获取和分析功能：
+- get_domain_distribution(): 获取记忆领域分布
+- get_active_periods(): 获取活跃时段
+- get_social_connections(): 获取社交关联
+
+业务逻辑（如生成洞察报告）应该在服务层（user_memory_service.py）中实现。
+
+This script can be executed directly to test the memory insight generation for a test user.
 """
 
 import asyncio
@@ -221,25 +228,32 @@ class MemoryInsight:
     async def get_social_connections(self) -> dict | None:
         """
         Finds the user with whom the most memories are shared.
+        使用 Chunk-Statement 的 CONTAINS 关系，因为系统中不创建 Dialogue-Statement 的 MENTIONS 关系。
         """
+        # 通过 Chunk 和 Statement 的 CONTAINS 关系来查找共同记忆
         query = f"""
-        MATCH (d1:Dialogue {{group_id: '{self.user_id}'}})<-[:MENTIONS]-(s:Statement)-[:MENTIONS]->(d2:Dialogue)
-        WHERE d1 <> d2
-        RETURN d2.group_id AS other_user_id, COUNT(s) AS common_statements
+        MATCH (c1:Chunk {{group_id: '{self.user_id}'}})
+        OPTIONAL MATCH (c1)-[:CONTAINS]->(s:Statement)
+        OPTIONAL MATCH (s)<-[:CONTAINS]-(c2:Chunk)
+        WHERE c1.group_id <> c2.group_id AND s IS NOT NULL AND c2 IS NOT NULL
+        WITH c2.group_id AS other_user_id, COUNT(DISTINCT s) AS common_statements
+        WHERE common_statements > 0
+        RETURN other_user_id, common_statements
         ORDER BY common_statements DESC
         LIMIT 1
         """
         records = await self.neo4j_connector.execute_query(query)
-        if not records:
+        if not records or not records[0].get("other_user_id"):
             return None
 
         most_connected_user = records[0]["other_user_id"]
         common_memories_count = records[0]["common_statements"]
 
+        # 使用 Chunk 的时间范围
         time_range_query = f"""
-        MATCH (d:Dialogue)
-        WHERE d.group_id IN ['{self.user_id}', '{most_connected_user}']
-        RETURN min(d.created_at) AS start_time, max(d.created_at) AS end_time
+        MATCH (c:Chunk)
+        WHERE c.group_id IN ['{self.user_id}', '{most_connected_user}']
+        RETURN min(c.created_at) AS start_time, max(c.created_at) AS end_time
         """
         time_records = await self.neo4j_connector.execute_query(time_range_query)
         start_year, end_year = "N/A", "N/A"
@@ -252,84 +266,6 @@ class MemoryInsight:
             "common_memories_count": common_memories_count,
             "time_range": f"{start_year}-{end_year}",
         }
-
-    async def generate_insight_report(self) -> str:
-        """
-        Generates the final insight report in natural language.
-        """
-        domain_dist, active_periods, social_conn = await asyncio.gather(
-            self.get_domain_distribution(),
-            self.get_active_periods(),
-            self.get_social_connections(),
-        )
-
-        prompt_parts = []
-
-        if domain_dist:
-            top_domains = ", ".join([f"{k}({v:.0%})" for k, v in list(domain_dist.items())[:3]])
-            prompt_parts.append(f"- 核心领域: 用户的记忆主要集中在 {top_domains}。")
-
-        if active_periods:
-            months_str = " 和 ".join(map(str, active_periods))
-            prompt_parts.append(f"- 活跃时段: 用户在每年的 {months_str} 月最为活跃。")
-
-        if social_conn:
-            prompt_parts.append(
-                f"- 社交关联: 与用户\"{social_conn['user_id']}\"拥有最多共同记忆({social_conn['common_memories_count']}条)，时间范围主要在 {social_conn['time_range']}。"
-            )
-
-        if not prompt_parts:
-            return "暂无足够数据生成洞察报告。"
-
-        system_prompt = '''你是一位资深的个人记忆分析师。你的任务是根据我提供的要点，为用户生成一段简洁、自然、个性化的记忆洞察报告。
-
-重要规则：
-1. 报告需要将所有要点流畅地串联成一个段落
-2. 语言风格要亲切、易于理解，就像和朋友聊天一样
-3. 不要添加任何额外的解释或标题，直接输出报告内容
-4. 只使用我提供的要点，不要编造或推测任何信息
-5. 如果某个维度没有数据（如没有活跃时段信息），就不要在报告中提及该维度
-
-例如，如果输入是：
-- 核心领域: 用户的记忆主要集中在 旅行(38%), 工作(24%), 家庭(21%)。
-- 活跃时段: 用户在每年的 4 和 10 月最为活跃。
-- 社交关联: 与用户"张明"拥有最多共同记忆(47条)，时间范围主要在 2017-2020。
-
-你的输出应该是：
-"您的记忆集中在旅行(38%)、工作(24%)和家庭(21%)三大领域。每年4月和10月是您最活跃的记录期，可能与春秋季旅行计划相关。您与'张明'共同拥有最多记忆(47条)，主要集中在2017-2020年间。"
-
-如果输入只有：
-- 核心领域: 用户的记忆主要集中在 教育(65%), 学习(25%)。
-
-你的输出应该是：
-"您的记忆主要集中在教育(65%)和学习(25%)两大领域，显示出您对知识和成长的持续关注。"'''
-
-        user_prompt = "\n".join(prompt_parts)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-
-        response = await self.llm_client.chat(messages=messages)
-
-        # 确保返回字符串类型
-        content = response.content
-        if isinstance(content, list):
-            # 如果是列表格式（如 [{'type': 'text', 'text': '...'}]），提取文本
-            if len(content) > 0:
-                if isinstance(content[0], dict):
-                    # 尝试提取 'text' 字段
-                    text = content[0].get('text', content[0].get('content', str(content[0])))
-                    return str(text)
-                else:
-                    return str(content[0])
-            return ""
-        elif isinstance(content, dict):
-            # 如果是字典格式，提取 text 字段
-            return str(content.get('text', content.get('content', str(content))))
-        else:
-            # 已经是字符串或其他类型，转为字符串
-            return str(content) if content is not None else ""
 
     async def close(self):
         """
@@ -346,10 +282,13 @@ async def main():
     test_user_id = DEFAULT_GROUP_ID
     print(f"正在为用户 {test_user_id} 生成记忆洞察报告...\n")
 
-    insight = None
     try:
-        insight = MemoryInsight(user_id=test_user_id)
-        report = await insight.generate_insight_report()
+        # 使用服务层函数生成报告
+        from app.services.user_memory_service import analytics_memory_insight_report
+        
+        result = await analytics_memory_insight_report(end_user_id=test_user_id)
+        report = result.get("report", "")
+        
         print("--- 记忆洞察报告 ---")
         print(report)
         print("---------------------")
@@ -379,9 +318,6 @@ async def main():
             print(f"写入 User-Dashboard.json 失败: {e}")
     except Exception as e:
         print(f"生成报告时出错: {e}")
-    finally:
-        if insight:
-            await insight.close()
 
 
 if __name__ == "__main__":
