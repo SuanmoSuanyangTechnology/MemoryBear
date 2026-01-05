@@ -293,12 +293,13 @@ class MultiAgentService:
         # 处理 model_parameters（可能是 None、字典或 Pydantic 模型）
         if data.model_parameters is None:
             model_parameters_data = None
-        elif isinstance(data.model_parameters, dict):
-            # 过滤掉值为 None 的字段
-            model_parameters_data = {k: v for k, v in data.model_parameters.items() if v is not None}
+        # elif isinstance(data.model_parameters, dict):
+        #     # 过滤掉值为 None 的字段
+        #     model_parameters_data = {k: v for k, v in data.model_parameters.items() if v is not None}
         else:
             # 过滤掉值为 None 的字段
-            model_parameters_data = {k: v for k, v in data.model_parameters.model_dump().items() if v is not None}
+            # model_parameters_data = {k: v for k, v in data.model_parameters.model_dump().items() if v is not None}
+            model_parameters_data = data.model_parameters
 
         config = MultiAgentConfig(
                 app_id=app_id,
