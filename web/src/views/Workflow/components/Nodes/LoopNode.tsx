@@ -75,12 +75,15 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     const parentBBox = node.getBBox();
     const centerX = parentBBox.x + 24; // 默认节点宽度的一半
     const centerY = parentBBox.y + 50; // 默认节点高度的一半
-    
+
+    const cycleStartNodeId = `cycle_start_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const cycleStartNode = graph.addNode({
       ...graphNodeLibrary.cycleStart,
       x: centerX,
       y: centerY,
+      id: cycleStartNodeId,
       data: {
+        id: cycleStartNodeId,
         type: 'cycle-start',
         parentId: node.id,
         isDefault: true, // 标记为默认节点，不可删除

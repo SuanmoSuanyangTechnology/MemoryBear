@@ -1793,12 +1793,20 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           "not_contains": 'Does Not Contain',
           "startwith": 'Starts With',
           "endwith": 'Ends With',
-          "eq": '==',
-          "ne": '!=',
-          "lt": '<',
-          "le": '<=',
-          "gt": '>',
-          "ge": '>=',
+          "eq": 'Equals',
+          "ne": 'Not Equals',
+          num: {
+            "eq": '=',
+            "ne": '≠',
+            "lt": '<',
+            "le": '≤',
+            "gt": '>',
+            "ge": '≥',
+          },
+          boolean: {
+            "eq": 'Is',
+            "ne": 'Is Not',
+          },
           else_desc: 'Used to define the logic that should be executed when the if condition is not met.'
         },
         'http-request': {
@@ -1839,12 +1847,17 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         loop: {
           cycle_vars: 'Loop Variables',
           condition: 'Loop Termination Condition',
+          max_loop: 'Maximum Loop Count',
         },
         assigner: {
           assignments: 'Variables',
-          cover: 'Overwrite',
+          cover: 'Override',
           assign: 'Set',
-          clear: 'Clear'
+          clear: 'Clear',
+          add: '+=',
+          subtract: '-=',
+          multiply: '*=',
+          divide: '/=',
         },
         iteration: {
           input: 'Input Variable',
