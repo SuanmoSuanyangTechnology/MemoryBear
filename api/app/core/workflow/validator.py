@@ -91,6 +91,7 @@ class WorkflowValidator:
         """验证工作流配置
         
         Args:
+            publish: 发布验证标识
             workflow_config: 工作流配置字典或 WorkflowConfig Pydantic 模型
         
         Returns:
@@ -114,7 +115,7 @@ class WorkflowValidator:
 
         graphs = cls.get_subgraph(workflow_config)
         logger.info(graphs)
-        for graph in graphs:
+        for index, graph in enumerate(graphs):
             nodes = graph.get("nodes", [])
             edges = graph.get("edges", [])
             variables = graph.get("variables", [])
@@ -125,10 +126,11 @@ class WorkflowValidator:
             elif len(start_nodes) > 1:
                 errors.append(f"工作流只能有一个 start 节点，当前有 {len(start_nodes)} 个")
 
-            # 2. 验证 end 节点（至少一个）
-            end_nodes = [n for n in nodes if n.get("type") == NodeType.END]
-            if len(end_nodes) == 0:
-                errors.append("工作流必须至少有一个 end 节点")
+            if index == len(graphs) - 1:
+                # 2. 验证 主图end 节点（至少一个）
+                end_nodes = [n for n in nodes if n.get("type") == NodeType.END]
+                if len(end_nodes) == 0:
+                    errors.append("工作流必须至少有一个 end 节点")
 
             # 3. 验证节点 ID 唯一性
             node_ids = [n.get("id") for n in nodes]
