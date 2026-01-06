@@ -7,7 +7,9 @@ import {
   getModelList, 
   createKnowledgeBase, 
   updateKnowledgeBase,
-  getKnowledgeGraphEntityTypes
+  getKnowledgeGraphEntityTypes,
+  deleteKnowledgeGraph,
+  rebuildKnowledgeGraph
 } from '@/api/knowledgeBase'
 import RbModal from '@/components/RbModal'
 const { TextArea } = Input;
@@ -31,6 +33,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const [activeTab, setActiveTab] = useState('basic');
   const [generatingEntityTypes, setGeneratingEntityTypes] = useState(false);
   const [isRebuildMode, setIsRebuildMode] = useState(false);
+  const [originalType, setOriginalType] = useState<string>(''); // 保存原始的 type 参数
   
   // 监听 parser_config.graphrag 相关字段的变化
   const parserConfig = Form.useWatch('parser_config', form);
@@ -47,6 +50,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     setLoading(false);
     setActiveTab('basic');
     setIsRebuildMode(false); // 重置重建模式标识
+    setOriginalType(''); // 重置原始 type
     setVisible(false);
   };
 
@@ -224,9 +228,12 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
 
   const handleOpen = (record?: KnowledgeBaseListItem | null, type?: string) => {
     setDatasets(record || null);
-    const nextType = type || currentType;
-    setCurrentType(nextType as any);
+    
+    // 如果是重建模式，使用记录的实际类型，否则使用传入的类型
+    const actualType = type === 'rebuild' ? (record?.type || 'General') : (type || currentType);
+    setCurrentType(actualType as any);
     setIsRebuildMode(type === 'rebuild'); // 设置重建模式标识
+    setOriginalType(type || ''); // 保存原始的 type 参数
     
     // 如果是重建模式，默认切换到知识图谱标签页
     if (type === 'rebuild') {
@@ -235,7 +242,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       setActiveTab('basic');
     }
     
-    setBaseFields(record || null, nextType);
+    setBaseFields(record || null, actualType);
     getTypeList(record || null);
     setVisible(true);
   };
@@ -260,6 +267,39 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
 
   // 封装保存方法，添加提交逻辑
   const handleSave = () => {
+    // 获取当前表单中的知识图谱开启状态
+    const currentFormValues = form.getFieldsValue();
+    const isGraphragEnabled = currentFormValues?.parser_config?.graphrag?.use_graphrag || false;
+    
+    // 如果原始 type 是 'rebuild' 并且知识图谱开启为true，显示确认弹框
+    if (originalType === 'rebuild' && isGraphragEnabled) {
+      confirm({
+        title: t('knowledgeBase.rebuildConfirmTitle'),
+        content: t('knowledgeBase.rebuildConfirmContent'),
+        onOk: async() => {
+          handleDeleteGraph()
+          performSave();
+          await rebuildKnowledgeGraph(datasets?.id || '')
+        },
+        onCancel: () => {
+          // 用户取消，不执行任何操作
+        },
+      });
+    } else {
+      // 非重建模式或知识图谱未开启，直接保存
+      performSave();
+    }
+  };
+  const handleDeleteGraph = () => {
+     try{
+        deleteKnowledgeGraph(datasets?.id || '')
+        console.log(t('knowledgeBase.deleteGraphSuccess'))
+     }catch(e){
+        messageApi.error(t('knowledgeBase.deleteGraphFailed'))
+     }
+  };
+  // 实际的保存逻辑
+  const performSave = () => {
     form
       .validateFields()
       .then(() => {
@@ -276,9 +316,12 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           formValues.parser_config.graphrag.entity_types = entityTypesArray;
         }
         
+        // 确保保存时使用正确的类型（不是 'rebuild'）
+        const saveType = originalType === 'rebuild' ? currentType : (formValues.type || currentType);
+        
         const payload: KnowledgeBaseFormData = {
           ...formValues,
-          type: formValues.type || currentType,
+          type: saveType,
           permission_id: formValues.permission_id || 'Private',
           parent_id: datasets?.parent_id || undefined,
         };

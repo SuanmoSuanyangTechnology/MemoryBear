@@ -296,3 +296,13 @@ export const getKnowledgeGraphEntityTypes = async (query: any) => {
   const response = await request.get(`${apiPrefix}/knowledges/knowledge_graph_entity_types`,query);
   return response ;
 };
+// 删除图谱
+export const deleteKnowledgeGraph = async (kb_id: string) => {
+  const response = await request.delete(`${apiPrefix}/knowledges/${kb_id}/knowledge_graph`);
+  return response;
+};
+// 知识库图谱重建
+export const rebuildKnowledgeGraph = async (kb_id: string) => {
+  const response = await request.post(`${apiPrefix}/knowledges/${kb_id}/knowledge_graph`);
+  return response;
+};
