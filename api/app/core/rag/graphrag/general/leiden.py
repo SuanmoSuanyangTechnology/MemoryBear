@@ -12,6 +12,8 @@ from graspologic.partition import hierarchical_leiden
 from graspologic.utils import largest_connected_component
 import networkx as nx
 from networkx import is_empty
+
+
 def _stabilize_graph(graph: nx.Graph) -> nx.Graph:
     """Ensure an undirected graph with the same relationships will always be read the same way."""
     fixed_graph = nx.DiGraph() if graph.is_directed() else nx.Graph()
