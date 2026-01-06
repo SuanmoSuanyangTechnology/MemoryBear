@@ -13,13 +13,15 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
   const handleNodeSelect = (selectedNodeType: any) => {
     const parentBBox = node.getBBox();
     const cycleId = data.cycle;
-    
+
+    const id = `${selectedNodeType.type.replace(/-/g, '_') }_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const newNode = graph.addNode({
       ...(graphNodeLibrary[selectedNodeType.type] || graphNodeLibrary.default),
       x: parentBBox.x,
       y: parentBBox.y,
+      id,
       data: {
-        id: `${selectedNodeType.type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id,
         type: selectedNodeType.type,
         icon: selectedNodeType.icon,
         name: t(`workflow.${selectedNodeType.type}`),

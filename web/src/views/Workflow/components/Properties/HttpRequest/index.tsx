@@ -1,6 +1,6 @@
-import { type FC, useEffect, useRef } from "react";
+import { type FC, useRef } from "react";
 import { useTranslation } from 'react-i18next'
-import { Form, Row, Col, Select, Button, Divider, InputNumber, Switch, Input, Slider } from 'antd'
+import { Form, Row, Col, Select, Button, Divider, InputNumber, Switch, Input } from 'antd'
 import Editor from '../../Editor'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import AuthConfigModal from './AuthConfigModal'

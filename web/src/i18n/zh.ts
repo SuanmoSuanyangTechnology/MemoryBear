@@ -1898,12 +1898,20 @@ export const zh = {
           "not_contains": '不包含',
           "startwith": '开始是',
           "endwith": '结束是',
-          "eq": '==',
-          "ne": '!=',
-          "lt": '<',
-          "le": '<=',
-          "gt": '>',
-          "ge": '>=',
+          "eq": '是',
+          "ne": '不是',
+          num: {
+            "eq": '=',
+            "ne": '≠',
+            "lt": '<',
+            "le": '≤',
+            "gt": '>',
+            "ge": '≥',
+          },
+          boolean: {
+            "eq": '是',
+            "ne": '不是',
+          },
           else_desc: '用于定义当 if 条件不满足时应执行的逻辑。'
         },
         'http-request': {
@@ -1944,12 +1952,17 @@ export const zh = {
         loop: {
           cycle_vars: '循环变量',
           condition: '循环终止条件',
+          max_loop: '最大循环次数',
         },
         assigner: {
           assignments: '变量',
           cover: '覆盖',
           assign: '设置',
-          clear: '清空'
+          clear: '清空',
+          add: '+=',
+          subtract: '-=',
+          multiply: '*=',
+          divide: '/=',
         },
         iteration: {
           input: '输入变量',
