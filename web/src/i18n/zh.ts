@@ -336,6 +336,11 @@ export const zh = {
       graphTitle: '知识图谱：实体、关系与属性的关联网络',
       graphTips: '探索知识库中的实体节点及其关系脉络',
       rebuildGraph: '重建图谱',
+      rebuildConfirmTitle: '确认重建图谱',
+      rebuildConfirmContent: '重建图谱将清除现有的图谱数据并重新构建，此操作不可逆。确定要继续吗？',
+      deleteGraphSuccess: '删除知识图谱成功',
+      deleteGraphFailed:'删除知识图谱失败',
+      graphEmpty: '书山有路，此处为始',
       createForm: {
         name: '名称',
         embedding_id: '嵌入模型',
@@ -1893,12 +1898,20 @@ export const zh = {
           "not_contains": '不包含',
           "startwith": '开始是',
           "endwith": '结束是',
-          "eq": '==',
-          "ne": '!=',
-          "lt": '<',
-          "le": '<=',
-          "gt": '>',
-          "ge": '>=',
+          "eq": '是',
+          "ne": '不是',
+          num: {
+            "eq": '=',
+            "ne": '≠',
+            "lt": '<',
+            "le": '≤',
+            "gt": '>',
+            "ge": '≥',
+          },
+          boolean: {
+            "eq": '是',
+            "ne": '不是',
+          },
           else_desc: '用于定义当 if 条件不满足时应执行的逻辑。'
         },
         'http-request': {
@@ -1939,12 +1952,17 @@ export const zh = {
         loop: {
           cycle_vars: '循环变量',
           condition: '循环终止条件',
+          max_loop: '最大循环次数',
         },
         assigner: {
           assignments: '变量',
           cover: '覆盖',
           assign: '设置',
-          clear: '清空'
+          clear: '清空',
+          add: '+=',
+          subtract: '-=',
+          multiply: '*=',
+          divide: '/=',
         },
         iteration: {
           input: '输入变量',

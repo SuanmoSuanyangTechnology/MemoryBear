@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2025-12-30 15:07:37
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-01-05 16:18:53
+ * @LastEditTime: 2026-01-05 20:28:51
  */
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next';
@@ -38,7 +38,13 @@ const KnowledgeGraphCard: React.FC<KnowledgeGraphCardProps> = ({ knowledgeBase, 
       setLoading(true)
       try {
         const res = await getKnowledgeGraph(knowledgeBase?.id)
-        setData(res as KnowledgeGraphResponse)
+        // 判断 res.graph 是否为空对象或不存在
+        const graphResponse = res as KnowledgeGraphResponse;
+        if (!graphResponse || !graphResponse.graph || Object.keys(graphResponse.graph).length === 0) {
+          setData(undefined) // 设置为 undefined 以显示 empty 状态
+        } else {
+          setData(graphResponse)
+        }
       } catch (error) {
         console.error('获取知识图谱数据失败:', error)
       } finally {
@@ -68,7 +74,10 @@ const KnowledgeGraphCard: React.FC<KnowledgeGraphCardProps> = ({ knowledgeBase, 
           </div>
       </div>
       <div className='rb:p-4 rb:pt-0'>
-        {knowledgeBase?.parser_config?.graphrag?.use_graphrag ? (<KnowledgeGraph data={data} loading={loading} />) : <Empty />}
+        {knowledgeBase?.parser_config?.graphrag?.use_graphrag ? 
+          (<KnowledgeGraph data={data} loading={loading} />) 
+          : 
+          <Empty title={t('knowledgeBase.graphEmpty')}/>}
       </div>
       
     </div>

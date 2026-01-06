@@ -657,6 +657,7 @@ const Private: FC = () => {
 
   const handleRefreshTable = () => {
     // 刷新表格数据
+    fetchKnowledgeBaseDetail(knowledgeBase.id)
     tableRef.current?.loadData();
   }
   return (

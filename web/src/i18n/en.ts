@@ -726,6 +726,11 @@ export const en = {
       graphTips: 'Explore the entity nodes in the knowledge base and their relationship networks',
       sourceDocuments: 'Source Documents',
       rebuildGraph: 'Rebuild Graph',
+      rebuildConfirmTitle: 'Confirm the rebuild graph',
+      rebuildConfirmContent: 'The rebuild graph will erase the existing map data and rebuild it from scratch. This operation is irreversible. Are you sure you want to proceed?',
+      deleteGraphSuccess: 'Knowledge graph deletion successful',
+      deleteGraphFailed:'Knowledge graph deletion failed',
+      graphEmpty: 'At the foot of the mountain of books, the journey begins.',
       createForm:{
         name: 'Name',
         embedding_id: 'Embedding',
@@ -1793,12 +1798,20 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           "not_contains": 'Does Not Contain',
           "startwith": 'Starts With',
           "endwith": 'Ends With',
-          "eq": '==',
-          "ne": '!=',
-          "lt": '<',
-          "le": '<=',
-          "gt": '>',
-          "ge": '>=',
+          "eq": 'Equals',
+          "ne": 'Not Equals',
+          num: {
+            "eq": '=',
+            "ne": '≠',
+            "lt": '<',
+            "le": '≤',
+            "gt": '>',
+            "ge": '≥',
+          },
+          boolean: {
+            "eq": 'Is',
+            "ne": 'Is Not',
+          },
           else_desc: 'Used to define the logic that should be executed when the if condition is not met.'
         },
         'http-request': {
@@ -1839,12 +1852,17 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         loop: {
           cycle_vars: 'Loop Variables',
           condition: 'Loop Termination Condition',
+          max_loop: 'Maximum Loop Count',
         },
         assigner: {
           assignments: 'Variables',
-          cover: 'Overwrite',
+          cover: 'Override',
           assign: 'Set',
-          clear: 'Clear'
+          clear: 'Clear',
+          add: '+=',
+          subtract: '-=',
+          multiply: '*=',
+          divide: '/=',
         },
         iteration: {
           input: 'Input Variable',

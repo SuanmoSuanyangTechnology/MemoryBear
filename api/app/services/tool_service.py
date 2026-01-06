@@ -344,14 +344,16 @@ class ToolService:
                 break
         
         if operation_param:
-            # 有多个操作
+            # 有多个操作，为每个操作生成具体参数
             methods = []
             for operation in operation_param.enum:
+                # 获取该操作的具体参数
+                operation_params = self._get_operation_specific_params(tool_instance, operation)
                 methods.append({
                     "method_id": f"{config.name}_{operation}",
                     "name": operation,
                     "description": f"{config.description} - {operation}",
-                    "parameters": [p for p in tool_instance.parameters if p.name != "operation"]
+                    "parameters": operation_params
                 })
             return methods
         else:
@@ -362,6 +364,243 @@ class ToolService:
                 "description": config.description,
                 "parameters": [p for p in tool_instance.parameters if p.name != "operation"]
             }]
+    
+    def _get_operation_specific_params(self, tool_instance: BaseTool, operation: str) -> List[Dict[str, Any]]:
+        """获取特定操作的参数列表"""
+        # 对于datetime_tool，根据操作类型返回相关参数
+        if hasattr(tool_instance, 'name') and tool_instance.name == 'datetime_tool':
+            return self._get_datetime_tool_params(operation)
+        # 对于json_tool，根据操作类型返回相关参数
+        elif hasattr(tool_instance, 'name') and tool_instance.name == 'json_tool':
+            return self._get_json_tool_params(operation)
+        
+        # 其他工具的默认处理：返回除operation外的所有参数
+        return [{
+            "name": param.name,
+            "type": param.type.value,
+            "description": param.description,
+            "required": param.required,
+            "default": param.default,
+            "enum": param.enum,
+            "minimum": param.minimum,
+            "maximum": param.maximum,
+            "pattern": param.pattern
+        } for param in tool_instance.parameters if param.name != "operation"]
+    
+    def _get_datetime_tool_params(self, operation: str) -> List[Dict[str, Any]]:
+        """获取datetime_tool特定操作的参数"""
+        if operation == "now":
+            return [
+                {
+                    "name": "to_timezone",
+                    "type": "string",
+                    "description": "目标时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                },
+                {
+                    "name": "output_format",
+                    "type": "string",
+                    "description": "输出时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                }
+            ]
+        elif operation == "format":
+            return [
+                {
+                    "name": "input_value",
+                    "type": "string",
+                    "description": "输入值（时间字符串或时间戳）",
+                    "required": True
+                },
+                {
+                    "name": "input_format",
+                    "type": "string",
+                    "description": "输入时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "output_format",
+                    "type": "string",
+                    "description": "输出时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                }
+            ]
+        elif operation == "convert_timezone":
+            return [
+                {
+                    "name": "input_value",
+                    "type": "string",
+                    "description": "输入值（时间字符串或时间戳）",
+                    "required": True
+                },
+                {
+                    "name": "input_format",
+                    "type": "string",
+                    "description": "输入时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "output_format",
+                    "type": "string",
+                    "description": "输出时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "from_timezone",
+                    "type": "string",
+                    "description": "源时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                },
+                {
+                    "name": "to_timezone",
+                    "type": "string",
+                    "description": "目标时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                }
+            ]
+        elif operation == "timestamp_to_datetime":
+            return [
+                {
+                    "name": "input_value",
+                    "type": "string",
+                    "description": "输入值（时间字符串或时间戳）",
+                    "required": True
+                },
+                {
+                    "name": "output_format",
+                    "type": "string",
+                    "description": "输出时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "to_timezone",
+                    "type": "string",
+                    "description": "目标时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                }
+            ]
+        else:
+            # 默认返回所有参数（除了operation）
+            return [
+                {
+                    "name": "input_value",
+                    "type": "string",
+                    "description": "输入值（时间字符串或时间戳）",
+                    "required": False
+                },
+                {
+                    "name": "input_format",
+                    "type": "string",
+                    "description": "输入时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "output_format",
+                    "type": "string",
+                    "description": "输出时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "from_timezone",
+                    "type": "string",
+                    "description": "源时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                },
+                {
+                    "name": "to_timezone",
+                    "type": "string",
+                    "description": "目标时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                },
+                {
+                    "name": "calculation",
+                    "type": "string",
+                    "description": "时间计算表达式（如：+1d, -2h, +30m）",
+                    "required": False
+                }
+            ]
+    
+    def _get_json_tool_params(self, operation: str) -> List[Dict[str, Any]]:
+        """获取json_tool特定操作的参数"""
+        base_params = [
+            {
+                "name": "input_data",
+                "type": "string",
+                "description": "输入数据（JSON字符串、YAML字符串或XML字符串）",
+                "required": True
+            }
+        ]
+        
+        if operation == "insert":
+            return base_params + [
+                {
+                    "name": "json_path",
+                    "type": "string",
+                    "description": "JSON路径表达式（如：$.user.name或users[0].name）",
+                    "required": True
+                },
+                {
+                    "name": "new_value",
+                    "type": "string",
+                    "description": "新值（用于insert操作）",
+                    "required": True
+                }
+            ]
+        elif operation == "replace":
+            return base_params + [
+                {
+                    "name": "json_path",
+                    "type": "string",
+                    "description": "JSON路径表达式（如：$.user.name或users[0].name）",
+                    "required": True
+                },
+                {
+                    "name": "old_text",
+                    "type": "string",
+                    "description": "要替换的原文本（用于replace操作）",
+                    "required": True
+                },
+                {
+                    "name": "new_text",
+                    "type": "string",
+                    "description": "替换后的新文本（用于replace操作）",
+                    "required": True
+                }
+            ]
+        elif operation == "delete":
+            return base_params + [
+                {
+                    "name": "json_path",
+                    "type": "string",
+                    "description": "JSON路径表达式（如：$.user.name或users[0].name）",
+                    "required": True
+                }
+            ]
+        elif operation == "parse":
+            return base_params + [
+                {
+                    "name": "json_path",
+                    "type": "string",
+                    "description": "JSON路径表达式（如：$.user.name或users[0].name）",
+                    "required": True
+                }
+            ]
+        
+        return base_params
 
     async def _get_custom_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
         """获取自定义工具的方法"""
