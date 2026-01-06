@@ -1054,6 +1054,28 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         core_values = core_values_match.group(1).strip() if core_values_match else ""
         one_sentence = one_sentence_match.group(1).strip() if one_sentence_match else ""
         
+        # 6) 清理可能包含的反思内容（防御性编程）
+        # 如果 LLM 仍然输出了反思内容，在这里过滤掉
+        def clean_reflection_content(text: str) -> str:
+            """移除可能包含的反思内容"""
+            if not text:
+                return text
+            # 移除 "---" 之后的所有内容（通常是反思部分的开始）
+            if '---' in text:
+                text = text.split('---')[0].strip()
+            # 移除 "**Step" 开头的内容
+            if '**Step' in text:
+                text = text.split('**Step')[0].strip()
+            # 移除 "Self-Review" 相关内容
+            if 'Self-Review' in text or 'self-review' in text:
+                text = re.sub(r'[\-\*]*\s*Self-Review.*$', '', text, flags=re.IGNORECASE | re.DOTALL).strip()
+            return text
+        
+        user_summary = clean_reflection_content(user_summary)
+        personality = clean_reflection_content(personality)
+        core_values = clean_reflection_content(core_values)
+        one_sentence = clean_reflection_content(one_sentence)
+        
         return {
             "user_summary": user_summary,
             "personality": personality,
