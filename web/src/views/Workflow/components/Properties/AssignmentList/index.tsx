@@ -62,6 +62,10 @@ const AssignmentList: FC<AssignmentListProps> = ({
                         placeholder={t('common.pleaseSelect')}
                         options={options}
                         popupMatchSelectWidth={false}
+                        onChange={() => {
+                          form.setFieldValue([parentName, name, 'operation'], undefined);
+                          form.setFieldValue([parentName, name, 'value'], undefined);
+                        }}
                       />
                     </Form.Item>
                   </Col>
@@ -72,6 +76,7 @@ const AssignmentList: FC<AssignmentListProps> = ({
                       noStyle
                     >
                       <Select
+                        placeholder={t('common.pleaseSelect')}
                         options={operationOptions.map(op => ({
                           ...op,
                           label: t(op.label)
@@ -99,14 +104,20 @@ const AssignmentList: FC<AssignmentListProps> = ({
                         name={[name, 'value']}
                         noStyle
                       >
-                        {operation === 'assign'
+                        {dataType === 'number' && operation === 'cover'
+                          ? <VariableSelect
+                            placeholder={t('common.pleaseSelect')}
+                            options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
+                            popupMatchSelectWidth={false}
+                          />
+                          : dataType === 'number'
+                          ? <InputNumber
+                            placeholder={t('common.pleaseEnter')}
+                            className="rb:w-full!"
+                          />
+                          : operation === 'assign'
                           ? <>
-                            {dataType === 'number'
-                              ? <InputNumber
-                                placeholder={t('common.pleaseEnter')}
-                                className="rb:w-full!"
-                              />
-                              : dataType === 'boolean'
+                            {dataType === 'boolean'
                               ? <Radio.Group block>
                                 <Radio.Button value={true}>True</Radio.Button>
                                 <Radio.Button value={false}>False</Radio.Button>

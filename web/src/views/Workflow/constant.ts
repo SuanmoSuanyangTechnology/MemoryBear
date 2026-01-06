@@ -327,7 +327,7 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'switch',
             defaultValue: false
           },
-          group_names: {
+          group_variables: {
             type: 'groupVariableList',
             defaultValue: [],
           }
@@ -373,11 +373,11 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           headers: {
             type: 'define',
-            defaultValue: {}
+            defaultValue: []
           },
           params: {
             type: 'define',
-            defaultValue: {}
+            defaultValue: []
           },
           body: {
             type: 'define',
