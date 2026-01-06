@@ -510,7 +510,6 @@ async def draft_run(
             variables=payload.variables or {},
             use_llm_routing=True  # 默认启用 LLM 路由
         )
-
         # 3. 流式返回
         if payload.stream:
             logger.debug(
