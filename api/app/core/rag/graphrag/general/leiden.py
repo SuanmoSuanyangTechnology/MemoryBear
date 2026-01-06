@@ -8,12 +8,10 @@ Reference:
 import logging
 import html
 from typing import Any, cast
-# from graspologic.partition import hierarchical_leiden
-# from graspologic.utils import largest_connected_component
+from graspologic.partition import hierarchical_leiden
+from graspologic.utils import largest_connected_component
 import networkx as nx
 from networkx import is_empty
-hierarchical_leiden=''
-largest_connected_component=''
 
 def _stabilize_graph(graph: nx.Graph) -> nx.Graph:
     """Ensure an undirected graph with the same relationships will always be read the same way."""
