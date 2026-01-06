@@ -728,9 +728,23 @@ async def draft_run_compare(
             from app.core.exceptions import ResourceNotFoundException
             raise ResourceNotFoundException("模型配置", str(model_item.model_config_id))
 
+        # 获取 agent_cfg.model_parameters，如果是 ModelParameters 对象则转为字典
+        agent_model_params = agent_cfg.model_parameters
+        if hasattr(agent_model_params, 'model_dump'):
+            agent_model_params = agent_model_params.model_dump()
+        elif not isinstance(agent_model_params, dict):
+            agent_model_params = {}
+
+        # 获取 model_item.model_parameters，如果是 ModelParameters 对象则转为字典
+        item_model_params = model_item.model_parameters
+        if hasattr(item_model_params, 'model_dump'):
+            item_model_params = item_model_params.model_dump()
+        elif not isinstance(item_model_params, dict):
+            item_model_params = {}
+
         merged_parameters = {
-            **(agent_cfg.model_parameters or {}),
-            **(model_item.model_parameters or {})
+            **(agent_model_params or {}),
+            **(item_model_params or {})
         }
 
         model_configs.append({
