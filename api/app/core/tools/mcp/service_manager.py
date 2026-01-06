@@ -16,14 +16,17 @@ logger = get_business_logger()
 class MCPServiceManager:
     """MCP服务管理器 - 管理MCP服务的生命周期"""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session = None):
         """初始化MCP服务管理器
         
         Args:
-            db: 数据库会话
+            db: 数据库会话（可选）
         """
         self.db = db
-        self.connection_pool = MCPConnectionPool(max_connections=20)
+        if db:
+            self.connection_pool = MCPConnectionPool(max_connections=20)
+        else:
+            self.connection_pool = None
         
         # 服务状态管理
         self._services: Dict[str, Dict[str, Any]] = {}  # service_id -> service_info
@@ -592,7 +595,7 @@ class MCPServiceManager:
             
         except Exception as e:
             logger.error(f"清理失效服务失败: {e}")
-    
+
     def get_manager_status(self) -> Dict[str, Any]:
         """获取管理器状态"""
         return {
