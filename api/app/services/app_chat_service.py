@@ -9,15 +9,18 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.agent.langchain_agent import LangChainAgent
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.db import get_db
-from app.models import MultiAgentConfig, AgentConfig
+from app.db import get_db, get_db_context
+from app.models import MultiAgentConfig, AgentConfig, WorkflowConfig
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
 from app.services.draft_run_service import create_knowledge_retrieval_tool, create_long_term_memory_tool
 from app.services.draft_run_service import create_web_search_tool
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
+from app.services.workflow_service import WorkflowService
 
 logger = get_business_logger()
 
@@ -479,7 +482,9 @@ class AppChatService:
             self,
             message: str,
             conversation_id: uuid.UUID,
-            config: AgentConfig,
+            config: WorkflowConfig,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
             user_id: Optional[str] = None,
             variables: Optional[Dict[str, Any]] = None,
             web_search: bool = False,
@@ -488,281 +493,158 @@ class AppChatService:
             user_rag_memory_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
+        workflow_service = WorkflowService(self.db)
 
-        start_time = time.time()
-        config_id = None
+        input_data = {"message":message, "variables": variables,
+                      "conversation_id": str(conversation_id)}
+        inconfig = workflow_service.get_workflow_config(app_id)
 
-        if variables is None:
-            variables = {}
+        # 2. 创建执行记录
+        execution = workflow_service.create_execution(
+            workflow_config_id=inconfig.id,
+            app_id=app_id,
+            trigger_type="manual",
+            triggered_by=None,
+            conversation_id=conversation_id,
+            input_data=input_data
+        )
 
-        # 获取模型配置ID
-        model_config_id = config.default_model_config_id
-        api_key_obj = ModelApiKeyService.get_a_api_key(self.db ,model_config_id)
-        # 处理系统提示词（支持变量替换）
-        system_prompt = config.get("system_prompt", "")
-        if variables:
-            system_prompt_rendered = render_prompt_message(
-                system_prompt,
-                PromptMessageRole.USER,
-                variables
+        # 3. 构建工作流配置字典
+        workflow_config_dict = {
+            "nodes": config.nodes,
+            "edges": config.edges,
+            "variables": config.variables,
+            "execution_config": config.execution_config
+        }
+
+        # 4. 获取工作空间 ID（从 app 获取）
+
+        # 5. 执行工作流
+        from app.core.workflow.executor import execute_workflow
+
+        try:
+            # 更新状态为运行中
+            workflow_service.update_execution_status(execution.execution_id, "running")
+
+            result = await execute_workflow(
+                workflow_config=workflow_config_dict,
+                input_data=input_data,
+                execution_id=execution.execution_id,
+                workspace_id=str(workspace_id),
+                user_id=user_id
             )
-            system_prompt = system_prompt_rendered.get_text_content() or system_prompt
 
-        # 准备工具列表
-        tools = []
-
-        # 添加知识库检索工具
-        knowledge_retrieval = config.get("knowledge_retrieval")
-        if knowledge_retrieval:
-            knowledge_bases = knowledge_retrieval.get("knowledge_bases", [])
-            kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
-            if kb_ids:
-                kb_tool = create_knowledge_retrieval_tool(knowledge_retrieval, kb_ids, user_id)
-                tools.append(kb_tool)
-
-        # 添加长期记忆工具
-        memory_flag = False
-        if memory == True:
-            memory_config = config.get("memory", {})
-            if memory_config.get("enabled") and user_id:
-                memory_flag = True
-                memory_tool = create_long_term_memory_tool(memory_config, user_id)
-                tools.append(memory_tool)
-
-        web_tools = config.get("tools")
-        web_search_choice = web_tools.get("web_search", {})
-        web_search_enable = web_search_choice.get("enabled", False)
-        if web_search == True:
-            if web_search_enable == True:
-                search_tool = create_web_search_tool({})
-                tools.append(search_tool)
-
-                logger.debug(
-                    "已添加网络搜索工具",
-                    extra={
-                        "tool_count": len(tools)
-                    }
+            # 更新执行结果
+            if result.get("status") == "completed":
+                workflow_service.update_execution_status(
+                    execution.execution_id,
+                    "completed",
+                    output_data=result.get("node_outputs", {})
+                )
+            else:
+                workflow_service.update_execution_status(
+                    execution.execution_id,
+                    "failed",
+                    error_message=result.get("error")
                 )
 
-        # 获取模型参数
-        model_parameters = config.get("model_parameters", {})
+            # 返回增强的响应结构
+            return {
+                "execution_id": execution.execution_id,
+                "status": result.get("status"),
+                "output": result.get("output"),  # 最终输出（字符串）
+                "output_data": result.get("node_outputs", {}),  # 所有节点输出（详细数据）
+                "conversation_id": result.get("conversation_id"),  # 所有节点输出（详细数据）payload.,  # 会话 ID
+                "error_message": result.get("error"),
+                "elapsed_time": result.get("elapsed_time"),
+                "token_usage": result.get("token_usage")
+            }
 
-        # 创建 LangChain Agent
-        agent = LangChainAgent(
-            model_name=api_key_obj.model_name,
-            api_key=api_key_obj.api_key,
-            provider=api_key_obj.provider,
-            api_base=api_key_obj.api_base,
-            temperature=model_parameters.get("temperature", 0.7),
-            max_tokens=model_parameters.get("max_tokens", 2000),
-            system_prompt=system_prompt,
-            tools=tools,
-
-        )
-
-        # 加载历史消息
-        history = []
-        memory_config = {"enabled": True, 'max_history': 10}
-        if memory_config.get("enabled"):
-            messages = self.conversation_service.get_messages(
-                conversation_id=conversation_id,
-                limit=memory_config.get("max_history", 10)
+        except Exception as e:
+            logger.error(f"工作流执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
+            workflow_service.update_execution_status(
+                execution.execution_id,
+                "failed",
+                error_message=str(e)
             )
-            history = [
-                {"role": msg.role, "content": msg.content}
-                for msg in messages
-            ]
-
-        # 调用 Agent
-        result = await agent.chat(
-            message=message,
-            history=history,
-            context=None,
-            end_user_id=user_id,
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            config_id=config_id,
-            memory_flag=memory_flag
-        )
-
-        # 保存消息
-        self.conversation_service.save_conversation_messages(
-            conversation_id=conversation_id,
-            user_message=message,
-            assistant_message=result["content"]
-        )
-
-        elapsed_time = time.time() - start_time
-
-        return {
-            "conversation_id": conversation_id,
-            "message": result["content"],
-            "usage": result.get("usage", {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0
-            }),
-            "elapsed_time": elapsed_time
-        }
+            raise BusinessException(
+                code=BizCode.INTERNAL_ERROR,
+                message=f"工作流执行失败: {str(e)}"
+            )
 
     async def workflow_chat_stream(
             self,
             message: str,
             conversation_id: uuid.UUID,
-            config: AgentConfig,
+            config: WorkflowConfig,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
             user_id: Optional[str] = None,
             variables: Optional[Dict[str, Any]] = None,
             web_search: bool = False,
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
+        workflow_service = WorkflowService(self.db)
+        input_data = {"message": message, "variables": variables,
+                      "conversation_id": str(conversation_id)}
+        inconfig = workflow_service.get_workflow_config(app_id)
+        # 2. 创建执行记录
+        execution = workflow_service.create_execution(
+            workflow_config_id=inconfig.id,
+            app_id=app_id,
+            trigger_type="manual",
+            triggered_by=None,
+            conversation_id=conversation_id,
+            input_data=input_data
+        )
+
+        # 3. 构建工作流配置字典
+        workflow_config_dict = {
+            "nodes": config.nodes,
+            "edges": config.edges,
+            "variables": config.variables,
+            "execution_config": config.execution_config
+        }
+
+        # 4. 获取工作空间 ID（从 app 获取）
+
+        # 5. 流式执行工作流
 
         try:
-            start_time = time.time()
-            config_id = None
+            # 更新状态为运行中
+            workflow_service.update_execution_status(execution.execution_id, "running")
 
-            if variables is None:
-                variables = {}
 
-            # 获取模型配置ID
-            model_config_id = config.default_model_config_id
-            api_key_obj = ModelApiKeyService.get_a_api_key(self.db ,model_config_id)
-            # 处理系统提示词（支持变量替换）
-            system_prompt = config.get("system_prompt", "")
-            if variables:
-                system_prompt_rendered = render_prompt_message(
-                    system_prompt,
-                    PromptMessageRole.USER,
-                    variables
-                )
-                system_prompt = system_prompt_rendered.get_text_content() or system_prompt
-
-            # 准备工具列表
-            tools = []
-
-            # 添加知识库检索工具
-            knowledge_retrieval = config.get("knowledge_retrieval")
-            if knowledge_retrieval:
-                knowledge_bases = knowledge_retrieval.get("knowledge_bases", [])
-                kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
-                if kb_ids:
-                    kb_tool = create_knowledge_retrieval_tool(knowledge_retrieval, kb_ids, user_id)
-                    tools.append(kb_tool)
-
-            # 添加长期记忆工具
-            memory_flag = False
-            if memory:
-                memory_config = config.get("memory", {})
-                if memory_config.get("enabled") and user_id:
-                    memory_flag = True
-                    memory_tool = create_long_term_memory_tool(memory_config, user_id)
-                    tools.append(memory_tool)
-
-            web_tools = config.get("tools")
-            web_search_choice = web_tools.get("web_search", {})
-            web_search_enable = web_search_choice.get("enabled", False)
-            if web_search == True:
-                if web_search_enable == True:
-                    search_tool = create_web_search_tool({})
-                    tools.append(search_tool)
-
-                    logger.debug(
-                        "已添加网络搜索工具",
-                        extra={
-                            "tool_count": len(tools)
-                        }
-                    )
-
-            # 获取模型参数
-            model_parameters = config.get("model_parameters", {})
-
-            # 创建 LangChain Agent
-            agent = LangChainAgent(
-                model_name=api_key_obj.model_name,
-                api_key=api_key_obj.api_key,
-                provider=api_key_obj.provider,
-                api_base=api_key_obj.api_base,
-                temperature=model_parameters.get("temperature", 0.7),
-                max_tokens=model_parameters.get("max_tokens", 2000),
-                system_prompt=system_prompt,
-                tools=tools,
-                streaming=True
-            )
-
-            # 加载历史消息
-            history = []
-            memory_config = {"enabled": True, 'max_history': 10}
-            if memory_config.get("enabled"):
-                messages = self.conversation_service.get_messages(
-                    conversation_id=conversation_id,
-                    limit=memory_config.get("max_history", 10)
-                )
-                history = [
-                    {"role": msg.role, "content": msg.content}
-                    for msg in messages
-                ]
-
-            # 发送开始事件
-            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
-
-            # 流式调用 Agent
-            full_content = ""
-            async for chunk in agent.chat_stream(
-                    message=message,
-                    history=history,
-                    context=None,
-                    end_user_id=user_id,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    config_id=config_id,
-                    memory_flag=memory_flag
+            # 调用流式执行（executor 会发送 workflow_start 和 workflow_end 事件）
+            async for event in workflow_service._run_workflow_stream(
+                    workflow_config=workflow_config_dict,
+                    input_data=input_data,
+                    execution_id=execution.execution_id,
+                    workspace_id=str(workspace_id),
+                    user_id=user_id
             ):
-                full_content += chunk
-                # 发送消息块事件
-                yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                # 直接转发 executor 的事件（已经是正确的格式）
+                yield event
 
-            elapsed_time = time.time() - start_time
-
-            # 保存消息
-            self.conversation_service.add_message(
-                conversation_id=conversation_id,
-                role="user",
-                content=message
-            )
-
-            self.conversation_service.add_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=full_content,
-                meta_data={
-                    "model": api_key_obj.model_name,
-                    "usage": {}
-                }
-            )
-
-            # 发送结束事件
-            end_data = {"elapsed_time": elapsed_time, "message_length": len(full_content)}
-            yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
-
-            logger.info(
-                "流式聊天完成",
-                extra={
-                    "conversation_id": str(conversation_id),
-                    "elapsed_time": elapsed_time,
-                    "message_length": len(full_content)
-                }
-            )
-
-        except (GeneratorExit, asyncio.CancelledError):
-            # 生成器被关闭或任务被取消，正常退出
-            logger.debug("流式聊天被中断")
-            raise
         except Exception as e:
-            logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
+            logger.error(f"工作流流式执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
+            workflow_service.update_execution_status(
+                execution.execution_id,
+                "failed",
+                error_message=str(e)
+            )
             # 发送错误事件
-            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield {
+                "event": "error",
+                "data": {
+                    "execution_id": execution.execution_id,
+                    "error": str(e)
+                }
+            }
 
 # ==================== 依赖注入函数 ====================
 
