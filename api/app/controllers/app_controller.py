@@ -496,6 +496,7 @@ async def draft_run(
                 }
             )
             raise
+
     elif app.type == AppType.MULTI_AGENT:
         # 1. 检查多智能体配置完整性
         service._check_multi_agent_config(app_id)
