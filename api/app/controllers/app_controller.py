@@ -496,6 +496,7 @@ async def draft_run(
                 }
             )
             raise
+
     elif app.type == AppType.MULTI_AGENT:
         # 1. 检查多智能体配置完整性
         service._check_multi_agent_config(app_id)
@@ -506,11 +507,10 @@ async def draft_run(
         multi_agent_request = MultiAgentRunRequest(
             message=payload.message,
             conversation_id=payload.conversation_id,
-            user_id=payload.user_id,
+            user_id=payload.user_id or str(current_user.id),
             variables=payload.variables or {},
             use_llm_routing=True  # 默认启用 LLM 路由
         )
-
         # 3. 流式返回
         if payload.stream:
             logger.debug(
