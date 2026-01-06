@@ -392,8 +392,8 @@ async def chat(
 
     if app_type == AppType.AGENT:
         # 流式返回
-        agent_config = agent_config_4_app_release(app.current_release)
-        
+        agent_config = agent_config_4_app_release(release)
+
         if payload.stream:
             # async def event_generator():
             #     async for event in service.chat_stream(

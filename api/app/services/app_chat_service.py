@@ -184,7 +184,7 @@ class AppChatService:
             model_config_id = config.default_model_config_id
             api_key_obj = ModelApiKeyService.get_a_api_key(self.db ,model_config_id)
             # 处理系统提示词（支持变量替换）
-            system_prompt = config.get("system_prompt", "")
+            system_prompt = config.system_prompt
             if variables:
                 system_prompt_rendered = render_prompt_message(
                     system_prompt,
@@ -197,7 +197,7 @@ class AppChatService:
             tools = []
 
             # 添加知识库检索工具
-            knowledge_retrieval = config.get("knowledge_retrieval")
+            knowledge_retrieval = config.knowledge_retrieval
             if knowledge_retrieval:
                 knowledge_bases = knowledge_retrieval.get("knowledge_bases", [])
                 kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
@@ -208,13 +208,13 @@ class AppChatService:
             # 添加长期记忆工具
             memory_flag = False
             if memory:
-                memory_config = config.get("memory", {})
+                memory_config = config.memory
                 if memory_config.get("enabled") and user_id:
                     memory_flag = True
                     memory_tool = create_long_term_memory_tool(memory_config, user_id)
                     tools.append(memory_tool)
 
-            web_tools = config.get("tools")
+            web_tools = config.tools
             web_search_choice = web_tools.get("web_search", {})
             web_search_enable = web_search_choice.get("enabled", False)
             if web_search == True:
@@ -230,7 +230,7 @@ class AppChatService:
                     )
 
             # 获取模型参数
-            model_parameters = config.get("model_parameters", {})
+            model_parameters = config.model_parameters
 
             # 创建 LangChain Agent
             agent = LangChainAgent(
@@ -763,6 +763,7 @@ class AppChatService:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
             # 发送错误事件
             yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
 # ==================== 依赖注入函数 ====================
 
 def get_app_chat_service(
