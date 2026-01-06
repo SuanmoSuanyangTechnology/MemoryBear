@@ -208,17 +208,12 @@ class HttpRequestNode(BaseNode):
                     retries -= 1
                     if retries > 0:
                         await asyncio.sleep(self.typed_config.retry.retry_interval / 1000)
+                    elif self.typed_config.error_handle.method == HttpErrorHandle.NONE:
+                        raise e
+                except Exception as e:
+                    raise RuntimeError(f"HTTP request node exception: {e}")
             else:
                 match self.typed_config.error_handle.method:
-                    case HttpErrorHandle.NONE:
-                        logger.warning(
-                            f"Node {self.node_id}: HTTP request failed, returning error response"
-                        )
-                        return HttpRequestNodeOutput(
-                            body="",
-                            status_code=resp.status_code,
-                            headers=resp.headers,
-                        ).model_dump()
                     case HttpErrorHandle.DEFAULT:
                         logger.warning(
                             f"Node {self.node_id}: HTTP request failed, returning default result"
@@ -229,3 +224,4 @@ class HttpRequestNode(BaseNode):
                             f"Node {self.node_id}: HTTP request failed, switching to error handling branch"
                         )
                         return "ERROR"
+                raise RuntimeError("http request failed")
