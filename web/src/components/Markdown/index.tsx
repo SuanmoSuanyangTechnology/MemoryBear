@@ -1,5 +1,4 @@
-import { Image, Input, Select, Form, Checkbox, Radio, ColorPicker, DatePicker, TimePicker, InputNumber, Slider, Button } from 'antd'
-import { EditOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons'
+import { Image, Input, Select, Form, Checkbox, Radio, ColorPicker, DatePicker, TimePicker, InputNumber, Slider } from 'antd'
 import ReactMarkdown from 'react-markdown'
 import RemarkGfm from 'remark-gfm'
 import RemarkMath from 'remark-math'
@@ -20,7 +19,6 @@ interface RbMarkdownProps {
   showHtmlComments?: boolean; // 是否显示 HTML 注释，默认为 false（隐藏）
   editable?: boolean; // 是否可编辑，默认为 false
   onContentChange?: (content: string) => void; // 内容变化回调
-  onSave?: (content: string) => void; // 保存回调
 }
 
 const components = {
@@ -51,7 +49,7 @@ const components = {
   video: ({ src, ...props }: any) => <VideoBlock node={{ children: [{ properties: { src: src || '' } }] }} {...props} />,
   audio: ({ src, ...props }: any) => <AudioBlock node={{ children: [{ properties: { src: src || '' } }] }} {...props} />,
   a: ({ href, children, ...props }: any) => <Link href={href || '#'} {...props}>{children}</Link>,
-  button: ({ children, ...props }: any) => <RbButton node={{ children }}>{[children]}</RbButton>,
+  button: ({ children }: any) => <RbButton node={{ children }}>{[children]}</RbButton>,
   table: ({ children, ...props }: any) => <table className="rb:border rb:border-[#D9D9D9] rb:mb-2" {...props}>{children}</table>,
   tr: ({ children, ...props }: any) => <tr className="rb:border rb:border-[#D9D9D9]" {...props}>{children}</tr>,
   th: ({ children, ...props }: any) => <th className="rb:border rb:border-[#D9D9D9] rb:px-2 rb:py-1 rb:text-left rb:font-bold" {...props}>{children}</th>,
@@ -100,9 +98,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
   showHtmlComments = false,
   editable = false,
   onContentChange,
-  onSave,
 }) => {
-  const [isEditing, setIsEditing] = useState(editable) // 如果可编辑，默认进入编辑模式
   const [editContent, setEditContent] = useState(content)
   const textareaRef = useRef<any>(null)
 
@@ -110,44 +106,6 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
   useEffect(() => {
     setEditContent(content)
   }, [content])
-
-  // 当editable变化时，自动切换编辑状态
-  useEffect(() => {
-    if (editable) {
-      setIsEditing(true)
-      // 延迟聚焦，确保 textarea 已渲染
-      setTimeout(() => {
-        textareaRef.current?.focus()
-      }, 100)
-    }
-  }, [editable])
-
-  // 进入编辑模式
-  const handleEdit = () => {
-    setIsEditing(true)
-    setEditContent(content)
-    // 延迟聚焦，确保 textarea 已渲染
-    setTimeout(() => {
-      textareaRef.current?.focus()
-    }, 100)
-  }
-
-  // 保存编辑
-  const handleSave = () => {
-    onContentChange?.(editContent)
-    onSave?.(editContent)
-    if (!editable) {
-      setIsEditing(false) // 只有在非强制编辑模式下才退出编辑
-    }
-  }
-
-  // 取消编辑
-  const handleCancel = () => {
-    setEditContent(content) // 恢复原内容
-    if (!editable) {
-      setIsEditing(false) // 只有在非强制编辑模式下才退出编辑
-    }
-  }
 
   // 处理 textarea 内容变化
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -160,15 +118,15 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
   // 根据参数决定是否将 HTML 注释转换为可见文本
   // 使用特殊的 markdown 语法来显示注释，避免被 rehype-raw 过滤
   const processedContent = showHtmlComments
-    ? (isEditing ? editContent : content).replace(/<!--([\s\S]*?)-->/g, (_match, commentContent) => {
+    ? (editable ? editContent : content).replace(/<!--([\s\S]*?)-->/g, (_match, commentContent) => {
         // 转换为带样式的文本，使用 <span class="html-comment"> 标记
         const escaped = commentContent.trim().replace(/</g, '&lt;').replace(/>/g, '&gt;')
         return `<span class="html-comment">&lt;!-- ${escaped} --&gt;</span>`
       })
-    : (isEditing ? editContent : content)
+    : (editable ? editContent : content)
 
   // 如果是编辑模式，显示 textarea
-  if (isEditing) {
+  if (editable) {
     return (
       <div className="rb:relative">
         <style>{`
@@ -177,34 +135,13 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
             font-size: 0.9em;
           }
         `}</style>
-        
-        {/* 编辑工具栏 - 只在非强制编辑模式下显示 */}
-        {!editable && (
-          <div className="rb:flex rb:justify-end rb:gap-2 rb:mb-2">
-            <Button 
-              type="primary" 
-              size="small" 
-              icon={<SaveOutlined />}
-              onClick={handleSave}
-            >
-              保存
-            </Button>
-            <Button 
-              size="small" 
-              icon={<CloseOutlined />}
-              onClick={handleCancel}
-            >
-              取消
-            </Button>
-          </div>
-        )}
 
         {/* 编辑区域 */}
         <Input.TextArea
           ref={textareaRef}
           value={editContent}
           onChange={handleTextareaChange}
-          rows={editable ? 5 : 10}
+          rows={10}
           className="rb:font-mono rb:text-sm"
           placeholder="请输入 Markdown 内容..."
           style={{ resize: 'vertical' }}
@@ -215,28 +152,13 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
 
   // 预览模式
   return (
-    <div className="rb:relative rb:group">
+    <div className="rb:relative">
       <style>{`
         .html-comment {
           color: #999;
           font-size: 0.9em;
         }
       `}</style>
-      
-      {/* 编辑按钮 - 只在非强制编辑模式且鼠标悬停时显示 */}
-      {!editable && (
-        <div className="rb:absolute rb:top-0 rb:right-0 rb:opacity-0 group-hover:rb:opacity-100 rb:transition-opacity rb:z-10">
-          <Button 
-            type="text" 
-            size="small" 
-            icon={<EditOutlined />}
-            onClick={handleEdit}
-            className="rb:bg-white rb:shadow-sm"
-          >
-            编辑
-          </Button>
-        </div>
-      )}
 
       <ReactMarkdown
         // allowElement={[]}
