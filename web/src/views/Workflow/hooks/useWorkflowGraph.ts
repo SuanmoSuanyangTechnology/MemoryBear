@@ -94,9 +94,7 @@ export const useWorkflowGraph = ({
               const { group_names, group } = config
               nodeLibraryConfig.config[key].defaultValue = group
                 ? Object.entries(group_names as Record<string, any>).map(([key, value]) => ({ key, value }))
-                : [{ key: 'Group1', value: group_names }]
-
-              console.log('group_names', nodeLibraryConfig.config)
+                : group_names
             } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && config[key]) {
               nodeLibraryConfig.config[key].defaultValue = config[key]
             }
@@ -832,7 +830,7 @@ export const useWorkflowGraph = ({
     
     // 创建干净的节点数据，只保留必要的字段
     const cleanNodeData = {
-      id: `${dragData.type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `${dragData.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: t(`workflow.${dragData.type}`),
       ...nodeLibraryConfig
     };
@@ -842,6 +840,7 @@ export const useWorkflowGraph = ({
         ...graphNodeLibrary[dragData.type],
         x: point.x - 150,
         y: point.y - 100,
+        id: cleanNodeData.id,
         data: { ...cleanNodeData, isGroup: true },
       });
     } else if (dragData.type === 'if-else') {
@@ -850,6 +849,7 @@ export const useWorkflowGraph = ({
         ...graphNodeLibrary[dragData.type],
         x: point.x - 100,
         y: point.y - 60,
+        id: cleanNodeData.id,
         data: { ...cleanNodeData },
       });
     } else {
@@ -858,6 +858,7 @@ export const useWorkflowGraph = ({
         ...(graphNodeLibrary[dragData.type] || graphNodeLibrary.default),
         x: point.x - 60,
         y: point.y - 20,
+        id: cleanNodeData.id,
         data: { ...cleanNodeData },
       });
     }
@@ -881,7 +882,15 @@ export const useWorkflowGraph = ({
 
           if (data.config) {
             Object.keys(data.config).forEach(key => {
-              if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
+              if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_names') {
+                let group_names = data.config.group.defaultValue ? {} : data.config[key].defaultValue
+                if (data.config.group.defaultValue) {
+                  data.config[key].defaultValue.map((vo: any) => {
+                    group_names[vo.key] = vo.value
+                  })
+                }
+                itemConfig[key] = group_names
+              } else if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
                 itemConfig[key] = data.config[key].defaultValue
               } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const { knowledge_bases } = data.config[key].defaultValue
@@ -910,7 +919,7 @@ export const useWorkflowGraph = ({
           const sourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
           const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
           const sourcePortId = edge.getSourcePortId();
-          
+
           // 过滤无效连线：源节点或目标节点不存在，或者是add-node类型
           if (!sourceCell?.getData()?.id || !targetCell?.getData()?.id || 
               sourceCell?.getData()?.type === 'add-node' || targetCell?.getData()?.type === 'add-node') {

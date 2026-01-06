@@ -25,7 +25,6 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
         <Row gutter={12} className="rb:mb-2!">
           <Col span={12}>
             <Form.Item
-              name={[name,0, 'key']}
               noStyle
             >
               {t('workflow.config.var-aggregator.variable')}
@@ -34,9 +33,8 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
         </Row>
 
         <Form.Item
-          name={[name, 0, 'value']}
+          name={name}
           noStyle
-          rules={[{ required: true, message: 'Missing last name' }]}
         >
           <VariableSelect
             placeholder={t('common.pleaseSelect')}
@@ -76,7 +74,6 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
                   {...restField}
                   name={[name, 'value']}
                   noStyle
-                  rules={[{ required: true, message: 'Missing last name' }]}
                 >
                   <VariableSelect
                     placeholder={t('common.pleaseSelect')}

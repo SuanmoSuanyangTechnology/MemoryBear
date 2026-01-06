@@ -85,15 +85,6 @@ const Properties: FC<PropertiesProps> = ({
       const { id, knowledge_retrieval, group, group_names, ...rest } = values
       const { knowledge_bases = [], ...restKnowledgeConfig } = (knowledge_retrieval as any) || {}
 
-      let groupNames: Record<string, string[]> | string[] = {}
-
-      if (group && group_names?.length) {
-        group_names.forEach(vo => {
-          (groupNames as Record<string, string[]>)[vo.key] = vo.value
-        })
-      } else if (!group) {
-        groupNames = group_names?.[0]?.value || []
-      }
       let allRest = {
         ...rest,
         ...restKnowledgeConfig,
@@ -107,7 +98,14 @@ const Properties: FC<PropertiesProps> = ({
 
       Object.keys(values).forEach(key => {
         if (selectedNode.data?.config?.[key]) {
-          selectedNode.data.config[key].defaultValue = values[key]
+          // Create a deep copy to avoid reference sharing between nodes
+          if (!selectedNode.data.config[key]) {
+            selectedNode.data.config[key] = {};
+          }
+          selectedNode.data.config[key] = {
+            ...selectedNode.data.config[key],
+            defaultValue: values[key]
+          };
         }
       })
 
@@ -194,7 +192,7 @@ const Properties: FC<PropertiesProps> = ({
     
     const allPreviousNodeIds = getAllPreviousNodes(selectedNode.id);
     const childNodeIds = getChildNodes(selectedNode.id);
-    console.log('childNodeIds', childNodeIds)
+    console.log('childNodeIds', selectedNode, childNodeIds)
     const allRelevantNodeIds = [...allPreviousNodeIds, ...childNodeIds];
     
     allRelevantNodeIds.forEach(nodeId => {
@@ -219,7 +217,7 @@ const Properties: FC<PropertiesProps> = ({
                 label: variable.name,
                 type: 'variable',
                 dataType: variable.type,
-                value: `{{${nodeId}.${variable.name}}}`,
+                value: `${node.getData().id}.${variable.name}`,
                 nodeData: nodeData,
               });
             }
@@ -249,7 +247,7 @@ const Properties: FC<PropertiesProps> = ({
               label: 'output',
               type: 'variable',
               dataType: 'String',
-              value: `${nodeId}.output`,
+              value: `${node.getData().id}.output`,
               nodeData: nodeData,
             });
           }
@@ -263,7 +261,104 @@ const Properties: FC<PropertiesProps> = ({
               label: 'message',
               type: 'variable',
               dataType: 'array[object]',
-              value: `${nodeId}.message`,
+              value: `${node.getData().id}.message`,
+              nodeData: nodeData,
+            });
+          }
+          break
+        case 'parameter-extractor':
+          const successKey = `${nodeId}___is_success`;
+          const reasonKey = `${nodeId}___reason`;
+          if (!addedKeys.has(successKey)) {
+            addedKeys.add(successKey);
+            variableList.push({
+              key: successKey,
+              label: '__is_success',
+              type: 'variable',
+              dataType: 'number',
+              value: `${node.getData().id}.__is_success`,
+              nodeData: nodeData,
+            });
+          }
+          if (!addedKeys.has(reasonKey)) {
+            addedKeys.add(reasonKey);
+            variableList.push({
+              key: reasonKey,
+              label: '__reason',
+              type: 'variable',
+              dataType: 'string',
+              value: `${node.getData().id}.__reason`,
+              nodeData: nodeData,
+            });
+          }
+          // Add params variables
+          const paramsList = nodeData.config?.params?.defaultValue || [];
+          paramsList.forEach((param: any) => {
+            if (!param || !param?.name) return;
+            const paramKey = `${nodeId}_${param.name}`;
+            if (!addedKeys.has(paramKey)) {
+              addedKeys.add(paramKey);
+              variableList.push({
+                key: paramKey,
+                label: param.name,
+                type: 'variable',
+                dataType: param.type || 'string',
+                value: `${node.getData().id}.${param.name}`,
+                nodeData: nodeData,
+              });
+            }
+          });
+          break
+        case 'var-aggregator':
+          const varAggregatorKey = `${nodeId}_output`;
+          if (!addedKeys.has(varAggregatorKey)) {
+            addedKeys.add(varAggregatorKey);
+            variableList.push({
+              key: varAggregatorKey,
+              label: 'output',
+              type: 'variable',
+              dataType: 'string',
+              value: `${node.getData().id}.output`,
+              nodeData: nodeData,
+            });
+          }
+          break
+        case 'http-request':
+          const httpBodyKey = `${nodeId}_body`;
+          const httpStatusKey = `${nodeId}_status_code`;
+          if (!addedKeys.has(httpBodyKey)) {
+            addedKeys.add(httpBodyKey);
+            variableList.push({
+              key: httpBodyKey,
+              label: 'body',
+              type: 'variable',
+              dataType: 'string',
+              value: `${node.getData().id}.body`,
+              nodeData: nodeData,
+            });
+          }
+          if (!addedKeys.has(httpStatusKey)) {
+            addedKeys.add(httpStatusKey);
+            variableList.push({
+              key: httpStatusKey,
+              label: 'status_code',
+              type: 'variable',
+              dataType: 'number',
+              value: `${node.getData().id}.status_code`,
+              nodeData: nodeData,
+            });
+          }
+          break
+        case 'jinja-render':
+          const jinjaOutputKey = `${nodeId}_output`;
+          if (!addedKeys.has(jinjaOutputKey)) {
+            addedKeys.add(jinjaOutputKey);
+            variableList.push({
+              key: jinjaOutputKey,
+              label: 'output',
+              type: 'variable',
+              dataType: 'string',
+              value: `${node.getData().id}.output`,
               nodeData: nodeData,
             });
           }
@@ -283,7 +378,7 @@ const Properties: FC<PropertiesProps> = ({
           label: variable.name,
           type: 'variable',
           dataType: variable.type,
-          value: `conversation.${variable.name}`,
+          value: `conv.${variable.name}`,
           nodeData: { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' },
           group: 'CONVERSATION'
         });
@@ -387,7 +482,7 @@ const Properties: FC<PropertiesProps> = ({
                         label: 'context',
                         type: 'variable',
                         dataType: 'String',
-                        value: `{{context}}`,
+                        value: `context`,
                         nodeData: selectedNode.getData(),
                         isContext: true,
                       });
@@ -476,7 +571,7 @@ const Properties: FC<PropertiesProps> = ({
                     <Form.Item key={key} name={key}
                       label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                     >
-                      <MappingList name={key} />
+                      <MappingList name={key} options={variableList} />
                     </Form.Item>
                   
                   )
@@ -583,7 +678,7 @@ const Properties: FC<PropertiesProps> = ({
                       ? <Input.TextArea placeholder={t('common.pleaseEnter')} />
                       : config.type === 'select'
                       ? <Select
-                            options={config.needTranslation ? config.options?.map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
+                        options={config.needTranslation ? config.options?.map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
                         placeholder={t('common.pleaseSelect')}
                       />
                       : config.type === 'inputNumber'
@@ -635,7 +730,7 @@ const Properties: FC<PropertiesProps> = ({
                         }
                         />
                       : config.type === 'switch'
-                      ? <Switch />
+                      ? <Switch onChange={key === 'group' ? () => { form.setFieldValue('group_names', []) } : undefined} />
                       : config.type === 'categoryList'
                       ? <CategoryList parentName={key} selectedNode={selectedNode} graphRef={graphRef} />
                       : config.type === 'conditionList'

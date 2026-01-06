@@ -39,6 +39,9 @@ import processEvolutionIcon from '@/assets/images/workflow/process_evolution.png
 import questionClassifierIcon from '@/assets/images/workflow/question-classifier.png'
 import breakIcon from '@/assets/images/workflow/break.png'
 import assignerIcon from '@/assets/images/workflow/assigner.png'
+import memoryReadIcon from '@/assets/images/workflow/memory-read.png'
+import memoryWriteIcon from '@/assets/images/workflow/memory-write.png'
+
 import { memoryConfigListUrl } from '@/api/memory'
 
 import { getModelListUrl } from '@/api/models'
@@ -159,6 +162,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           text: {
             type: 'variableList',
+            filterLoopIterationVars: true
           },
           params: {
             type: 'paramList',
@@ -174,8 +178,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "cognitiveUpgrading",
     nodes: [
-      {
-        type: "memory-read", icon: memoryEnhancementIcon,
+      { type: "memory-read", icon: memoryReadIcon,
         config: {
           message: {
             type: 'messageEditor',
@@ -198,7 +201,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "memory-write", icon: memoryEnhancementIcon,
+      { type: "memory-write", icon: memoryWriteIcon,
         config: {
           message: {
             type: 'messageEditor',
@@ -272,6 +275,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           parallel: {
             type: 'switch',
+            defaultValue: false
           },
           parallel_count: {
             type: 'slider',
@@ -284,6 +288,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           flatten: { // 扁平化输出
             type: 'switch',
+            defaultValue: false
           },
           output: {
             type: 'variableList',
@@ -304,6 +309,13 @@ export const nodeLibrary: NodeLibrary[] = [
               expressions: []
             }
           },
+          max_loop: {
+            type: 'slider',
+            min: 1,
+            max: 100,
+            step: 1,
+            defaultValue: 10
+          },
         }
       },
       { type: "cycle-start", icon: loopIcon },
@@ -317,7 +329,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           group_names: {
             type: 'groupVariableList',
-            defaultValue: [{ key: 'Group1', value: []}]
+            defaultValue: [],
           }
         }
       },
