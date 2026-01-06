@@ -4,10 +4,9 @@ import {
   Col,
   Tag,
   List,
-  Space
+  Flex
 } from 'antd';
 import { EyeOutlined } from '@ant-design/icons';
-import clsx from 'clsx'
 import { useTranslation } from 'react-i18next';
 import dayjs, { type Dayjs } from 'dayjs'
 
@@ -103,9 +102,9 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getS
                 <div className="rb:h-full rb:flex rb:flex-col rb:justify-between">
                   <div className="rb:text-[12px] rb:leading-4 rb:font-regular rb:text-[#5B6167]">
                     {t(`tool.${item.config_data.tool_class}_features`)} <br />
-                    <Space size={4} className="rb:mt-2">
+                    <Flex gap={4} wrap className="rb:mt-2 rb:w-full">
                       {InnerConfigData[item.config_data.tool_class].features.map(vo => <Tag key={vo} color="default">{ t(`tool.${vo}`) }</Tag>) }
-                    </Space>
+                    </Flex>
 
                     {item.config_data.tool_class === 'DateTimeTool'
                       ? <div className="rb:mt-3 rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md">

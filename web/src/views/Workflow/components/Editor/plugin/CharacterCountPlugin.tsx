@@ -14,17 +14,22 @@ const CharacterCountPlugin = ({ setCount, onChange }: { setCount: (count: number
         let serializedContent = '';
         
         // Traverse all nodes and serialize properly
+        const paragraphs: string[] = [];
         root.getChildren().forEach(child => {
           if ($isParagraphNode(child)) {
+            let paragraphContent = '';
             child.getChildren().forEach(node => {
               if ($isVariableNode(node)) {
-                serializedContent += node.getTextContent();
+                paragraphContent += node.getTextContent();
               } else {
-                serializedContent += node.getTextContent();
+                paragraphContent += node.getTextContent();
               }
             });
+            paragraphs.push(paragraphContent);
           }
         });
+        
+        serializedContent = paragraphs.join('\n');
         
         setCount(serializedContent.length);
         onChange?.(serializedContent);

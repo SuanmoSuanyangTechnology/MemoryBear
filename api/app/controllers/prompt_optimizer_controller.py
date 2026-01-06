@@ -108,16 +108,23 @@ async def get_prompt_opt(
     service = PromptOptimizerService(db)
 
     async def event_generator():
-        async for chunk in service.optimize_prompt(
-                tenant_id=current_user.tenant_id,
-                model_id=data.model_id,
-                session_id=session_id,
-                user_id=current_user.id,
-                current_prompt=data.current_prompt,
-                user_require=data.message
-        ):
-            # chunk 是 prompt 的增量内容
-            yield f"event:'message'\ndata: {json.dumps(chunk)}\n\n"
+        yield "event:start\ndata: {}\n\n"
+        try:
+            async for chunk in service.optimize_prompt(
+                    tenant_id=current_user.tenant_id,
+                    model_id=data.model_id,
+                    session_id=session_id,
+                    user_id=current_user.id,
+                    current_prompt=data.current_prompt,
+                    user_require=data.message
+            ):
+                # chunk 是 prompt 的增量内容
+                yield f"event:message\ndata: {json.dumps(chunk)}\n\n"
+        except Exception as e:
+            yield f"event:error\ndata: {json.dumps(
+                {"error": str(e)}
+            )}\n\n"
+        yield "event:end\ndata: {}\n\n"
 
     return StreamingResponse(
         event_generator(),

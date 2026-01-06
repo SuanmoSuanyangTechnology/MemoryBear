@@ -1,4 +1,5 @@
 """App 服务接口 - 基于 API Key 认证"""
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Body
@@ -21,7 +22,7 @@ from app.schemas.api_key_schema import ApiKeyAuth
 from app.services import workspace_service
 from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.conversation_service import ConversationService, get_conversation_service
-from app.utils.app_config_utils import dict_to_multi_agent_config, dict_to_workflow_config, agent_config_4_app_release, multi_agent_config_4_app_release
+from app.utils.app_config_utils import dict_to_multi_agent_config, workflow_config_4_app_release, agent_config_4_app_release, multi_agent_config_4_app_release
 from app.services.app_service import get_app_service, AppService
 
 router = APIRouter(prefix="/app", tags=["V1 - App API"])
@@ -226,22 +227,29 @@ async def chat(
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.WORKFLOW:
         # 多 Agent 流式返回
-        config = dict_to_workflow_config(app.current_release.config,app.id)
+        config = workflow_config_4_app_release(app.current_release)
         if payload.stream:
             async def event_generator():
                 async for event in app_chat_service.workflow_chat_stream(
 
                     message=payload.message,
                     conversation_id=conversation.id,  # 使用已创建的会话 ID
-                    user_id=end_user_id,  # 转换为字符串
+                    user_id=new_end_user.id,  # 转换为字符串
                     variables=payload.variables,
                     config=config,
-                    web_search=web_search,
-                    memory=memory,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
+                    web_search=payload.web_search,
+                    memory=payload.memory,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id,
+                    app_id=app.app_id,
+                    workspace_id=workspace_id
                 ):
-                    yield event
+                    event_type = event.get("event", "message")
+                    event_data = event.get("data", {})
+
+                    # 转换为标准 SSE 格式（字符串）
+                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                    yield sse_message
 
             return StreamingResponse(
                 event_generator(),
@@ -253,21 +261,32 @@ async def chat(
                 }
             )
 
-        #  非流式返回
+        # 多 Agent 非流式返回
         result = await app_chat_service.workflow_chat(
 
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
-            user_id=end_user_id,  # 转换为字符串
+            user_id=new_end_user.id,  # 转换为字符串
             variables=payload.variables,
             config=config,
-            web_search=web_search,
-            memory=memory,
+            web_search=payload.web_search,
+            memory=payload.memory,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id
+            user_rag_memory_id=user_rag_memory_id,
+            app_id=app.app_id,
+            workspace_id=workspace_id
         )
-
-        return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
+        logger.debug(
+            "工作流试运行返回结果",
+            extra={
+                "result_type": str(type(result)),
+                "has_response": "response" in result if isinstance(result, dict) else False
+            }
+        )
+        return success(
+            data=result,
+            msg="工作流任务执行成功"
+        )
     else:
         from app.core.exceptions import BusinessException
         from app.core.error_codes import BizCode
