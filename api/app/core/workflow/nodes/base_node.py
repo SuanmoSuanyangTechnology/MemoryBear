@@ -29,7 +29,7 @@ class WorkflowState(TypedDict):
 
     # Set of loop node IDs, used for assigning values in loop nodes
     cycle_nodes: list
-    looping: bool
+    looping: Annotated[bool, lambda x, y: x and y]
 
     # Input variables (passed from configured variables)
     # Uses a deep merge function, supporting nested dict updates (e.g., conv.xxx)

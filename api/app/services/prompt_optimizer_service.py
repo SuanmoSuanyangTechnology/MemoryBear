@@ -231,9 +231,9 @@ class PromptOptimizerService:
                 if m:
                     prompt_index = m.start()
                     prompt_finished = True
-                    yield {"type": "delta", "content": buffer[idx:prompt_index]}
+                    yield {"content": buffer[idx:prompt_index]}
                 else:
-                    yield {"type": "delta", "content": cache[idx:]}
+                    yield {"content": cache[idx:]}
                     if len(cache) != 0:
                         idx = len(cache)
 
@@ -249,8 +249,8 @@ class PromptOptimizerService:
             role=RoleType.ASSISTANT,
             content=desc
         )
-
-        yield {"type": "done", "desc": optim_result.get("desc")}
+        variables = self.parser_prompt_variables(optim_result.get("prompt"))
+        yield {"desc": optim_result.get("desc"), "variables": variables}
 
     @staticmethod
     def parser_prompt_variables(prompt: str):
