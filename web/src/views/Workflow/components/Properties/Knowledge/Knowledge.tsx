@@ -128,29 +128,32 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
           <List
             grid={{ gutter: 12, column: 1 }}
             dataSource={knowledgeList}
-            renderItem={(item) => (
-              <List.Item>
-                <div key={item.id} className="rb:flex rb:items-center rb:justify-between rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
-                  <div className="rb:font-medium rb:leading-4">
-                    {item.name}
-                    <Tag color={item.status === 1 ? 'success' : item.status === 0 ? 'default' : 'error'} className="rb:ml-2">
-                      {item.status === 1 ? t('common.enable') : item.status === 0 ? t('common.disabled') : t('common.deleted')}
-                    </Tag>
-                    <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5">{t('application.contains', {include_count: item.doc_num})}</div>
+            renderItem={(item) => {
+              if (!item.id) return null
+              return (
+                <List.Item>
+                  <div key={item.id} className="rb:flex rb:items-center rb:justify-between rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
+                    <div className="rb:font-medium rb:leading-4">
+                      {item.name}
+                      <Tag color={item.status === 1 ? 'success' : item.status === 0 ? 'default' : 'error'} className="rb:ml-2">
+                        {item.status === 1 ? t('common.enable') : item.status === 0 ? t('common.disabled') : t('common.deleted')}
+                      </Tag>
+                      <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5">{t('application.contains', {include_count: item.doc_num})}</div>
+                    </div>
+                    <Space size={12}>
+                      <div 
+                        className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]" 
+                        onClick={() => handleEditKnowledge(item)}
+                      ></div>
+                      <div 
+                        className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
+                        onClick={() => handleDeleteKnowledge(item.id)}
+                      ></div>
+                    </Space>
                   </div>
-                  <Space size={12}>
-                    <div 
-                      className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]" 
-                      onClick={() => handleEditKnowledge(item)}
-                    ></div>
-                    <div 
-                      className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
-                      onClick={() => handleDeleteKnowledge(item.id)}
-                    ></div>
-                  </Space>
-                </div>
-              </List.Item>
-            )}
+                </List.Item>
+              )
+            }}
           />
       }
       {/* 全局设置 */}

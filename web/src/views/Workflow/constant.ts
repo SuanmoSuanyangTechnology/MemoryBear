@@ -162,6 +162,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           text: {
             type: 'variableList',
+            filterLoopIterationVars: true
           },
           params: {
             type: 'paramList',
@@ -274,6 +275,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           parallel: {
             type: 'switch',
+            defaultValue: false
           },
           parallel_count: {
             type: 'slider',
@@ -286,6 +288,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           flatten: { // 扁平化输出
             type: 'switch',
+            defaultValue: false
           },
           output: {
             type: 'variableList',
@@ -306,6 +309,13 @@ export const nodeLibrary: NodeLibrary[] = [
               expressions: []
             }
           },
+          max_loop: {
+            type: 'slider',
+            min: 1,
+            max: 100,
+            step: 1,
+            defaultValue: 10
+          },
         }
       },
       { type: "cycle-start", icon: loopIcon },
@@ -319,7 +329,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           group_names: {
             type: 'groupVariableList',
-            defaultValue: [{ key: 'Group1', value: []}]
+            defaultValue: [],
           }
         }
       },
