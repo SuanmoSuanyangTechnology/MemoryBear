@@ -1218,6 +1218,8 @@ export const en = {
       key_findings: 'Key Findings',
       behavior_pattern: 'Behavior Pattern',
       growth_trajectory: 'Growth Trajectory',
+      personality: 'Personality Traits',
+      core_values: 'Core Values',
     },
     space: {
       createSpace: 'Create Space',
