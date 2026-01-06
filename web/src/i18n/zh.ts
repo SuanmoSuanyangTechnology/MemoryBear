@@ -305,6 +305,7 @@ export const zh = {
       fileDurationLimitError: '媒体文件时长超过限制，最大支持150秒，当前时长',
       unableReadFile:'无法读取媒体文件信息，请检查文件格式',
       // 知识图谱相关
+      graph: '图谱',
       knowledgeGraph: '知识图谱',
       basicConfig: '基础配置',
       enableKnowledgeGraph: '启用知识图谱',
