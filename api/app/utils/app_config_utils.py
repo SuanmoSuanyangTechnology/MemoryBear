@@ -8,7 +8,7 @@ import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-from app.models import AppRelease
+from app.models import AppRelease, WorkflowConfig
 from app.models.agent_app_config_model import AgentConfig
 from app.models.multi_agent_model import MultiAgentConfig
 
@@ -28,7 +28,7 @@ class AgentConfigProxy:
 def agent_config_4_app_release(release: AppRelease )  -> AgentConfig:
 
     config_dict = release.config
- 
+
     agent_config = AgentConfig(
         app_id=release.app_id,
         system_prompt=config_dict.get("system_prompt"),
@@ -45,10 +45,10 @@ def agent_config_4_app_release(release: AppRelease )  -> AgentConfig:
 def multi_agent_config_4_app_release(release: AppRelease ) -> MultiAgentConfig:
 
     config_dict = release.config
-    
+
 
     agent_config = MultiAgentConfig(
-        app_id=release.app_id,        
+        app_id=release.app_id,
         default_model_config_id=release.default_model_config_id,
         model_parameters=config_dict.get("model_parameters"),
         master_agent_id=config_dict.get("master_agent_id"),
@@ -58,10 +58,28 @@ def multi_agent_config_4_app_release(release: AppRelease ) -> MultiAgentConfig:
         routing_rules=config_dict.get("routing_rules"),
         execution_config=config_dict.get("execution_config", {}),
         aggregation_strategy=config_dict.get("aggregation_strategy", "merge"),
-        
+
     )
 
     return agent_config
+
+def workflow_config_4_app_release(release: AppRelease ) -> WorkflowConfig:
+
+    config_dict = release.config
+
+
+    config = WorkflowConfig(
+        id=release.id,
+        app_id=release.app_id,
+        nodes=config_dict.get("nodes", []),
+        edges=config_dict.get("edges", []),
+        variables=config_dict.get("variables", []),
+        execution_config=config_dict.get("execution_config", {}),
+        triggers=config_dict.get("triggers", [])
+
+    )
+
+    return config
 
 def dict_to_multi_agent_config(config_dict: Dict[str, Any], app_id: Optional[uuid.UUID] = None):
     """Convert dict to MultiAgentConfig model object

@@ -26,7 +26,6 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
   const [form] = Form.useForm<ChatVariable>();
   const [loading, setLoading] = useState(false)
   const [editIndex, setEditIndex] = useState<number | undefined>(undefined)
-  const typeValue = Form.useWatch('type', form);
 
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {

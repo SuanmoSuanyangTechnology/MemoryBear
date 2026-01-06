@@ -1,7 +1,7 @@
 import { type FC } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next';
-import { Form, Button, Select, Space, Row, Col, Divider } from 'antd'
+import { Form, Button, Select, Space, Row, Col, Divider, InputNumber, Radio, type SelectProps } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons';
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
@@ -9,37 +9,48 @@ import VariableSelect from '../VariableSelect'
 import Editor from '../../Editor'
 
 interface CaseListProps {
-  value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; comparison_operator: string; right: string; }[] }>;
+  value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; comparison_operator: string; right: string; input_type?: string; }[] }>;
   onChange?: (value: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; comparison_operator: string; right: string; }[] }>) => void;
   options: Suggestion[];
   name: string;
   selectedNode?: any;
   graphRef?: any;
 }
-const operatorList = [
-  "empty",
-  "not_empty",
-  "contains",
-  "not_contains",
-  "startwith",
-  "endwith",
-  "eq",
-  "ne",
-  "lt",
-  "le",
-  "gt",
-  "ge"
-]
+const operatorsObj: { [key: string]: SelectProps['options'] } = {
+  default: [
+    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
+    { value: 'contains', label: 'workflow.config.if-else.contains' },
+    { value: 'not_contains', label: 'workflow.config.if-else.not_contains' },
+    { value: 'startwith', label: 'workflow.config.if-else.startwith' },
+    { value: 'endwith', label: 'workflow.config.if-else.endwith' },
+    { value: 'eq', label: 'workflow.config.if-else.eq' },
+    { value: 'ne', label: 'workflow.config.if-else.ne' },
+  ],
+  number: [
+    { value: 'eq', label: 'workflow.config.if-else.num.eq' },
+    { value: 'ne', label: 'workflow.config.if-else.num.ne' },
+    { value: 'lt', label: 'workflow.config.if-else.num.lt' },
+    { value: 'le', label: 'workflow.config.if-else.num.le' },
+    { value: 'gt', label: 'workflow.config.if-else.num.gt' },
+    { value: 'ge', label: 'workflow.config.if-else.num.ge' },
+    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
+  ],
+  boolean: [
+    { value: 'eq', label: 'workflow.config.if-else.boolean.eq' },
+    { value: 'ne', label: 'workflow.config.if-else.boolean.ne' },
+  ]
+}
 
 const CaseList: FC<CaseListProps> = ({
-  value = [],
   options,
   name,
-  onChange,
   selectedNode,
   graphRef
 }) => {
   const { t } = useTranslation();
+  const form = Form.useFormInstance();
 
   const updateNodePorts = (caseCount: number, removedCaseIndex?: number) => {
     if (!selectedNode || !graphRef?.current) return;
@@ -175,27 +186,47 @@ const CaseList: FC<CaseListProps> = ({
       });
     }, 50);
   };
+
   const handleChangeLogicalOperator = (index: number) => {
-    const newValue = [...value]
-    newValue[index] = {
-      ...newValue[index],
-      logical_operator: newValue[index].logical_operator === 'and' ? 'or' : 'and'
-    }
-    onChange && onChange(newValue)
-  }
+    const currentValue = form.getFieldValue([name, index, 'logical_operator']);
+    form.setFieldValue([name, index, 'logical_operator'], currentValue === 'and' ? 'or' : 'and');
+  };
+
+  const handleLeftFieldChange = (caseIndex: number, conditionIndex: number, newValue: string) => {
+    form.setFieldsValue({
+      [name]: {
+        [caseIndex]: {
+          expressions: {
+            [conditionIndex]: {
+              left: newValue,
+              comparison_operator: undefined,
+              right: undefined,
+              input_type: undefined
+            }
+          }
+        }
+      }
+    });
+  };
 
   const handleAddCase = (addCaseFunc: Function) => {
     addCaseFunc({ logical_operator: 'and', expressions: [] });
     setTimeout(() => {
-      updateNodePorts((value?.length || 0) + 1);
+      const currentCases = form.getFieldValue(name) || [];
+      updateNodePorts(currentCases.length);
     }, 100);
   };
 
   const handleRemoveCase = (removeCaseFunc: Function, fieldName: number, caseIndex: number) => {
     removeCaseFunc(fieldName);
     setTimeout(() => {
-      updateNodePorts((value?.length || 1) - 1, caseIndex);
+      const currentCases = form.getFieldValue(name) || [];
+      updateNodePorts(currentCases.length, caseIndex);
     }, 100);
+  };
+
+  const handleInputTypeChange = (caseIndex: number, conditionIndex: number) => {
+    form.setFieldValue([name, caseIndex, 'expressions', conditionIndex, 'right'], undefined);
   };
 
   return (
@@ -218,7 +249,7 @@ const CaseList: FC<CaseListProps> = ({
                           <Space>
                             <Button
                               type="dashed"
-                              onClick={() => addCondition()}
+                              onClick={() => addCondition({})}
                               size="small"
                             >
                               + {t('workflow.config.addCase')}
@@ -234,15 +265,23 @@ const CaseList: FC<CaseListProps> = ({
                           <div className="rb:absolute rb:w-3 rb:left-2 rb:top-15 rb:bottom-6 rb:z-10 rb:border rb:border-[#DFE4ED] rb:rounded-l-md rb:border-r-0"></div>
                           <div className="rb:absolute rb:z-10 rb:left-0 rb:top-[50%] rb:transform-[translateY(-50%)]]">
                             <Form.Item name={[caseField.name, 'logical_operator']} noStyle >
-                              <Button size="small" className="rb:cursor-pointer" onClick={() => handleChangeLogicalOperator(caseIndex)}>{value?.[caseIndex].logical_operator}</Button>
+                              <Button size="small" className="rb:cursor-pointer" onClick={() => handleChangeLogicalOperator(caseIndex)}>{logicalOperator}</Button>
                             </Form.Item>
                           </div>
                         </>
                         }
                         {conditionFields.map((conditionField, conditionIndex) => {
-                          const currentOperator = value?.[caseIndex]?.expressions?.[conditionIndex]?.comparison_operator;
+                          const cases = form.getFieldValue(name) || [];
+                          const currentCase = cases[caseIndex] || {};
+                          const currentExpression = currentCase.expressions?.[conditionIndex] || {};
+                          const currentOperator = currentExpression.comparison_operator;
                           const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty';
-                          
+                          const leftFieldValue = currentExpression.left;
+                          const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue);
+                          const leftFieldType = leftFieldOption?.dataType;
+                          const operatorList = operatorsObj[leftFieldType || 'default'] || operatorsObj.default || [];
+                          const inputType = leftFieldType === 'number' ? currentExpression.input_type : undefined;
+                          const logicalOperator = currentCase.logical_operator;
                           return (
                             <div key={conditionField.key} className={clsx({
                               "rb:mb-3": conditionIndex !== conditionFields.length - 1
@@ -257,18 +296,20 @@ const CaseList: FC<CaseListProps> = ({
                                         size="small"
                                         allowClear={false}
                                         popupMatchSelectWidth={false}
+                                        onChange={(val) => handleLeftFieldChange(caseIndex, conditionIndex, val)}
                                       />
                                     </Form.Item>
                                   </Col>
                                   <Col span={8}>
                                     <Form.Item name={[conditionField.name, 'comparison_operator']} noStyle>
                                       <Select
-                                        options={operatorList.map(key => ({
-                                          value: key,
-                                          label: t(`workflow.config.if-else.${key}`)
+                                        options={operatorList.map(vo => ({
+                                          ...vo,
+                                          label: t(String(vo?.label || ''))
                                         }))}
                                         size="small"
                                         popupMatchSelectWidth={false}
+                                        placeholder={t('common.pleaseSelect')}
                                       />
                                     </Form.Item>
                                   </Col>
@@ -280,11 +321,48 @@ const CaseList: FC<CaseListProps> = ({
                                   </Col>
                                 </Row>
                                 
-                                {!hideRightField && (
-                                  <Form.Item name={[conditionField.name, 'right']} noStyle>
-                                    <Editor options={options} />
-                                  </Form.Item>
-                                )}
+                                {!hideRightField && <>
+                                  {leftFieldType === 'number'
+                                    ? <Row>
+                                      <Col span={12}>
+                                        <Form.Item name={[conditionField.name, 'input_type']} noStyle>
+                                          <Select
+                                            placeholder={t('common.pleaseSelect')}
+                                            options={[{ value: 'Variable', label: 'Variable' }, { value: 'Constant', label: 'Constant' }]}
+                                            popupMatchSelectWidth={false}
+                                            variant="borderless"
+                                            onChange={() => handleInputTypeChange(caseIndex, conditionIndex)}
+                                          />
+                                        </Form.Item>
+                                      </Col>
+                                      <Col span={12}>
+                                        <Form.Item name={[conditionField.name, 'right']} noStyle>
+                                          {inputType === 'Variable'
+                                            ?
+                                            <VariableSelect
+                                              placeholder={t('common.pleaseSelect')}
+                                              options={options.filter(vo => vo.dataType === 'number')}
+                                              allowClear={false}
+                                              popupMatchSelectWidth={false}
+                                              variant="borderless"
+                                            />
+                                            : <InputNumber placeholder={t('common.pleaseEnter')}
+                                              variant="borderless" className="rb:w-full!" />
+                                          }
+                                        </Form.Item>
+                                      </Col>
+                                    </Row>
+                                    : <Form.Item name={[conditionField.name, 'right']} noStyle>
+                                      {leftFieldType === 'boolean'
+                                          ? <Radio.Group block>
+                                            <Radio.Button value={true}>True</Radio.Button>
+                                            <Radio.Button value={false}>False</Radio.Button>
+                                          </Radio.Group>
+                                          : <Editor options={options} />
+                                      }
+                                    </Form.Item>
+                                  }
+                                </>}
                               </div>
                             </div>
                           )

@@ -43,12 +43,14 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     const newY = sourceBBox.y;
     
     // 创建新节点
+    const id = `${selectedNodeType.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const newNode = graph.addNode({
       ...(graphNodeLibrary[selectedNodeType.type] || graphNodeLibrary.default),
       x: newX,
       y: newY,
+      id,
       data: {
-        id: `${selectedNodeType.type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id,
         type: selectedNodeType.type,
         icon: selectedNodeType.icon,
         name: t(`workflow.${selectedNodeType.type}`),

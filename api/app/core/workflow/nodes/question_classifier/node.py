@@ -65,7 +65,7 @@ class QuestionClassifierNode(BaseNode):
             category_map[category_name] = case_tag
         return category_map
     
-    async def execute(self, state: WorkflowState) -> str:
+    async def execute(self, state: WorkflowState) -> dict:
         """执行问题分类"""
         question = self.typed_config.input_variable
         supplement_prompt = self.typed_config.user_supplement_prompt or ""
@@ -79,7 +79,15 @@ class QuestionClassifierNode(BaseNode):
                 f"（默认分支：{DEFAULT_EMPTY_QUESTION_CASE}，分类总数：{category_count}）"
             )
             # 若分类列表为空，返回默认unknown分支，否则返回CASE1
-            return DEFAULT_EMPTY_QUESTION_CASE if category_count > 0 else "unknown"
+            if category_count > 0:
+                return {
+                    "class_name": category_names[0],
+                    "output": DEFAULT_EMPTY_QUESTION_CASE
+                }
+            return {
+                "class_name": "unknown",
+                "output": DEFAULT_EMPTY_QUESTION_CASE
+            }
 
         try:
             llm = self._get_llm_instance()
@@ -111,7 +119,10 @@ class QuestionClassifierNode(BaseNode):
             log_supplement = supplement_prompt if supplement_prompt else "无"
             logger.info(f"节点 {self.node_id} 分类结果: {category}, 用户补充提示词：{log_supplement}")
 
-            return f"CASE{category_names.index(category) + 1}"
+            return {
+                "class_name": category,
+                "output": f"CASE{category_names.index(category) + 1}",
+            }
         except Exception as e:
             logger.error(
                 f"节点 {self.node_id} 分类执行异常：{str(e)}",
@@ -119,5 +130,11 @@ class QuestionClassifierNode(BaseNode):
             )
             # 异常时返回默认分支，保证工作流容错性
             if category_count > 0:
-                return DEFAULT_EMPTY_QUESTION_CASE
-            return "unknown"
+                return {
+                    "class_name": category_names[0],
+                    "output": DEFAULT_EMPTY_QUESTION_CASE
+                }
+            return {
+                "class_name": "unknown",
+                "output": DEFAULT_EMPTY_QUESTION_CASE
+            }

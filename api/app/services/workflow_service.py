@@ -17,6 +17,7 @@ from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db, get_db_context
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
 from app.repositories.end_user_repository import EndUserRepository
+from app.services.multi_agent_service import convert_uuids_to_str
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
@@ -364,7 +365,7 @@ class WorkflowService:
 
         execution.status = status
         if output_data is not None:
-            execution.output_data = output_data
+            execution.output_data = convert_uuids_to_str(output_data)
         if error_message is not None:
             execution.error_message = error_message
         if error_node_id is not None:

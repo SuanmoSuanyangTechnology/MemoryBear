@@ -21,6 +21,7 @@ from app.core.exceptions import (
     BusinessException,
 )
 from app.core.logging_config import get_business_logger
+from app.core.workflow.validator import WorkflowValidator
 from app.db import get_db
 from app.models import App, AgentConfig, AppRelease, MultiAgentConfig, WorkflowConfig
 from app.models.app_model import AppStatus, AppType
@@ -31,6 +32,7 @@ from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services.agent_config_converter import AgentConfigConverter
 from app.models import AppShare, Workspace
 from app.services.model_service import ModelApiKeyService
+from app.services.workflow_service import WorkflowService
 
 # 获取业务日志器
 logger = get_business_logger()
@@ -1224,6 +1226,26 @@ class AppService:
                     "sub_agent_count": len(multi_agent_cfg.sub_agents) if multi_agent_cfg.sub_agents else 0,
                     "orchestration_mode": multi_agent_cfg.orchestration_mode
                 }
+            )
+        elif app.type == AppType.WORKFLOW:
+            service = WorkflowService(self.db)
+            workflow_cfg = service.get_workflow_config(app_id)
+            if not workflow_cfg:
+                raise BusinessException("应用缺少有效配置，无法发布", BizCode.CONFIG_MISSING)
+
+            config = {
+                "nodes": workflow_cfg.nodes,
+                "edges": workflow_cfg.edges,
+                "variables": workflow_cfg.variables,
+                "execution_config": workflow_cfg.execution_config,
+                "triggers": workflow_cfg.triggers
+            }
+
+            is_valid, errors = WorkflowValidator.validate_for_publish(config)
+            if not is_valid:
+                raise BusinessException("应用缺少有效配置，无法发布", BizCode.CONFIG_MISSING)
+            logger.info(
+                "应用发布配置准备完成"
             )
 
         now = datetime.datetime.now()

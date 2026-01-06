@@ -65,7 +65,7 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
               label: `${childData.name || childData.type}.${key}`,
               type: 'output',
               dataType: 'string',
-              value: `{{${childData.id}.${key}}}`,
+              value: `${childData.id}.${key}`,
               nodeData: childData
             });
           }
