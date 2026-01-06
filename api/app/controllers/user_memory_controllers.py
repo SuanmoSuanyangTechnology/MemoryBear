@@ -13,7 +13,6 @@ from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
 from app.services.user_memory_service import (
     UserMemoryService,
-    analytics_node_statistics,
     analytics_memory_types,
     analytics_graph_data,
 )
@@ -41,24 +40,27 @@ router = APIRouter(
 
 @router.get("/analytics/memory_insight/report", response_model=ApiResponse)
 async def get_memory_insight_report_api(
-    end_user_id: str,  # 使用 end_user_id
+    end_user_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
-    """获取缓存的记忆洞察报告"""
-    api_logger.info(f"记忆洞察报告请求: end_user_id={end_user_id}, user={current_user.username}")
+) -> dict:
+    """
+    获取缓存的记忆洞察报告
+    
+    此接口仅查询数据库中已缓存的记忆洞察数据，不执行生成操作。
+    如需生成新的洞察报告，请使用专门的生成接口。
+    """
+    api_logger.info(f"记忆洞察报告查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
         # 调用服务层获取缓存数据
         result = await user_memory_service.get_cached_memory_insight(db, end_user_id)
         
         if result["is_cached"]:
-            # 缓存存在，返回缓存数据
             api_logger.info(f"成功返回缓存的记忆洞察报告: end_user_id={end_user_id}")
             return success(data=result, msg="查询成功")
         else:
-            # 缓存不存在，返回提示消息
             api_logger.info(f"记忆洞察报告缓存不存在: end_user_id={end_user_id}")
-            return success(data=result, msg="查询成功")
+            return success(data=result, msg="数据尚未生成")
     except Exception as e:
         api_logger.error(f"记忆洞察报告查询失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "记忆洞察报告查询失败", str(e))
@@ -66,24 +68,27 @@ async def get_memory_insight_report_api(
 
 @router.get("/analytics/user_summary", response_model=ApiResponse)
 async def get_user_summary_api(
-    end_user_id: str,  # 使用 end_user_id
+    end_user_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
-    """获取缓存的用户摘要"""
-    api_logger.info(f"用户摘要请求: end_user_id={end_user_id}, user={current_user.username}")
+) -> dict:
+    """
+    获取缓存的用户摘要
+    
+    此接口仅查询数据库中已缓存的用户摘要数据，不执行生成操作。
+    如需生成新的用户摘要，请使用专门的生成接口。
+    """
+    api_logger.info(f"用户摘要查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
         # 调用服务层获取缓存数据
         result = await user_memory_service.get_cached_user_summary(db, end_user_id)
         
         if result["is_cached"]:
-            # 缓存存在，返回缓存数据
             api_logger.info(f"成功返回缓存的用户摘要: end_user_id={end_user_id}")
             return success(data=result, msg="查询成功")
         else:
-            # 缓存不存在，返回提示消息
             api_logger.info(f"用户摘要缓存不存在: end_user_id={end_user_id}")
-            return success(data=result, msg="查询成功")
+            return success(data=result, msg="数据尚未生成")
     except Exception as e:
         api_logger.error(f"用户摘要查询失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "用户摘要查询失败", str(e))
