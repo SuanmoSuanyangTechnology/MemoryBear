@@ -26,12 +26,27 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
         parts.forEach(part => {
           const match = part.match(/^\{\{([^.]+)\.([^}]+)\}\}$/);
           const contextMatch = part.match(/^\{\{context\}\}$/);
+          const conversationMatch = part.match(/^\{\{conv\.([^}]+)\}\}$/);
 
           // 匹配{{context}}格式
           if (contextMatch) {
             const contextSuggestion = options.find(s => s.isContext && s.label === 'context');
             if (contextSuggestion) {
               paragraph.append($createVariableNode(contextSuggestion));
+            } else {
+              paragraph.append($createTextNode(part));
+            }
+            return
+          }
+          
+          // 匹配{{conv.xx}}格式
+          if (conversationMatch) {
+            const [_, variableName] = conversationMatch;
+            const conversationSuggestion = options.find(s => 
+              s.group === 'CONVERSATION' && s.label === variableName
+            );
+            if (conversationSuggestion) {
+              paragraph.append($createVariableNode(conversationSuggestion));
             } else {
               paragraph.append($createTextNode(part));
             }

@@ -117,7 +117,7 @@ async def get_prompt_opt(
                 user_require=data.message
         ):
             # chunk 是 prompt 的增量内容
-            yield f"event:'message'\ndata: {json.dumps(chunk)}\n\n"
+            yield f"event:message\ndata: {json.dumps(chunk)}\n\n"
 
     return StreamingResponse(
         event_generator(),

@@ -1,5 +1,5 @@
 import logging
-import uuid
+import re
 from typing import Any
 
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
@@ -8,6 +8,8 @@ from app.services.tool_service import ToolService
 from app.db import get_db_read
 
 logger = logging.getLogger(__name__)
+
+TEMPLATE_PATTERN = re.compile(r"\{\{.*?\}\}")
 
 
 class ToolNode(BaseNode):
@@ -25,25 +27,33 @@ class ToolNode(BaseNode):
         
         # 如果没有租户ID，尝试从工作流ID获取
         if not tenant_id:
-            workflow_id = self.get_variable("sys.workflow_id", state)
-            if workflow_id:
+            workspace_id = self.get_variable("sys.workspace_id", state)
+            if workspace_id:
                 from app.repositories.tool_repository import ToolRepository
                 with get_db_read() as db:
-                    tenant_id = ToolRepository.get_tenant_id_by_workflow_id(db, workflow_id)
+                    tenant_id = ToolRepository.get_tenant_id_by_workspace_id(db, workspace_id)
         
         if not tenant_id:
-            tenant_id = uuid.UUID("6c2c91b0-3f49-4489-9157-2208aa56a097")
-            # logger.error(f"节点 {self.node_id} 缺少租户ID")
-            # return {"error": "缺少租户ID"}
+            logger.error(f"节点 {self.node_id} 缺少租户ID")
+            return {
+                "success": False,
+                "data": "缺少租户ID"
+            }
         
         # 渲染工具参数
         rendered_parameters = {}
         for param_name, param_template in self.typed_config.tool_parameters.items():
-            rendered_value = self._render_template(param_template, state)
+            if isinstance(param_template, str) and TEMPLATE_PATTERN.search(param_template):
+                try:
+                    rendered_value = self._render_template(param_template, state)
+                except Exception as e:
+                    raise ValueError(f"模板渲染失败：参数 {param_name} 的模板 {param_template} 解析错误") from e
+            else:
+                # 非模板参数（数字/布尔/普通字符串）直接保留原值
+                rendered_value = param_template
             rendered_parameters[param_name] = rendered_value
         
         logger.info(f"节点 {self.node_id} 执行工具 {self.typed_config.tool_id}，参数: {rendered_parameters}")
-        print(self.typed_config.tool_id)
         
         # 执行工具
         with get_db_read() as db:
@@ -54,7 +64,7 @@ class ToolNode(BaseNode):
                 tenant_id=tenant_id,
                 user_id=user_id
             )
-        print(result)
+
         if result.success:
             logger.info(f"节点 {self.node_id} 工具执行成功")
             return {
@@ -66,7 +76,7 @@ class ToolNode(BaseNode):
             logger.error(f"节点 {self.node_id} 工具执行失败: {result.error}")
             return {
                 "success": False,
-                "error": result.error,
+                "data": result.error,
                 "error_code": result.error_code,
                 "execution_time": result.execution_time
             }
