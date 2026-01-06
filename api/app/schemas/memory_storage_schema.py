@@ -409,10 +409,9 @@ class ForgettingTriggerRequest(BaseModel):
     """手动触发遗忘周期请求模型"""
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     
-    group_id: Optional[str] = Field(None, description="组ID（可选，用于过滤特定组的节点）")
+    group_id: str = Field(..., description="组ID（即终端用户ID，必填）")
     max_merge_batch_size: int = Field(100, ge=1, le=1000, description="单次最大融合节点对数（默认100）")
     min_days_since_access: int = Field(30, ge=1, le=365, description="最小未访问天数（默认30天）")
-    config_id: Optional[int] = Field(None, description="配置ID（可选，用于指定遗忘引擎配置）") # TODO 后续group_id更换成enduser_id，自动与config_id关联 ，要删除此行
 
 
 class ForgettingConfigResponse(BaseModel):
@@ -458,7 +457,7 @@ class ForgettingStatsResponse(BaseModel):
     consistency_check: Optional[Dict[str, Any]] = Field(None, description="数据一致性检查结果")
     nodes_merged_total: int = Field(..., description="累计融合节点对数")
     recent_cycles: List[Dict[str, Any]] = Field(..., description="最近的遗忘周期记录")
-    timestamp: str = Field(..., description="统计时间（ISO格式）")
+    timestamp: int = Field(..., description="统计时间（时间戳）")
 
 
 class ForgettingReportResponse(BaseModel):

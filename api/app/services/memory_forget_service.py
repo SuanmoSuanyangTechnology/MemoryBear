@@ -164,7 +164,7 @@ class MemoryForgetService:
     async def trigger_forgetting_cycle(
         self,
         db: Session,
-        group_id: Optional[str] = None,
+        group_id: str,
         max_merge_batch_size: Optional[int] = None,
         min_days_since_access: Optional[int] = None,
         config_id: Optional[int] = None
@@ -176,10 +176,10 @@ class MemoryForgetService:
         
         Args:
             db: 数据库会话
-            group_id: 组ID（可选）
+            group_id: 组ID（即终端用户ID，必填）
             max_merge_batch_size: 最大融合批次大小（可选）
             min_days_since_access: 最小未访问天数（可选）
-            config_id: 配置ID（可选）
+            config_id: 配置ID（必填，由控制器层通过 group_id 获取）
         
         Returns:
             dict: 遗忘报告
@@ -337,7 +337,7 @@ class MemoryForgetService:
                 'nodes_without_activation': result['nodes_without_activation'] or 0,
                 'average_activation_value': result['average_activation'],
                 'low_activation_nodes': result['low_activation_nodes'] or 0,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': int(datetime.now().timestamp())
             }
         else:
             activation_metrics = {
@@ -346,7 +346,7 @@ class MemoryForgetService:
                 'nodes_without_activation': 0,
                 'average_activation_value': None,
                 'low_activation_nodes': 0,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': int(datetime.now().timestamp())
             }
         
         # 收集节点类型分布
@@ -402,7 +402,7 @@ class MemoryForgetService:
             'consistency_check': None,  # 不再提供一致性检查
             'nodes_merged_total': 0,  # 不再跟踪累计融合数
             'recent_cycles': [],  # 不再提供历史记录
-            'timestamp': datetime.now().isoformat()
+            'timestamp': int(datetime.now().timestamp())
         }
         
         api_logger.info(
