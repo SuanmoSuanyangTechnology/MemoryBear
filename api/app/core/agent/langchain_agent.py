@@ -7,7 +7,6 @@ LangChain Agent 封装
 - 支持流式输出
 - 使用 RedBearLLM 支持多提供商
 """
-import os
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
@@ -156,6 +155,7 @@ class LangChainAgent:
         store.delete_duplicate_sessions()
         # logger.info(f'Redis_Agent:{end_user_end};{session_id}')
         return session_id
+
     async def term_memory_redis_read(self,end_user_end):
         end_user_end = f"Term_{end_user_end}"
         history = store.find_user_apply_group(end_user_end, end_user_end, end_user_end)
