@@ -9,8 +9,8 @@ import VariableSelect from '../VariableSelect'
 import Editor from '../../Editor'
 
 interface CaseListProps {
-  value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; comparison_operator: string; right: string; input_type?: string; }[] }>;
-  onChange?: (value: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; comparison_operator: string; right: string; }[] }>) => void;
+  value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; operator: string; right: string; input_type?: string; }[] }>;
+  onChange?: (value: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; operator: string; right: string; }[] }>) => void;
   options: Suggestion[];
   name: string;
   selectedNode?: any;
@@ -40,6 +40,8 @@ const operatorsObj: { [key: string]: SelectProps['options'] } = {
   boolean: [
     { value: 'eq', label: 'workflow.config.if-else.boolean.eq' },
     { value: 'ne', label: 'workflow.config.if-else.boolean.ne' },
+    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
   ]
 }
 
@@ -199,7 +201,7 @@ const CaseList: FC<CaseListProps> = ({
           expressions: {
             [conditionIndex]: {
               left: newValue,
-              comparison_operator: undefined,
+              operator: undefined,
               right: undefined,
               input_type: undefined
             }
@@ -238,6 +240,7 @@ const CaseList: FC<CaseListProps> = ({
               <div key={caseField.key}>
                 <Form.List name={[caseField.name, 'expressions']}>
                   {(conditionFields, { add: addCondition, remove: removeCondition }) => {
+                    const logicalOperator = form.getFieldValue(name)?.[caseIndex]?.logical_operator || 'and'
                     return (
                       <div className={clsx("rb:relative rb:mb-4 rb:border rb:border-gray-200 rb:rounded rb:p-3 rb:pl-5")}>
                         <div className="rb:flex rb:items-center rb:justify-between rb:mb-3">
@@ -274,14 +277,13 @@ const CaseList: FC<CaseListProps> = ({
                           const cases = form.getFieldValue(name) || [];
                           const currentCase = cases[caseIndex] || {};
                           const currentExpression = currentCase.expressions?.[conditionIndex] || {};
-                          const currentOperator = currentExpression.comparison_operator;
+                          const currentOperator = currentExpression.operator;
                           const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty';
                           const leftFieldValue = currentExpression.left;
                           const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue);
                           const leftFieldType = leftFieldOption?.dataType;
                           const operatorList = operatorsObj[leftFieldType || 'default'] || operatorsObj.default || [];
                           const inputType = leftFieldType === 'number' ? currentExpression.input_type : undefined;
-                          const logicalOperator = currentCase.logical_operator;
                           return (
                             <div key={conditionField.key} className={clsx({
                               "rb:mb-3": conditionIndex !== conditionFields.length - 1
@@ -301,7 +303,7 @@ const CaseList: FC<CaseListProps> = ({
                                     </Form.Item>
                                   </Col>
                                   <Col span={8}>
-                                    <Form.Item name={[conditionField.name, 'comparison_operator']} noStyle>
+                                    <Form.Item name={[conditionField.name, 'operator']} noStyle>
                                       <Select
                                         options={operatorList.map(vo => ({
                                           ...vo,
