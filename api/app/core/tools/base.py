@@ -191,10 +191,14 @@ class BaseTool(ABC):
                 execution_time=execution_time
             )
     
-    def to_langchain_tool(self):
-        """转换为Langchain工具格式"""
+    def to_langchain_tool(self, operation: Optional[str] = None):
+        """转换为Langchain工具格式
+        
+        Args:
+            operation: 特定操作（适用于有操作的工具）
+        """
         from app.core.tools.langchain_adapter import LangchainAdapter
-        return LangchainAdapter.convert_tool(self)
+        return LangchainAdapter.convert_tool(self, operation)
     
     def __repr__(self):
         return f"<{self.__class__.__name__}(id={self.tool_id}, name={self.name})>"

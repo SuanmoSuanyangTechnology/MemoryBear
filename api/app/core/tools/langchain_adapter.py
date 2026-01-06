@@ -38,7 +38,7 @@ class LangchainToolWrapper(LangchainBaseTool):
             name=tool_instance.name,
             description=tool_instance.description,
             args_schema=args_schema,
-            _tool_instance=tool_instance,
+            tool_instance=tool_instance,
             **kwargs
         )
     
@@ -59,7 +59,7 @@ class LangchainToolWrapper(LangchainBaseTool):
         """异步执行工具"""
         try:
             # 执行内部工具
-            result = await self._tool_instance.safe_execute(**kwargs)
+            result = await self.tool_instance.safe_execute(**kwargs)
             
             # 转换结果为Langchain格式
             return LangchainAdapter._format_result_for_langchain(result)
@@ -73,23 +73,38 @@ class LangchainAdapter:
     """Langchain适配器 - 负责工具格式转换和标准化"""
     
     @staticmethod
-    def convert_tool(tool: BaseTool) -> LangchainToolWrapper:
+    def convert_tool(tool: BaseTool, operation: Optional[str] = None) -> LangchainToolWrapper:
         """将内部工具转换为Langchain工具
         
         Args:
             tool: 内部工具实例
+            operation: 特定操作（适用于有操作的工具）
             
         Returns:
             Langchain兼容的工具包装器
         """
         try:
-            wrapper = LangchainToolWrapper(tool_instance=tool)
-            logger.debug(f"工具转换成功: {tool.name} -> Langchain格式")
-            return wrapper
+            if operation and tool.name in ['datetime_tool', 'json_tool']:
+                # 为特定操作创建工具
+                operation_tool = LangchainAdapter._create_operation_tool(tool, operation)
+                wrapper = LangchainToolWrapper(tool_instance=operation_tool)
+                logger.debug(f"工具转换成功: {tool.name}_{operation} -> Langchain格式")
+                return wrapper
+            else:
+                # 单个工具
+                wrapper = LangchainToolWrapper(tool_instance=tool)
+                logger.debug(f"工具转换成功: {tool.name} -> Langchain格式")
+                return wrapper
             
         except Exception as e:
             logger.error(f"工具转换失败: {tool.name}, 错误: {e}")
             raise
+    
+    @staticmethod
+    def _create_operation_tool(base_tool: BaseTool, operation: str) -> BaseTool:
+        """为特定操作创建工具实例"""
+        from app.core.tools.builtin.operation_tool import OperationTool
+        return OperationTool(base_tool, operation)
     
     @staticmethod
     def convert_tools(tools: List[BaseTool]) -> List[LangchainToolWrapper]:
@@ -110,7 +125,7 @@ class LangchainAdapter:
             except Exception as e:
                 logger.error(f"跳过工具转换: {tool.name}, 错误: {e}")
         
-        logger.info(f"批量转换完成: {len(converted_tools)}/{len(tools)} 个工具")
+        logger.info(f"批量转换完成: {len(converted_tools)} 个工具")
         return converted_tools
     
     @staticmethod
@@ -169,9 +184,10 @@ class LangchainAdapter:
             "ToolArgsSchema",
             (BaseModel,),
             {
+                "__module__": __name__,
                 "__annotations__": annotations,
-                **fields,
-                "Config": type("Config", (), {"extra": "forbid"})
+                "model_config": {"extra": "forbid"},
+                **fields
             }
         )
         

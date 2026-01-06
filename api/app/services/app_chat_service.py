@@ -14,6 +14,10 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.db import get_db, get_db_context
 from app.models import MultiAgentConfig, AgentConfig, WorkflowConfig
+from app.services.tool_service import ToolService
+from app.repositories.tool_repository import ToolRepository
+from app.db import get_db
+from app.models import MultiAgentConfig, AgentConfig
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
 from app.services.draft_run_service import create_knowledge_retrieval_tool, create_long_term_memory_tool
@@ -43,6 +47,7 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            workspace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
 
@@ -68,6 +73,24 @@ class AppChatService:
         # 准备工具列表
         tools = []
 
+        # 获取工具服务
+        tool_service = ToolService(self.db)
+
+        # 从配置中获取启用的工具
+        if hasattr(config, 'tools') and config.tools:
+            for tool_config in config.tools:
+                if tool_config.get("enabled", False):
+                    # 根据工具名称查找工具实例
+                    tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
+                                                                    ToolRepository.get_tenant_id_by_workspace_id(
+                                                                        self.db, workspace_id))
+                    if tool_instance:
+                        if tool_instance.name == "baidu_search_tool" and not web_search:
+                            continue
+                        # 转换为LangChain工具
+                        langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
+                        tools.append(langchain_tool)
+
         # 添加知识库检索工具
         knowledge_retrieval = config.knowledge_retrieval
         if knowledge_retrieval:
@@ -86,7 +109,7 @@ class AppChatService:
                 memory_tool = create_long_term_memory_tool(memory_config, user_id)
                 tools.append(memory_tool)
 
-        web_tools = config.tools
+        # web_tools = config.tools
         # web_search_choice = web_tools.get("web_search", {})
         # web_search_enable = web_search_choice.get("enabled", False)
         # if web_search == True:
@@ -173,6 +196,7 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            workspace_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
 
@@ -199,6 +223,23 @@ class AppChatService:
             # 准备工具列表
             tools = []
 
+            # 获取工具服务
+            tool_service = ToolService(self.db)
+
+            if hasattr(config, 'tools') and config.tools:
+                for tool_config in config.tools:
+                    if tool_config.get("enabled", False):
+                        # 根据工具名称查找工具实例
+                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
+                                                                        ToolRepository.get_tenant_id_by_workspace_id(
+                                                                            self.db, workspace_id))
+                        if tool_instance:
+                            if tool_instance.name == "baidu_search_tool" and not web_search:
+                                continue
+                            # 转换为LangChain工具
+                            langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
+                            tools.append(langchain_tool)
+
             # 添加知识库检索工具
             knowledge_retrieval = config.knowledge_retrieval
             if knowledge_retrieval:
@@ -217,20 +258,20 @@ class AppChatService:
                     memory_tool = create_long_term_memory_tool(memory_config, user_id)
                     tools.append(memory_tool)
 
-            web_tools = config.tools
-            web_search_choice = web_tools.get("web_search", {})
-            web_search_enable = web_search_choice.get("enabled", False)
-            if web_search == True:
-                if web_search_enable == True:
-                    search_tool = create_web_search_tool({})
-                    tools.append(search_tool)
-
-                    logger.debug(
-                        "已添加网络搜索工具",
-                        extra={
-                            "tool_count": len(tools)
-                        }
-                    )
+            # web_tools = config.tools
+            # web_search_choice = web_tools.get("web_search", {})
+            # web_search_enable = web_search_choice.get("enabled", False)
+            # if web_search == True:
+            #     if web_search_enable == True:
+            #         search_tool = create_web_search_tool({})
+            #         tools.append(search_tool)
+            #
+            #         logger.debug(
+            #             "已添加网络搜索工具",
+            #             extra={
+            #                 "tool_count": len(tools)
+            #             }
+            #         )
 
             # 获取模型参数
             model_parameters = config.model_parameters
