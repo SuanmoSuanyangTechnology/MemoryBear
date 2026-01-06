@@ -5,16 +5,25 @@ import { Skeleton } from 'antd';
 
 import RbCard from '@/components/RbCard/Card'
 import Empty from '@/components/Empty';
+import RbAlert from '@/components/RbAlert';
 import {
   getUserSummary,
 } from '@/api/memory'
 import type { AboutMeRef } from '../types'
 
+
+interface Data {
+  user_summary: string;
+  personality: string;
+  core_values: string;
+  one_sentence: string;
+  [key: string]: string;
+}
 const AboutMe = forwardRef<AboutMeRef>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
-  const [data, setData] = useState<string | null>(null)
+  const [data, setData] = useState<Data>({} as Data)
 
   useEffect(() => {
     if (!id) return
@@ -27,7 +36,7 @@ const AboutMe = forwardRef<AboutMeRef>((_props, ref) => {
     setLoading(true)
     getUserSummary(id)
       .then((res) => {
-        setData((res as { summary?: string }).summary || null)
+        setData((res as Data) || null)
       })
       .finally(() => {
         setLoading(false)
@@ -44,10 +53,29 @@ const AboutMe = forwardRef<AboutMeRef>((_props, ref) => {
     >
       {loading
         ? <Skeleton className="rb:mt-4" />
-        : data
-          ? <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167]">
-            {data || '-'}
-          </div>
+        : Object.keys(data).filter(key => data[key] !== null).length > 0
+          ? <>
+            {data.user_summary && 
+              <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167]">
+                {data.user_summary}
+              </div>
+            }
+            {data.personality && <>
+              <div className="rb:pt-4 rb:font-medium rb:leading-5 rb:mb-2">{t('userMemory.personality')}</div>
+              <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167]">
+                {data.personality}
+              </div>
+            </>}
+            {data.core_values && <>
+              <div className="rb:pt-4 rb:font-medium rb:leading-5 rb:mb-2">{t('userMemory.core_values')}</div>
+              <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167]">
+                {data.core_values}
+              </div>
+            </>}
+            {data.one_sentence && 
+              <RbAlert className="rb:mt-4">{data.one_sentence}</RbAlert>
+            }
+          </>
           : <Empty size={88} className="rb:mt-12 rb:mb-20.25" />
       }
     </RbCard>
