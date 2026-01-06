@@ -392,6 +392,8 @@ async def chat(
 
     if app_type == AppType.AGENT:
         # 流式返回
+        agent_config = agent_config_4_app_release(app.current_release)
+        
         if payload.stream:
             # async def event_generator():
             #     async for event in service.chat_stream(
@@ -424,7 +426,7 @@ async def chat(
                     user_id= str(new_end_user.id),  # 转换为字符串
                     variables=payload.variables,
                     web_search=payload.web_search,
-                    config=payload.agent_config,
+                    config=agent_config,
                     memory=payload.memory,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
