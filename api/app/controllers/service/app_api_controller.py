@@ -153,7 +153,8 @@ async def chat(
                     config=agent_config,
                     memory=memory,
                     storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+                    user_rag_memory_id=user_rag_memory_id,
+                    workspace_id=workspace_id
                 ):
                     yield event
 
@@ -177,7 +178,8 @@ async def chat(
             web_search=web_search,
             memory=memory,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id
+            user_rag_memory_id=user_rag_memory_id,
+            workspace_id=workspace_id
         )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:

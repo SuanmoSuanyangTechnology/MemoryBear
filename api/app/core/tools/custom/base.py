@@ -1,4 +1,5 @@
 """自定义工具基类"""
+import json
 import time
 from typing import Dict, Any, List, Optional
 import aiohttp
@@ -135,6 +136,13 @@ class CustomTool(BaseTool):
         
         if not self.schema_content:
             return operations
+
+        if isinstance(self.schema_content, str):
+            try:
+                self.schema_content = json.loads(self.schema_content)
+            except json.JSONDecodeError:
+                logger.error(f"无效的OpenAPI schema: {self.schema_content}")
+                return operations
         
         paths = self.schema_content.get("paths", {})
         

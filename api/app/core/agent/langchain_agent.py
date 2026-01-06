@@ -97,8 +97,7 @@ class LangChainAgent:
                 "temperature": temperature,
                 "streaming": streaming,
                 "tool_count": len(self.tools),
-                "tool_names": [tool.name for tool in self.tools] if self.tools else [],
-                "tool_count": len(self.tools)
+                "tool_names": [tool.name for tool in self.tools] if self.tools else []
             }
         )
 
@@ -139,8 +138,11 @@ class LangChainAgent:
         messages.append(HumanMessage(content=user_content))
 
         return messages
+
     async def term_memory_save(self,messages,end_user_end,aimessages):
-        '''短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j'''
+        """
+        短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j
+        """
         end_user_end=f"Term_{end_user_end}"
         print(messages)
         print(aimessages)
