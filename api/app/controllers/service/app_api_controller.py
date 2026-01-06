@@ -154,7 +154,8 @@ async def chat(
                     config=agent_config,
                     memory=memory,
                     storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+                    user_rag_memory_id=user_rag_memory_id,
+                    workspace_id=workspace_id
                 ):
                     yield event
 
@@ -178,7 +179,8 @@ async def chat(
             web_search=web_search,
             memory=memory,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id
+            user_rag_memory_id=user_rag_memory_id,
+            workspace_id=workspace_id
         )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
@@ -195,8 +197,8 @@ async def chat(
                     config=config,
                     web_search=web_search,
                     memory=memory,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id
                 ):
                     yield event
 
@@ -212,7 +214,6 @@ async def chat(
 
         # 多 Agent 非流式返回
         result = await app_chat_service.multi_agent_chat(
-
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
             user_id=end_user_id,  # 转换为字符串
@@ -291,4 +292,4 @@ async def chat(
         from app.core.exceptions import BusinessException
         from app.core.error_codes import BizCode
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
-        pass
+

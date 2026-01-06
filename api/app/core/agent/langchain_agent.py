@@ -7,7 +7,6 @@ LangChain Agent 封装
 - 支持流式输出
 - 使用 RedBearLLM 支持多提供商
 """
-import os
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
@@ -97,8 +96,7 @@ class LangChainAgent:
                 "temperature": temperature,
                 "streaming": streaming,
                 "tool_count": len(self.tools),
-                "tool_names": [tool.name for tool in self.tools] if self.tools else [],
-                "tool_count": len(self.tools)
+                "tool_names": [tool.name for tool in self.tools] if self.tools else []
             }
         )
 
@@ -139,8 +137,11 @@ class LangChainAgent:
         messages.append(HumanMessage(content=user_content))
 
         return messages
+
     async def term_memory_save(self,messages,end_user_end,aimessages):
-        '''短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j'''
+        """
+        短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j
+        """
         end_user_end=f"Term_{end_user_end}"
         print(messages)
         print(aimessages)
@@ -154,6 +155,7 @@ class LangChainAgent:
         store.delete_duplicate_sessions()
         # logger.info(f'Redis_Agent:{end_user_end};{session_id}')
         return session_id
+
     async def term_memory_redis_read(self,end_user_end):
         end_user_end = f"Term_{end_user_end}"
         history = store.find_user_apply_group(end_user_end, end_user_end, end_user_end)
