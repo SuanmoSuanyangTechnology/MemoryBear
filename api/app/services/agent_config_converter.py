@@ -86,7 +86,12 @@ class AgentConfigConverter:
         # 1. 解析模型参数配置
         if model_parameters:
             from app.schemas.app_schema import ModelParameters
-            result["model_parameters"] = ModelParameters(**model_parameters)
+            if isinstance(model_parameters, ModelParameters):
+                result["model_parameters"] = model_parameters
+            elif isinstance(model_parameters, dict):
+                result["model_parameters"] = ModelParameters(**model_parameters)
+            else:
+                result["model_parameters"] = ModelParameters()
         
         # 2. 解析知识库检索配置
         if knowledge_retrieval:

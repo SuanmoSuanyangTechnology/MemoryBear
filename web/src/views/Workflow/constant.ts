@@ -394,7 +394,8 @@ export const nodeLibrary: NodeLibrary[] = [
             defaultValue: {}
           },
           retry: {
-            type: 'define',
+            type: 'switch',
+            defaultValue: false
           },
           error_handle: {
             type: 'define',

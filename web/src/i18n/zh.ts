@@ -1304,6 +1304,8 @@ export const zh = {
       key_findings: '关键发现',
       behavior_pattern: '行为模式',
       growth_trajectory: '成长轨迹',
+      personality: '性格特点',
+      core_values: '核心价值观',
     },
     space: {
       createSpace: '创建空间',
