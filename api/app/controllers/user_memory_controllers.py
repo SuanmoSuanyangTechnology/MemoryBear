@@ -11,6 +11,7 @@ from app.db import get_db
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
+from app.core.api_key_utils import timestamp_to_datetime
 from app.services.user_memory_service import (
     UserMemoryService,
     analytics_memory_types,
@@ -356,7 +357,7 @@ async def update_end_user_profile(
         if 'hire_date' in update_data:
             hire_date_timestamp = update_data['hire_date']
             if hire_date_timestamp is not None:
-                update_data['hire_date'] = UserMemoryService.timestamp_to_datetime(hire_date_timestamp)
+                update_data['hire_date'] = timestamp_to_datetime(hire_date_timestamp)
             # 如果是 None，保持 None（允许清空）
         
         for field, value in update_data.items():
