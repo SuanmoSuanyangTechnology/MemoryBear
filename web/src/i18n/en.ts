@@ -695,6 +695,7 @@ export const en = {
       fileDurationLimitError: 'The duration of the media file exceeds the limit. The maximum supported duration is 150 seconds. Current duration',
       unableReadFile:'Unable to read the information of the media file. Please check the file format.',
       // Knowledge Graph related
+      graph: 'Graph',
       knowledgeGraph: 'Knowledge Graph',
       basicConfig: 'Basic Configuration',
       enableKnowledgeGraph: 'Enable Knowledge Graph',
