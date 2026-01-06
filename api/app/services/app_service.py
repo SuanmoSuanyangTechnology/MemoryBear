@@ -307,7 +307,7 @@ class AppService:
             knowledge_retrieval=storage_data.get("knowledge_retrieval"),
             memory=storage_data.get("memory"),
             variables=storage_data.get("variables", []),
-            tools=storage_data.get("tools", {}),
+            tools=storage_data.get("tools", []),
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -689,7 +689,7 @@ class AppService:
                         knowledge_retrieval=source_config.knowledge_retrieval.copy() if source_config.knowledge_retrieval else None,
                         memory=source_config.memory.copy() if source_config.memory else None,
                         variables=source_config.variables.copy() if source_config.variables else [],
-                        tools=source_config.tools.copy() if source_config.tools else {},
+                        tools=source_config.tools.copy() if source_config.tools else [],
                         is_active=True,
                         created_at=now,
                         updated_at=now,
@@ -879,7 +879,7 @@ class AppService:
         # if data.variables is not None:
         agent_cfg.variables = storage_data.get("variables", [])
         # if data.tools is not None:
-        agent_cfg.tools = storage_data.get("tools", {})
+        agent_cfg.tools = storage_data.get("tools", [])
 
         agent_cfg.updated_at = now
 
@@ -966,7 +966,7 @@ class AppService:
                 "max_history": 10
             },
             variables=[],
-            tools={},
+            tools=[],
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -1183,7 +1183,7 @@ class AppService:
                 "knowledge_retrieval": agent_cfg.knowledge_retrieval,
                 "memory": agent_cfg.memory,
                 "variables": agent_cfg.variables or [],
-                "tools": agent_cfg.tools or {},
+                "tools": agent_cfg.tools or [],
             }
             # config = AgentConfigConverter.from_storage_format(agent_cfg)
             default_model_config_id = agent_cfg.default_model_config_id

@@ -78,13 +78,17 @@ class AppChatService:
 
         # 从配置中获取启用的工具
         if hasattr(config, 'tools') and config.tools:
-            for tool_id, tool_config in config.tools.items():
+            for tool_config in config.tools:
                 if tool_config.get("enabled", False):
                     # 根据工具名称查找工具实例
-                    tool_instance = tool_service._get_tool_instance(tool_id, ToolRepository.get_tenant_id_by_workspace_id(self.db, workspace_id))
+                    tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
+                                                                    ToolRepository.get_tenant_id_by_workspace_id(
+                                                                        self.db, workspace_id))
                     if tool_instance:
+                        if tool_instance.name == "baidu_search_tool" and not web_search:
+                            continue
                         # 转换为LangChain工具
-                        langchain_tool = tool_instance.to_langchain_tool(tool_config.get("config", {}).get("operation", None))
+                        langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                         tools.append(langchain_tool)
 
         # 添加知识库检索工具
@@ -219,6 +223,23 @@ class AppChatService:
             # 准备工具列表
             tools = []
 
+            # 获取工具服务
+            tool_service = ToolService(self.db)
+
+            if hasattr(config, 'tools') and config.tools:
+                for tool_config in config.tools:
+                    if tool_config.get("enabled", False):
+                        # 根据工具名称查找工具实例
+                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
+                                                                        ToolRepository.get_tenant_id_by_workspace_id(
+                                                                            self.db, workspace_id))
+                        if tool_instance:
+                            if tool_instance.name == "baidu_search_tool" and not web_search:
+                                continue
+                            # 转换为LangChain工具
+                            langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
+                            tools.append(langchain_tool)
+
             # 添加知识库检索工具
             knowledge_retrieval = config.knowledge_retrieval
             if knowledge_retrieval:
@@ -237,20 +258,20 @@ class AppChatService:
                     memory_tool = create_long_term_memory_tool(memory_config, user_id)
                     tools.append(memory_tool)
 
-            web_tools = config.tools
-            web_search_choice = web_tools.get("web_search", {})
-            web_search_enable = web_search_choice.get("enabled", False)
-            if web_search == True:
-                if web_search_enable == True:
-                    search_tool = create_web_search_tool({})
-                    tools.append(search_tool)
-
-                    logger.debug(
-                        "已添加网络搜索工具",
-                        extra={
-                            "tool_count": len(tools)
-                        }
-                    )
+            # web_tools = config.tools
+            # web_search_choice = web_tools.get("web_search", {})
+            # web_search_enable = web_search_choice.get("enabled", False)
+            # if web_search == True:
+            #     if web_search_enable == True:
+            #         search_tool = create_web_search_tool({})
+            #         tools.append(search_tool)
+            #
+            #         logger.debug(
+            #             "已添加网络搜索工具",
+            #             extra={
+            #                 "tool_count": len(tools)
+            #             }
+            #         )
 
             # 获取模型参数
             model_parameters = config.model_parameters

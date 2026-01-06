@@ -1,6 +1,6 @@
 import datetime
 import uuid
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Union
 
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
 
@@ -36,6 +36,12 @@ class KnowledgeRetrievalConfig(BaseModel):
 
 
 class ToolConfig(BaseModel):
+    """工具配置"""
+    enabled: bool = Field(default=False, description="是否启用该工具")
+    tool_id: str = Field(default=None, description="工具ID")
+    operation: Optional[str] = Field(default_factory=dict, description="工具特定配置")
+
+class ToolOldConfig(BaseModel):
     """工具配置"""
     enabled: bool = Field(default=False, description="是否启用该工具")
     config: Optional[Dict[str, Any]] = Field(default_factory=dict, description="工具特定配置")
@@ -103,9 +109,9 @@ class AgentConfigCreate(BaseModel):
     )
 
     # 工具配置
-    tools: Dict[str, ToolConfig] = Field(
-        default_factory=dict,
-        description="工具配置，key 为工具名称（web_search, code_interpreter, image_generation 等）"
+    tools: List[ToolConfig] = Field(
+        default_factory=list,
+        description="Agent 可用的工具列表"
     )
 
 
@@ -158,7 +164,7 @@ class AgentConfigUpdate(BaseModel):
     variables: Optional[List[VariableDefinition]] = Field(default=None, description="变量列表")
 
     # 工具配置
-    tools: Optional[Dict[str, ToolConfig]] = Field(default=None, description="工具配置")
+    tools: Optional[List[ToolConfig]] = Field(default=None, description="工具列表")
 
 
 # ---------- Output Schemas ----------
@@ -216,7 +222,7 @@ class AgentConfig(BaseModel):
     variables: List[VariableDefinition] = []
 
     # 工具配置
-    tools: Dict[str, ToolConfig] = {}
+    tools: Union[List[ToolConfig], Dict[str, ToolOldConfig]] = []
 
     is_active: bool
     created_at: datetime.datetime

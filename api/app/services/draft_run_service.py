@@ -298,16 +298,17 @@ class DraftRunService:
 
             # 从配置中获取启用的工具
             if hasattr(agent_config, 'tools') and agent_config.tools:
-                for tool_id, tool_config in agent_config.tools.items():
+                for tool_config in agent_config.tools:
                     if tool_config.get("enabled", False):
                         # 根据工具名称查找工具实例
-                        tool_instance = tool_service._get_tool_instance(tool_id,
+                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
                                                                         ToolRepository.get_tenant_id_by_workspace_id(
                                                                             self.db, str(workspace_id)))
                         if tool_instance:
+                            if tool_instance.name == "baidu_search_tool" and not web_search:
+                                continue
                             # 转换为LangChain工具
-                            langchain_tool = tool_instance.to_langchain_tool(
-                                tool_config.get("config", {}).get("operation", None))
+                            langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                             tools.append(langchain_tool)
 
             # 添加知识库检索工具
@@ -507,16 +508,17 @@ class DraftRunService:
 
             # 从配置中获取启用的工具
             if hasattr(agent_config, 'tools') and agent_config.tools:
-                for tool_id, tool_config in agent_config.tools.items():
+                for tool_config in agent_config.tools:
                     if tool_config.get("enabled", False):
                         # 根据工具名称查找工具实例
-                        tool_instance = tool_service._get_tool_instance(tool_id,
+                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
                                                                         ToolRepository.get_tenant_id_by_workspace_id(
                                                                             self.db, str(workspace_id)))
                         if tool_instance:
+                            if tool_instance.name == "baidu_search_tool" and not web_search:
+                                continue
                             # 转换为LangChain工具
-                            langchain_tool = tool_instance.to_langchain_tool(
-                                tool_config.get("config", {}).get("operation", None))
+                            langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                             tools.append(langchain_tool)
 
             # 添加知识库检索工具
