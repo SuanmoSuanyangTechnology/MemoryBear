@@ -726,6 +726,11 @@ export const en = {
       graphTips: 'Explore the entity nodes in the knowledge base and their relationship networks',
       sourceDocuments: 'Source Documents',
       rebuildGraph: 'Rebuild Graph',
+      rebuildConfirmTitle: 'Confirm the rebuild graph',
+      rebuildConfirmContent: 'The rebuild graph will erase the existing map data and rebuild it from scratch. This operation is irreversible. Are you sure you want to proceed?',
+      deleteGraphSuccess: 'Knowledge graph deletion successful',
+      deleteGraphFailed:'Knowledge graph deletion failed',
+      graphEmpty: 'At the foot of the mountain of books, the journey begins.',
       createForm:{
         name: 'Name',
         embedding_id: 'Embedding',
