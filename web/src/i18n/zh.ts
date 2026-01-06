@@ -336,6 +336,11 @@ export const zh = {
       graphTitle: '知识图谱：实体、关系与属性的关联网络',
       graphTips: '探索知识库中的实体节点及其关系脉络',
       rebuildGraph: '重建图谱',
+      rebuildConfirmTitle: '确认重建图谱',
+      rebuildConfirmContent: '重建图谱将清除现有的图谱数据并重新构建，此操作不可逆。确定要继续吗？',
+      deleteGraphSuccess: '删除知识图谱成功',
+      deleteGraphFailed:'删除知识图谱失败',
+      graphEmpty: '书山有路，此处为始',
       createForm: {
         name: '名称',
         embedding_id: '嵌入模型',
