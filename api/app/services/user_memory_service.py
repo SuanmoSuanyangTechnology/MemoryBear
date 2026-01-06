@@ -147,12 +147,12 @@ class MemoryInsightHelper:
         Identify the top 2 most active months for the user.
         Only returns months if there is valid and diverse time data.
         """
-        query = f"""
+        query = """
         MATCH (d:Dialogue)
-        WHERE d.group_id = '{self.user_id}' AND d.created_at IS NOT NULL AND d.created_at <> ''
+        WHERE d.group_id = $group_id AND d.created_at IS NOT NULL AND d.created_at <> ''
         RETURN d.created_at AS creation_time
         """
-        records = await self.neo4j_connector.execute_query(query)
+        records = await self.neo4j_connector.execute_query(query, group_id=self.user_id)
         
         if not records:
             return []
@@ -195,8 +195,8 @@ class MemoryInsightHelper:
     
     async def get_social_connections(self) -> dict | None:
         """Find the user with whom the most memories are shared."""
-        query = f"""
-        MATCH (c1:Chunk {{group_id: '{self.user_id}'}})
+        query = """
+        MATCH (c1:Chunk {group_id: $group_id})
         OPTIONAL MATCH (c1)-[:CONTAINS]->(s:Statement)
         OPTIONAL MATCH (s)<-[:CONTAINS]-(c2:Chunk)
         WHERE c1.group_id <> c2.group_id AND s IS NOT NULL AND c2 IS NOT NULL
@@ -206,19 +206,23 @@ class MemoryInsightHelper:
         ORDER BY common_statements DESC
         LIMIT 1
         """
-        records = await self.neo4j_connector.execute_query(query)
+        records = await self.neo4j_connector.execute_query(query, group_id=self.user_id)
         if not records or not records[0].get("other_user_id"):
             return None
         
         most_connected_user = records[0]["other_user_id"]
         common_memories_count = records[0]["common_statements"]
         
-        time_range_query = f"""
+        time_range_query = """
         MATCH (c:Chunk)
-        WHERE c.group_id IN ['{self.user_id}', '{most_connected_user}']
+        WHERE c.group_id IN [$user_id, $other_user_id]
         RETURN min(c.created_at) AS start_time, max(c.created_at) AS end_time
         """
-        time_records = await self.neo4j_connector.execute_query(time_range_query)
+        time_records = await self.neo4j_connector.execute_query(
+            time_range_query, 
+            user_id=self.user_id, 
+            other_user_id=most_connected_user
+        )
         start_year, end_year = "N/A", "N/A"
         if time_records and time_records[0]["start_time"]:
             start_year = datetime.fromisoformat(time_records[0]["start_time"].replace("Z", "+00:00")).year
