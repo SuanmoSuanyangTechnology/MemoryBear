@@ -520,7 +520,6 @@ async def draft_run(
                     "has_conversation_id": bool(payload.conversation_id)
                 }
             )
-
             async def event_generator():
                 """多智能体流式事件生成器"""
                 multiservice = MultiAgentService(db)
