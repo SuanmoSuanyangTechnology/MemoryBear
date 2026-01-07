@@ -18,16 +18,15 @@ router = APIRouter(
     tags=["Memory"],
 )
 @router.get("/short_term")
-async def start_reflection_configs(
+async def short_term_configs(
         end_user_id: str,
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ):
-    """获取短期记忆和长期记忆的反思配置数据"""
     # 获取短期记忆数据
     short_repo = ShortTermMemoryRepository(db)
     short_memories = short_repo.get_latest_by_user_id(end_user_id, 3)
-    shot_count=short_repo.count_by_user_id(end_user_id)
+    short_count=short_repo.count_by_user_id(end_user_id)
 
     short_result = []
     for memory in short_memories:
@@ -65,7 +64,7 @@ async def start_reflection_configs(
         'short_term': short_result,
         'long_term': long_result,
         'entity': entity_result.get('num', 0),
-        "retrieval_number":shot_count,
+        "retrieval_number":short_count,
         "long_term_number":len(long_result)
     }
 
