@@ -38,8 +38,8 @@ class KnowledgeRetrievalConfig(BaseModel):
 class ToolConfig(BaseModel):
     """工具配置"""
     enabled: bool = Field(default=False, description="是否启用该工具")
-    tool_id: str = Field(default=None, description="工具ID")
-    operation: Optional[str] = Field(default_factory=dict, description="工具特定配置")
+    tool_id: Optional[str] = Field(default=None, description="工具ID")
+    operation: Optional[str] = Field(default=None, description="工具特定配置")
 
 class ToolOldConfig(BaseModel):
     """工具配置"""
@@ -164,7 +164,7 @@ class AgentConfigUpdate(BaseModel):
     variables: Optional[List[VariableDefinition]] = Field(default=None, description="变量列表")
 
     # 工具配置
-    tools: Optional[List[ToolConfig]] = Field(default=None, description="工具列表")
+    tools: Optional[List[ToolConfig]] = Field(default_factory=list, description="工具列表")
 
 
 # ---------- Output Schemas ----------
