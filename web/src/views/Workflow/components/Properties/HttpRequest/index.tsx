@@ -7,7 +7,7 @@ import AuthConfigModal from './AuthConfigModal'
 import type { AuthConfigModalRef, HttpRequestConfigForm } from './types'
 import VariableSelect from "../VariableSelect";
 import MessageEditor from '../MessageEditor'
-import EditableTable, { type TableRow } from './EditableTable'
+import EditableTable from './EditableTable'
 
 const HttpRequest: FC<{ options: Suggestion[]; }> = ({
   options,
@@ -34,17 +34,6 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
         data: undefined
       }
     })
-  }
-
-  const updateObjectList = (data: TableRow[], key: string) => {
-    let obj: Record<string, string> = {}
-    if (data.length) {
-      data.forEach(vo => {
-        obj[vo.name] = vo.value
-      })
-    }
-
-    form.setFieldValue(key, obj)
   }
 
   console.log('HttpRequest', values)
@@ -81,17 +70,17 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
 
       <Form.Item name="headers">
         <EditableTable
+          parentName="headers"
           title="HEADERS"
           options={options}
-          onChange={(headers) => updateObjectList(headers, 'headers')}
         />
       </Form.Item>
 
       <Form.Item name="params">
         <EditableTable
+          parentName="params"
           title="PARAMS"
           options={options}
-          onChange={(params) => updateObjectList(params, 'params')}
         />
       </Form.Item>
 
@@ -113,15 +102,8 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
         {values?.body?.content_type === 'form-data' &&
           <Form.Item name={['body', 'data']} noStyle>
             <EditableTable
+              parentName={['body', 'data']}
               options={options}
-              onChange={(data) => {
-                form.setFieldsValue({
-                  body: { 
-                    ...form.getFieldValue('body'), 
-                    data 
-                  }
-                })
-              }}
               typeOptions={[
                 { label: 'text', value: 'text' },
                 { label: 'file', value: 'file' }
@@ -132,13 +114,8 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
         {values?.body?.content_type === 'x-www-form-urlencoded' &&
           <Form.Item name={['body', 'data']} noStyle>
             <EditableTable
+              parentName={['body', 'data']}
               options={options}
-              onChange={(data) => {
-                const currentBody = form.getFieldValue('body') || {}
-                form.setFieldsValue({
-                  body: { ...currentBody, data }
-                })
-              }}
             />
           </Form.Item>
         }

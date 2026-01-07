@@ -18,7 +18,9 @@ import type {
   Variable,
   MemoryConfig,
   AiPromptModalRef,
-  Source
+  Source,
+  ToolModalRef,
+  ToolOption
 } from './types'
 import type { Model } from '@/views/ModelManagement/types'
 import { getModelList } from '@/api/models';
@@ -31,6 +33,8 @@ import { memoryConfigListUrl } from '@/api/memory'
 import CustomSelect from '@/components/CustomSelect'
 import aiPrompt from '@/assets/images/application/aiPrompt.png'
 import AiPromptModal from './components/AiPromptModal'
+import ToolModal from './components/ToolModal'
+import ToolList from './components/ToolList'
 
 const DescWrapper: FC<{desc: string, className?: string}> = ({desc, className}) => {
   return (
@@ -47,12 +51,12 @@ const LabelWrapper: FC<{title: string, className?: string; children?: ReactNode}
     </div>
   )
 }
-const SwitchWrapper: FC<{ title: string, desc: string, name: string }> = ({ title, desc, name }) => {
+const SwitchWrapper: FC<{ title: string, desc?: string, name: string | string[]; needTransition?: boolean; }> = ({ title, desc, name, needTransition = true }) => {
   const { t } = useTranslation();
   return (
     <div className="rb:flex rb:items-center rb:justify-between">
-      <LabelWrapper title={t(`application.${title}`)}>
-        <DescWrapper desc={t(`application.${desc}`)} className="rb:mt-2" />
+      <LabelWrapper title={needTransition ? t(`application.${title}`) : title}>
+        {desc && <DescWrapper desc={needTransition ? t(`application.${desc}`) : desc} className="rb:mt-2" />}
       </LabelWrapper>
       <Form.Item
         name={name}
@@ -100,11 +104,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   const [formData, setFormData] = useState<{
     default_model_config_id?: string,
     model_parameters?: Config['model_parameters'],
+    tools: ToolOption[],
   } | null>(null)
   const values = Form.useWatch<{
     memoryEnabled: boolean;
     memory_content?: string | number;
-    webSearch: boolean;
   } & Config>([], form)
 
   const [knowledgeConfig, setKnowledgeConfig] = useState<KnowledgeConfig>({ knowledge_bases: [] })  
@@ -149,17 +153,21 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     setLoading(true)
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
-      setData(response)
+      setData({
+        ...response,
+        tools: Array.isArray(response.tools) ? response.tools : []
+      })
       const { memory, tools } = response
       form.setFieldsValue({
         ...response,
         memoryEnabled: memory?.enabled || false,
         memory_content: memory?.memory_content ? Number(memory?.memory_content) : undefined,
-        webSearch: tools?.web_search?.enabled || false,
+        tools: Array.isArray(tools) ? tools : []
       })
       setFormData({
         default_model_config_id: response.default_model_config_id,
         model_parameters: response.model_parameters || {},
+        tools: Array.isArray(tools) ? tools : []
       })
       if (response?.knowledge_retrieval?.knowledge_bases?.length) {
         getDefaultKnowledgeList(response)
@@ -260,8 +268,9 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   // 保存Agent配置
   const handleSave = (flag = true) => {
     if (!isSave || !data) return Promise.resolve()
-    const { memoryEnabled, memory_content, webSearch, ...rest } = values
+    const { memoryEnabled, memory_content, ...rest } = values
     const { knowledge_bases = [], ...knowledgeRest } = knowledgeConfig || {}
+
     
     // 从原数据中获取memory的其他必要属性
     const originalMemory = data.memory || ({} as MemoryConfig)
@@ -285,15 +294,10 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
           ...(item.config || {})
         }))
       } as KnowledgeConfig : null,
-      tools: {
-        web_search: {
-          enabled: webSearch,
-          config: {
-            web_search: webSearch
-          }
-        }
-      }
+      tools: toolList
     }
+
+    console.log('params', rest, params)
     
     return new Promise((resolve, reject) => {
       saveAgentConfig(data.app_id, params)
@@ -342,6 +346,19 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   const updatePrompt = (value: string) => {
     form.setFieldValue('system_prompt', value)
   }
+
+  const toolModalRef = useRef<ToolModalRef>(null)
+  const [toolList, setToolList] = useState<ToolOption[]>([])
+  const handleAddTool = () => {
+    toolModalRef.current?.handleOpen()
+  }
+  const updateTools = (tool: ToolOption) => {
+    const tools = [...toolList, tool]
+    setToolList(tools)
+    form.setFieldValue('tools', tools)
+  }
+
+  console.log('toolList', toolList)
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
@@ -410,14 +427,12 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                 data={data?.variables}
                 onUpdate={setVariableList}
               />
+              
               {/* 工具配置 */}
-              <Card title={t('application.toolConfiguration')}>
-                <Space size={24} direction='vertical' style={{ width: '100%' }}>
-                  <SwitchWrapper title="webSearch" desc="webSearchDesc" name="webSearch" />
-                  {/* <SwitchWrapper title="codeExecutor" desc="codeExecutorDesc" name="codeExecutor" />
-                  <SwitchWrapper title="imageGeneration" desc="imageGenerationDesc" name="imageGeneration" /> */}
-                </Space>
-              </Card>
+              <ToolList
+                data={data?.tools || []}
+                onUpdate={setToolList}
+              />
             </Space>
           </Form>
         </Col>
@@ -453,6 +468,10 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         ref={aiPromptModalRef}
         defaultModel={defaultModel}
         refresh={updatePrompt}
+      />
+      <ToolModal
+        ref={toolModalRef}
+        refresh={updateTools}
       />
     </>
   );
