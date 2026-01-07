@@ -6,7 +6,7 @@ from .document_model import Document
 from .file_model import File
 from .generic_file_model import GenericFile
 from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey
-from .memory_model import ShortTermMemory, LongTermMemory
+from .memory_short_model import ShortTermMemory, LongTermMemory
 from .knowledgeshare_model import KnowledgeShare
 from .app_model import App
 from .agent_app_config_model import AgentConfig
