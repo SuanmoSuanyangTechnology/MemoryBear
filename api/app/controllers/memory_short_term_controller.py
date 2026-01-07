@@ -14,7 +14,7 @@ load_dotenv()
 api_logger = get_api_logger()
 
 router = APIRouter(
-    prefix="/memory",
+    prefix="/memory/short",
     tags=["Memory"],
 )
 @router.get("/short_term")
