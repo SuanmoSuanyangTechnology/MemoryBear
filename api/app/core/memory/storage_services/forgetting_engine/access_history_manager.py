@@ -246,7 +246,7 @@ class AccessHistoryManager:
         if not node_data:
             return ConsistencyCheckResult.CONSISTENT, None
         
-        access_history = node_data.get('access_history', [])
+        access_history = node_data.get('access_history') or []
         last_access_time = node_data.get('last_access_time')
         access_count = node_data.get('access_count', 0)
         activation_value = node_data.get('activation_value')
@@ -409,7 +409,7 @@ class AccessHistoryManager:
                 logger.error(f"节点不存在，无法修复: {node_label}[{node_id}]")
                 return False
             
-            access_history = node_data.get('access_history', [])
+            access_history = node_data.get('access_history') or []
             importance_score = node_data.get('importance_score', 0.5)
             
             # 准备修复数据
@@ -530,7 +530,7 @@ class AccessHistoryManager:
         Returns:
             Dict[str, Any]: 更新数据，包含所有需要更新的字段
         """
-        access_history = node_data.get('access_history', [])
+        access_history = node_data.get('access_history') or []
         importance_score = node_data.get('importance_score', 0.5)
         
         # 追加新的访问时间
