@@ -7,6 +7,7 @@ LangChain Agent 封装
 - 支持流式输出
 - 使用 RedBearLLM 支持多提供商
 """
+import os
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
@@ -102,7 +103,8 @@ class LangChainAgent:
                 "temperature": temperature,
                 "streaming": streaming,
                 "tool_count": len(self.tools),
-                "tool_names": [tool.name for tool in self.tools] if self.tools else []
+                "tool_names": [tool.name for tool in self.tools] if self.tools else [],
+                "tool_count": len(self.tools)
             }
         )
 
@@ -143,11 +145,8 @@ class LangChainAgent:
         messages.append(HumanMessage(content=user_content))
 
         return messages
-
     async def term_memory_save(self,messages,end_user_end,aimessages):
-        """
-        短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j
-        """
+        '''短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j'''
         end_user_end=f"Term_{end_user_end}"
         print(messages)
         print(aimessages)
@@ -161,7 +160,6 @@ class LangChainAgent:
         store.delete_duplicate_sessions()
         # logger.info(f'Redis_Agent:{end_user_end};{session_id}')
         return session_id
-
     async def term_memory_redis_read(self,end_user_end):
         end_user_end = f"Term_{end_user_end}"
         history = store.find_user_apply_group(end_user_end, end_user_end, end_user_end)
@@ -239,11 +237,16 @@ class LangChainAgent:
                 retrieved_content = history_term_memory_result[1]
                 print(retrieved_content)
                 # 为长期记忆操作获取新的数据库连接
-                repo = LongTermMemoryRepository(db_for_memory)
-                repo.upsert(end_user_id, retrieved_content)
-                logger.info(
-                    f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
-
+                try:
+                    repo = LongTermMemoryRepository(db_for_memory)
+                    repo.upsert(end_user_id, retrieved_content)
+                    logger.info(
+                        f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
+                except Exception as e:
+                    logger.error(f"Failed to write to LongTermMemory: {e}")
+                    raise
+                finally:
+                    db_for_memory.close()
 
                 await self.write(storage_type,end_user_id,history_term_memory,user_rag_memory_id,actual_end_user_id,history_term_memory,actual_config_id)
             await self.write(storage_type,end_user_id,message,user_rag_memory_id,actual_end_user_id,message,actual_config_id)
@@ -351,12 +354,17 @@ class LangChainAgent:
                 history_term_memory = ';'.join(history_term_memory)
                 retrieved_content = history_term_memory_result[1]
                 db_for_memory = next(get_db())
-                repo = LongTermMemoryRepository(db_for_memory)
-                repo.upsert(end_user_id, retrieved_content)
-                logger.info(
-                    f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
-                await self.write(storage_type, end_user_id, history_term_memory, user_rag_memory_id, end_user_id,
-                                 history_term_memory, actual_config_id)
+                try:
+                    repo = LongTermMemoryRepository(db_for_memory)
+                    repo.upsert(end_user_id, retrieved_content)
+                    logger.info(
+                        f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
+                    await self.write(storage_type, end_user_id, history_term_memory, user_rag_memory_id, end_user_id,
+                                     history_term_memory, actual_config_id)
+                except Exception as e:
+                    logger.error(f"Failed to write to long term memory: {e}")
+                finally:
+                    db_for_memory.close()
 
             await self.write(storage_type, end_user_id, message, user_rag_memory_id, end_user_id, message, actual_config_id)
         try:

@@ -395,7 +395,7 @@ class MemoryAgentService:
 
         import time
         start_time = time.time()
-
+        ori_message=message
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
             try:
@@ -408,15 +408,15 @@ class MemoryAgentService:
                     raise  # Re-raise our specific error
                 logger.error(f"Failed to get connected config for end_user {group_id}: {e}")
                 raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
-        
+
         logger.info(f"Read operation for group {group_id} with config_id {config_id}")
-        
+
         # 导入审计日志记录器
         try:
             from app.core.memory.utils.log.audit_logger import audit_logger
         except ImportError:
             audit_logger = None
-        
+
         # Get group lock to prevent concurrent processing
         group_lock = self.get_group_lock(group_id)
 
@@ -432,7 +432,7 @@ class MemoryAgentService:
             except ConfigurationError as e:
                 error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
                 logger.error(error_msg)
-                
+
                 # Log failed operation
                 if audit_logger:
                     duration = time.time() - start_time
@@ -444,9 +444,9 @@ class MemoryAgentService:
                         duration=duration,
                         error=error_msg
                     )
-                
+
                 raise ValueError(error_msg)
-            
+
             # Step 2: Prepare history
             history.append({"role": "user", "content": message})
             logger.debug(f"Group ID:{group_id}, Message:{message}, History:{history}, Config ID:{config_id}")
@@ -454,7 +454,7 @@ class MemoryAgentService:
             # Step 3: Initialize MCP client and execute read workflow
             mcp_config = get_mcp_server_config()
             client = MultiServerMCPClient(mcp_config)
-            
+
             async with client.session('data_flow') as session:
                 logger.debug("Connected to MCP Server: data_flow")
                 tools = await load_mcp_tools(session)
@@ -477,7 +477,7 @@ class MemoryAgentService:
                         # Capture any errors from the state
                         if event.get('errors'):
                             workflow_errors.extend(event.get('errors', []))
-                        
+
                         for msg in messages:
                             msg_content = msg.content
                             msg_role = msg.__class__.__name__.lower().replace("message", "")
@@ -485,7 +485,7 @@ class MemoryAgentService:
                                 "role": msg_role,
                                 "content": msg_content
                             })
-                            
+
                             # Extract intermediate outputs
                             if hasattr(msg, 'content'):
                                 try:
@@ -498,7 +498,7 @@ class MemoryAgentService:
                                                 break
                                         else:
                                             continue  # No text block found
-                                    
+
                                     # Try to parse content as JSON
                                     if isinstance(content_to_parse, str):
                                         try:
@@ -508,16 +508,16 @@ class MemoryAgentService:
                                                 if '_intermediate' in parsed:
                                                     intermediate_data = parsed['_intermediate']
                                                     output_key = self._create_intermediate_key(intermediate_data)
-                                                    
+
                                                     if output_key not in seen_intermediates:
                                                         seen_intermediates.add(output_key)
                                                         intermediate_outputs.append(self._format_intermediate_output(intermediate_data))
-                                                
+
                                                 # Check for multiple intermediate outputs (from Retrieve)
                                                 if '_intermediates' in parsed:
                                                     for intermediate_data in parsed['_intermediates']:
                                                         output_key = self._create_intermediate_key(intermediate_data)
-                                                        
+
                                                         if output_key not in seen_intermediates:
                                                             seen_intermediates.add(output_key)
                                                             intermediate_outputs.append(self._format_intermediate_output(intermediate_data))
@@ -525,7 +525,7 @@ class MemoryAgentService:
                                             pass
                                 except Exception as e:
                                     logger.debug(f"Failed to extract intermediate output: {e}")
-            
+
             workflow_duration = time.time() - start
             logger.info(f"Read graph workflow completed in {workflow_duration}s")
 
@@ -534,7 +534,7 @@ class MemoryAgentService:
             for messages in outputs:
                 if messages['role'] == 'tool':
                     message = messages['content']
-                    
+
                     # Handle MCP content format: [{'type': 'text', 'text': '...'}]
                     if isinstance(message, list):
                         # Extract text from MCP content blocks
@@ -544,7 +544,7 @@ class MemoryAgentService:
                                 break
                         else:
                             continue  # No text block found
-                    
+
                     try:
                         parsed = json.loads(message) if isinstance(message, str) else message
                         if isinstance(parsed, dict):
@@ -554,15 +554,15 @@ class MemoryAgentService:
                                     final_answer = summary_result
                     except (json.JSONDecodeError, ValueError):
                         pass
-            
+
             # 记录成功的操作
             total_duration = time.time() - start_time
-            
+
             # Check for workflow errors
             if workflow_errors:
                 error_details = "; ".join([f"{e['tool']}: {e['error']}" for e in workflow_errors])
                 logger.warning(f"Read workflow completed with errors: {error_details}")
-                
+
                 if audit_logger:
                     audit_logger.log_operation(
                         operation="READ",
@@ -579,11 +579,11 @@ class MemoryAgentService:
                             "errors": workflow_errors
                         }
                     )
-                
+
                 # Raise error if no answer was produced
                 if not final_answer:
                     raise ValueError(f"Read workflow failed: {error_details}")
-            
+
             if audit_logger and not workflow_errors:
                 audit_logger.log_operation(
                     operation="READ",
@@ -604,17 +604,17 @@ class MemoryAgentService:
                 for intermediate in intermediate_outputs:
                     intermediate_type=intermediate['type']
                     if intermediate_type=="search_result":
-                        message=intermediate['query']
+                        query=intermediate['query']
                         raw_results=intermediate['raw_results']
                         reranked_results=raw_results.get('reranked_results',[])
                         statements=[statement['statement'] for statement in reranked_results.get('statements', [])]
                         statements=list(set(statements))
-                        retrieved_content.append({message:statements})
+                        retrieved_content.append({query:statements})
             if   '信息不足，无法回答' in str(final_answer) or retrieved_content!=[]:
                 # 使用 upsert 方法
                 repo.upsert(
                     end_user_id=group_id,  # 确保这个变量在作用域内
-                    messages=message,
+                    messages=ori_message,
                     aimessages=final_answer,
                     retrieved_content=retrieved_content,
                     search_switch=str(search_switch)
