@@ -24,6 +24,7 @@ from . import (
     memory_storage_controller,
     memory_dashboard_controller,
     memory_reflection_controller,
+    memory_short_term_controller,
     api_key_controller,
     release_share_controller,
     public_share_controller,
@@ -69,6 +70,7 @@ manager_router.include_router(emotion_controller.router)
 manager_router.include_router(emotion_config_controller.router)
 manager_router.include_router(prompt_optimizer_controller.router)
 manager_router.include_router(memory_reflection_controller.router)
+manager_router.include_router(memory_short_term_controller.router)
 manager_router.include_router(tool_controller.router)
 
 __all__ = ["manager_router"]

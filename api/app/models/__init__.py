@@ -11,6 +11,7 @@ from .app_model import App
 from .agent_app_config_model import AgentConfig
 from .app_release_model import AppRelease
 from .memory_increment_model import MemoryIncrement
+from .memory_model import ShortTermMemory, LongTermMemory
 from .end_user_model import EndUser
 from .appshare_model import AppShare
 from .release_share_model import ReleaseShare
@@ -45,6 +46,8 @@ __all__ = [
     "AgentConfig",
     "AppRelease",
     "MemoryIncrement",
+    "ShortTermMemory",
+    "LongTermMemory",
     "EndUser",
     "AppShare",
     "ReleaseShare",

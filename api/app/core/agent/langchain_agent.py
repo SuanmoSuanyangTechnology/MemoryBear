@@ -11,10 +11,16 @@ import os
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
+
+from app.db import get_db
 from app.core.logging_config import get_business_logger
 from app.core.memory.agent.utils.redis_tool import store
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.models.models_model import ModelType
+from app.repositories.memory_repository import LongTermMemoryRepository
+from app.services.memory_agent_service import (
+    get_end_user_connected_config,
+)
 from app.services.memory_konwledges_server import write_rag
 from app.services.task_service import get_task_memory_write_result
 from app.tasks import write_message_task
@@ -159,11 +165,13 @@ class LangChainAgent:
         history = store.find_user_apply_group(end_user_end, end_user_end, end_user_end)
         # logger.info(f'Redis_Agent:{end_user_end};{history}')
         messagss_list=[]
+        retrieved_content=[]
         for messages in history:
             query = messages.get("Query")
             aimessages = messages.get("Answer")
             messagss_list.append(f'用户:{query}。AI回复:{aimessages}')
-        return messagss_list
+            retrieved_content.append({query: aimessages})
+        return messagss_list,retrieved_content
 
 
     async def write(self,storage_type,end_user_id,message,user_rag_memory_id,actual_end_user_id,content,actual_config_id):
@@ -203,7 +211,6 @@ class LangChainAgent:
         # If config_id is None, try to get from end_user's connected config
         if actual_config_id is None and end_user_id:
             try:
-                from app.db import get_db
                 from app.services.memory_agent_service import (
                     get_end_user_connected_config,
                 )
@@ -221,11 +228,21 @@ class LangChainAgent:
         logger.info(f'写入类型{storage_type,str(end_user_id), message, str(user_rag_memory_id)}')
         print(f'写入类型{storage_type,str(end_user_id), message, str(user_rag_memory_id)}')
 
-        history_term_memory=await self.term_memory_redis_read(end_user_id)
+        history_term_memory_result = await self.term_memory_redis_read(end_user_id)
+        history_term_memory = history_term_memory_result[0]
+        db_for_memory = next(get_db())
         if memory_flag:
             if len(history_term_memory)>=4 and storage_type != "rag":
-                history_term_memory=';'.join(history_term_memory)
-                logger.info(f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
+                history_term_memory = ';'.join(history_term_memory)
+                retrieved_content = history_term_memory_result[1]
+                print(retrieved_content)
+                # 为长期记忆操作获取新的数据库连接
+                repo = LongTermMemoryRepository(db_for_memory)
+                repo.upsert(end_user_id, retrieved_content)
+                logger.info(
+                    f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
+
+
                 await self.write(storage_type,end_user_id,history_term_memory,user_rag_memory_id,actual_end_user_id,history_term_memory,actual_config_id)
             await self.write(storage_type,end_user_id,message,user_rag_memory_id,actual_end_user_id,message,actual_config_id)
         try:
@@ -314,10 +331,6 @@ class LangChainAgent:
         # If config_id is None, try to get from end_user's connected config
         if actual_config_id is None and end_user_id:
             try:
-                from app.db import get_db
-                from app.services.memory_agent_service import (
-                    get_end_user_connected_config,
-                )
                 db = next(get_db())
                 try:
                     connected_config = get_end_user_connected_config(end_user_id, db)
@@ -329,10 +342,15 @@ class LangChainAgent:
             except Exception as e:
                 logger.warning(f"Failed to get db session: {e}")
 
-        history_term_memory = await self.term_memory_redis_read(end_user_id)
+        history_term_memory_result = await self.term_memory_redis_read(end_user_id)
+        history_term_memory = history_term_memory_result[0]
         if memory_flag:
             if len(history_term_memory) >= 4 and storage_type != "rag":
                 history_term_memory = ';'.join(history_term_memory)
+                retrieved_content = history_term_memory_result[1]
+                db_for_memory = next(get_db())
+                repo = LongTermMemoryRepository(db_for_memory)
+                repo.upsert(end_user_id, retrieved_content)
                 logger.info(
                     f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
                 await self.write(storage_type, end_user_id, history_term_memory, user_rag_memory_id, end_user_id,
