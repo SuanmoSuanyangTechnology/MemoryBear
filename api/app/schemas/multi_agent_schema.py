@@ -84,9 +84,9 @@ class MultiAgentConfigUpdate(BaseModel):
     """更新多 Agent 配置"""
     master_agent_id: Optional[uuid.UUID] = None
     master_agent_name: Optional[str] = Field(None, max_length=100, description="主 Agent 名称")
-    default_model_config_id : uuid.UUID = Field(description="默认模型配置ID")
-    model_parameters: ModelParameters | None = Field(
-        default_factory=ModelParameters,
+    default_model_config_id: Optional[uuid.UUID] = Field(None, description="默认模型配置ID")
+    model_parameters: Optional[ModelParameters] = Field(
+        None,
         description="模型参数配置（temperature、max_tokens 等）"
     )
     orchestration_mode: Optional[str] = Field(

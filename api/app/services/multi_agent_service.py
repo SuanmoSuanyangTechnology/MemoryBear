@@ -264,10 +264,11 @@ class MultiAgentService:
         if not app:
             raise ResourceNotFoundException("应用", str(app_id))
 
-        # 2. 验证模型配置
-        model_api_key = ModelApiKeyService.get_a_api_key(self.db,data.default_model_config_id)
-        if not model_api_key:
-            raise ResourceNotFoundException("模型配置", str(data.default_model_config_id))
+        # 2. 验证模型配置（如果提供了）
+        if data.default_model_config_id:
+            model_api_key = ModelApiKeyService.get_a_api_key(self.db, data.default_model_config_id)
+            if not model_api_key:
+                raise ResourceNotFoundException("模型配置", str(data.default_model_config_id))
 
         # 3. 验证子 Agent 存在并获取发布版本 ID
         for sub_agent in data.sub_agents:
