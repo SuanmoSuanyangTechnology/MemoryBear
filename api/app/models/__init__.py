@@ -26,6 +26,7 @@ from .tool_model import (
     ToolConfig, BuiltinToolConfig, CustomToolConfig, MCPToolConfig,
     ToolExecution, ToolType, ToolStatus, AuthType, ExecutionStatus
 )
+from .memory_perceptual_model import MemoryPerceptualModel
 
 __all__ = [
     "Tenants",
@@ -74,5 +75,6 @@ __all__ = [
     "ToolType",
     "ToolStatus",
     "AuthType",
-    "ExecutionStatus"
+    "ExecutionStatus",
+    "MemoryPerceptualModel"
 ]
