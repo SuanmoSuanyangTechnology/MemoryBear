@@ -77,7 +77,7 @@ class AppChatService:
         tool_service = ToolService(self.db)
 
         # 从配置中获取启用的工具
-        if hasattr(config, 'tools') and config.tools:
+        if hasattr(config, 'tools') and config.tools and isinstance(config.tools, list):
             for tool_config in config.tools:
                 if tool_config.get("enabled", False):
                     # 根据工具名称查找工具实例
@@ -109,20 +109,21 @@ class AppChatService:
                 memory_tool = create_long_term_memory_tool(memory_config, user_id)
                 tools.append(memory_tool)
 
-        # web_tools = config.tools
-        # web_search_choice = web_tools.get("web_search", {})
-        # web_search_enable = web_search_choice.get("enabled", False)
-        # if web_search == True:
-        #     if web_search_enable == True:
-        #         search_tool = create_web_search_tool({})
-        #         tools.append(search_tool)
-        #
-        #         logger.debug(
-        #             "已添加网络搜索工具",
-        #             extra={
-        #                 "tool_count": len(tools)
-        #             }
-        #         )
+        if hasattr(config, 'tools') and config.tools and isinstance(config.tools, dict):
+            web_tools = config.tools
+            web_search_choice = web_tools.get("web_search", {})
+            web_search_enable = web_search_choice.get("enabled", False)
+            if web_search == True:
+                if web_search_enable == True:
+                    search_tool = create_web_search_tool({})
+                    tools.append(search_tool)
+
+                    logger.debug(
+                        "已添加网络搜索工具",
+                        extra={
+                            "tool_count": len(tools)
+                        }
+                    )
 
         # 获取模型参数
         model_parameters = config.model_parameters
@@ -226,7 +227,7 @@ class AppChatService:
             # 获取工具服务
             tool_service = ToolService(self.db)
 
-            if hasattr(config, 'tools') and config.tools:
+            if hasattr(config, 'tools') and config.tools and isinstance(config.tools, list):
                 for tool_config in config.tools:
                     if tool_config.get("enabled", False):
                         # 根据工具名称查找工具实例
@@ -258,20 +259,21 @@ class AppChatService:
                     memory_tool = create_long_term_memory_tool(memory_config, user_id)
                     tools.append(memory_tool)
 
-            # web_tools = config.tools
-            # web_search_choice = web_tools.get("web_search", {})
-            # web_search_enable = web_search_choice.get("enabled", False)
-            # if web_search == True:
-            #     if web_search_enable == True:
-            #         search_tool = create_web_search_tool({})
-            #         tools.append(search_tool)
-            #
-            #         logger.debug(
-            #             "已添加网络搜索工具",
-            #             extra={
-            #                 "tool_count": len(tools)
-            #             }
-            #         )
+            if hasattr(config, 'tools') and config.tools and isinstance(config.tools, dict):
+                web_tools = config.tools
+                web_search_choice = web_tools.get("web_search", {})
+                web_search_enable = web_search_choice.get("enabled", False)
+                if web_search == True:
+                    if web_search_enable == True:
+                        search_tool = create_web_search_tool({})
+                        tools.append(search_tool)
+
+                        logger.debug(
+                            "已添加网络搜索工具",
+                            extra={
+                                "tool_count": len(tools)
+                            }
+                        )
 
             # 获取模型参数
             model_parameters = config.model_parameters

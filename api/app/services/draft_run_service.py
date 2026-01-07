@@ -297,19 +297,35 @@ class DraftRunService:
             tool_service = ToolService(self.db)
 
             # 从配置中获取启用的工具
-            if hasattr(agent_config, 'tools') and agent_config.tools:
-                for tool_config in agent_config.tools:
-                    if tool_config.get("enabled", False):
-                        # 根据工具名称查找工具实例
-                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
-                                                                        ToolRepository.get_tenant_id_by_workspace_id(
-                                                                            self.db, str(workspace_id)))
-                        if tool_instance:
-                            if tool_instance.name == "baidu_search_tool" and not web_search:
-                                continue
-                            # 转换为LangChain工具
-                            langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
-                            tools.append(langchain_tool)
+            if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, list):
+                if hasattr(agent_config, 'tools') and agent_config.tools:
+                    for tool_config in agent_config.tools:
+                        if tool_config.get("enabled", False):
+                            # 根据工具名称查找工具实例
+                            tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
+                                                                            ToolRepository.get_tenant_id_by_workspace_id(
+                                                                                self.db, str(workspace_id)))
+                            if tool_instance:
+                                if tool_instance.name == "baidu_search_tool" and not web_search:
+                                    continue
+                                # 转换为LangChain工具
+                                langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
+                                tools.append(langchain_tool)
+            elif hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, dict):
+                web_tools = agent_config.tools
+                web_search_choice = web_tools.get("web_search", {})
+                web_search_enable = web_search_choice.get("enabled", False)
+                if web_search == True:
+                    if web_search_enable == True:
+                        search_tool = create_web_search_tool({})
+                        tools.append(search_tool)
+
+                        logger.debug(
+                            "已添加网络搜索工具",
+                            extra={
+                                "tool_count": len(tools)
+                            }
+                        )
 
             # 添加知识库检索工具
             if agent_config.knowledge_retrieval:
@@ -507,7 +523,7 @@ class DraftRunService:
             tool_service = ToolService(self.db)
 
             # 从配置中获取启用的工具
-            if hasattr(agent_config, 'tools') and agent_config.tools:
+            if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, dict):
                 for tool_config in agent_config.tools:
                     if tool_config.get("enabled", False):
                         # 根据工具名称查找工具实例
@@ -520,6 +536,22 @@ class DraftRunService:
                             # 转换为LangChain工具
                             langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                             tools.append(langchain_tool)
+            elif hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, dict):
+                web_tools = agent_config.tools
+                web_search_choice = web_tools.get("web_search", {})
+                web_search_enable = web_search_choice.get("enabled", False)
+                if web_search == True:
+                    if web_search_enable == True:
+                        search_tool = create_web_search_tool({})
+                        tools.append(search_tool)
+
+                        logger.debug(
+                            "已添加网络搜索工具",
+                            extra={
+                                "tool_count": len(tools)
+                            }
+                        )
+
 
             # 添加知识库检索工具
             if agent_config.knowledge_retrieval:
