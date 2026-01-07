@@ -134,6 +134,10 @@ export const getEmotionSuggestions = (group_id: string) => {
 export const analyticsRefresh = (end_user_id: string) => {
   return request.post('/memory-storage/analytics/generate_cache', { end_user_id })
 }
+export const getForgetStats = (group_id: string) => {
+  return request.get(`/memory/forget/stats`, { group_id })
+}
+
 
 /*************** end 用户记忆 相关接口 ******************************/
 

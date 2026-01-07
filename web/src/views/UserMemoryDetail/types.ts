@@ -141,3 +141,37 @@ export interface AboutMeRef {
 export interface EndUserProfileRef {
   data: EndUser | null
 }
+
+
+export interface ForgetData {
+  activation_metrics: {
+    total_nodes: number;
+    nodes_with_activation: number;
+    nodes_without_activation: number;
+    average_activation_value: number;
+    low_activation_nodes: number;
+    timestamp: number;
+    forgetting_threshold: number;
+  },
+  node_distribution: {
+    statement_count: number;
+    entity_count: number;
+    summary_count: number;
+    chunk_count: number;
+  },
+  recent_trends: {
+    date: string;
+    merged_count: number;
+    average_activation: number;
+    total_nodes: number;
+    execution_time: number;
+  }[],
+  pending_nodes: {
+    node_id: string;
+    node_type: string;
+    content_summary: string;
+    activation_value: number;
+    last_access_time: number;
+  }[],
+  timestamp: number;
+}

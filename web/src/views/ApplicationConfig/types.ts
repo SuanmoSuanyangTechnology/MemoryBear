@@ -88,11 +88,11 @@ export interface MultiAgentConfig {
   app_id: string;
   default_model_config_id?: string;
   model_parameters: ModelConfig;
-  orchestration_mode: 'conditional' | 'sequential' | 'parallel';
   sub_agents?: SubAgentItem[];
   routing_rules: null;
+  orchestration_mode: 'supervisor' | 'collaboration';
   execution_config: {
-    routing_mode: 'master' | 'handoffs'
+    sub_agent_execution_mode: 'sequential' | 'parallel';
   };
   aggregation_strategy: 'merge' | 'vote' | 'priority'
 }
