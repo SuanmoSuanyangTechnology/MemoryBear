@@ -67,16 +67,16 @@ class ForgettingCycleHistoryRepository:
     def get_recent_by_end_user(
         self,
         db: Session,
-        end_user_id: str,
-        limit: int = 7
+        end_user_id: str
     ) -> List[ForgettingCycleHistory]:
         """
-        获取指定终端用户的所有历史记录（用于后续按日期分组）
+        获取指定终端用户的所有历史记录（按时间降序排列）
+        
+        注意：此方法返回所有历史记录，调用方需要自行处理日期分组和数量限制。
         
         Args:
             db: 数据库会话
             end_user_id: 终端用户ID
-            limit: 最终返回的日期数量（默认7个日期）
         
         Returns:
             List[ForgettingCycleHistory]: 历史记录列表，按时间降序排列

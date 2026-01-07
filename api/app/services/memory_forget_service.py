@@ -11,7 +11,7 @@
 """
 
 from typing import Optional, Dict, Any, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -222,8 +222,8 @@ class MemoryForgetService:
         """
         from datetime import timedelta
         
-        # 计算最小访问时间（ISO 8601 格式字符串）
-        min_access_time = datetime.now() - timedelta(days=min_days_since_access)
+        # 计算最小访问时间（ISO 8601 格式字符串，使用 UTC 时区）
+        min_access_time = datetime.now(timezone.utc) - timedelta(days=min_days_since_access)
         min_access_time_str = min_access_time.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
         
         query = """
@@ -270,7 +270,13 @@ class MemoryForgetService:
             # 将 Neo4j DateTime 对象转换为时间戳
             last_access_time = result['last_access_time']
             last_access_dt = convert_neo4j_datetime_to_python(last_access_time)
-            last_access_timestamp = int(last_access_dt.timestamp()) if last_access_dt else 0
+            # 确保 datetime 带有时区信息(假定为 UTC),避免 naive datetime 导致的时区偏差
+            if last_access_dt:
+                if last_access_dt.tzinfo is None:
+                    last_access_dt = last_access_dt.replace(tzinfo=timezone.utc)
+                last_access_timestamp = int(last_access_dt.timestamp())
+            else:
+                last_access_timestamp = 0
             
             pending_nodes.append({
                 'node_id': str(result['node_id']),
@@ -580,8 +586,7 @@ class MemoryForgetService:
                 # 查询所有历史记录
                 history_records = self.history_repository.get_recent_by_end_user(
                     db=db,
-                    end_user_id=group_id,
-                    limit=7
+                    end_user_id=group_id
                 )
                 
                 # 按日期分组（一天可能有多次执行，取最后一次）
@@ -628,11 +633,19 @@ class MemoryForgetService:
         pending_nodes = []
         try:
             if group_id:
+                # 验证 min_days_since_access 配置值
+                min_days = config.get('min_days_since_access')
+                if min_days is None or not isinstance(min_days, (int, float)) or min_days < 0:
+                    api_logger.warning(
+                        f"min_days_since_access 配置无效: {min_days}, 使用默认值 7"
+                    )
+                    min_days = 7
+                
                 pending_nodes = await self._get_pending_forgetting_nodes(
                     connector=connector,
                     group_id=group_id,
                     forgetting_threshold=forgetting_threshold,
-                    min_days_since_access=config['min_days_since_access'],
+                    min_days_since_access=int(min_days),
                     limit=20
                 )
                 
