@@ -395,7 +395,7 @@ class MemoryAgentService:
 
         import time
         start_time = time.time()
-
+        ori_message=message
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
             try:
@@ -604,17 +604,17 @@ class MemoryAgentService:
                 for intermediate in intermediate_outputs:
                     intermediate_type=intermediate['type']
                     if intermediate_type=="search_result":
-                        message=intermediate['query']
+                        query=intermediate['query']
                         raw_results=intermediate['raw_results']
                         reranked_results=raw_results.get('reranked_results',[])
                         statements=[statement['statement'] for statement in reranked_results.get('statements', [])]
                         statements=list(set(statements))
-                        retrieved_content.append({message:statements})
+                        retrieved_content.append({query:statements})
             if   '信息不足，无法回答' in str(final_answer) or retrieved_content!=[]:
                 # 使用 upsert 方法
                 repo.upsert(
                     end_user_id=group_id,  # 确保这个变量在作用域内
-                    messages=message,
+                    messages=ori_message,
                     aimessages=final_answer,
                     retrieved_content=retrieved_content,
                     search_switch=str(search_switch)
