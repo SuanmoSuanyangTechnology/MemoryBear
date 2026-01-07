@@ -17,7 +17,7 @@ export interface Suggestion {
   disabled?: boolean; // 标记是否禁用
 }
 
-const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
+const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> = ({ options, enableJinja2 = false }) => {
   const [editor] = useLexicalComposerContext();
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -82,7 +82,32 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
   }, [editor]);
 
   const insertMention = (suggestion: Suggestion) => {
-    editor.dispatchCommand(INSERT_VARIABLE_COMMAND, { data: suggestion });
+    if (enableJinja2) {
+      // 在jinja2模式下，插入{{variable}}格式的文本
+      editor.update(() => {
+        const selection = $getSelection();
+        if ($isRangeSelection(selection)) {
+          const anchorNode = selection.anchor.getNode();
+          const anchorOffset = selection.anchor.offset;
+          const nodeText = anchorNode.getTextContent();
+          
+          // 移除触发字符'/'
+          const textBefore = nodeText.substring(0, anchorOffset - 1);
+          const textAfter = nodeText.substring(anchorOffset);
+          const newText = textBefore + `{{${suggestion.value}}}` + textAfter;
+          
+          anchorNode.setTextContent(newText);
+          
+          // 设置光标位置到插入文本之后
+          const newOffset = textBefore.length + `{{${suggestion.value}}}`.length;
+          selection.anchor.offset = newOffset;
+          selection.focus.offset = newOffset;
+        }
+      });
+    } else {
+      // 普通模式下使用VariableNode
+      editor.dispatchCommand(INSERT_VARIABLE_COMMAND, { data: suggestion });
+    }
     setShowSuggestions(false);
   };
 
