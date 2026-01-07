@@ -5,14 +5,15 @@ import { MinusCircleOutlined } from '@ant-design/icons';
 import Editor from '../Editor'
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 
-interface TextareaProps {
+interface MessageEditor {
   options: Suggestion[];
   title?: string
   isArray?: boolean;
-  parentName?: string;
+  parentName?: string | string[];
   label?: string;
   placeholder?: string;
   value?: string;
+  enableJinja2?: boolean;
   onChange?: (value?: string) => void;
 }
 const roleOptions = [
@@ -20,12 +21,13 @@ const roleOptions = [
   { label: 'USER', value: 'USER' },
   { label: 'ASSISTANT', value: 'ASSISTANT' },
 ]
-const MessageEditor: FC<TextareaProps> = ({
+const MessageEditor: FC<MessageEditor> = ({
   title,
   isArray = true,
   parentName = 'messages',
   placeholder,
   options,
+  enableJinja2 = false,
 }) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance();
@@ -33,10 +35,17 @@ const MessageEditor: FC<TextareaProps> = ({
 
   // 检查是否已经使用了context变量，将已使用的context设置为disabled
   const processedOptions = useMemo(() => {
-    if (!isArray || !values?.[parentName]) return options;
+    if (!isArray) return options;
+    
+    // 获取表单中对应字段的值
+    const fieldValue = Array.isArray(parentName) 
+      ? parentName.reduce((obj, key) => obj?.[key], values)
+      : values?.[parentName];
+    
+    if (!fieldValue) return options;
     
     // 获取所有消息内容
-    const allContents = values[parentName]
+    const allContents = fieldValue
       .map((msg: any) => msg?.content || '')
       .join(' ');
     
@@ -50,7 +59,11 @@ const MessageEditor: FC<TextareaProps> = ({
   }, [options, values, parentName, isArray]);
 
   const handleAdd = (add: FormListOperation['add']) => {
-    const list = values?.[parentName] || [];
+    const fieldValue = Array.isArray(parentName) 
+      ? parentName.reduce((obj, key) => obj?.[key], values)
+      : values?.[parentName];
+    
+    const list = fieldValue || [];
     const lastRole = list.length > 0 ? list[list.length - 1]?.role : 'ASSISTANT';
 
     add({
@@ -61,14 +74,14 @@ const MessageEditor: FC<TextareaProps> = ({
 
   if (!isArray) {
     return (
-      <Space size={12} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5 rb:bg-white">
+      <Space size={12} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5 rb:bg-white" data-editor-type={parentName === 'template' ? 'template' : undefined}>
         <Row>
           <Col span={12}>
             {title ?? t('workflow.answerDesc')}
           </Col>
         </Row>
         <Form.Item name={parentName} noStyle>
-          <Editor placeholder={placeholder} options={processedOptions} />
+          <Editor enableJinja2={enableJinja2} placeholder={placeholder} options={processedOptions} />
         </Form.Item>
       </Space>
     );
@@ -79,7 +92,11 @@ const MessageEditor: FC<TextareaProps> = ({
       {(fields, { add, remove }) => (
         <Space size={12} direction="vertical" className="rb:w-full">
           {fields.map(({ key, name, ...restField }) => {
-            const currentRole = (values?.[parentName]?.[name]?.role || 'USER').toUpperCase();
+            const fieldValue = Array.isArray(parentName) 
+              ? parentName.reduce((obj, key) => obj?.[key], values)
+              : values?.[parentName];
+            
+            const currentRole = (fieldValue?.[name]?.role || 'USER').toUpperCase();
             
             return (
               <Space key={key} size={12} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5 rb:bg-white">
@@ -105,7 +122,7 @@ const MessageEditor: FC<TextareaProps> = ({
                   )}
                 </Row>
                 <Form.Item {...restField} name={[name, 'content']} noStyle>
-                  <Editor placeholder={placeholder} options={processedOptions} />
+                  <Editor enableJinja2={enableJinja2} placeholder={placeholder} options={processedOptions} />
                 </Form.Item>
               </Space>
             );
