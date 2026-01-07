@@ -120,7 +120,7 @@ class HttpRequestNode(BaseNode):
                 return {}
             case HttpContentType.JSON:
                 content["json"] = json.loads(self._render_template(
-                    json.dumps(self.typed_config.body.data), state
+                    self.typed_config.body.data, state
                 ))
             case HttpContentType.FROM_DATA:
                 data = {}

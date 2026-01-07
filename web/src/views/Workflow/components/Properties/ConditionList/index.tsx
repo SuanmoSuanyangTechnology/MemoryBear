@@ -9,7 +9,7 @@ import Editor from '../../Editor'
 
 interface Case {
   logical_operator: 'and' | 'or';
-  expressions: Array<{ left: string; comparison_operator: string; right: string; input_type: string; }>
+  expressions: Array<{ left: string; operator: string; right: string; input_type: string; }>
 }
 
 interface CaseListProps {
@@ -45,6 +45,8 @@ const operatorsObj: { [key: string]: SelectProps['options'] } = {
   boolean: [
     { value: 'eq', label: 'workflow.config.if-else.boolean.eq' },
     { value: 'ne', label: 'workflow.config.if-else.boolean.ne' },
+    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
   ]
 }
 
@@ -61,7 +63,7 @@ const ConditionList: FC<CaseListProps> = ({
         expressions: {
           [index]: {
             left: newValue,
-            comparison_operator: undefined,
+            operator: undefined,
             right: undefined,
             input_type: undefined
           }
@@ -87,7 +89,7 @@ const ConditionList: FC<CaseListProps> = ({
             {fields.map((field, index) => {
               const expressions = form.getFieldValue([parentName, 'expressions']) || [];
               const currentExpression = expressions[index] || {};
-              const currentOperator = currentExpression.comparison_operator;
+              const currentOperator = currentExpression.operator;
               const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty';
               const leftFieldValue = currentExpression.left;
               const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue);
@@ -122,7 +124,7 @@ const ConditionList: FC<CaseListProps> = ({
                       </Col>
                       
                       <Col span={8}>
-                        <Form.Item name={[field.name, 'comparison_operator']} noStyle>
+                        <Form.Item name={[field.name, 'operator']} noStyle>
                           <Select
                             options={operatorList.map(vo => ({
                               ...vo,
@@ -196,7 +198,7 @@ const ConditionList: FC<CaseListProps> = ({
 
             <Button
               type="dashed"
-              onClick={() => add({ left: '', comparison_operator: '', right: '' })}
+              onClick={() => add({ left: '', operator: '', right: '' })}
               className="rb:w-full rb:ml-6 rb:mt-2"
               icon={<span>+</span>}
             >

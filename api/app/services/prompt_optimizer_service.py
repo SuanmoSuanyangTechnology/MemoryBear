@@ -166,6 +166,8 @@ class PromptOptimizerService:
         model_config = self.get_model_config(tenant_id, model_id)
         session_history = self.get_session_message_history(session_id=session_id, user_id=user_id)
 
+        logger.info(f"Prompt optimization started, user_id={user_id}, session_id={session_id}")
+
         # Create LLM instance
         api_config: ModelApiKey = model_config.api_keys[0]
         llm = RedBearLLM(RedBearModelConfig(
@@ -203,7 +205,6 @@ class PromptOptimizerService:
 
         messages.extend(session_history[:-1])  # last message is current message
         messages.extend([(RoleType.USER.value, rendered_user_message)])
-        logger.info(f"Prompt optimization message: {messages}")
         buffer = ""
         prompt_started = False
         prompt_finished = False
@@ -250,6 +251,7 @@ class PromptOptimizerService:
             content=desc
         )
         variables = self.parser_prompt_variables(optim_result.get("prompt"))
+        logger.info(f"Prompt optimization completed, user_id={user_id}, session_id={session_id}")
         yield {"desc": optim_result.get("desc"), "variables": variables}
 
     @staticmethod

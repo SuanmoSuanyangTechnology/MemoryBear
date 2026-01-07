@@ -78,14 +78,7 @@ export interface Config extends MultiAgentConfig {
   knowledge_retrieval: KnowledgeConfig | null;
   memory?: MemoryConfig;
   variables: Variable[];
-  tools: {
-    web_search: {
-      enabled: boolean;
-      config: {
-        web_search: boolean;
-      }
-    }
-  };
+  tools: ToolOption[];
   is_active: boolean;
   created_at: number;
   updated_at: number;
@@ -211,4 +204,31 @@ export interface AiPromptForm {
   model_id?: string;
   message?: string;
   current_prompt?: string;
+}
+export interface ToolModalRef {
+  handleOpen: () => void;
+}
+
+export interface ToolOption {
+  value?: string | number | null;
+  label?: React.ReactNode;
+  description?: string;
+  children?: ToolOption[];
+  isLeaf?: boolean;
+  method_id?: string;
+  operation?: string;
+  parameters?: Parameter[];
+  tool_id?: string;
+  enabled?: boolean;
+}
+export interface Parameter {
+  name: string;
+  type: string;
+  description: string;
+  required: boolean;
+  default: any;
+  enum: null | string[];
+  minimum: number;
+  maximum: number;
+  pattern: null | string;
 }

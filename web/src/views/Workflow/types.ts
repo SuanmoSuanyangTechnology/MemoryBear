@@ -24,7 +24,7 @@ export interface NodeConfig {
 
   knowledge_retrieval?: KnowledgeConfig;
 
-  group_names?: Array<{ key: string, value: string[] }>
+  group_variables?: Array<{ key: string, value: string[] }>
   cycle?: string;
   [key: string]: unknown;
 }

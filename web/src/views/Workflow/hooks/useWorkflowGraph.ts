@@ -90,11 +90,13 @@ export const useWorkflowGraph = ({
               nodeLibraryConfig.config[key].defaultValue = {
                 ...rest
               }
-            } else if (key === 'group_names' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
-              const { group_names, group } = config
+            } else if (key === 'group_variables' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+              const { group_variables, group } = config
               nodeLibraryConfig.config[key].defaultValue = group
-                ? Object.entries(group_names as Record<string, any>).map(([key, value]) => ({ key, value }))
-                : group_names
+                ? Object.entries(group_variables as Record<string, any>).map(([key, value]) => ({ key, value }))
+                : group_variables
+            } else if (type === 'http-request' && (key === 'headers' || key === 'params') && config[key] && typeof config[key] === 'object' && !Array.isArray(config[key]) && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+              nodeLibraryConfig.config[key].defaultValue = Object.entries(config[key]).map(([name, value]) => ({ name, value }))
             } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && config[key]) {
               nodeLibraryConfig.config[key].defaultValue = config[key]
             }
@@ -882,14 +884,22 @@ export const useWorkflowGraph = ({
 
           if (data.config) {
             Object.keys(data.config).forEach(key => {
-              if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_names') {
-                let group_names = data.config.group.defaultValue ? {} : data.config[key].defaultValue
+              if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_variables') {
+                let group_variables = data.config.group.defaultValue ? {} : data.config[key].defaultValue
                 if (data.config.group.defaultValue) {
                   data.config[key].defaultValue.map((vo: any) => {
-                    group_names[vo.key] = vo.value
+                    group_variables[vo.key] = vo.value
                   })
                 }
-                itemConfig[key] = group_names
+                itemConfig[key] = group_variables
+              } else if (data.type === 'http-request' && (key === 'headers' || key === 'params') && data.config[key] && 'defaultValue' in data.config[key]) {
+                const value = data.config[key].defaultValue
+                itemConfig[key] = {}
+                if (value.length > 0) {
+                  value.forEach((vo: any) => {
+                    itemConfig[key][vo.name] = vo.value
+                  })
+                }
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
                 itemConfig[key] = data.config[key].defaultValue
               } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {

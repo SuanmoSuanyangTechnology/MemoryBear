@@ -22,6 +22,7 @@ from . import (
     memory_dashboard_controller,
     memory_forget_controller,
     memory_reflection_controller,
+    memory_short_term_controller,
     memory_storage_controller,
     model_controller,
     multi_agent_controller,
@@ -72,6 +73,7 @@ manager_router.include_router(emotion_controller.router)
 manager_router.include_router(emotion_config_controller.router)
 manager_router.include_router(prompt_optimizer_controller.router)
 manager_router.include_router(memory_reflection_controller.router)
+manager_router.include_router(memory_short_term_controller.router)
 manager_router.include_router(tool_controller.router)
 manager_router.include_router(memory_forget_controller.router)
 manager_router.include_router(home_page_controller.router)

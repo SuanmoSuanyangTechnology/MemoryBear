@@ -2,14 +2,14 @@
 Agent 配置格式转换器
 用于将 Pydantic 模型转换为数据库存储格式
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from app.schemas.app_schema import (
     KnowledgeRetrievalConfig,
     MemoryConfig,
     VariableDefinition,
     ToolConfig,
     AgentConfigCreate,
-    AgentConfigUpdate,
+    AgentConfigUpdate, ToolOldConfig,
 )
 
 
@@ -47,10 +47,7 @@ class AgentConfigConverter:
         
         # 5. 工具配置
         if hasattr(config, 'tools') and config.tools:
-            result["tools"] = {
-                name: tool.model_dump() 
-                for name, tool in config.tools.items()
-            }
+            result["tools"] = [tool.model_dump() for tool in config.tools]
         
         return result
     
@@ -60,7 +57,7 @@ class AgentConfigConverter:
         knowledge_retrieval: Optional[Dict[str, Any]],
         memory: Optional[Dict[str, Any]],
         variables: Optional[list],
-        tools: Optional[Dict[str, Any]],
+        tools: Optional[Union[list, Dict[str, Any]]],
     ) -> Dict[str, Any]:
         """
         将数据库存储格式转换为 Pydantic 对象
@@ -80,7 +77,7 @@ class AgentConfigConverter:
             "knowledge_retrieval": None,
             "memory": MemoryConfig(enabled=True),
             "variables": [],
-            "tools": {},
+            "tools": [],
         }
         
         # 1. 解析模型参数配置
@@ -113,9 +110,12 @@ class AgentConfigConverter:
         
         # 5. 解析工具配置
         if tools:
-            result["tools"] = {
-                name: ToolConfig(**tool_data)
-                for name, tool_data in tools.items()
-            }
+            if isinstance(tools, list):
+                result["tools"] = [ToolConfig(**tool_config) for tool_config in tools]
+            else:
+                result["tools"] = {
+                    name: ToolOldConfig(**tool_data)
+                    for name, tool_data in tools.items()
+                }
         
         return result
