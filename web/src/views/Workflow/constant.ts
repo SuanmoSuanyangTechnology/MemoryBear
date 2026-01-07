@@ -300,6 +300,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           cycle_vars: {
             type: 'cycleVarsList',
+            defaultValue: []
           },
           condition: {
             type: 'conditionList',
@@ -395,12 +396,14 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           retry: {
             type: 'switch',
-            defaultValue: false
+            defaultValue: {
+              enable: false
+            }
           },
           error_handle: {
             type: 'define',
             defaultValue: {
-              method: 'default'
+              method: 'none'
             }
           }
         }
@@ -420,11 +423,13 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           mapping: {
             type: 'mappingList',
-            defaultValue: []
+            defaultValue: [{name: 'arg1'}]
           },
           template: {
             type: 'messageEditor',
             isArray: false,
+            enableJinja2: true,
+            defaultValue: "{{arg1}}"
           },
         }
       }

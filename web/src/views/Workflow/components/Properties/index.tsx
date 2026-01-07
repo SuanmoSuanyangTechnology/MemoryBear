@@ -45,12 +45,133 @@ const Properties: FC<PropertiesProps> = ({
   const values = Form.useWatch([], form);
   const variableModalRef = useRef<VariableEditModalRef>(null)
   const [editIndex, setEditIndex] = useState<number | null>(null)
+  const prevMappingNamesRef = useRef<string[]>([])
+  const prevTemplateVarsRef = useRef<string[]>([])
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const isSyncingRef = useRef(false)
+  const lastSyncSourceRef = useRef<'mapping' | 'template' | null>(null)
 
   useEffect(() => {
     if (selectedNode?.getData()?.id) {
       form.resetFields()
+      prevMappingNamesRef.current = []
+      prevTemplateVarsRef.current = []
+      lastSyncSourceRef.current = null
     }
   }, [selectedNode?.getData()?.id])
+
+  // Sync template when mapping names change
+  useEffect(() => {
+    if (isSyncingRef.current || lastSyncSourceRef.current === 'mapping' || selectedNode?.data?.type !== 'jinja-render' || !values?.mapping || !values?.template) return
+    
+    const currentMappingNames = values.mapping.map((item: any) => item.name).filter(Boolean)
+    const prevNames = prevMappingNamesRef.current
+    
+    if (prevNames.length === 0) {
+      prevMappingNamesRef.current = currentMappingNames
+      return
+    }
+    
+    if (JSON.stringify(prevNames) === JSON.stringify(currentMappingNames)) return
+    
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
+    const activeElement = document.activeElement as HTMLElement
+    
+    syncTimeoutRef.current = setTimeout(() => {
+      let updatedTemplate = String(form.getFieldValue('template') || '')
+      
+      prevNames.forEach((oldName, index) => {
+        const newName = currentMappingNames[index]
+        if (newName && oldName !== newName) {
+          updatedTemplate = updatedTemplate.replace(new RegExp(`{{\\s*${oldName}\\s*}}`, 'g'), `{{${newName}}}`)
+        }
+      })
+      
+      if (updatedTemplate !== form.getFieldValue('template')) {
+        isSyncingRef.current = true
+        lastSyncSourceRef.current = 'mapping'
+        const newTemplateVars = (updatedTemplate.match(/{{\s*([\w.]+)\s*}}/g) || []).map(m => m.replace(/{{\s*|\s*}}/g, ''))
+        prevTemplateVarsRef.current = newTemplateVars
+        prevMappingNamesRef.current = currentMappingNames
+        form.setFieldValue('template', updatedTemplate)
+        
+        requestAnimationFrame(() => {
+          activeElement?.focus?.()
+          setTimeout(() => { 
+            isSyncingRef.current = false
+            lastSyncSourceRef.current = null
+          }, 50)
+        })
+      } else {
+        prevMappingNamesRef.current = currentMappingNames
+      }
+    }, 0)
+  }, [values?.mapping, selectedNode?.data?.type, form])
+
+  // Sync mapping when template variables change
+  useEffect(() => {
+    if (isSyncingRef.current || lastSyncSourceRef.current === 'template' || selectedNode?.data?.type !== 'jinja-render' || !values?.template || !values?.mapping) return
+    
+    const templateVars = (String(values.template).match(/{{\s*([\w.]+)\s*}}/g) || []).map(m => m.replace(/{{\s*|\s*}}/g, ''))
+    if (JSON.stringify(prevTemplateVarsRef.current) === JSON.stringify(templateVars)) return
+    
+    const isTemplateEditor = document.activeElement?.closest('[data-editor-type="template"]')
+    if (!isTemplateEditor) {
+      prevTemplateVarsRef.current = templateVars
+      return
+    }
+    
+    const updatedMapping = [...values.mapping]
+    const existingNames = updatedMapping.map(item => item.name)
+    let updatedTemplate = String(values.template)
+    
+    if (prevTemplateVarsRef.current.length > 0) {
+      prevTemplateVarsRef.current.forEach((oldVar, index) => {
+        const newVar = templateVars[index]
+        if (newVar && oldVar !== newVar && updatedMapping[index]) {
+          updatedMapping[index] = { ...updatedMapping[index], name: newVar }
+        }
+      })
+    }
+    
+    templateVars.forEach(varName => {
+      const existingMapping = updatedMapping.find(item => item.value === `{{${varName}}}`)
+      const regex = new RegExp(`{{\\s*${varName.replace(/\./g, '\\.')}\\s*}}`, 'g')
+      
+      if (existingMapping) {
+        updatedTemplate = updatedTemplate.replace(regex, `{{${existingMapping.name}}}`)
+      } else if (!existingNames.includes(varName)) {
+        const mappingName = varName.includes('.') ? varName.split('.').pop() || varName : varName
+        updatedMapping.push({ name: mappingName, value: `{{${varName}}}` })
+        updatedTemplate = updatedTemplate.replace(regex, `{{${mappingName}}}`)
+      }
+    })
+    
+    const seenNames = new Set<string>()
+    const finalMapping = updatedMapping.filter(item => {
+      const isUsed = templateVars.some(v => item.name === v || item.value === `{{${v}}}`)
+      if (!isUsed || seenNames.has(item.name)) return false
+      seenNames.add(item.name)
+      return true
+    })
+    
+    isSyncingRef.current = true
+    lastSyncSourceRef.current = 'template'
+    prevMappingNamesRef.current = finalMapping.map((item: any) => item.name).filter(Boolean)
+    prevTemplateVarsRef.current = templateVars
+    
+    if (JSON.stringify(finalMapping) !== JSON.stringify(values.mapping)) {
+      form.setFieldValue('mapping', finalMapping)
+    }
+    if (updatedTemplate !== String(values.template)) {
+      form.setFieldValue('template', updatedTemplate)
+    }
+    
+    setTimeout(() => { 
+      isSyncingRef.current = false
+      lastSyncSourceRef.current = null
+    }, 50)
+  }, [values?.template, selectedNode?.data?.type, form])
 
   useEffect(() => {
     if (selectedNode && form) {
@@ -96,6 +217,8 @@ const Properties: FC<PropertiesProps> = ({
         }))
       }
 
+
+
       Object.keys(values).forEach(key => {
         if (selectedNode.data?.config?.[key]) {
           // Create a deep copy to avoid reference sharing between nodes
@@ -114,7 +237,7 @@ const Properties: FC<PropertiesProps> = ({
         ...allRest,
       })
     }
-  }, [values, selectedNode])
+  }, [values, selectedNode, form])
 
   const handleAddVariable = () => {
     variableModalRef.current?.handleOpen()
@@ -190,10 +313,87 @@ const Properties: FC<PropertiesProps> = ({
         .map(node => node.id);
     };
     
+    // Find parent loop/iteration node if current node is a child
+    const getParentLoopNode = (nodeId: string): Node | null => {
+      const node = nodes.find(n => n.id === nodeId);
+      if (!node) return null;
+      
+      const nodeData = node.getData();
+      const cycle = nodeData?.cycle;
+      
+      if (cycle) {
+        const parentNode = nodes.find(n => n.getData().id === cycle);
+        if (parentNode) {
+          const parentData = parentNode.getData();
+          if (parentData?.type === 'loop' || parentData?.type === 'iteration') {
+            return parentNode;
+          }
+        }
+      }
+      return null;
+    };
+    
     const allPreviousNodeIds = getAllPreviousNodes(selectedNode.id);
     const childNodeIds = getChildNodes(selectedNode.id);
+    const parentLoopNode = getParentLoopNode(selectedNode.id);
+    
     console.log('childNodeIds', selectedNode, childNodeIds)
     const allRelevantNodeIds = [...allPreviousNodeIds, ...childNodeIds];
+    
+    // Add parent loop/iteration node variables if current node is a child
+    if (parentLoopNode) {
+      const parentData = parentLoopNode.getData();
+      
+      if (parentData.type === 'loop') {
+        const cycleVars = parentData.cycle_vars || [];
+        cycleVars.forEach((cycleVar: any) => {
+          const key = `${parentLoopNode.getData().id}_cycle_${cycleVar.name}`;
+          if (!addedKeys.has(key)) {
+            addedKeys.add(key);
+            variableList.push({
+              key,
+              label: cycleVar.name,
+              type: 'variable',
+              dataType: cycleVar.type || 'String',
+              value: `${parentLoopNode.getData().id}.${cycleVar.name}`,
+              nodeData: parentData,
+            });
+          }
+        });
+      } else if (parentData.type === 'iteration') {
+        // Add item and index variables for iteration parent
+        const itemKey = `${parentLoopNode.getData().id}_item`;
+        const indexKey = `${parentLoopNode.getData().id}_index`;
+        
+        if (!addedKeys.has(itemKey)) {
+          addedKeys.add(itemKey);
+          variableList.push({
+            key: itemKey,
+            label: 'item',
+            type: 'variable',
+            dataType: 'Object',
+            value: `${parentLoopNode.getData().id}.item`,
+            nodeData: parentData,
+          });
+        }
+        
+        if (!addedKeys.has(indexKey)) {
+          addedKeys.add(indexKey);
+          variableList.push({
+            key: indexKey,
+            label: 'index',
+            type: 'variable',
+            dataType: 'Number',
+            value: `${parentLoopNode.getData().id}.index`,
+            nodeData: parentData,
+          });
+        }
+      }
+      
+      // Add variables from nodes preceding the parent loop/iteration node
+      const parentPreviousNodeIds = getAllPreviousNodes(parentLoopNode.id);
+      allRelevantNodeIds.push(...parentPreviousNodeIds);
+    }
     
     allRelevantNodeIds.forEach(nodeId => {
       const node = nodes.find(n => n.id === nodeId);
@@ -363,6 +563,87 @@ const Properties: FC<PropertiesProps> = ({
             });
           }
           break
+        case 'question-classifier':
+          const classNameKey = `${nodeId}_class_name`;
+          const outputKey = `${nodeId}_output`;
+          if (!addedKeys.has(classNameKey)) {
+            addedKeys.add(classNameKey);
+            variableList.push({
+              key: classNameKey,
+              label: 'class_name',
+              type: 'variable',
+              dataType: 'string',
+              value: `${node.getData().id}.class_name`,
+              nodeData: nodeData,
+            });
+          }
+          if (!addedKeys.has(outputKey)) {
+            addedKeys.add(outputKey);
+            variableList.push({
+              key: outputKey,
+              label: 'output',
+              type: 'variable',
+              dataType: 'string',
+              value: `${node.getData().id}.output`,
+              nodeData: nodeData,
+            });
+          }
+          break
+        case 'iteration':
+          const iterationOutputKey = `${nodeId}_output`;
+          if (!addedKeys.has(iterationOutputKey)) {
+            addedKeys.add(iterationOutputKey);
+            // Get the data type from the output configuration, default to string
+            const outputConfig = nodeData.output;
+            let outputDataType = 'string';
+            if (outputConfig) {
+              // Find the selected variable from variableList to get its type
+              const selectedVariable = variableList.find(v => v.value === outputConfig);
+              if (selectedVariable) {
+                outputDataType = selectedVariable.dataType;
+              }
+            }
+            variableList.push({
+              key: iterationOutputKey,
+              label: 'output',
+              type: 'variable',
+              dataType: outputDataType,
+              value: `${node.getData().id}.output`,
+              nodeData: nodeData,
+            });
+          }
+          break
+        case 'loop':
+          const cycleVars = nodeData.cycle_vars || [];
+          cycleVars.forEach((cycleVar: any) => {
+            const cycleVarKey = `${nodeId}_cycle_${cycleVar.name}`;
+            if (!addedKeys.has(cycleVarKey)) {
+              addedKeys.add(cycleVarKey);
+              variableList.push({
+                key: cycleVarKey,
+                label: cycleVar.name,
+                type: 'variable',
+                dataType: cycleVar.type || 'string',
+                value: `${node.getData().id}.${cycleVar.name}`,
+                nodeData: nodeData,
+              });
+            }
+          });
+          break
+        case 'tool':
+          const toolDataKey = `${nodeId}_data`;
+          if (!addedKeys.has(toolDataKey)) {
+            addedKeys.add(toolDataKey);
+            variableList.push({
+              key: toolDataKey,
+              label: 'data',
+              type: 'variable',
+              dataType: 'object',
+              value: `${node.getData().id}.data`,
+              nodeData: nodeData,
+            });
+          }
+          break
       }
     });
 
@@ -388,6 +669,14 @@ const Properties: FC<PropertiesProps> = ({
     return variableList;
   }, [selectedNode, graphRef]);
 
+  // Filter out boolean type variables for loop and llm nodes
+  const getFilteredVariableList = (nodeType?: string) => {
+    if (nodeType === 'loop' || nodeType === 'llm') {
+      return variableList.filter(variable => variable.dataType !== 'boolean');
+    }
+    return variableList;
+  };
+
   console.log('values', values)
   console.log('variableList', variableList, selectedNode?.data)
 
@@ -412,6 +701,8 @@ const Properties: FC<PropertiesProps> = ({
             {selectedNode?.data?.type === 'http-request'
               ? <HttpRequest 
                   options={variableList} 
+                  selectedNode={selectedNode}
+                  graphRef={graphRef}
                 />
               : selectedNode?.data?.type === 'tool'
               ? <ToolConfig options={variableList} />
@@ -469,7 +760,7 @@ const Properties: FC<PropertiesProps> = ({
 
                 if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                   // 为llm节点且isArray=true时添加context变量支持
-                  let contextVariableList = [...variableList];
+                  let contextVariableList = [...getFilteredVariableList('llm')];
                   const isArrayMode = config.isArray !== false; // 默认为true
                   
                   if (isArrayMode) {
@@ -491,14 +782,14 @@ const Properties: FC<PropertiesProps> = ({
                   
                   return (
                     <Form.Item key={key} name={key}>
-                      <MessageEditor options={contextVariableList} parentName={key} />
+                      <MessageEditor key={key} options={contextVariableList} parentName={key} />
                     </Form.Item>
                   )
                 }
                 if (selectedNode?.data?.type === 'end' && key === 'output') {
                   return (
                     <Form.Item key={key} name={key}>
-                      <MessageEditor isArray={false} parentName={key} options={variableList} />
+                      <MessageEditor key={key} isArray={false} parentName={key} options={variableList} />
                     </Form.Item>
                   )
                 }
@@ -525,7 +816,8 @@ const Properties: FC<PropertiesProps> = ({
                         title={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                         isArray={!!config.isArray} 
                         parentName={key}
-                        options={variableList}
+                        enableJinja2={config.enableJinja2 as boolean}
+                        options={getFilteredVariableList(selectedNode?.data?.type)}
                       />
                     </Form.Item>
                   )
@@ -546,7 +838,7 @@ const Properties: FC<PropertiesProps> = ({
                     <Form.Item key={key} name={key}>
                       <GroupVariableList
                         name={key}
-                        options={variableList}
+                        options={getFilteredVariableList(selectedNode?.data?.type)}
                         isCanAdd={!!(values as any)?.group}
                       />
                     </Form.Item>
@@ -558,7 +850,7 @@ const Properties: FC<PropertiesProps> = ({
                     <Form.Item key={key} name={key}>
                       <CaseList
                         name={key}
-                        options={variableList}
+                        options={getFilteredVariableList(selectedNode?.data?.type)}
                         selectedNode={selectedNode}
                         graphRef={graphRef}
                       />
@@ -571,7 +863,7 @@ const Properties: FC<PropertiesProps> = ({
                     <Form.Item key={key} name={key}
                       label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                     >
-                      <MappingList name={key} options={variableList} />
+                      <MappingList name={key} options={getFilteredVariableList(selectedNode?.data?.type)} />
                     </Form.Item>
                   
                   )
@@ -581,7 +873,7 @@ const Properties: FC<PropertiesProps> = ({
                     <Form.Item key={key} name={key}>
                       <CycleVarsList
                         parentName={key}
-                        options={variableList}
+                        options={getFilteredVariableList(selectedNode?.data?.type)}
                       />
                     </Form.Item>
                   )
@@ -655,9 +947,9 @@ const Properties: FC<PropertiesProps> = ({
                               findParentLoopIteration(selectedNode.id);
                             }
                             
-                            return [...variableList, ...loopIterationVars];
+                            return [...getFilteredVariableList(selectedNode?.data?.type), ...loopIterationVars];
                           }
-                          return variableList;
+                          return getFilteredVariableList(selectedNode?.data?.type);
                         })()
                       }
                     />
@@ -678,7 +970,7 @@ const Properties: FC<PropertiesProps> = ({
                       ? <Input.TextArea placeholder={t('common.pleaseEnter')} />
                       : config.type === 'select'
                       ? <Select
-                        options={config.needTranslation ? config.options?.map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
+                        options={config.needTranslation ? (config.options || []).map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
                         placeholder={t('common.pleaseSelect')}
                       />
                       : config.type === 'inputNumber'
@@ -698,9 +990,10 @@ const Properties: FC<PropertiesProps> = ({
                       ? <VariableSelect
                           placeholder={t('common.pleaseSelect')}
                           options={(() => {
+                            const baseVariableList = getFilteredVariableList(selectedNode?.data?.type);
                             // Apply filtering if specified in config
                             if (config.filterNodeTypes || config.filterVariableNames) {
-                              return variableList.filter(variable => {
+                              return baseVariableList.filter(variable => {
                                 const nodeTypeMatch = !config.filterNodeTypes || 
                                   (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
                                 const variableNameMatch = !config.filterVariableNames || 
@@ -721,22 +1014,38 @@ const Properties: FC<PropertiesProps> = ({
                                 return nodeData?.cycle === selectedNode.id;
                               });
                               
-                              return variableList.filter(variable => 
+                              return baseVariableList.filter(variable => 
                                 childNodes.some(node => node.id === variable.nodeData?.id)
                               );
                             }
-                            return variableList;
+                            return baseVariableList;
                           })()
                         }
                         />
                       : config.type === 'switch'
-                                    ? <Switch onChange={key === 'group' ? () => { form.setFieldValue('group_variables', []) } : undefined} />
+                      ? <Switch onChange={key === 'group' ? () => { form.setFieldValue('group_variables', []) } : undefined} />
                       : config.type === 'categoryList'
                       ? <CategoryList parentName={key} selectedNode={selectedNode} graphRef={graphRef} />
                       : config.type === 'conditionList'
                       ? <ConditionList
                         parentName={key}
-                        options={variableList}
+                        options={(() => {
+                          // For loop nodes, add cycle_vars to condition options
+                          if (selectedNode?.data?.type === 'loop') {
+                            const cycleVars = values?.cycle_vars || [];
+                            const cycleVarSuggestions: Suggestion[] = cycleVars.map((cycleVar: any) => ({
+                              key: `${selectedNode.id}_cycle_${cycleVar.name}`,
+                              label: cycleVar.name,
+                              type: 'variable',
+                              dataType: cycleVar.type || 'String',
+                              value: `${selectedNode.getData().id}.${cycleVar.name}`,
+                              nodeData: selectedNode.getData(),
+                            }));
+                            return [...getFilteredVariableList(selectedNode?.data?.type), ...cycleVarSuggestions];
+                          }
+                          return getFilteredVariableList(selectedNode?.data?.type);
+                        })()
+                      }
                         selectedNode={selectedNode}
                         graphRef={graphRef}
                         addBtnText={t('workflow.config.addCase')}
