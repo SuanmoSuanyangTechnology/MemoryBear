@@ -78,13 +78,20 @@ class LangchainAdapter:
         
         Args:
             tool: 内部工具实例
-            operation: 特定操作（适用于有操作的工具）
+            operation: 特定操作（适用于有操作的工具）或MCP工具名称
             
         Returns:
             Langchain兼容的工具包装器
         """
         try:
-            if operation and tool.name in ['datetime_tool', 'json_tool']:
+            # 处理MCP工具的特定工具名称
+            if hasattr(tool, 'tool_type') and tool.tool_type.value == 'mcp' and operation:
+                # 为MCP工具创建特定工具名称的实例
+                mcp_tool = LangchainAdapter._create_mcp_tool_with_name(tool, operation)
+                wrapper = LangchainToolWrapper(tool_instance=mcp_tool)
+                logger.debug(f"MCP工具转换成功: {tool.name}_{operation} -> Langchain格式")
+                return wrapper
+            elif operation and tool.name in ['datetime_tool', 'json_tool']:
                 # 为特定操作创建工具
                 operation_tool = LangchainAdapter._create_operation_tool(tool, operation)
                 wrapper = LangchainToolWrapper(tool_instance=operation_tool)
@@ -105,6 +112,18 @@ class LangchainAdapter:
         """为特定操作创建工具实例"""
         from app.core.tools.builtin.operation_tool import OperationTool
         return OperationTool(base_tool, operation)
+    
+    @staticmethod
+    def _create_mcp_tool_with_name(base_tool: BaseTool, tool_name: str) -> BaseTool:
+        """为MCP工具创建指定工具名称的实例"""
+        from app.core.tools.mcp.base import MCPTool
+        
+        # 创建新的配置，指定具体工具名称
+        new_config = base_tool.config.copy()
+        new_config["tool_name"] = tool_name
+        
+        # 创建新的MCP工具实例
+        return MCPTool(f"{base_tool.tool_id}_{tool_name}", new_config)
     
     @staticmethod
     def convert_tools(tools: List[BaseTool]) -> List[LangchainToolWrapper]:
