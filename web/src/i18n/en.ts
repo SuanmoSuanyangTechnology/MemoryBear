@@ -1137,10 +1137,10 @@ export const en = {
       promptEmpty: 'Describe your use case on the left, and the orchestration preview will be displayed here.',
 
       master: 'Supervisor Mode',
-      master_agent: 'Supervisor Mode',
-      master_agentDesc: 'Unified scheduling and management by the main Agent, with sub-Agents executing tasks assigned by the supervisor, suitable for scenarios requiring centralized control.',
-      handoffs: 'Collaboration Mode',
-      handoffsDesc: 'Multiple Agents collaborate equally, autonomously coordinating according to task requirements, suitable for complex scenarios requiring flexible interaction.',
+      supervisor: 'Supervisor Mode',
+      supervisorDesc: 'Unified scheduling and management by the main Agent, with sub-Agents executing tasks assigned by the supervisor, suitable for scenarios requiring centralized control.',
+      collaboration: 'Collaboration Mode',
+      collaborationDesc: 'Multiple Agents collaborate equally, autonomously coordinating according to task requirements, suitable for complex scenarios requiring flexible interaction.',
       masterConfig: 'Supervisor Configuration',
       orchestrationMode: 'Task Assignment Strategy',
       conditional: 'Intelligent Assignment',
@@ -1150,6 +1150,8 @@ export const en = {
       merge: 'Complete Aggregation',
       vote: 'Key Information Extraction',
       priority: 'Structured Integration',
+      addTool: 'Add Tool',
+      tool: 'Tool',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -1207,6 +1209,7 @@ export const en = {
       IMPLICIT_MEMORY: 'Implicit Memory',
       EMOTIONAL_MEMORY: 'Emotional Memory',
       EPISODIC_MEMORY: 'Episodic Memory',
+      FORGETTING_MANAGEMENT: 'Forgetting Management',
 
       endUserProfile: 'Core Profile',
       editEndUserProfile: 'Edit',
@@ -1839,6 +1842,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           status_code: 'Status Code',
           max_attempts: 'Max Retry Attempts',
           retry_interval: 'Retry Interval',
+          errorBranch: 'Error Branch',
         },
         'jinja-render': {
           template: 'Code',
