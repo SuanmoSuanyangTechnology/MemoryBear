@@ -17,14 +17,14 @@ const MappingList: React.FC<MappingListProps> = ({ name, options }) => {
         {(fields, { add, remove }) => (
           <>
             {fields.map(({ key, name, ...restField }) => (
-              <Row gutter={12} className="rb:mb-2">
+              <Row key={key} gutter={12} className="rb:mb-2">
                 <Col span={10}>
                   <Form.Item
                     {...restField}
                     name={[name, 'name']}
                     noStyle
                   >
-                    <Input placeholder={t('common.pleaseEnter')} />
+                    <Input placeholder={t('common.pleaseEnter')} data-field-type="mapping-name" />
                   </Form.Item>
                 </Col>
                 <Col span={12}>

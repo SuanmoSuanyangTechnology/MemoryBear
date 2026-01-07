@@ -38,6 +38,9 @@ from . import (
     user_memory_controllers,
     workflow_controller,
     workspace_controller,
+    memory_forget_controller,
+    home_page_controller,
+    memory_perceptual_controller
 )
 
 # 创建管理端 API 路由器
@@ -78,5 +81,6 @@ manager_router.include_router(tool_controller.router)
 manager_router.include_router(memory_forget_controller.router)
 manager_router.include_router(home_page_controller.router)
 manager_router.include_router(implicit_memory_controller.router)
+manager_router.include_router(memory_perceptual_controller.router)
 
 __all__ = ["manager_router"]
