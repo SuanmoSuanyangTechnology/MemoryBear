@@ -8,7 +8,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.core.tools.mcp import MCPClient
+from app.core.tools.mcp import MCPToolManager, SimpleMCPClient
 from app.repositories.tool_repository import (
     ToolRepository, BuiltinToolRepository, CustomToolRepository,
     MCPToolRepository, ToolExecutionRepository
@@ -42,6 +42,9 @@ class ToolService:
     def __init__(self, db: Session):
         self.db = db
         self._tool_cache: Dict[str, BaseTool] = {}
+        
+        # MCP管理器
+        self.mcp_tool_manager = MCPToolManager(db)
 
         # 初始化仓储
         self.tool_repo = ToolRepository()
@@ -675,23 +678,85 @@ class ToolService:
             return []
 
     async def _get_mcp_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
-        """获取MCP工具的方法"""
+        """获取MCP工具的方法和参数"""
         mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
         if not mcp_config:
             return []
         
         available_tools = mcp_config.available_tools or []
         if not available_tools:
-            return []
+            # 如果没有工具列表，尝试同步
+            try:
+                success, tools, _ = await self.mcp_tool_manager.discover_tools(
+                    mcp_config.server_url, mcp_config.connection_config or {}
+                )
+                if success:
+                    tool_names = [tool.get("name") for tool in tools if tool.get("name")]
+                    mcp_config.available_tools = tool_names
+                    self.db.commit()
+                    available_tools = tool_names
+            except Exception as e:
+                logger.error(f"同步MCP工具列表失败: {e}")
+                return []
         
         methods = []
-        for tool_name in available_tools:
-            methods.append({
-                "method_id": tool_name,
-                "name": tool_name,
-                "description": f"MCP工具: {tool_name}",
-                "parameters": []  # MCP工具参数需要动态获取
-            })
+        
+        # 获取工具详细信息
+        try:
+            success, tools, _ = await self.mcp_tool_manager.discover_tools(
+                mcp_config.server_url, mcp_config.connection_config or {}
+            )
+            
+            if success:
+                tools_dict = {tool.get("name"): tool for tool in tools if tool.get("name")}
+                
+                for tool_name in available_tools:
+                    tool_info = tools_dict.get(tool_name, {})
+                    
+                    # 解析工具参数
+                    parameters = []
+                    input_schema = tool_info.get("inputSchema", {})
+                    properties = input_schema.get("properties", {})
+                    required_fields = input_schema.get("required", [])
+                    
+                    for param_name, param_def in properties.items():
+                        parameters.append({
+                            "name": param_name,
+                            "type": param_def.get("type", "string"),
+                            "description": param_def.get("description", ""),
+                            "required": param_name in required_fields,
+                            "default": param_def.get("default"),
+                            "enum": param_def.get("enum"),
+                            "minimum": param_def.get("minimum"),
+                            "maximum": param_def.get("maximum")
+                        })
+                    
+                    methods.append({
+                        "method_id": tool_name,
+                        "name": tool_name,
+                        "description": tool_info.get("description", f"MCP工具: {tool_name}"),
+                        "parameters": parameters
+                    })
+            else:
+                # 如果无法获取详细信息，返回基本信息
+                for tool_name in available_tools:
+                    methods.append({
+                        "method_id": tool_name,
+                        "name": tool_name,
+                        "description": f"MCP工具: {tool_name}",
+                        "parameters": []
+                    })
+                    
+        except Exception as e:
+            logger.error(f"获取MCP工具详细信息失败: {e}")
+            # 返回基本信息
+            for tool_name in available_tools:
+                methods.append({
+                    "method_id": tool_name,
+                    "name": tool_name,
+                    "description": f"MCP工具: {tool_name}",
+                    "parameters": []
+                })
         
         return methods
 
@@ -812,10 +877,14 @@ class ToolService:
         if not mcp_config:
             return None
 
+        # 从配置中获取特定工具名称
+        tool_name = config.config_data.get("tool_name")
+        
         tool_config = {
             "server_url": mcp_config.server_url,
             "connection_config": mcp_config.connection_config or {},
-            "available_tools": mcp_config.available_tools or []
+            "available_tools": mcp_config.available_tools or [],
+            "tool_name": tool_name  # 指定具体工具
         }
 
         return MCPTool(str(config.id), tool_config)
@@ -1071,71 +1140,59 @@ class ToolService:
             return {}
 
     async def _test_mcp_connection(self, config: ToolConfig) -> Dict[str, Any]:
-        """测试MCP连接"""
+        """测试MCP连接并自动同步工具列表"""
         try:
-            mcp_config = self.db.query(MCPToolConfig).filter(
-                MCPToolConfig.id == config.id
-            ).first()
-
+            mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
             if not mcp_config:
                 return {"success": False, "message": "MCP配置不存在"}
 
-            client = MCPClient(mcp_config.server_url, mcp_config.connection_config or {})
-
-            if await client.connect():
-                try:
-                    # tools = await client.list_tools()
-                    await client.disconnect()
-
-                    # 更新连接状态
+            # 使用集成的MCP管理器测试连接
+            test_result = await self.mcp_tool_manager.test_tool_connection(
+                mcp_config.server_url, mcp_config.connection_config or {}
+            )
+            
+            if test_result["success"]:
+                # 连接成功，自动同步工具列表
+                success, tools, error = await self.mcp_tool_manager.discover_tools(
+                    mcp_config.server_url, mcp_config.connection_config or {}
+                )
+                
+                if success:
+                    tool_names = [tool.get("name") for tool in tools if tool.get("name")]
+                    
+                    # 更新数据库
+                    mcp_config.available_tools = tool_names
                     mcp_config.last_health_check = datetime.now()
                     mcp_config.health_status = "healthy"
                     mcp_config.error_message = None
-
-                    # 更新工具状态
-                    self._update_tool_status(config)
+                    config.status = ToolStatus.AVAILABLE.value
+                    
                     self.db.commit()
-
+                    
                     return {
                         "success": True,
-                        "message": "MCP连接成功",
-                        # "details": {"server_url": mcp_config.server_url, "tools_count": len(tools)}
-                        "details": {"server_url": mcp_config.server_url}
+                        "message": "MCP连接成功并同步工具列表",
+                        "details": {
+                            "server_url": mcp_config.server_url,
+                            "tools_count": len(tool_names),
+                            "tools": tool_names
+                        }
                     }
-                except Exception as e:
-                    await client.disconnect()
-
-                    # 更新错误状态
-                    mcp_config.last_health_check = datetime.now()
-                    mcp_config.health_status = "error"
-                    mcp_config.error_message = str(e)
-                    self._update_tool_status(config)
-                    self.db.commit()
-
-                    return {"success": False, "message": f"MCP功能测试失败: {str(e)}"}
+                else:
+                    return {"success": False, "message": f"同步工具失败: {error}"}
             else:
-                # 更新连接失败状态
+                # 更新错误状态
                 mcp_config.last_health_check = datetime.now()
                 mcp_config.health_status = "error"
-                mcp_config.error_message = "连接失败"
-                self._update_tool_status(config)
+                mcp_config.error_message = test_result.get("error", "连接失败")
+                config.status = ToolStatus.ERROR.value
                 self.db.commit()
-
-                return {"success": False, "message": "MCP连接失败"}
-
+                
+                return test_result
+                
         except Exception as e:
-            # 更新异常状态
-            mcp_config = self.db.query(MCPToolConfig).filter(
-                MCPToolConfig.id == config.id
-            ).first()
-            if mcp_config:
-                mcp_config.last_health_check = datetime.now()
-                mcp_config.health_status = "error"
-                mcp_config.error_message = str(e)
-                self._update_tool_status(config)
-                self.db.commit()
-
-            return {"success": False, "message": f"MCP测试异常: {str(e)}"}
+            logger.error(f"测试MCP连接失败: {config.id}, 错误: {e}")
+            return {"success": False, "message": f"测试失败: {str(e)}"}
 
     @staticmethod
     async def parse_openapi_schema(schema_data: str = None, schema_url: str = None) -> Dict[str, Any]:
@@ -1190,57 +1247,44 @@ class ToolService:
             
             # 创建MCP客户端
             connection_config = mcp_config.connection_config or {}
+            client = SimpleMCPClient(mcp_config.server_url, connection_config)
             
-            client = MCPClient(mcp_config.server_url, connection_config)
-            
-            if await client.connect():
-                try:
-                    # 获取工具列表
-                    tools = await client.list_tools()
-                    tool_names = [tool.get("name") for tool in tools if tool.get("name")]
-                    
-                    # 更新数据库
-                    mcp_config.available_tools = tool_names
-                    mcp_config.last_health_check = datetime.now()
-                    mcp_config.health_status = "healthy"
-                    mcp_config.error_message = None
-                    
-                    # 更新工具状态
-                    config.status = ToolStatus.AVAILABLE.value
-                    
-                    self.db.commit()
-                    
-                    await client.disconnect()
-                    
-                    return {
-                        "success": True,
-                        "message": "工具列表同步成功",
-                        "tools_count": len(tool_names),
-                        "tools": tool_names
-                    }
-                    
-                except Exception as e:
-                    await client.disconnect()
-                    
-                    # 更新错误状态
+            async with client:
+                # 获取工具列表
+                tools = await client.list_tools()
+                tool_names = [tool.get("name") for tool in tools if tool.get("name")]
+                
+                # 更新数据库
+                mcp_config.available_tools = tool_names
+                mcp_config.last_health_check = datetime.now()
+                mcp_config.health_status = "healthy"
+                mcp_config.error_message = None
+                
+                # 更新工具状态
+                config.status = ToolStatus.AVAILABLE.value
+                
+                self.db.commit()
+                
+                return {
+                    "success": True,
+                    "message": "工具列表同步成功",
+                    "tools_count": len(tool_names),
+                    "tools": tool_names
+                }
+                
+        except Exception as e:
+            # 更新错误状态
+            try:
+                mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
+                if mcp_config:
                     mcp_config.last_health_check = datetime.now()
                     mcp_config.health_status = "error"
                     mcp_config.error_message = str(e)
                     config.status = ToolStatus.ERROR.value
                     self.db.commit()
-                    
-                    return {"success": False, "message": f"获取工具列表失败: {str(e)}"}
-            else:
-                # 连接失败
-                mcp_config.last_health_check = datetime.now()
-                mcp_config.health_status = "error"
-                mcp_config.error_message = "连接失败"
-                config.status = ToolStatus.ERROR.value
-                self.db.commit()
-                
-                return {"success": False, "message": "MCP连接失败"}
-                
-        except Exception as e:
+            except:
+                pass
+            
             logger.error(f"同步MCP工具列表失败: {tool_id}, 错误: {e}")
             return {"success": False, "message": f"同步失败: {str(e)}"}
 
