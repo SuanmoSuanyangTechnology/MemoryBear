@@ -4,6 +4,7 @@ Memory Agent Service
 Handles business logic for memory agent operations including read/write services,
 health checks, and message type classification.
 """
+import datetime
 import json
 import os
 import re
@@ -24,6 +25,7 @@ from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
+from app.repositories.memory_repository import ShortTermMemoryRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import ConfigurationError, MemoryConfig
 from app.services.memory_config_service import MemoryConfigService
@@ -596,7 +598,31 @@ class MemoryAgentService:
                         "has_answer": bool(final_answer)
                     }
                 )
-            
+            retrieved_content=[]
+            repo = ShortTermMemoryRepository(db)
+            if str(search_switch)!="2":
+                for intermediate in intermediate_outputs:
+                    intermediate_type=intermediate['type']
+                    if intermediate_type=="search_result":
+                        message=intermediate['query']
+                        raw_results=intermediate['raw_results']
+                        reranked_results=raw_results.get('reranked_results',[])
+                        statements=[statement['statement'] for statement in reranked_results.get('statements', [])]
+                        statements=list(set(statements))
+                        retrieved_content.append({message:statements})
+            if   '信息不足，无法回答' in str(final_answer) or retrieved_content!=[]:
+                # 使用 upsert 方法
+                repo.upsert(
+                    end_user_id=group_id,  # 确保这个变量在作用域内
+                    messages=message,
+                    aimessages=final_answer,
+                    retrieved_content=retrieved_content,
+                    search_switch=str(search_switch)
+                )
+                print("写入成功")
+
+
+
             return {
                 "answer": final_answer,
                 "intermediate_outputs": intermediate_outputs
