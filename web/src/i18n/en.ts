@@ -1144,6 +1144,8 @@ export const en = {
       merge: 'Complete Aggregation',
       vote: 'Key Information Extraction',
       priority: 'Structured Integration',
+      addTool: 'Add Tool',
+      tool: 'Tool',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -1201,6 +1203,7 @@ export const en = {
       IMPLICIT_MEMORY: 'Implicit Memory',
       EMOTIONAL_MEMORY: 'Emotional Memory',
       EPISODIC_MEMORY: 'Episodic Memory',
+      FORGETTING_MANAGEMENT: 'Forgetting Management',
 
       endUserProfile: 'Core Profile',
       editEndUserProfile: 'Edit',
@@ -1833,6 +1836,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           status_code: 'Status Code',
           max_attempts: 'Max Retry Attempts',
           retry_interval: 'Retry Interval',
+          errorBranch: 'Error Branch',
         },
         'jinja-render': {
           template: 'Code',
