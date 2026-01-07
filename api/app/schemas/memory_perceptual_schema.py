@@ -41,7 +41,7 @@ class PerceptualMemoryItem(BaseModel):
     file_path: str = Field(..., description="File path in the storage service")
     file_name: str = Field(..., description="File name")
     summary: Optional[str] = Field(None, description="摘要")
-    metadata: dict = Field(..., description="元数据")
+    storage_type: FileStorageType = Field(..., description="Storage type for file")
     created_time: Optional[datetime] = Field(None, description="创建时间")
 
     class Config:
