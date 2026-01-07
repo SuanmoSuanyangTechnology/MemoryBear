@@ -17,7 +17,7 @@ from app.core.logging_config import get_business_logger
 from app.core.memory.agent.utils.redis_tool import store
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.models.models_model import ModelType
-from app.repositories.memory_repository import LongTermMemoryRepository
+from app.repositories.memory_short_repository import LongTermMemoryRepository
 from app.services.memory_agent_service import (
     get_end_user_connected_config,
 )

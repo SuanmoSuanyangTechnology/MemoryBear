@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 import uuid
 import datetime
 
-from app.models.memory_model import ShortTermMemory, LongTermMemory
+from app.models.memory_short_model import ShortTermMemory, LongTermMemory
 from app.core.logging_config import get_db_logger
 
 # 获取数据库专用日志器
