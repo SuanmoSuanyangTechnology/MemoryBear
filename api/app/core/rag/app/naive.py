@@ -64,8 +64,8 @@ def by_mineru(filename, binary=None, from_page=0, to_page=100000, lang="Chinese"
 
 def by_textln(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, vision_model=None, pdf_cls = None, **kwargs):
     textln_api = os.environ.get("TEXTLN_APISERVER", "https://api.textin.com/ai/service/v1/pdf_to_markdown")
-    app_id = os.environ.get("TEXTLN_APP_ID", "fa3f24380683ad53e6c620c0f0878a09")
-    secret_code = os.environ.get("TEXTLN_SECRET_CODE", "6130caac9aabc6eb26433758d7898f4a")
+    app_id = os.environ.get("TEXTLN_APP_ID", "")
+    secret_code = os.environ.get("TEXTLN_SECRET_CODE", "")
     pdf_parser = TextLnParser(textln_api=textln_api, app_id=app_id, secret_code=secret_code)
 
     sections, tables = pdf_parser.parse_pdf(
