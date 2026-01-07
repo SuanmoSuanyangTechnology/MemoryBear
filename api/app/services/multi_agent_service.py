@@ -348,13 +348,14 @@ class MultiAgentService:
             )
             return config
 
+        # 完全替换配置，但对于数据库 NOT NULL 字段，如果新值是 None 则保留原值
         config.default_model_config_id = newConfig.default_model_config_id
         config.model_parameters = newConfig.model_parameters
-        config.orchestration_mode = newConfig.orchestration_mode
-        config.sub_agents = newConfig.sub_agents
+        config.orchestration_mode = newConfig.orchestration_mode or config.orchestration_mode
+        config.sub_agents = newConfig.sub_agents if newConfig.sub_agents is not None else config.sub_agents
         config.routing_rules = newConfig.routing_rules
-        config.execution_config = newConfig.execution_config
-        config.aggregation_strategy = newConfig.aggregation_strategy
+        config.execution_config = newConfig.execution_config if newConfig.execution_config else config.execution_config
+        config.aggregation_strategy = newConfig.aggregation_strategy or config.aggregation_strategy
         self.db.commit()
         self.db.refresh(config)
 
