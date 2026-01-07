@@ -25,7 +25,7 @@ const Neo4j: FC = () => {
   const aboutMeRef = useRef<AboutMeRef>(null)
 
   const handleNameUpdate = (data: { other_name?: string; id: string }) => {
-    setName(data.other_name ?? data.id)
+    setName(data.other_name && data.other_name !== '' ? data.other_name : data.id)
   }
 
   const handleRefresh = () => {

@@ -9,7 +9,7 @@ const { Header } = Layout;
 interface ConfigHeaderProps {
   name?: string;
   operation?: ReactNode;
-  source?: 'detail' | 'statement'
+  source?: 'detail' | 'node'
 }
 const PageHeader: FC<ConfigHeaderProps> = ({ 
   name,
