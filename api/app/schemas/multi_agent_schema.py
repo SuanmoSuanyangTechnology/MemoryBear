@@ -66,9 +66,9 @@ class MultiAgentConfigCreate(BaseModel):
     master_agent_id: uuid.UUID = Field(..., description="主 Agent ID")
     master_agent_name: Optional[str] = Field(None, max_length=100, description="主 Agent 名称")
     orchestration_mode: str = Field(
-        ...,
-        pattern="^(sequential|parallel|conditional|loop)$",
-        description="编排模式：sequential|parallel|conditional|loop"
+        default="collaboration",
+        pattern="^(collaboration|supervisor)$",
+        description="协作模式：collaboration（协作）| supervisor（监督）"
     )
     sub_agents: List[SubAgentConfig] = Field(..., description="子 Agent 列表")
     routing_rules: Optional[List[RoutingRule]] = Field(None, description="路由规则")
@@ -90,8 +90,9 @@ class MultiAgentConfigUpdate(BaseModel):
         description="模型参数配置（temperature、max_tokens 等）"
     )
     orchestration_mode: Optional[str] = Field(
-        None,
-        pattern="^(sequential|parallel|conditional|loop)$"
+        default="collaboration",
+        pattern="^(collaboration|supervisor)$",
+        description="协作模式：collaboration（协作）| supervisor（监督）"
     )
     sub_agents: Optional[List[SubAgentConfig]] = None
     routing_rules: Optional[List[RoutingRule]] = None
