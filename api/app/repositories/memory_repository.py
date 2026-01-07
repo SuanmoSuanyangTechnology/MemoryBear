@@ -63,22 +63,18 @@ class ShortTermMemoryRepository:
             Optional[ShortTermMemory]: 记忆对象，如果不存在则返回None
         """
         try:
-            memory = (
+            count = (
                 self.db.query(ShortTermMemory)
                 .filter(ShortTermMemory.end_user_id == end_user_id)
                 .count()
             )
-            
-            if memory:
-                db_logger.debug(f"成功查询到短期记忆记录 {memory}")
-            else:
-                db_logger.debug(f"未找到短期记忆记录 {memory}")
+            db_logger.debug(f"成功统计用户 {end_user_id} 的短期记忆数量: {count}")
                 
-            return memory
+            return count
             
         except Exception as e:
             self.db.rollback()
-            db_logger.error(f"查询短期记忆记录 {memory} 时出错: {str(e)}")
+            db_logger.error(f"查询短期记忆记录 {count} 时出错: {str(e)}")
             raise
 
 
