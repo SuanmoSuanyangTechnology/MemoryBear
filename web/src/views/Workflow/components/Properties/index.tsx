@@ -82,7 +82,7 @@ const Properties: FC<PropertiesProps> = ({
 
   useEffect(() => {
     if (values && selectedNode) {
-      const { id, knowledge_retrieval, group, group_names, ...rest } = values
+      const { id, knowledge_retrieval, group, group_variables, ...rest } = values
       const { knowledge_bases = [], ...restKnowledgeConfig } = (knowledge_retrieval as any) || {}
 
       let allRest = {
@@ -730,7 +730,7 @@ const Properties: FC<PropertiesProps> = ({
                         }
                         />
                       : config.type === 'switch'
-                      ? <Switch onChange={key === 'group' ? () => { form.setFieldValue('group_names', []) } : undefined} />
+                                    ? <Switch onChange={key === 'group' ? () => { form.setFieldValue('group_variables', []) } : undefined} />
                       : config.type === 'categoryList'
                       ? <CategoryList parentName={key} selectedNode={selectedNode} graphRef={graphRef} />
                       : config.type === 'conditionList'

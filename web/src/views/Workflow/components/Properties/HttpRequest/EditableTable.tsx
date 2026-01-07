@@ -1,179 +1,155 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next'
-import { Button, Select, Table } from 'antd';
+import { Button, Select, Table, Form, type TableProps } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
-import Editor from '../../Editor';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
 import Empty from '@/components/Empty';
 import VariableSelect from '../VariableSelect';
 
+interface EditableCellProps extends React.HTMLAttributes<HTMLElement> {
+  name?: string | string[];
+  inputType?: 'select' | 'variableSelect';
+  options?: { value: string, label: string }[] | Suggestion[];
+}
+
+const EditableCell: React.FC<React.PropsWithChildren<EditableCellProps>> = ({ 
+  name, 
+  inputType, 
+  options, 
+  children,
+  ...restProps 
+}) => {
+  const { t } = useTranslation();
+  
+  if (!inputType) return <td {...restProps}>{children}</td>;
+  
+  return (
+    <td {...restProps}>
+      <Form.Item name={name} style={{ margin: 0 }}>
+        {inputType === 'select' ? (
+          <Select 
+            placeholder={t('common.pleaseSelect')} 
+            size="small" 
+            options={options as { value: string, label: string }[]} 
+          />
+        ) : (
+          <VariableSelect 
+            placeholder={t('common.pleaseSelect')} 
+            size="small" 
+            options={(options as Suggestion[]) || []} 
+          />
+        )}
+      </Form.Item>
+    </td>
+  );
+};
+
 export interface TableRow {
   key: string;
-  name: string;
-  value: string;
+  name?: string;
+  value?: string;
   type?: string;
 }
 
 interface EditableTableProps {
+  parentName: string | string[];
   title?: string;
-  value?: Record<string, string> | TableRow[];
-  onChange?: (value: TableRow[]) => void;
   options?: Suggestion[];
-  typeOptions?: {value: string, label: string}[]
+  typeOptions?: { value: string, label: string }[]
 }
 
 const EditableTable: React.FC<EditableTableProps> = ({
+  parentName,
   title,
-  value,
-  onChange,
   options = [],
   typeOptions = []
 }) => {
-  const { t } = useTranslation()
-  const [rows, setRows] = useState<TableRow[]>([]);
+  const { t } = useTranslation();
+  const form = Form.useFormInstance();
+  const values = Form.useWatch(typeof parentName === 'string' ? [parentName] : parentName, form);
 
-  useEffect(() => {
-    if (Array.isArray(value)) {
-      setRows([...value])
-    } else if (value && Object.keys(value).length > 0) {
-      setRows(Object.entries(value).map(([key, val], index) => ({
-        key: index.toString(),
-        name: key || '',
-        value: val || '',
-        type: typeOptions.length > 0 ? typeOptions[0].value : undefined
-      })))
-    } else {
-      setRows([])
-    }
-  }, [value, typeOptions])
+  const createNewRow = (): TableRow => ({
+    key: Date.now().toString(),
+    name: undefined,
+    value: undefined,
+    ...(typeOptions.length > 0 && { type: typeOptions[0].value })
+  });
 
-  const handleChange = (key: string, field: 'name' | 'value' | 'type', val: string) => {
-    const newRows = rows.map(row => 
-      row.key === key ? { ...row, [field]: val } : row
-    );
-    setRows(newRows);
-    onChange?.(newRows);
-  };
+  const handleAdd = useCallback(() => {
+    form.setFieldValue(parentName, [...(values ?? []), createNewRow()]);
+  }, [form, parentName, values, typeOptions]);
 
-  const handleAdd = () => {
-    const newRow: TableRow = {
-      key: Date.now().toString(),
-      name: '',
-      value: '',
-      ...(typeOptions.length > 0 && { type: typeOptions[0].value })
-    };
-    const newRows = [...rows, newRow];
-    setRows(newRows);
-    onChange?.(newRows);
-  };
+  const handleDelete = useCallback((index: number) => {
+    const currentValues = form.getFieldValue(parentName) || [];
+    form.setFieldValue(parentName, currentValues.filter((_: TableRow, i: number) => i !== index));
+  }, [form, parentName]);
 
-  const handleDelete = (key: string) => {
-    const newRows = rows.filter(row => row.key !== key);
-    setRows(newRows);
-    onChange?.(newRows);
-  };
+  const createColumn = (dataIndex: string, inputType: 'select' | 'variableSelect', width: string, columnOptions: any[]) => ({
+    title: t(`workflow.config.${dataIndex}`),
+    dataIndex,
+    width,
+    onCell: (_: TableRow, index?: number) => ({
+      name: typeof parentName === 'string' ? [parentName, index ?? 0, dataIndex] : [...parentName, index ?? 0, dataIndex],
+      inputType,
+      options: columnOptions
+    } as any)
+  });
 
-  const columns = useMemo(() => {
-    const baseColumns = [
+  const columns: TableProps<TableRow>['columns'] = useMemo(() => {
+    const hasType = typeOptions.length > 0;
+    const baseWidth = hasType ? '35%' : '45%';
+
+    return [
+      createColumn('name', 'variableSelect', baseWidth, options),
+      ...(hasType ? [createColumn('type', 'select', '20%', typeOptions)] : []),
+      createColumn('value', 'variableSelect', baseWidth, options),
       {
-        title: typeOptions.length > 0 ? t('workflow.config.name') : '键',
-        dataIndex: 'name',
-        width: typeOptions.length > 0 ? '35%' : '45%',
-        render: (text: string, record: TableRow) => (
-          <Editor
-            options={options}
-            value={text}
-            height={32}
-            variant="outlined"
-            onChange={(value) => handleChange(record.key, 'name', value || '')}
-          />
-        ),
+        title: '',
+        dataIndex: 'actions',
+        width: '10%',
+        render: (_: any, __: TableRow, index: number) => (
+          <Button type="text" icon={<DeleteOutlined />} onClick={() => handleDelete(index)} />
+        )
       }
     ];
+  }, [typeOptions, options, t, parentName, handleDelete]);
 
-    if (typeOptions.length > 0) {
-      baseColumns.push({
-        title: t('workflow.config.type'),
-        dataIndex: 'type',
-        width: '20%',
-        render: (text: string, record: TableRow) => (
-          <Select
-            value={text}
-            options={typeOptions}
-            onChange={(value) => handleChange(record.key, 'type', value)}
-          />
-        ),
-      });
-    }
-
-    baseColumns.push({
-      title: typeOptions.length > 0 ? t('workflow.config.value') : '值',
-      dataIndex: 'value',
-      width: typeOptions.length > 0 ? '35%' : '45%',
-      render: (text: string, record: TableRow) => {
-        if (record.type === 'file') {
-          return (
-            <VariableSelect
-              options={options}
-              value={text}
-              onChange={(value) => handleChange(record.key, 'value', value || '')}
-            />
-          )
-        }
-        return (
-          <Editor
-            options={options}
-            value={text}
-            height={32}
-            variant="outlined"
-            onChange={(value) => handleChange(record.key, 'value', value || '')}
-          />
-        )
-      },
-    });
-
-    baseColumns.push({
-      title: '',
-      dataIndex: 'actions',
-      width: '10%',
-      render: (_: any, record: TableRow) => (
-        <Button
-          type="text"
-          icon={<DeleteOutlined />}
-          onClick={() => handleDelete(record.key)}
-        />
-      ),
-    });
-
-    return baseColumns;
-  }, [typeOptions, options, t]);
+  const AddButton = ({ block = false }: { block?: boolean }) => (
+    <Button 
+      type={block ? "dashed" : "text"} 
+      icon={<PlusOutlined />} 
+      onClick={handleAdd} 
+      size="small"
+      block={block}
+      className={block ? "rb:mt-1" : ""}
+    >
+      {block && `+${t('common.add')}`}
+    </Button>
+  );
 
   return (
     <div className="rb:mb-4">
       {title && (
         <div className="rb:flex rb:items-center rb:mb-2 rb:justify-between">
           <div className="rb:font-medium">{title}</div>
-          <Button
-            type="text"
-            icon={<PlusOutlined />}
-            onClick={handleAdd}
-            size="small"
-          />
+          <AddButton />
         </div>
       )}
-      <Table
-        columns={columns}
-        dataSource={rows}
-        pagination={false}
-        size="small"
-        locale={{ emptyText: <Empty size={88} /> }}
-        scroll={{ x: 'max-content' }}
-      />
-      {!title && (
-        <Button type="dashed" onClick={handleAdd} block className='rb:mt-1'>
-          +{t('common.add')}
-        </Button>
-      )}
+      
+      <Form.Item name={parentName}>
+        <Table<TableRow>
+          components={{ body: { cell: EditableCell } }}
+          bordered
+          dataSource={values}
+          columns={columns}
+          pagination={false}
+          size="small"
+          locale={{ emptyText: <Empty size={88} /> }}
+          scroll={{ x: 'max-content' }}
+        />
+      </Form.Item>
+      
+      {!title && <AddButton block />}
     </div>
   );
 };
