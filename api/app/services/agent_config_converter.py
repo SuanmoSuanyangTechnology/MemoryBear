@@ -77,7 +77,7 @@ class AgentConfigConverter:
             "knowledge_retrieval": None,
             "memory": MemoryConfig(enabled=True),
             "variables": [],
-            "tools": {},
+            "tools": [],
         }
         
         # 1. 解析模型参数配置
