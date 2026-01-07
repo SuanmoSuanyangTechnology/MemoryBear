@@ -54,29 +54,34 @@ class MultiAgentOrchestrator:
         # 初始化会话状态管理器
         self.state_manager = ConversationStateManager()
 
-        # 获取 Master Agent 的模型配置
-        if not self.default_model_config_id:
-            raise BusinessException("Master Agent 缺少模型配置", BizCode.AGENT_CONFIG_MISSING)
+        # 只有 supervisor 模式才需要 default_model_config_id 和 router
+        self.master_model_config = None
+        self.router = None
+        
+        if self._normalized_mode == OrchestrationMode.SUPERVISOR:
+            # 获取 Master Agent 的模型配置
+            if not self.default_model_config_id:
+                raise BusinessException("Supervisor 模式需要配置默认模型", BizCode.AGENT_CONFIG_MISSING)
 
-        self.master_model_config = self.db.get(ModelConfig, self.default_model_config_id)
-        if not self.master_model_config:
-            raise BusinessException("Master Agent 模型配置不存在", BizCode.AGENT_CONFIG_MISSING)
+            self.master_model_config = self.db.get(ModelConfig, self.default_model_config_id)
+            if not self.master_model_config:
+                raise BusinessException("Master Agent 模型配置不存在", BizCode.AGENT_CONFIG_MISSING)
 
-        # 初始化 Master Agent 路由器
-        self.router = MasterAgentRouter(
-            db=db,
-            master_model_config=self.master_model_config,
-            model_parameters=self.model_parameters,
-            sub_agents=self.sub_agents,
-            state_manager=self.state_manager,
-            enable_rule_fast_path=config.execution_config.get("enable_rule_fast_path", True)
-        )
+            # 初始化 Master Agent 路由器
+            self.router = MasterAgentRouter(
+                db=db,
+                master_model_config=self.master_model_config,
+                model_parameters=self.model_parameters,
+                sub_agents=self.sub_agents,
+                state_manager=self.state_manager,
+                enable_rule_fast_path=config.execution_config.get("enable_rule_fast_path", True)
+            )
 
         logger.info(
             "多 Agent 编排器初始化完成",
             extra={
                 "config_id": str(config.id),
-                "model": self.master_model_config.name,
+                "model": self.master_model_config.name if self.master_model_config else None,
                 "sub_agent_count": len(self.sub_agents),
                 "orchestration_mode": self._normalized_mode
             }
@@ -139,15 +144,11 @@ class MultiAgentOrchestrator:
                 "timestamp": time.time()
             })
 
-            # 1. 主 Agent 分析任务
-            task_analysis = await self._analyze_task(message, variables)
-            task_analysis["use_llm_routing"] = use_llm_routing
-
             # 2. 根据模式执行（流式）
-            # Supervisor 模式：由主 Agent 统一调度子 Agent
-            if self._normalized_mode == OrchestrationMode.SUPERVISOR:
-                async for event in self._execute_conditional_stream(
-                    task_analysis,
+            # Collaboration 模式：Agent 之间可以相互 handoff（使用 handoffs_service）
+            if self._normalized_mode == OrchestrationMode.COLLABORATION:
+                async for event in self._execute_collaboration_mode_stream(
+                    message,
                     conversation_id,
                     user_id,
                     web_search,
@@ -156,9 +157,13 @@ class MultiAgentOrchestrator:
                     user_rag_memory_id
                 ):
                     yield event
-            # Collaboration 模式：Agent 之间可以相互 handoff（使用 handoffs_service）
-            elif self._normalized_mode == OrchestrationMode.COLLABORATION:
-                async for event in self._execute_collaboration_mode_stream(
+            # Supervisor 模式：由主 Agent 统一调度子 Agent
+            elif self._normalized_mode == OrchestrationMode.SUPERVISOR:
+                # 1. 主 Agent 分析任务
+                task_analysis = await self._analyze_task(message, variables)
+                task_analysis["use_llm_routing"] = use_llm_routing
+                
+                async for event in self._execute_conditional_stream(
                     task_analysis,
                     conversation_id,
                     user_id,
@@ -1406,7 +1411,7 @@ class MultiAgentOrchestrator:
 
     async def _execute_collaboration_mode_stream(
         self,
-        task_analysis: Dict[str, Any],
+        message: str,
         conversation_id: Optional[uuid.UUID],
         user_id: Optional[str],
         web_search: bool = False,
@@ -1419,7 +1424,7 @@ class MultiAgentOrchestrator:
         使用 handoffs_service 实现 Agent 之间的动态切换
         
         Args:
-            task_analysis: 任务分析结果
+            message: 用户消息
             conversation_id: 会话 ID
             user_id: 用户 ID
             web_search: 是否启用网络搜索
@@ -1435,19 +1440,15 @@ class MultiAgentOrchestrator:
             HandoffsService
         )
         
-        message = task_analysis.get("message", "")
-        
         try:
             # 1. 构建 multi_agent_config 字典
             multi_agent_config = {
                 "sub_agents": self.config.sub_agents,
-                "default_model_config_id": self.config.default_model_config_id,
-                "model_parameters": self.config.model_parameters,
                 "orchestration_mode": self.config.orchestration_mode
             }
             
-            # 2. 转换配置
-            agent_configs, model_config = convert_multi_agent_config_to_handoffs(
+            # 2. 转换配置（每个 Agent 包含自己的 model_config）
+            agent_configs = convert_multi_agent_config_to_handoffs(
                 multi_agent_config, 
                 self.db
             )
@@ -1455,13 +1456,9 @@ class MultiAgentOrchestrator:
             if not agent_configs:
                 raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
             
-            if not model_config:
-                raise BusinessException("没有配置模型", BizCode.AGENT_CONFIG_MISSING)
-            
             # 3. 创建 HandoffsService
             handoffs_service = HandoffsService(
                 agent_configs=agent_configs,
-                model_config=model_config,
                 streaming=True
             )
             
@@ -1513,13 +1510,11 @@ class MultiAgentOrchestrator:
             # 1. 构建 multi_agent_config 字典
             multi_agent_config = {
                 "sub_agents": self.config.sub_agents,
-                "default_model_config_id": self.config.default_model_config_id,
-                "model_parameters": self.config.model_parameters,
                 "orchestration_mode": self.config.orchestration_mode
             }
             
-            # 2. 转换配置
-            agent_configs, model_config = convert_multi_agent_config_to_handoffs(
+            # 2. 转换配置（每个 Agent 包含自己的 model_config）
+            agent_configs = convert_multi_agent_config_to_handoffs(
                 multi_agent_config, 
                 self.db
             )
@@ -1527,13 +1522,9 @@ class MultiAgentOrchestrator:
             if not agent_configs:
                 raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
             
-            if not model_config:
-                raise BusinessException("没有配置模型", BizCode.AGENT_CONFIG_MISSING)
-            
             # 3. 创建 HandoffsService
             handoffs_service = HandoffsService(
                 agent_configs=agent_configs,
-                model_config=model_config,
                 streaming=False
             )
             
