@@ -26,6 +26,7 @@ export interface NodeConfig {
 
   group_variables?: Array<{ key: string, value: string[] }>
   cycle?: string;
+  cycle_vars?: Array<{ name: string; type: string; value: string; input_type: string; }>
   [key: string]: unknown;
 }
 

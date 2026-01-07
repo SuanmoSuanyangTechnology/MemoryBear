@@ -626,10 +626,10 @@ export const zh = {
       promptEmpty: '在左侧描述您的用例，编排预览将在此处显示。',
 
       master: '主管模式',
-      master_agent: '主管模式',
-      master_agentDesc: '由主 Agent 统一调度和管理，子 Agent 按照主管分配的任务执行，适合需要集中控制的场景。',
-      handoffs: '协作模式',
-      handoffsDesc: '多个 Agent 平等协作，根据任务需求自主协调配合，适合需要灵活互动的复杂场景。',
+      supervisor: '主管模式',
+      supervisorDesc: '由主 Agent 统一调度和管理，子 Agent 按照主管分配的任务执行，适合需要集中控制的场景。',
+      collaboration: '协作模式',
+      collaborationDesc: '多个 Agent 平等协作，根据任务需求自主协调配合，适合需要灵活互动的复杂场景。',
       masterConfig: '主管配置',
       orchestrationMode: '任务分配策略',
       conditional: '智能分配',
@@ -639,6 +639,8 @@ export const zh = {
       merge: '完整汇总',
       vote: '关键信息提取',
       priority: '结构化整合',
+      addTool: '添加工具',
+      tool: '工具',
     },
     // 角色管理相关翻译
     role: {
@@ -1286,6 +1288,7 @@ export const zh = {
       IMPLICIT_MEMORY: '隐性记忆',
       EMOTIONAL_MEMORY: '情绪记忆',
       EPISODIC_MEMORY: '情景记忆',
+      FORGETTING_MANAGEMENT: '遗忘',
 
       endUserProfile: '核心档案',
       editEndUserProfile: '编辑',
@@ -1939,6 +1942,7 @@ export const zh = {
           status_code: '状态码',
           max_attempts: '最大重试次数',
           retry_interval: '重试间隔',
+          errorBranch: '异常分支',
         },
         'jinja-render': {
           template: '代码',
@@ -2252,5 +2256,12 @@ export const zh = {
       orderPayInfo: '支付信息',
       create_time: '创建时间',
     },
+    forgetDetail: {
+      title: '遗忘管理系统帮助AI智能管理记忆生命周期，通过自动识别低价值记忆、设置遗忘策略和执行定期清理，优化记忆库存储空间，提升检索效率。',
+      overviewTitle: '核心指标概览',
+      totalMemory: '记忆总量',
+      MemoryHealth: '记忆健康度',
+      riskOfForgetting: '遗忘风险',
+    }
   },
 }

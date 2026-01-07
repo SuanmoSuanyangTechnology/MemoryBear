@@ -9,8 +9,10 @@ import VariableSelect from "../VariableSelect";
 import MessageEditor from '../MessageEditor'
 import EditableTable from './EditableTable'
 
-const HttpRequest: FC<{ options: Suggestion[]; }> = ({
+const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: any; }> = ({
   options,
+  selectedNode,
+  graphRef
 }) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance();
@@ -22,18 +24,45 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
   }
   const handleRefresh = (auth: HttpRequestConfigForm['auth']) => {
     console.log('handleRefresh', auth)
-    form.setFieldsValue({ auth: {...auth} })
+    form.setFieldsValue({ auth })
   }
 
-  const handleChangeBodyContentType = (contentType: string) => {
-    const currentValues = form.getFieldsValue()
+  const handleChangeBodyContentType = () => {
+    form.setFieldValue(['body', 'data'], undefined)
+  }
+
+  const handleChangeErrorHandleMethod = (method: string) => {
     form.setFieldsValue({
-      body: {
-        ...currentValues?.body,
-        content_type: contentType,
-        data: undefined
+      error_handle: {
+        method,
+        body: undefined,
+        status_code: undefined,
+        headers: undefined
       }
     })
+    
+    // 更新节点连接桩
+    console.log('handleChangeErrorHandleMethod', selectedNode, graphRef?.current)
+    if (selectedNode && graphRef?.current) {
+      const existingPorts = selectedNode.getPorts();
+      const errorPort = existingPorts.find((port: any) => port.id === 'ERROR');
+      
+      if (method === 'branch' && !errorPort) {
+        // 添加异常节点连接桩
+        selectedNode.addPort({
+          id: 'ERROR',
+          group: 'right',
+          attrs: { text: { text: t('workflow.config.http-request.errorBranch'), fontSize: 12, fill: '#5B6167' }}
+        });
+      } else if (method !== 'branch' && errorPort) {
+        // 移除异常节点连接桩和相关连线
+        const edges = graphRef.current.getEdges().filter((edge: any) => 
+          edge.getSourceCellId() === selectedNode.id && edge.getSourcePortId() === 'ERROR'
+        );
+        edges.forEach((edge: any) => graphRef.current.removeCell(edge));
+        selectedNode.removePort('ERROR');
+      }
+    }
   }
 
   console.log('HttpRequest', values)
@@ -73,6 +102,7 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
           parentName="headers"
           title="HEADERS"
           options={options}
+          filterBooleanType={true}
         />
       </Form.Item>
 
@@ -81,6 +111,7 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
           parentName="params"
           title="PARAMS"
           options={options}
+          filterBooleanType={true}
         />
       </Form.Item>
 
@@ -104,6 +135,7 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
             <EditableTable
               parentName={['body', 'data']}
               options={options}
+              filterBooleanType={true}
               typeOptions={[
                 { label: 'text', value: 'text' },
                 { label: 'file', value: 'file' }
@@ -116,12 +148,15 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
             <EditableTable
               parentName={['body', 'data']}
               options={options}
+              filterBooleanType={true}
             />
           </Form.Item>
         }
         {values?.body?.content_type === 'json' &&
           <Form.Item name={['body', 'data']}>
             <MessageEditor
+              key="json"
+              parentName={['body', 'data']}
               options={options}
               isArray={false}
               title="JSON"
@@ -131,6 +166,8 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
         {values?.body?.content_type === 'raw' &&
           <Form.Item name={['body', 'data']}>
             <MessageEditor
+              key="raw"
+              parentName={['body', 'data']}
               options={options}
               isArray={false}
               title="RAW TEXT"
@@ -141,6 +178,7 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
           <Form.Item name={['body', 'data']}>
             <VariableSelect
               options={options}
+              filterBooleanType={true}
             />
           </Form.Item>
         }
@@ -185,7 +223,7 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
           </Form.Item>
           <Form.Item
             name={['retry', 'retry_interval']}
-            label={t('workflow.config.http-request.retry_interval')}
+            label={<>{t('workflow.config.http-request.retry_interval')} <span className="rb:text-[#5B6167]">(ms)</span></>}
           >
             <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
           </Form.Item>
@@ -196,6 +234,7 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
       <Form.Item layout="horizontal" name={['error_handle', 'method']} label={t('workflow.config.http-request.error_handle')}>
         <Select
           placeholder={t('common.pleaseSelect')}
+          onChange={handleChangeErrorHandleMethod}
           options={[
             { value: 'none', label: t('workflow.config.http-request.none') },
             { value: 'default', label: t('workflow.config.http-request.default') },
@@ -207,32 +246,19 @@ const HttpRequest: FC<{ options: Suggestion[]; }> = ({
         <>
           <Form.Item
             name={['error_handle', 'body']}
-            label="body"
+            label={<>body <span className="rb:text-[#5B6167] rb:ml-1">string</span></>}
           >
             <Input placeholder={t('common.pleaseEnter')} />
           </Form.Item>
           <Form.Item
             name={['error_handle', 'status_code']}
-            label="status_code"
+            label={<>status_code <span className="rb:text-[#5B6167] rb:ml-1">number</span></>}
           >
             <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
           </Form.Item>
           <Form.Item
             name={['error_handle', 'headers']}
-            label="headers"
-            rules={[
-              {
-                validator: (_, value) => {
-                  if (!value) return Promise.resolve();
-                  try {
-                    JSON.parse(value);
-                    return Promise.resolve();
-                  } catch {
-                    return Promise.reject(new Error('Please enter valid JSON format'));
-                  }
-                }
-              }
-            ]}
+            label={<>headers <span className="rb:text-[#5B6167] rb:ml-1">object</span></>}
           >
             <Input.TextArea placeholder={t('common.pleaseEnter')} />
           </Form.Item>

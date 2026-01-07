@@ -90,11 +90,19 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
         switch (item.event) {
           case 'start':
             currentPromptValueRef.current = ''
+            if (editorRef.current?.clear) {
+              editorRef.current.clear();
+            }
             break;
           case 'message':
             if (content) {
               currentPromptValueRef.current += content;
-              form.setFieldsValue({ current_prompt: currentPromptValueRef.current })
+              if (editorRef.current?.appendText) {
+                editorRef.current.appendText(content);
+                editorRef.current.scrollToBottom();
+              } else {
+                form.setFieldsValue({ current_prompt: currentPromptValueRef.current })
+              }
             }
             if (desc) {
               setChatList(prev => {
@@ -107,6 +115,8 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
             break;
           case 'end':
             setLoading(false)
+            // 流结束时同步表单值
+            form.setFieldsValue({ current_prompt: currentPromptValueRef.current })
             break
         }
       })
