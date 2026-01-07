@@ -185,7 +185,6 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "llm_id": config.llm_id,
                 "embedding_id": config.embedding_id,
                 "rerank_id": config.rerank_id,
-                "llm": config.llm,
                 "enable_llm_dedup_blockwise": config.enable_llm_dedup_blockwise,
                 "enable_llm_disambiguation": config.enable_llm_disambiguation,
                 "deep_retrieval": config.deep_retrieval,

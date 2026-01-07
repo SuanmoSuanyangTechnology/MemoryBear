@@ -327,7 +327,7 @@ class DataConfigRepository:
             # 更新字段映射
             field_mapping = {
                 # 模型选择
-                "llm_id": "llm",
+                "llm_id": "llm_id",
                 "embedding_id": "embedding_id",
                 "rerank_id": "rerank_id",
                 # 记忆萃取引擎
