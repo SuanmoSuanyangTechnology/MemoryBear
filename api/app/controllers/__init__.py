@@ -35,6 +35,7 @@ from . import (
     tool_controller,
     memory_forget_controller,
     home_page_controller,
+    memory_perceptual_controller
 )
 from . import user_memory_controllers
 
@@ -74,5 +75,6 @@ manager_router.include_router(memory_reflection_controller.router)
 manager_router.include_router(tool_controller.router)
 manager_router.include_router(memory_forget_controller.router)
 manager_router.include_router(home_page_controller.router)
+manager_router.include_router(memory_perceptual_controller.router)
 
 __all__ = ["manager_router"]
