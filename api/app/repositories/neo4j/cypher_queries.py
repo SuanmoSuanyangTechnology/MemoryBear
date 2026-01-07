@@ -722,7 +722,12 @@ SET m += {
     chunk_ids: summary.chunk_ids,
     content: summary.content,
     summary_embedding: summary.summary_embedding,
-    config_id: summary.config_id
+    config_id: summary.config_id,
+    importance_score: CASE WHEN summary.importance_score IS NOT NULL THEN summary.importance_score ELSE coalesce(m.importance_score, 0.5) END,
+    activation_value: CASE WHEN summary.activation_value IS NOT NULL THEN summary.activation_value ELSE m.activation_value END,
+    access_history: CASE WHEN summary.access_history IS NOT NULL THEN summary.access_history ELSE coalesce(m.access_history, []) END,
+    last_access_time: CASE WHEN summary.last_access_time IS NOT NULL THEN summary.last_access_time ELSE m.last_access_time END,
+    access_count: CASE WHEN summary.access_count IS NOT NULL THEN summary.access_count ELSE coalesce(m.access_count, 0) END
 }
 RETURN m.id AS uuid
 """

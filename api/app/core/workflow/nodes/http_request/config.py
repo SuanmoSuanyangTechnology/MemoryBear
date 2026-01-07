@@ -73,8 +73,10 @@ class HttpContentTypeConfig(BaseModel):
         content_type = info.data.get("content_type")
         if content_type == HttpContentType.FROM_DATA and not isinstance(v, HttpFormData):
             raise ValueError("When content_type is 'form-data', data must be of type HttpFormData")
-        elif content_type in [HttpContentType.JSON, HttpContentType.WWW_FORM] and not isinstance(v, dict):
-            raise ValueError("When content_type is JSON or x-www-form-urlencoded, data must be a object")
+        elif content_type in [HttpContentType.JSON] and not isinstance(v, str):
+            raise ValueError("When content_type is JSON, data must be of type str")
+        elif content_type in [HttpContentType.WWW_FORM] and not isinstance(v, dict):
+            raise ValueError("When content_type is x-www-form-urlencoded, data must be a object")
         elif content_type in [HttpContentType.RAW, HttpContentType.BINARY] and not isinstance(v, str):
             raise ValueError("When content_type is raw/binary, data must be a string (File descriptor)")
         return v
