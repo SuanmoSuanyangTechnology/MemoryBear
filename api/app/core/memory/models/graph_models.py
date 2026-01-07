@@ -37,12 +37,20 @@ def parse_historical_datetime(v):
     此函数手动解析 ISO 8601 格式的日期字符串，支持1-4位年份
     
     Args:
-        v: 日期值（可以是 None、datetime 对象或字符串）
+        v: 日期值（可以是 None、datetime 对象、Neo4j DateTime 对象或字符串）
         
     Returns:
         datetime 对象或 None
     """
-    if v is None or isinstance(v, datetime):
+    if v is None:
+        return v
+    
+    # 处理 Neo4j DateTime 对象
+    if hasattr(v, 'to_native'):
+        return v.to_native()
+    
+    # 处理 Python datetime 对象
+    if isinstance(v, datetime):
         return v
     
     if isinstance(v, str):
