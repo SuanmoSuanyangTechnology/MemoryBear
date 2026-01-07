@@ -4,7 +4,7 @@ import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
-import { $getSelection } from 'lexical';
+import { $getSelection, $getRoot, $createParagraphNode, $createTextNode, $isParagraphNode, $isTextNode } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import InitialValuePlugin from './plugin/InitialValuePlugin'
 import LineBreakPlugin from './plugin/LineBreakPlugin';
@@ -12,6 +12,9 @@ import InsertTextPlugin from './plugin/InsertTextPlugin';
 
 export interface EditorRef {
   insertText: (text: string) => void;
+  appendText: (text: string) => void;
+  clear: () => void;
+  scrollToBottom: () => void;
 }
 
 interface LexicalEditorProps {
@@ -46,6 +49,41 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
           selection.insertText(text);
         }
       });
+    },
+    appendText: (text: string) => {
+      editor.update(() => {
+        const root = $getRoot();
+        const lastChild = root.getLastChild();
+        if (lastChild && $isParagraphNode(lastChild)) {
+          const lastTextNode = lastChild.getLastChild();
+          if (lastTextNode && $isTextNode(lastTextNode)) {
+            const currentText = lastTextNode.getTextContent();
+            lastTextNode.setTextContent(currentText + text);
+          } else {
+            const textNode = $createTextNode(text);
+            lastChild.append(textNode);
+          }
+        } else {
+          const paragraph = $createParagraphNode();
+          const textNode = $createTextNode(text);
+          paragraph.append(textNode);
+          root.append(paragraph);
+        }
+      });
+    },
+    clear: () => {
+      editor.update(() => {
+        const root = $getRoot();
+        root.clear();
+        const paragraph = $createParagraphNode();
+        root.append(paragraph);
+      });
+    },
+    scrollToBottom: () => {
+      const editorElement = editor.getRootElement();
+      if (editorElement) {
+        editorElement.scrollTop = editorElement.scrollHeight;
+      }
     }
   }), [editor]);
 

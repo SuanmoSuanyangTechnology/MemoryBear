@@ -19,7 +19,6 @@ import type {
   MemoryConfig,
   AiPromptModalRef,
   Source,
-  ToolModalRef,
   ToolOption
 } from './types'
 import type { Model } from '@/views/ModelManagement/types'
@@ -33,7 +32,6 @@ import { memoryConfigListUrl } from '@/api/memory'
 import CustomSelect from '@/components/CustomSelect'
 import aiPrompt from '@/assets/images/application/aiPrompt.png'
 import AiPromptModal from './components/AiPromptModal'
-import ToolModal from './components/ToolModal'
 import ToolList from './components/ToolList'
 
 const DescWrapper: FC<{desc: string, className?: string}> = ({desc, className}) => {
@@ -115,6 +113,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   const [variableList, setVariableList] = useState<Variable[]>([])  
   const [isSave, setIsSave] = useState(false)
   const initialized = useRef(false)
+  const [toolList, setToolList] = useState<ToolOption[]>([])
   
   // 初始化完成标记
   useEffect(() => {
@@ -143,6 +142,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     if (isSave) return
     setIsSave(true)
   }, [values])
+  useEffect(() => {
+    if (!initialized.current) return
+    if (isSave) return
+    setIsSave(true)
+  }, [toolList])
 
   useEffect(() => {
     getModels()
@@ -294,7 +298,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
           ...(item.config || {})
         }))
       } as KnowledgeConfig : null,
-      tools: toolList
+      tools: toolList.map(vo => ({
+        tool_id: vo.tool_id,
+        operation: vo.operation,
+        enabled: vo.enabled
+      }))
     }
 
     console.log('params', rest, params)
@@ -347,18 +355,6 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     form.setFieldValue('system_prompt', value)
   }
 
-  const toolModalRef = useRef<ToolModalRef>(null)
-  const [toolList, setToolList] = useState<ToolOption[]>([])
-  const handleAddTool = () => {
-    toolModalRef.current?.handleOpen()
-  }
-  const updateTools = (tool: ToolOption) => {
-    const tools = [...toolList, tool]
-    setToolList(tools)
-    form.setFieldValue('tools', tools)
-  }
-
-  console.log('toolList', toolList)
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
@@ -468,10 +464,6 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         ref={aiPromptModalRef}
         defaultModel={defaultModel}
         refresh={updatePrompt}
-      />
-      <ToolModal
-        ref={toolModalRef}
-        refresh={updateTools}
       />
     </>
   );

@@ -633,6 +633,8 @@ export const zh = {
       merge: '完整汇总',
       vote: '关键信息提取',
       priority: '结构化整合',
+      addTool: '添加工具',
+      tool: '工具',
     },
     // 角色管理相关翻译
     role: {
@@ -1280,6 +1282,7 @@ export const zh = {
       IMPLICIT_MEMORY: '隐性记忆',
       EMOTIONAL_MEMORY: '情绪记忆',
       EPISODIC_MEMORY: '情景记忆',
+      FORGETTING_MANAGEMENT: '遗忘',
 
       endUserProfile: '核心档案',
       editEndUserProfile: '编辑',
@@ -1933,6 +1936,7 @@ export const zh = {
           status_code: '状态码',
           max_attempts: '最大重试次数',
           retry_interval: '重试间隔',
+          errorBranch: '异常分支',
         },
         'jinja-render': {
           template: '代码',
@@ -2246,5 +2250,12 @@ export const zh = {
       orderPayInfo: '支付信息',
       create_time: '创建时间',
     },
+    forgetDetail: {
+      title: '遗忘管理系统帮助AI智能管理记忆生命周期，通过自动识别低价值记忆、设置遗忘策略和执行定期清理，优化记忆库存储空间，提升检索效率。',
+      overviewTitle: '核心指标概览',
+      totalMemory: '记忆总量',
+      MemoryHealth: '记忆健康度',
+      riskOfForgetting: '遗忘风险',
+    }
   },
 }
