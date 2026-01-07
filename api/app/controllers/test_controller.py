@@ -13,7 +13,7 @@ from app.core.response_utils import success
 from app.schemas.response_schema import ApiResponse
 from app.schemas.app_schema import AppChatRequest
 from app.services.model_service import ModelConfigService
-from app.services.handoffs_service import get_handoffs_service, reset_default_service
+from app.services.handoffs_service import get_handoffs_service_for_app, reset_handoffs_service_cache
 from app.services.conversation_service import ConversationService
 from app.core.logging_config import get_api_logger
 from app.dependencies import get_current_user
@@ -139,7 +139,7 @@ async def test_handoffs(
     
     演示 LangGraph 实现的多 Agent 协作和动态切换
     
-    - 默认从 sales_agent 开始
+    - 从数据库 multi_agent_config 获取 Agent 配置
     - 根据用户问题自动切换到合适的 Agent
     - 使用 conversation_id 保持会话状态
     - 通过 stream 参数控制是否流式输出
@@ -177,7 +177,7 @@ async def test_handoffs(
         # 根据 stream 参数决定返回方式
         if request.stream:
             # 流式返回
-            service = get_handoffs_service(streaming=True)
+            service = get_handoffs_service_for_app(app_id, db, streaming=True)
             return StreamingResponse(
                 service.chat_stream(
                     message=request.message,
@@ -192,13 +192,15 @@ async def test_handoffs(
             )
         else:
             # 非流式返回
-            service = get_handoffs_service(streaming=False)
+            service = get_handoffs_service_for_app(app_id, db, streaming=False)
             result = await service.chat(
                 message=request.message,
                 conversation_id=conversation_id
             )
             return success(data=result, msg="Handoffs 测试成功")
         
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
@@ -206,17 +208,29 @@ async def test_handoffs(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/handoffs/agents", response_model=ApiResponse)
-def get_handoff_agents():
-    """获取可用的 Handoff Agent 列表"""
-    service = get_handoffs_service()
-    agents = service.get_agents()
-    
-    return success(data={"agents": agents}, msg="获取 Agent 列表成功")
+@router.get("/handoffs/{app_id}/agents", response_model=ApiResponse)
+def get_handoff_agents(
+    app_id: uuid.UUID = Path(..., description="应用 ID"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """获取应用的 Handoff Agent 列表"""
+    try:
+        service = get_handoffs_service_for_app(app_id, db, streaming=False)
+        agents = service.get_agents()
+        return success(data={"agents": agents}, msg="获取 Agent 列表成功")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        api_logger.error(f"获取 Agent 列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/handoffs/reset")
-def reset_handoff_service():
-    """重置 Handoff 服务（清除所有会话状态）"""
-    reset_default_service()
+@router.delete("/handoffs/{app_id}/reset")
+def reset_handoff_service(
+    app_id: uuid.UUID = Path(..., description="应用 ID"),
+    current_user=Depends(get_current_user)
+):
+    """重置指定应用的 Handoff 服务缓存"""
+    reset_handoffs_service_cache(app_id)
     return success(msg="Handoff 服务已重置")
