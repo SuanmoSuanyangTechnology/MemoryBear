@@ -27,7 +27,7 @@ async def start_reflection_configs(
     # 获取短期记忆数据
     short_repo = ShortTermMemoryRepository(db)
     short_memories = short_repo.get_latest_by_user_id(end_user_id, 3)
-    shot_count=short_repo.get_by_id_count(end_user_id)
+    shot_count=short_repo.count_by_user_id(end_user_id)
 
     short_result = []
     for memory in short_memories:

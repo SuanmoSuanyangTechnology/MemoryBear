@@ -53,7 +53,7 @@ class ShortTermMemoryRepository:
             db_logger.error(f"创建短期记忆记录时出错: {str(e)}")
             raise
 
-    def get_by_id_count(self,end_user_id: str) -> int:
+    def count_by_user_id(self,end_user_id: str) -> int:
         """根据ID获取短期记忆记录
         
         Args:
