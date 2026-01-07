@@ -61,7 +61,6 @@ def get_memory_count(
         return fail(
             code=BizCode.INTERNAL_ERROR,
             msg="Failed to fetch memory statistics",
-            error=str(e)
         )
 
 
@@ -106,7 +105,6 @@ def get_last_visual_memory(
         return fail(
             code=BizCode.INTERNAL_ERROR,
             msg="Failed to fetch latest visual memory",
-            error=str(e)
         )
 
 
@@ -151,7 +149,6 @@ def get_last_memory_listen(
         return fail(
             code=BizCode.INTERNAL_ERROR,
             msg="Failed to fetch latest audio memory",
-            error=str(e)
         )
 
 
@@ -197,7 +194,6 @@ def get_last_text_memory(
         return fail(
             code=BizCode.INTERNAL_ERROR,
             msg="Failed to fetch latest text memory",
-            error=str(e)
         )
 
 
@@ -256,5 +252,4 @@ def get_memory_time_line(
         return fail(
             code=BizCode.INTERNAL_ERROR,
             msg="Failed to fetch perceptual memory timeline",
-            error=str(e)
         )
