@@ -275,12 +275,7 @@ class AppService:
                 )
 
         logger.info(
-            "多智能体配置检查通过",
-            extra={
-                "app_id": str(app_id),
-                "master_agent_id": str(multi_agent_config.master_agent_id),
-                "sub_agent_count": len(multi_agent_config.sub_agents)
-            }
+            "多智能体配置检查通过"
         )
 
     def _create_agent_config(
