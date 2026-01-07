@@ -253,7 +253,7 @@ def route_after_agent(state: HandoffState) -> str:
 def convert_multi_agent_config_to_handoffs(
     multi_agent_config: Dict,
     db: Session
-) -> tuple[Dict[str, Dict], RedBearModelConfig]:
+) -> Dict[str, Dict]:
     """将 multi_agent_config 转换为 handoffs 配置格式
     
     Args:
@@ -261,7 +261,7 @@ def convert_multi_agent_config_to_handoffs(
         db: 数据库会话
     
     Returns:
-        (agent_configs, model_config) 元组
+        agent_configs 字典，每个 Agent 包含自己的 model_config
     """
     from app.models import AppRelease, App
     
@@ -271,45 +271,77 @@ def convert_multi_agent_config_to_handoffs(
     
     # 遍历子 Agent，构建配置
     for sub_agent in sub_agents:
-        agent_app_id = sub_agent.get("agent_id")
-        agent_name = sub_agent.get("name", f"agent_{agent_app_id[:8] if agent_app_id else 'unknown'}")
+        agent_id = sub_agent.get("agent_id")  # 可能是 release_id 或 app_id
+        agent_name = sub_agent.get("name", f"agent_{agent_id[:8] if agent_id else 'unknown'}")
         # 使用安全的 agent name（去除特殊字符）
         safe_name = agent_name.replace(" ", "_").replace("-", "_").lower()
         agent_names.append(safe_name)
         
-        # 从 AppRelease 获取 Agent 的系统提示词
+        # 从 AppRelease 获取 Agent 的系统提示词和模型配置
         system_prompt = f"你是 {agent_name}。"
         capabilities = sub_agent.get("capabilities", [])
+        model_config = None
+        release = None
         
-        if agent_app_id:
+        if agent_id:
             try:
-                agent_app_id_uuid = uuid.UUID(agent_app_id) if isinstance(agent_app_id, str) else agent_app_id
-                # 获取应用的当前发布版本
-                app = db.get(App, agent_app_id_uuid)
-                if app and app.current_release_id:
-                    release = db.get(AppRelease, app.current_release_id)
-                    if release and release.config:
+                agent_id_uuid = uuid.UUID(agent_id) if isinstance(agent_id, str) else agent_id
+                
+                # 先尝试作为 release_id 查询
+                release = db.get(AppRelease, agent_id_uuid)
+                
+                # 如果找不到，尝试作为 app_id 查询，获取 current_release
+                if not release:
+                    app = db.get(App, agent_id_uuid)
+                    if app and app.current_release_id:
+                        release = db.get(AppRelease, app.current_release_id)
+                
+                if release:
+                    # 从 release.config 获取 system_prompt
+                    if release.config:
                         config_data = release.config
-                        # 从 release.config 获取 system_prompt
                         release_system_prompt = config_data.get("system_prompt")
                         if release_system_prompt:
                             system_prompt = release_system_prompt
-                        logger.debug(f"从 AppRelease 获取 Agent {agent_name} 的系统提示词")
+                    
+                    # 获取该 Agent 的模型配置
+                    if release.default_model_config_id:
+                        model_api_key = ModelApiKeyService.get_a_api_key(db, release.default_model_config_id)
+                        if model_api_key:
+                            model_config = RedBearModelConfig(
+                                model_name=model_api_key.model_name,
+                                provider=model_api_key.provider,
+                                api_key=model_api_key.api_key,
+                                base_url=model_api_key.api_base,
+                                extra_params={
+                                    "temperature": 0.7,
+                                    "max_tokens": 2000,
+                                    "streaming": True
+                                }
+                            )
+                            logger.debug(f"Agent {agent_name} 使用模型: {model_api_key.model_name}")
+                        else:
+                            logger.warning(f"Agent {agent_name} 模型配置无效: {release.default_model_config_id}")
+                    else:
+                        logger.warning(f"Agent {agent_name} 没有配置 default_model_config_id")
+                else:
+                    logger.warning(f"Agent {agent_name} 找不到发布版本: agent_id={agent_id}")
             except Exception as e:
-                logger.warning(f"获取 Agent {agent_name} 的系统提示词失败: {str(e)}")
+                logger.warning(f"获取 Agent {agent_name} 配置失败: {str(e)}")
         
         # 如果有 capabilities，添加到系统提示词
-        if capabilities and not system_prompt.endswith("。"):
-            system_prompt += f" 你的专长是: {', '.join(capabilities)}。"
-        elif capabilities:
+        if capabilities:
+            if not system_prompt.endswith("。"):
+                system_prompt += "。"
             system_prompt += f" 你的专长是: {', '.join(capabilities)}。"
         
         agent_configs[safe_name] = {
-            "agent_id": agent_app_id,
+            "agent_id": agent_id,
             "name": agent_name,
             "description": f"转移到 {agent_name}。{sub_agent.get('role') or ''}",
             "system_prompt": system_prompt,
             "capabilities": capabilities,
+            "model_config": model_config,  # 每个 Agent 自己的模型配置
             "can_transfer_to": []  # 稍后填充
         }
     
@@ -327,38 +359,7 @@ def convert_multi_agent_config_to_handoffs(
                 transfer_instructions += f"\n- transfer_to_{other_name}: {other_config['description']}"
             agent_configs[safe_name]["system_prompt"] += transfer_instructions
     
-    # 获取 LLM 配置
-    model_config = None
-    default_model_config_id = multi_agent_config.get("default_model_config_id")
-    if default_model_config_id:
-        model_api_key = ModelApiKeyService.get_a_api_key(db, default_model_config_id)
-        if model_api_key:
-            # 获取模型参数
-            model_parameters = multi_agent_config.get("model_parameters")
-            temperature = 0.7
-            max_tokens = 2000
-            
-            if model_parameters:
-                if hasattr(model_parameters, 'temperature'):
-                    temperature = model_parameters.temperature
-                    max_tokens = model_parameters.max_tokens or 2000
-                elif isinstance(model_parameters, dict):
-                    temperature = model_parameters.get("temperature", 0.7)
-                    max_tokens = model_parameters.get("max_tokens", 2000)
-            
-            model_config = RedBearModelConfig(
-                model_name=model_api_key.model_name,
-                provider=model_api_key.provider,
-                api_key=model_api_key.api_key,
-                base_url=model_api_key.api_base,
-                extra_params={
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "streaming": True
-                }
-            )
-    
-    return agent_configs, model_config
+    return agent_configs
 
 
 # ==================== Handoffs 服务类 ====================
@@ -369,20 +370,22 @@ class HandoffsService:
     def __init__(
         self,
         agent_configs: Dict[str, Dict],
-        model_config: RedBearModelConfig,
         streaming: bool = True
     ):
         """初始化 Handoffs 服务
         
         Args:
-            agent_configs: Agent 配置字典
-            model_config: RedBearModelConfig 模型配置
+            agent_configs: Agent 配置字典，每个 Agent 包含自己的 model_config
             streaming: 是否启用流式输出
         """
         self.agent_configs = agent_configs
-        self.model_config = model_config
         self.streaming = streaming
         self._graph = None
+        
+        # 验证每个 Agent 都有模型配置
+        for agent_name, config in agent_configs.items():
+            if not config.get("model_config"):
+                raise ValueError(f"Agent {agent_name} 没有配置模型")
         
         logger.info(f"HandoffsService 初始化, agents: {list(self.agent_configs.keys())}")
     
@@ -392,25 +395,29 @@ class HandoffsService:
         agent_names = list(self.agent_configs.keys())
         
         if not agent_names:
+            
             raise ValueError("至少需要一个 Agent 配置")
         
         for agent_name in agent_names:
             config = self.agent_configs[agent_name]
             tools = create_tools_for_agent(agent_name, self.agent_configs)
             
+            # 使用每个 Agent 自己的模型配置
+            agent_model_config = config.get("model_config")
+            
             if self.streaming:
                 agent_node = create_streaming_agent_node(
                     agent_name=agent_name,
                     system_prompt=config.get("system_prompt", f"你是 {agent_name}"),
                     tools=tools,
-                    model_config=self.model_config
+                    model_config=agent_model_config
                 )
             else:
                 agent_node = create_agent_node(
                     agent_name=agent_name,
                     system_prompt=config.get("system_prompt", f"你是 {agent_name}"),
                     tools=tools,
-                    model_config=self.model_config
+                    model_config=agent_model_config
                 )
             builder.add_node(agent_name, agent_node)
 
@@ -569,17 +576,14 @@ def get_handoffs_service_for_app(
     if not multi_agent_config:
         raise ValueError(f"应用 {app_id} 没有多 Agent 配置")
     
-    # 转换配置
-    agent_configs, model_config = convert_multi_agent_config_to_handoffs(multi_agent_config, db)
+    # 转换配置（每个 Agent 包含自己的 model_config）
+    agent_configs = convert_multi_agent_config_to_handoffs(multi_agent_config, db)
     
     if not agent_configs:
         raise ValueError(f"应用 {app_id} 没有配置子 Agent")
     
-    if not model_config:
-        raise ValueError(f"应用 {app_id} 没有配置模型")
-    
     # 创建服务
-    service = HandoffsService(agent_configs, model_config, streaming)
+    service = HandoffsService(agent_configs, streaming)
     
     # 缓存
     _service_cache[cache_key] = service
