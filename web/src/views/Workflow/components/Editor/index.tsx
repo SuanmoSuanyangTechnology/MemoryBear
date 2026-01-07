@@ -1,4 +1,4 @@
-import { type FC, useState } from 'react';
+import { type FC, useState, useEffect } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
@@ -23,6 +23,7 @@ interface LexicalEditorProps {
   options: Suggestion[];
   variant?: 'outlined' | 'borderless';
   height?: number;
+  enableJinja2?: boolean;
 }
 
 const theme = {
@@ -33,6 +34,15 @@ const theme = {
   },
 };
 
+const jinja2Theme = {
+  ...theme,
+  code: 'jinja2-expression',
+  text: {
+    ...theme.text,
+    code: 'jinja2-inline',
+  },
+};
+
 const Editor: FC<LexicalEditorProps> =({
   placeholder = "请输入内容...",
   value = "",
@@ -40,19 +50,62 @@ const Editor: FC<LexicalEditorProps> =({
   options,
   variant = 'borderless',
   height = 60,
+  enableJinja2 = false,
 }) => {
+
   const [_count, setCount] = useState(0);
+
+  useEffect(() => {
+    if (enableJinja2) {
+      const styleId = 'jinja2-styles';
+      let existingStyle = document.getElementById(styleId);
+      
+      if (!existingStyle) {
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+          .jinja2-expression {
+            background-color: #f6f8fa !important;
+            border: 1px solid #d1d9e0 !important;
+            border-radius: 3px !important;
+            padding: 2px 4px !important;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
+            font-size: 13px !important;
+            color: #0969da !important;
+          }
+          .jinja2-inline {
+            background-color: #f6f8fa !important;
+            padding: 1px 3px !important;
+            border-radius: 2px !important;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
+            font-size: 13px !important;
+            color: #0969da !important;
+          }
+          .editor-paragraph {
+            margin: 0;
+          }
+          .editor-paragraph:has-text('{') .editor-text,
+          .editor-paragraph:has-text('[') .editor-text {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
+          }
+        `;
+        document.head.appendChild(style);
+      }
+    }
+  }, [enableJinja2]);
   const initialConfig = {
     namespace: 'AutocompleteEditor',
-    theme,
-    nodes: [
+    theme: enableJinja2 ? jinja2Theme : theme,
+    nodes: enableJinja2 ? [
+      // 当启用jinja2时，不使用VariableNode，使用普通文本
+    ] : [
       // HeadingNode,
       // QuoteNode,
       // ListItemNode,
       // ListNode,
       // LinkNode,
       // CodeNode,
-      VariableNode
+      VariableNode,
     ],
     onError: (error: Error) => {
       console.error(error);
@@ -96,9 +149,9 @@ const Editor: FC<LexicalEditorProps> =({
         />
         <HistoryPlugin />
         <CommandPlugin />
-        <AutocompletePlugin options={options} />
+        <AutocompletePlugin options={options} enableJinja2={enableJinja2} />
         <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
-        <InitialValuePlugin value={value} options={options} />
+        <InitialValuePlugin value={value} options={options} enableJinja2={enableJinja2} />
       </div>
     </LexicalComposer>
   );
