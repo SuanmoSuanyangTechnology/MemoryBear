@@ -7,7 +7,7 @@ from app.repositories.memory_short_repository import ShortTermMemoryRepository
 
 api_logger = get_api_logger()
 db=next(get_db())
-class ShrotService:
+class ShortService:
     def __init__(self, end_user_id):
         self.short_repo = ShortTermMemoryRepository(db)
         self.end_user_id = end_user_id
@@ -34,7 +34,7 @@ class ShrotService:
             deep_expanded['answer'] = aimessages
             short_result.append(deep_expanded)
         return short_result
-    def get_short_database(self):
+    def get_short_count(self):
         short_count = self.short_repo.count_by_user_id(self.end_user_id)
         return short_count
 

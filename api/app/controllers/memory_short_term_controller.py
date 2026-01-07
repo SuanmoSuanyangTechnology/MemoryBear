@@ -6,7 +6,7 @@ from app.dependencies import get_current_user
 from app.models.user_model import User
 
 from app.services.memory_storage_service import search_entity
-from app.services.memory_short_service import ShrotService,LongService
+from app.services.memory_short_service import ShortService,LongService
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -24,9 +24,9 @@ async def short_term_configs(
         db: Session = Depends(get_db),
 ):
     # 获取短期记忆数据
-    short_term=ShrotService(end_user_id)
+    short_term=ShortService(end_user_id)
     short_result=short_term.get_short_databasets()
-    short_count=short_term.get_short_database()
+    short_count=short_term.get_short_count()
 
     long_term=LongService(end_user_id)
     long_result=long_term.get_long_databasets()
