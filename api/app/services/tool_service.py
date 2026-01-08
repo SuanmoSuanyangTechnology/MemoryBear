@@ -42,7 +42,7 @@ class ToolService:
     def __init__(self, db: Session):
         self.db = db
         self._tool_cache: Dict[str, BaseTool] = {}
-        
+
         # MCP管理器
         self.mcp_tool_manager = MCPToolManager(db)
 
@@ -691,34 +691,35 @@ class ToolService:
                     mcp_config.server_url, mcp_config.connection_config or {}
                 )
                 if success:
-                    tool_names = [tool.get("name") for tool in tools if tool.get("name")]
-                    mcp_config.available_tools = tool_names
+                    # 转换为新格式
+                    tool_list = []
+                    for tool in tools:
+                        if tool.get("name"):
+                            tool_list.append({
+                                tool["name"]: {
+                                    "description": tool.get("description", ""),
+                                    "inputSchema": tool.get("inputSchema", {})
+                                }
+                            })
+                    mcp_config.available_tools = tool_list
                     self.db.commit()
-                    available_tools = tool_names
+                    available_tools = tool_list
             except Exception as e:
                 logger.error(f"同步MCP工具列表失败: {e}")
                 return []
         
         methods = []
-        
-        # 获取工具详细信息
-        try:
-            success, tools, _ = await self.mcp_tool_manager.discover_tools(
-                mcp_config.server_url, mcp_config.connection_config or {}
-            )
-            
-            if success:
-                tools_dict = {tool.get("name"): tool for tool in tools if tool.get("name")}
-                
-                for tool_name in available_tools:
-                    tool_info = tools_dict.get(tool_name, {})
-                    
+
+        # 处理新格式的available_tools
+        for tool_item in available_tools:
+            if isinstance(tool_item, dict):
+                for tool_name, tool_data in tool_item.items():
                     # 解析工具参数
                     parameters = []
-                    input_schema = tool_info.get("inputSchema", {})
+                    input_schema = tool_data.get("inputSchema", {})
                     properties = input_schema.get("properties", {})
                     required_fields = input_schema.get("required", [])
-                    
+
                     for param_name, param_def in properties.items():
                         parameters.append({
                             "name": param_name,
@@ -730,27 +731,16 @@ class ToolService:
                             "minimum": param_def.get("minimum"),
                             "maximum": param_def.get("maximum")
                         })
-                    
+
                     methods.append({
                         "method_id": tool_name,
                         "name": tool_name,
-                        "description": tool_info.get("description", f"MCP工具: {tool_name}"),
+                        "description": tool_data.get("description", f"MCP工具: {tool_name}"),
                         "parameters": parameters
                     })
             else:
-                # 如果无法获取详细信息，返回基本信息
-                for tool_name in available_tools:
-                    methods.append({
-                        "method_id": tool_name,
-                        "name": tool_name,
-                        "description": f"MCP工具: {tool_name}",
-                        "parameters": []
-                    })
-                    
-        except Exception as e:
-            logger.error(f"获取MCP工具详细信息失败: {e}")
-            # 返回基本信息
-            for tool_name in available_tools:
+                # 兼容旧格式（字符串）
+                tool_name = str(tool_item)
                 methods.append({
                     "method_id": tool_name,
                     "name": tool_name,
@@ -877,14 +867,10 @@ class ToolService:
         if not mcp_config:
             return None
 
-        # 从配置中获取特定工具名称
-        tool_name = config.config_data.get("tool_name")
-        
         tool_config = {
             "server_url": mcp_config.server_url,
             "connection_config": mcp_config.connection_config or {},
-            "available_tools": mcp_config.available_tools or [],
-            "tool_name": tool_name  # 指定具体工具
+            "available_tools": mcp_config.available_tools or []
         }
 
         return MCPTool(str(config.id), tool_config)
@@ -897,10 +883,18 @@ class ToolService:
         if config.tool_type == ToolType.MCP.value:
             mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
             if mcp_config:
+                # 处理available_tools显示格式
+                available_tools_display = []
+                for tool_item in (mcp_config.available_tools or []):
+                    if isinstance(tool_item, dict):
+                        available_tools_display.extend(list(tool_item.keys()))
+                    else:
+                        available_tools_display.append(str(tool_item))
+
                 config_data.update({
                     "last_health_check": int(mcp_config.last_health_check.timestamp() * 1000) if mcp_config.last_health_check else None,
                     "health_status": mcp_config.health_status,
-                    "available_tools": mcp_config.available_tools or []
+                    "available_tools": available_tools_display
                 })
         
         return ToolInfo(
@@ -1150,25 +1144,36 @@ class ToolService:
             test_result = await self.mcp_tool_manager.test_tool_connection(
                 mcp_config.server_url, mcp_config.connection_config or {}
             )
-            
+
             if test_result["success"]:
                 # 连接成功，自动同步工具列表
                 success, tools, error = await self.mcp_tool_manager.discover_tools(
                     mcp_config.server_url, mcp_config.connection_config or {}
                 )
-                
+
                 if success:
-                    tool_names = [tool.get("name") for tool in tools if tool.get("name")]
-                    
+                    # 转换为新格式
+                    tool_list = []
+                    tool_names = []
+                    for tool in tools:
+                        if tool.get("name"):
+                            tool_names.append(tool["name"])
+                            tool_list.append({
+                                tool["name"]: {
+                                    "description": tool.get("description", ""),
+                                    "inputSchema": tool.get("inputSchema", {})
+                                }
+                            })
+
                     # 更新数据库
-                    mcp_config.available_tools = tool_names
+                    mcp_config.available_tools = tool_list
                     mcp_config.last_health_check = datetime.now()
                     mcp_config.health_status = "healthy"
                     mcp_config.error_message = None
                     config.status = ToolStatus.AVAILABLE.value
-                    
+
                     self.db.commit()
-                    
+
                     return {
                         "success": True,
                         "message": "MCP连接成功并同步工具列表",
@@ -1187,9 +1192,9 @@ class ToolService:
                 mcp_config.error_message = test_result.get("error", "连接失败")
                 config.status = ToolStatus.ERROR.value
                 self.db.commit()
-                
+
                 return test_result
-                
+
         except Exception as e:
             logger.error(f"测试MCP连接失败: {config.id}, 错误: {e}")
             return {"success": False, "message": f"测试失败: {str(e)}"}
@@ -1248,30 +1253,42 @@ class ToolService:
             # 创建MCP客户端
             connection_config = mcp_config.connection_config or {}
             client = SimpleMCPClient(mcp_config.server_url, connection_config)
-            
+
             async with client:
                 # 获取工具列表
                 tools = await client.list_tools()
-                tool_names = [tool.get("name") for tool in tools if tool.get("name")]
-                
+
+                # 转换为新格式
+                tool_list = []
+                tool_names = []
+                for tool in tools:
+                    if tool.get("name"):
+                        tool_names.append(tool["name"])
+                        tool_list.append({
+                            tool["name"]: {
+                                "description": tool.get("description", ""),
+                                "inputSchema": tool.get("inputSchema", {})
+                            }
+                        })
+
                 # 更新数据库
-                mcp_config.available_tools = tool_names
+                mcp_config.available_tools = tool_list
                 mcp_config.last_health_check = datetime.now()
                 mcp_config.health_status = "healthy"
                 mcp_config.error_message = None
-                
+
                 # 更新工具状态
                 config.status = ToolStatus.AVAILABLE.value
-                
+
                 self.db.commit()
-                
+
                 return {
                     "success": True,
                     "message": "工具列表同步成功",
                     "tools_count": len(tool_names),
                     "tools": tool_names
                 }
-                
+
         except Exception as e:
             # 更新错误状态
             try:
@@ -1284,7 +1301,7 @@ class ToolService:
                     self.db.commit()
             except:
                 pass
-            
+
             logger.error(f"同步MCP工具列表失败: {tool_id}, 错误: {e}")
             return {"success": False, "message": f"同步失败: {str(e)}"}
 
