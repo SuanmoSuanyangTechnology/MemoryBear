@@ -41,4 +41,3 @@ async def short_term_configs(
     }
 
     return success(data=result, msg="短期记忆系统数据获取成功")
-

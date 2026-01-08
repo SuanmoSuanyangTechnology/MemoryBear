@@ -862,3 +862,120 @@ neo4j_query_all = """
                           """
 
 
+'''针对当前节点下扩长的句子，实体和总结'''
+Memory_Timeline_ExtractedEntity="""
+MATCH (n)-[r1]-(e)-[r2]-(ms)
+WHERE elementId(n) =$id
+AND (ms:ExtractedEntity OR ms:MemorySummary)
+RETURN
+  collect(DISTINCT coalesce(ms.name, n.name, e.name)) AS ExtractedEntity,
+  collect(DISTINCT ms.content) AS MemorySummary,
+  collect(DISTINCT e.statement) AS statement;
+"""
+Memory_Timeline_MemorySummary=""" 
+MATCH (n)-[r1]-(e)-[r2]-(ms)
+WHERE elementId(n) = $id
+  AND (ms:MemorySummary OR ms:ExtractedEntity)
+RETURN
+  collect(DISTINCT coalesce(ms.name, n.name, e.name)) AS ExtractedEntity,
+  collect(DISTINCT ms.content) AS MemorySummary,
+  collect(DISTINCT e.statement) AS statement;"""
+Memory_Timeline_Statement="""
+MATCH (n)
+WHERE elementId(n) = "4:f6039a9b-d553-4ba2-9b1c-d9a18917801f:77154"
+
+CALL {
+  WITH n
+  MATCH (n)-[]-(m)
+  WHERE m:ExtractedEntity
+    AND NOT m:MemorySummary
+    AND NOT m:Chunk
+  RETURN collect(DISTINCT m.name) AS ExtractedEntity
+}
+
+CALL {
+  WITH n
+  MATCH (n)-[]-(m)
+  WHERE m:MemorySummary
+    AND NOT m:Chunk
+  RETURN collect(DISTINCT m.content) AS MemorySummary
+}
+
+RETURN
+  ExtractedEntity,
+  MemorySummary,
+  collect(DISTINCT n.statement) AS Statement;
+
+"""
+
+'''针对当前节点，主要获取更加完整的句子节点'''
+Memory_Space_Emotion_Statement="""
+MATCH (n)
+WHERE elementId(n) = $id
+RETURN
+  n.emotion_intensity AS emotion_intensity,
+  n.created_at        AS created_at,
+  n.emotion_type      AS emotion_type,
+  n.statement         AS statement;
+
+"""
+Memory_Space_Emotion_MemorySummary="""
+MATCH (n)-[]-(e)
+WHERE elementId(n) = "4:f6039a9b-d553-4ba2-9b1c-d9a18917801f:77019"
+  AND EXISTS {
+    MATCH (e)-[]-(ms)
+    WHERE ms:MemorySummary OR ms:ExtractedEntity
+  }
+RETURN DISTINCT
+  e.emotion_intensity AS emotion_intensity,
+  e.created_at        AS created_at,
+  e.emotion_type      AS emotion_type,
+  e.statement         AS statement;
+"""
+Memory_Space_Emotion_ExtractedEntity="""
+MATCH (n)-[]-(e)
+WHERE elementId(n) = $id
+  AND EXISTS {
+    MATCH (e)-[]-(ms:ExtractedEntity)
+  }
+RETURN DISTINCT
+  e.emotion_intensity AS emotion_intensity,
+  e.created_at        AS created_at,
+  e.emotion_type      AS emotion_type,
+  e.statement         AS statement;
+"""
+
+'''获取实体'''
+Memory_Space_Interaction_Statement="""
+MATCH (n)-[]-(m)
+WHERE elementId(n) = $id
+  AND m.entity_type = "Person"
+RETURN
+  m.name             AS name,
+  m.importance_score AS importance_score;
+
+"""
+
+Memory_Space_Interaction_ExtractedEntity="""
+MATCH (n)-[]-(e)
+WHERE elementId(n) = $id
+  AND EXISTS {
+    MATCH (e)-[]-(ms:ExtractedEntity)
+  }
+RETURN DISTINCT
+  e.name             AS name,
+  e.importance_score AS importance_score;
+
+"""
+
+Memory_Space_Interaction_Summary="""
+MATCH (n)-[]-(e)
+WHERE elementId(n) = $id
+  AND EXISTS {
+    MATCH (e)-[]-(ms:ExtractedEntity)
+  }
+RETURN DISTINCT
+  e.name             AS name,
+  e.importance_score AS importance_score;
+
+"""
