@@ -24,9 +24,6 @@ class MemoryEntityService:
         self.id = id
         self.table = table
         self.connector = Neo4jConnector()
-
-
-
     async def get_timeline_memories_server(self):
         """
         获取时间线记忆数据
