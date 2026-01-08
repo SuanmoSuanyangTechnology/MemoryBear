@@ -44,6 +44,7 @@ export interface Data {
 export interface BaseProperties {
   content: string;
   created_at: number;
+  associative_memory: number;
 }
 export interface StatementNodeProperties {
   temporal_info: string;
@@ -51,12 +52,21 @@ export interface StatementNodeProperties {
   statement: string;
   valid_at: string;
   created_at: number;
+  emotion_keywords: string[];
+  emotion_type: string;
+  emotion_subject: string;
+  importance_score: number;
+  associative_memory: number;
 }
 export interface ExtractedEntityNodeProperties {
   description: string;
   name: string;
   entity_type: string;
   created_at: number;
+  aliases: string;
+  connect_strngth: string;
+  importance_score: number;
+  associative_memory: number;
 }
 export interface MemorySummaryNode {
   id: string;
@@ -72,7 +82,7 @@ export interface MemorySummaryNode {
     created_at: number;
   }
   caption: string;
-
+  associative_memory: number;
 }
 
 export interface Node {

@@ -1,17 +1,18 @@
 import React, { type FC, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Col, Row } from 'antd'
+import { Col, Row, Space, Button } from 'antd'
 import dayjs from 'dayjs'
 
 import RbCard from '@/components/RbCard/Card'
 import ReactEcharts from 'echarts-for-react'
 import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
-import type { Node, Edge, GraphData } from '../types'
+import type { Node, Edge, GraphData, StatementNodeProperties, ExtractedEntityNodeProperties } from '../types'
 import {
   getMemorySearchEdges,
 } from '@/api/memory'
 import Empty from '@/components/Empty'
+import Tag from '@/components/Tag'
 
 const colors = ['#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
 const RelationshipNetwork:FC = () => {
@@ -136,6 +137,11 @@ const RelationshipNetwork:FC = () => {
 
   console.log('selectedNode', selectedNode)
 
+  const handleViewAll = () => {
+    if (!selectedNode) return
+    window.open(`/#/graph/${selectedNode.id}`);
+  }
+
   return (
     <Row gutter={16}>
       {/* 关系网络 */}
@@ -240,8 +246,14 @@ const RelationshipNetwork:FC = () => {
           title={t('userMemory.memoryDetails')}
           headerType="borderless"
           bodyClassName='rb:p-0!'
+          extra={selectedNode && <Button type="text" onClick={handleViewAll}>
+            <div
+              className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/view.svg')] rb:hover:bg-[url('@/assets/images/userMemory/view_hover.svg')]"
+            ></div>
+            {t('userMemory.completeMemory')}
+          </Button>}
         >
-          <div className="rb:h-133.5">
+          <div className="rb:h-133.5 rb:overflow-y-auto">
             {!selectedNode
               ? <Empty 
                 url={detailEmpty}
@@ -267,9 +279,52 @@ const RelationshipNetwork:FC = () => {
                   </>
                   <div className="rb:font-medium rb:mb-2 rb:mt-4">
                     <div className="rb:font-medium rb:leading-5">{t('userMemory.created_at')}</div>
-                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4">
+                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
                       {dayjs(selectedNode?.properties.created_at).format('YYYY-MM-DD HH:mm:ss')}
                     </div>
+
+                    {selectedNode?.properties.associative_memory > 0 && <div className="rb:mt-4">
+                      <div className="rb:font-medium rb:leading-5">{t('userMemory.associative_memory')}</div>
+                      <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                        <span className="rb:text-[#155EEF] rb:font-medium">{selectedNode?.properties.associative_memory}</span> {t('userMemory.unix')}{t('userMemory.associative_memory')}
+                      </div>
+                    </div>}
+
+                    {selectedNode.label === 'Statement' && <>
+                      {(['emotion_keywords', 'emotion_type', 'emotion_subject', 'importance_score'] as const).map(key => {
+                        const statementProps = selectedNode.properties as StatementNodeProperties;
+                        if ((key === 'emotion_keywords' && statementProps[key]?.length > 0) || statementProps[key]) {
+                          return (
+                            <div className="rb:mt-4" key={key}>
+                              {t(`userMemory.Statement_${key}`)}
+                              <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                                {key === 'emotion_keywords'
+                                  ? <Space>{statementProps.emotion_keywords.map((vo, index) => <Tag key={index}>{vo}</Tag>)}</Space>
+                                  : statementProps[key]
+                                }
+                              </div>
+                            </div>
+                          )
+                        }
+                        return null
+                      })}
+                    </>}
+                    {selectedNode.label === 'ExtractedEntity' && <>
+                      {(['name', 'entity_type', 'aliases', 'connect_strngth', 'importance_score'] as const).map(key => {
+                        const entityProps = selectedNode.properties as ExtractedEntityNodeProperties;
+                        if (entityProps[key]) {
+                          return (
+                            <div className="rb:mt-4" key={key}>
+                              {t(`userMemory.ExtractedEntity_${key}`)}
+                              <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                                {entityProps[key]}
+                              </div>
+                            </div>
+                          )
+                        }
+                        return null
+                      })}
+                    </>}
                   </div>
                 </div>
               </>

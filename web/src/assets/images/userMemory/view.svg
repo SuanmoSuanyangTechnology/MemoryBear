@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>查看</title>
+    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="红熊空间-记忆管理-个人记忆-2" transform="translate(-245, -141)" stroke="#5B6167">
+            <g id="实体详情备份" transform="translate(62, 125)">
+                <g id="查看" transform="translate(183, 16)">
+                    <g id="编组-22" transform="translate(2, 2)">
+                        <path d="M0,4 L0,1 C0,0.44771525 0.44771525,1.11022302e-16 1,0 L4,0 L4,0" id="路径"></path>
+                        <path d="M8,4 L8,1 C8,0.44771525 8.44771525,1.11022302e-16 9,0 L12,0 L12,0" id="路径备份-2" transform="translate(10, 2) scale(-1, 1) translate(-10, -2)"></path>
+                        <circle id="椭圆形" cx="8" cy="8" r="3"></circle>
+                        <path d="M0,12 L0,9 C0,8.44771525 0.44771525,8 1,8 L4,8 L4,8" id="路径备份" transform="translate(2, 10) scale(1, -1) translate(-2, -10)"></path>
+                        <line x1="10.1926589" y1="10.2894584" x2="11.6795155" y2="11.7850158" id="路径-10"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
