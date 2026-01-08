@@ -264,6 +264,7 @@ class MemoryAgentService:
         Args:
             group_id: Group identifier (also used as end_user_id)
             message: Message string with role markers (e.g., "user: hello\\nassistant: hi")
+            message: Message string with role markers (e.g., "user: hello\\nassistant: hi")
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -310,10 +311,12 @@ class MemoryAgentService:
             
             raise ValueError(error_msg)
         
+        
         mcp_config = get_mcp_server_config()
         client = MultiServerMCPClient(mcp_config)
 
         if storage_type == "rag":
+            # Use message directly for RAG storage
             # Use message directly for RAG storage
             result = await write_rag(group_id, message, user_rag_memory_id)
             return result
@@ -329,7 +332,9 @@ class MemoryAgentService:
 
                     config = {"configurable": {"thread_id": group_id}}
                     
+                    
                     async for event in graph.astream(
+                           {"content": message, "memory_config": memory_config, "errors": []},
                            {"content": message, "memory_config": memory_config, "errors": []},
                             stream_mode="values",
                             config=config
