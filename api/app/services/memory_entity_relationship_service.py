@@ -27,7 +27,7 @@ class MemoryEntityService:
 
 
 
-    async def get_timeline_memories_server(self) -> Dict[str, Any]:
+    async def get_timeline_memories_server(self):
         """
         获取时间线记忆数据
 
