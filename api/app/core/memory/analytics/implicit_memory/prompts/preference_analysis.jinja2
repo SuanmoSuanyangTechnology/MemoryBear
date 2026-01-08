@@ -1,0 +1,47 @@
+You are an expert at analyzing user memory summaries to identify implicit preferences.
+
+## Memory Summaries
+{% for summary in memory_summaries %}
+Summary {{ loop.index }}:
+{{ summary.content or summary.user_content or '' }}
+---
+{% endfor %}
+
+## Target User ID
+{{ user_id }}
+
+## Instructions
+1. Focus ONLY on the specified user's preferences
+2. Extract SHORT preference tags (1-3 words max), like: "音乐", "咖啡", "科幻", "设计", "古典", "吉他"
+3. DO NOT use long phrases - use short nouns or noun phrases
+4. Only include preferences with confidence_score >= 0.3
+5. **IMPORTANT: Output language MUST match the input language. If summaries are in Chinese, output in Chinese. If in English, output in English.**
+
+## Output Format
+{
+  "preferences": [
+    {
+      "tag_name": "short tag",
+      "confidence_score": 0.0-1.0,
+      "supporting_evidence": ["evidence1", "evidence2"],
+      "context_details": "brief context",
+      "category": "category or null"
+    }
+  ]
+}
+
+## Example (Chinese input → Chinese output)
+{
+  "preferences": [
+    {"tag_name": "咖啡", "confidence_score": 0.8, "supporting_evidence": ["每天早上喝咖啡"], "context_details": "日常习惯", "category": "lifestyle"},
+    {"tag_name": "古典音乐", "confidence_score": 0.7, "supporting_evidence": ["喜欢听古典"], "context_details": "音乐偏好", "category": "music"}
+  ]
+}
+
+## Example (English input → English output)
+{
+  "preferences": [
+    {"tag_name": "coffee", "confidence_score": 0.8, "supporting_evidence": ["drinks coffee every morning"], "context_details": "daily routine", "category": "lifestyle"},
+    {"tag_name": "classical music", "confidence_score": 0.7, "supporting_evidence": ["enjoys classical"], "context_details": "music preference", "category": "music"}
+  ]
+}

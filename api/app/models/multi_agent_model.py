@@ -13,10 +13,9 @@ from app.schemas import ModelParameters
 
 
 class OrchestrationMode(StrEnum):
-    """图标类型枚举"""
-    SEQUENTIAL = "sequential"
-    PARALLEL = "parallel"
-    CONDITIONAL = "conditional"
+    """协作模式枚举"""
+    COLLABORATION = "collaboration"  # 协作模式：Agent 之间可以相互 handoff
+    SUPERVISOR = "supervisor"        # 监督模式：由主 Agent 统一调度子 Agent
 
 class AggregationStrategy(StrEnum):
     """图标类型枚举"""
@@ -66,8 +65,8 @@ class MultiAgentConfig(Base):
     orchestration_mode = Column(
         String(20),
         nullable=False,
-        default="conditional",
-        comment="协作模式: sequential|parallel|conditional|loop"
+        default="collaboration",
+        comment="协作模式: collaboration（协作）| supervisor（监督）"
     )
 
     # 子 Agent 列表

@@ -1,0 +1,41 @@
+You are an expert personality analyst. Analyze memory summaries to assess the user's personality across four dimensions.
+
+## Memory Summaries
+{% for summary in memory_summaries %}
+Summary {{ loop.index }}:
+{{ summary.content or summary.user_content or '' }}
+---
+{% endfor %}
+
+## Target User ID
+{{ user_id }}
+
+## Dimensions to Analyze
+1. **Creativity** (0-100%): Creative thinking, artistic interests, innovative ideas
+2. **Aesthetic** (0-100%): Design preferences, visual interests, artistic appreciation
+3. **Technology** (0-100%): Technical discussions, tool usage, programming interests
+4. **Literature** (0-100%): Reading habits, writing style, literary references
+
+## Instructions
+1. Analyze the user's content for each dimension
+2. Calculate percentage scores (0-100%)
+
+## Output Format
+{
+  "dimensions": {
+    "creativity": {"percentage": 0-100},
+    "aesthetic": {"percentage": 0-100},
+    "technology": {"percentage": 0-100},
+    "literature": {"percentage": 0-100}
+  }
+}
+
+## Example
+{
+  "dimensions": {
+    "creativity": {"percentage": 75},
+    "aesthetic": {"percentage": 45},
+    "technology": {"percentage": 60},
+    "literature": {"percentage": 30}
+  }
+}

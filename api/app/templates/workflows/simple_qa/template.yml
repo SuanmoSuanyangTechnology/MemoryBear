@@ -68,12 +68,7 @@ edges:
     label: 完成
 
 # 变量定义
-variables:
-  - name: user_question
-    type: string
-    required: true
-    description: 用户的问题
-    default: ""
+variables: []
 
 # 执行配置
 execution_config:

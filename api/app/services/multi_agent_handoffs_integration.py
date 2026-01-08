@@ -13,16 +13,17 @@ from app.schemas.multi_agent_schema import MultiAgentRunRequest
 from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.services.multi_agent_service import MultiAgentService
 
 logger = get_business_logger()
 
 
 class MultiAgentHandoffsService:
     """Multi-Agent Handoffs 服务 - 扩展现有的 Multi-Agent Service"""
-    
-    def __init__(self, db: Session, multi_agent_service):
+
+    def __init__(self, db: Session, multi_agent_service:MultiAgentService):
         """初始化服务
-        
+
         Args:
             db: 数据库会话
             multi_agent_service: 现有的 MultiAgentService 实例
@@ -30,25 +31,25 @@ class MultiAgentHandoffsService:
         self.db = db
         self.multi_agent_service = multi_agent_service
         self.handoff_manager = get_handoff_manager()
-        
+
         logger.info("Multi-Agent Handoffs 服务初始化完成")
-    
+
     async def run_with_handoffs(
         self,
         app_id: uuid.UUID,
         request: MultiAgentRunRequest
     ) -> Dict[str, Any]:
         """运行支持 handoffs 的多 Agent 任务
-        
+
         Args:
             app_id: 应用 ID
             request: 运行请求
-            
+
         Returns:
             执行结果
         """
         start_time = time.time()
-        
+
         try:
             # 1. 获取配置
             config = self.multi_agent_service.get_config(app_id)
@@ -57,23 +58,25 @@ class MultiAgentHandoffsService:
                     "多 Agent 配置不存在",
                     BizCode.RESOURCE_NOT_FOUND
                 )
-            
+
             # 2. 检查是否启用 handoffs
             execution_config = config.execution_config or {}
+            print("="*50)
+            print(execution_config)
             enable_handoffs = execution_config.get("enable_handoffs", False)
-            
+
             if not enable_handoffs:
                 # 降级到普通模式
                 logger.info("Handoffs 未启用，使用普通模式")
                 return await self.multi_agent_service.run(app_id, request)
-            
+
             # 3. 创建协作编排器
             orchestrator = CollaborativeOrchestrator(
                 db=self.db,
                 config=config,
                 handoff_manager=self.handoff_manager
             )
-            
+
             # 4. 执行协作
             result = await orchestrator.execute_with_handoffs(
                 message=request.message,
@@ -81,11 +84,11 @@ class MultiAgentHandoffsService:
                 user_id=request.user_id,
                 variables=request.variables
             )
-            
+
             # 5. 增强结果
             result["mode"] = "handoffs"
             result["elapsed_time"] = time.time() - start_time
-            
+
             logger.info(
                 "Handoffs 执行完成",
                 extra={
@@ -95,27 +98,27 @@ class MultiAgentHandoffsService:
                     "elapsed_time": result["elapsed_time"]
                 }
             )
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Handoffs 执行失败: {str(e)}")
-            
+
             # 降级到普通模式
             logger.info("降级到普通模式")
             return await self.multi_agent_service.run(app_id, request)
-    
+
     async def run_stream_with_handoffs(
         self,
         app_id: uuid.UUID,
         request: MultiAgentRunRequest
     ) -> AsyncGenerator[str, None]:
         """流式运行支持 handoffs 的多 Agent 任务
-        
+
         Args:
             app_id: 应用 ID
             request: 运行请求
-            
+
         Yields:
             SSE 格式的事件流
         """
@@ -125,24 +128,24 @@ class MultiAgentHandoffsService:
             if not config:
                 yield f"data: {{\"event\": \"error\", \"error\": \"配置不存在\"}}\n\n"
                 return
-            
+
             # 2. 检查是否启用 handoffs
             execution_config = config.execution_config or {}
             enable_handoffs = execution_config.get("enable_handoffs", False)
-            
+
             if not enable_handoffs:
                 # 降级到普通流式模式
                 async for event in self.multi_agent_service.run_stream(app_id, request):
                     yield event
                 return
-            
+
             # 3. 创建协作编排器
             orchestrator = CollaborativeOrchestrator(
                 db=self.db,
                 config=config,
                 handoff_manager=self.handoff_manager
             )
-            
+
             # 4. 流式执行
             async for event in orchestrator.execute_stream_with_handoffs(
                 message=request.message,
@@ -151,27 +154,27 @@ class MultiAgentHandoffsService:
                 variables=request.variables
             ):
                 yield event
-                
+
         except Exception as e:
             logger.error(f"流式 Handoffs 执行失败: {str(e)}")
             yield f"data: {{\"event\": \"error\", \"error\": \"{str(e)}\"}}\n\n"
-    
+
     def get_handoff_history(
         self,
         conversation_id: str
     ) -> Optional[Dict[str, Any]]:
         """获取会话的 handoff 历史
-        
+
         Args:
             conversation_id: 会话 ID
-            
+
         Returns:
             Handoff 历史信息
         """
         state = self.handoff_manager.get_state(conversation_id)
         if not state:
             return None
-        
+
         return {
             "conversation_id": state.conversation_id,
             "current_agent_id": state.current_agent_id,
@@ -190,27 +193,27 @@ class MultiAgentHandoffsService:
             "created_at": state.created_at.isoformat(),
             "updated_at": state.updated_at.isoformat()
         }
-    
+
     def clear_handoff_state(self, conversation_id: str):
         """清除会话的 handoff 状态
-        
+
         Args:
             conversation_id: 会话 ID
         """
         self.handoff_manager.clear_state(conversation_id)
         logger.info(f"清除 handoff 状态: {conversation_id}")
-    
+
     async def test_handoff_routing(
         self,
         app_id: uuid.UUID,
         message: str
     ) -> Dict[str, Any]:
         """测试 handoff 路由决策（不实际执行）
-        
+
         Args:
             app_id: 应用 ID
             message: 测试消息
-            
+
         Returns:
             路由决策结果
         """
@@ -221,7 +224,7 @@ class MultiAgentHandoffsService:
                 "多 Agent 配置不存在",
                 BizCode.RESOURCE_NOT_FOUND
             )
-        
+
         # 2. 解析 sub agents
         sub_agents = {}
         for agent_data in config.sub_agents:
@@ -230,37 +233,37 @@ class MultiAgentHandoffsService:
                 sub_agents[str(agent_id)] = {
                     "info": agent_data
                 }
-        
+
         # 3. 测试路由
         test_conversation_id = f"test-{uuid.uuid4()}"
-        
+
         # 选择初始 Agent
         initial_agent_id = None
         message_lower = message.lower()
-        
+
         for agent_id, agent_data in sub_agents.items():
             agent_info = agent_data.get("info", {})
             capabilities = agent_info.get("capabilities", [])
             role = agent_info.get("role", "")
-            
+
             keywords = capabilities + ([role] if role else [])
             for keyword in keywords:
                 if keyword.lower() in message_lower:
                     initial_agent_id = agent_id
                     break
-            
+
             if initial_agent_id:
                 break
-        
+
         if not initial_agent_id:
             initial_agent_id = next(iter(sub_agents.keys()))
-        
+
         # 4. 生成 handoff 工具
         handoff_tools = self.handoff_manager.generate_handoff_tools(
             initial_agent_id,
             sub_agents
         )
-        
+
         # 5. 检查是否需要 handoff
         handoff_suggestion = self.handoff_manager.should_handoff(
             conversation_id=test_conversation_id,
@@ -268,7 +271,7 @@ class MultiAgentHandoffsService:
             message=message,
             available_agents=sub_agents
         )
-        
+
         return {
             "message": message,
             "initial_agent_id": initial_agent_id,
