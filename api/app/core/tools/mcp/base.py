@@ -16,19 +16,15 @@ class MCPTool(BaseTool):
         super().__init__(tool_id, config)
         self.server_url = config.get("server_url", "")
         self.connection_config = config.get("connection_config", {})
-        self.tool_name = config.get("tool_name", "")  # 特定工具名称
-        self.tool_schema = config.get("tool_schema", {})  # 工具参数 schema
         self.available_tools = config.get("available_tools", [])
     
     @property
     def name(self) -> str:
-        return f"mcp_{self.tool_name}" if self.tool_name else f"mcp_tool_{self.tool_id[:8]}"
+        return f"mcp_tool_{self.tool_id[:8]}"
     
     @property
     def description(self) -> str:
-        if self.tool_schema.get("description"):
-            return self.tool_schema["description"]
-        return f"MCP工具: {self.tool_name}" if self.tool_name else f"MCP工具 - 连接到 {self.server_url}"
+        return f"MCP工具 - 连接到 {self.server_url}"
     
     @property
     def tool_type(self) -> ToolType:
@@ -36,20 +32,36 @@ class MCPTool(BaseTool):
     
     @property
     def parameters(self) -> List[ToolParameter]:
-        """从 MCP 工具 schema 生成参数"""
-        if not self.tool_schema:
-            return [ToolParameter(
+        """根据工具名称返回对应参数"""
+        # 如果有指定的工具名称，从 available_tools 中获取参数
+        tool_name = getattr(self, '_current_tool_name', None)
+        if tool_name and self.available_tools:
+            for tool_info in self.available_tools:
+                if tool_info.get("tool_name") == tool_name:
+                    arguments = tool_info.get("arguments", {})
+                    return self._generate_parameters_from_schema(arguments)
+        
+        # 默认返回通用参数
+        return [
+            ToolParameter(
+                name="tool_name",
+                type=ParameterType.STRING,
+                description="要执行的工具名称",
+                required=True
+            ),
+            ToolParameter(
                 name="arguments",
                 type=ParameterType.OBJECT,
                 description="工具参数",
                 required=False,
                 default={}
-            )]
-        
-        # 解析 MCP 工具的 inputSchema
-        input_schema = self.tool_schema.get("inputSchema", {})
-        properties = input_schema.get("properties", {})
-        required_fields = input_schema.get("required", [])
+            )
+        ]
+    
+    def _generate_parameters_from_schema(self, arguments: Dict[str, Any]) -> List[ToolParameter]:
+        """从参数schema生成参数列表"""
+        properties = arguments.get("properties", {})
+        required_fields = arguments.get("required", [])
         
         params = []
         for param_name, param_def in properties.items():
@@ -69,7 +81,7 @@ class MCPTool(BaseTool):
         return params
     
     def _convert_json_type_to_parameter_type(self, json_type: str) -> ParameterType:
-        """转换 JSON Schema 类型到 ParameterType"""
+        """转换JSON Schema类型到ParameterType"""
         type_mapping = {
             "string": ParameterType.STRING,
             "integer": ParameterType.INTEGER,
@@ -80,25 +92,27 @@ class MCPTool(BaseTool):
         }
         return type_mapping.get(json_type, ParameterType.STRING)
     
+    def set_current_tool(self, tool_name: str):
+        """设置当前工具名称，用于获取特定参数"""
+        self._current_tool_name = tool_name
+    
     async def execute(self, **kwargs) -> ToolResult:
-        """执行 MCP 工具"""
+        """执行MCP工具"""
         start_time = time.time()
         
         try:
+            tool_name = kwargs.get("tool_name")
+            if not tool_name:
+                raise Exception("未指定工具名称")
+            
+            arguments = kwargs.get("arguments", {})
+            
             from .client import SimpleMCPClient
             
             client = SimpleMCPClient(self.server_url, self.connection_config)
             
             async with client:
-                # 使用指定的工具名称或默认第一个工具
-                tool_name_to_use = self.tool_name
-                if not tool_name_to_use and self.available_tools:
-                    tool_name_to_use = self.available_tools[0]
-                
-                if not tool_name_to_use:
-                    raise Exception("未指定工具名称且无可用工具")
-                
-                result = await client.call_tool(tool_name_to_use, kwargs)
+                result = await client.call_tool(tool_name, arguments)
                 
                 execution_time = time.time() - start_time
                 return ToolResult.success_result(
@@ -108,7 +122,7 @@ class MCPTool(BaseTool):
                 
         except Exception as e:
             execution_time = time.time() - start_time
-            logger.error(f"MCP工具执行失败: {self.tool_name or 'unknown'}, 错误: {e}")
+            logger.error(f"MCP工具执行失败: {kwargs.get('tool_name', 'unknown')}, 错误: {e}")
             return ToolResult.error_result(
                 error=str(e),
                 error_code="MCP_EXECUTION_ERROR",
