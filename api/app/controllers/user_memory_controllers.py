@@ -17,6 +17,7 @@ from app.services.user_memory_service import (
     analytics_memory_types,
     analytics_graph_data,
 )
+from app.services.memory_entity_relationship_service import MemoryEntityService,MemoryEmotion,MemoryInteraction
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.schemas.end_user_schema import (
@@ -392,3 +393,42 @@ async def update_end_user_profile(
         db.rollback()
         api_logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", str(e))
+@router.get("/memory_space/timeline_memories", response_model=ApiResponse)
+async def memory_space_timeline_of_shared_memories(id: str, label: str,
+                                      current_user: User = Depends(get_current_user),
+                                      db: Session = Depends(get_db),
+                                      ):
+    MemoryEntity = MemoryEntityService(id, label)
+    timeline_memories_result = await MemoryEntity.get_timeline_memories_server()
+    return success(data=timeline_memories_result, msg="共同记忆时间线")
+@router.get("/memory_space/relationship_evolution", response_model=ApiResponse)
+async def memory_space_relationship_evolution(id: str, label: str,
+                                      current_user: User = Depends(get_current_user),
+                                      db: Session = Depends(get_db),
+                                      ):
+    try:
+        api_logger.info(f"关系演变查询请求: id={id}, table={label}, user={current_user.username}")
+        
+        # 获取情绪数据
+        emotion = MemoryEmotion(id, label)
+        emotion_result = await emotion.get_emotion()
+        
+        # 获取交互数据
+        interaction = MemoryInteraction(id, label)
+        interaction_result = await interaction.get_interaction_frequency()
+        
+        # 关闭连接
+        await emotion.close()
+        await interaction.close()
+        
+        result = {
+            "emotion": emotion_result,
+            "interaction": interaction_result
+        }
+        
+        api_logger.info(f"关系演变查询成功: id={id}, table={label}")
+        return success(data=result, msg="关系演变")
+        
+    except Exception as e:
+        api_logger.error(f"关系演变查询失败: id={id}, table={label}, error={str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "关系演变查询失败", str(e))

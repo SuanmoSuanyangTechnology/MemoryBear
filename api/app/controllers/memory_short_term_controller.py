@@ -58,7 +58,7 @@ async def short_term_configs(
             for memory_item in long_memory.retrieved_content:
                 if isinstance(memory_item, dict):
                     for key, values in memory_item.items():
-                        long_result.append({"query": key, "retrieval": values})
+                        long_result.append({"query": key, "retrieval": values,"source":"上下文对话"})
     entity_result = await search_entity(end_user_id)
     result = {
         'short_term': short_result,
