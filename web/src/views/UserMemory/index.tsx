@@ -104,15 +104,15 @@ export default function UserMemory() {
 
   return (
     <div>
-      <Row gutter={16} className="rb:mb-[16px]">
+      <Row gutter={16} className="rb:mb-4">
         {countList.map(key => (
           <Col key={key} span={6}>
-            <div className="rb:bg-[#FBFDFF] rb:border-[1px] rb:border-[#DFE4ED] rb:rounded-[12px] rb:p-[18px_20px_20px_20px]">
-              <div className="rb:text-[28px] rb:font-extrabold rb:leading-[35px] rb:flex rb:items-center rb:justify-between rb:mb-[12px]">
+            <div className="rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-xl rb:p-[18px_20px_20px_20px]">
+              <div className="rb:text-[28px] rb:font-extrabold rb:leading-8.75 rb:flex rb:items-center rb:justify-between rb:mb-3">
                 {countData[key] || 0}{key === 'avgInteractionTime' ? 's' : ''}
-                <img className="rb:w-[24px] rb:h-[24px]" src={IconList[key]} />
+                <img className="rb:w-6 rb:h-6" src={IconList[key]} />
               </div>
-              <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-[16px]">{t(`userMemory.${key}`)}</div>
+              <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`userMemory.${key}`)}</div>
             </div>
           </Col>
         ))}
@@ -140,22 +140,22 @@ export default function UserMemory() {
                 return (
                   <List.Item key={index}>
                     <div
-                      className="rb:p-[20px] rb:rounded-[12px] rb:border-[1px] rb:border-[#DFE4ED] rb:cursor-pointer"
+                      className="rb:p-5 rb:rounded-xl rb:border rb:border-[#DFE4ED] rb:cursor-pointer"
                       style={{
                         background: bgList[index % bgList.length],
                       }}
                       onClick={() => handleViewDetail(end_user.id)}
                     >
                       <div className="rb:flex rb:items-center">
-                        <div className="rb:w-[48px] rb:h-[48px] rb:text-center rb:font-semibold rb:text-[28px] rb:leading-[48px] rb:rounded-[8px] rb:text-[#FBFDFF] rb:bg-[#155EEF]">{name[0]}</div>
-                        <div className="rb:max-w-[calc(100%-60px)] rb:text-base rb:font-medium rb:leading-[24px] rb:ml-[12px] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
+                        <div className="rb:w-12 rb:h-12 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-12 rb:rounded-lg rb:text-[#FBFDFF] rb:bg-[#155EEF]">{name[0]}</div>
+                        <div className="rb:max-w-[calc(100%-60px)] rb:text-base rb:font-medium rb:leading-6 rb:ml-3 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
                           {name || '-'}<br/>
                         </div>
                       </div>
-                      <div className="rb:grid rb:grid-cols-1 rb:gap-[12px] rb:mt-[28px] rb:mb-[28px]">
+                      <div className="rb:grid rb:grid-cols-1 rb:gap-3 rb:mt-7 rb:mb-7">
                         <div className="rb:text-center">
-                          <div className="rb:text-[24px] rb:leading-[30px] rb:font-extrabold">{memory_num.total || 0}</div>
-                          <div className="rb:break-words">{t(`userMemory.knowledgeEntryCount`)}</div>
+                          <div className="rb:text-[24px] rb:leading-7.5 rb:font-extrabold">{memory_num.total || 0}</div>
+                          <div className="rb:wrap-break-word">{t(`userMemory.knowledgeEntryCount`)}</div>
                         </div>
                       </div>
                     </div>

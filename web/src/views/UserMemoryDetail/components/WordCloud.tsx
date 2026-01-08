@@ -114,7 +114,7 @@ const WordCloud: FC = () => {
                 <div key={item.emotion_type}>
                   <div className="rb:flex rb:items-center rb:justify-between rb:font-medium">
                     {t(`statementDetail.${item.emotion_type}`)}
-                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular">{item.count}{t('statementDetail.pieces')}</div>
+                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular">{item.count} {t('statementDetail.pieces')}</div>
                   </div>
                   <Progress size="small" percent={item.percentage} />
                 </div>
