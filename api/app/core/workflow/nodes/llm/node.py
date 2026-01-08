@@ -65,11 +65,12 @@ class LLMNode(BaseNode):
     - user/human: 用户消息（HumanMessage）
     - ai/assistant: AI 消息（AIMessage）
     """
+
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
         self.typed_config = LLMNodeConfig(**self.config)
 
-    def _render_context(self, message,state):
+    def _render_context(self, message, state):
         context = f"<context>{self._render_template(self.typed_config.context, state)}</context>"
         return re.sub(r"{{context}}", context, message)
 
