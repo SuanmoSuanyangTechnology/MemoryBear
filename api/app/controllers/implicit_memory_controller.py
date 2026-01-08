@@ -171,7 +171,7 @@ async def get_preference_tags(
         )
         
         api_logger.info(f"Retrieved {len(tags)} preference tags for user: {user_id}")
-        return success(data=[tag.dict() for tag in tags], msg="偏好标签获取成功")
+        return success(data=[tag.model_dump(mode='json') for tag in tags], msg="偏好标签获取成功")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "偏好标签获取", user_id)
@@ -210,7 +210,7 @@ async def get_dimension_portrait(
         )
         
         api_logger.info(f"Dimension portrait retrieved for user: {user_id}")
-        return success(data=portrait.dict(), msg="四维画像获取成功")
+        return success(data=portrait.model_dump(mode='json'), msg="四维画像获取成功")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "四维画像获取", user_id)
@@ -249,7 +249,7 @@ async def get_interest_area_distribution(
         )
         
         api_logger.info(f"Interest area distribution retrieved for user: {user_id}")
-        return success(data=distribution.dict(), msg="兴趣领域分布获取成功")
+        return success(data=distribution.model_dump(mode='json'), msg="兴趣领域分布获取成功")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "兴趣领域分布获取", user_id)
@@ -283,18 +283,28 @@ async def get_behavior_habits(
         # Validate inputs
         validate_user_id(user_id)
         
+        # Convert string confidence level to numerical
+        numerical_confidence = None
+        if confidence_level:
+            confidence_mapping = {
+                "high": 85,
+                "medium": 50,
+                "low": 20
+            }
+            numerical_confidence = confidence_mapping.get(confidence_level.lower())
+        
         # Create service with user-specific config
         service = ImplicitMemoryService(db=db, end_user_id=user_id)
         
         habits = await service.get_behavior_habits(
             user_id=user_id,
-            confidence_level=confidence_level,
+            confidence_level=numerical_confidence,
             frequency_pattern=frequency_pattern,
             time_period=time_period
         )
         
         api_logger.info(f"Retrieved {len(habits)} behavior habits for user: {user_id}")
-        return success(data=[habit.dict() for habit in habits], msg="行为习惯获取成功")
+        return success(data=[habit.model_dump(mode='json') for habit in habits], msg="行为习惯获取成功")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "行为习惯获取", user_id)

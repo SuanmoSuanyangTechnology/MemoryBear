@@ -6,14 +6,13 @@ similar habits with confidence scoring.
 """
 
 import logging
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import List, Optional
 
 from app.core.memory.analytics.implicit_memory.llm_client import ImplicitMemoryLLMClient
 from app.core.memory.llm_tools.llm_client import LLMClientException
 from app.schemas.implicit_memory_schema import (
     BehaviorHabit,
-    ConfidenceLevel,
     FrequencyPattern,
     UserMemorySummary,
 )
@@ -28,7 +27,7 @@ class HabitData(BaseModel):
     habit_description: str
     frequency_pattern: str
     time_context: str
-    confidence_level: str
+    confidence_level: int = 50  # Default to medium confidence
     supporting_summaries: List[str] = Field(default_factory=list)
     specific_examples: List[str] = Field(default_factory=list)
     is_current: bool = True
@@ -88,7 +87,6 @@ class HabitAnalyzer:
             
             # Convert to BehaviorHabit objects
             behavior_habits = []
-            current_time = datetime.now()
             
             for habit_data in response.get("habits", []):
                 try:
@@ -105,8 +103,7 @@ class HabitAnalyzer:
                         habit_description=habit_data.get("habit_description", ""),
                         frequency_pattern=self._validate_frequency_pattern(habit_data.get("frequency_pattern", "occasional")),
                         time_context=habit_data.get("time_context", ""),
-                        confidence_level=self._validate_confidence_level(habit_data.get("confidence_level", "medium")),
-                        supporting_summaries=supporting_summaries,
+                        confidence_level=self._validate_confidence_level(habit_data.get("confidence_level", 50)),
                         specific_examples=specific_examples,
                         first_observed=first_observed,
                         last_observed=last_observed,
@@ -165,26 +162,38 @@ class HabitAnalyzer:
         
         return frequency_mapping.get(frequency_str, FrequencyPattern.OCCASIONAL)
     
-    def _validate_confidence_level(self, confidence_str: str) -> ConfidenceLevel:
-        """Validate and convert confidence level string.
+    def _validate_confidence_level(self, confidence_level) -> int:
+        """Return confidence level as integer, handling both string and numeric inputs.
         
         Args:
-            confidence_str: Confidence level as string
+            confidence_level: Confidence level (string or numeric)
             
         Returns:
-            ConfidenceLevel enum value
+            Confidence level as integer (0-100)
         """
-        confidence_str = confidence_str.lower().strip()
+        # If it's already a number, return it as int
+        if isinstance(confidence_level, (int, float)):
+            return int(confidence_level)
         
-        if confidence_str in ["high", "높음"]:
-            return ConfidenceLevel.HIGH
-        elif confidence_str in ["medium", "중간"]:
-            return ConfidenceLevel.MEDIUM
-        elif confidence_str in ["low", "낮음"]:
-            return ConfidenceLevel.LOW
-        else:
-            logger.warning(f"Unknown confidence level: {confidence_str}, defaulting to medium")
-            return ConfidenceLevel.MEDIUM
+        # If it's a string, convert common values to numbers
+        if isinstance(confidence_level, str):
+            confidence_str = confidence_level.lower().strip()
+            if confidence_str in ["high", "높음"]:
+                return 85
+            elif confidence_str in ["medium", "중간"]:
+                return 50
+            elif confidence_str in ["low", "낮음"]:
+                return 20
+            else:
+                # Try to parse as number
+                try:
+                    return int(float(confidence_str))
+                except ValueError:
+                    logger.warning(f"Unknown confidence level: {confidence_level}, defaulting to medium")
+                    return 50
+        
+        # Default fallback
+        return 50
     
     def _determine_observation_dates(
         self,
@@ -249,7 +258,7 @@ class HabitAnalyzer:
                 return False
             
             # Check supporting summaries
-            if not habit.supporting_summaries or len(habit.supporting_summaries) == 0:
+            if not habit.specific_examples or len(habit.specific_examples) == 0:
                 return False
             
             # Check specific examples
@@ -389,9 +398,9 @@ class HabitAnalyzer:
         Returns:
             Merged behavioral habit
         """
-        # Combine supporting summaries
-        combined_summaries = list(set(
-            existing_habit.supporting_summaries + new_habit.supporting_summaries
+        # Combine supporting summaries (using specific_examples instead)
+        combined_examples = list(set(
+            existing_habit.specific_examples + new_habit.specific_examples
         ))
         
         # Combine specific examples
@@ -400,8 +409,7 @@ class HabitAnalyzer:
         ))
         
         # Update confidence level (take higher confidence)
-        confidence_levels = [existing_habit.confidence_level, new_habit.confidence_level]
-        new_confidence = max(confidence_levels, key=lambda x: ["low", "medium", "high"].index(x.value))
+        new_confidence = max(existing_habit.confidence_level, new_habit.confidence_level)
         
         # Update observation dates
         first_observed = min(existing_habit.first_observed, new_habit.first_observed)
@@ -420,7 +428,6 @@ class HabitAnalyzer:
             frequency_pattern=existing_habit.frequency_pattern,  # Keep original frequency
             time_context=combined_time_context,
             confidence_level=new_confidence,
-            supporting_summaries=combined_summaries,
             specific_examples=combined_examples,
             first_observed=first_observed,
             last_observed=last_observed,
@@ -437,8 +444,8 @@ class HabitAnalyzer:
             Sorted list of habits
         """
         def priority_score(habit: BehaviorHabit) -> tuple:
-            # Confidence level score (high=3, medium=2, low=1)
-            confidence_score = {"high": 3, "medium": 2, "low": 1}.get(habit.confidence_level.value, 1)
+            # Confidence level score (0-100 scale)
+            confidence_score = habit.confidence_level
             
             # Recency score (more recent = higher score)
             days_since_last = (datetime.now() - habit.last_observed).days
