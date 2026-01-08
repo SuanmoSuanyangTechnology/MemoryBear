@@ -16,7 +16,6 @@ from app.core.memory.analytics.implicit_memory.analyzers.habit_analyzer import (
 from app.core.memory.llm_tools.llm_client import LLMClientException
 from app.schemas.implicit_memory_schema import (
     BehaviorHabit,
-    ConfidenceLevel,
     FrequencyPattern,
     UserMemorySummary,
 )
@@ -116,13 +115,8 @@ class HabitDetector:
         def calculate_ranking_score(habit: BehaviorHabit) -> float:
             """Calculate combined ranking score for a habit."""
             
-            # Confidence score (0.0-1.0)
-            confidence_scores = {
-                ConfidenceLevel.HIGH: 1.0,
-                ConfidenceLevel.MEDIUM: 0.6,
-                ConfidenceLevel.LOW: 0.3
-            }
-            confidence_score = confidence_scores.get(habit.confidence_level, 0.3)
+            # Confidence score (0.0-1.0) - convert from 0-100 scale
+            confidence_score = habit.confidence_level / 100.0
             
             # Recency score (0.0-1.0)
             current_time = datetime.now()
@@ -152,7 +146,7 @@ class HabitDetector:
             frequency_bonus = frequency_bonuses.get(habit.frequency_pattern, 0.0)
             
             # Evidence quality bonus
-            evidence_bonus = min(len(habit.supporting_summaries) / 10.0, 0.1)  # Max 0.1 bonus
+            evidence_bonus = min(len(habit.specific_examples) / 10.0, 0.1)  # Max 0.1 bonus
             
             # Current habit bonus
             current_bonus = 0.1 if habit.is_current else 0.0
@@ -204,7 +198,6 @@ class HabitDetector:
                     frequency_pattern=habit.frequency_pattern,
                     time_context=habit.time_context,
                     confidence_level=habit.confidence_level,
-                    supporting_summaries=habit.supporting_summaries,
                     specific_examples=habit.specific_examples,
                     first_observed=habit.first_observed,
                     last_observed=habit.last_observed,
@@ -218,7 +211,6 @@ class HabitDetector:
                     frequency_pattern=habit.frequency_pattern,
                     time_context=habit.time_context,
                     confidence_level=habit.confidence_level,
-                    supporting_summaries=habit.supporting_summaries,
                     specific_examples=habit.specific_examples,
                     first_observed=habit.first_observed,
                     last_observed=habit.last_observed,
