@@ -30,6 +30,7 @@
     "dayjs": "^1.11.18",
     "echarts": "^5.6.0",
     "echarts-for-react": "^3.0.2",
+    "echarts-wordcloud": "^2.1.0",
     "i18next": "^25.6.0",
     "js-yaml": "^4.1.1",
     "lexical": "^0.39.0",

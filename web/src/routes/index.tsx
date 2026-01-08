@@ -61,6 +61,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   StatementDetail: lazy(() => import('@/views/UserMemoryDetail/pages/StatementDetail')),
   ForgetDetail: lazy(() => import('@/views/UserMemoryDetail/pages/ForgetDetail')),
   MemoryNodeDetail: lazy(() => import('@/views/UserMemoryDetail/pages/index')),
+  GraphDetail: lazy(() => import('@/views/UserMemoryDetail/pages/GraphDetail')),
   SelfReflectionEngine: lazy(() => import('@/views/SelfReflectionEngine')),
   OrderPayment: lazy(() => import('@/views/OrderPayment')),
   OrderHistory: lazy(() => import('@/views/OrderHistory')),

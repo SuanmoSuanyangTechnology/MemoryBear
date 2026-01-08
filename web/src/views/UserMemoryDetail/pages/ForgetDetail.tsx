@@ -20,7 +20,7 @@ const statusTagColors: Record<string, 'success' | 'purple' | 'default' | 'warnin
   chunk: 'warning',
 }
 
-const ForgetOverview: FC = () => {
+const ForgetDetail: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
@@ -156,4 +156,4 @@ const ForgetOverview: FC = () => {
     </div>
   )
 }
-export default ForgetOverview
+export default ForgetDetail
