@@ -24,7 +24,6 @@ from app.core.memory.analytics.implicit_memory.habit_detector import HabitDetect
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.implicit_memory_schema import (
     BehaviorHabit,
-    ConfidenceLevel,
     DateRange,
     DimensionPortrait,
     FrequencyPattern,
@@ -303,7 +302,7 @@ class ImplicitMemoryService:
     async def get_behavior_habits(
         self,
         user_id: str,
-        confidence_level: Optional[str] = None,
+        confidence_level: Optional[int] = None,
         frequency_pattern: Optional[str] = None,
         time_period: Optional[str] = None
     ) -> List[BehaviorHabit]:
@@ -311,7 +310,7 @@ class ImplicitMemoryService:
         
         Args:
             user_id: Target user ID
-            confidence_level: Optional confidence level filter ("high", "medium", "low")
+            confidence_level: Optional confidence level filter (0-100)
             frequency_pattern: Optional frequency pattern filter
             time_period: Optional time period filter ("current", "past")
             
@@ -338,13 +337,8 @@ class ImplicitMemoryService:
             filtered_habits = []
             for habit in behavior_habits:
                 # Filter by confidence level
-                if confidence_level:
-                    try:
-                        target_confidence = ConfidenceLevel(confidence_level.lower())
-                        if habit.confidence_level != target_confidence:
-                            continue
-                    except ValueError:
-                        logger.warning(f"Invalid confidence level: {confidence_level}")
+                if confidence_level is not None:
+                    if habit.confidence_level < confidence_level:
                         continue
                 
                 # Filter by frequency pattern
@@ -367,12 +361,8 @@ class ImplicitMemoryService:
                 filtered_habits.append(habit)
             
             # Sort by confidence level and recency
-            confidence_order = {"high": 3, "medium": 2, "low": 1}
             filtered_habits.sort(
-                key=lambda x: (
-                    confidence_order.get(x.confidence_level.value, 0),
-                    x.last_observed
-                ),
+                key=lambda x: (x.confidence_level, x.last_observed),
                 reverse=True
             )
             
