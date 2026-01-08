@@ -1,18 +1,27 @@
 """会话服务"""
 import uuid
+from datetime import datetime, timedelta
 from typing import Annotated
 from typing import Optional, List, Tuple
 
+import json_repair
 from fastapi import Depends
+from jinja2 import Template
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.exceptions import ResourceNotFoundException
 from app.core.logging_config import get_business_logger
+from app.core.models import RedBearLLM, RedBearModelConfig
 from app.db import get_db
-from app.models import Conversation, Message
-from app.repositories.conversation_repository import ConversationRepository, UnitOfWork, MessageRepository
+from app.models import Conversation, Message, User, ModelType
+from app.models.conversation_model import ConversationDetail
+from app.models.prompt_optimizer_model import RoleType
+from app.repositories.conversation_repository import ConversationRepository, MessageRepository
+from app.schemas.conversation_schema import ConversationOut
+from app.services import workspace_service
+from app.services.model_service import ModelConfigService
 
 logger = get_business_logger()
 
@@ -28,7 +37,6 @@ class ConversationService:
         self.db = db
         self.conversation_repo = ConversationRepository(db)
         self.message_repo = MessageRepository(db)
-        self.unit_repo_option = UnitOfWork(db)
 
     def create_conversation(
             self,
@@ -53,14 +61,33 @@ class ConversationService:
         Returns:
             Conversation: Newly created Conversation instance.
         """
-        conversation = self.conversation_repo.create_conversation(
-            app_id=app_id,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            title=title or "New Conversation",
-            is_draft=is_draft,
-            config_snapshot=config_snapshot
-        )
+        try:
+            conversation = self.conversation_repo.create_conversation(
+                app_id=app_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                title=title or "New Conversation",
+                is_draft=is_draft,
+                config_snapshot=config_snapshot
+            )
+            self.db.commit()
+            self.db.refresh(conversation)
+
+            logger.info(
+                "Create Conversation Success",
+                extra={
+                    "conversation_id": str(conversation.id),
+                    "app_id": str(app_id),
+                    "workspace_id": str(workspace_id),
+                    "is_draft": is_draft
+                }
+            )
+        except Exception as e:
+            logger.error(
+                f"Create Conversation Failed - {str(e)}"
+            )
+            self.db.rollback()
+            raise BusinessException(f"Error create Convsersation", code=BizCode.DB_ERROR)
 
         return conversation
 
@@ -88,6 +115,31 @@ class ConversationService:
         )
 
         return conversation
+
+    def get_user_conversations(
+            self,
+            user_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+    ) -> list[Conversation]:
+        """
+        Retrieve recent conversations for a specific user within a workspace.
+
+        This method delegates persistence logic to the repository layer and
+        applies service-level defaults (e.g. recent conversation limit).
+
+        Args:
+            user_id (uuid.UUID): Unique identifier of the user.
+            workspace_id (uuid.UUID): Workspace scope for the query.
+
+        Returns:
+            list[Conversation]: A list of recent conversation entities.
+        """
+        conversations = self.conversation_repo.get_conversation_by_user_id(
+            user_id,
+            workspace_id,
+            limit=10
+        )
+        return conversations
 
     def list_conversations(
             self,
@@ -142,14 +194,55 @@ class ConversationService:
         Returns:
             Message: Newly created Message instance.
         """
-        message = self.unit_repo_option.add_message(
-            conversation_id=conversation_id,
-            role=role,
-            content=content,
-            meta_data=meta_data
-        )
+        try:
+            conversation = self.conversation_repo.get_conversation_by_conversation_id(
+                conversation_id
+            )
 
-        return message
+            message = Message(
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                meta_data=meta_data,
+            )
+
+            self.message_repo.add_message(message)
+
+            conversation.message_count += 1
+
+            if conversation.message_count == 1 and role == "user":
+                conversation.title = (
+                        content[:50] + ("..." if len(content) > 50 else "")
+                )
+
+            self.db.commit()
+            self.db.refresh(message)
+
+            logger.info(
+                "Message added successfully",
+                extra={
+                    "conversation_id": str(conversation_id),
+                    "message_id": str(message.id),
+                    "role": role,
+                    "content_length": len(content),
+                },
+            )
+
+            return message
+        except Exception as e:
+            logger.error(
+                f"Message added error, db roll back - {str(e)}",
+                extra={
+                    "conversation_id": str(conversation_id),
+                    "role": role,
+                    "content_length": len(content),
+                },
+            )
+            self.db.rollback()
+            raise BusinessException(
+                f"Error adding message, conversation_id={conversation_id}",
+                code=BizCode.DB_ERROR
+            )
 
     def get_messages(
             self,
@@ -251,10 +344,26 @@ class ConversationService:
             conversation_id (uuid.UUID): Conversation UUID.
             workspace_id (uuid.UUID): Workspace UUID for validation.
         """
-        self.conversation_repo.soft_delete_conversation_by_conversation_id(
-            conversation_id,
-            workspace_id
-        )
+        try:
+            self.conversation_repo.soft_delete_conversation_by_conversation_id(
+                conversation_id,
+                workspace_id
+            )
+            self.db.commit()
+
+            logger.info(
+                "Soft deleted conversation successfully",
+                extra={
+                    "conversation_id": str(conversation_id),
+                    "workspace_id": str(workspace_id)
+                }
+            )
+        except Exception as e:
+            self.db.rollback()
+            logger.error(
+                f"Error deleting conversation, conversation_id={conversation_id} - {str(e)}",
+            )
+            raise BusinessException("Error deleting conversation", code=BizCode.DB_ERROR)
 
     def create_or_get_conversation(
             self,
@@ -313,6 +422,158 @@ class ConversationService:
         )
 
         return conversation
+
+    async def get_conversation_detail(
+            self,
+            user: User,
+            conversation_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            language: str = "zh"
+    ) -> ConversationOut:
+        """
+        Retrieve or generate the summary and theme of a conversation.
+
+        This method first attempts to fetch the conversation detail from the repository.
+        If no detail exists or the conversation is outdated (>1 day), it generates a new
+        summary using the configured LLM model, stores it, and returns it.
+
+        Args:
+            user (User): The user requesting the conversation summary.
+            conversation_id (UUID): Unique identifier of the conversation.
+            workspace_id (UUID): Identifier of the workspace where the conversation belongs.
+            language (str, optional): Language for the summary generation. Defaults to "zh".
+
+        Returns:
+            ConversationOut: An object containing the conversation's theme, summary,
+                             takeaways, and information score.
+
+        Raises:
+            BusinessException: If the workspace model is not configured, the model does
+                               not exist, API keys are missing, or the LLM output is invalid.
+
+        Notes:
+            - If conversation details exist and are recent, they are returned directly.
+            - LLM generation uses system and user prompt templates from the filesystem.
+            - JSON repair is applied to ensure model outputs can be safely parsed.
+            - Commits the new conversation detail only if it is generated or outdated.
+        """
+        logger.info(f"Fetching conversation detail for conversation_id={conversation_id}, workspace_id={workspace_id}")
+
+        conversation_detail = self.conversation_repo.get_conversation_detail(
+            conversation_id=conversation_id,
+        )
+        conversation = self.get_conversation(
+            conversation_id=conversation_id,
+        )
+        if conversation_detail:
+            logger.info(f"Conversation detail found in repository for conversation_id={conversation_id}")
+            return ConversationOut(
+                theme=conversation_detail.theme,
+                theme_intro=conversation_detail.theme_intro,
+                summary=conversation_detail.summary,
+                takeaways=conversation_detail.takeaways,
+                info_score=conversation_detail.info_score,
+            )
+        logger.info("Conversation detail not found, generating new summary using LLM")
+        configs = workspace_service.get_workspace_models_configs(
+            db=self.db,
+            workspace_id=workspace_id,
+            user=user
+        )
+        model_id = configs.get('llm')
+        if not model_id:
+            logger.error(f"Workspace model configuration not found for workspace_id={workspace_id}")
+            raise BusinessException("Workspace model configuration not found. Please configure a model first.", code=BizCode.MODEL_NOT_FOUND)
+        config = ModelConfigService.get_model_by_id(db=self.db, model_id=model_id)
+
+        if not config:
+            logger.error("Configured model not found for model_id={model_id}")
+            raise BusinessException("Configured model does not exist.", BizCode.NOT_FOUND)
+
+        if not config.api_keys or len(config.api_keys) == 0:
+            logger.error(f"Model API keys missing for model_id={model_id}", )
+            raise BusinessException("Model configuration missing API keys.", BizCode.INVALID_PARAMETER)
+
+        api_config = config.api_keys[0]
+        model_name = api_config.model_name
+        provider = api_config.provider
+        api_key = api_config.api_key
+        api_base = api_config.api_base
+        model_type = config.type
+
+        llm = RedBearLLM(
+            RedBearModelConfig(
+                model_name=model_name,
+                provider=provider,
+                api_key=api_key,
+                base_url=api_base
+            ),
+            type=ModelType(model_type)
+        )
+
+        conversation_messages = self.get_conversation_history(
+            conversation_id=conversation_id,
+            max_history=30
+        )
+
+        with open('app/services/prompt/conversation_summary_system.jinja2', 'r', encoding='utf-8') as f:
+            system_prompt = f.read()
+        rendered_system_message = Template(system_prompt).render()
+
+        with open('app/services/prompt/conversation_summary_user.jinja2', 'r', encoding='utf-8') as f:
+            user_prompt = f.read()
+        rendered_user_message = Template(user_prompt).render(
+            language=language,
+            conversation=str(conversation_messages)
+        )
+        messages = [
+            (RoleType.SYSTEM, rendered_system_message),
+            (RoleType.USER, rendered_user_message),
+        ]
+        logger.info(f"Invoking LLM for conversation_id={conversation_id}")
+        model_resp = await llm.ainvoke(messages)
+        try:
+            if isinstance(model_resp.content, str):
+                result = json_repair.repair_json(model_resp.content, return_objects=True)
+            elif isinstance(model_resp.content, list):
+                result = json_repair.repair_json(model_resp.content[0].get("text"), return_objects=True)
+            elif isinstance(model_resp.content, dict):
+                result = model_resp.content
+            else:
+                raise BusinessException("Unexpect model output", code=BizCode.LLM_ERROR)
+        except Exception as e:
+            logger.exception(f"Failed to parse LLM response for conversation_id={conversation_id}")
+            raise BusinessException("Failed to parse LLM response", code=BizCode.LLM_ERROR) from e
+
+        summary = result.get('summary', "")
+        theme = result.get('theme', "")
+        theme_intro = result.get("theme_intro", "")
+        takeaways = result.get("takeaways") or []
+        info_score = result.get("info_score", "")
+
+        if datetime.now() - conversation.updated_at > timedelta(days=1):
+            logger.info(f"Updating conversation detail in DB for conversation_id={conversation_id}")
+            conversation_detail = ConversationDetail(
+                conversation_id=conversation.id,
+                summary=summary,
+                theme=theme,
+                theme_intro=theme_intro,
+                takeaways=takeaways,
+                info_score=info_score
+            )
+            self.conversation_repo.add_conversation_detail(conversation_detail)
+
+            self.db.commit()
+            self.db.refresh(conversation_detail)
+        logger.info(f"Returning conversation summary for conversation_id={conversation_id}")
+        conversation_out = ConversationOut(
+            theme=theme,
+            theme_intro=theme_intro,
+            summary=summary,
+            takeaways=takeaways,
+            info_score=info_score
+        )
+        return conversation_out
 
 
 # ==================== Dependency Injection ====================
