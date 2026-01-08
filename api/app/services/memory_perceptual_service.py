@@ -99,7 +99,7 @@ class MemoryPerceptualService:
                 "keywords": content.keywords,
                 "topic": content.topic,
                 "domain": content.domain,
-                "created_time": memory.created_time.isoformat() if memory.created_time else None,
+                "created_time": int(memory.created_time.timestamp()*1000),
                 **detail
             }
 
@@ -141,8 +141,9 @@ class MemoryPerceptualService:
                     perceptual_type=PerceptualType(memory.perceptual_type),
                     file_path=memory.file_path,
                     file_name=memory.file_name,
+                    file_ext=memory.file_ext,
                     summary=memory.summary,
-                    created_time=memory.created_time,
+                    created_time=int(memory.created_time.timestamp()*1000),
                     storage_type=FileStorageType(memory.storage_service),
                 )
                 memory_items.append(memory_item)

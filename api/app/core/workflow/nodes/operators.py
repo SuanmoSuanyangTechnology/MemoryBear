@@ -387,6 +387,11 @@ class ArrayComparisonOperator(ConditionBase):
         return self.right_value not in self.left_value
 
 
+class NoneObjectComparisonOperator(ConditionBase):
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: False
+
+
 CompareOperatorInstance = Union[
     StringComparisonOperator,
     NumberComparisonOperator,
@@ -405,6 +410,7 @@ class ConditionExpressionResolver:
         float: NumberComparisonOperator,
         list: ArrayComparisonOperator,
         dict: ObjectComparisonOperator,
+        type(None): NoneObjectComparisonOperator
     }
 
     @classmethod
