@@ -160,11 +160,20 @@ class MemoryInsightHelper:
         month_counts = Counter()
         valid_dates_count = 0
         for record in records:
-            creation_time_str = record.get("creation_time")
-            if not creation_time_str:
+            creation_time = record.get("creation_time")
+            if not creation_time:
                 continue
             try:
-                dt_object = datetime.fromisoformat(creation_time_str.replace("Z", "+00:00"))
+                # 处理 Neo4j DateTime 对象或字符串
+                if hasattr(creation_time, 'to_native'):
+                    dt_object = creation_time.to_native()
+                elif isinstance(creation_time, str):
+                    dt_object = datetime.fromisoformat(creation_time.replace("Z", "+00:00"))
+                elif isinstance(creation_time, datetime):
+                    dt_object = creation_time
+                else:
+                    dt_object = datetime.fromisoformat(str(creation_time).replace("Z", "+00:00"))
+                
                 month_counts[dt_object.month] += 1
                 valid_dates_count += 1
             except (ValueError, TypeError, AttributeError):
@@ -225,8 +234,33 @@ class MemoryInsightHelper:
         )
         start_year, end_year = "N/A", "N/A"
         if time_records and time_records[0]["start_time"]:
-            start_year = datetime.fromisoformat(time_records[0]["start_time"].replace("Z", "+00:00")).year
-            end_year = datetime.fromisoformat(time_records[0]["end_time"].replace("Z", "+00:00")).year
+            start_time = time_records[0]["start_time"]
+            end_time = time_records[0]["end_time"]
+            
+            # 处理 Neo4j DateTime 对象或字符串
+            try:
+                if hasattr(start_time, 'to_native'):
+                    start_year = start_time.to_native().year
+                elif isinstance(start_time, str):
+                    start_year = datetime.fromisoformat(start_time.replace("Z", "+00:00")).year
+                elif isinstance(start_time, datetime):
+                    start_year = start_time.year
+                else:
+                    start_year = datetime.fromisoformat(str(start_time).replace("Z", "+00:00")).year
+            except Exception:
+                start_year = "N/A"
+            
+            try:
+                if hasattr(end_time, 'to_native'):
+                    end_year = end_time.to_native().year
+                elif isinstance(end_time, str):
+                    end_year = datetime.fromisoformat(end_time.replace("Z", "+00:00")).year
+                elif isinstance(end_time, datetime):
+                    end_year = end_time.year
+                else:
+                    end_year = datetime.fromisoformat(str(end_time).replace("Z", "+00:00")).year
+            except Exception:
+                end_year = "N/A"
         
         return {
             "user_id": most_connected_user,

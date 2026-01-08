@@ -76,9 +76,28 @@ async def trigger_forgetting_cycle(
         api_logger.warning(f"用户 {current_user.username} 尝试触发遗忘周期但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
     
+    # 通过 group_id 获取关联的 config_id
+    try:
+        from app.services.memory_agent_service import get_end_user_connected_config
+        
+        connected_config = get_end_user_connected_config(payload.group_id, db)
+        config_id = connected_config.get("memory_config_id")
+        
+        if config_id is None:
+            api_logger.warning(f"终端用户 {payload.group_id} 未关联记忆配置")
+            return fail(BizCode.INVALID_PARAMETER, f"终端用户 {payload.group_id} 未关联记忆配置", "memory_config_id is None")
+        
+        api_logger.debug(f"通过 group_id={payload.group_id} 获取到 config_id={config_id}")
+    except ValueError as e:
+        api_logger.warning(f"获取终端用户配置失败: {str(e)}")
+        return fail(BizCode.INVALID_PARAMETER, str(e), "ValueError")
+    except Exception as e:
+        api_logger.error(f"获取终端用户配置时发生错误: {str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "获取终端用户配置失败", str(e))
+    
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求触发遗忘周期: "
-        f"group_id={payload.group_id}, max_batch={payload.max_merge_batch_size}, "
+        f"group_id={payload.group_id}, config_id={config_id}, max_batch={payload.max_merge_batch_size}, "
         f"min_days={payload.min_days_since_access}"
     )
     
@@ -89,7 +108,7 @@ async def trigger_forgetting_cycle(
             group_id=payload.group_id,
             max_merge_batch_size=payload.max_merge_batch_size,
             min_days_since_access=payload.min_days_since_access,
-            config_id=payload.config_id
+            config_id=config_id
         )
         
         # 构建响应
@@ -217,7 +236,6 @@ async def update_forgetting_config(
 @router.get("/stats", response_model=ApiResponse)
 async def get_forgetting_stats(
     group_id: Optional[str] = None,
-    config_id: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -227,8 +245,7 @@ async def get_forgetting_stats(
     返回知识层节点统计、激活值分布等信息。
     
     Args:
-        group_id: 组ID（可选）
-        config_id: 配置ID（可选，用于获取遗忘阈值）
+        group_id: 组ID（即 end_user_id，可选）
         current_user: 当前用户
         db: 数据库会话
     
@@ -241,6 +258,27 @@ async def get_forgetting_stats(
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试获取遗忘引擎统计但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+    
+    # 如果提供了 group_id，通过它获取 config_id
+    config_id = None
+    if group_id:
+        try:
+            from app.services.memory_agent_service import get_end_user_connected_config
+            
+            connected_config = get_end_user_connected_config(group_id, db)
+            config_id = connected_config.get("memory_config_id")
+            
+            if config_id is None:
+                api_logger.warning(f"终端用户 {group_id} 未关联记忆配置")
+                return fail(BizCode.INVALID_PARAMETER, f"终端用户 {group_id} 未关联记忆配置", "memory_config_id is None")
+            
+            api_logger.debug(f"通过 group_id={group_id} 获取到 config_id={config_id}")
+        except ValueError as e:
+            api_logger.warning(f"获取终端用户配置失败: {str(e)}")
+            return fail(BizCode.INVALID_PARAMETER, str(e), "ValueError")
+        except Exception as e:
+            api_logger.error(f"获取终端用户配置时发生错误: {str(e)}")
+            return fail(BizCode.INTERNAL_ERROR, "获取终端用户配置失败", str(e))
     
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求获取遗忘引擎统计: "
