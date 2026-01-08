@@ -506,7 +506,7 @@ async def draft_run(
         multi_agent_request = MultiAgentRunRequest(
             message=payload.message,
             conversation_id=payload.conversation_id,
-            user_id=payload.user_id,
+            user_id=payload.user_id or str(current_user.id),
             variables=payload.variables or {},
             use_llm_routing=True  # 默认启用 LLM 路由
         )
