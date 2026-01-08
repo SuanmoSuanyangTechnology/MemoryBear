@@ -39,10 +39,11 @@ class PerceptualMemoryItem(BaseModel):
     id: uuid.UUID = Field(..., description="Unique memory ID")
     perceptual_type: PerceptualType = Field(..., description="Type of perception, e.g., text, audio, or video")
     file_path: str = Field(..., description="File path in the storage service")
+    file_ext: str = Field(..., description="File extension")
     file_name: str = Field(..., description="File name")
-    summary: Optional[str] = Field(None, description="摘要")
+    summary: Optional[str] = Field(None, description="summary")
     storage_type: FileStorageType = Field(..., description="Storage type for file")
-    created_time: Optional[datetime] = Field(None, description="创建时间")
+    created_time: int = Field(None, description="create time")
 
     class Config:
         from_attributes = True
@@ -114,6 +115,8 @@ class AudioModal(BaseModel):
 
 class TextModal(BaseModel):
     section_count: int
+    title: str
+    first_line: str
 
 
 class Asset(BaseModel):
