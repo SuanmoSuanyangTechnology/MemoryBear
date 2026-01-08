@@ -138,7 +138,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
         </div>
         <Form form={form} layout="vertical">
           <Space size={20} direction="vertical" style={{width: '100%'}}>
-            <Card title={t('application.handoffs')}>
+            <Card title={t('application.collaboration')}>
               <Form.Item
                 name="orchestration_mode"
                 noStyle

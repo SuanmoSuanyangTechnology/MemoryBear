@@ -55,7 +55,7 @@ class ConditionDetail(BaseModel):
     )
 
     input_type: ValueInputType = Field(
-        ...,
+        default=ValueInputType.CONSTANT,
         description="Input type of the loop variable"
     )
 

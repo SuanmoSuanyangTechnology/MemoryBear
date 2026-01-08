@@ -37,7 +37,7 @@ class EndNode(BaseNode):
 
         # 如果配置了输出模板，使用模板渲染；否则使用默认输出
         if output_template:
-            output = self._render_template(output_template, state)
+            output = self._render_template(output_template, state, struct=False)
         else:
             output = "工作流已完成"
 
