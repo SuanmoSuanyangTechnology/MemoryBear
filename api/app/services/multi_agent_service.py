@@ -264,10 +264,11 @@ class MultiAgentService:
         if not app:
             raise ResourceNotFoundException("应用", str(app_id))
 
-        # 2. 验证模型配置
-        model_api_key = ModelApiKeyService.get_a_api_key(self.db,data.default_model_config_id)
-        if not model_api_key:
-            raise ResourceNotFoundException("模型配置", str(data.default_model_config_id))
+        # 2. 验证模型配置（如果提供了）
+        if data.default_model_config_id:
+            model_api_key = ModelApiKeyService.get_a_api_key(self.db, data.default_model_config_id)
+            if not model_api_key:
+                raise ResourceNotFoundException("模型配置", str(data.default_model_config_id))
 
         # 3. 验证子 Agent 存在并获取发布版本 ID
         for sub_agent in data.sub_agents:
@@ -347,13 +348,14 @@ class MultiAgentService:
             )
             return config
 
+        # 完全替换配置，但对于数据库 NOT NULL 字段，如果新值是 None 则保留原值
         config.default_model_config_id = newConfig.default_model_config_id
         config.model_parameters = newConfig.model_parameters
-        config.orchestration_mode = newConfig.orchestration_mode
-        config.sub_agents = newConfig.sub_agents
+        config.orchestration_mode = newConfig.orchestration_mode or config.orchestration_mode
+        config.sub_agents = newConfig.sub_agents if newConfig.sub_agents is not None else config.sub_agents
         config.routing_rules = newConfig.routing_rules
-        config.execution_config = newConfig.execution_config
-        config.aggregation_strategy = newConfig.aggregation_strategy
+        config.execution_config = newConfig.execution_config if newConfig.execution_config else config.execution_config
+        config.aggregation_strategy = newConfig.aggregation_strategy or config.aggregation_strategy
         self.db.commit()
         self.db.refresh(config)
 

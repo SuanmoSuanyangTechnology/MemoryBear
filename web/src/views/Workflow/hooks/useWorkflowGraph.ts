@@ -193,6 +193,27 @@ export const useWorkflowGraph = ({
           nodeConfig.height = newHeight;
         }
         
+        // 如果是http-request节点，检查error_handle.method配置
+        if (type === 'http-request' && (config as any).error_handle?.method === 'branch') {
+          const portAttrs = {
+            circle: {
+              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
+            },
+          };
+          
+          nodeConfig.ports = {
+            groups: {
+              right: { position: 'right', attrs: portAttrs },
+              left: { position: 'left', attrs: portAttrs },
+            },
+            items: [
+              { group: 'left' },
+              { group: 'right', id: 'right' },
+              { group: 'right', id: 'ERROR', attrs: { text: { text: t('workflow.config.http-request.errorBranch'), fontSize: 12, fill: '#5B6167' }}}
+            ]
+          };
+        }
+        
         return nodeConfig
       })
       
@@ -278,6 +299,14 @@ export const useWorkflowGraph = ({
           
           // 如果是question-classifier节点且有label，根据label匹配对应的端口
           if (sourceCell.getData()?.type === 'question-classifier' && label) {
+            const matchingPort = sourcePorts.find((port: any) => port.id === label);
+            if (matchingPort) {
+              sourcePort = label;
+            }
+          }
+          
+          // 如果是http-request节点且有label，根据label匹配对应的端口
+          if (sourceCell.getData()?.type === 'http-request' && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
               sourcePort = label;
@@ -952,6 +981,23 @@ export const useWorkflowGraph = ({
               target: targetCell?.getData().id,
               label: sourcePortId,
             };
+          }
+          
+          // 如果是http-request节点的右侧端口连线，添加label
+          if (sourceCell?.getData()?.type === 'http-request') {
+            if (sourcePortId === 'ERROR') {
+              return {
+                source: sourceCell.getData().id,
+                target: targetCell?.getData().id,
+                label: 'ERROR',
+              };
+            } else {
+              return {
+                source: sourceCell.getData().id,
+                target: targetCell?.getData().id,
+                label: 'SUCCESS',
+              };
+            }
           }
           
           return {

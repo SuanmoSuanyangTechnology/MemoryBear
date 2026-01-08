@@ -7,6 +7,7 @@ from .file_model import File
 from .generic_file_model import GenericFile
 from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey
 from .memory_model import ShortTermMemory, LongTermMemory
+from .memory_short_model import ShortTermMemory, LongTermMemory
 from .knowledgeshare_model import KnowledgeShare
 from .app_model import App
 from .agent_app_config_model import AgentConfig
@@ -26,6 +27,7 @@ from .tool_model import (
     ToolConfig, BuiltinToolConfig, CustomToolConfig, MCPToolConfig,
     ToolExecution, ToolType, ToolStatus, AuthType, ExecutionStatus
 )
+from .memory_perceptual_model import MemoryPerceptualModel
 
 __all__ = [
     "Tenants",
@@ -74,5 +76,6 @@ __all__ = [
     "ToolType",
     "ToolStatus",
     "AuthType",
-    "ExecutionStatus"
+    "ExecutionStatus",
+    "MemoryPerceptualModel"
 ]

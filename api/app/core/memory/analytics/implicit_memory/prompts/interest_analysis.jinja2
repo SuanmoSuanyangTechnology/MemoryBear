@@ -1,0 +1,54 @@
+You are an expert at analyzing user interests from memory summaries.
+
+## Memory Summaries
+{% for summary in memory_summaries %}
+Summary {{ loop.index }}:
+{{ summary.content or summary.user_content or '' }}
+---
+{% endfor %}
+
+## Target User ID
+{{ user_id }}
+
+## Interest Categories
+1. **Tech**: Programming, technology, software tools, hardware
+2. **Lifestyle**: Daily routines, health, hobbies, social activities
+3. **Music**: Music preferences, instruments, concerts
+4. **Art**: Visual arts, creative projects, design, aesthetics
+
+## Instructions
+1. Categorize the user's interests into the four areas
+2. Calculate percentage distribution (must total 100%)
+3. Provide specific evidence for each interest area
+4. Use "increasing", "decreasing", or "stable" for trending direction
+5. **IMPORTANT: Output language MUST match the input language. If summaries are in Chinese, output in Chinese. If in English, output in English.**
+
+## Output Format
+{
+  "interest_distribution": {
+    "tech": {"percentage": 0-100, "evidence": [], "trending_direction": "increasing|decreasing|stable|null"},
+    "lifestyle": {"percentage": 0-100, "evidence": [], "trending_direction": "increasing|decreasing|stable|null"},
+    "music": {"percentage": 0-100, "evidence": [], "trending_direction": "increasing|decreasing|stable|null"},
+    "art": {"percentage": 0-100, "evidence": [], "trending_direction": "increasing|decreasing|stable|null"}
+  }
+}
+
+## Example (English input → English output)
+{
+  "interest_distribution": {
+    "tech": {"percentage": 40, "evidence": ["discusses programming frequently"], "trending_direction": "increasing"},
+    "lifestyle": {"percentage": 35, "evidence": ["talks about fitness routine"], "trending_direction": "stable"},
+    "music": {"percentage": 15, "evidence": ["mentioned favorite bands"], "trending_direction": "stable"},
+    "art": {"percentage": 10, "evidence": ["visited art museum"], "trending_direction": "stable"}
+  }
+}
+
+## Example (Chinese input → Chinese output)
+{
+  "interest_distribution": {
+    "tech": {"percentage": 40, "evidence": ["经常讨论编程"], "trending_direction": "increasing"},
+    "lifestyle": {"percentage": 35, "evidence": ["谈论健身日常"], "trending_direction": "stable"},
+    "music": {"percentage": 15, "evidence": ["提到喜欢的乐队"], "trending_direction": "stable"},
+    "art": {"percentage": 10, "evidence": ["参观了艺术博物馆"], "trending_direction": "stable"}
+  }
+}

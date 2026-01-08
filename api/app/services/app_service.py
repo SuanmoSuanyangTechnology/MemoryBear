@@ -203,27 +203,28 @@ class AppService:
                 "多智能体配置未激活，无法运行",
                 BizCode.AGENT_CONFIG_MISSING
             )
-        if not multi_agent_config.default_model_config_id:
-            # # 2. 检查主 Agent 配置
-            if not multi_agent_config.master_agent_id:
-                raise BusinessException(
-                    "未配置主 Agent，无法运行",
-                    BizCode.AGENT_CONFIG_MISSING
-                )
+        if multi_agent_config.orchestration_mode == "supervisor":
+            if not multi_agent_config.default_model_config_id:
+                # # 2. 检查主 Agent 配置
+                if not multi_agent_config.master_agent_id:
+                    raise BusinessException(
+                        "未配置主 Agent，无法运行",
+                        BizCode.AGENT_CONFIG_MISSING
+                    )
 
-            master_agent_release = self.db.get(AppRelease, multi_agent_config.master_agent_id)
-            if not master_agent_release:
-                raise BusinessException(
-                    f"主 Agent 配置不存在: {multi_agent_config.master_agent_id}",
-                    BizCode.AGENT_CONFIG_MISSING
-                )
+                master_agent_release = self.db.get(AppRelease, multi_agent_config.master_agent_id)
+                if not master_agent_release:
+                    raise BusinessException(
+                        f"主 Agent 配置不存在: {multi_agent_config.master_agent_id}",
+                        BizCode.AGENT_CONFIG_MISSING
+                    )
 
-            # 检查主 Agent 的模型配置
-            multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
+                # 检查主 Agent 的模型配置
+                multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
 
-        model_api_key = ModelApiKeyService.get_a_api_key(self.db, multi_agent_config.default_model_config_id)
-        if not model_api_key:
-            raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
+            model_api_key = ModelApiKeyService.get_a_api_key(self.db, multi_agent_config.default_model_config_id)
+            if not model_api_key:
+                raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
 
 
         # 3. 检查子 Agent 配置
@@ -275,12 +276,7 @@ class AppService:
                 )
 
         logger.info(
-            "多智能体配置检查通过",
-            extra={
-                "app_id": str(app_id),
-                "master_agent_id": str(multi_agent_config.master_agent_id),
-                "sub_agent_count": len(multi_agent_config.sub_agents)
-            }
+            "多智能体配置检查通过"
         )
 
     def _create_agent_config(

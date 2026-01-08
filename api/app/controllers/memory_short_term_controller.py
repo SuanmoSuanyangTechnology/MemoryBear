@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.logging_config import get_api_logger
+
 from app.core.response_utils import success, fail
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -7,6 +8,13 @@ from app.models.user_model import User
 from app.repositories.memory_repository import LongTermMemoryRepository
 from app.repositories.memory_repository import ShortTermMemoryRepository
 from app.services.memory_storage_service import search_entity
+from app.core.response_utils import success
+from app.db import get_db
+from app.dependencies import get_current_user
+from app.models.user_model import User
+
+from app.services.memory_storage_service import search_entity
+from app.services.memory_short_service import ShortService,LongService
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -24,6 +32,7 @@ async def short_term_configs(
         db: Session = Depends(get_db),
 ):
     # 获取短期记忆数据
+
     short_repo = ShortTermMemoryRepository(db)
     short_memories = short_repo.get_latest_by_user_id(end_user_id, 3)
     short_count=short_repo.count_by_user_id(end_user_id)
@@ -59,6 +68,15 @@ async def short_term_configs(
                 if isinstance(memory_item, dict):
                     for key, values in memory_item.items():
                         long_result.append({"query": key, "retrieval": values,"source":"上下文对话"})
+
+    short_term=ShortService(end_user_id)
+    short_result=short_term.get_short_databasets()
+    short_count=short_term.get_short_count()
+
+    long_term=LongService(end_user_id)
+    long_result=long_term.get_long_databasets()
+
+
     entity_result = await search_entity(end_user_id)
     result = {
         'short_term': short_result,
