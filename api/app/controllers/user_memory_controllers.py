@@ -393,6 +393,7 @@ async def update_end_user_profile(
         db.rollback()
         api_logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", str(e))
+
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)
 async def memory_space_timeline_of_shared_memories(id: str, label: str,
                                       current_user: User = Depends(get_current_user),
