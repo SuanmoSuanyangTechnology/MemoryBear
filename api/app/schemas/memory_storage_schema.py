@@ -409,10 +409,9 @@ class ForgettingTriggerRequest(BaseModel):
     """手动触发遗忘周期请求模型"""
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     
-    group_id: Optional[str] = Field(None, description="组ID（可选，用于过滤特定组的节点）")
+    group_id: str = Field(..., description="组ID（即终端用户ID，必填）")
     max_merge_batch_size: int = Field(100, ge=1, le=1000, description="单次最大融合节点对数（默认100）")
     min_days_since_access: int = Field(30, ge=1, le=365, description="最小未访问天数（默认30天）")
-    config_id: Optional[int] = Field(None, description="配置ID（可选，用于指定遗忘引擎配置）") # TODO 后续group_id更换成enduser_id，自动与config_id关联 ，要删除此行
 
 
 class ForgettingConfigResponse(BaseModel):
@@ -450,15 +449,36 @@ class ForgettingConfigUpdateRequest(BaseModel):
     forgetting_interval_hours: Optional[int] = Field(None, ge=1, le=168, description="遗忘周期间隔（小时）")
 
 
+class ForgettingCycleHistoryPoint(BaseModel):
+    """遗忘周期历史数据点模型（用于趋势图）"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    date: str = Field(..., description="日期（格式: '1/1', '1/2'）")
+    merged_count: int = Field(..., description="每日融合节点数")
+    average_activation: Optional[float] = Field(None, description="平均激活值")
+    total_nodes: int = Field(..., description="总节点数")
+    execution_time: int = Field(..., description="执行时间（Unix时间戳，秒）")
+
+
+class PendingForgettingNode(BaseModel):
+    """待遗忘节点模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    
+    node_id: str = Field(..., description="节点ID")
+    node_type: str = Field(..., description="节点类型：statement/entity/summary")
+    content_summary: str = Field(..., description="内容摘要")
+    activation_value: float = Field(..., description="激活值")
+    last_access_time: int = Field(..., description="最后访问时间（Unix时间戳，秒）")
+
+
 class ForgettingStatsResponse(BaseModel):
     """遗忘引擎统计信息响应模型"""
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     activation_metrics: Dict[str, Any] = Field(..., description="激活值相关指标")
     node_distribution: Dict[str, int] = Field(..., description="节点类型分布")
-    consistency_check: Optional[Dict[str, Any]] = Field(None, description="数据一致性检查结果")
-    nodes_merged_total: int = Field(..., description="累计融合节点对数")
-    recent_cycles: List[Dict[str, Any]] = Field(..., description="最近的遗忘周期记录")
-    timestamp: str = Field(..., description="统计时间（ISO格式）")
+    recent_trends: List[ForgettingCycleHistoryPoint] = Field(..., description="最近7个日期的遗忘趋势数据（每天取最后一次执行）")
+    pending_nodes: List[PendingForgettingNode] = Field(..., description="待遗忘节点列表（前20个满足遗忘条件的节点）")
+    timestamp: int = Field(..., description="统计时间（时间戳）")
 
 
 class ForgettingReportResponse(BaseModel):

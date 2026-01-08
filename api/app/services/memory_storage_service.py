@@ -89,11 +89,15 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                     value = item[field]
                     dt = None
 
-                    # 如果是 datetime 对象，直接使用
-                    if isinstance(value, datetime):
+                    # 处理不同类型的时间值
+                    if hasattr(value, 'to_native'):
+                        # Neo4j DateTime 对象
+                        dt = value.to_native()
+                    elif isinstance(value, datetime):
+                        # Python datetime 对象
                         dt = value
-                    # 如果是字符串，先解析
                     elif isinstance(value, str):
+                        # 字符串格式
                         try:
                             dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
                         except Exception:
