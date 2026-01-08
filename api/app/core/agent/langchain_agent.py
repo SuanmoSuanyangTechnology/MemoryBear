@@ -248,7 +248,7 @@ class LangChainAgent:
                     db_for_memory.close()
 
                 await self.write(storage_type,end_user_id,history_term_memory,user_rag_memory_id,actual_end_user_id,history_term_memory,actual_config_id)
-            await self.write(storage_type,end_user_id,message,user_rag_memory_id,actual_end_user_id,message,actual_config_id)
+        
         try:
             # 准备消息列表
             messages = self._prepare_messages(message, history, context)
@@ -275,9 +275,14 @@ class LangChainAgent:
                     break
 
             elapsed_time = time.time() - start_time
+            
+            # 【修复】组合用户消息和AI回复，一起写入（带角色标记）
             if memory_flag:
-                await self.write(storage_type,end_user_id,content,user_rag_memory_id,actual_end_user_id,content,actual_config_id)
-                await self.term_memory_save(message_chat,end_user_id,content)
+                # 组合格式: "user: 用户消息\nassistant: AI回复"
+                combined_message = f"user: {message_chat}\nassistant: {content}"
+                logger.info(f'写入对话（带角色标记）: {combined_message[:100]}...')
+                await self.write(storage_type, end_user_id, combined_message, user_rag_memory_id, actual_end_user_id, combined_message, actual_config_id)
+                await self.term_memory_save(message_chat, end_user_id, content)
             response = {
                 "content": content,
                 "model": self.model_name,
@@ -365,7 +370,6 @@ class LangChainAgent:
                 finally:
                     db_for_memory.close()
 
-            await self.write(storage_type, end_user_id, message, user_rag_memory_id, end_user_id, message, actual_config_id)
         try:
             # 准备消息列表
             messages = self._prepare_messages(message, history, context)
@@ -416,8 +420,12 @@ class LangChainAgent:
                         logger.debug(f"工具调用结束: {event.get('name')}")
                 
                 logger.debug(f"Agent 流式完成，共 {chunk_count} 个事件")
+                
+                # 【修复】组合用户消息和AI回复，一起写入（带角色标记）
                 if memory_flag:
-                    await self.write(storage_type, end_user_id,full_content, user_rag_memory_id, end_user_id,full_content, actual_config_id)
+                    combined_message = f"user: {message_chat}\nassistant: {full_content}"
+                    logger.info(f'写入流式对话（带角色标记）: {combined_message[:100]}...')
+                    await self.write(storage_type, end_user_id, combined_message, user_rag_memory_id, end_user_id, combined_message, actual_config_id)
                     await self.term_memory_save(message_chat, end_user_id, full_content)
                 
             except Exception as e:
