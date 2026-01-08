@@ -43,7 +43,7 @@ class PerceptualMemoryItem(BaseModel):
     file_name: str = Field(..., description="File name")
     summary: Optional[str] = Field(None, description="summary")
     storage_type: FileStorageType = Field(..., description="Storage type for file")
-    created_time: int = Field(None, description="create time")
+    created_time: int = Field(..., description="create time")
 
     class Config:
         from_attributes = True

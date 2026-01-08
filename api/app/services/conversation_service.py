@@ -549,7 +549,7 @@ class ConversationService:
         theme = result.get('theme', "")
         theme_intro = result.get("theme_intro", "")
         takeaways = result.get("takeaways") or []
-        info_score = result.get("info_score", "")
+        info_score = result.get("info_score", 50)
 
         if datetime.now() - conversation.updated_at > timedelta(days=1):
             logger.info(f"Updating conversation detail in DB for conversation_id={conversation_id}")
