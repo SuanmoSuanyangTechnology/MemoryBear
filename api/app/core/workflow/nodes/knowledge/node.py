@@ -205,10 +205,14 @@ class KnowledgeRetrievalNode(BaseNode):
                                                                  score_threshold=kb_config.similarity_threshold)
                         # Deduplicate hy    brid retrieval results
                         unique_rs = self._deduplicate_docs(rs1, rs2)
+                        if unique_rs:
+                            continue
                         vector_service.reranker = self.get_reranker_model()
                         rs.extend(vector_service.rerank(query=query, docs=unique_rs, top_k=kb_config.top_k))
                     case _:
                         raise RuntimeError("Unknown retrieval type")
+            if not rs:
+                return []
             vector_service.reranker = self.get_reranker_model()
             # TODO：其他重排序方式支持
             final_rs = vector_service.rerank(query=query, docs=rs, top_k=self.typed_config.reranker_top_k)

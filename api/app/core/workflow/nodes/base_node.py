@@ -534,7 +534,7 @@ class BaseNode(ABC):
                 return edge
         return None
     
-    def _render_template(self, template: str, state: WorkflowState | None) -> str:
+    def _render_template(self, template: str, state: WorkflowState | None, struct: bool = True) -> str:
         """渲染模板
         
         支持的变量命名空间：
@@ -568,7 +568,8 @@ class BaseNode(ABC):
             template=template,
             variables=variables,
             node_outputs=pool.get_all_node_outputs(),
-            system_vars=pool.get_all_system_vars()
+            system_vars=pool.get_all_system_vars(),
+            struct=struct
         )
     
     def _evaluate_condition(self, expression: str, state: WorkflowState | None) -> bool:
