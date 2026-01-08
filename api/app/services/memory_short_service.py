@@ -27,7 +27,7 @@ class ShortService:
             for item in retrieved_content:
                 if isinstance(item, dict):
                     for key, values in item.items():
-                        retrieval_source.append({"query": key, "retrieval": values})
+                        retrieval_source.append({"query": key, "retrieval": values,"source":"上下文记忆"})
 
             deep_expanded['retrieval'] = retrieval_source
             deep_expanded['message'] = messages  # 修正拼写错误
