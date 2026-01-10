@@ -24,6 +24,7 @@ from app.schemas.user_memory_schema import (
     EpisodicMemoryOverviewRequest,
     EpisodicMemoryDetailsRequest,
 )
+
 from app.schemas.end_user_schema import (
     EndUserProfileResponse,
     EndUserProfileUpdate,
@@ -539,4 +540,3 @@ async def get_episodic_memory_details_api(
     except Exception as e:
         api_logger.error(f"情景记忆详情查询失败: end_user_id={request.end_user_id}, summary_id={request.summary_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "情景记忆详情查询失败", str(e))
-
