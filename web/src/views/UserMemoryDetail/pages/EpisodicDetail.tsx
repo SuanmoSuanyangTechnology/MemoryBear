@@ -72,10 +72,9 @@ const EpisodicDetail: FC = () => {
 
   useEffect(() => {
     if (!id) return
-    // getData()
+    getData()
   }, [id])
-  
-  // 记忆洞察
+
   const getData = () => {
     if (!id) return
     setLoading(true)

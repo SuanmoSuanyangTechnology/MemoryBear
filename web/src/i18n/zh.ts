@@ -1321,6 +1321,10 @@ export const zh = {
       associative_memory: '关联记忆',
       unix: '个',
       completeMemory: '完整记忆',
+      relationshipEvolution: '关系演化',
+      timelineMemories: '共同记忆时间线',
+      emotionLine: '情绪随时间变化',
+      interaction: '互动频率 & 关系阶段',
     },
     space: {
       createSpace: '创建空间',
@@ -2368,6 +2372,15 @@ export const zh = {
       section_count: '段落数',
       timeLine: '感知时间线',
       lastInfo: '实时感知仪表盘',
+    },
+    explicitDetail: {
+      episodic_memories: '情景记忆',
+      semantic_memories: '语义记忆',
+      content: '核心描述',
+      created_at: '创建时间',
+      emotion: '情绪',
+      core_definition: '核心定义',
+      detailed_notes: '详细笔记',
     }
   },
 }
