@@ -348,8 +348,12 @@ const CaseList: FC<CaseListProps> = ({
                                               popupMatchSelectWidth={false}
                                               variant="borderless"
                                             />
-                                            : <InputNumber placeholder={t('common.pleaseEnter')}
-                                              variant="borderless" className="rb:w-full!" />
+                                            : <InputNumber
+                                                placeholder={t('common.pleaseEnter')}
+                                                variant="borderless"
+                                                className="rb:w-full!"
+                                                onChange={(value) => form.setFieldValue([name, caseIndex, 'expressions', conditionIndex, 'right'], value)}
+                                              />
                                           }
                                         </Form.Item>
                                       </Col>
