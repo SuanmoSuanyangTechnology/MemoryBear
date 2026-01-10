@@ -194,19 +194,31 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         name={['timeouts', 'connect_timeout']}
         label={t('workflow.config.http-request.connect_timeout')}
       >
-        <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+        <InputNumber
+          placeholder={t('common.pleaseEnter')}
+          className="rb:w-full!"
+          onChange={(value) => form.setFieldValue(['timeouts', 'connect_timeout'], value)}
+        />
       </Form.Item>
       <Form.Item
         name={['timeouts', 'read_timeout']}
         label={t('workflow.config.http-request.read_timeout')}
       >
-        <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+        <InputNumber
+          placeholder={t('common.pleaseEnter')}
+          className="rb:w-full!"
+          onChange={(value) => form.setFieldValue(['timeouts', 'read_timeout'], value)}
+        />
       </Form.Item>
       <Form.Item
         name={['timeouts', 'write_timeout']}
         label={t('workflow.config.http-request.write_timeout')}
       >
-        <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+        <InputNumber
+          placeholder={t('common.pleaseEnter')}
+          className="rb:w-full!"
+          onChange={(value) => form.setFieldValue(['timeouts', 'write_timeout'], value)}
+        />
       </Form.Item>
 
       <Divider />
@@ -219,13 +231,21 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             name={['retry', 'max_attempts']}
             label={t('workflow.config.http-request.max_attempts')}
           >
-            <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+            <InputNumber
+              placeholder={t('common.pleaseEnter')}
+              className="rb:w-full!"
+              onChange={(value) => form.setFieldValue(['retry', 'max_attempts'], value)}
+            />
           </Form.Item>
           <Form.Item
             name={['retry', 'retry_interval']}
             label={<>{t('workflow.config.http-request.retry_interval')} <span className="rb:text-[#5B6167]">(ms)</span></>}
           >
-            <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+            <InputNumber
+              placeholder={t('common.pleaseEnter')}
+              className="rb:w-full!"
+              onChange={(value) => form.setFieldValue(['retry', 'retry_interval'], value)}
+            />
           </Form.Item>
         </>
       }
@@ -254,7 +274,11 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             name={['error_handle', 'status_code']}
             label={<>status_code <span className="rb:text-[#5B6167] rb:ml-1">number</span></>}
           >
-            <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+            <InputNumber
+              placeholder={t('common.pleaseEnter')}
+              className="rb:w-full!"
+              onChange={(value) => form.setFieldValue(['error_handle', 'status_code'], value)}
+            />
           </Form.Item>
           <Form.Item
             name={['error_handle', 'headers']}
