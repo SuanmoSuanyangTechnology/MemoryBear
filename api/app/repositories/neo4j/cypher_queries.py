@@ -865,7 +865,7 @@ neo4j_query_all = """
 '''针对当前节点下扩长的句子，实体和总结'''
 Memory_Timeline_ExtractedEntity="""
 MATCH (n)-[r1]-(e)-[r2]-(ms)
-WHERE elementId(n) = "4:f6039a9b-d553-4ba2-9b1c-d9a18917801f:77061"
+WHERE elementId(n) = $id
   AND (ms:ExtractedEntity OR ms:MemorySummary)
 
 RETURN
