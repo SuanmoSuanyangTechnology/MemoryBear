@@ -332,9 +332,7 @@ class MemoryAgentService:
 
                     config = {"configurable": {"thread_id": group_id}}
                     
-                    
                     async for event in graph.astream(
-                           {"content": message, "memory_config": memory_config, "errors": []},
                            {"content": message, "memory_config": memory_config, "errors": []},
                             stream_mode="values",
                             config=config

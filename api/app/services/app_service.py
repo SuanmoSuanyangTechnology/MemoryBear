@@ -28,6 +28,7 @@ from app.models.app_model import AppStatus, AppType
 from app.repositories.app_repository import get_apps_by_id
 from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
+from app.schemas.app_schema import ModelParameters
 from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services.agent_config_converter import AgentConfigConverter
 from app.models import AppShare, Workspace
@@ -1173,9 +1174,10 @@ class AppService:
             if not agent_cfg:
                 raise BusinessException("Agent 应用缺少配置，无法发布", BizCode.AGENT_CONFIG_MISSING)
 
+            # 将 Pydantic 对象转换为字典以便 JSON 序列化
             config = {
                 "system_prompt": agent_cfg.system_prompt,
-                "model_parameters": agent_cfg.model_parameters,
+                "model_parameters": agent_cfg.model_parameters.model_dump() if isinstance(agent_cfg.model_parameters, ModelParameters) else agent_cfg.model_parameters,
                 "knowledge_retrieval": agent_cfg.knowledge_retrieval,
                 "memory": agent_cfg.memory,
                 "variables": agent_cfg.variables or [],
@@ -1205,7 +1207,7 @@ class AppService:
 
             # 4. 构建配置快照
             config = {
-                "model_parameters":multi_agent_cfg.model_parameters,
+                "model_parameters": multi_agent_cfg.model_parameters.model_dump() if isinstance(multi_agent_cfg.model_parameters, ModelParameters) else multi_agent_cfg.model_parameters,
                 "master_agent_id": str(multi_agent_cfg.master_agent_id),
                 "orchestration_mode": multi_agent_cfg.orchestration_mode,
                 "sub_agents": multi_agent_cfg.sub_agents,
