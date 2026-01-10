@@ -211,6 +211,7 @@ async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector
                 "dialog_id": s.dialog_id,
                 "chunk_ids": s.chunk_ids,
                 "content": s.content,
+                "memory_type": s.memory_type,  # 添加 memory_type 字段
                 "summary_embedding": s.summary_embedding if s.summary_embedding else None,
                 "config_id": s.config_id,  # 添加 config_id
             })
