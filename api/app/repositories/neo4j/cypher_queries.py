@@ -721,6 +721,7 @@ SET m += {
     dialog_id: summary.dialog_id,
     chunk_ids: summary.chunk_ids,
     content: summary.content,
+    memory_type: summary.memory_type,
     summary_embedding: summary.summary_embedding,
     config_id: summary.config_id,
     importance_score: CASE WHEN summary.importance_score IS NOT NULL THEN summary.importance_score ELSE coalesce(m.importance_score, 0.5) END,
