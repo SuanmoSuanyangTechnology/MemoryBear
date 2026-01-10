@@ -950,10 +950,20 @@ class UserMemoryService:
         from app.core.memory.utils.prompt.prompt_utils import render_episodic_title_and_type_prompt
         import json
         
+        # 定义有效的类型集合
+        VALID_TYPES = {
+            "conversation",      # 对话
+            "project_work",      # 项目/工作
+            "learning",          # 学习
+            "decision",          # 决策
+            "important_event"    # 重要事件
+        }
+        DEFAULT_TYPE = "conversation"  # 默认类型
+        
         try:
             if not content:
                 logger.warning("content为空，无法生成标题和类型")
-                return ("空内容", "其他")
+                return ("空内容", DEFAULT_TYPE)
             
             # 1. 渲染Jinja2提示词模板
             prompt = await render_episodic_title_and_type_prompt(content)
@@ -997,18 +1007,43 @@ class UserMemoryService:
                 
                 result_data = json.loads(json_str)
                 title = result_data.get("title", "未知标题")
-                episodic_type = result_data.get("type", "其他")
+                episodic_type_raw = result_data.get("type", DEFAULT_TYPE)
+                
+                # 5. 校验和归一化类型
+                # 将类型转换为小写并去除空格
+                episodic_type_normalized = str(episodic_type_raw).lower().strip()
+                
+                # 检查是否在有效类型集合中
+                if episodic_type_normalized in VALID_TYPES:
+                    episodic_type = episodic_type_normalized
+                else:
+                    # 尝试映射常见的中文类型到英文
+                    type_mapping = {
+                        "对话": "conversation",
+                        "项目": "project_work",
+                        "工作": "project_work",
+                        "项目/工作": "project_work",
+                        "学习": "learning",
+                        "决策": "decision",
+                        "重要事件": "important_event",
+                        "事件": "important_event"
+                    }
+                    episodic_type = type_mapping.get(episodic_type_raw, DEFAULT_TYPE)
+                    logger.warning(
+                        f"LLM返回的类型 '{episodic_type_raw}' 不在有效集合中，"
+                        f"已归一化为 '{episodic_type}'"
+                    )
                 
                 logger.info(f"成功生成标题和类型: title={title}, type={episodic_type}")
                 return (title, episodic_type)
                 
             except json.JSONDecodeError:
                 logger.error(f"无法解析LLM响应为JSON: {full_response}")
-                return ("解析失败", "其他")
+                return ("解析失败", DEFAULT_TYPE)
             
         except Exception as e:
             logger.error(f"生成标题和类型时出错: {str(e)}", exc_info=True)
-            return ("错误", "其他")
+            return ("错误", DEFAULT_TYPE)
     
     async def _extract_involved_objects(
         self,
@@ -1204,7 +1239,8 @@ class UserMemoryService:
             query += """
             RETURN elementId(s) AS id, 
                    s.created_at AS created_at,
-                   s.memory_type AS type
+                   s.memory_type AS type,
+                   s.name AS title
             ORDER BY s.created_at DESC
             """
             
@@ -1231,6 +1267,7 @@ class UserMemoryService:
                 summary_id = record["id"]
                 created_at_str = record.get("created_at")
                 memory_type = record.get("type", "其他")
+                title = record.get("title") or "未命名"  # 直接从查询结果获取标题
                 
                 # 应用情景类型筛选
                 if episodic_type != "all":
@@ -1252,12 +1289,6 @@ class UserMemoryService:
                     if memory_type != episodic_type and memory_type != chinese_type:
                         continue
                 
-                # 调用_get_title_and_type读取标题和类型
-                title, episodic_type_value = await self._get_title_and_type(
-                    summary_id=summary_id,
-                    end_user_id=end_user_id
-                )
-                
                 # 转换时间戳
                 created_at_timestamp = None
                 if created_at_str:
@@ -1271,7 +1302,7 @@ class UserMemoryService:
                 episodic_memories.append({
                     "id": summary_id,
                     "title": title,
-                    "type": episodic_type_value,
+                    "type": memory_type,
                     "created_at": created_at_timestamp
                 })
             
