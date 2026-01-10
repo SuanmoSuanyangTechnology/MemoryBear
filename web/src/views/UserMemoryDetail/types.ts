@@ -185,3 +185,6 @@ export interface ForgetData {
   }[],
   timestamp: number;
 }
+export interface GraphDetailRef {
+  handleOpen: (vo: Node) => void
+}

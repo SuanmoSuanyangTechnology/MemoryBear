@@ -1240,6 +1240,10 @@ export const en = {
       associative_memory: 'Associative Memory',
       unix: 'items',
       completeMemory: 'Complete Memory',
+      relationshipEvolution: 'Relationship Evolution',
+      timelineMemories: 'Shared Memory Timeline',
+      emotionLine: 'Emotion Changes Over Time',
+      interaction: 'Interaction Frequency & Relationship Stages',
     },
     space: {
       createSpace: 'Create Space',
@@ -2268,6 +2272,15 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       section_count: 'Number of Sections',
       timeLine: 'Perception Timeline',
       lastInfo: 'Real-time Perception Dashboard',
+    },
+    explicitDetail: {
+      episodic_memories: 'Episodic Memories',
+      semantic_memories: 'Semantic Memories',
+      content: 'Core Description',
+      created_at: 'Created At',
+      emotion: 'Emotion',
+      core_definition: 'Core Definition',
+      detailed_notes: 'Detailed Notes',
     }
   },
 };
