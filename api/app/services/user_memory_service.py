@@ -1394,7 +1394,7 @@ async def analytics_graph_data(
                 "group_id": end_user_id,
                 "limit": limit
             }
-        
+
         # 执行节点查询
         node_results = await _neo4j_connector.execute_query(node_query, **node_params)
         
@@ -1409,7 +1409,7 @@ async def analytics_graph_data(
             node_props = record["properties"]
             
             # 根据节点类型提取需要的属性字段
-            filtered_props = _extract_node_properties(node_label, node_props)
+            filtered_props = await _extract_node_properties(node_label, node_props,node_id)
             
             # 直接使用数据库中的 caption，如果没有则使用节点类型作为默认值
             caption = filtered_props.get("caption", node_label)
@@ -1515,7 +1515,7 @@ async def analytics_graph_data(
 
 # 辅助函数
 
-def _extract_node_properties(label: str, properties: Dict[str, Any]) -> Dict[str, Any]:
+async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_id: str) -> Dict[str, Any]:
     """
     根据节点类型提取需要的属性字段
     
@@ -1542,7 +1542,8 @@ def _extract_node_properties(label: str, properties: Dict[str, Any]) -> Dict[str
     if not allowed_fields:
         # 对于未定义的节点类型，只返回基本字段
         allowed_fields = ["name", "created_at", "caption"]
-    
+    count_neo4j=f"""MATCH (n)-[r]-(m) WHERE elementId(n) ="{node_id}" RETURN count(r) AS rel_count;"""
+    node_results = await (_neo4j_connector.execute_query(count_neo4j))
     # 提取白名单中的字段
     filtered_props = {}
     for field in allowed_fields:
@@ -1550,7 +1551,8 @@ def _extract_node_properties(label: str, properties: Dict[str, Any]) -> Dict[str
             value = properties[field]
             # 清理 Neo4j 特殊类型
             filtered_props[field] = _clean_neo4j_value(value)
-    
+    filtered_props['associative_memory']=[i['rel_count'] for i in node_results][0]
+    print(filtered_props)
     return filtered_props
 
 

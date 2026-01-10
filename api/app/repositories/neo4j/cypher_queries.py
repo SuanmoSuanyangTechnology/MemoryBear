@@ -865,46 +865,113 @@ neo4j_query_all = """
 '''针对当前节点下扩长的句子，实体和总结'''
 Memory_Timeline_ExtractedEntity="""
 MATCH (n)-[r1]-(e)-[r2]-(ms)
-WHERE elementId(n) =$id
-AND (ms:ExtractedEntity OR ms:MemorySummary)
+WHERE elementId(n) = $id
+  AND (ms:ExtractedEntity OR ms:MemorySummary)
+
 RETURN
-  collect(DISTINCT coalesce(ms.name, n.name, e.name)) AS ExtractedEntity,
-  collect(DISTINCT ms.content) AS MemorySummary,
-  collect(DISTINCT e.statement) AS statement;
+  collect(
+    DISTINCT
+    CASE
+      WHEN ms:ExtractedEntity THEN {
+        text: ms.name,
+        created_at: ms.created_at,
+     type: "情景记忆" 
+      }
+    END
+  ) AS ExtractedEntity,
+
+  collect(
+    DISTINCT
+    CASE
+      WHEN ms:MemorySummary THEN {
+        text: ms.content,
+        created_at: ms.created_at,
+       type: "长期沉淀" 
+      }
+    END
+  ) AS MemorySummary,
+
+  collect(
+    DISTINCT {
+      text: e.statement,
+      created_at: e.created_at,
+      type: "情绪记忆" 
+    }
+  ) AS statement;
+
+
 """
 Memory_Timeline_MemorySummary=""" 
 MATCH (n)-[r1]-(e)-[r2]-(ms)
-WHERE elementId(n) = $id
+WHERE elementId(n) =$id
   AND (ms:MemorySummary OR ms:ExtractedEntity)
 RETURN
-  collect(DISTINCT coalesce(ms.name, n.name, e.name)) AS ExtractedEntity,
-  collect(DISTINCT ms.content) AS MemorySummary,
-  collect(DISTINCT e.statement) AS statement;"""
+  collect(
+    DISTINCT
+    CASE
+      WHEN ms:ExtractedEntity THEN {
+        text: ms.name,
+        created_at: ms.created_at
+      }
+    END
+  ) AS ExtractedEntity,
+
+  collect(
+    DISTINCT
+    CASE
+      WHEN n:MemorySummary THEN {
+        text: n.content,
+        created_at: n.created_at
+      }
+    END
+  ) AS MemorySummary,
+
+  collect(
+    DISTINCT {
+      text: e.statement,
+      created_at: e.created_at
+    }
+  ) AS statement;
+"""
 Memory_Timeline_Statement="""
 MATCH (n)
-WHERE elementId(n) = "4:f6039a9b-d553-4ba2-9b1c-d9a18917801f:77154"
+WHERE elementId(n) = "4:f6039a9b-d553-4ba2-9b1c-d9a18917801f:77003"
 
 CALL {
   WITH n
-  MATCH (n)-[]-(m)
-  WHERE m:ExtractedEntity
-    AND NOT m:MemorySummary
-    AND NOT m:Chunk
-  RETURN collect(DISTINCT m.name) AS ExtractedEntity
+  MATCH (n)-[]-(m:ExtractedEntity)
+  WHERE NOT m:MemorySummary AND NOT m:Chunk
+  RETURN collect(
+    DISTINCT {
+      text: m.name,
+      created_at: m.created_at,
+      type: "情景记忆" 
+    }
+  ) AS ExtractedEntity
 }
 
 CALL {
   WITH n
-  MATCH (n)-[]-(m)
-  WHERE m:MemorySummary
-    AND NOT m:Chunk
-  RETURN collect(DISTINCT m.content) AS MemorySummary
+  MATCH (n)-[]-(m:MemorySummary)
+  WHERE NOT m:Chunk
+  RETURN collect(
+    DISTINCT {
+      text: m.content,
+      created_at: m.created_at,
+       type: "长期沉淀" 
+    }
+  ) AS MemorySummary
 }
 
 RETURN
   ExtractedEntity,
   MemorySummary,
-  collect(DISTINCT n.statement) AS Statement;
+  {
+    text: n.statement,
+    created_at: n.created_at,
+     type: "情绪记忆" 
+  } AS statement;
+
 
 """
 
