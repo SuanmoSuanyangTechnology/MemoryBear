@@ -659,7 +659,6 @@ class MemoryInteraction:
                 # 计算季度
                 quarter = (dt.month - 1) // 3 + 1
                 quarter_key = f"{dt.year}.Q{quarter}"
-                
                 # 增加该季度的计数
                 quarterly_counts[quarter_key] += 1
                 
