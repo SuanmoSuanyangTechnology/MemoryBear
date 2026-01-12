@@ -1032,3 +1032,4 @@ WHERE elementId(u) = $user_id
 RETURN DISTINCT
  x.statement as statement,x.created_at as created_at
 """
+
