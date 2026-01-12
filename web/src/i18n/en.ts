@@ -2246,6 +2246,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       context_details: 'Preference Details',
       supporting_evidence: 'Preference Source',
       specific_examples: 'Source',
+      wordEmpty: 'Click on a node in the left chart to view preference details'
     },
     shortTermDetail: {
       title: 'Short-term memory is the "workbench" of the AI system, connecting instant conversations with long-term knowledge bases. Through real-time capture, deep retrieval, intelligent extraction and filtering transformation, temporary unstructured information is converted into valuable long-term knowledge.',

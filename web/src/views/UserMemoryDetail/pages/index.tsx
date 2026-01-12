@@ -62,10 +62,10 @@ const Detail: FC = () => {
         {type === 'FORGETTING_MANAGEMENT' && <ForgetDetail />}
         {type === 'IMPLICIT_MEMORY' && <ImplicitDetail />}
         {type === 'SHORT_TERM_MEMORY' && <ShortTermDetail />}
-        {type === 'PERCEPTUAL_MEMORY' && <PerceptualDetail />} {/** TODO */}
+        {type === 'PERCEPTUAL_MEMORY' && <PerceptualDetail />}
         {type === 'EPISODIC_MEMORY' && <EpisodicDetail />}
-        {type === 'WORKING_MEMORY' && <WorkingDetail />} {/** TODO */}
-        {type === 'EXPLICIT_MEMORY' && <ExplicitDetail />} {/** TODO */}
+        {type === 'WORKING_MEMORY' && <WorkingDetail />}
+        {type === 'EXPLICIT_MEMORY' && <ExplicitDetail />}
       </div>
     </div>
   )
