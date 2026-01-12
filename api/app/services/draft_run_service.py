@@ -300,6 +300,9 @@ class DraftRunService:
             if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, list):
                 if hasattr(agent_config, 'tools') and agent_config.tools:
                     for tool_config in agent_config.tools:
+                        print("+"*50)
+                        print(f"agent_config:{agent_config}")
+                        print(f"tool_config:{tool_config}")
                         if tool_config.get("enabled", False):
                             # 根据工具名称查找工具实例
                             tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
@@ -523,8 +526,11 @@ class DraftRunService:
             tool_service = ToolService(self.db)
 
             # 从配置中获取启用的工具
-            if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, dict):
+            if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, list):
                 for tool_config in agent_config.tools:
+                    print("+"*50)
+                    print(f"agent_config:{agent_config}")
+                    print(f"tool_config:{tool_config}")
                     if tool_config.get("enabled", False):
                         # 根据工具名称查找工具实例
                         tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
@@ -677,7 +683,7 @@ class DraftRunService:
             )
 
         except Exception as e:
-            logger.error("流式 Agent 调用失败", extra={"error": str(e)})
+            logger.error("流式 Agent 调用失败", extra={"error": str(e)}, exc_info=True)
             # 发送错误事件
             yield self._format_sse_event("error", {
                 "error": str(e),
