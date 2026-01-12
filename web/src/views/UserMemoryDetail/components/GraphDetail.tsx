@@ -1,13 +1,16 @@
-import { type FC, useState, forwardRef, useImperativeHandle } from 'react'
+import {  useState, forwardRef, useImperativeHandle, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router-dom'
-import { Row, Col, Tabs } from 'antd'
+import { Row, Col, Tabs, Space, Skeleton } from 'antd'
 
 import { getRelationshipEvolution, getTimelineMemories } from '@/api/memory'
 import type { Node, GraphDetailRef } from '../types'
 import RbDrawer from '@/components/RbDrawer'
 import RbCard from '@/components/RbCard/Card'
 import EmotionLine from './EmotionLine'
+import { formatDateTime } from '@/utils/format'
+import Tag from '@/components/Tag'
+import InteractionBar from './InteractionBar'
+import Empty from '@/components/Empty'
 
 export interface Emotion {
   emotion_intensity: number;
@@ -15,140 +18,71 @@ export interface Emotion {
   created_at: string | number;
 }
 export interface Interaction {
-  name: string;
-  importance_score: number;
-  interaction_count: number;
+  created_at: string | number;
+  count: number;
+}
+interface TimelineMemory {
+  text: string;
+  type: string;
+  created_at: number | string;
+}
+interface Timeline {
+  MemorySummary: TimelineMemory[];
+  Statement: TimelineMemory[];
+  ExtractedEntity: TimelineMemory[];
+  timelines_memory: TimelineMemory[];
 }
 
 const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
   const { t } = useTranslation()
-  const { id } = useParams()
   const [open, setOpen] = useState(false);
   const [vo, setVo] = useState<Node | null>(null)
-  const [emotionData, setEmotionData] = useState<Emotion[]>([
-    {
-      "emotion_intensity": 0.1,
-      "emotion_type": "neutral",
-      "created_at": "2026-01-07 19:14:34"
-    },
-    {
-      "emotion_intensity": 0.2,
-      "emotion_type": "neutral",
-      "created_at": "2026-02-08 19:14:34"
-    },
-    {
-      "emotion_intensity": 0.1,
-      "emotion_type": "neutral",
-      "created_at": "2026-03-09 19:14:34"
-    },
-    {
-      "emotion_intensity": 0.1,
-      "emotion_type": "neutral",
-      "created_at": "2026-04-10 19:14:34"
-    },
-    {
-      "emotion_intensity": 0.1,
-      "emotion_type": "sadness",
-      "created_at": "2026-01-07 19:14:34"
-    },
-    {
-      "emotion_intensity": 0.2,
-      "emotion_type": "sadness",
-      "created_at": "2026-02-08 19:14:34"
-    },
-    {
-      "emotion_intensity": 0.1,
-      "emotion_type": "sadness",
-      "created_at": "2026-03-09 19:14:34"
-    },
-    {
-      "emotion_intensity": 0.1,
-      "emotion_type": "sadness",
-      "created_at": "2026-04-10 19:14:34"
-    },
-  ])
-  const [interactionData, setInteractionData] = useState<Interaction[]>([
-    {
-      "name": "小蓝",
-      "importance_score": 0.5,
-      "interaction_count": 1
-    }
-  ])
-  const [timelineMemories, setTimelineMemories] = useState({
-    "code": 0,
-    "msg": "共同记忆时间线",
-    "data": {
-      "success": true,
-      "data": {
-        "MemorySummary": [
-          "小蓝今天原计划与小明野餐、与小绿看电影，但最终选择与姐姐小红一起看戏。",
-          "用户小明喜欢喝咖啡，每天都要喝拿铁。"
-        ],
-        "Statement": [
-          "小蓝对是否去野餐或看电影感到犹豫。",
-          "小蓝和她姐姐小红出去看戏。",
-          "小明喜欢喝咖啡。",
-          "小明每天都要喝拿铁。",
-          "小明今天约小蓝出去野餐。"
-        ],
-        "ExtractedEntity": [
-          "小明",
-          "咖啡",
-          "拿铁",
-          "小蓝",
-          "野餐"
-        ],
-        "timelines_memory": [
-          "小蓝今天原计划与小明野餐、与小绿看电影，但最终选择与姐姐小红一起看戏。",
-          "用户小明喜欢喝咖啡，每天都要喝拿铁。",
-          "小蓝对是否去野餐或看电影感到犹豫。",
-          "小蓝和她姐姐小红出去看戏。",
-          "小明喜欢喝咖啡。",
-          "小明每天都要喝拿铁。",
-          "小明今天约小蓝出去野餐。",
-          "小明",
-          "咖啡",
-          "拿铁",
-          "小蓝",
-          "野餐"
-        ]
-      }
-    },
-    "error": "",
-    "time": 1767852781464
-  })
+  const [loading, setLoading] = useState(false)
+  const [emotionData, setEmotionData] = useState<Emotion[]>([])
+  const [interactionData, setInteractionData] = useState<Interaction[]>([])
+  const [activeTab, setActiveTab] = useState('timelines_memory')
+  const [timelineLoading, setTimelineLoading] = useState(false)
+  const [timelineMemories, setTimelineMemories] = useState<Timeline>({ timelines_memory: [], MemorySummary: [], Statement: [], ExtractedEntity: []})
 
   const handleCancel = () => {
     setVo(null)
     setOpen(false)
   }
   const handleOpen = (vo: Node) => {
+    setActiveTab('timelines_memory')
     setOpen(true)
     setVo(vo)
+    getRelationshipEvolutionData(vo)
     getTimelineMemoriesData(vo)
   }
   const getRelationshipEvolutionData = (vo: Node) => {
-    if (!id || !vo.label) return
-
-    getRelationshipEvolution({ id: id as string, label: vo.label })
+    if (!vo.id || !vo.label) return
+    setLoading(true)
+    getRelationshipEvolution({ id: vo.id as string, label: vo.label })
       .then(res => {
-        const { emotion, interaction } = res as { emotion: { data: Emotion[]}; interaction: {data: Interaction[]} } || {}
-        setEmotionData(emotion?.data)
-        setInteractionData(interaction?.data)
+        const { emotion, interaction } = res as { emotion: Emotion[]; interaction: Interaction[] } || {}
+        setEmotionData(emotion)
+        setInteractionData(interaction)
       })
+      .finally(() => setLoading(false))
   }
   const getTimelineMemoriesData = (vo: Node) => {
-    if (!id || !vo.label) return
-
-    getTimelineMemories({ id: id as string, label: vo.label })
+    if (!vo.id || !vo.label) return
+    setTimelineLoading(true)
+    getTimelineMemories({ id: vo.id as string, label: vo.label })
       .then(res => {
-
+        setTimelineMemories(res as Timeline)
       })
+      .finally(() => setTimelineLoading(false))
   }
 
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));
+
+  const activeContent = useMemo(() => {
+    return timelineMemories[activeTab as keyof Timeline] || []
+  }, [activeTab, timelineMemories])
 
   return (
     <RbDrawer
@@ -157,16 +91,48 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
       onClose={handleCancel}
       width={1000}
     >
-      <div className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:mb-3">{t('useMemory.relationshipEvolution')}</div>
+      <div className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:mb-3">{t('userMemory.relationshipEvolution')}</div>
       <RbCard>
         <Row gutter={16}>
           <Col span={12}>
-            <EmotionLine chartData={emotionData} />
+            <EmotionLine chartData={emotionData} loading={loading} />
           </Col>
           <Col span={12}>
-            <div>{t('userMemory.interaction')}</div>
+            <InteractionBar chartData={interactionData} loading={loading} />
           </Col>
         </Row>
+      </RbCard>
+
+      <div className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:mb-3 rb:mt-6">{t('userMemory.timelineMemories')}</div>
+      <RbCard>
+        <Tabs
+          activeKey={activeTab}
+          items={['timelines_memory', 'ExtractedEntity', 'Statement', 'MemorySummary'].map(key => ({
+            label: t(`userMemory.${key}`),
+            key
+          }))}
+          onChange={(key: string) => setActiveTab(key)}
+        />
+        {timelineLoading
+          ? <Skeleton active />
+          : !activeContent || activeContent.length === 0
+          ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
+          : <Space size={16} direction="vertical" className="rb:w-full">
+            {activeContent.map((vo, index) => (
+              <RbCard
+                key={index}
+                headerType="borderL"
+                headerClassName="rb:before:bg-[#155EEF]!"
+                title={vo.text}
+              >
+                <div className="rb:text-[#A8A9AA] rb:text-[12px] rb:leading-4">{formatDateTime(vo.created_at)}</div>
+                <Tag className="rb:mt-2">{vo.type}</Tag>
+              </RbCard>
+            ))}
+          </Space>
+        }
+
+        
       </RbCard>
     </RbDrawer>
   )
