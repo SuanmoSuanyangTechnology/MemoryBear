@@ -1,0 +1,119 @@
+import { type FC } from 'react'
+import { useTranslation } from 'react-i18next'
+import ReactEcharts from 'echarts-for-react'
+import Empty from '@/components/Empty'
+import Loading from '@/components/Empty/Loading'
+import type { Interaction } from './GraphDetail'
+
+interface InteractionBarProps {
+  chartData: Interaction[];
+  loading?: boolean;
+}
+
+const Colors = ['#155EEF', '#369F21', '#FF5D34']
+const InteractionBar: FC<InteractionBarProps> = ({ chartData, loading }) => {
+  const { t } = useTranslation()
+
+  const series = [{
+    name: 'Interaction Count',
+    type: 'bar',
+    data: chartData.map(item => item.count)
+  }]
+
+  return (
+    <>
+      <div>{t('userMemory.interaction')}</div>
+      {loading
+        ? <Loading size={249} />
+        : !chartData || chartData.length === 0
+          ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
+          : <ReactEcharts
+            option={{
+              color: Colors,
+              tooltip: {
+                trigger: 'axis',
+                extraCssText: 'box-shadow: 0px 2px 6px 0px rgba(33,35,50,0.16); border-radius: 8px;',
+                axisPointer: {
+                  type: 'line',
+                  crossStyle: {
+                    color: '#5F6266',
+                  },
+                  lineStyle: {
+                    color: '#5F6266',
+                  }
+                },
+              },
+              grid: {
+                top: 16,
+                left: 30,
+                right: 36,
+                bottom: 48,
+                // containLabel: false
+              },
+              xAxis: {
+                type: 'category',
+                data: chartData.map(item => item.created_at),
+                axisLabel: {
+                  color: '#A8A9AA',
+                  fontFamily: 'PingFangSC, PingFang SC'
+                },
+                axisLine: {
+                  show: true,
+                  lineStyle: {
+                    color: '#EBEBEB'
+                  }
+                },
+                splitLine: {
+                  show: true,
+                  lineStyle: {
+                    color: '#EBEBEB',
+                    type: 'solid'
+                  }
+                },
+                axisTick: {
+                  show: true,
+                  lineStyle: {
+                    color: '#EBEBEB',
+                    type: 'solid'
+                  }
+                }
+              },
+              yAxis: {
+                type: 'value',
+                axisLabel: {
+                  color: '#A8A9AA',
+                  fontFamily: 'PingFangSC, PingFang SC'
+                },
+                axisLine: {
+                  show: true,
+                  lineStyle: {
+                    color: '#EBEBEB'
+                  }
+                },
+                splitLine: {
+                  show: true,
+                  lineStyle: {
+                    color: '#EBEBEB',
+                    type: 'solid'
+                  }
+                },
+                axisTick: {
+                  show: true,
+                  lineStyle: {
+                    color: '#EBEBEB',
+                    type: 'solid'
+                  }
+                },
+                max: 1,
+                min: 0
+              },
+              series
+            }}
+            style={{ height: '265px', width: '100%' }}
+          />
+      }
+    </>
+  )
+}
+
+export default InteractionBar

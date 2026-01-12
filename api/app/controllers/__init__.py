@@ -4,39 +4,45 @@
 认证方式: JWT Token
 """
 from fastapi import APIRouter
+
 from . import (
-    model_controller,
-    task_controller,
-    test_controller,
-    user_controller,
-    auth_controller,
-    workspace_controller,
-    setup_controller,
-    file_controller,
-    document_controller,
-    knowledge_controller,
-    chunk_controller,
-    knowledgeshare_controller,
+    api_key_controller,
     app_controller,
-    upload_controller,
+    auth_controller,
+    chunk_controller,
+    document_controller,
+    emotion_config_controller,
+    emotion_controller,
+    file_controller,
+    home_page_controller,
+    implicit_memory_controller,
+    knowledge_controller,
+    knowledgeshare_controller,
     memory_agent_controller,
     memory_dashboard_controller,
-    memory_storage_controller,
-    memory_dashboard_controller,
+    memory_forget_controller,
     memory_reflection_controller,
-    api_key_controller,
-    release_share_controller,
-    public_share_controller,
+    memory_short_term_controller,
+    memory_storage_controller,
+    model_controller,
     multi_agent_controller,
-    workflow_controller,
-    emotion_controller,
-    emotion_config_controller,
     prompt_optimizer_controller,
+    public_share_controller,
+    release_share_controller,
+    setup_controller,
+    task_controller,
+    test_controller,
     tool_controller,
+    upload_controller,
+    user_controller,
+    user_memory_controllers,
+    workflow_controller,
+    workspace_controller,
     memory_forget_controller,
     home_page_controller,
+    memory_perceptual_controller,
+    memory_working_controller,
 )
-from . import user_memory_controllers
 
 # 创建管理端 API 路由器
 manager_router = APIRouter()
@@ -71,8 +77,12 @@ manager_router.include_router(emotion_controller.router)
 manager_router.include_router(emotion_config_controller.router)
 manager_router.include_router(prompt_optimizer_controller.router)
 manager_router.include_router(memory_reflection_controller.router)
+manager_router.include_router(memory_short_term_controller.router)
 manager_router.include_router(tool_controller.router)
 manager_router.include_router(memory_forget_controller.router)
 manager_router.include_router(home_page_controller.router)
+manager_router.include_router(implicit_memory_controller.router)
+manager_router.include_router(memory_perceptual_controller.router)
+manager_router.include_router(memory_working_controller.router)
 
 __all__ = ["manager_router"]

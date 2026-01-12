@@ -25,7 +25,6 @@ class DataConfig(Base):
     llm_id = Column(String, nullable=True, comment="LLM模型配置ID")
     embedding_id = Column(String, nullable=True, comment="嵌入模型配置ID")
     rerank_id = Column(String, nullable=True, comment="重排序模型配置ID")
-    llm = Column(String, nullable=True, comment="LLM模型配置ID")
 
     # 记忆萃取引擎配置
     enable_llm_dedup_blockwise = Column(Boolean, default=True, comment="启用LLM决策去重")

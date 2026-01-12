@@ -1,4 +1,5 @@
 import hashlib
+import json
 import uuid
 from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
@@ -18,7 +19,7 @@ from app.services.conversation_service import ConversationService
 from app.services.release_share_service import ReleaseShareService
 from app.services.shared_chat_service import SharedChatService
 from app.services.app_chat_service import AppChatService, get_app_chat_service
-from app.utils.app_config_utils import dict_to_multi_agent_config, dict_to_workflow_config, agent_config_4_app_release, multi_agent_config_4_app_release
+from app.utils.app_config_utils import dict_to_multi_agent_config, workflow_config_4_app_release, agent_config_4_app_release, multi_agent_config_4_app_release
 
 router = APIRouter(prefix="/public/share", tags=["Public Share"])
 logger = get_business_logger()
@@ -288,7 +289,7 @@ async def chat(
     password = None  # Token 认证不需要密码
     # end_user_id = user_id
     other_id = user_id
-    
+
     # 提前验证和准备（在流式响应开始前完成）
     # 这样可以确保错误能正确返回，而不是在流式响应中间出错
     from app.models.app_model import AppType
@@ -364,6 +365,9 @@ async def chat(
             config = release.config or {}
             if not config.get("sub_agents"):
                 raise BusinessException("多 Agent 应用未配置子 Agent", BizCode.AGENT_CONFIG_MISSING)
+        elif app_type == AppType.WORKFLOW:
+            # Multi-Agent 类型：验证多 Agent 配置
+            pass
         else:
             raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
 
@@ -392,6 +396,8 @@ async def chat(
 
     if app_type == AppType.AGENT:
         # 流式返回
+        agent_config = agent_config_4_app_release(release)
+
         if payload.stream:
             # async def event_generator():
             #     async for event in service.chat_stream(
@@ -424,10 +430,11 @@ async def chat(
                     user_id= str(new_end_user.id),  # 转换为字符串
                     variables=payload.variables,
                     web_search=payload.web_search,
-                    config=payload.agent_config,
+                    config=agent_config,
                     memory=payload.memory,
                     storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+                    user_rag_memory_id=user_rag_memory_id,
+                    workspace_id=workspace_id
                 ):
                     yield event
 
@@ -463,10 +470,12 @@ async def chat(
             web_search=payload.web_search,
             memory=payload.memory,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id
+            user_rag_memory_id=user_rag_memory_id,
+            workspace_id=workspace_id
         )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
+        # config = workflow_config_4_app_release(release)
         config = multi_agent_config_4_app_release(release)
         if payload.stream:
             async def event_generator():
@@ -479,8 +488,8 @@ async def chat(
                     config=config,
                     web_search=payload.web_search,
                     memory=payload.memory,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id
                 ):
                     yield event
 
@@ -551,8 +560,71 @@ async def chat(
         # )
 
         # return success(data=conversation_schema.ChatResponse(**result))
+    elif app_type == AppType.WORKFLOW:
+
+        config = workflow_config_4_app_release(release)
+        if payload.stream:
+            async def event_generator():
+                async for event in app_chat_service.workflow_chat_stream(
+
+                    message=payload.message,
+                    conversation_id=conversation.id,  # 使用已创建的会话 ID
+                    user_id=new_end_user.id,  # 转换为字符串
+                    variables=payload.variables,
+                    config=config,
+                    web_search=payload.web_search,
+                    memory=payload.memory,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id,
+                    app_id=release.app_id,
+                    workspace_id=workspace_id
+                ):
+                    event_type = event.get("event", "message")
+                    event_data = event.get("data", {})
+
+                    # 转换为标准 SSE 格式（字符串）
+                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                    yield sse_message
+
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+
+        # 多 Agent 非流式返回
+        result = await app_chat_service.workflow_chat(
+
+            message=payload.message,
+            conversation_id=conversation.id,  # 使用已创建的会话 ID
+            user_id=new_end_user.id,  # 转换为字符串
+            variables=payload.variables,
+            config=config,
+            web_search=payload.web_search,
+            memory=payload.memory,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            app_id=release.app_id,
+            workspace_id=workspace_id
+        )
+        logger.debug(
+            "工作流试运行返回结果",
+            extra={
+                "result_type": str(type(result)),
+                "has_response": "response" in result if isinstance(result, dict) else False
+            }
+        )
+        return success(
+            data=result,
+            msg="工作流任务执行成功"
+        )
+        # return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
+
     else:
         from app.core.exceptions import BusinessException
         from app.core.error_codes import BizCode
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
-        pass

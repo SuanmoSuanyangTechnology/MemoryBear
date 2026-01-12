@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, field_validator
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableType
 from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType
@@ -27,6 +27,16 @@ class CycleVariable(BaseNodeConfig):
         description="Initial or current value of the loop variable"
     )
 
+    @field_validator("input_type", mode="before")
+    @classmethod
+    def lower_input_type(cls, v):
+        if isinstance(v, str):
+            try:
+                return ValueInputType(v.lower())
+            except ValueError:
+                raise ValueError(f"Invalid input_type: {v}")
+        return v
+
 
 class ConditionDetail(BaseModel):
     operator: ComparisonOperator = Field(
@@ -45,9 +55,19 @@ class ConditionDetail(BaseModel):
     )
 
     input_type: ValueInputType = Field(
-        ...,
+        default=ValueInputType.CONSTANT,
         description="Input type of the loop variable"
     )
+
+    @field_validator("input_type", mode="before")
+    @classmethod
+    def lower_input_type(cls, v):
+        if isinstance(v, str):
+            try:
+                return ValueInputType(v.lower())
+            except ValueError:
+                raise ValueError(f"Invalid input_type: {v}")
+        return v
 
 
 class ConditionsConfig(BaseModel):

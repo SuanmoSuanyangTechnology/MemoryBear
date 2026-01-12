@@ -537,7 +537,7 @@ class CollaborativeOrchestrator:
                     })
             
             # 提取 usage
-            if hasattr(response, 'usage_metadata'):
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 result["usage"] = {
                     "prompt_tokens": response.usage_metadata.get("input_tokens", 0),
                     "completion_tokens": response.usage_metadata.get("output_tokens", 0),

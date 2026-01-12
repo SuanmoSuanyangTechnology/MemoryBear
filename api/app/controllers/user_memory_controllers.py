@@ -11,14 +11,22 @@ from app.db import get_db
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
+from app.core.api_key_utils import timestamp_to_datetime
 from app.services.user_memory_service import (
     UserMemoryService,
-    analytics_node_statistics,
     analytics_memory_types,
     analytics_graph_data,
 )
+from app.services.memory_entity_relationship_service import MemoryEntityService,MemoryEmotion,MemoryInteraction
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import GenerateCacheRequest
+from app.schemas.user_memory_schema import (
+    EpisodicMemoryOverviewRequest,
+    EpisodicMemoryDetailsRequest,
+    ExplicitMemoryOverviewRequest,
+    ExplicitMemoryDetailsRequest,
+)
+
 from app.schemas.end_user_schema import (
     EndUserProfileResponse,
     EndUserProfileUpdate,
@@ -41,24 +49,27 @@ router = APIRouter(
 
 @router.get("/analytics/memory_insight/report", response_model=ApiResponse)
 async def get_memory_insight_report_api(
-    end_user_id: str,  # 使用 end_user_id
+    end_user_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
-    """获取缓存的记忆洞察报告"""
-    api_logger.info(f"记忆洞察报告请求: end_user_id={end_user_id}, user={current_user.username}")
+) -> dict:
+    """
+    获取缓存的记忆洞察报告
+
+    此接口仅查询数据库中已缓存的记忆洞察数据，不执行生成操作。
+    如需生成新的洞察报告，请使用专门的生成接口。
+    """
+    api_logger.info(f"记忆洞察报告查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
         # 调用服务层获取缓存数据
         result = await user_memory_service.get_cached_memory_insight(db, end_user_id)
-        
+
         if result["is_cached"]:
-            # 缓存存在，返回缓存数据
             api_logger.info(f"成功返回缓存的记忆洞察报告: end_user_id={end_user_id}")
             return success(data=result, msg="查询成功")
         else:
-            # 缓存不存在，返回提示消息
             api_logger.info(f"记忆洞察报告缓存不存在: end_user_id={end_user_id}")
-            return success(data=result, msg="查询成功")
+            return success(data=result, msg="数据尚未生成")
     except Exception as e:
         api_logger.error(f"记忆洞察报告查询失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "记忆洞察报告查询失败", str(e))
@@ -66,24 +77,27 @@ async def get_memory_insight_report_api(
 
 @router.get("/analytics/user_summary", response_model=ApiResponse)
 async def get_user_summary_api(
-    end_user_id: str,  # 使用 end_user_id
+    end_user_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
-    """获取缓存的用户摘要"""
-    api_logger.info(f"用户摘要请求: end_user_id={end_user_id}, user={current_user.username}")
+) -> dict:
+    """
+    获取缓存的用户摘要
+
+    此接口仅查询数据库中已缓存的用户摘要数据，不执行生成操作。
+    如需生成新的用户摘要，请使用专门的生成接口。
+    """
+    api_logger.info(f"用户摘要查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
         # 调用服务层获取缓存数据
         result = await user_memory_service.get_cached_user_summary(db, end_user_id)
-        
+
         if result["is_cached"]:
-            # 缓存存在，返回缓存数据
             api_logger.info(f"成功返回缓存的用户摘要: end_user_id={end_user_id}")
             return success(data=result, msg="查询成功")
         else:
-            # 缓存不存在，返回提示消息
             api_logger.info(f"用户摘要缓存不存在: end_user_id={end_user_id}")
-            return success(data=result, msg="查询成功")
+            return success(data=result, msg="数据尚未生成")
     except Exception as e:
         api_logger.error(f"用户摘要查询失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "用户摘要查询失败", str(e))
@@ -97,35 +111,35 @@ async def generate_cache_api(
 ) -> dict:
     """
     手动触发缓存生成
-    
+
     - 如果提供 end_user_id，只为该用户生成
     - 如果不提供，为当前工作空间的所有用户生成
     """
     workspace_id = current_user.current_workspace_id
-    
+
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试生成缓存但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
+
     group_id = request.end_user_id
-    
+
     api_logger.info(
         f"缓存生成请求: user={current_user.username}, workspace={workspace_id}, "
         f"end_user_id={group_id if group_id else '全部用户'}"
     )
-    
+
     try:
         if group_id:
             # 为单个用户生成
             api_logger.info(f"开始为单个用户生成缓存: end_user_id={group_id}")
-            
+
             # 生成记忆洞察
             insight_result = await user_memory_service.generate_and_cache_insight(db, group_id, workspace_id)
-            
+
             # 生成用户摘要
             summary_result = await user_memory_service.generate_and_cache_summary(db, group_id, workspace_id)
-            
+
             # 构建响应
             result = {
                 "end_user_id": group_id,
@@ -133,7 +147,7 @@ async def generate_cache_api(
                 "summary_success": summary_result["success"],
                 "errors": []
             }
-            
+
             # 收集错误信息
             if not insight_result["success"]:
                 result["errors"].append({
@@ -145,29 +159,29 @@ async def generate_cache_api(
                     "type": "summary",
                     "error": summary_result.get("error")
                 })
-            
+
             # 记录结果
             if result["insight_success"] and result["summary_success"]:
                 api_logger.info(f"成功为用户 {group_id} 生成缓存")
             else:
                 api_logger.warning(f"用户 {group_id} 的缓存生成部分失败: {result['errors']}")
-            
+
             return success(data=result, msg="生成完成")
-            
+
         else:
             # 为整个工作空间生成
             api_logger.info(f"开始为工作空间 {workspace_id} 批量生成缓存")
-            
+
             result = await user_memory_service.generate_cache_for_workspace(db, workspace_id)
-            
+
             # 记录统计信息
             api_logger.info(
                 f"工作空间 {workspace_id} 批量生成完成: "
                 f"总数={result['total_users']}, 成功={result['successful']}, 失败={result['failed']}"
             )
-            
+
             return success(data=result, msg="批量生成完成")
-            
+
     except Exception as e:
         api_logger.error(f"缓存生成失败: user={current_user.username}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "缓存生成失败", str(e))
@@ -180,18 +194,18 @@ async def get_node_statistics_api(
     db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
+
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试查询节点统计但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
+
     api_logger.info(f"记忆类型统计请求: end_user_id={end_user_id}, user={current_user.username}, workspace={workspace_id}")
-    
+
     try:
         # 调用新的记忆类型统计函数
         result = await analytics_memory_types(db, end_user_id)
-        
+
         # 计算总数用于日志
         total_count = sum(item["count"] for item in result)
         api_logger.info(f"成功获取记忆类型统计: end_user_id={end_user_id}, 总记忆数={total_count}, 类型数={len(result)}")
@@ -211,31 +225,31 @@ async def get_graph_data_api(
     db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
+
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试查询图数据但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
+
     # 参数验证
     if limit > 1000:
         limit = 1000
         api_logger.warning("limit 参数超过最大值，已调整为 1000")
-    
+
     if depth > 3:
         depth = 3
         api_logger.warning("depth 参数超过最大值，已调整为 3")
-    
+
     # 解析 node_types 参数
     node_types_list = None
     if node_types:
         node_types_list = [t.strip() for t in node_types.split(",") if t.strip()]
-    
+
     api_logger.info(
         f"图数据查询请求: end_user_id={end_user_id}, user={current_user.username}, "
         f"workspace={workspace_id}, node_types={node_types_list}, limit={limit}, depth={depth}"
     )
-    
+
     try:
         result = await analytics_graph_data(
             db=db,
@@ -245,19 +259,19 @@ async def get_graph_data_api(
             depth=depth,
             center_node_id=center_node_id
         )
-        
+
         # 检查是否有错误消息
         if "message" in result and result["statistics"]["total_nodes"] == 0:
             api_logger.warning(f"图数据查询返回空结果: {result.get('message')}")
             return success(data=result, msg=result.get("message", "查询成功"))
-        
+
         api_logger.info(
             f"成功获取图数据: end_user_id={end_user_id}, "
             f"nodes={result['statistics']['total_nodes']}, "
             f"edges={result['statistics']['total_edges']}"
         )
         return success(data=result, msg="查询成功")
-        
+
     except Exception as e:
         api_logger.error(f"图数据查询失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "图数据查询失败", str(e))
@@ -270,25 +284,25 @@ async def get_end_user_profile(
     db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
+
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试查询用户信息但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
+
     api_logger.info(
         f"用户信息查询请求: end_user_id={end_user_id}, user={current_user.username}, "
         f"workspace={workspace_id}"
     )
-    
+
     try:
         # 查询终端用户
         end_user = db.query(EndUser).filter(EndUser.id == end_user_id).first()
-        
+
         if not end_user:
             api_logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
             return fail(BizCode.INVALID_PARAMETER, "终端用户不存在", f"end_user_id={end_user_id}")
-        
+
         # 构建响应数据
         profile_data = EndUserProfileResponse(
             id=end_user.id,
@@ -300,10 +314,10 @@ async def get_end_user_profile(
             hire_date=end_user.hire_date,
             updatetime_profile=end_user.updatetime_profile
         )
-        
+
         api_logger.info(f"成功获取用户信息: end_user_id={end_user_id}")
         return success(data=UserMemoryService.convert_profile_to_dict_with_timestamp(profile_data), msg="查询成功")
-        
+
     except Exception as e:
         api_logger.error(f"用户信息查询失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "用户信息查询失败", str(e))
@@ -317,56 +331,56 @@ async def update_end_user_profile(
 ) -> dict:
     """
     更新终端用户的基本信息
-    
+
     该接口可以更新用户的姓名、职位、部门、联系方式、电话和入职日期等信息。
     所有字段都是可选的，只更新提供的字段。
-    
+
     """
     workspace_id = current_user.current_workspace_id
     end_user_id = profile_update.end_user_id
-    
+
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新用户信息但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
+
     api_logger.info(
         f"用户信息更新请求: end_user_id={end_user_id}, user={current_user.username}, "
         f"workspace={workspace_id}"
     )
-    
+
     try:
         # 查询终端用户
         end_user = db.query(EndUser).filter(EndUser.id == end_user_id).first()
-        
+
         if not end_user:
             api_logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
             return fail(BizCode.INVALID_PARAMETER, "终端用户不存在", f"end_user_id={end_user_id}")
-        
+
         # 更新字段（只更新提供的字段，排除 end_user_id）
         # 允许 None 值来重置字段（如 hire_date）
         update_data = profile_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
-        
+
         # 特殊处理 hire_date：如果提供了时间戳，转换为 DateTime
         if 'hire_date' in update_data:
             hire_date_timestamp = update_data['hire_date']
             if hire_date_timestamp is not None:
-                update_data['hire_date'] = UserMemoryService.timestamp_to_datetime(hire_date_timestamp)
+                update_data['hire_date'] = timestamp_to_datetime(hire_date_timestamp)
             # 如果是 None，保持 None（允许清空）
-        
+
         for field, value in update_data.items():
             setattr(end_user, field, value)
-        
+
         # 更新 updated_at 时间戳
         end_user.updated_at = datetime.datetime.now()
-        
+
         # 更新 updatetime_profile 为当前时间
         end_user.updatetime_profile = datetime.datetime.now()
-        
+
         # 提交更改
         db.commit()
         db.refresh(end_user)
-        
+
         # 构建响应数据
         profile_data = EndUserProfileResponse(
             id=end_user.id,
@@ -378,11 +392,243 @@ async def update_end_user_profile(
             hire_date=end_user.hire_date,
             updatetime_profile=end_user.updatetime_profile
         )
-        
+
         api_logger.info(f"成功更新用户信息: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
         return success(data=UserMemoryService.convert_profile_to_dict_with_timestamp(profile_data), msg="更新成功")
-        
+
     except Exception as e:
         db.rollback()
         api_logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", str(e))
+
+@router.get("/memory_space/timeline_memories", response_model=ApiResponse)
+async def memory_space_timeline_of_shared_memories(id: str, label: str,
+                                      current_user: User = Depends(get_current_user),
+                                      db: Session = Depends(get_db),
+                                      ):
+    MemoryEntity = MemoryEntityService(id, label)
+    timeline_memories_result = await MemoryEntity.get_timeline_memories_server()
+    return success(data=timeline_memories_result, msg="共同记忆时间线")
+@router.get("/memory_space/relationship_evolution", response_model=ApiResponse)
+async def memory_space_relationship_evolution(id: str, label: str,
+                                      current_user: User = Depends(get_current_user),
+                                      db: Session = Depends(get_db),
+                                      ):
+    try:
+        api_logger.info(f"关系演变查询请求: id={id}, table={label}, user={current_user.username}")
+
+        # 获取情绪数据
+        emotion = MemoryEmotion(id, label)
+        emotion_result = await emotion.get_emotion()
+
+        # 获取交互数据
+        interaction = MemoryInteraction(id, label)
+        interaction_result = await interaction.get_interaction_frequency()
+
+        # 关闭连接
+        await emotion.close()
+        await interaction.close()
+
+        result = {
+            "emotion": emotion_result,
+            "interaction": interaction_result
+        }
+
+        api_logger.info(f"关系演变查询成功: id={id}, table={label}")
+        return success(data=result, msg="关系演变")
+
+    except Exception as e:
+        api_logger.error(f"关系演变查询失败: id={id}, table={label}, error={str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "关系演变查询失败", str(e))
+
+
+@router.post("/classifications/episodic-memory", response_model=ApiResponse)
+async def get_episodic_memory_overview_api(
+    request: EpisodicMemoryOverviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    获取情景记忆总览
+    
+    返回指定用户的所有情景记忆列表，包括标题和创建时间。
+  支持通过时间范围、情景类型和标题关键词进行筛选。
+    
+    """
+    workspace_id = current_user.current_workspace_id
+    
+    # 检查用户是否已选择工作空间
+    if workspace_id is None:
+        api_logger.warning(f"用户 {current_user.username} 尝试查询情景记忆总览但未选择工作空间")
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+    
+    # 验证参数
+    valid_time_ranges = ["all", "today", "this_week", "this_month"]
+    valid_episodic_types = ["all", "conversation", "project_work", "learning", "decision", "important_event"]
+    
+    if request.time_range not in valid_time_ranges:
+        return fail(BizCode.INVALID_PARAMETER, f"无效的时间范围参数，可选值：{', '.join(valid_time_ranges)}")
+    
+    if request.episodic_type not in valid_episodic_types:
+        return fail(BizCode.INVALID_PARAMETER, f"无效的情景类型参数，可选值：{', '.join(valid_episodic_types)}")
+    
+    # 处理 title_keyword（去除首尾空格）
+    title_keyword = request.title_keyword.strip() if request.title_keyword else None
+    
+    api_logger.info(
+        f"情景记忆总览查询请求: end_user_id={request.end_user_id}, user={current_user.username}, "
+        f"workspace={workspace_id}, time_range={request.time_range}, episodic_type={request.episodic_type}, "
+        f"title_keyword={title_keyword}"
+    )
+    
+    try:
+        # 调用Service层方法
+        result = await user_memory_service.get_episodic_memory_overview(
+            db, request.end_user_id, request.time_range, request.episodic_type, title_keyword
+        )
+        
+        api_logger.info(
+            f"成功获取情景记忆总览: end_user_id={request.end_user_id}, "
+            f"total={result['total']}"
+        )
+        return success(data=result, msg="查询成功")
+        
+    except Exception as e:
+        api_logger.error(f"情景记忆总览查询失败: end_user_id={request.end_user_id}, error={str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "情景记忆总览查询失败", str(e))
+
+
+@router.post("/classifications/episodic-memory-details", response_model=ApiResponse)
+async def get_episodic_memory_details_api(
+    request: EpisodicMemoryDetailsRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    获取情景记忆详情
+    
+    返回指定情景记忆的详细信息，包括涉及对象、情景类型、内容记录和情绪。
+    
+    """
+    workspace_id = current_user.current_workspace_id
+    
+    # 检查用户是否已选择工作空间
+    if workspace_id is None:
+        api_logger.warning(f"用户 {current_user.username} 尝试查询情景记忆详情但未选择工作空间")
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+    
+    api_logger.info(
+        f"情景记忆详情查询请求: end_user_id={request.end_user_id}, summary_id={request.summary_id}, "
+        f"user={current_user.username}, workspace={workspace_id}"
+    )
+    
+    try:
+        # 调用Service层方法
+        result = await user_memory_service.get_episodic_memory_details(
+            db=db,
+            end_user_id=request.end_user_id,
+            summary_id=request.summary_id
+        )
+        
+        api_logger.info(
+            f"成功获取情景记忆详情: end_user_id={request.end_user_id}, summary_id={request.summary_id}"
+        )
+        return success(data=result, msg="查询成功")
+        
+    except ValueError as e:
+        # 处理情景记忆不存在的情况
+        api_logger.warning(f"情景记忆不存在: end_user_id={request.end_user_id}, summary_id={request.summary_id}, error={str(e)}")
+        return fail(BizCode.INVALID_PARAMETER, "情景记忆不存在", str(e))
+    except Exception as e:
+        api_logger.error(f"情景记忆详情查询失败: end_user_id={request.end_user_id}, summary_id={request.summary_id}, error={str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "情景记忆详情查询失败", str(e))
+
+
+@router.post("/classifications/explicit-memory", response_model=ApiResponse)
+async def get_explicit_memory_overview_api(
+    request: ExplicitMemoryOverviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    获取显性记忆总览
+    
+    返回指定用户的所有显性记忆列表，包括标题、完整内容、创建时间和情绪信息。
+    """
+    workspace_id = current_user.current_workspace_id
+    
+    # 检查用户是否已选择工作空间
+    if workspace_id is None:
+        api_logger.warning(f"用户 {current_user.username} 尝试查询显性记忆总览但未选择工作空间")
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+    
+    api_logger.info(
+        f"显性记忆总览查询请求: end_user_id={request.end_user_id}, user={current_user.username}, "
+        f"workspace={workspace_id}"
+    )
+    
+    try:
+        # 调用Service层方法
+        result = await user_memory_service.get_explicit_memory_overview(
+            db, request.end_user_id
+        )
+        
+        api_logger.info(
+            f"成功获取显性记忆总览: end_user_id={request.end_user_id}, "
+            f"total={result['total']}"
+        )
+        return success(data=result, msg="查询成功")
+        
+    except Exception as e:
+        api_logger.error(f"显性记忆总览查询失败: end_user_id={request.end_user_id}, error={str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "显性记忆总览查询失败", str(e))
+
+
+@router.post("/classifications/explicit-memory-details", response_model=ApiResponse)
+async def get_explicit_memory_details_api(
+    request: ExplicitMemoryDetailsRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    获取显性记忆详情
+    
+    根据 memory_id 返回情景记忆或语义记忆的详细信息。
+    - 情景记忆：包括标题、内容、情绪、创建时间
+    - 语义记忆：包括名称、核心定义、详细笔记、创建时间
+    """
+    workspace_id = current_user.current_workspace_id
+    
+    # 检查用户是否已选择工作空间
+    if workspace_id is None:
+        api_logger.warning(f"用户 {current_user.username} 尝试查询显性记忆详情但未选择工作空间")
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+    
+    api_logger.info(
+        f"显性记忆详情查询请求: end_user_id={request.end_user_id}, memory_id={request.memory_id}, "
+        f"user={current_user.username}, workspace={workspace_id}"
+    )
+    
+    try:
+        # 调用Service层方法
+        result = await user_memory_service.get_explicit_memory_details(
+            db=db,
+            end_user_id=request.end_user_id,
+            memory_id=request.memory_id
+        )
+        
+        api_logger.info(
+            f"成功获取显性记忆详情: end_user_id={request.end_user_id}, memory_id={request.memory_id}, "
+            f"memory_type={result.get('memory_type')}"
+        )
+        return success(data=result, msg="查询成功")
+        
+    except ValueError as e:
+        # 处理记忆不存在的情况
+        api_logger.warning(f"显性记忆不存在: end_user_id={request.end_user_id}, memory_id={request.memory_id}, error={str(e)}")
+        return fail(BizCode.INVALID_PARAMETER, "显性记忆不存在", str(e))
+    except Exception as e:
+        api_logger.error(f"显性记忆详情查询失败: end_user_id={request.end_user_id}, memory_id={request.memory_id}, error={str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "显性记忆详情查询失败", str(e))
+
+

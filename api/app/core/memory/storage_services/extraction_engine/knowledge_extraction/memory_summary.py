@@ -59,13 +59,28 @@ async def _process_chunk_summary(
         )
         summary_text = structured.summary.strip()
 
+        # Generate title and type for the summary
+        title = None
+        episodic_type = None
+        try:
+            from app.services.user_memory_service import UserMemoryService
+            title, episodic_type = await UserMemoryService.generate_title_and_type_for_summary(
+                content=summary_text,
+                end_user_id=dialog.group_id
+            )
+            logger.info(f"Generated title and type for MemorySummary: title={title}, type={episodic_type}")
+        except Exception as e:
+            logger.warning(f"Failed to generate title and type for chunk {chunk.id}: {e}")
+            # Continue without title and type
+
         # Embed the summary
         embedding = (await embedder.response([summary_text]))[0]
 
         # Build node per chunk
+        # Note: title is stored in the 'name' field, type is stored in 'memory_type' field
         node = MemorySummaryNode(
             id=uuid4().hex,
-            name=f"MemorySummaryChunk_{chunk.id}",
+            name=title if title else f"MemorySummaryChunk_{chunk.id}",
             group_id=dialog.group_id,
             user_id=dialog.user_id,
             apply_id=dialog.apply_id,
@@ -75,6 +90,7 @@ async def _process_chunk_summary(
             dialog_id=dialog.id,
             chunk_ids=[chunk.id],
             content=summary_text,
+            memory_type=episodic_type,
             summary_embedding=embedding,
             metadata={"ref_id": dialog.ref_id},
             config_id=dialog.config_id,  # 添加 config_id

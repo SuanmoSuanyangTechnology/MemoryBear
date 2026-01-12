@@ -41,18 +41,24 @@ const Suggestions: FC = () => {
     <RbCard
       title={t('statementDetail.suggestions')}
       headerType="borderless"
-      headerClassName="rb:text-[18px]! rb:leading-[24px]"
+      headerClassName="rb:leading-[24px] rb:bg-[#F6F8FC]! rb:min-h-[46px]! rb:border-b! rb:border-b-[#DFE4ED]!"
+      bodyClassName="rb:px-[16px]! rb:pt-[20px]! rb:pb-[24px]!"
     >
       {suggestions?.suggestions && suggestions?.suggestions.length > 0
         ? <>
           <RbAlert className="rb:mb-3">{suggestions.health_summary}</RbAlert>
-          {suggestions.suggestions.map((item, index) => (
-            <div key={index} className="rb:mb-3">
-              <div className="rb:font-medium">{index + 1}. {item.title}</div>
-              <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-1 rb:mb-2">{item.content}</div>
-              {item.actionable_steps.map((vo, idx) => <div key={idx} className="rb:ml-6 rb:text-[12px] rb:text-[#5B6167] rb:mt-1">- {vo}</div>)}
-            </div>
-          ))}
+          <div className="rb:space-y-8">
+            {suggestions.suggestions.map((item, index) => (
+              <div key={index}>
+                <div className="rb:font-medium">{index + 1}. {item.title}</div>
+                <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2 rb:mb-2 rb:leading-5">{item.content}</div>
+
+                <ul className="rb:list-disc rb:ml-4 rb:text-[12px] rb:text-[#5B6167] rb:leading-5">
+                  {item.actionable_steps.map((vo, idx) => <li key={idx}>{vo}</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
         </>
         : <Empty size={88} className="rb:h-full" />
       }

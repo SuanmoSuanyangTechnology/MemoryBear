@@ -40,7 +40,7 @@ const AddChatVariable = forwardRef<AddChatVariableRef, AddChatVariableProps>(({
   }
   const handleSave = (value: ChatVariable, index?: number) => {
     const list = [...variables]
-    if (index && index > -1) {
+    if (typeof index === 'number' && index > -1) {
       list[index] = value
     } else {
       list.push(value)
@@ -75,17 +75,15 @@ const AddChatVariable = forwardRef<AddChatVariableRef, AddChatVariableProps>(({
             dataSource={variables}
             renderItem={(item, index) => (
               <List.Item>
-                <div key={index} className="rb:group rb:relative rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:cursor-pointer rb:border rb:border-[#DFE4ED] rb:rounded-lg">
+                <div key={index} className="rb:relative rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:cursor-pointer rb:border rb:border-[#DFE4ED] rb:rounded-lg">
                   <div className="rb:flex rb:items-center rb:justify-between">
                     <div className="rb:leading-4">
                       <span className="rb:font-medium">{item.name}</span>
                       <span className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular"> ({t(`workflow.config.parameter-extractor.${item.type}`)})</span>
                     </div>
-                    <span className="rb:block rb:group-hover:hidden rb:text-[12px] rb:text-[#5B6167] rb:font-regular">{item.required ? t('workflow.config.parameter-extractor.required') : ''}</span>
-
                   </div>
                   <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:wrap-break-word rb:line-clamp-1">{item.description}</div>
-                  <Space size={12} className="rb:hidden! rb:group-hover:flex! rb:absolute rb:right-4 rb:top-[50%] rb:transform-[translateY(-50%)] rb:bg-white">
+                  <Space size={12} className="rb:flex rb:absolute rb:right-4 rb:top-[50%] rb:transform-[translateY(-50%)] rb:bg-white">
                     <div
                       className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]"
                       onClick={() => handleEdit(index)}

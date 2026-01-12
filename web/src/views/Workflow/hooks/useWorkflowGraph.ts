@@ -63,7 +63,17 @@ export const useWorkflowGraph = ({
     if (!id) return
     getWorkflowConfig(id)
       .then(res => {
-        setConfig(res as WorkflowConfig)
+        const { variables, ...rest } = res as WorkflowConfig
+        setConfig({
+          ...rest,
+          variables: variables.map(v => {
+            const { default: _, ...cleanV } = v
+            return {
+              ...cleanV,
+              defaultValue: v.default ?? ''
+            }
+          })
+        })
       })
   }
 
@@ -90,13 +100,13 @@ export const useWorkflowGraph = ({
               nodeLibraryConfig.config[key].defaultValue = {
                 ...rest
               }
-            } else if (key === 'group_names' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
-              const { group_names, group } = config
+            } else if (key === 'group_variables' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+              const { group_variables, group } = config
               nodeLibraryConfig.config[key].defaultValue = group
-                ? Object.entries(group_names as Record<string, any>).map(([key, value]) => ({ key, value }))
-                : [{ key: 'Group1', value: group_names }]
-
-              console.log('group_names', nodeLibraryConfig.config)
+                ? Object.entries(group_variables as Record<string, any>).map(([key, value]) => ({ key, value }))
+                : group_variables
+            } else if (type === 'http-request' && (key === 'headers' || key === 'params') && config[key] && typeof config[key] === 'object' && !Array.isArray(config[key]) && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+              nodeLibraryConfig.config[key].defaultValue = Object.entries(config[key]).map(([name, value]) => ({ name, value }))
             } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && config[key]) {
               nodeLibraryConfig.config[key].defaultValue = config[key]
             }
@@ -193,6 +203,27 @@ export const useWorkflowGraph = ({
           nodeConfig.height = newHeight;
         }
         
+        // 如果是http-request节点，检查error_handle.method配置
+        if (type === 'http-request' && (config as any).error_handle?.method === 'branch') {
+          const portAttrs = {
+            circle: {
+              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
+            },
+          };
+          
+          nodeConfig.ports = {
+            groups: {
+              right: { position: 'right', attrs: portAttrs },
+              left: { position: 'left', attrs: portAttrs },
+            },
+            items: [
+              { group: 'left' },
+              { group: 'right', id: 'right' },
+              { group: 'right', id: 'ERROR', attrs: { text: { text: t('workflow.config.http-request.errorBranch'), fontSize: 12, fill: '#5B6167' }}}
+            ]
+          };
+        }
+        
         return nodeConfig
       })
       
@@ -284,6 +315,14 @@ export const useWorkflowGraph = ({
             }
           }
           
+          // 如果是http-request节点且有label，根据label匹配对应的端口
+          if (sourceCell.getData()?.type === 'http-request' && label) {
+            const matchingPort = sourcePorts.find((port: any) => port.id === label);
+            if (matchingPort) {
+              sourcePort = label;
+            }
+          }
+          
           const edgeConfig = {
             source: {
               cell: sourceCell.id,
@@ -303,6 +342,7 @@ export const useWorkflowGraph = ({
                 },
               },
             },
+            zIndex: 0
           }
 
           return edgeConfig
@@ -832,7 +872,7 @@ export const useWorkflowGraph = ({
     
     // 创建干净的节点数据，只保留必要的字段
     const cleanNodeData = {
-      id: `${dragData.type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `${dragData.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: t(`workflow.${dragData.type}`),
       ...nodeLibraryConfig
     };
@@ -842,6 +882,7 @@ export const useWorkflowGraph = ({
         ...graphNodeLibrary[dragData.type],
         x: point.x - 150,
         y: point.y - 100,
+        id: cleanNodeData.id,
         data: { ...cleanNodeData, isGroup: true },
       });
     } else if (dragData.type === 'if-else') {
@@ -850,6 +891,7 @@ export const useWorkflowGraph = ({
         ...graphNodeLibrary[dragData.type],
         x: point.x - 100,
         y: point.y - 60,
+        id: cleanNodeData.id,
         data: { ...cleanNodeData },
       });
     } else {
@@ -858,6 +900,7 @@ export const useWorkflowGraph = ({
         ...(graphNodeLibrary[dragData.type] || graphNodeLibrary.default),
         x: point.x - 60,
         y: point.y - 20,
+        id: cleanNodeData.id,
         data: { ...cleanNodeData },
       });
     }
@@ -874,6 +917,13 @@ export const useWorkflowGraph = ({
 
       const params = {
         ...config,
+        variables: config.variables.map(v => {
+            const { defaultValue, ...cleanV } = v
+            return {
+              ...cleanV,
+              default: defaultValue ?? ''
+            }
+          }),
         nodes: nodes.map((node: Node) => {
           const data = node.getData();
           const position = node.getPosition();
@@ -881,7 +931,23 @@ export const useWorkflowGraph = ({
 
           if (data.config) {
             Object.keys(data.config).forEach(key => {
-              if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
+              if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_variables') {
+                let group_variables = data.config.group.defaultValue ? {} : data.config[key].defaultValue
+                if (data.config.group.defaultValue) {
+                  data.config[key].defaultValue.map((vo: any) => {
+                    group_variables[vo.key] = vo.value
+                  })
+                }
+                itemConfig[key] = group_variables
+              } else if (data.type === 'http-request' && (key === 'headers' || key === 'params') && data.config[key] && 'defaultValue' in data.config[key]) {
+                const value = data.config[key].defaultValue
+                itemConfig[key] = {}
+                if (value.length > 0) {
+                  value.forEach((vo: any) => {
+                    itemConfig[key][vo.name] = vo.value
+                  })
+                }
+              } else if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
                 itemConfig[key] = data.config[key].defaultValue
               } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const { knowledge_bases } = data.config[key].defaultValue
@@ -910,7 +976,7 @@ export const useWorkflowGraph = ({
           const sourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
           const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
           const sourcePortId = edge.getSourcePortId();
-          
+
           // 过滤无效连线：源节点或目标节点不存在，或者是add-node类型
           if (!sourceCell?.getData()?.id || !targetCell?.getData()?.id || 
               sourceCell?.getData()?.type === 'add-node' || targetCell?.getData()?.type === 'add-node') {
@@ -933,6 +999,23 @@ export const useWorkflowGraph = ({
               target: targetCell?.getData().id,
               label: sourcePortId,
             };
+          }
+          
+          // 如果是http-request节点的右侧端口连线，添加label
+          if (sourceCell?.getData()?.type === 'http-request') {
+            if (sourcePortId === 'ERROR') {
+              return {
+                source: sourceCell.getData().id,
+                target: targetCell?.getData().id,
+                label: 'ERROR',
+              };
+            } else {
+              return {
+                source: sourceCell.getData().id,
+                target: targetCell?.getData().id,
+                label: 'SUCCESS',
+              };
+            }
           }
           
           return {

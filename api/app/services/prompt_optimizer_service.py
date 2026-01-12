@@ -3,9 +3,8 @@ import uuid
 from typing import Any, AsyncGenerator
 
 import json_repair
-from langchain_core.prompts import ChatPromptTemplate
-from sqlalchemy.orm import Session
 from jinja2 import Template
+from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -166,6 +165,8 @@ class PromptOptimizerService:
         model_config = self.get_model_config(tenant_id, model_id)
         session_history = self.get_session_message_history(session_id=session_id, user_id=user_id)
 
+        logger.info(f"Prompt optimization started, user_id={user_id}, session_id={session_id}")
+
         # Create LLM instance
         api_config: ModelApiKey = model_config.api_keys[0]
         llm = RedBearLLM(RedBearModelConfig(
@@ -175,11 +176,11 @@ class PromptOptimizerService:
             base_url=api_config.api_base
         ), type=ModelType(model_config.type))
         try:
-            with open('app/templates/prompt/prompt_optimizer_system.jinja2', 'r', encoding='utf-8') as f:
+            with open('app/services/prompt/prompt_optimizer_system.jinja2', 'r', encoding='utf-8') as f:
                 opt_system_prompt = f.read()
             rendered_system_message = Template(opt_system_prompt).render()
 
-            with open('app/templates/prompt/prompt_optimizer_user.jinja2', 'r', encoding='utf-8') as f:
+            with open('app/services/prompt/prompt_optimizer_user.jinja2', 'r', encoding='utf-8') as f:
                 opt_user_prompt = f.read()
         except FileNotFoundError:
             raise BusinessException(message="System prompt template not found", code=BizCode.NOT_FOUND)
@@ -203,7 +204,6 @@ class PromptOptimizerService:
 
         messages.extend(session_history[:-1])  # last message is current message
         messages.extend([(RoleType.USER.value, rendered_user_message)])
-        logger.info(f"Prompt optimization message: {messages}")
         buffer = ""
         prompt_started = False
         prompt_finished = False
@@ -231,9 +231,9 @@ class PromptOptimizerService:
                 if m:
                     prompt_index = m.start()
                     prompt_finished = True
-                    yield {"type": "delta", "content": buffer[idx:prompt_index]}
+                    yield {"content": buffer[idx:prompt_index]}
                 else:
-                    yield {"type": "delta", "content": cache[idx:]}
+                    yield {"content": cache[idx:]}
                     if len(cache) != 0:
                         idx = len(cache)
 
@@ -249,8 +249,9 @@ class PromptOptimizerService:
             role=RoleType.ASSISTANT,
             content=desc
         )
-
-        yield {"type": "done", "desc": optim_result.get("desc")}
+        variables = self.parser_prompt_variables(optim_result.get("prompt"))
+        logger.info(f"Prompt optimization completed, user_id={user_id}, session_id={session_id}")
+        yield {"desc": optim_result.get("desc"), "variables": variables}
 
     @staticmethod
     def parser_prompt_variables(prompt: str):

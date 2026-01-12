@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, Select, Checkbox, InputNumber } from 'antd';
+import { Form, Input, Select, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ChatVariableModalRef } from './types'
@@ -26,7 +26,7 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
   const [form] = Form.useForm<ChatVariable>();
   const [loading, setLoading] = useState(false)
   const [editIndex, setEditIndex] = useState<number | undefined>(undefined)
-  const typeValue = Form.useWatch('type', form);
+  const type = Form.useWatch('type', form);
 
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
@@ -39,7 +39,8 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
   const handleOpen = (variable?: ChatVariable, index?: number) => {
     setVisible(true);
     if (variable) {
-      form.setFieldsValue(variable)
+      const { default: _, ...rest } = variable
+      form.setFieldsValue({ ...rest })
       setEditIndex(index)
     } else {
       form.resetFields();
@@ -49,7 +50,7 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
   // 封装保存方法，添加提交逻辑
   const handleSave = () => {
     form.validateFields().then((values) => {
-      refresh({ ...values }, editIndex)
+      refresh({ ...values, default: values.defaultValue }, editIndex)
       handleClose()
     })
   }
@@ -90,51 +91,35 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
         >
           <Select
             placeholder={t('common.pleaseSelect')}
-            onChange={() => form.setFieldValue('default', undefined)}
+            onChange={() => form.setFieldValue('defaultValue', undefined)}
             options={types.map(key => ({
               value: key,
               label: t(`workflow.config.parameter-extractor.${key}`),
             }))}
           />
         </FormItem>
-        <FormItem
-          name="default"
+        <Form.Item
+          name="defaultValue"
           label={t('workflow.config.parameter-extractor.default')}
         >
-          <Form.Item noStyle shouldUpdate={(prevValues, currentValues) => prevValues.type !== currentValues.type}>
-            {({ getFieldValue }) => {
-              const type = getFieldValue('type');
-              if (type === 'number') {
-                return <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />;
-              }
-              if (type === 'boolean') {
-                return (
-                  <Select
-                    placeholder={t('common.pleaseSelect')}
-                    options={[
-                      { value: true, label: 'true' },
-                      { value: false, label: 'false' }
-                    ]}
-                  />
-                );
-              }
-              return <Input placeholder={t('common.enter')} />;
-            }}
-          </Form.Item>
-        </FormItem>
-
+          {type === 'number'
+            ? <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
+            : type === 'boolean'
+            ? <Select
+              placeholder={t('common.pleaseSelect')}
+              options={[
+                { value: true, label: 'true' },
+                { value: false, label: 'false' }
+              ]}
+            />
+            : <Input placeholder={t('common.enter')} />
+          }
+        </Form.Item>
         <FormItem
           name="description"
           label={t('workflow.config.parameter-extractor.desc')}
         >
           <Input.TextArea placeholder={t('common.enter')} />
-        </FormItem>
-
-        <FormItem
-          name="required"
-          valuePropName="checked"
-        >
-          <Checkbox>{t('workflow.config.parameter-extractor.required')}</Checkbox>
         </FormItem>
       </Form>
     </RbModal>

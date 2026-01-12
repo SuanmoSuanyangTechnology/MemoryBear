@@ -31,10 +31,6 @@ const Knowledge: FC<{data: KnowledgeConfig; onUpdate: (config: KnowledgeConfig) 
       setEditConfig({ ...(data || {}) })
       const knowledge_bases = [...(data.knowledge_bases || [])]
       setKnowledgeList(knowledge_bases)
-      onUpdate(prev => ({
-        ...prev,
-        knowledge_bases: knowledge_bases,
-      }))
     }
   }, [data])
 
@@ -47,10 +43,10 @@ const Knowledge: FC<{data: KnowledgeConfig; onUpdate: (config: KnowledgeConfig) 
   const handleDeleteKnowledge = (id: string) => {
     const list = knowledgeList.filter(item => item.id !== id)
     setKnowledgeList([...list])
-    onUpdate(prev => ({
-      ...prev,
+    onUpdate({
+      ...editConfig,
       knowledge_bases: [...list],
-    }))
+    })
   }
   const handleEditKnowledge = (item: KnowledgeBase) => {
     knowledgeConfigModalRef.current?.handleOpen(item)
@@ -69,10 +65,10 @@ const Knowledge: FC<{data: KnowledgeConfig; onUpdate: (config: KnowledgeConfig) 
           list = [...values as KnowledgeBase[]]
         }
       setKnowledgeList([...list])
-      onUpdate(prev => ({
-        ...prev,
+      onUpdate({
+        ...editConfig,
         knowledge_bases: [...list],
-      }))
+      })
     } else if (type === 'knowledgeConfig') {
       const index = knowledgeList.findIndex(item => item.id === (values as KnowledgeBase).kb_id)
       const list = [...knowledgeList]
@@ -81,18 +77,19 @@ const Knowledge: FC<{data: KnowledgeConfig; onUpdate: (config: KnowledgeConfig) 
         config: {...values as KnowledgeConfigForm}
       }
       setKnowledgeList([...list])
-      onUpdate(prev => ({
-        ...prev,
+      onUpdate({
+        ...editConfig,
         knowledge_bases: [...list],
-      }))
+      })
     } else if (type === 'rerankerConfig') {
-      setEditConfig(prev => ({ ...prev, ...(values as RerankerConfig) }))
-      onUpdate(prev => ({
-        ...prev,
-        ...values,
-        reranker_id: values.rerank_model ? values.reranker_id : undefined,
-        reranker_top_k: values.rerank_model ? values.reranker_top_k : undefined,
-      }))
+      const rerankerValues = values as RerankerConfig
+      setEditConfig(prev => ({ ...prev, ...rerankerValues }))
+      onUpdate({
+        ...editConfig,
+        ...rerankerValues,
+        reranker_id: rerankerValues.rerank_model ? rerankerValues.reranker_id : undefined,
+        reranker_top_k: rerankerValues.rerank_model ? rerankerValues.reranker_top_k : undefined,
+      })
     }
   }
   return (
@@ -102,8 +99,8 @@ const Knowledge: FC<{data: KnowledgeConfig; onUpdate: (config: KnowledgeConfig) 
         <Button style={{padding: '0 8px', height: '24px'}} onClick={() => handleKnowledgeConfig()}>{t('application.globalConfig')}</Button>
       }
     >
-      <div className="rb:flex rb:items-center rb:justify-between rb:mb-[12px]">
-        <div className="rb:font-medium rb:leading-[20px]">{t('application.associatedKnowledgeBase')}</div>
+      <div className="rb:flex rb:items-center rb:justify-between rb:mb-3">
+        <div className="rb:font-medium rb:leading-5">{t('application.associatedKnowledgeBase')}</div>
         <Button style={{padding: '0 8px', height: '24px'}} onClick={handleAddKnowledge}>+{t('application.addKnowledgeBase')}</Button>
       </div>
 
@@ -115,21 +112,21 @@ const Knowledge: FC<{data: KnowledgeConfig; onUpdate: (config: KnowledgeConfig) 
             dataSource={knowledgeList}
             renderItem={(item) => (
               <List.Item>
-                <div key={item.id} className="rb:flex rb:items-center rb:justify-between rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-[8px]">
-                  <div className="rb:font-medium rb:leading-[16px]">
+                <div key={item.id} className="rb:flex rb:items-center rb:justify-between rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
+                  <div className="rb:font-medium rb:leading-4">
                     {item.name}
-                    <Tag color={item.status === 1 ? 'success' : item.status === 0 ? 'default' : 'error'} className="rb:ml-[8px]">
+                    <Tag color={item.status === 1 ? 'success' : item.status === 0 ? 'default' : 'error'} className="rb:ml-2">
                       {item.status === 1 ? t('common.enable') : item.status === 0 ? t('common.disabled') : t('common.deleted')}
                     </Tag>
-                    <div className="rb:mt-[4px] rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-[20px]">{t('application.contains', {include_count: item.doc_num})}</div>
+                    <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5">{t('application.contains', {include_count: item.doc_num})}</div>
                   </div>
                   <Space size={12}>
                     <div 
-                      className="rb:w-[24px] rb:h-[24px] rb:cursor-pointer rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]" 
+                      className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]" 
                       onClick={() => handleEditKnowledge(item)}
                     ></div>
                     <div 
-                      className="rb:w-[24px] rb:h-[24px] rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
+                      className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
                       onClick={() => handleDeleteKnowledge(item.id)}
                     ></div>
                   </Space>

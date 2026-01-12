@@ -28,12 +28,18 @@ const AuthConfigModal = forwardRef<AuthConfigModalRef, AuthConfigModalProps>(({
 
   const handleOpen = (data?: HttpRequestConfigForm['auth']) => {
     if (data) {
-      form.setFieldsValue({
+      const initialValues = {
         auth: !data.auth_type || data.auth_type === 'none' ? 'none' : 'api_key',
         auth_type: !data.auth_type || data.auth_type === 'none' ? undefined : data.auth_type,
         header: data.header,
         api_key: data.api_key
-      })
+      }
+      form.setFieldValue('auth', initialValues.auth)
+      if (initialValues.auth !== 'none') {
+        setTimeout(() => {
+          form.setFieldsValue(initialValues)
+        }, 1)
+      }
     }
     setVisible(true);
   };
@@ -91,6 +97,9 @@ const AuthConfigModal = forwardRef<AuthConfigModalRef, AuthConfigModalProps>(({
         <FormItem
           name="auth"
           label={t('workflow.config.http-request.authType')}
+          rules={[
+            { required: true, message: t('common.pleaseSelect') }
+          ]}
         >
           <Select
             options={[
@@ -103,6 +112,9 @@ const AuthConfigModal = forwardRef<AuthConfigModalRef, AuthConfigModalProps>(({
           <FormItem
             name="auth_type"
             label={t('workflow.config.http-request.authType')}
+            rules={[
+              { required: true, message: t('common.pleaseSelect') }
+            ]}
           >
             <Select
               options={[

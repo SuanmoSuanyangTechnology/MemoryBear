@@ -24,7 +24,7 @@ class MemoryReadNode(BaseNode):
 
             return await MemoryAgentService().read_memory(
                 group_id=end_user_id,
-                message=self.typed_config.message,
+                message=self._render_template(self.typed_config.message, state),
                 config_id=self.typed_config.config_id,
                 search_switch=self.typed_config.search_switch,
                 history=[],
@@ -51,7 +51,7 @@ class MemoryWriteNode(BaseNode):
 
             return await MemoryAgentService().write_memory(
                 group_id=end_user_id,
-                message=self.typed_config.message,
+                message=self._render_template(self.typed_config.message, state),
                 config_id=self.typed_config.config_id,
                 db=db,
                 storage_type="neo4j",

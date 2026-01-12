@@ -21,24 +21,35 @@ class LangchainToolWrapper(LangchainBaseTool):
     
     # 内部工具实例
     tool_instance: BaseTool = Field(..., description="内部工具实例")
+    # 特定操作（用于自定义工具）
+    operation: Optional[str] = Field(None, description="特定操作")
     
     class Config:
         arbitrary_types_allowed = True
     
-    def __init__(self, tool_instance: BaseTool, **kwargs):
+    def __init__(self, tool_instance: BaseTool, operation: Optional[str] = None, **kwargs):
         """初始化Langchain工具包装器
         
         Args:
             tool_instance: 内部工具实例
+            operation: 特定操作（用于自定义工具）
         """
         # 动态创建参数schema
-        args_schema = LangchainAdapter._create_pydantic_schema(tool_instance.parameters)
+        args_schema = LangchainAdapter._create_pydantic_schema(
+            tool_instance.parameters, operation
+        )
+        
+        # 构建工具名称
+        tool_name = tool_instance.name
+        if operation:
+            tool_name = f"{tool_instance.name}_{operation}"
         
         super().__init__(
-            name=tool_instance.name,
+            name=tool_name,
             description=tool_instance.description,
             args_schema=args_schema,
-            _tool_instance=tool_instance,
+            tool_instance=tool_instance,
+            operation=operation,
             **kwargs
         )
     
@@ -58,8 +69,12 @@ class LangchainToolWrapper(LangchainBaseTool):
     ) -> str:
         """异步执行工具"""
         try:
+            # 如果有特定操作，添加到参数中
+            if self.operation:
+                kwargs["operation"] = self.operation
+            
             # 执行内部工具
-            result = await self._tool_instance.safe_execute(**kwargs)
+            result = await self.tool_instance.safe_execute(**kwargs)
             
             # 转换结果为Langchain格式
             return LangchainAdapter._format_result_for_langchain(result)
@@ -73,24 +88,82 @@ class LangchainAdapter:
     """Langchain适配器 - 负责工具格式转换和标准化"""
     
     @staticmethod
-    def convert_tool(tool: BaseTool) -> LangchainToolWrapper:
+    def convert_tool(tool: BaseTool, operation: Optional[str] = None) -> LangchainToolWrapper:
         """将内部工具转换为Langchain工具
         
         Args:
             tool: 内部工具实例
+            operation: 特定操作（适用于有操作的工具）或MCP工具名称
             
         Returns:
             Langchain兼容的工具包装器
         """
         try:
-            wrapper = LangchainToolWrapper(tool_instance=tool)
-            logger.debug(f"工具转换成功: {tool.name} -> Langchain格式")
-            return wrapper
+            # 处理MCP工具的特定工具名称
+            if hasattr(tool, 'tool_type') and tool.tool_type.value == "mcp" and operation:
+                # 为MCP工具创建特定工具名称的实例
+                mcp_tool = LangchainAdapter._create_mcp_tool_with_name(tool, operation)
+                wrapper = LangchainToolWrapper(tool_instance=mcp_tool)
+                logger.debug(f"MCP工具转换成功: {tool.name}_{operation} -> Langchain格式")
+                return wrapper
+            elif operation and LangchainAdapter._tool_supports_operations(tool):
+                # 为支持多操作的工具创建特定操作实例
+                if tool.tool_type.value == "custom":
+                    # 自定义工具直接传递operation参数
+                    wrapper = LangchainToolWrapper(tool_instance=tool, operation=operation)
+                else:
+                    # 内置工具使用OperationTool包装
+                    operation_tool = LangchainAdapter._create_operation_tool(tool, operation)
+                    wrapper = LangchainToolWrapper(tool_instance=operation_tool)
+                logger.debug(f"工具转换成功: {tool.name}_{operation} -> Langchain格式")
+                return wrapper
+            else:
+                # 单个工具
+                wrapper = LangchainToolWrapper(tool_instance=tool)
+                logger.debug(f"工具转换成功: {tool.name} -> Langchain格式")
+                return wrapper
             
         except Exception as e:
             logger.error(f"工具转换失败: {tool.name}, 错误: {e}")
             raise
     
+    @staticmethod
+    def _tool_supports_operations(tool: BaseTool) -> bool:
+        """检查工具是否支持多操作"""
+        # 内置工具中支持操作的工具
+        builtin_operation_tools = ['datetime_tool', 'json_tool']
+        
+        # 检查内置工具
+        if tool.tool_type.value == "builtin" and tool.name in builtin_operation_tools:
+            return True
+        
+        # 检查自定义工具（自定义工具通过解析OpenAPI schema支持多操作）
+        if tool.tool_type.value == "custom":
+            # 检查工具是否有多个操作
+            if hasattr(tool, '_parsed_operations') and len(tool._parsed_operations) > 1:
+                return True
+            # 或者检查参数中是否有operation参数
+            for param in tool.parameters:
+                if param.name == "operation" and param.enum:
+                    return True
+        
+        return False
+    
+    @staticmethod
+    def _create_operation_tool(base_tool: BaseTool, operation: str) -> BaseTool:
+        """为特定操作创建工具实例"""
+        if base_tool.tool_type.value == "builtin":
+            from app.core.tools.builtin.operation_tool import OperationTool
+            return OperationTool(base_tool, operation)
+        else:
+            raise ValueError(f"不支持的工具类型: {base_tool.tool_type.value}")
+    
+    @staticmethod
+    def _create_mcp_tool_with_name(mcp_tool: BaseTool, tool_name: str) -> BaseTool:
+        """为MCP工具创建指定工具名称的实例"""
+        mcp_tool.set_current_tool(tool_name)
+        return mcp_tool
+
     @staticmethod
     def convert_tools(tools: List[BaseTool]) -> List[LangchainToolWrapper]:
         """批量转换工具
@@ -110,15 +183,19 @@ class LangchainAdapter:
             except Exception as e:
                 logger.error(f"跳过工具转换: {tool.name}, 错误: {e}")
         
-        logger.info(f"批量转换完成: {len(converted_tools)}/{len(tools)} 个工具")
+        logger.info(f"批量转换完成: {len(converted_tools)} 个工具")
         return converted_tools
     
     @staticmethod
-    def _create_pydantic_schema(parameters: List[ToolParameter]) -> Type[BaseModel]:
+    def _create_pydantic_schema(
+        parameters: List[ToolParameter], 
+        operation: Optional[str] = None
+    ) -> Type[BaseModel]:
         """根据工具参数创建Pydantic schema
         
         Args:
             parameters: 工具参数列表
+            operation: 特定操作（用于过滤参数）
             
         Returns:
             Pydantic模型类
@@ -127,7 +204,12 @@ class LangchainAdapter:
         fields = {}
         annotations = {}
         
-        for param in parameters:
+        # 如果指定了operation，过滤掉operation参数
+        filtered_params = parameters
+        if operation:
+            filtered_params = [p for p in parameters if p.name != "operation"]
+        
+        for param in filtered_params:
             # 确定Python类型
             python_type = LangchainAdapter._get_python_type(param.type)
             
@@ -169,9 +251,10 @@ class LangchainAdapter:
             "ToolArgsSchema",
             (BaseModel,),
             {
+                "__module__": __name__,
                 "__annotations__": annotations,
-                **fields,
-                "Config": type("Config", (), {"extra": "forbid"})
+                "model_config": {"extra": "forbid"},
+                **fields
             }
         )
         

@@ -10,19 +10,22 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from langchain.tools import tool
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.models import AgentConfig, ModelApiKey, ModelConfig
+from app.repositories.tool_repository import ToolRepository
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services.langchain_tool_server import Search
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
-from langchain.tools import tool
-from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from app.services.tool_service import ToolService
 
 logger = get_business_logger()
 class KnowledgeRetrievalInput(BaseModel):
@@ -291,16 +294,30 @@ class DraftRunService:
             # 4. 准备工具列表
             tools = []
 
-            # 添加网络搜索工具
-            if web_search:
-                if agent_config.tools:
-                    web_search_config = agent_config.tools.get("web_search", {})
-                    web_search_enable = web_search_config.get("enabled", False)
+            tool_service = ToolService(self.db)
 
-                    if web_search_enable:
-                        logger.info("网络搜索已启用")
-                        # 创建网络搜索工具
-                        search_tool = create_web_search_tool(web_search_config)
+            # 从配置中获取启用的工具
+            if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, list):
+                if hasattr(agent_config, 'tools') and agent_config.tools:
+                    for tool_config in agent_config.tools:
+                        if tool_config.get("enabled", False):
+                            # 根据工具名称查找工具实例
+                            tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
+                                                                            ToolRepository.get_tenant_id_by_workspace_id(
+                                                                                self.db, str(workspace_id)))
+                            if tool_instance:
+                                if tool_instance.name == "baidu_search_tool" and not web_search:
+                                    continue
+                                # 转换为LangChain工具
+                                langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
+                                tools.append(langchain_tool)
+            elif hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, dict):
+                web_tools = agent_config.tools
+                web_search_choice = web_tools.get("web_search", {})
+                web_search_enable = web_search_choice.get("enabled", False)
+                if web_search == True:
+                    if web_search_enable == True:
+                        search_tool = create_web_search_tool({})
                         tools.append(search_tool)
 
                         logger.debug(
@@ -454,7 +471,8 @@ class DraftRunService:
         storage_type: Optional[str] = None,
         user_rag_memory_id: Optional[str] = None,
         web_search: bool = True,  # 布尔类型默认值
-        memory: bool = True  # 布尔类型默认值
+        memory: bool = True,  # 布尔类型默认值
+        sub_agent: bool = False # 是否是作为子Agent运行
 
     ) -> AsyncGenerator[str, None]:
         """执行试运行（流式返回，使用 LangChain Agent）
@@ -502,16 +520,29 @@ class DraftRunService:
             # 4. 准备工具列表
             tools = []
 
-            # 添加网络搜索工具
-            if web_search:
-                if agent_config.tools:
-                    web_search_config = agent_config.tools.get("web_search", {})
-                    web_search_enable = web_search_config.get("enabled", False)
+            tool_service = ToolService(self.db)
 
-                    if web_search_enable:
-                        logger.info("网络搜索已启用")
-                        # 创建网络搜索工具
-                        search_tool = create_web_search_tool(web_search_config)
+            # 从配置中获取启用的工具
+            if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, dict):
+                for tool_config in agent_config.tools:
+                    if tool_config.get("enabled", False):
+                        # 根据工具名称查找工具实例
+                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
+                                                                        ToolRepository.get_tenant_id_by_workspace_id(
+                                                                            self.db, str(workspace_id)))
+                        if tool_instance:
+                            if tool_instance.name == "baidu_search_tool" and not web_search:
+                                continue
+                            # 转换为LangChain工具
+                            langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
+                            tools.append(langchain_tool)
+            elif hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, dict):
+                web_tools = agent_config.tools
+                web_search_choice = web_tools.get("web_search", {})
+                web_search_enable = web_search_choice.get("enabled", False)
+                if web_search == True:
+                    if web_search_enable == True:
+                        search_tool = create_web_search_tool({})
                         tools.append(search_tool)
 
                         logger.debug(
@@ -520,6 +551,7 @@ class DraftRunService:
                                 "tool_count": len(tools)
                             }
                         )
+
 
             # 添加知识库检索工具
             if agent_config.knowledge_retrieval:
@@ -619,7 +651,7 @@ class DraftRunService:
             elapsed_time = time.time() - start_time
 
             # 10. 保存会话消息
-            if agent_config.memory and agent_config.memory.get("enabled"):
+            if not sub_agent and agent_config.memory and agent_config.memory.get("enabled"):
                 await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,

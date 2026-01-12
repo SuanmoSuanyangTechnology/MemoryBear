@@ -24,8 +24,9 @@ export interface NodeConfig {
 
   knowledge_retrieval?: KnowledgeConfig;
 
-  group_names?: Array<{ key: string, value: string[] }>
+  group_variables?: Array<{ key: string, value: string[] }>
   cycle?: string;
+  cycle_vars?: Array<{ name: string; type: string; value: string; input_type: string; }>
   [key: string]: unknown;
 }
 
@@ -73,7 +74,8 @@ export interface WorkflowConfig {
     type: string;
     required: boolean;
     description: string;
-    default: string;
+    default?: string;
+    defaultValue: string;
   }>,
   execution_config: {
     max_execution_time: number;
@@ -113,7 +115,8 @@ export interface ChatVariable {
   type: string;
   required: boolean;
   description: string;
-  default: string;
+  default?: string;
+  defaultValue: string;
 }
 export interface AddChatVariableRef {
   handleOpen: (value?: ChatVariable) => void;
