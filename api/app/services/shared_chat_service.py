@@ -209,7 +209,7 @@ class SharedChatService:
 
         # 添加长期记忆工具
         memory_flag=False
-        if memory==True:
+        if memory:
             memory_config = config.get("memory", {})
             if memory_config.get("enabled") and user_id:
                 memory_flag=True
@@ -219,8 +219,8 @@ class SharedChatService:
         web_tools=config.get("tools")
         web_search_choice = web_tools.get("web_search", {})
         web_search_enable = web_search_choice.get("enabled",False)
-        if web_search==True:
-            if web_search_enable==True:
+        if web_search:
+            if web_search_enable:
                 search_tool = create_web_search_tool({})
                 tools.append(search_tool)
 
@@ -413,8 +413,8 @@ class SharedChatService:
             web_tools = config.get("tools")
             web_search_choice = web_tools.get("web_search", {})
             web_search_enable = web_search_choice.get("enabled", False)
-            if web_search == True:
-                if web_search_enable == True:
+            if web_search:
+                if web_search_enable:
                     search_tool = create_web_search_tool({})
                     tools.append(search_tool)
 
