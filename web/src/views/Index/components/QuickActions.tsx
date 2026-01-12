@@ -3,11 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import modelIcon from '@/assets/images/index/model_mgt.svg'
 import spaceIcon from '@/assets/images/index/space_mgt.svg'
-import workflowIcon from '@/assets/images/index/workflow_mgt.svg'
 import userIcon from '@/assets/images/index/user_mgt.svg'
-import dataExportIcon from '@/assets/images/index/data_export.svg'
-import logIcon from '@/assets/images/index/log_mgt.svg'
-import noteIcon from '@/assets/images/index/note_mgt.svg'
 import helpCenterIcon from '@/assets/images/index/help_center.svg'
 interface QuickAction {
   key: string;
@@ -22,14 +18,30 @@ interface QuickActionsProps {
 }
 
 const QuickActions: FC<QuickActionsProps> = ({ onNavigate }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+
+  // 根据当前语言环境打开帮助中心
+  const openHelpCenter = () => {
+    const currentLang = i18n.language;
+    const lang = currentLang === 'zh' ? 'zh' : 'en';
+    const helpUrl = `https://docs.redbearai.com/s/${lang}-memorybear`;
+    
+    // 创建隐藏的 a 标签来避免弹窗拦截
+    const link = document.createElement('a');
+    link.href = helpUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const quickActions: QuickAction[] = [
     {
       key: 'model-management',
       icon: modelIcon,
       title: t('quickActions.modelManagement'),
-      onClick: () => onNavigate?.('/model-management')
+      onClick: () => onNavigate?.('/model')
     },
     {
       key: 'space-management',
@@ -37,42 +49,42 @@ const QuickActions: FC<QuickActionsProps> = ({ onNavigate }) => {
       title: t('quickActions.spaceManagement'),
       onClick: () => onNavigate?.('/spce')
     },
-    {
-      key: 'workflow-orchestration', 
-      icon: workflowIcon,
-      title: t('quickActions.workflowOrchestration'),
-      onClick: () => onNavigate?.('/workflow')
-    },
+    // {
+    //   key: 'workflow-orchestration', 
+    //   icon: workflowIcon,
+    //   title: t('quickActions.workflowOrchestration'),
+    //   onClick: () => onNavigate?.('/workflow')
+    // },
     {
       key: 'user-management',
       icon: userIcon,
       title: t('quickActions.userManagement'),
       onClick: () => onNavigate?.('/user-management')
     },
-    {
-      key: 'data-export',
-      icon: dataExportIcon,
-      title: t('quickActions.dataExport'),
-      onClick: () => onNavigate?.('/')
-    },
-    {
-      key: 'log-query',
-      icon: logIcon,
-      title: t('quickActions.logQuery'),
-      onClick: () => onNavigate?.('/log')
-    },
-    {
-      key: 'notification-reminder', 
-      icon: noteIcon,
-      title: t('quickActions.notificationReminder'),
-      onClick: () => onNavigate?.('/notification-reminder')
-    },
+    // {
+    //   key: 'data-export',
+    //   icon: dataExportIcon,
+    //   title: t('quickActions.dataExport'),
+    //   onClick: () => onNavigate?.('/')
+    // },
+    // {
+    //   key: 'log-query',
+    //   icon: logIcon,
+    //   title: t('quickActions.logQuery'),
+    //   onClick: () => onNavigate?.('/log')
+    // },
+    // {
+    //   key: 'notification-reminder', 
+    //   icon: noteIcon,
+    //   title: t('quickActions.notificationReminder'),
+    //   onClick: () => onNavigate?.('/notification-reminder')
+    // },
 
     {
       key: 'help-center',
       icon: helpCenterIcon,
       title: t('quickActions.helpCenter'),
-      onClick: () => onNavigate?.('/help-center')
+      onClick: openHelpCenter
     }
   ];
 
