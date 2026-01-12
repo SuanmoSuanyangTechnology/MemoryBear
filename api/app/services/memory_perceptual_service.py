@@ -136,6 +136,9 @@ class MemoryPerceptualService:
 
             memory_items = []
             for memory in memories:
+                meta_data = memory.meta_data or {}
+                content = meta_data.get("content")
+                content = Content(**content)
                 memory_item = PerceptualMemoryItem(
                     id=memory.id,
                     perceptual_type=PerceptualType(memory.perceptual_type),
@@ -143,6 +146,9 @@ class MemoryPerceptualService:
                     file_name=memory.file_name,
                     file_ext=memory.file_ext,
                     summary=memory.summary,
+                    topic=content.topic,
+                    domain=content.domain,
+                    keywords=content.keywords,
                     created_time=int(memory.created_time.timestamp()*1000),
                     storage_type=FileStorageType(memory.storage_service),
                 )
