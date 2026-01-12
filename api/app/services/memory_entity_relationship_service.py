@@ -613,6 +613,11 @@ class MemoryInteraction:
                     'data': final_data,
                     'total': len(final_data)
                 }
+            return {
+                'success': False,
+                'data': [],
+                'total': 0
+            }
             
         except Exception as e:
             logger.error(f"获取交互数据失败: {str(e)}")
