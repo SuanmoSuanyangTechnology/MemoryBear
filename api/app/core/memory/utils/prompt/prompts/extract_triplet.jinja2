@@ -12,7 +12,34 @@ Extract entities and knowledge triplets from the given statement.
 ===Guidelines===
 
 **Entity Extraction:**
-- Extract entities with their types, context-independent descriptions, and aliases
+- Extract entities with their types, context-independent descriptions, **concise examples**, aliases, and semantic memory classification
+- **Semantic Memory Classification (is_explicit_memory):**
+  * Set to `true` if the entity represents **explicit/semantic memory**:
+    - **Concepts:** "Machine Learning", "Photosynthesis", "Democracy", "人工智能", "光合作用", "民主"
+    - **Knowledge:** "Python Programming Language", "Theory of Relativity", "Python编程语言", "相对论"
+    - **Definitions:** "API (Application Programming Interface)", "REST API", "应用程序接口"
+    - **Principles:** "SOLID Principles", "First Law of Thermodynamics", "SOLID原则", "热力学第一定律"
+    - **Theories:** "Evolution Theory", "Quantum Mechanics", "进化论", "量子力学"
+    - **Methods/Techniques:** "Agile Development", "Machine Learning Algorithm", "敏捷开发", "机器学习算法"
+    - **Technical Terms:** "Neural Network", "Database", "神经网络", "数据库"
+  * Set to `false` for:
+    - **People:** "John Smith", "Dr. Wang", "张明", "王博士"
+    - **Organizations:** "Microsoft", "Harvard University", "微软", "哈佛大学"
+    - **Locations:** "Beijing", "Central Park", "北京", "中央公园"
+    - **Events:** "2024 Conference", "Project Meeting", "2024会议", "项目会议"
+    - **Specific objects:** "iPhone 15", "Building A", "iPhone 15", "A栋"
+- **Example Generation (IMPORTANT for semantic memory entities):**
+  * For entities where `is_explicit_memory=true`, generate a **concise example (around 20 characters)** to help understand the concept
+  * The example should be:
+    - **Specific and concrete**: Use real-world scenarios or applications
+    - **Brief**: Around 20 characters (can be slightly longer if needed for clarity)
+    - **In the same language as the entity name**
+  * Examples:
+    - Entity: "机器学习" → example: "如：用神经网络识别图片中的猫狗"
+    - Entity: "SOLID Principles" → example: "e.g., Single Responsibility, Open-Closed"
+    - Entity: "Photosynthesis" → example: "e.g., plants convert sunlight to energy"
+    - Entity: "人工智能" → example: "如：智能客服、自动驾驶"
+  * For non-semantic entities (`is_explicit_memory=false`), the example field can be empty
 - **Aliases Extraction (Important):**
   * **CRITICAL: Extract aliases ONLY in the SAME LANGUAGE as the input text**
   * **DO NOT translate or add aliases in different languages**
@@ -84,21 +111,27 @@ Output:
       "name": "I",
       "type": "Person",
       "description": "The user",
-      "aliases": []
+      "example": "",
+      "aliases": [],
+      "is_explicit_memory": false
     },
     {
       "entity_idx": 1,
       "name": "Paris",
       "type": "Location",
       "description": "Capital city of France",
-      "aliases": []
+      "example": "",
+      "aliases": [],
+      "is_explicit_memory": false
     },
     {
       "entity_idx": 2,
       "name": "Louvre",
       "type": "Location",
       "description": "World-famous museum located in Paris",
-      "aliases": ["Louvre Museum"]
+      "example": "",
+      "aliases": ["Louvre Museum"],
+      "is_explicit_memory": false
     }
   ]
 }
@@ -130,21 +163,27 @@ Output:
       "name": "John Smith",
       "type": "Person",
       "description": "Individual person name",
-      "aliases": []
+      "example": "",
+      "aliases": [],
+      "is_explicit_memory": false
     },
     {
       "entity_idx": 1,
       "name": "Google",
       "type": "Organization",
       "description": "American technology company",
-      "aliases": ["Google LLC", "Alphabet Inc."]
+      "example": "",
+      "aliases": ["Google LLC", "Alphabet Inc."],
+      "is_explicit_memory": false
     },
     {
       "entity_idx": 2,
       "name": "AI product development",
-      "type": "WorkRole",
+      "type": "Concept",
       "description": "Artificial intelligence product development work",
-      "aliases": []
+      "example": "e.g., developing chatbots, recommendation systems",
+      "aliases": [],
+      "is_explicit_memory": true
     }
   ]
 }
@@ -176,21 +215,27 @@ Output:
       "name": "我",
       "type": "Person",
       "description": "用户本人",
-      "aliases": []
+      "example": "",
+      "aliases": [],
+      "is_explicit_memory": false
     },
     {
       "entity_idx": 1,
       "name": "巴黎",
       "type": "Location",
       "description": "法国首都城市",
-      "aliases": []
+      "example": "",
+      "aliases": [],
+      "is_explicit_memory": false
     },
     {
       "entity_idx": 2,
       "name": "卢浮宫",
       "type": "Location",
       "description": "位于巴黎的世界著名博物馆",
-      "aliases": []
+      "example": "",
+      "aliases": [],
+      "is_explicit_memory": false
     }
   ]
 }
@@ -222,21 +267,27 @@ Output:
       "name": "张明",
       "type": "Person",
       "description": "个人姓名",
-      "aliases": []
+      "example": "",
+      "aliases": [],
+      "is_explicit_memory": false
     },
     {
       "entity_idx": 1,
       "name": "腾讯",
       "type": "Organization",
       "description": "中国科技公司",
-      "aliases": ["腾讯控股", "腾讯公司"]
+      "example": "",
+      "aliases": ["腾讯控股", "腾讯公司"],
+      "is_explicit_memory": false
     },
     {
       "entity_idx": 2,
       "name": "AI产品开发",
-      "type": "WorkRole",
+      "type": "Concept",
       "description": "人工智能产品研发工作",
-      "aliases": []
+      "example": "如：开发智能客服机器人、推荐系统",
+      "aliases": [],
+      "is_explicit_memory": true
     }
   ]
 }
@@ -251,7 +302,9 @@ Output:
       "name": "Tripod",
       "type": "Equipment",
       "description": "Photography equipment accessory",
-      "aliases": ["Camera Tripod"]
+      "example": "",
+      "aliases": ["Camera Tripod"],
+      "is_explicit_memory": false
     }
   ]
 }
@@ -266,7 +319,9 @@ Output:
       "name": "三脚架",
       "type": "Equipment",
       "description": "摄影器材配件",
-      "aliases": ["相机三脚架"]
+      "example": "",
+      "aliases": ["相机三脚架"],
+      "is_explicit_memory": false
     }
   ]
 }

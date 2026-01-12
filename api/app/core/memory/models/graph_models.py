@@ -405,6 +405,10 @@ class ExtractedEntityNode(Node):
     statement_id: str = Field(..., description="Statement this entity was extracted from")
     entity_type: str = Field(..., description="Type of the entity")
     description: str = Field(..., description="Entity description")
+    example: str = Field(
+        default="", 
+        description="A concise example (around 20 characters) to help understand the entity"
+    )
     aliases: List[str] = Field(
         default_factory=list, 
         description="Entity aliases - alternative names for this entity"
@@ -439,6 +443,12 @@ class ExtractedEntityNode(Node):
         default=0,
         ge=0,
         description="Total number of times this node has been accessed"
+    )
+    
+    # Explicit Memory Classification
+    is_explicit_memory: bool = Field(
+        default=False,
+        description="Whether this entity represents explicit/semantic memory (knowledge, concepts, definitions, theories, principles)"
     )
     
     @field_validator('aliases', mode='before')
