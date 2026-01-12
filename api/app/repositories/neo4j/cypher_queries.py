@@ -865,7 +865,7 @@ neo4j_query_all = """
 '''针对当前节点下扩长的句子，实体和总结'''
 Memory_Timeline_ExtractedEntity="""
 MATCH (n)-[r1]-(e)-[r2]-(ms)
-WHERE elementId(n) = "4:f6039a9b-d553-4ba2-9b1c-d9a18917801f:77061"
+WHERE elementId(n) = $id
   AND (ms:ExtractedEntity OR ms:MemorySummary)
 
 RETURN
@@ -935,7 +935,7 @@ RETURN
 """
 Memory_Timeline_Statement="""
 MATCH (n)
-WHERE elementId(n) = "4:f6039a9b-d553-4ba2-9b1c-d9a18917801f:77003"
+WHERE elementId(n) = $id
 
 CALL {
   WITH n
@@ -988,7 +988,7 @@ RETURN
 """
 Memory_Space_Emotion_MemorySummary="""
 MATCH (n)-[]-(e)
-WHERE elementId(n) = "4:f6039a9b-d553-4ba2-9b1c-d9a18917801f:77019"
+WHERE elementId(n) = $id
   AND EXISTS {
     MATCH (e)-[]-(ms)
     WHERE ms:MemorySummary OR ms:ExtractedEntity
@@ -1013,36 +1013,22 @@ RETURN DISTINCT
 """
 
 '''获取实体'''
-Memory_Space_Interaction_Statement="""
+
+Memory_Space_User="""
+MATCH (n)-[r]->(m)
+WHERE n.group_id = $group_id  AND m.name="用户" 
+return DISTINCT elementId(m) as id
+"""
+Memory_Space_Entity="""
 MATCH (n)-[]-(m)
-WHERE elementId(n) = $id
-  AND m.entity_type = "Person"
+WHERE elementId(m) = $id AND  m.entity_type = "Person"
 RETURN
-  m.name             AS name,
-  m.importance_score AS importance_score;
-
+DISTINCT m.name as name,m.group_id as group_id
 """
-
-Memory_Space_Interaction_ExtractedEntity="""
-MATCH (n)-[]-(e)
-WHERE elementId(n) = $id
-  AND EXISTS {
-    MATCH (e)-[]-(ms:ExtractedEntity)
-  }
+Memory_Space_Associative="""
+MATCH (u)-[]-(x)-[]-(h)
+WHERE elementId(u) = $user_id
+  AND elementId(h) = $id
 RETURN DISTINCT
-  e.name             AS name,
-  e.importance_score AS importance_score;
-
-"""
-
-Memory_Space_Interaction_Summary="""
-MATCH (n)-[]-(e)
-WHERE elementId(n) = $id
-  AND EXISTS {
-    MATCH (e)-[]-(ms:ExtractedEntity)
-  }
-RETURN DISTINCT
-  e.name             AS name,
-  e.importance_score AS importance_score;
-
+ x.statement as statement,x.created_at as created_at
 """

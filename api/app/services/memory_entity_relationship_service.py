@@ -6,9 +6,7 @@ Memory_Timeline_Statement,
 Memory_Space_Emotion_Statement,
 Memory_Space_Emotion_MemorySummary,
 Memory_Space_Emotion_ExtractedEntity,
-Memory_Space_Interaction_Statement,
-Memory_Space_Interaction_ExtractedEntity,
-Memory_Space_Interaction_Summary
+Memory_Space_Associative,Memory_Space_User,Memory_Space_Entity
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from typing import Dict, List, Any, Optional
@@ -578,6 +576,7 @@ class MemoryInteraction:
             # 如果解析失败，返回原始字符串
             return iso_string
 
+
     async def get_interaction_frequency(self) -> Dict[str, Any]:
         """
         获取交互频率数据
@@ -588,27 +587,30 @@ class MemoryInteraction:
         try:
             logger.info(f"获取交互数据 - ID: {self.id}, Table: {self.table}")
 
-            if self.table == 'Statement':
-                results = await self.connector.execute_query(Memory_Space_Interaction_Statement, id=self.id)
-            elif self.table == 'ExtractedEntity':
-                results = await self.connector.execute_query(Memory_Space_Interaction_ExtractedEntity, id=self.id)
-            else:
-                # MemorySummary/Chunk类型查询
-                results = await self.connector.execute_query(Memory_Space_Interaction_Summary, id=self.id)
+            ori_data= await self.connector.execute_query(Memory_Space_Entity, id=self.id)
+            if ori_data!=[]:
+                # name = ori_data[0]['name']
+                group_id = ori_data[0]['group_id']
+                Space_User = await self.connector.execute_query(Memory_Space_User, group_id=group_id)
+                user_id=Space_User[0]['id']
 
-            # 处理查询结果
-            interaction_data = self._process_interaction_results(results)
-            
-            # 转换Neo4j类型
-            final_data = self._convert_neo4j_types(interaction_data)
-            
-            logger.info(f"成功获取 {len(final_data)} 条交互数据")
-            
-            return {
-                'success': True,
-                'data': final_data,
-                'total': len(final_data)
-            }
+                results = await self.connector.execute_query(Memory_Space_Associative, id=self.id,user_id=user_id)
+
+
+
+                # 处理查询结果
+                interaction_data = self._process_interaction_results(results)
+
+                # 转换Neo4j类型
+                final_data = self._convert_neo4j_types(interaction_data)
+
+                logger.info(f"成功获取 {len(final_data)} 条交互数据")
+
+                return {
+                    'success': True,
+                    'data': final_data,
+                    'total': len(final_data)
+                }
             
         except Exception as e:
             logger.error(f"获取交互数据失败: {str(e)}")
@@ -621,36 +623,59 @@ class MemoryInteraction:
 
     def _process_interaction_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        处理交互查询结果
+        处理交互查询结果，按季度统计交互频率
         
         Args:
             results: Neo4j查询结果
             
         Returns:
-            处理后的交互数据列表
+            按季度统计的交互数据列表，格式: [{"created_at": "2026Q1", "count": 3}]
         """
-        interaction_data = []
+        from collections import defaultdict
+        from datetime import datetime
         
-        # 检查results是否为空或不是列表
-        if not results or not isinstance(results, list):
-            logger.warning(f"交互查询结果为空或格式不正确: {type(results)}")
-            return interaction_data
+        # 用于按季度分组计数
+        quarterly_counts = defaultdict(int)
         
         for record in results:
-            # 检查record是否为字典类型
-            if not isinstance(record, dict):
-                logger.warning(f"跳过非字典类型的记录: {type(record)} - {record}")
+            # 过滤掉statement为None的记录
+            if not isinstance(record, dict) or record.get('statement') is None:
                 continue
                 
-            # 只保留交互相关的字段
-            name = record.get('name')
-            if name is not None:
-                interaction_record = {
-                    'name': name,
-                    'importance_score': record.get('importance_score', 0.0),
-                    'interaction_count': record.get('interaction_count', 1)  # 默认交互次数为1
-                }
-                interaction_data.append(interaction_record)
+            created_at = record.get('created_at')
+            if not created_at:
+                continue
+                
+            try:
+                # 处理不同类型的时间格式
+                if isinstance(created_at, str):
+                    # 解析ISO格式时间字符串
+                    dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                elif hasattr(created_at, 'year') and hasattr(created_at, 'month'):
+                    # 处理Neo4j DateTime对象
+                    dt = datetime(created_at.year, created_at.month, created_at.day)
+                else:
+                    continue
+                    
+                # 计算季度
+                quarter = (dt.month - 1) // 3 + 1
+                quarter_key = f"{dt.year}.Q{quarter}"
+                
+                # 增加该季度的计数
+                quarterly_counts[quarter_key] += 1
+                
+            except (ValueError, AttributeError) as e:
+                logger.warning(f"解析时间失败: {e}, 原始值: {created_at}")
+                continue
+        
+        # 转换为所需格式并按时间排序
+        interaction_data = [
+            {"created_at": quarter, "count": count}
+            for quarter, count in quarterly_counts.items()
+        ]
+        
+        # 按季度排序（最新的在前）
+        interaction_data.sort(key=lambda x: x["created_at"], reverse=True)
         
         return interaction_data
 
