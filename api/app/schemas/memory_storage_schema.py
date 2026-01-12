@@ -292,8 +292,8 @@ class ConfigUpdateExtracted(BaseModel):  # 更新记忆萃取引擎配置参数�
     iteration_period: Optional[Literal["1", "3", "6", "12", "24"]] = Field(
         "3", description="反思迭代周期，单位小时"
     )
-    reflexion_range: Optional[Literal["retrieval", "database"]] = Field(
-        "retrieval", description="反思范围：部分/全部"
+    reflexion_range: Optional[Literal["partial", "all"]] = Field(
+        "partial", description="反思范围：部分/全部"
     )
     baseline: Optional[Literal["TIME", "FACT", "TIME-FACT"]] = Field(
         "TIME", description="基线：时间/事实/时间和事实"
