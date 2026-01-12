@@ -418,6 +418,7 @@ class MemoryEmotion:
         else:
             return obj
 
+
     def _format_datetime(self, iso_string: str) -> str:
         """
         将ISO格式的日期时间字符串转换为用户友好的格式
