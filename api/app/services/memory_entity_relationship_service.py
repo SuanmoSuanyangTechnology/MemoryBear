@@ -64,24 +64,11 @@ class MemoryEntityService:
 
             logger.info(f"成功获取时间线记忆数据: 总计 {len(timeline_data.get('timelines_memory', []))} 条")
 
-            return {
-                'success': True,
-                'data': timeline_data,
-            }
+            return timeline_data
             
         except Exception as e:
             logger.error(f"获取时间线记忆数据失败: {str(e)}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e),
-                'data': {
-                    "MemorySummary": [],
-                    "Statement": [],
-                    "ExtractedEntity": [],
-                    "timelines_memory": []
-                },
-                'total': 0
-            }
+            return  str(e)
     def _process_timeline_results(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         处理时间线查询结果
@@ -463,37 +450,32 @@ class MemoryEmotion:
             
             logger.info(f"成功获取 {len(final_data)} 条情绪数据")
             
-            return {
-                'success': True,
-                'data': final_data,
-                'total': len(final_data)
-            }
+            return final_data
             
         except Exception as e:
             logger.error(f"获取情绪数据失败: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e),
-                'data': [],
-                'total': 0
-            }
+            return e
 
     def _process_emotion_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        处理情绪查询结果
+        处理情绪查询结果，按emotion_type和created_at分组并累加emotion_intensity
         
         Args:
             results: Neo4j查询结果
             
         Returns:
-            处理后的情绪数据列表
+            处理后的情绪数据列表，相同emotion_type和created_at的记录会合并并累加intensity
         """
-        emotion_data = []
+        length_data=[]
+        from collections import defaultdict
+        
+        # 用于按(emotion_type, created_at)分组累加intensity
+        emotion_groups = defaultdict(float)
         
         # 检查results是否为空或不是列表
         if not results or not isinstance(results, list):
             logger.warning(f"情绪查询结果为空或格式不正确: {type(results)}")
-            return emotion_data
+            return []
         
         for record in results:
             # 检查record是否为字典类型
@@ -511,15 +493,33 @@ class MemoryEmotion:
                 
             emotion_type = record.get('emotion_type')
             emotion_intensity = record.get('emotion_intensity')
+            if emotion_type !=None:
+                length_data.append(emotion_intensity)
+
             
-            if emotion_type is not None and emotion_intensity is not None:
-                # 只保留情绪相关的字段
-                emotion_record = {
-                    'emotion_intensity': emotion_intensity,
-                    'emotion_type': emotion_type,
-                    'created_at': formatted_created_at
-                }
-                emotion_data.append(emotion_record)
+            if emotion_type is not None and emotion_intensity is not None and formatted_created_at is not None:
+                # 使用(emotion_type, created_at)作为分组键
+                group_key = (emotion_type, formatted_created_at)
+                
+                # 累加emotion_intensity
+                try:
+                    emotion_groups[group_key] += float(emotion_intensity)
+                except (ValueError, TypeError):
+                    logger.warning(f"无法转换emotion_intensity为数字: {emotion_intensity}")
+                    continue
+        # 转换为最终格式
+        emotion_data = [
+            {
+                'emotion_intensity':  round(intensity / len(length_data) * 100, 2),
+                'emotion_type': emotion_type,
+                'created_at': created_at
+            }
+            for (emotion_type, created_at), intensity in emotion_groups.items()
+        ]
+        
+        # 按时间排序（最新的在前）
+        emotion_data.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+
         
         return emotion_data
 
@@ -593,12 +593,7 @@ class MemoryInteraction:
                 group_id = ori_data[0]['group_id']
                 Space_User = await self.connector.execute_query(Memory_Space_User, group_id=group_id)
                 if not Space_User:
-                    return {
-                        'success': False,
-                        'msg':"不存在用户",
-                        'data': [],
-                        'total': 0
-                    }
+                    return '不存在用户'
                 user_id=Space_User[0]['id']
 
                 results = await self.connector.execute_query(Memory_Space_Associative, id=self.id,user_id=user_id)
@@ -613,25 +608,12 @@ class MemoryInteraction:
 
                 logger.info(f"成功获取 {len(final_data)} 条交互数据")
 
-                return {
-                    'success': True,
-                    'data': final_data,
-                    'total': len(final_data)
-                }
-            return {
-                'success': False,
-                'data': [],
-                'total': 0
-            }
+                return final_data
+            return []
             
         except Exception as e:
             logger.error(f"获取交互数据失败: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e),
-                'data': [],
-                'total': 0
-            }
+            return e
 
     def _process_interaction_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
