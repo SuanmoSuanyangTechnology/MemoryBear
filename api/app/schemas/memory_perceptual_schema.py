@@ -44,6 +44,9 @@ class PerceptualMemoryItem(BaseModel):
     summary: Optional[str] = Field(None, description="summary")
     storage_type: FileStorageType = Field(..., description="Storage type for file")
     created_time: int = Field(..., description="create time")
+    topic: str = Field(..., description="topic")
+    domain: str = Field(..., description="domain")
+    keywords: list[str] = Field(..., description="keywords")
 
     class Config:
         from_attributes = True
