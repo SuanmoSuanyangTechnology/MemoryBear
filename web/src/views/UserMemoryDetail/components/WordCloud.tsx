@@ -2,7 +2,7 @@ import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import ReactEcharts from 'echarts-for-react'
-import { Progress } from 'antd'
+import { Progress, Row, Col } from 'antd'
 
 import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
@@ -101,27 +101,35 @@ const WordCloud: FC = () => {
     <RbCard
       title={t('statementDetail.wordCloud')}
       headerType="borderless"
-      headerClassName="rb:text-[18px]! rb:leading-[24px]"
-      height="100%"
+      headerClassName="rb:leading-[24px] rb:bg-[#F6F8FC]! rb:min-h-[46px]! rb:border-b! rb:border-b-[#DFE4ED]!"
+      bodyClassName="rb:px-[28px]! rb:py-[16px]!"
     >
       {wordCloud?.total_count && wordCloud?.total_count > 0
-        ? <div className="rb:flex rb:h-100">
-          <ReactEcharts ref={chartRef} option={radarOption} style={{ width: '50%', height: '100%' }} />
-          <div className="rb:w-[50%] rb:pl-4 rb:flex rb:flex-col rb:justify-center">
-            <div className="rb:text-[18px] rb:font-medium rb:mb-4">样本数：{wordCloud.total_count}</div>
-            <div className="rb:space-y-3">
+        ? <Row gutter={50}>
+          <Col span={12}>
+            <ReactEcharts ref={chartRef} option={radarOption} style={{ width: '100%', height: 'calc(100% - 100px)' }} />
+            <div className="rb:mb-4 rb:text-center rb:bg-[#F5F7FC] rb:rounded-lg rb:p-2.5 rb:mt-4">
+              <span className="rb:text-[#155EEF] rb:text-[28px] rb:font-bold rb:leading-8">{wordCloud.total_count}</span><br />
+              <span className="rb:text-[#5B6167] rb:leading-5">{t('statementDetail.totalCount')}</span>
+            </div>
+          </Col>
+          <Col span={12}>
+            <div className="rb:space-y-5">
               {wordCloud.tags.map(item => (
                 <div key={item.emotion_type}>
-                  <div className="rb:flex rb:items-center rb:justify-between rb:font-medium">
-                    {t(`statementDetail.${item.emotion_type}`)}
-                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular">{item.count} {t('statementDetail.pieces')}</div>
+                  <div className="rb:flex rb:items-center rb:justify-between">
+                    <div>
+                      <span className="rb:font-medium">{t(`statementDetail.${item.emotion_type}`)}</span>
+                      <span className="rb:font-regular rb:text-[#5B6167]"> ( {item.count} {t('statementDetail.pieces')} )</span>
+                    </div>
+                    <div className="rb:text-[12px] rb:text-[#155EEF] rb:font-medium">{item.percentage.toFixed(1)}%</div>
                   </div>
-                  <Progress size="small" percent={item.percentage} />
+                  <Progress strokeColor="#155EEF" percent={item.percentage} showInfo={false} />
                 </div>
               ))}
             </div>
-          </div>
-        </div>
+          </Col>
+        </Row>
         : <Empty size={88} />
       }
     </RbCard>

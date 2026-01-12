@@ -14,8 +14,8 @@ interface PreferenceItem {
   confidence_score: number;
   supporting_evidence: string[];
   context_details: string;
-  created_at: number | string; // TODO
-  updated_at: number | string; // TODO
+  created_at: number | string;
+  updated_at: number | string;
   conversation_references: string[];
   category: string;
 }

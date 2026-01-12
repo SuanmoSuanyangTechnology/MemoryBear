@@ -151,6 +151,7 @@ const RelationshipNetwork:FC = () => {
         <RbCard 
           title={t('userMemory.relationshipNetwork')}
           headerType="borderless"
+          headerClassName="rb:min-h-[46px]!"
           // extra={
           //   <div
           //     onClick={handleFullScreen}
@@ -247,6 +248,7 @@ const RelationshipNetwork:FC = () => {
         <RbCard 
           title={t('userMemory.memoryDetails')}
           headerType="borderless"
+          headerClassName="rb:min-h-[46px]!"
           bodyClassName='rb:p-0!'
           extra={selectedNode && <Button type="text" onClick={handleViewAll}>
             <div
@@ -261,7 +263,7 @@ const RelationshipNetwork:FC = () => {
                 url={detailEmpty}
                 subTitle={t('userMemory.memoryDetailEmptyDesc')}
                 className="rb:h-full rb:mx-10 rb:text-center"
-                size={90}
+                size={[197.81, 150]}
               />
               : <>
                 <div className="rb:bg-[#F6F8FC] rb:border-t rb:border-b rb:border-[#DFE4ED] rb:font-medium rb:py-2 rb:px-4 rb:h-10">{selectedNode.name}</div>
