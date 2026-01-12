@@ -157,9 +157,17 @@ class ParameterExtractorNode(BaseNode):
 
         messages = [
             ("system", system_prompt),
-            ("user", self._render_template(self.typed_config.prompt, state)),
-            ("user", rendered_user_prompt),
+
         ]
+        if self.typed_config.prompt:
+            messages.extend([
+                ("user", self._render_template(self.typed_config.prompt, state)),
+                ("user", rendered_user_prompt),
+            ])
+        else:
+            messages.extend([
+                ("user", rendered_user_prompt),
+            ])
 
         model_resp = await llm.ainvoke(messages)
         result = json_repair.repair_json(model_resp.content, return_objects=True)
