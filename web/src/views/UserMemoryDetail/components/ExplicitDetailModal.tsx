@@ -72,7 +72,7 @@ const ExplicitDetailModal = forwardRef<ExplicitDetailModalRef>((_props, ref) => 
       onCancel={handleClose}
     >
       {loading ? <Skeleton active />
-        : <Descriptions column={data.memory_type === 'semantic' ? 1 : 2} classNames={{ label: 'rb:w-20' }}>
+        : <Descriptions column={1} classNames={{ label: 'rb:w-20' }}>
           {data.emotion && <Descriptions.Item label={t('explicitDetail.emotion')}>
             <div className="rb:flex rb:items-center rb:gap-2">
               <div className="rb:w-3 rb:h-3 rb:rounded-full" style={{ backgroundColor: getEmotionColor(data.emotion) }}></div>
@@ -88,7 +88,7 @@ const ExplicitDetailModal = forwardRef<ExplicitDetailModalRef>((_props, ref) => 
           {data.created_at && <Descriptions.Item label={t('explicitDetail.created_at')}>
             {formatDateTime(data.created_at)}
           </Descriptions.Item>}
-          {data.content && <Descriptions.Item span="filled" label={t('explicitDetail.content')}>
+          {data.content && <Descriptions.Item label={t('explicitDetail.content')}>
             {data.content}
           </Descriptions.Item>}
         </Descriptions>

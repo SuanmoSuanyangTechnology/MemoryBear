@@ -292,8 +292,8 @@ class ConfigUpdateExtracted(BaseModel):  # 更新记忆萃取引擎配置参数�
     iteration_period: Optional[Literal["1", "3", "6", "12", "24"]] = Field(
         "3", description="反思迭代周期，单位小时"
     )
-    reflexion_range: Optional[Literal["retrieval", "database"]] = Field(
-        "retrieval", description="反思范围：部分/全部"
+    reflexion_range: Optional[Literal["partial", "all"]] = Field(
+        "partial", description="反思范围：部分/全部"
     )
     baseline: Optional[Literal["TIME", "FACT", "TIME-FACT"]] = Field(
         "TIME", description="基线：时间/事实/时间和事实"
@@ -409,7 +409,7 @@ class ForgettingTriggerRequest(BaseModel):
     """手动触发遗忘周期请求模型"""
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     
-    group_id: str = Field(..., description="组ID（即终端用户ID，必填）")
+    end_user_id: str = Field(..., description="组ID（即终端用户ID，必填）")
     max_merge_batch_size: int = Field(100, ge=1, le=1000, description="单次最大融合节点对数（默认100）")
     min_days_since_access: int = Field(30, ge=1, le=365, description="最小未访问天数（默认30天）")
 

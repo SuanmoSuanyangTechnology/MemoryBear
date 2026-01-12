@@ -101,8 +101,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         <EditableTable
           parentName="headers"
           title="HEADERS"
-          options={options}
-          filterBooleanType={true}
+          options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
         />
       </Form.Item>
 
@@ -110,8 +109,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         <EditableTable
           parentName="params"
           title="PARAMS"
-          options={options}
-          filterBooleanType={true}
+          options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
         />
       </Form.Item>
 
@@ -134,8 +132,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           <Form.Item name={['body', 'data']} noStyle>
             <EditableTable
               parentName={['body', 'data']}
-              options={options}
-              filterBooleanType={true}
+              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
               typeOptions={[
                 { label: 'text', value: 'text' },
                 { label: 'file', value: 'file' }
@@ -168,7 +165,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             <MessageEditor
               key="raw"
               parentName={['body', 'data']}
-              options={options}
+              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
               isArray={false}
               title="RAW TEXT"
             />
@@ -177,7 +174,8 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         {values?.body?.content_type === 'binary' &&
           <Form.Item name={['body', 'data']}>
             <VariableSelect
-              options={options}
+              placeholder={t('common.pleaseSelect')}
+              options={options.filter(vo => vo.dataType.includes('file'))}
               filterBooleanType={true}
             />
           </Form.Item>

@@ -39,6 +39,7 @@ const TAG_COLORS: Record<string, "processing" | "success" | "warning" | "error" 
   learning: "warning",
   decision: "warning",
   important_event: "error",
+  default: 'default'
 }
 const BG_COLORS: Record<string, string> = {
   conversation: "rb:bg-[#155EEF]",
@@ -46,10 +47,12 @@ const BG_COLORS: Record<string, string> = {
   learning: "rb:bg-[#FF5D34]",
   decision: "rb:bg-[#FF5D34]",
   important_event: "rb:bg-[#5B6167]",
+  default: 'rb:bg-[#F0F3F8] rb:text-[#5B6167]!'
 }
 
 // Map display types to internal keys
 const getTypeKey = (type: string): string => {
+  if (!type) return 'default'
   const typeMap: Record<string, string> = {
     'Learning': 'learning',
     'Project/Work': 'project_work',
@@ -176,6 +179,7 @@ const EpisodicDetail: FC = () => {
           <RbCard
             title={<>{t('episodicDetail.curResult')}<span className="rb:text-[#5B6167] rb:font-regular!"> ({data.total || 0}{t('episodicDetail.unix')})</span></>}
             headerType="borderless"
+            bodyClassName="rb:h-[calc(100vh-349px)] rb:overflow-y-auto"
           >
             {loading
               ? <Skeleton active />
@@ -192,9 +196,12 @@ const EpisodicDetail: FC = () => {
                         })}
                         onClick={() => setSelected(vo)}
                       >
-                        <div className={clsx("rb:bg-[#369F21] rb:rounded-lg rb:text-[#FFFFFF] rb:size-6 rb:text-[12px] rb:leading-6 rb:text-center rb:mr-3", BG_COLORS[getTypeKey(vo.type)])}>{index + 1}</div>
-                        <div className="rb:flex-1">
-                          <div className="rb:flex rb:items-center rb:justify-between">{vo.title} <Tag color={TAG_COLORS[getTypeKey(vo.type)]}>{t(`episodicDetail.${getTypeKey(vo.type)}`)}</Tag></div>
+                        <div className={clsx("rb:rounded-lg rb:text-[#FFFFFF] rb:size-6 rb:text-[12px] rb:leading-6 rb:text-center rb:mr-3", BG_COLORS[getTypeKey(vo.type)])}>{index + 1}</div>
+                        <div className="rb:flex-1 rb:w-[calc(100%-36px)]">
+                          <div className="rb:flex rb:items-center rb:justify-between">
+                            <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1">{vo.title}</div>
+                            {vo.type && <Tag color={TAG_COLORS[getTypeKey(vo.type)]}>{t(`episodicDetail.${getTypeKey(vo.type)}`)}</Tag>}
+                          </div>
                           <div className="rb:text-[#5B6167] rb:text-[12px]">{formatDateTime(vo.created_at)}</div>
                         </div>
                       </div>
@@ -202,13 +209,13 @@ const EpisodicDetail: FC = () => {
                   </Space>
                 )
             }
-
           </RbCard>
         </Col>
         <Col span={16}>
           <RbCard
             title={selected?.title}
             headerType="borderless"
+            bodyClassName="rb:h-[calc(100vh-349px)] rb:overflow-y-auto"
           >
             {detailLoading
               ? <Skeleton active />

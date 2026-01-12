@@ -260,8 +260,7 @@ class ConditionBase(ABC):
         raise RuntimeError("Unsupported variable type")
 
     def check(self, no_right=False):
-        left = self.pool.get(self.left_selector.variable_selector)
-        if not isinstance(left, self.type_limit):
+        if not isinstance(self.left_value, self.type_limit):
             raise TypeError(f"The variable to be compared on must be of {self.type_limit} type")
         if not no_right:
             right = self.resolve_right_literal_value()
