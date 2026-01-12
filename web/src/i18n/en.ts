@@ -57,6 +57,16 @@ export const en = {
       createNow: 'Create Now',
       goConfig: 'Go Configure',
     },
+    indexTour:{
+      startTitle:'Welcome to Memory Bear 👋',
+      startDescription:'Not sure where to start? Head to Model Management first to get your models ready — everything else builds on that.👉 Click Model Management in the left menu to get started.',
+      stepOne: 'This is Model Management',
+      stepOneDescription: 'Here you can view and configure available models to get ready for building applications.Once your models are set, head to Space Management to create a space and continue.👉 Click Space Management in the left menu to move on.',
+      stepTwo: 'This is Space Management',
+      stepTwoDescription: 'Here you can create and manage spaces to organize models and data for different use cases.Once your spaces are ready, head to User Management to invite members and manage access.👉 Click User Management in the left menu to continue.',
+      stepThree: 'This is User Management',
+      stepThreeDescription: 'Here you can create users, assign roles, and manage access for your team.Once users are set up, the basic configuration is complete and you’re ready to start using the platform 🎉',
+    },
     menu: {
       home: 'Home',
       tenantManagement: 'Tenant Management',
