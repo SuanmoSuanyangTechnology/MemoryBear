@@ -42,7 +42,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
 
   const handleSave = (flag = true) => {
     if (!data) return Promise.resolve()
-    if (!values.default_model_config_id) {
+    if (!values.default_model_config_id && values.orchestration_mode === 'supervisor') {
       message.warning(t('common.selectPlaceholder', { title: t('application.model') }))
       return Promise.resolve()
     }
@@ -138,17 +138,16 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
         </div>
         <Form form={form} layout="vertical">
           <Space size={20} direction="vertical" style={{width: '100%'}}>
-            <Card title={t('application.handoffs')}>
+            <Card title={t('application.collaboration')}>
               <Form.Item
-                name={['execution_config', 'routing_mode']}
+                name="orchestration_mode"
                 noStyle
               >
                 <RadioGroupCard
-                  options={['master_agent', 'handoffs'].map((type) => ({
+                  options={['supervisor', 'collaboration'].map((type) => ({
                     value: type,
                     label: t(`application.${type}`),
                     labelDesc: t(`application.${type}Desc`),
-                    disabled: type === 'handoffs'
                   }))}
                   allowClear={false}
                 />
@@ -192,7 +191,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                 ))}
             </Card>
 
-            <Card title={t('application.masterConfig')}>
+            {values?.orchestration_mode !== 'collaboration' && <Card title={t('application.masterConfig')}>
               <Form.Item
                 label={t('application.model')}
                 required={true}
@@ -218,11 +217,11 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                 </Row>
               </Form.Item>
               <Form.Item
-                name="orchestration_mode"
+                name={['execution_config',"sub_agent_execution_mode"]}
                 label={t('application.orchestrationMode')}
               >
                 <Select
-                  options={['conditional', 'sequential', 'parallel'].map((type) => ({
+                  options={['sequential', 'parallel'].map((type) => ({
                     value: type,
                     label: t(`application.${type}`),
                   }))}
@@ -239,7 +238,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                   }))}
                 />
               </Form.Item>
-            </Card>
+            </Card>}
           </Space>
         </Form>
       </Col>

@@ -1,6 +1,6 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next';
-import { Form, Input, Button, Row, Col, Select } from 'antd'
+import { Form, Input, Row, Col, Select, InputNumber, Radio } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
@@ -9,6 +9,23 @@ interface AssignmentListProps {
   value?: Array<{ variable_selector: string; operation: string[]; value: string;}>;
   parentName: string;
   options: Suggestion[];
+}
+
+const operationsObj = {
+  number: [
+    { value: 'cover', label: 'workflow.config.assigner.cover' },
+    { value: 'clear', label: 'workflow.config.assigner.clear' },
+    { value: 'assign', label: 'workflow.config.assigner.assign' },
+    { value: 'add', label: 'workflow.config.assigner.add' },
+    { value: 'subtract', label: 'workflow.config.assigner.subtract' },
+    { value: 'multiply', label: 'workflow.config.assigner.multiply' },
+    { value: 'divide', label: 'workflow.config.assigner.divide' },
+  ],
+  default: [
+    { value: 'cover', label: 'workflow.config.assigner.cover' },
+    { value: 'clear', label: 'workflow.config.assigner.clear' },
+    { value: 'assign', label: 'workflow.config.assigner.assign' },
+  ],
 }
 
 const AssignmentList: FC<AssignmentListProps> = ({
@@ -27,6 +44,11 @@ const AssignmentList: FC<AssignmentListProps> = ({
             <PlusOutlined onClick={() => add({ operation: 'cover'})} />
           </div>
           {fields.map(({ key, name, ...restField }) => {
+            const variableSelector = form.getFieldValue([parentName, name, 'variable_selector']);
+            const selectedOption = options.find(option => `{{${option.value}}}` === variableSelector);
+            const dataType = selectedOption?.dataType;
+            const operationOptions = dataType === 'number' ? operationsObj.number : operationsObj.default;
+            
             return (
               <div key={key} className="rb:mb-4">
                 <Row gutter={12} className="rb:mb-2!">
@@ -40,6 +62,10 @@ const AssignmentList: FC<AssignmentListProps> = ({
                         placeholder={t('common.pleaseSelect')}
                         options={options}
                         popupMatchSelectWidth={false}
+                        onChange={() => {
+                          form.setFieldValue([parentName, name, 'operation'], undefined);
+                          form.setFieldValue([parentName, name, 'value'], undefined);
+                        }}
                       />
                     </Form.Item>
                   </Col>
@@ -50,11 +76,11 @@ const AssignmentList: FC<AssignmentListProps> = ({
                       noStyle
                     >
                       <Select
-                        options={[
-                          { value: 'cover', label: t('workflow.config.assigner.cover') },
-                          { value: 'clear', label: t('workflow.config.assigner.clear') },
-                          { value: 'assign', label: t('workflow.config.assigner.assign') },
-                        ]}
+                        placeholder={t('common.pleaseSelect')}
+                        options={operationOptions.map(op => ({
+                          ...op,
+                          label: t(op.label)
+                        }))}
                         popupMatchSelectWidth={false}
                         onChange={() => {
                           form.setFieldValue([parentName, name, 'value'], undefined);
@@ -77,20 +103,38 @@ const AssignmentList: FC<AssignmentListProps> = ({
                         {...restField}
                         name={[name, 'value']}
                         noStyle
-                        rules={[{ required: true, message: 'Missing last name' }]}
                       >
-                        {operation === 'assign' ? (
-                          <Input.TextArea
-                            placeholder={t('common.pleaseEnter')}
-                            rows={3}
-                          />
-                        ) : (
-                          <VariableSelect
+                        {dataType === 'number' && operation === 'cover'
+                          ? <VariableSelect
                             placeholder={t('common.pleaseSelect')}
-                            options={options}
+                            options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
                             popupMatchSelectWidth={false}
                           />
-                        )}
+                          : dataType === 'number'
+                          ? <InputNumber
+                            placeholder={t('common.pleaseEnter')}
+                            className="rb:w-full!"
+                            onChange={(value) => form.setFieldValue([name, 'value'], value)}
+                          />
+                          : operation === 'assign'
+                          ? <>
+                            {dataType === 'boolean'
+                              ? <Radio.Group block>
+                                <Radio.Button value={true}>True</Radio.Button>
+                                <Radio.Button value={false}>False</Radio.Button>
+                              </Radio.Group>
+                              : <Input.TextArea
+                                placeholder={t('common.pleaseEnter')}
+                                rows={3}
+                              />
+                            }
+                          </>
+                          : <VariableSelect
+                            placeholder={t('common.pleaseSelect')}
+                            options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
+                            popupMatchSelectWidth={false}
+                          />
+                        }
                       </Form.Item>
                     );
                   }}

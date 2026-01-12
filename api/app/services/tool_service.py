@@ -8,7 +8,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.core.tools.mcp import MCPClient
+from app.core.tools.mcp import MCPToolManager, SimpleMCPClient
 from app.repositories.tool_repository import (
     ToolRepository, BuiltinToolRepository, CustomToolRepository,
     MCPToolRepository, ToolExecutionRepository
@@ -42,6 +42,9 @@ class ToolService:
     def __init__(self, db: Session):
         self.db = db
         self._tool_cache: Dict[str, BaseTool] = {}
+
+        # MCP管理器
+        self.mcp_tool_manager = MCPToolManager(db)
 
         # 初始化仓储
         self.tool_repo = ToolRepository()
@@ -344,14 +347,16 @@ class ToolService:
                 break
         
         if operation_param:
-            # 有多个操作
+            # 有多个操作，为每个操作生成具体参数
             methods = []
             for operation in operation_param.enum:
+                # 获取该操作的具体参数
+                operation_params = self._get_operation_specific_params(tool_instance, operation)
                 methods.append({
                     "method_id": f"{config.name}_{operation}",
                     "name": operation,
                     "description": f"{config.description} - {operation}",
-                    "parameters": [p for p in tool_instance.parameters if p.name != "operation"]
+                    "parameters": operation_params
                 })
             return methods
         else:
@@ -362,6 +367,243 @@ class ToolService:
                 "description": config.description,
                 "parameters": [p for p in tool_instance.parameters if p.name != "operation"]
             }]
+    
+    def _get_operation_specific_params(self, tool_instance: BaseTool, operation: str) -> List[Dict[str, Any]]:
+        """获取特定操作的参数列表"""
+        # 对于datetime_tool，根据操作类型返回相关参数
+        if hasattr(tool_instance, 'name') and tool_instance.name == 'datetime_tool':
+            return self._get_datetime_tool_params(operation)
+        # 对于json_tool，根据操作类型返回相关参数
+        elif hasattr(tool_instance, 'name') and tool_instance.name == 'json_tool':
+            return self._get_json_tool_params(operation)
+        
+        # 其他工具的默认处理：返回除operation外的所有参数
+        return [{
+            "name": param.name,
+            "type": param.type.value,
+            "description": param.description,
+            "required": param.required,
+            "default": param.default,
+            "enum": param.enum,
+            "minimum": param.minimum,
+            "maximum": param.maximum,
+            "pattern": param.pattern
+        } for param in tool_instance.parameters if param.name != "operation"]
+    
+    def _get_datetime_tool_params(self, operation: str) -> List[Dict[str, Any]]:
+        """获取datetime_tool特定操作的参数"""
+        if operation == "now":
+            return [
+                {
+                    "name": "to_timezone",
+                    "type": "string",
+                    "description": "目标时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                },
+                {
+                    "name": "output_format",
+                    "type": "string",
+                    "description": "输出时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                }
+            ]
+        elif operation == "format":
+            return [
+                {
+                    "name": "input_value",
+                    "type": "string",
+                    "description": "输入值（时间字符串或时间戳）",
+                    "required": True
+                },
+                {
+                    "name": "input_format",
+                    "type": "string",
+                    "description": "输入时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "output_format",
+                    "type": "string",
+                    "description": "输出时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                }
+            ]
+        elif operation == "convert_timezone":
+            return [
+                {
+                    "name": "input_value",
+                    "type": "string",
+                    "description": "输入值（时间字符串或时间戳）",
+                    "required": True
+                },
+                {
+                    "name": "input_format",
+                    "type": "string",
+                    "description": "输入时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "output_format",
+                    "type": "string",
+                    "description": "输出时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "from_timezone",
+                    "type": "string",
+                    "description": "源时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                },
+                {
+                    "name": "to_timezone",
+                    "type": "string",
+                    "description": "目标时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                }
+            ]
+        elif operation == "timestamp_to_datetime":
+            return [
+                {
+                    "name": "input_value",
+                    "type": "string",
+                    "description": "输入值（时间字符串或时间戳）",
+                    "required": True
+                },
+                {
+                    "name": "output_format",
+                    "type": "string",
+                    "description": "输出时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "to_timezone",
+                    "type": "string",
+                    "description": "目标时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                }
+            ]
+        else:
+            # 默认返回所有参数（除了operation）
+            return [
+                {
+                    "name": "input_value",
+                    "type": "string",
+                    "description": "输入值（时间字符串或时间戳）",
+                    "required": False
+                },
+                {
+                    "name": "input_format",
+                    "type": "string",
+                    "description": "输入时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "output_format",
+                    "type": "string",
+                    "description": "输出时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "from_timezone",
+                    "type": "string",
+                    "description": "源时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                },
+                {
+                    "name": "to_timezone",
+                    "type": "string",
+                    "description": "目标时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                },
+                {
+                    "name": "calculation",
+                    "type": "string",
+                    "description": "时间计算表达式（如：+1d, -2h, +30m）",
+                    "required": False
+                }
+            ]
+    
+    def _get_json_tool_params(self, operation: str) -> List[Dict[str, Any]]:
+        """获取json_tool特定操作的参数"""
+        base_params = [
+            {
+                "name": "input_data",
+                "type": "string",
+                "description": "输入数据（JSON字符串、YAML字符串或XML字符串）",
+                "required": True
+            }
+        ]
+        
+        if operation == "insert":
+            return base_params + [
+                {
+                    "name": "json_path",
+                    "type": "string",
+                    "description": "JSON路径表达式（如：$.user.name或users[0].name）",
+                    "required": True
+                },
+                {
+                    "name": "new_value",
+                    "type": "string",
+                    "description": "新值（用于insert操作）",
+                    "required": True
+                }
+            ]
+        elif operation == "replace":
+            return base_params + [
+                {
+                    "name": "json_path",
+                    "type": "string",
+                    "description": "JSON路径表达式（如：$.user.name或users[0].name）",
+                    "required": True
+                },
+                {
+                    "name": "old_text",
+                    "type": "string",
+                    "description": "要替换的原文本（用于replace操作）",
+                    "required": True
+                },
+                {
+                    "name": "new_text",
+                    "type": "string",
+                    "description": "替换后的新文本（用于replace操作）",
+                    "required": True
+                }
+            ]
+        elif operation == "delete":
+            return base_params + [
+                {
+                    "name": "json_path",
+                    "type": "string",
+                    "description": "JSON路径表达式（如：$.user.name或users[0].name）",
+                    "required": True
+                }
+            ]
+        elif operation == "parse":
+            return base_params + [
+                {
+                    "name": "json_path",
+                    "type": "string",
+                    "description": "JSON路径表达式（如：$.user.name或users[0].name）",
+                    "required": True
+                }
+            ]
+        
+        return base_params
 
     async def _get_custom_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
         """获取自定义工具的方法"""
@@ -436,23 +678,75 @@ class ToolService:
             return []
 
     async def _get_mcp_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
-        """获取MCP工具的方法"""
+        """获取MCP工具的方法和参数"""
         mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
         if not mcp_config:
             return []
         
         available_tools = mcp_config.available_tools or []
         if not available_tools:
-            return []
+            # 如果没有工具列表，尝试同步
+            try:
+                success, tools, _ = await self.mcp_tool_manager.discover_tools(
+                    mcp_config.server_url, mcp_config.connection_config or {}
+                )
+                if success:
+                    # 转换为新格式
+                    tool_list = []
+                    for tool in tools:
+                        if tool.get("name"):
+                            tool_list.append({
+                                tool["name"]: {
+                                    "description": tool.get("description", ""),
+                                    "inputSchema": tool.get("inputSchema", {})
+                                }
+                            })
+                    mcp_config.available_tools = tool_list
+                    self.db.commit()
+                    available_tools = tool_list
+            except Exception as e:
+                logger.error(f"同步MCP工具列表失败: {e}")
+                return []
         
         methods = []
-        for tool_name in available_tools:
-            methods.append({
-                "method_id": tool_name,
-                "name": tool_name,
-                "description": f"MCP工具: {tool_name}",
-                "parameters": []  # MCP工具参数需要动态获取
-            })
+
+        # 处理新格式的available_tools
+        for tool_item in available_tools:
+            if isinstance(tool_item, dict):
+                for tool_name, tool_data in tool_item.items():
+                    # 解析工具参数
+                    parameters = []
+                    input_schema = tool_data.get("inputSchema", {})
+                    properties = input_schema.get("properties", {})
+                    required_fields = input_schema.get("required", [])
+
+                    for param_name, param_def in properties.items():
+                        parameters.append({
+                            "name": param_name,
+                            "type": param_def.get("type", "string"),
+                            "description": param_def.get("description", ""),
+                            "required": param_name in required_fields,
+                            "default": param_def.get("default"),
+                            "enum": param_def.get("enum"),
+                            "minimum": param_def.get("minimum"),
+                            "maximum": param_def.get("maximum")
+                        })
+
+                    methods.append({
+                        "method_id": tool_name,
+                        "name": tool_name,
+                        "description": tool_data.get("description", f"MCP工具: {tool_name}"),
+                        "parameters": parameters
+                    })
+            else:
+                # 兼容旧格式（字符串）
+                tool_name = str(tool_item)
+                methods.append({
+                    "method_id": tool_name,
+                    "name": tool_name,
+                    "description": f"MCP工具: {tool_name}",
+                    "parameters": []
+                })
         
         return methods
 
@@ -589,10 +883,18 @@ class ToolService:
         if config.tool_type == ToolType.MCP.value:
             mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
             if mcp_config:
+                # 处理available_tools显示格式
+                available_tools_display = []
+                for tool_item in (mcp_config.available_tools or []):
+                    if isinstance(tool_item, dict):
+                        available_tools_display.extend(list(tool_item.keys()))
+                    else:
+                        available_tools_display.append(str(tool_item))
+
                 config_data.update({
                     "last_health_check": int(mcp_config.last_health_check.timestamp() * 1000) if mcp_config.last_health_check else None,
                     "health_status": mcp_config.health_status,
-                    "available_tools": mcp_config.available_tools or []
+                    "available_tools": available_tools_display
                 })
         
         return ToolInfo(
@@ -832,71 +1134,70 @@ class ToolService:
             return {}
 
     async def _test_mcp_connection(self, config: ToolConfig) -> Dict[str, Any]:
-        """测试MCP连接"""
+        """测试MCP连接并自动同步工具列表"""
         try:
-            mcp_config = self.db.query(MCPToolConfig).filter(
-                MCPToolConfig.id == config.id
-            ).first()
-
+            mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
             if not mcp_config:
                 return {"success": False, "message": "MCP配置不存在"}
 
-            client = MCPClient(mcp_config.server_url, mcp_config.connection_config or {})
+            # 使用集成的MCP管理器测试连接
+            test_result = await self.mcp_tool_manager.test_tool_connection(
+                mcp_config.server_url, mcp_config.connection_config or {}
+            )
 
-            if await client.connect():
-                try:
-                    # tools = await client.list_tools()
-                    await client.disconnect()
+            if test_result["success"]:
+                # 连接成功，自动同步工具列表
+                success, tools, error = await self.mcp_tool_manager.discover_tools(
+                    mcp_config.server_url, mcp_config.connection_config or {}
+                )
 
-                    # 更新连接状态
+                if success:
+                    # 转换为新格式
+                    tool_list = []
+                    tool_names = []
+                    for tool in tools:
+                        if tool.get("name"):
+                            tool_names.append(tool["name"])
+                            tool_list.append({
+                                tool["name"]: {
+                                    "description": tool.get("description", ""),
+                                    "inputSchema": tool.get("inputSchema", {})
+                                }
+                            })
+
+                    # 更新数据库
+                    mcp_config.available_tools = tool_list
                     mcp_config.last_health_check = datetime.now()
                     mcp_config.health_status = "healthy"
                     mcp_config.error_message = None
+                    config.status = ToolStatus.AVAILABLE.value
 
-                    # 更新工具状态
-                    self._update_tool_status(config)
                     self.db.commit()
 
                     return {
                         "success": True,
-                        "message": "MCP连接成功",
-                        # "details": {"server_url": mcp_config.server_url, "tools_count": len(tools)}
-                        "details": {"server_url": mcp_config.server_url}
+                        "message": "MCP连接成功并同步工具列表",
+                        "details": {
+                            "server_url": mcp_config.server_url,
+                            "tools_count": len(tool_names),
+                            "tools": tool_names
+                        }
                     }
-                except Exception as e:
-                    await client.disconnect()
-
-                    # 更新错误状态
-                    mcp_config.last_health_check = datetime.now()
-                    mcp_config.health_status = "error"
-                    mcp_config.error_message = str(e)
-                    self._update_tool_status(config)
-                    self.db.commit()
-
-                    return {"success": False, "message": f"MCP功能测试失败: {str(e)}"}
+                else:
+                    return {"success": False, "message": f"同步工具失败: {error}"}
             else:
-                # 更新连接失败状态
+                # 更新错误状态
                 mcp_config.last_health_check = datetime.now()
                 mcp_config.health_status = "error"
-                mcp_config.error_message = "连接失败"
-                self._update_tool_status(config)
+                mcp_config.error_message = test_result.get("error", "连接失败")
+                config.status = ToolStatus.ERROR.value
                 self.db.commit()
 
-                return {"success": False, "message": "MCP连接失败"}
+                return test_result
 
         except Exception as e:
-            # 更新异常状态
-            mcp_config = self.db.query(MCPToolConfig).filter(
-                MCPToolConfig.id == config.id
-            ).first()
-            if mcp_config:
-                mcp_config.last_health_check = datetime.now()
-                mcp_config.health_status = "error"
-                mcp_config.error_message = str(e)
-                self._update_tool_status(config)
-                self.db.commit()
-
-            return {"success": False, "message": f"MCP测试异常: {str(e)}"}
+            logger.error(f"测试MCP连接失败: {config.id}, 错误: {e}")
+            return {"success": False, "message": f"测试失败: {str(e)}"}
 
     @staticmethod
     async def parse_openapi_schema(schema_data: str = None, schema_url: str = None) -> Dict[str, Any]:
@@ -951,57 +1252,56 @@ class ToolService:
             
             # 创建MCP客户端
             connection_config = mcp_config.connection_config or {}
-            
-            client = MCPClient(mcp_config.server_url, connection_config)
-            
-            if await client.connect():
-                try:
-                    # 获取工具列表
-                    tools = await client.list_tools()
-                    tool_names = [tool.get("name") for tool in tools if tool.get("name")]
-                    
-                    # 更新数据库
-                    mcp_config.available_tools = tool_names
-                    mcp_config.last_health_check = datetime.now()
-                    mcp_config.health_status = "healthy"
-                    mcp_config.error_message = None
-                    
-                    # 更新工具状态
-                    config.status = ToolStatus.AVAILABLE.value
-                    
-                    self.db.commit()
-                    
-                    await client.disconnect()
-                    
-                    return {
-                        "success": True,
-                        "message": "工具列表同步成功",
-                        "tools_count": len(tool_names),
-                        "tools": tool_names
-                    }
-                    
-                except Exception as e:
-                    await client.disconnect()
-                    
-                    # 更新错误状态
+            client = SimpleMCPClient(mcp_config.server_url, connection_config)
+
+            async with client:
+                # 获取工具列表
+                tools = await client.list_tools()
+
+                # 转换为新格式
+                tool_list = []
+                tool_names = []
+                for tool in tools:
+                    if tool.get("name"):
+                        tool_names.append(tool["name"])
+                        tool_list.append({
+                            tool["name"]: {
+                                "description": tool.get("description", ""),
+                                "inputSchema": tool.get("inputSchema", {})
+                            }
+                        })
+
+                # 更新数据库
+                mcp_config.available_tools = tool_list
+                mcp_config.last_health_check = datetime.now()
+                mcp_config.health_status = "healthy"
+                mcp_config.error_message = None
+
+                # 更新工具状态
+                config.status = ToolStatus.AVAILABLE.value
+
+                self.db.commit()
+
+                return {
+                    "success": True,
+                    "message": "工具列表同步成功",
+                    "tools_count": len(tool_names),
+                    "tools": tool_names
+                }
+
+        except Exception as e:
+            # 更新错误状态
+            try:
+                mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
+                if mcp_config:
                     mcp_config.last_health_check = datetime.now()
                     mcp_config.health_status = "error"
                     mcp_config.error_message = str(e)
                     config.status = ToolStatus.ERROR.value
                     self.db.commit()
-                    
-                    return {"success": False, "message": f"获取工具列表失败: {str(e)}"}
-            else:
-                # 连接失败
-                mcp_config.last_health_check = datetime.now()
-                mcp_config.health_status = "error"
-                mcp_config.error_message = "连接失败"
-                config.status = ToolStatus.ERROR.value
-                self.db.commit()
-                
-                return {"success": False, "message": "MCP连接失败"}
-                
-        except Exception as e:
+            except:
+                pass
+
             logger.error(f"同步MCP工具列表失败: {tool_id}, 错误: {e}")
             return {"success": False, "message": f"同步失败: {str(e)}"}
 

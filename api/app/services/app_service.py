@@ -21,6 +21,7 @@ from app.core.exceptions import (
     BusinessException,
 )
 from app.core.logging_config import get_business_logger
+from app.core.workflow.validator import WorkflowValidator
 from app.db import get_db
 from app.models import App, AgentConfig, AppRelease, MultiAgentConfig, WorkflowConfig
 from app.models.app_model import AppStatus, AppType
@@ -31,6 +32,8 @@ from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services.agent_config_converter import AgentConfigConverter
 from app.models import AppShare, Workspace
 from app.services.model_service import ModelApiKeyService
+from app.services.workflow_service import WorkflowService
+from app.utils.app_config_utils import model_parameters_to_dict
 
 # 获取业务日志器
 logger = get_business_logger()
@@ -201,27 +204,28 @@ class AppService:
                 "多智能体配置未激活，无法运行",
                 BizCode.AGENT_CONFIG_MISSING
             )
-        if not multi_agent_config.default_model_config_id:
-            # # 2. 检查主 Agent 配置
-            if not multi_agent_config.master_agent_id:
-                raise BusinessException(
-                    "未配置主 Agent，无法运行",
-                    BizCode.AGENT_CONFIG_MISSING
-                )
+        if multi_agent_config.orchestration_mode == "supervisor":
+            if not multi_agent_config.default_model_config_id:
+                # # 2. 检查主 Agent 配置
+                if not multi_agent_config.master_agent_id:
+                    raise BusinessException(
+                        "未配置主 Agent，无法运行",
+                        BizCode.AGENT_CONFIG_MISSING
+                    )
 
-            master_agent_release = self.db.get(AppRelease, multi_agent_config.master_agent_id)
-            if not master_agent_release:
-                raise BusinessException(
-                    f"主 Agent 配置不存在: {multi_agent_config.master_agent_id}",
-                    BizCode.AGENT_CONFIG_MISSING
-                )
+                master_agent_release = self.db.get(AppRelease, multi_agent_config.master_agent_id)
+                if not master_agent_release:
+                    raise BusinessException(
+                        f"主 Agent 配置不存在: {multi_agent_config.master_agent_id}",
+                        BizCode.AGENT_CONFIG_MISSING
+                    )
 
-            # 检查主 Agent 的模型配置
-            multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
+                # 检查主 Agent 的模型配置
+                multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
 
-        model_api_key = ModelApiKeyService.get_a_api_key(self.db, multi_agent_config.default_model_config_id)
-        if not model_api_key:
-            raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
+            model_api_key = ModelApiKeyService.get_a_api_key(self.db, multi_agent_config.default_model_config_id)
+            if not model_api_key:
+                raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
 
 
         # 3. 检查子 Agent 配置
@@ -273,12 +277,7 @@ class AppService:
                 )
 
         logger.info(
-            "多智能体配置检查通过",
-            extra={
-                "app_id": str(app_id),
-                "master_agent_id": str(multi_agent_config.master_agent_id),
-                "sub_agent_count": len(multi_agent_config.sub_agents)
-            }
+            "多智能体配置检查通过"
         )
 
     def _create_agent_config(
@@ -305,7 +304,7 @@ class AppService:
             knowledge_retrieval=storage_data.get("knowledge_retrieval"),
             memory=storage_data.get("memory"),
             variables=storage_data.get("variables", []),
-            tools=storage_data.get("tools", {}),
+            tools=storage_data.get("tools", []),
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -687,7 +686,7 @@ class AppService:
                         knowledge_retrieval=source_config.knowledge_retrieval.copy() if source_config.knowledge_retrieval else None,
                         memory=source_config.memory.copy() if source_config.memory else None,
                         variables=source_config.variables.copy() if source_config.variables else [],
-                        tools=source_config.tools.copy() if source_config.tools else {},
+                        tools=source_config.tools.copy() if source_config.tools else [],
                         is_active=True,
                         created_at=now,
                         updated_at=now,
@@ -813,6 +812,37 @@ class AppService:
         )
         return items, int(total)
 
+    def get_apps_by_ids(
+        self,
+        app_ids: List[str],
+        workspace_id: uuid.UUID
+    ) -> List[App]:
+        """根据ID列表获取应用
+
+        Args:
+            app_ids: 应用ID列表
+            workspace_id: 工作空间ID（用于权限验证）
+
+        Returns:
+            List[App]: 应用列表
+        """
+        if not app_ids:
+            return []
+
+        # 转换字符串ID为UUID
+        try:
+            uuid_ids = [uuid.UUID(app_id) for app_id in app_ids]
+        except ValueError:
+            return []
+
+        # 查询本工作空间的应用 + 分享给本工作空间的应用
+        stmt = select(App).where(
+            App.id.in_(uuid_ids),
+            App.workspace_id == workspace_id
+        )
+
+        return list(self.db.scalars(stmt).all())
+
     # ==================== Agent 配置管理 ====================
 
     def update_agent_config(
@@ -877,7 +907,7 @@ class AppService:
         # if data.variables is not None:
         agent_cfg.variables = storage_data.get("variables", [])
         # if data.tools is not None:
-        agent_cfg.tools = storage_data.get("tools", {})
+        agent_cfg.tools = storage_data.get("tools", [])
 
         agent_cfg.updated_at = now
 
@@ -964,7 +994,7 @@ class AppService:
                 "max_history": 10
             },
             variables=[],
-            tools={},
+            tools=[],
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -1177,11 +1207,11 @@ class AppService:
 
             config = {
                 "system_prompt": agent_cfg.system_prompt,
-                "model_parameters": agent_cfg.model_parameters,
+                "model_parameters": model_parameters_to_dict(agent_cfg.model_parameters),
                 "knowledge_retrieval": agent_cfg.knowledge_retrieval,
                 "memory": agent_cfg.memory,
                 "variables": agent_cfg.variables or [],
-                "tools": agent_cfg.tools or {},
+                "tools": agent_cfg.tools or [],
             }
             # config = AgentConfigConverter.from_storage_format(agent_cfg)
             default_model_config_id = agent_cfg.default_model_config_id
@@ -1206,8 +1236,10 @@ class AppService:
             default_model_config_id = multi_agent_cfg.default_model_config_id
 
             # 4. 构建配置快照
+            
+            
             config = {
-                "model_parameters":multi_agent_cfg.model_parameters,
+                "model_parameters": model_parameters_to_dict(multi_agent_cfg.model_parameters),
                 "master_agent_id": str(multi_agent_cfg.master_agent_id),
                 "orchestration_mode": multi_agent_cfg.orchestration_mode,
                 "sub_agents": multi_agent_cfg.sub_agents,
@@ -1224,6 +1256,26 @@ class AppService:
                     "sub_agent_count": len(multi_agent_cfg.sub_agents) if multi_agent_cfg.sub_agents else 0,
                     "orchestration_mode": multi_agent_cfg.orchestration_mode
                 }
+            )
+        elif app.type == AppType.WORKFLOW:
+            service = WorkflowService(self.db)
+            workflow_cfg = service.get_workflow_config(app_id)
+            if not workflow_cfg:
+                raise BusinessException("应用缺少有效配置，无法发布", BizCode.CONFIG_MISSING)
+
+            config = {
+                "nodes": workflow_cfg.nodes,
+                "edges": workflow_cfg.edges,
+                "variables": workflow_cfg.variables,
+                "execution_config": workflow_cfg.execution_config,
+                "triggers": workflow_cfg.triggers
+            }
+
+            is_valid, errors = WorkflowValidator.validate_for_publish(config)
+            if not is_valid:
+                raise BusinessException("应用缺少有效配置，无法发布", BizCode.CONFIG_MISSING)
+            logger.info(
+                "应用发布配置准备完成"
             )
 
         now = datetime.datetime.now()
@@ -2045,6 +2097,16 @@ def list_apps(
         page=page,
         pagesize=pagesize,
     )
+
+
+def get_apps_by_ids(
+    db: Session,
+    app_ids: List[str],
+    workspace_id: uuid.UUID
+) -> List[App]:
+    """根据ID列表获取应用（向后兼容接口）"""
+    service = AppService(db)
+    return service.get_apps_by_ids(app_ids, workspace_id)
 
 
 # ==================== 向后兼容的函数接口 ====================

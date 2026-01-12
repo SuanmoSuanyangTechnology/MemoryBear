@@ -164,6 +164,10 @@ class Settings:
     TOOL_EXECUTION_TIMEOUT: int = int(os.getenv("TOOL_EXECUTION_TIMEOUT", "60"))
     TOOL_MAX_CONCURRENCY: int = int(os.getenv("TOOL_MAX_CONCURRENCY", "10"))
     ENABLE_TOOL_MANAGEMENT: bool = os.getenv("ENABLE_TOOL_MANAGEMENT", "true").lower() == "true"
+
+    # official environment system version
+    SYSTEM_VERSION: str = os.getenv("SYSTEM_VERSION", "v0.2.0")
+    SYSTEM_INTRODUCTION: str = os.getenv("SYSTEM_INTRODUCTION", "")
     
     def get_memory_output_path(self, filename: str = "") -> str:
         """

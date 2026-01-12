@@ -71,7 +71,10 @@ class IfElseNode(BaseNode):
             for expression in case_branch.expressions:
                 pattern = r"\{\{\s*(.*?)\s*\}\}"
                 left_string = re.sub(pattern, r"\1", expression.left).strip()
-                left_value = self.get_variable(left_string, state)
+                try:
+                    left_value = self.get_variable(left_string, state)
+                except KeyError:
+                    left_value = None
                 evaluator = ConditionExpressionResolver.resolve_by_value(left_value)(
                     self.get_variable_pool(state),
                     expression.left,

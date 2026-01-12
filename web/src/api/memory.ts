@@ -134,6 +134,77 @@ export const getEmotionSuggestions = (group_id: string) => {
 export const analyticsRefresh = (end_user_id: string) => {
   return request.post('/memory-storage/analytics/generate_cache', { end_user_id })
 }
+// 遗忘
+export const getForgetStats = (group_id: string) => {
+  return request.get(`/memory/forget/stats`, { group_id })
+}
+// 隐性记忆-偏好
+export const getImplicitPreferences = (end_user_id: string) => {
+  return request.get(`/memory/implicit-memory/preferences/${end_user_id}`)
+}
+// 隐性记忆-核心特质
+export const getImplicitPortrait = (end_user_id: string) => {
+  return request.get(`/memory/implicit-memory/portrait/${end_user_id}`)
+}
+// 隐性记忆-兴趣领域分布
+export const getImplicitInterestAreas = (end_user_id: string) => {
+  return request.get(`/memory/implicit-memory/interest-areas/${end_user_id}`)
+}
+// 隐性记忆-用户习惯分析
+export const getImplicitHabits = (end_user_id: string) => {
+  return request.get(`/memory/implicit-memory/habits/${end_user_id}`)
+}
+// 短期记忆
+export const getShortTerm = (end_user_id: string) => {
+  return request.get(`/memory/short/short_term`, { end_user_id })
+}
+// 感知记忆-视觉记忆
+export const getPerceptualLastVisual = (end_user: string) => {
+  return request.get(`/memory/perceptual/${end_user}/last_visual`)
+}
+// 感知记忆-音频记忆
+export const getPerceptualLastListen = (end_user: string) => {
+  return request.get(`/memory/perceptual/${end_user}/last_listen`)
+}
+// 感知记忆-文本记忆
+export const getPerceptualLastText = (end_user: string) => {
+  return request.get(`/memory/perceptual/${end_user}/last_text`)
+}
+// 感知记忆-感知记忆时间线
+export const getPerceptualTimeline = (end_user: string) => {
+  return request.get(`/memory/perceptual/${end_user}/timeline`)
+}
+// 情景记忆-总览
+export const getEpisodicOverview = (data: { end_user_id: string; time_range: string; episodic_type: string; } ) => {
+  return request.post(`/memory-storage/classifications/episodic-memory`, data)
+}
+export const getEpisodicDetail = (data: { end_user_id: string; summary_id: string; } ) => {
+  return request.post(`/memory-storage/classifications/episodic-memory-details`, data)
+}
+// 关系演化
+export const getRelationshipEvolution = (data: { id: string; label: string; } ) => {
+  return request.get(`/memory-storage/memory_space/relationship_evolution`, data)
+}
+// 共同记忆时间线
+export const getTimelineMemories = (data: { id: string; label: string; }) => {
+  return request.get(`/memory-storage/memory_space/timeline_memories`, data)
+}
+export const getExplicitMemory = (end_user_id: string) => {
+  return request.post(`/memory-storage/classifications/explicit-memory`, { end_user_id })
+}
+export const getExplicitMemoryDetails = (data: { end_user_id: string, memory_id: string; }) => {
+  return request.post(`/memory-storage/classifications/explicit-memory-details`, data)
+}
+export const getConversations = (end_user: string) => {
+  return request.get(`/memory/work/${end_user}/conversations`)
+}
+export const getConversationMessages = (end_user: string, conversation_id: string) => {
+  return request.get(`/memory/work/${end_user}/messages`, { conversation_id })
+}
+export const getConversationDetail = (end_user: string, conversation_id: string) => {
+  return request.get(`/memory/work/${end_user}/detail`, { conversation_id })
+}
+
 
 /*************** end 用户记忆 相关接口 ******************************/
 

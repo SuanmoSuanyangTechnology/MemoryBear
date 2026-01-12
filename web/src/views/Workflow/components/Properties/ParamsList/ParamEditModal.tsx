@@ -103,6 +103,7 @@ const ParamEditModal = forwardRef<ParamEditModalRef, ParamEditModalProps>(({
         <FormItem
           name="desc"
           label={t('workflow.config.parameter-extractor.desc')}
+          rules={[{ required: true, message: t('common.pleaseEnter') }]}
         >
           <Input.TextArea placeholder={t('common.enter')} />
         </FormItem>

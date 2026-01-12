@@ -9,6 +9,7 @@ interface VariableSelectProps extends SelectProps {
   value?: string;
   onChange?: (value: string) => void;
   allowClear?: boolean;
+  filterBooleanType?: boolean;
 }
 
 const VariableSelect: FC<VariableSelectProps> = ({
@@ -18,6 +19,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   allowClear = true,
   onChange,
   size,
+  filterBooleanType = false,
   ...resetPorps
 }) => {
 
@@ -26,7 +28,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   }
   const labelRender: LabelRender = (props) => {
     const { value } = props
-    const filterOption = options.find(vo => `{{${vo.value}}}` === value)
+    const filterOption = filteredOptions.find(vo => `{{${vo.value}}}` === value)
 
     if (filterOption) {
       return (
@@ -54,7 +56,11 @@ const VariableSelect: FC<VariableSelectProps> = ({
     }
     return null
   }
-  const groupedSuggestions = options.reduce((groups: Record<string, any[]>, suggestion) => {
+  const filteredOptions = filterBooleanType 
+    ? options.filter(option => option.dataType !== 'boolean')
+    : options;
+
+  const groupedSuggestions = filteredOptions.reduce((groups: Record<string, any[]>, suggestion) => {
     const { nodeData } = suggestion
     const nodeId = nodeData.id as string;
     if (!groups[nodeId]) {
@@ -64,12 +70,13 @@ const VariableSelect: FC<VariableSelectProps> = ({
     return groups;
   }, {});
 
-  const groupedOptions = Object.entries(groupedSuggestions).map(([nodeId, suggestions]) => ({
+  const groupedOptions = Object.entries(groupedSuggestions).map(([_nodeId, suggestions]) => ({
     label: suggestions[0].nodeData.name,
-    options: suggestions.map(s => ({ label: s.label, value: `{{${s.value}}}` }))
+    options: suggestions.map(s => ({ 
+      label: <div className="rb:flex rb:items-center rb:gap-1 rb:justify-between"> { s.label } <span>{s.dataType}</span></div>, 
+      value: `{{${s.value}}}` 
+    }))
   }));
-
-  console.log('groupedOptions', groupedOptions)
   
   return (
     <Select

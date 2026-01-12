@@ -93,5 +93,5 @@ class HttpErrorHandle(StrEnum):
 
 
 class ValueInputType(StrEnum):
-    VARIABLE = "Variable"
-    CONSTANT = "Constant"
+    VARIABLE = "variable"
+    CONSTANT = "constant"

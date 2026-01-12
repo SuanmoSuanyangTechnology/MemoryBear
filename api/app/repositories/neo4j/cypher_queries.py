@@ -92,6 +92,11 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
         WHEN entity.description IS NOT NULL AND entity.description <> ''
          AND (e.description IS NULL OR size(e.description) = 0 OR size(entity.description) > size(e.description))
         THEN entity.description ELSE e.description END,
+    e.example = CASE 
+        WHEN entity.example IS NOT NULL AND entity.example <> '' 
+        THEN entity.example 
+        ELSE coalesce(e.example, '') 
+    END,
     e.statement_id = CASE WHEN entity.statement_id IS NOT NULL AND entity.statement_id <> '' THEN entity.statement_id ELSE e.statement_id END,
     e.aliases = CASE
         WHEN entity.aliases IS NOT NULL AND size(entity.aliases) > 0
@@ -121,7 +126,8 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.activation_value = CASE WHEN entity.activation_value IS NOT NULL THEN entity.activation_value ELSE e.activation_value END,
     e.access_history = CASE WHEN entity.access_history IS NOT NULL THEN entity.access_history ELSE coalesce(e.access_history, []) END,
     e.last_access_time = CASE WHEN entity.last_access_time IS NOT NULL THEN entity.last_access_time ELSE e.last_access_time END,
-    e.access_count = CASE WHEN entity.access_count IS NOT NULL THEN entity.access_count ELSE coalesce(e.access_count, 0) END
+    e.access_count = CASE WHEN entity.access_count IS NOT NULL THEN entity.access_count ELSE coalesce(e.access_count, 0) END,
+    e.is_explicit_memory = CASE WHEN entity.is_explicit_memory IS NOT NULL THEN entity.is_explicit_memory ELSE coalesce(e.is_explicit_memory, false) END
 RETURN e.id AS uuid
 """
 
@@ -722,7 +728,12 @@ SET m += {
     chunk_ids: summary.chunk_ids,
     content: summary.content,
     summary_embedding: summary.summary_embedding,
-    config_id: summary.config_id
+    config_id: summary.config_id,
+    importance_score: CASE WHEN summary.importance_score IS NOT NULL THEN summary.importance_score ELSE coalesce(m.importance_score, 0.5) END,
+    activation_value: CASE WHEN summary.activation_value IS NOT NULL THEN summary.activation_value ELSE m.activation_value END,
+    access_history: CASE WHEN summary.access_history IS NOT NULL THEN summary.access_history ELSE coalesce(m.access_history, []) END,
+    last_access_time: CASE WHEN summary.last_access_time IS NOT NULL THEN summary.last_access_time ELSE m.last_access_time END,
+    access_count: CASE WHEN summary.access_count IS NOT NULL THEN summary.access_count ELSE coalesce(m.access_count, 0) END
 }
 RETURN m.id AS uuid
 """
@@ -856,4 +867,175 @@ neo4j_query_all = """
                 other as entity2
                           """
 
+
+'''针对当前节点下扩长的句子，实体和总结'''
+Memory_Timeline_ExtractedEntity="""
+MATCH (n)-[r1]-(e)-[r2]-(ms)
+WHERE elementId(n) = $id
+  AND (ms:ExtractedEntity OR ms:MemorySummary)
+
+RETURN
+  collect(
+    DISTINCT
+    CASE
+      WHEN ms:ExtractedEntity THEN {
+        text: ms.name,
+        created_at: ms.created_at,
+     type: "情景记忆" 
+      }
+    END
+  ) AS ExtractedEntity,
+
+  collect(
+    DISTINCT
+    CASE
+      WHEN ms:MemorySummary THEN {
+        text: ms.content,
+        created_at: ms.created_at,
+       type: "长期沉淀" 
+      }
+    END
+  ) AS MemorySummary,
+
+  collect(
+    DISTINCT {
+      text: e.statement,
+      created_at: e.created_at,
+      type: "情绪记忆" 
+    }
+  ) AS statement;
+
+
+"""
+Memory_Timeline_MemorySummary=""" 
+MATCH (n)-[r1]-(e)-[r2]-(ms)
+WHERE elementId(n) =$id
+  AND (ms:MemorySummary OR ms:ExtractedEntity)
+RETURN
+  collect(
+    DISTINCT
+    CASE
+      WHEN ms:ExtractedEntity THEN {
+        text: ms.name,
+        created_at: ms.created_at
+      }
+    END
+  ) AS ExtractedEntity,
+
+  collect(
+    DISTINCT
+    CASE
+      WHEN n:MemorySummary THEN {
+        text: n.content,
+        created_at: n.created_at
+      }
+    END
+  ) AS MemorySummary,
+
+  collect(
+    DISTINCT {
+      text: e.statement,
+      created_at: e.created_at
+    }
+  ) AS statement;
+"""
+Memory_Timeline_Statement="""
+MATCH (n)
+WHERE elementId(n) = $id
+
+CALL {
+  WITH n
+  MATCH (n)-[]-(m:ExtractedEntity)
+  WHERE NOT m:MemorySummary AND NOT m:Chunk
+  RETURN collect(
+    DISTINCT {
+      text: m.name,
+      created_at: m.created_at,
+      type: "情景记忆" 
+    }
+  ) AS ExtractedEntity
+}
+
+CALL {
+  WITH n
+  MATCH (n)-[]-(m:MemorySummary)
+  WHERE NOT m:Chunk
+  RETURN collect(
+    DISTINCT {
+      text: m.content,
+      created_at: m.created_at,
+       type: "长期沉淀" 
+    }
+  ) AS MemorySummary
+}
+
+RETURN
+  ExtractedEntity,
+  MemorySummary,
+  {
+    text: n.statement,
+    created_at: n.created_at,
+     type: "情绪记忆" 
+  } AS statement;
+
+
+"""
+
+'''针对当前节点，主要获取更加完整的句子节点'''
+Memory_Space_Emotion_Statement="""
+MATCH (n)
+WHERE elementId(n) = $id
+RETURN
+  n.emotion_intensity AS emotion_intensity,
+  n.created_at        AS created_at,
+  n.emotion_type      AS emotion_type,
+  n.statement         AS statement;
+
+"""
+Memory_Space_Emotion_MemorySummary="""
+MATCH (n)-[]-(e)
+WHERE elementId(n) = $id
+  AND EXISTS {
+    MATCH (e)-[]-(ms)
+    WHERE ms:MemorySummary OR ms:ExtractedEntity
+  }
+RETURN DISTINCT
+  e.emotion_intensity AS emotion_intensity,
+  e.created_at        AS created_at,
+  e.emotion_type      AS emotion_type,
+  e.statement         AS statement;
+"""
+Memory_Space_Emotion_ExtractedEntity="""
+MATCH (n)-[]-(e)
+WHERE elementId(n) = $id
+  AND EXISTS {
+    MATCH (e)-[]-(ms:ExtractedEntity)
+  }
+RETURN DISTINCT
+  e.emotion_intensity AS emotion_intensity,
+  e.created_at        AS created_at,
+  e.emotion_type      AS emotion_type,
+  e.statement         AS statement;
+"""
+
+'''获取实体'''
+
+Memory_Space_User="""
+MATCH (n)-[r]->(m)
+WHERE n.group_id = $group_id  AND m.name="用户" 
+return DISTINCT elementId(m) as id
+"""
+Memory_Space_Entity="""
+MATCH (n)-[]-(m)
+WHERE elementId(m) = $id AND  m.entity_type = "Person"
+RETURN
+DISTINCT m.name as name,m.group_id as group_id
+"""
+Memory_Space_Associative="""
+MATCH (u)-[]-(x)-[]-(h)
+WHERE elementId(u) = $user_id
+  AND elementId(h) = $id
+RETURN DISTINCT
+ x.statement as statement,x.created_at as created_at
+"""
 

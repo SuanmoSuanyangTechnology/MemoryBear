@@ -215,8 +215,8 @@ async def sync_mcp_tools(
     """同步MCP工具列表"""
     try:
         result = await service.sync_mcp_tools(tool_id, current_user.tenant_id)
-        if result["success"] is False:
-            raise HTTPException(status_code=404, detail=result["message"])
+        if not result.get("success", False):
+            raise HTTPException(status_code=400, detail=result.get("message", "同步失败"))
         return success(data=result, msg="MCP工具列表同步完成")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

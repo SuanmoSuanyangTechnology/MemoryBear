@@ -50,6 +50,7 @@ const MemoryInsight = forwardRef<MemoryInsightRef>((_props, ref) => {
     <RbCard 
       title={t('userMemory.memoryInsight')} 
       headerType="borderless"
+      headerClassName="rb:min-h-[46px]!"
     >
       {loading
         ? <Skeleton />

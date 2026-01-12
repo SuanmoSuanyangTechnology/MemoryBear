@@ -39,6 +39,33 @@ class ToolRepository:
         return result[0] if result else None
 
     @staticmethod
+    def get_tenant_id_by_workspace_id(db: Session, workspace_id: str) -> Optional[uuid.UUID]:
+        """
+        根据空间ID获取tenant_id
+
+        Args:
+            db: 数据库会话
+            workspace_id: 空间ID
+
+        Returns:
+            tenant_id或None
+        """
+        from app.models.workspace_model import Workspace
+
+        tenant_id = db.query(Workspace.tenant_id).filter(
+            Workspace.id == workspace_id
+        ).scalar()
+
+        if tenant_id is not None and not isinstance(tenant_id, uuid.UUID):
+            # 兼容数据库中字段类型不匹配的情况（比如存储为字符串）
+            try:
+                tenant_id = uuid.UUID(tenant_id)
+            except (ValueError, TypeError):
+                return None
+
+        return tenant_id
+
+    @staticmethod
     def find_by_tenant(
         db: Session,
         tenant_id: uuid.UUID,

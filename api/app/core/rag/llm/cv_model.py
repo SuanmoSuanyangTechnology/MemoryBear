@@ -448,7 +448,7 @@ if __name__ == "__main__":
     # 准备配置vision_model信息
     # 初始化 QWenCV
     vision_model = QWenCV(
-        key="sk-8e9e40cd171749858ce2d3722ea75669",
+        key="",
         model_name="qwen-vl-max",
         lang="Chinese",  # 默认使用中文
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"

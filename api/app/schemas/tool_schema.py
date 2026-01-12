@@ -154,7 +154,7 @@ class MCPToolConfigSchema(BaseModel):
     last_health_check: Optional[datetime] = None
     health_status: str = "unknown"
     error_message: Optional[str] = None
-    available_tools: List[str] = Field(default_factory=list)
+    available_tools: List[Dict[str, Dict[str, Any]]] = Field(default_factory=list, description="工具列表，格式: [{'tool_name': str, 'arguments': dict}]")
 
     class Config:
         from_attributes = True

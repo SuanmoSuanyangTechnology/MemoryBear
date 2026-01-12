@@ -16,6 +16,8 @@ import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpt
 import type { ChatItem } from '@/components/Chat/types' 
 import CustomSelect from '@/components/CustomSelect'
 import AiPromptVariableModal from './AiPromptVariableModal'
+import { type SSEMessage } from '@/utils/stream'
+import Editor from './Editor'
 
 interface AiPromptModalProps {
   refresh: (value: string) => void;
@@ -35,7 +37,8 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
   const [variables, setVariables] = useState<string[]>([])
   const [promptSession, setPromptSession] = useState<string | null>(null)
   const aiPromptVariableModalRef = useRef<AiPromptVariableModalRef>(null)
-  const currentPromptRef = useRef<any>(null)
+  const editorRef = useRef<any>(null)
+  const currentPromptValueRef = useRef<string>('')
 
   const values = Form.useWatch([], form)
 
@@ -78,16 +81,55 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
     setChatList(prev => {
       return [...prev, { role: 'user', content: messageContent}]
     })
-    form.setFieldsValue({ message: undefined })
-    updatePromptMessages(promptSession, values)
-      .then(res => {
-        const response = res as { prompt: string; desc: string; variables: string[] }
-        form.setFieldsValue({ current_prompt: response.prompt })
-        setChatList(prev => {
-          return [...prev, { role: 'assistant', content: response.desc }]
-        })
-        setVariables(response.variables)
+    form.setFieldsValue({ message: undefined, current_prompt: undefined })
+
+    const handleStreamMessage = (data: SSEMessage[]) => {
+      data.map(item => {
+        const { content, desc, variables } = item.data as { content: string; desc: string; variables: string[] };
+
+        switch (item.event) {
+          case 'start':
+            currentPromptValueRef.current = ''
+            if (editorRef.current?.clear) {
+              editorRef.current.clear();
+            }
+            break;
+          case 'message':
+            if (content) {
+              currentPromptValueRef.current += content;
+              if (editorRef.current?.appendText) {
+                editorRef.current.appendText(content);
+                editorRef.current.scrollToBottom();
+              } else {
+                form.setFieldsValue({ current_prompt: currentPromptValueRef.current })
+              }
+            }
+            if (desc) {
+              setChatList(prev => {
+                return [...prev, { role: 'assistant', content: desc }]
+              })
+            }
+            if (variables) {
+              setVariables(variables)
+            }
+            break;
+          case 'end':
+            setLoading(false)
+            // 流结束时同步表单值
+            form.setFieldsValue({ current_prompt: currentPromptValueRef.current })
+            break
+        }
       })
+    };
+    updatePromptMessages(promptSession, values, handleStreamMessage)
+      // .then(res => {
+      //   const response = res as { prompt: string; desc: string; variables: string[] }
+      //   form.setFieldsValue({ current_prompt: response.prompt })
+      //   setChatList(prev => {
+      //     return [...prev, { role: 'assistant', content: response.desc }]
+      //   })
+      //   setVariables(response.variables)
+      // })
       .finally(() => {
         setLoading(false)
       })
@@ -101,18 +143,8 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
     aiPromptVariableModalRef.current?.handleOpen()
   }
   const handleVariableApply = (value: string) => {
-    const textArea = currentPromptRef.current?.resizableTextArea?.textArea
-    if (textArea) {
-      const cursorPosition = textArea.selectionStart
-      const currentValue = values.current_prompt || ''
-      const newValue = currentValue.slice(0, cursorPosition) + value + currentValue.slice(cursorPosition)
-      form.setFieldValue('current_prompt', newValue)
-      
-      // 设置新的光标位置
-      setTimeout(() => {
-        textArea.focus()
-        textArea.setSelectionRange(cursorPosition + value.length, cursorPosition + value.length)
-      }, 0)
+    if (editorRef.current?.insertText) {
+      editorRef.current.insertText(value)
     } else {
       form.setFieldValue('current_prompt', (values.current_prompt || '') + value)
     }
@@ -191,7 +223,11 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
               </Col>
             </Row>
             <Form.Item name="current_prompt">
-              <Input.TextArea ref={currentPromptRef} className="rb:bg-[#FBFDFF]! rb:h-100.5!" />
+              <Editor 
+                ref={editorRef}
+                className="rb:h-100.5 " 
+                onChange={(value) => form.setFieldValue('current_prompt', value)}
+              />
             </Form.Item>
             <div className="rb:grid rb:grid-cols-2 rb:gap-4 rb:mt-6">
               <Button block disabled={!values?.current_prompt} onClick={handleCopy}>{t('common.copy')}</Button>

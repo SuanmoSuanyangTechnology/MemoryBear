@@ -68,6 +68,7 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onD
           onClick={handleEdit}
         ></div>
       }
+      headerClassName="rb:min-h-[46px]!"
     >
       {loading
         ? <Skeleton />

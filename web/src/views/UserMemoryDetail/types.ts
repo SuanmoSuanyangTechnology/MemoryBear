@@ -44,6 +44,7 @@ export interface Data {
 export interface BaseProperties {
   content: string;
   created_at: number;
+  associative_memory: number;
 }
 export interface StatementNodeProperties {
   temporal_info: string;
@@ -51,12 +52,21 @@ export interface StatementNodeProperties {
   statement: string;
   valid_at: string;
   created_at: number;
+  emotion_keywords: string[];
+  emotion_type: string;
+  emotion_subject: string;
+  importance_score: number;
+  associative_memory: number;
 }
 export interface ExtractedEntityNodeProperties {
   description: string;
   name: string;
   entity_type: string;
   created_at: number;
+  aliases: string;
+  connect_strngth: string;
+  importance_score: number;
+  associative_memory: number;
 }
 export interface MemorySummaryNode {
   id: string;
@@ -72,7 +82,7 @@ export interface MemorySummaryNode {
     created_at: number;
   }
   caption: string;
-
+  associative_memory: number;
 }
 
 export interface Node {
@@ -140,4 +150,41 @@ export interface AboutMeRef {
 }
 export interface EndUserProfileRef {
   data: EndUser | null
+}
+
+
+export interface ForgetData {
+  activation_metrics: {
+    total_nodes: number;
+    nodes_with_activation: number;
+    nodes_without_activation: number;
+    average_activation_value: number;
+    low_activation_nodes: number;
+    timestamp: number;
+    forgetting_threshold: number;
+  },
+  node_distribution: {
+    statement_count: number;
+    entity_count: number;
+    summary_count: number;
+    chunk_count: number;
+  },
+  recent_trends: {
+    date: string;
+    merged_count: number;
+    average_activation: number;
+    total_nodes: number;
+    execution_time: number;
+  }[],
+  pending_nodes: {
+    node_id: string;
+    node_type: string;
+    content_summary: string;
+    activation_value: number;
+    last_access_time: number;
+  }[],
+  timestamp: number;
+}
+export interface GraphDetailRef {
+  handleOpen: (vo: Node) => void
 }

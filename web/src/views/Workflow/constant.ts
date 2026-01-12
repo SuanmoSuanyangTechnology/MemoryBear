@@ -39,6 +39,9 @@ import processEvolutionIcon from '@/assets/images/workflow/process_evolution.png
 import questionClassifierIcon from '@/assets/images/workflow/question-classifier.png'
 import breakIcon from '@/assets/images/workflow/break.png'
 import assignerIcon from '@/assets/images/workflow/assigner.png'
+import memoryReadIcon from '@/assets/images/workflow/memory-read.png'
+import memoryWriteIcon from '@/assets/images/workflow/memory-write.png'
+
 import { memoryConfigListUrl } from '@/api/memory'
 
 import { getModelListUrl } from '@/api/models'
@@ -159,6 +162,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           text: {
             type: 'variableList',
+            filterLoopIterationVars: true
           },
           params: {
             type: 'paramList',
@@ -174,8 +178,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "cognitiveUpgrading",
     nodes: [
-      {
-        type: "memory-read", icon: memoryEnhancementIcon,
+      { type: "memory-read", icon: memoryReadIcon,
         config: {
           message: {
             type: 'messageEditor',
@@ -198,7 +201,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "memory-write", icon: memoryEnhancementIcon,
+      { type: "memory-write", icon: memoryWriteIcon,
         config: {
           message: {
             type: 'messageEditor',
@@ -272,6 +275,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           parallel: {
             type: 'switch',
+            defaultValue: false
           },
           parallel_count: {
             type: 'slider',
@@ -284,6 +288,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           flatten: { // 扁平化输出
             type: 'switch',
+            defaultValue: false
           },
           output: {
             type: 'variableList',
@@ -295,6 +300,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           cycle_vars: {
             type: 'cycleVarsList',
+            defaultValue: []
           },
           condition: {
             type: 'conditionList',
@@ -303,6 +309,13 @@ export const nodeLibrary: NodeLibrary[] = [
               logical_operator: 'and',
               expressions: []
             }
+          },
+          max_loop: {
+            type: 'slider',
+            min: 1,
+            max: 100,
+            step: 1,
+            defaultValue: 10
           },
         }
       },
@@ -315,9 +328,9 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'switch',
             defaultValue: false
           },
-          group_names: {
+          group_variables: {
             type: 'groupVariableList',
-            defaultValue: [{ key: 'Group1', value: []}]
+            defaultValue: [],
           }
         }
       },
@@ -361,11 +374,11 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           headers: {
             type: 'define',
-            defaultValue: {}
+            defaultValue: []
           },
           params: {
             type: 'define',
-            defaultValue: {}
+            defaultValue: []
           },
           body: {
             type: 'define',
@@ -382,12 +395,15 @@ export const nodeLibrary: NodeLibrary[] = [
             defaultValue: {}
           },
           retry: {
-            type: 'define',
+            type: 'switch',
+            defaultValue: {
+              enable: false
+            }
           },
           error_handle: {
             type: 'define',
             defaultValue: {
-              method: 'default'
+              method: 'none'
             }
           }
         }
@@ -407,11 +423,13 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           mapping: {
             type: 'mappingList',
-            defaultValue: []
+            defaultValue: [{name: 'arg1'}]
           },
           template: {
             type: 'messageEditor',
             isArray: false,
+            enableJinja2: true,
+            defaultValue: "{{arg1}}"
           },
         }
       }

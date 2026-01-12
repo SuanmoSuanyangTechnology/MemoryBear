@@ -8,14 +8,31 @@ import { type Suggestion } from '../plugin/AutocompletePlugin'
 interface InitialValuePluginProps {
   value: string;
   options?: Suggestion[];
+  enableJinja2?: boolean;
 }
 
-const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [] }) => {
+const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [], enableJinja2 = false }) => {
   const [editor] = useLexicalComposerContext();
-  const initializedRef = useRef(false);
+  const prevValueRef = useRef<string>('');
+  const isUserInputRef = useRef(false);
 
   useEffect(() => {
-    if (!initializedRef.current && value) {
+    // 监听编辑器变化，标记是否为用户输入
+    const removeListener = editor.registerUpdateListener(({ editorState }) => {
+      editorState.read(() => {
+        const root = $getRoot();
+        const textContent = root.getTextContent();
+        if (textContent !== prevValueRef.current) {
+          isUserInputRef.current = true;
+        }
+      });
+    });
+
+    return removeListener;
+  }, [editor]);
+
+  useEffect(() => {
+    if (value !== prevValueRef.current && !isUserInputRef.current) {
       editor.update(() => {
         const root = $getRoot();
         root.clear();
@@ -26,8 +43,13 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
         parts.forEach(part => {
           const match = part.match(/^\{\{([^.]+)\.([^}]+)\}\}$/);
           const contextMatch = part.match(/^\{\{context\}\}$/);
+          const conversationMatch = part.match(/^\{\{conv\.([^}]+)\}\}$/);
 
-          // 匹配{{context}}格式
+          if (enableJinja2) {
+            paragraph.append($createTextNode(part));
+            return;
+          }
+
           if (contextMatch) {
             const contextSuggestion = options.find(s => s.isContext && s.label === 'context');
             if (contextSuggestion) {
@@ -38,7 +60,19 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
             return
           }
           
-          // 匹配普通变量{{nodeId.label}}格式
+          if (conversationMatch) {
+            const [_, variableName] = conversationMatch;
+            const conversationSuggestion = options.find(s => 
+              s.group === 'CONVERSATION' && s.label === variableName
+            );
+            if (conversationSuggestion) {
+              paragraph.append($createVariableNode(conversationSuggestion));
+            } else {
+              paragraph.append($createTextNode(part));
+            }
+            return
+          }
+          
           if (match) {
             const [_, nodeId, label] = match;
 
@@ -60,11 +94,12 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
         });
 
         root.append(paragraph);
-      });
-      
-      initializedRef.current = true;
+      }, { discrete: true });
     }
-  }, [options]);
+    
+    prevValueRef.current = value;
+    isUserInputRef.current = false;
+  }, [value, options, editor, enableJinja2]);
 
   return null;
 };

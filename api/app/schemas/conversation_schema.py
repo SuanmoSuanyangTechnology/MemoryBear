@@ -35,14 +35,14 @@ class ChatRequest(BaseModel):
 class Message(BaseModel):
     """消息输出"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: uuid.UUID
     conversation_id: uuid.UUID
     role: str
     content: str
     meta_data: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
-    
+
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
@@ -51,7 +51,7 @@ class Message(BaseModel):
 class Conversation(BaseModel):
     """会话输出"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: uuid.UUID
     app_id: uuid.UUID
     workspace_id: uuid.UUID
@@ -63,11 +63,11 @@ class Conversation(BaseModel):
     is_active: bool
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    
+
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
@@ -84,3 +84,12 @@ class ChatResponse(BaseModel):
     message: str
     usage: Optional[Dict[str, Any]] = None
     elapsed_time: Optional[float] = None
+
+
+# ---------- Conversation Summary Schemas ----------
+class ConversationOut(BaseModel):
+    theme: str
+    question: list[str]
+    summary: str
+    takeaways: list[str]
+    info_score: int

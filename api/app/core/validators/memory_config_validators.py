@@ -64,6 +64,11 @@ def validate_model_exists_and_active(
 ) -> tuple[str, bool]:
     """Validate that a model exists and is active.
     
+    This function performs tenant-aware model validation with detailed error messages:
+    - If model doesn't exist at all: "Model not found"
+    - If model exists but belongs to different tenant: "Model belongs to different tenant" with details
+    - If model exists and accessible but inactive: "Model is inactive"
+    
     Args:
         model_id: Model UUID to validate
         model_type: Type of model ("llm", "embedding", "rerank")
@@ -76,7 +81,7 @@ def validate_model_exists_and_active(
         Tuple of (model_name, is_active)
         
     Raises:
-        ModelNotFoundError: If model does not exist
+        ModelNotFoundError: If model does not exist or belongs to different tenant
         ModelInactiveError: If model exists but is inactive
     """
     from app.repositories.model_repository import ModelConfigRepository
@@ -84,21 +89,48 @@ def validate_model_exists_and_active(
     start_time = time.time()
     
     try:
+        # First check if model exists at all (without tenant filtering)
+        model_without_tenant = ModelConfigRepository.get_by_id(db, model_id, tenant_id=None)
+        
+        # Then check with tenant filtering
         model = ModelConfigRepository.get_by_id(db, model_id, tenant_id)
         elapsed_ms = (time.time() - start_time) * 1000
         
         if not model:
-            logger.warning(
-                "Model not found",
-                extra={"model_id": str(model_id), "model_type": model_type, "elapsed_ms": elapsed_ms}
-            )
-            raise ModelNotFoundError(
-                model_id=model_id,
-                model_type=model_type,
-                config_id=config_id,
-                workspace_id=workspace_id,
-                message=f"{model_type.title()} model {model_id} not found"
-            )
+            if model_without_tenant:
+                # Model exists but belongs to different tenant
+                logger.warning(
+                    "Model belongs to different tenant",
+                    extra={
+                        "model_id": str(model_id), 
+                        "model_type": model_type, 
+                        "model_name": model_without_tenant.name,
+                        "model_tenant_id": str(model_without_tenant.tenant_id),
+                        "requested_tenant_id": str(tenant_id),
+                        "is_public": model_without_tenant.is_public,
+                        "elapsed_ms": elapsed_ms
+                    }
+                )
+                raise ModelNotFoundError(
+                    model_id=model_id,
+                    model_type=model_type,
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    message=f"{model_type.title()} model {model_id} ({model_without_tenant.name}) belongs to a different tenant (model tenant: {model_without_tenant.tenant_id}, workspace tenant: {tenant_id}). The model is not public and cannot be accessed from this workspace."
+                )
+            else:
+                # Model doesn't exist at all
+                logger.warning(
+                    "Model not found",
+                    extra={"model_id": str(model_id), "model_type": model_type, "elapsed_ms": elapsed_ms}
+                )
+                raise ModelNotFoundError(
+                    model_id=model_id,
+                    model_type=model_type,
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    message=f"{model_type.title()} model {model_id} not found"
+                )
         
         if not model.is_active:
             logger.warning(

@@ -23,9 +23,19 @@ class ConditionDetail(BaseModel):
     )
 
     input_type: ValueInputType = Field(
-        ...,
+        default=ValueInputType.CONSTANT,
         description="Value input type for comparison"
     )
+
+    @field_validator("input_type", mode="before")
+    @classmethod
+    def lower_input_type(cls, v):
+        if isinstance(v, str):
+            try:
+                return ValueInputType(v.lower())
+            except ValueError:
+                raise ValueError(f"Invalid input_type: {v}")
+        return v
 
 
 class ConditionBranchConfig(BaseModel):

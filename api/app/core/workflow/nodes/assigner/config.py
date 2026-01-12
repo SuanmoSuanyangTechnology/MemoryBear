@@ -22,7 +22,7 @@ class AssignmentItem(BaseModel):
     )
 
     value: Any = Field(
-        ...,
+        default=None,
         description="Value(s) to assign to the variable(s)",
     )
 

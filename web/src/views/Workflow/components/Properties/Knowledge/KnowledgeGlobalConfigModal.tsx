@@ -110,7 +110,12 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
             rules={[{ required: true, message: t('common.pleaseEnter') }]}
             extra={t('application.reranker_top_k_desc')}
           >
-            <InputNumber style={{ width: '100%' }} min={1} max={20} />
+            <InputNumber
+              style={{ width: '100%' }}
+              min={1}
+              max={20}
+              onChange={(value) => form.setFieldValue('reranker_top_k', value)}
+            />
           </FormItem>
         </>}
       </Form>
