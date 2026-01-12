@@ -396,6 +396,7 @@ class MemoryAgentService:
         import time
         start_time = time.time()
         ori_message=message
+        end_user_id=group_id
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
             try:
@@ -602,18 +603,24 @@ class MemoryAgentService:
             repo = ShortTermMemoryRepository(db)
             if str(search_switch)!="2":
                 for intermediate in intermediate_outputs:
+                    print(intermediate)
                     intermediate_type=intermediate['type']
                     if intermediate_type=="search_result":
                         query=intermediate['query']
                         raw_results=intermediate['raw_results']
                         reranked_results=raw_results.get('reranked_results',[])
-                        statements=[statement['statement'] for statement in reranked_results.get('statements', [])]
+                        try:
+                            statements=[statement['statement'] for statement in reranked_results.get('statements', [])]
+                        except Exception as e:
+                            statements=[]
                         statements=list(set(statements))
                         retrieved_content.append({query:statements})
-            if   '信息不足，无法回答' in str(final_answer) or retrieved_content!=[]:
+            if retrieved_content==[]:
+                retrieved_content=''
+            if   '信息不足，无法回答。' != str(final_answer) :#and retrieved_content!=[]
                 # 使用 upsert 方法
                 repo.upsert(
-                    end_user_id=group_id,  # 确保这个变量在作用域内
+                    end_user_id=end_user_id,  # 确保这个变量在作用域内
                     messages=ori_message,
                     aimessages=final_answer,
                     retrieved_content=retrieved_content,
