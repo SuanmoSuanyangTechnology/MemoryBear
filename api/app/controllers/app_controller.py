@@ -48,6 +48,7 @@ def list_apps(
         include_shared: bool = True,
         page: int = 1,
         pagesize: int = 10,
+        ids: Optional[str] = None,
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
@@ -55,8 +56,19 @@ def list_apps(
 
     - 默认包含本工作空间的应用和分享给本工作空间的应用
     - 设置 include_shared=false 可以只查看本工作空间的应用
+    - 当提供 ids 参数时，按逗号分割获取指定应用，不分页
     """
     workspace_id = current_user.current_workspace_id
+    service = app_service.AppService(db)
+    
+    # 当 ids 存在且不为 None 时，根据 ids 获取应用
+    if ids is not None:
+        app_ids = [id.strip() for id in ids.split(',') if id.strip()]
+        items_orm = app_service.get_apps_by_ids(db, app_ids, workspace_id)
+        items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
+        return success(data=items)
+    
+    # 正常分页查询
     items_orm, total = app_service.list_apps(
         db,
         workspace_id=workspace_id,
@@ -69,8 +81,6 @@ def list_apps(
         pagesize=pagesize,
     )
 
-    # 使用 AppService 的转换方法来设置 is_shared 字段
-    service = app_service.AppService(db)
     items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
     return success(data=PageData(page=meta, items=items))
