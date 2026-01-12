@@ -506,7 +506,6 @@ class MemoryEmotion:
                 elif emotion_type=='neutral':
                     emotion_type='neutral'
                 group_key = (emotion_type, formatted_created_at)
-                
                 # 累加emotion_intensity
                 try:
                     emotion_groups[group_key] += float(emotion_intensity)
