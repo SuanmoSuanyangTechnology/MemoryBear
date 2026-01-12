@@ -38,9 +38,19 @@ class Entity(BaseModel):
     name_embedding: Optional[List[float]] = Field(None, description="Embedding vector for the entity name")
     type: str = Field(..., description="Type/category of the entity")
     description: str = Field(..., description="Description of the entity")
+    example: str = Field(
+        default="",
+        description="A concise example (around 20 characters) to help understand the entity"
+    )
     aliases: List[str] = Field(
         default_factory=list,
         description="Alternative names for this entity (abbreviations, full names, translations, etc.)"
+    )
+    
+    # Explicit Memory Classification
+    is_explicit_memory: bool = Field(
+        default=False,
+        description="Whether this entity represents explicit/semantic memory (knowledge, concepts, definitions, theories, principles)"
     )
 
 
