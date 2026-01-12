@@ -89,7 +89,7 @@ class ChatResponse(BaseModel):
 # ---------- Conversation Summary Schemas ----------
 class ConversationOut(BaseModel):
     theme: str
-    theme_intro: str
+    question: list[str]
     summary: str
     takeaways: list[str]
     info_score: int
