@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Row, Col, Space, Button } from 'antd';
+import { Space, Button } from 'antd';
 import TopCardList from './components/TopCardList';
 import GuideCard from './components/GuideCard';
 import VersionCard from './components/VersionCard';
@@ -100,8 +100,8 @@ const Index = () => {
 
   return (
     <div className="rb:pb-[24px]">
-      <Row className="rb:mt-[16px]" gutter={16}>
-        <Col span={19}>
+      <div className="rb:mt-[16px] rb:flex rb:gap-4">
+        <div className='rb:flex-1'>
           <div className='rb:flex-col rb:w-full rb:h-[120px] rb:mb-4 rb:p-6 rb:leading-[30px]' style={{backgroundImage: `url(${bgImg})`, backgroundSize: '100% 100%'}}>
               <div className='rb:flex rb:text-[22px] rb:text-[#0041C3] rb:font-semibold'>
                 { t('index.spaceTitle' )}
@@ -121,8 +121,8 @@ const Index = () => {
               
             />
         </div>
-        </Col>
-        <Col span={5}>
+        </div>
+        <div className='rb:flex-0 rb:min-w-80'>
             {/* 引导 */}
             <GuideCard />
             <div className='rb:w-full rb:mt-4 '>
@@ -130,10 +130,10 @@ const Index = () => {
             </div>
             {/* 快捷操作 */}
             <div className='rb:w-full rb:mt-4'>
-                <QuickActions />
+                <QuickActions onNavigate={navigate} />
             </div>
-        </Col>
-      </Row>
+        </div>
+      </div>
 
      
     </div>

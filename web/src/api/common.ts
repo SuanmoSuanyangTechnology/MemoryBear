@@ -23,6 +23,10 @@ export interface DataResponse {
   new_apps_this_week: Number;
   app_week_growth_rate: Number
 }
+export interface versionResponse{
+  version: string;
+  introduction: string;
+}
 // 首页数据统计
 export const getDashboardData = `/home-page/workspaces`
 
@@ -30,4 +34,9 @@ export const getDashboardData = `/home-page/workspaces`
 export const getDashboardStatistics = async () => {
     const response = await request.get(`/home-page/statistics`);
     return response as DataResponse;
+};
+// 获取版本号
+export const getVersion = async () => {
+  const response = await request.get(`/home-page/version`);
+  return response as versionResponse;
 };
