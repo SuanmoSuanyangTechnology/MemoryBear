@@ -338,7 +338,6 @@ class WorkflowExecutor:
                     chunk_count += 1
                     event_type = data.get("type", "node_chunk")  # "message" or "node_chunk"
                     logger.info(f"[CUSTOM] ✅ 收到 {event_type} #{chunk_count} from {data.get('node_id')}")
-
                     yield {
                         "event": event_type,  # "message" or "node_chunk"
                         "data": {
@@ -347,7 +346,8 @@ class WorkflowExecutor:
                             "full_content": data.get("full_content"),
                             "chunk_index": data.get("chunk_index"),
                             "is_prefix": data.get("is_prefix"),
-                            "is_suffix": data.get("is_suffix")
+                            "is_suffix": data.get("is_suffix"),
+                            "conversation_id": input_data.get("conversation_id"),
                         }
                     }
 
