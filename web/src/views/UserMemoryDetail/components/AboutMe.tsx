@@ -48,7 +48,8 @@ const AboutMe = forwardRef<AboutMeRef>((_props, ref) => {
 
   return (
     <RbCard 
-      title={t('userMemory.aboutMe')} 
+      title={t('userMemory.aboutMe')}
+      headerClassName="rb:min-h-[46px]!"
     >
       {loading
         ? <Skeleton className="rb:mt-4" />

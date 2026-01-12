@@ -98,6 +98,7 @@ const NodeStatistics: FC = () => {
     <RbCard 
       title={<>{t('userMemory.nodeStatistics')} <span className="rb:text-[#5B6167] rb:font-normal!">({t('userMemory.total')}: {total})</span></>}
       headerType="borderless"
+      headerClassName="rb:min-h-[46px]!"
     >
       {loading
         ? <Skeleton active />
