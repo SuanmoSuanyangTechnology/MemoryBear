@@ -1,7 +1,7 @@
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { List, Skeleton, Row, Col } from 'antd'
+import { Skeleton, Row, Col } from 'antd'
 import RbCard from '@/components/RbCard/Card'
 import {
   getExplicitMemory,
@@ -65,7 +65,7 @@ const ExplicitDetail: FC = () => {
       {loading ?
         <Skeleton active />
         : data.episodic_memories?.length > 0 ? (
-          <Row gutter={16}>
+          <Row gutter={[16, 16]}>
             {data.episodic_memories.map(item => (
               <Col key={item.id} span={6}>
                 <RbCard
@@ -85,7 +85,7 @@ const ExplicitDetail: FC = () => {
       {loading ?
         <Skeleton active />
         : data.semantic_memories?.length > 0 ? (
-          <Row gutter={16}>
+          <Row gutter={[16, 16]}>
             {data.semantic_memories.map(item => (
               <Col key={item.id} span={6}>
                 <RbCard

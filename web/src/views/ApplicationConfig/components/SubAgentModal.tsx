@@ -40,7 +40,10 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
   const handleSave = () => {
     form.validateFields().then(() => {
       setLoading(false)
-      refresh(values)
+      refresh({
+        ...values,
+        is_active: true
+      })
       handleClose()
     })
   }

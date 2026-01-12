@@ -37,7 +37,7 @@ class ParamsConfig(BaseModel):
     )
 
     required: bool = Field(
-        ...,
+        default=False,
         description="Whether the parameter is required"
     )
 
@@ -59,6 +59,6 @@ class ParameterExtractorNodeConfig(BaseNodeConfig):
     )
 
     prompt: str = Field(
-        ...,
+        default="",
         description="User-provided supplemental prompt"
     )
