@@ -115,7 +115,11 @@ const Menu: FC<{
         return {
           key: menu.path,
           title: menu.i18nKey ? t(menu.i18nKey) : menu.label,
-          label: menu.i18nKey ? t(menu.i18nKey) : menu.label,
+          label: (
+            <span data-menu-id={menu.path}>
+              {menu.i18nKey ? t(menu.i18nKey) : menu.label}
+            </span>
+          ),
           icon: iconSrc ? <img 
             src={iconSrc} 
             className="rb:w-[16px] rb:h-[16px] rb:mr-[8px]" 
