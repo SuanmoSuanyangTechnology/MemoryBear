@@ -656,7 +656,6 @@ class MemoryInteraction:
                     dt = datetime(created_at.year, created_at.month, created_at.day)
                 else:
                     continue
-                    
                 # 计算季度
                 quarter = (dt.month - 1) // 3 + 1
                 quarter_key = f"{dt.year}.Q{quarter}"
