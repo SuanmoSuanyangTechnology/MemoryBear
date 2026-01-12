@@ -30,7 +30,6 @@ const AboutMe = forwardRef<AboutMeRef>((_props, ref) => {
     getData()
   }, [id])
   
-  // 记忆洞察
   const getData = () => {
     if (!id) return
     setLoading(true)

@@ -12,7 +12,7 @@ interface HabitsItem {
   habit_description: string;
   frequency_pattern: string;
   time_context: string;
-  confidence_level: string;
+  confidence_level: number;
   supporting_summaries: string[];
   first_observed: string;
   last_observed: string;
@@ -31,7 +31,6 @@ const Habits: FC = () => {
     getData()
   }, [id])
   
-  // 记忆洞察
   const getData = () => {
     if (!id) return
     setLoading(true)
