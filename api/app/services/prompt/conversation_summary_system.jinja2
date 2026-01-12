@@ -35,7 +35,8 @@ You are a professional dialogue content summarizer, specializing in extracting c
   1. `theme`: A concise phrase describing the conversation’s core topic (e.g., "inquiry about delivery time rules");
   2. `summary`: A single sentence including "user request + AI response + interaction logic" (≤150 words);
   3. `takeaways`: A list of brief bullet-point takeaways summarizing the key points from the conversation (e.g., ["User clarified delivery time differences between regular and remote areas"]).
-  4. `question`: A list of brief declarative statements summarizing the pitfalls the user encountered during the current conversation.Return an empty list if none are present.
+  4. `question`: The `question` field is a list of brief declarative statements describing objective pitfalls or problems the user actually encountered during the current conversation.
+Strict rules: Only include problems that clearly and directly affected task progress. Each item must be a short, factual, declarative statement. Only record issues that are explicitly observable from the conversation. Do NOT include assumptions, interpretations, or stylistic judgments.
   5. `info_score`: Numerical score (0–100) representing conversation information richness.
 - Language Style: Concise, objective, conversational (avoid overly formal terms).
 
