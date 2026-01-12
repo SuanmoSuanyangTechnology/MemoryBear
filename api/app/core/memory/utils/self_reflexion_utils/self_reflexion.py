@@ -54,9 +54,9 @@ async def get_reflexion_data(host_id: uuid.UUID) -> List[Any]:
     Returns:
         符合反思范围的记忆数据列表。
     """
-    if REFLEXION_RANGE == "retrieval":
+    if REFLEXION_RANGE == "partial":
         return await get_data(host_id)
-    elif REFLEXION_RANGE == "database":
+    elif REFLEXION_RANGE == "all":
         return []
     else:
         raise ValueError(f"未知的反思范围: {REFLEXION_RANGE}")

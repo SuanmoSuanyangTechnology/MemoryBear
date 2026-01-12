@@ -173,8 +173,8 @@ class MemoryConfigValidation(BaseModel):
     chunker_strategy: str = Field(default="RecursiveChunker", min_length=1, max_length=100)
     reflexion_enabled: bool = Field(default=False)
     reflexion_iteration_period: int = Field(default=3, ge=1, le=100)
-    reflexion_range: Literal["retrieval", "all"] = Field(default="retrieval")
-    reflexion_baseline: Literal["time", "fact", "time_and_fact"] = Field(default="time")
+    reflexion_range: Literal["partial", "all"] = Field(default="partial")
+    reflexion_baseline: Literal["TIME", "FACT", "HYBRID"] = Field(default="TIME")
     
     llm_params: Dict[str, Any] = Field(default_factory=dict)
     embedding_params: Dict[str, Any] = Field(default_factory=dict)
