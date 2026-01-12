@@ -92,6 +92,11 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
         WHEN entity.description IS NOT NULL AND entity.description <> ''
          AND (e.description IS NULL OR size(e.description) = 0 OR size(entity.description) > size(e.description))
         THEN entity.description ELSE e.description END,
+    e.example = CASE 
+        WHEN entity.example IS NOT NULL AND entity.example <> '' 
+        THEN entity.example 
+        ELSE coalesce(e.example, '') 
+    END,
     e.statement_id = CASE WHEN entity.statement_id IS NOT NULL AND entity.statement_id <> '' THEN entity.statement_id ELSE e.statement_id END,
     e.aliases = CASE
         WHEN entity.aliases IS NOT NULL AND size(entity.aliases) > 0
@@ -121,7 +126,8 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.activation_value = CASE WHEN entity.activation_value IS NOT NULL THEN entity.activation_value ELSE e.activation_value END,
     e.access_history = CASE WHEN entity.access_history IS NOT NULL THEN entity.access_history ELSE coalesce(e.access_history, []) END,
     e.last_access_time = CASE WHEN entity.last_access_time IS NOT NULL THEN entity.last_access_time ELSE e.last_access_time END,
-    e.access_count = CASE WHEN entity.access_count IS NOT NULL THEN entity.access_count ELSE coalesce(e.access_count, 0) END
+    e.access_count = CASE WHEN entity.access_count IS NOT NULL THEN entity.access_count ELSE coalesce(e.access_count, 0) END,
+    e.is_explicit_memory = CASE WHEN entity.is_explicit_memory IS NOT NULL THEN entity.is_explicit_memory ELSE coalesce(e.is_explicit_memory, false) END
 RETURN e.id AS uuid
 """
 

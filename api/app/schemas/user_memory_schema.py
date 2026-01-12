@@ -28,3 +28,16 @@ class EpisodicMemoryDetailsRequest(BaseModel):
     
     end_user_id: str = Field(..., description="终端用户ID")
     summary_id: str = Field(..., description="情景记忆摘要ID")
+
+
+class ExplicitMemoryOverviewRequest(BaseModel):
+    """显性记忆总览查询请求"""
+    
+    end_user_id: str = Field(..., description="终端用户ID")
+
+
+class ExplicitMemoryDetailsRequest(BaseModel):
+    """显性记忆详情查询请求"""
+    
+    end_user_id: str = Field(..., description="终端用户ID")
+    memory_id: str = Field(..., description="记忆ID（情景记忆或语义记忆的ID）")

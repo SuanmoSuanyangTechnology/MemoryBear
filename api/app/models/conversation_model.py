@@ -65,9 +65,9 @@ class ConversationDetail(Base):
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"))
 
     theme = Column(String, comment="会话主题")
-    theme_intro = Column(String, comment="主题介绍")
     summary = Column(String, comment="会话摘要")
     takeaways = Column(JSON, comment="会话要点")
+    question = Column(JSON, comment="用户问题")
     info_score = Column(Integer, comment="会话信息量评分")
 
 
