@@ -42,7 +42,6 @@ from app.core.memory.storage_services.extraction_engine.deduplication.two_stage_
 )
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.embedding_generation import (
     embedding_generation,
-    embedding_generation_all,
     generate_entity_embeddings_from_triplets,
 )
 
@@ -179,7 +178,7 @@ class ExtractionOrchestrator:
             for dialog in dialog_data_list:
                 for chunk in dialog.chunks:
                     all_statements_list.extend(chunk.statements)
-            total_statements = len(all_statements_list)
+            len(all_statements_list)
 
             # 步骤 2: 并行执行三元组提取、时间信息提取、情绪提取和基础嵌入生成
             logger.info("步骤 2/6: 并行执行三元组提取、时间信息提取、情绪提取和嵌入生成")
@@ -201,9 +200,9 @@ class ExtractionOrchestrator:
                         all_entities_list.extend(triplet_info.entities)
                         all_triplets_list.extend(triplet_info.triplets)
             
-            total_entities = len(all_entities_list)
-            total_triplets = len(all_triplets_list)
-            total_temporal = sum(len(temporal_map) for temporal_map in temporal_maps)
+            len(all_entities_list)
+            len(all_triplets_list)
+            sum(len(temporal_map) for temporal_map in temporal_maps)
 
             # 步骤 3: 生成实体嵌入（依赖三元组提取结果）
             logger.info("步骤 3/6: 生成实体嵌入")
@@ -385,7 +384,7 @@ class ExtractionOrchestrator:
         
         # 用于跟踪已完成的陈述句数量
         completed_statements = 0
-        total_statements = len(all_statements)
+        len(all_statements)
 
         # 全局并行处理所有陈述句
         async def extract_for_statement(stmt_data, stmt_index):
@@ -497,7 +496,7 @@ class ExtractionOrchestrator:
         
         # 用于跟踪已完成的时间提取数量
         completed_temporal = 0
-        total_temporal_statements = len(all_statements)
+        len(all_statements)
 
         # 全局并行处理所有陈述句
         async def extract_for_statement(stmt_data, stmt_index):
@@ -1082,10 +1081,12 @@ class ExtractionOrchestrator:
                                     statement_id=statement.id,  # 添加必需的 statement_id 字段
                                     entity_type=getattr(entity, 'type', 'unknown'),  # 使用 type 而不是 entity_type
                                     description=getattr(entity, 'description', ''),  # 添加必需的 description 字段
+                                    example=getattr(entity, 'example', ''),  # 新增：传递示例字段
                                     fact_summary=getattr(entity, 'fact_summary', ''),  # 添加必需的 fact_summary 字段
                                     connect_strength=entity_connect_strength if entity_connect_strength is not None else 'Strong',  # 添加必需的 connect_strength 字段
                                     aliases=getattr(entity, 'aliases', []) or [],  # 传递从三元组提取阶段获取的aliases
                                     name_embedding=getattr(entity, 'name_embedding', None),
+                                    is_explicit_memory=getattr(entity, 'is_explicit_memory', False),  # 新增：传递语义记忆标记
                                     group_id=dialog_data.group_id,
                                     user_id=dialog_data.user_id,
                                     apply_id=dialog_data.apply_id,
