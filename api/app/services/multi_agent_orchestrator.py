@@ -57,7 +57,7 @@ class MultiAgentOrchestrator:
         # 只有 supervisor 模式才需要 default_model_config_id 和 router
         self.master_model_config = None
         self.router = None
-        
+
         if self._normalized_mode == OrchestrationMode.SUPERVISOR:
             # 获取 Master Agent 的模型配置
             if not self.default_model_config_id:
@@ -89,10 +89,10 @@ class MultiAgentOrchestrator:
 
     def _normalize_orchestration_mode(self, mode: str) -> str:
         """标准化 orchestration_mode，兼容旧值
-        
+
         Args:
             mode: 原始的 orchestration_mode 值
-            
+
         Returns:
             标准化后的模式：collaboration 或 supervisor
         """
@@ -162,8 +162,8 @@ class MultiAgentOrchestrator:
                 # 1. 主 Agent 分析任务
                 task_analysis = await self._analyze_task(message, variables)
                 task_analysis["use_llm_routing"] = use_llm_routing
-                
-                async for event in self._execute_conditional_stream(
+
+                async for event in self._execute_supervisor_stream(
                     task_analysis,
                     conversation_id,
                     user_id,
@@ -247,7 +247,7 @@ class MultiAgentOrchestrator:
                     user_id,
                     variables
                 )
-            
+
             # Supervisor 模式：由 Master Agent 统一调度
             # 1. Master Agent 分析任务并做出决策
             task_analysis = await self._analyze_task(message, variables)
@@ -920,7 +920,7 @@ class MultiAgentOrchestrator:
                     "content": final_response
                 })
 
-    async def _execute_conditional_stream(
+    async def _execute_supervisor_stream(
         self,
         task_analysis: Dict[str, Any],
         conversation_id: Optional[uuid.UUID],
@@ -945,6 +945,9 @@ class MultiAgentOrchestrator:
 
         message = task_analysis.get("message", "")
         routing_decision = task_analysis.get("routing_decision")
+        yield self._format_sse_event("routing_decision", {
+            "routing_decision": routing_decision
+        })
 
         # 1. 检查是否需要协作
         if routing_decision and routing_decision.get("need_collaboration"):
@@ -1426,9 +1429,9 @@ class MultiAgentOrchestrator:
         user_rag_memory_id: str = ''
     ):
         """Collaboration 模式流式执行 - Agent 之间可以相互 handoff
-        
+
         使用 handoffs_service 实现 Agent 之间的动态切换
-        
+
         Args:
             message: 用户消息
             conversation_id: 会话 ID
@@ -1437,7 +1440,7 @@ class MultiAgentOrchestrator:
             memory: 是否启用记忆
             storage_type: 存储类型
             user_rag_memory_id: RAG 记忆 ID
-            
+
         Yields:
             SSE 格式的事件流
         """
@@ -1445,39 +1448,39 @@ class MultiAgentOrchestrator:
             convert_multi_agent_config_to_handoffs,
             HandoffsService
         )
-        
+
         try:
             # 1. 构建 multi_agent_config 字典
             multi_agent_config = {
                 "sub_agents": self.config.sub_agents,
                 "orchestration_mode": self.config.orchestration_mode
             }
-            
+
             # 2. 转换配置（每个 Agent 包含自己的 model_config）
             agent_configs = convert_multi_agent_config_to_handoffs(
-                multi_agent_config, 
+                multi_agent_config,
                 self.db
             )
-            
+
             if not agent_configs:
                 raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
-            
+
             # 3. 创建 HandoffsService
             handoffs_service = HandoffsService(
                 agent_configs=agent_configs,
                 streaming=True
             )
-            
+
             # 4. 使用 handoffs_service 的流式聊天
             conv_id = str(conversation_id) if conversation_id else None
-            
+
             async for event in handoffs_service.chat_stream(
                 message=message,
                 conversation_id=conv_id
             ):
                 # handoffs_service 返回的已经是 SSE 格式，直接 yield
                 yield event
-                
+
         except Exception as e:
             logger.error(f"Collaboration 模式执行失败: {str(e)}", exc_info=True)
             yield self._format_sse_event("error", {
@@ -1493,15 +1496,15 @@ class MultiAgentOrchestrator:
         variables: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Collaboration 模式非流式执行 - Agent 之间可以相互 handoff
-        
+
         使用 handoffs_service 实现 Agent 之间的动态切换
-        
+
         Args:
             message: 用户消息
             conversation_id: 会话 ID
             user_id: 用户 ID
             variables: 变量参数
-            
+
         Returns:
             执行结果
         """
@@ -1509,41 +1512,41 @@ class MultiAgentOrchestrator:
             convert_multi_agent_config_to_handoffs,
             HandoffsService
         )
-        
+
         start_time = time.time()
-        
+
         try:
             # 1. 构建 multi_agent_config 字典
             multi_agent_config = {
                 "sub_agents": self.config.sub_agents,
                 "orchestration_mode": self.config.orchestration_mode
             }
-            
+
             # 2. 转换配置（每个 Agent 包含自己的 model_config）
             agent_configs = convert_multi_agent_config_to_handoffs(
-                multi_agent_config, 
+                multi_agent_config,
                 self.db
             )
-            
+
             if not agent_configs:
                 raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
-            
+
             # 3. 创建 HandoffsService
             handoffs_service = HandoffsService(
                 agent_configs=agent_configs,
                 streaming=False
             )
-            
+
             # 4. 使用 handoffs_service 的非流式聊天
             conv_id = str(conversation_id) if conversation_id else None
-            
+
             result = await handoffs_service.chat(
                 message=message,
                 conversation_id=conv_id
             )
-            
+
             elapsed_time = time.time() - start_time
-            
+
             return {
                 "message": result.get("response", ""),
                 "conversation_id": result.get("conversation_id"),
@@ -1552,7 +1555,7 @@ class MultiAgentOrchestrator:
                 "active_agent": result.get("active_agent"),
                 "sub_results": result
             }
-                
+
         except Exception as e:
             logger.error(f"Collaboration 模式执行失败: {str(e)}", exc_info=True)
             raise
@@ -2352,7 +2355,7 @@ class MultiAgentOrchestrator:
                         merged_parts.append(f"**{sub_question}**\n{message}")
                     else:
                         merged_parts.append(message)
-            
+
             if merged_parts:
                 return "\n\n".join(merged_parts)
             return ""
