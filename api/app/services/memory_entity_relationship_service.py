@@ -432,7 +432,7 @@ class MemoryEmotion:
             # 解析ISO格式的日期时间
             dt = datetime.fromisoformat(iso_string.replace('Z', '+00:00'))
             # 返回用户友好的格式：YYYY-MM-DD HH:MM:SS
-            return dt.strftime("%Y-%m-%d %H:%M:%S")
+            return dt.strftime("%Y.%m")
         except (ValueError, AttributeError):
             # 如果解析失败，返回原始字符串
             return iso_string
