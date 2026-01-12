@@ -118,25 +118,22 @@ class ConversationService:
 
     def get_user_conversations(
             self,
-            user_id: uuid.UUID,
-            workspace_id: uuid.UUID,
+            user_id: uuid.UUID
     ) -> list[Conversation]:
         """
-        Retrieve recent conversations for a specific user within a workspace.
+        Retrieve recent conversations for a specific user
 
         This method delegates persistence logic to the repository layer and
         applies service-level defaults (e.g. recent conversation limit).
 
         Args:
             user_id (uuid.UUID): Unique identifier of the user.
-            workspace_id (uuid.UUID): Workspace scope for the query.
 
         Returns:
             list[Conversation]: A list of recent conversation entities.
         """
         conversations = self.conversation_repo.get_conversation_by_user_id(
             user_id,
-            workspace_id,
             limit=10
         )
         return conversations
@@ -465,11 +462,17 @@ class ConversationService:
         conversation = self.get_conversation(
             conversation_id=conversation_id,
         )
-        if conversation_detail:
+        if not conversation:
+            raise BusinessException("Conversation not found", BizCode.INVALID_CONVERSATION)
+        is_stable = (
+                conversation.updated_at
+                and datetime.now() - conversation.updated_at > timedelta(days=1)
+        )
+        if conversation_detail and is_stable:
             logger.info(f"Conversation detail found in repository for conversation_id={conversation_id}")
             return ConversationOut(
                 theme=conversation_detail.theme,
-                theme_intro=conversation_detail.theme_intro,
+                question=conversation_detail.question if conversation_detail.question else [],
                 summary=conversation_detail.summary,
                 takeaways=conversation_detail.takeaways,
                 info_score=conversation_detail.info_score,
@@ -526,6 +529,7 @@ class ConversationService:
             language=language,
             conversation=str(conversation_messages)
         )
+
         messages = [
             (RoleType.SYSTEM, rendered_system_message),
             (RoleType.USER, rendered_user_message),
@@ -547,28 +551,37 @@ class ConversationService:
 
         summary = result.get('summary', "")
         theme = result.get('theme', "")
-        theme_intro = result.get("theme_intro", "")
+        question = result.get("question") or []
         takeaways = result.get("takeaways") or []
         info_score = result.get("info_score", 50)
 
-        if datetime.now() - conversation.updated_at > timedelta(days=1):
-            logger.info(f"Updating conversation detail in DB for conversation_id={conversation_id}")
-            conversation_detail = ConversationDetail(
-                conversation_id=conversation.id,
-                summary=summary,
-                theme=theme,
-                theme_intro=theme_intro,
-                takeaways=takeaways,
-                info_score=info_score
-            )
-            self.conversation_repo.add_conversation_detail(conversation_detail)
+        if not is_stable:
+            if not conversation_detail:
+                logger.info(f"Creating conversation detail in DB for conversation_id={conversation_id}")
+                conversation_detail = ConversationDetail(
+                    conversation_id=conversation.id,
+                    summary=summary,
+                    theme=theme,
+                    question=question,
+                    takeaways=takeaways,
+                    info_score=info_score
+                )
+                self.conversation_repo.add_conversation_detail(conversation_detail)
+            else:
+                logger.info(f"Updating conversation detail in DB for conversation_id={conversation_id}")
+                conversation_detail.summary = summary
+                conversation_detail.theme = theme
+                conversation_detail.question = question
+                conversation_detail.takeaways = takeaways
+                conversation_detail.info_score = info_score
 
             self.db.commit()
             self.db.refresh(conversation_detail)
+
         logger.info(f"Returning conversation summary for conversation_id={conversation_id}")
         conversation_out = ConversationOut(
             theme=theme,
-            theme_intro=theme_intro,
+            question=question,
             summary=summary,
             takeaways=takeaways,
             info_score=info_score

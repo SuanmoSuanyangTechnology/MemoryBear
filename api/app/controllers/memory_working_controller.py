@@ -2,14 +2,13 @@ import uuid
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from app.core.response_utils import success, fail
 
 from app.core.logging_config import get_api_logger
+from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models import User
 from app.schemas.response_schema import ApiResponse
-from app.services import conversation_service
 from app.services.conversation_service import ConversationService
 
 api_logger = get_api_logger()
@@ -54,8 +53,7 @@ def get_conversations(
     """
     conversation_service = ConversationService(db)
     conversations = conversation_service.get_user_conversations(
-        group_id,
-        current_user.current_workspace_id
+        group_id
     )
     return success(data=[
         {
@@ -88,9 +86,17 @@ def get_messages(
         - Logging can be added for audit and debugging.
     """
     conversation_service = ConversationService(db)
-    messages = conversation_service.get_conversation_history(
+    messages_obj = conversation_service.get_messages(
         conversation_id,
     )
+    messages = [
+        {
+            "role": message.role,
+            "content": message.content,
+            "created_at": int(message.created_at.timestamp() * 1000),
+        }
+        for message in messages_obj
+    ]
     return success(data=messages, msg="get conversation history success")
 
 
