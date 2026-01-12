@@ -113,7 +113,7 @@ const WorkingDetail: FC = () => {
                     <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
                       'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === selected?.id,
                     })}
-                      onClick={() => getDetail(item.id)}
+                      onClick={() => setSelected(item)}
                     >
                       {item.title}
                     </div>
