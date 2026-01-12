@@ -1196,10 +1196,6 @@ export const en = {
 
       nodeStatistics: 'Memory Classification',
       total: 'Total',
-      Chunk: 'Long-term Memory',
-      MemorySummary: 'Episodic Memory',
-      Statement: 'Emotional Memory',
-      ExtractedEntity: 'Short-term Memory',
 
       PERCEPTUAL_MEMORY: 'Perceptual Memory',
       WORKING_MEMORY: 'Working Memory',
@@ -1250,6 +1246,10 @@ export const en = {
       timelineMemories: 'Shared Memory Timeline',
       emotionLine: 'Emotion Changes Over Time',
       interaction: 'Interaction Frequency & Relationship Stages',
+      timelines_memory: 'All',
+      MemorySummary: 'Long-term Accumulation',
+      Statement: 'Emotional Memory',
+      ExtractedEntity: 'Episodic Memory',
     },
     space: {
       createSpace: 'Create Space',
@@ -1993,6 +1993,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
     },
     statementDetail: {
       wordCloud: 'Emotion Distribution Analysis',
+      totalCount: 'Sample Count',
       pieces: 'items',
       emotionTags: 'High-Frequency Emotion Keywords',
       joy: 'Joy',
@@ -2287,6 +2288,14 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       emotion: 'Emotion',
       core_definition: 'Core Definition',
       detailed_notes: 'Detailed Notes',
+    },
+    workingDetail: {
+      conversationStream: 'Real-time Conversation Stream',
+      refresh: 'Refresh',
+      successfulTitle: 'Successful Experience',
+      question: 'Lessons Learned',
+      summary: 'Core Insights',
+      none: 'None'
     }
   },
 };

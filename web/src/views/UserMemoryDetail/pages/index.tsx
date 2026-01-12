@@ -11,6 +11,7 @@ import ShortTermDetail from './ShortTermDetail'
 import PerceptualDetail from './PerceptualDetail'
 import EpisodicDetail from './EpisodicDetail'
 import ExplicitDetail from './ExplicitDetail'
+import WorkingDetail from './WorkingDetail'
 import {
   getEndUserProfile,
 } from '@/api/memory'
@@ -63,7 +64,7 @@ const Detail: FC = () => {
         {type === 'SHORT_TERM_MEMORY' && <ShortTermDetail />}
         {type === 'PERCEPTUAL_MEMORY' && <PerceptualDetail />} {/** TODO */}
         {type === 'EPISODIC_MEMORY' && <EpisodicDetail />}
-        {/* {type === 'WORKING_MEMORY' && <WorkingDetail />} */} {/** TODO */}
+        {type === 'WORKING_MEMORY' && <WorkingDetail />} {/** TODO */}
         {type === 'EXPLICIT_MEMORY' && <ExplicitDetail />} {/** TODO */}
       </div>
     </div>

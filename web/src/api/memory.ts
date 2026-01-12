@@ -195,6 +195,15 @@ export const getExplicitMemory = (end_user_id: string) => {
 export const getExplicitMemoryDetails = (data: { end_user_id: string, memory_id: string; }) => {
   return request.post(`/memory-storage/classifications/explicit-memory-details`, data)
 }
+export const getConversations = (end_user: string) => {
+  return request.get(`/memory/work/${end_user}/conversations`)
+}
+export const getConversationMessages = (end_user: string, conversation_id: string) => {
+  return request.get(`/memory/work/${end_user}/messages`, { conversation_id })
+}
+export const getConversationDetail = (end_user: string, conversation_id: string) => {
+  return request.get(`/memory/work/${end_user}/detail`, { conversation_id })
+}
 
 
 /*************** end 用户记忆 相关接口 ******************************/

@@ -1,7 +1,8 @@
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Progress } from 'antd'
+import { Row, Col, Progress } from 'antd'
+import ReactEcharts from 'echarts-for-react'
 
 import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
@@ -58,37 +59,95 @@ const Health: FC = () => {
     <RbCard
       title={t('statementDetail.health')}
       headerType="borderless"
-      headerClassName="rb:text-[18px]! rb:leading-[24px]"
+      headerClassName="rb:leading-[24px] rb:bg-[#F6F8FC]! rb:min-h-[46px]! rb:border-b! rb:border-b-[#DFE4ED]!"
+      bodyClassName="rb:px-[28px]! rb:py-[16px]!"
     >
       {health?.health_score && health?.health_score > 0
         ? <>
-          <div className="rb:flex rb:justify-center rb:items-center">
-            <Progress
-              size={250}
-              type="circle"
-              strokeColor={{
-                '0%': '#108ee9',
-                '100%': '#87d068',
-              }}
-              percent={health.health_score}
-              format={(percent) => `${percent}(${health.level})`}
-            />
-          </div>
+          <Row gutter={59}>
+            <Col span={12}>
+              <div className="rb:flex rb:justify-center rb:items-center">
+                <ReactEcharts
+                  option={{
+                    series: [{
+                      type: 'pie',
+                      radius: ['65%', '80%'],
+                      center: ['50%', '50%'],
+                      startAngle: 90,
+                      data: [
+                        { 
+                          value: health.health_score, 
+                          name: health.level, 
+                          itemStyle: { 
+                            color: '#155EEF',
+                            borderRadius: [10, 10, 10, 10]
+                          } 
+                        },
+                        { 
+                          value: 100 - health.health_score, 
+                          name: '', 
+                          itemStyle: { 
+                            color: '#DFE4ED',
+                            borderRadius: [10, 10, 10, 10]
+                          } 
+                        }
+                      ],
+                      label: {
+                        show: true,
+                        position: 'center',
+                        formatter: '{score|' + health.health_score + '}\n{level|' + health.level + '}',
+                        rich: {
+                          score: {
+                            fontSize: 36,
+                            fontWeight: 'bold',
+                            color: '#212332',
+                            lineHeight: 36
+                          },
+                          level: {
+                            fontSize: 14,
+                            color: '#5B6167',
+                            lineHeight: 20
+                          }
+                        }
+                      },
+                      labelLine: { show: false },
+                      emphasis: { disabled: true },
+                      itemStyle: {
+                        borderRadius: 10
+                      }
+                    }]
+                  }}
+                  style={{ height: '200px', width: '200px' }}
+                />
+              </div>
+            </Col>
+            <Col span={12}>
+              {health.dimensions && <div className="rb:space-y-7">
+                <div>
+                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167]">
+                    {t('statementDetail.positivity_rate')}
+                    <div className="rb:text-[12px] rb:text-[#155EEF] rb:font-medium">{health.dimensions.positivity_rate.score}%</div>
+                  </div>
+                  <Progress strokeColor="#155EEF" percent={health.dimensions.positivity_rate.score} showInfo={false} />
+                </div>
+                <div>
+                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167]">
+                    {t('statementDetail.stability')}
+                    <div className="rb:text-[12px] rb:text-[#155EEF] rb:font-medium">{health.dimensions.stability.score}%</div>
+                  </div>
+                  <Progress strokeColor="#155EEF" percent={health.dimensions.stability.score} showInfo={false} />
+                </div>
+                <div>
+                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167]">
+                    {t('statementDetail.resilience')}
+                    <div className="rb:text-[12px] rb:text-[#155EEF] rb:font-medium">{health.dimensions.resilience.score}%</div>
+                  </div>
+                  <Progress strokeColor="#155EEF" percent={health.dimensions.resilience.score} showInfo={false} />
+                </div>
+              </div>}
+            </Col>
+          </Row>
 
-          {health.dimensions && <>
-            <div className="rb:flex rb:items-center rb:justify-between rb:mt-6">
-              <div className="rb:w-40 rb:mr-3">{t('statementDetail.positivity_rate')}</div> 
-              <Progress className="rb:w-[calc(100%-180px)]" percent={health.dimensions.positivity_rate.score} />
-            </div>
-            <div className="rb:flex rb:items-center rb:gap-3 rb:mt-3">
-              <div className="rb:w-40 rb:mr-3">{t('statementDetail.stability')}</div>
-              <Progress className="rb:w-[calc(100%-180px)]" percent={health.dimensions.stability.score} />
-            </div>
-            <div className="rb:flex rb:items-center rb:gap-3 rb:mt-3">
-              <div className="rb:w-40 rb:mr-3">{t('statementDetail.resilience')}</div> 
-              <Progress className="rb:w-[calc(100%-180px)]" percent={health.dimensions.resilience.score} />
-            </div>
-          </>}
         </>
         : <Empty size={88} className="rb:h-full" />
       }

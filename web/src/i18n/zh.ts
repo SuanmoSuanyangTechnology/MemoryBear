@@ -1275,11 +1275,6 @@ export const zh = {
       nodeStatistics: '记忆分类',
       total: '总计',
 
-      Chunk: '长期记忆',
-      MemorySummary: '情景记忆',
-      Statement: '情绪记忆',
-      ExtractedEntity: '短期记忆',
-
       PERCEPTUAL_MEMORY: '感知记忆',
       WORKING_MEMORY: '工作记忆',
       SHORT_TERM_MEMORY: '短期记忆',
@@ -1331,6 +1326,10 @@ export const zh = {
       timelineMemories: '共同记忆时间线',
       emotionLine: '情绪随时间变化',
       interaction: '互动频率 & 关系阶段',
+      timelines_memory: '全部',
+      MemorySummary: '长期沉淀',
+      Statement: '情绪记忆',
+      ExtractedEntity: '情景记忆',
     },
     space: {
       createSpace: '创建空间',
@@ -2093,6 +2092,7 @@ export const zh = {
     },
     statementDetail: {
       wordCloud: '情感分布分析',
+      totalCount: '样本数',
       pieces: '条',
       emotionTags: '高频情绪关键词',
       joy: '喜悦',
@@ -2387,6 +2387,14 @@ export const zh = {
       emotion: '情绪',
       core_definition: '核心定义',
       detailed_notes: '详细笔记',
+    },
+    workingDetail: {
+      conversationStream: '实时对话流',
+      refresh: '刷新',
+      successfulTitle: '成功经验',
+      question: '踩过的坑',
+      summary: '核心洞察',
+      none: '无'
     }
   },
 }

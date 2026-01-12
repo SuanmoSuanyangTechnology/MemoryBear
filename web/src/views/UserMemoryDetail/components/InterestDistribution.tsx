@@ -63,6 +63,7 @@ const InterestDistribution: FC = () => {
   return (
     <RbCard
       title={t('userMemory.interestDistribution')}
+      headerClassName="rb:min-h-[46px]!"
     >
       {loading
       ? <Loading size={249} />
