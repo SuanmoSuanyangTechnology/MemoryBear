@@ -16,7 +16,7 @@ api_logger = get_api_logger()
 
 router = APIRouter(
     prefix="/memory/work",
-    tags=["Perceptual Memory System"],
+    tags=["Working Memory System"],
     dependencies=[Depends(get_current_user)]
 )
 
@@ -57,7 +57,12 @@ def get_conversations(
         group_id,
         current_user.current_workspace_id
     )
-    return success(data=[conversation.id for conversation in conversations], msg="get conversations success")
+    return success(data=[
+        {
+            "id": conversation.id,
+            "title": conversation.title
+        } for conversation in conversations
+    ], msg="get conversations success")
 
 
 @router.get("/{group_id}/messages", response_model=ApiResponse)
