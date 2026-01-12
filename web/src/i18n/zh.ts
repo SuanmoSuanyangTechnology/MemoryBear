@@ -2361,6 +2361,7 @@ export const zh = {
       context_details: '偏好详情',
       supporting_evidence: '偏好来源',
       specific_examples: '来源',
+      wordEmpty: '点击左侧图表中的节点查看偏好详情'
     },
     shortTermDetail: {
       title: '短期记忆是AI系统的"工作台"，连接即时对话与长期知识库。通过实时捕获、深度检索、智能提取和筛选转化，将临时的非结构化信息转化为有价值的长期知识。',

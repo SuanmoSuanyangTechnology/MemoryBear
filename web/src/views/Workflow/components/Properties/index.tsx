@@ -64,7 +64,7 @@ const Properties: FC<PropertiesProps> = ({
   useEffect(() => {
     if (isSyncingRef.current || lastSyncSourceRef.current === 'mapping' || selectedNode?.data?.type !== 'jinja-render' || !values?.mapping || !values?.template) return
     
-    const currentMappingNames = Array.isArray(values.mapping) ? values.mapping.map((item: any) => item.name).filter(Boolean) : []
+    const currentMappingNames = Array.isArray(values.mapping) ? values.mapping.filter(item => item && item.name).map((item: any) => item.name) : []
     const prevNames = prevMappingNamesRef.current
     
     if (prevNames.length === 0) {
@@ -121,8 +121,8 @@ const Properties: FC<PropertiesProps> = ({
       return
     }
     
-    const updatedMapping = Array.isArray(values.mapping) ? [...values.mapping] : []
-    const existingNames = updatedMapping.map(item => item.name)
+    const updatedMapping = Array.isArray(values.mapping) ? [...values.mapping.filter(item => item)] : []
+    const existingNames = updatedMapping.filter(item => item && item.name).map(item => item.name)
     let updatedTemplate = String(values.template)
     
     if (prevTemplateVarsRef.current.length > 0) {
@@ -157,7 +157,7 @@ const Properties: FC<PropertiesProps> = ({
     
     isSyncingRef.current = true
     lastSyncSourceRef.current = 'template'
-    prevMappingNamesRef.current = finalMapping.map((item: any) => item.name).filter(Boolean)
+    prevMappingNamesRef.current = finalMapping.filter(item => item && item.name).map((item: any) => item.name)
     prevTemplateVarsRef.current = templateVars
     
     if (JSON.stringify(finalMapping) !== JSON.stringify(values.mapping)) {
@@ -391,6 +391,54 @@ const Properties: FC<PropertiesProps> = ({
         }
       }
       
+      // Check if parent loop/iteration is connected to http-request via ERROR connection
+      if (parentData.type === 'loop' || parentData.type === 'iteration') {
+        const parentPreviousNodeIds = getAllPreviousNodes(parentLoopNode.id);
+        parentPreviousNodeIds.forEach(prevNodeId => {
+          const prevNode = nodes.find(n => n.id === prevNodeId);
+          if (!prevNode) return;
+          
+          const prevNodeData = prevNode.getData();
+          if (prevNodeData.type === 'http-request') {
+            // Check if connected via ERROR connection point
+            const errorEdges = edges.filter(edge => {
+              return edge.getTargetCellId() === parentLoopNode.id && 
+              edge.getSourceCellId() === prevNodeId &&
+              edge.getSourcePortId() === 'ERROR'
+            });
+            
+            if (errorEdges.length > 0) {
+              const errorMessageKey = `${prevNodeData.id}_error_message`;
+              const errorTypeKey = `${prevNodeData.id}_error_type`;
+              
+              if (!addedKeys.has(errorMessageKey)) {
+                addedKeys.add(errorMessageKey);
+                variableList.push({
+                  key: errorMessageKey,
+                  label: 'error_message',
+                  type: 'variable',
+                  dataType: 'string',
+                  value: `${prevNodeData.id}.error_message`,
+                  nodeData: prevNodeData,
+                });
+              }
+              
+              if (!addedKeys.has(errorTypeKey)) {
+                addedKeys.add(errorTypeKey);
+                variableList.push({
+                  key: errorTypeKey,
+                  label: 'error_type',
+                  type: 'variable',
+                  dataType: 'string',
+                  value: `${prevNodeData.id}.error_type`,
+                  nodeData: prevNodeData,
+                });
+              }
+            }
+          }
+        });
+      }
+      
       // Add variables from nodes preceding the parent loop/iteration node
       const parentPreviousNodeIds = getAllPreviousNodes(parentLoopNode.id);
       allRelevantNodeIds.push(...parentPreviousNodeIds);
@@ -455,15 +503,15 @@ const Properties: FC<PropertiesProps> = ({
           }
           break
         case 'knowledge-retrieval':
-          const knowledgeKey = `${dataNodeId}_message`;
+          const knowledgeKey = `${dataNodeId}_output`;
           if (!addedKeys.has(knowledgeKey)) {
             addedKeys.add(knowledgeKey);
             variableList.push({
               key: knowledgeKey,
-              label: 'message',
+              label: 'output',
               type: 'variable',
               dataType: 'array[object]',
-              value: `${dataNodeId}.message`,
+              value: `${dataNodeId}.output`,
               nodeData: nodeData,
             });
           }
@@ -571,6 +619,42 @@ const Properties: FC<PropertiesProps> = ({
               nodeData: nodeData,
             });
           }
+          
+          // Check if connected via ERROR connection point
+          const errorEdges = edges.filter(edge => 
+            edge.getTargetCellId() === selectedNode.id && 
+            edge.getSourceCellId() === nodeId &&
+            edge.getSourcePortId() === 'ERROR'
+          );
+          
+          if (errorEdges.length > 0) {
+            const errorMessageKey = `${dataNodeId}_error_message`;
+            const errorTypeKey = `${dataNodeId}_error_type`;
+            
+            if (!addedKeys.has(errorMessageKey)) {
+              addedKeys.add(errorMessageKey);
+              variableList.push({
+                key: errorMessageKey,
+                label: 'error_message',
+                type: 'variable',
+                dataType: 'string',
+                value: `${dataNodeId}.error_message`,
+                nodeData: nodeData,
+              });
+            }
+            
+            if (!addedKeys.has(errorTypeKey)) {
+              addedKeys.add(errorTypeKey);
+              variableList.push({
+                key: errorTypeKey,
+                label: 'error_type',
+                type: 'variable',
+                dataType: 'string',
+                value: `${dataNodeId}.error_type`,
+                nodeData: nodeData,
+              });
+            }
+          }
           break
         case 'jinja-render':
           const jinjaOutputKey = `${dataNodeId}_output`;
@@ -613,7 +697,6 @@ const Properties: FC<PropertiesProps> = ({
           }
           break
         case 'iteration':
-          console.log('iteration addedKeys', addedKeys)
           const iterationOutputKey = `${dataNodeId}_output`;
           const iterationItemKey = `${dataNodeId}_item`;
           if (!addedKeys.has(iterationOutputKey)) {
@@ -651,18 +734,21 @@ const Properties: FC<PropertiesProps> = ({
           break
         case 'loop':
           const cycleVars = nodeData.config.cycle_vars.defaultValue || [];
+          console.log('cycleVars', cycleVars)
           cycleVars.forEach((cycleVar: any) => {
             const cycleVarKey = `${dataNodeId}_cycle_${cycleVar.name}`;
             if (!addedKeys.has(cycleVarKey)) {
               addedKeys.add(cycleVarKey);
-              variableList.push({
-                key: cycleVarKey,
-                label: cycleVar.name,
-                type: 'variable',
-                dataType: cycleVar.type || 'string',
-                value: `${dataNodeId}.${cycleVar.name}`,
-                nodeData: nodeData,
-              });
+              if (cycleVar.name && cycleVar.name.trim() !== '') {
+                variableList.push({
+                  key: cycleVarKey,
+                  label: cycleVar.name,
+                  type: 'variable',
+                  dataType: cycleVar.type || 'string',
+                  value: `${dataNodeId}.${cycleVar.name}`,
+                  nodeData: nodeData,
+                });
+              }
             }
           });
           break
@@ -818,7 +904,11 @@ const Properties: FC<PropertiesProps> = ({
                   
                   return (
                     <Form.Item key={key} name={key}>
-                      <MessageEditor key={key} options={contextVariableList} parentName={key} />
+                      <MessageEditor
+                        key={key} 
+                        options={contextVariableList.filter(variable => variable.nodeData?.type !== 'knowledge-retrieval')} 
+                        parentName={key}
+                      />
                     </Form.Item>
                   )
                 }
@@ -1010,39 +1100,25 @@ const Properties: FC<PropertiesProps> = ({
                       ? <ConditionList
                         parentName={key}
                         options={(() => {
-                          // For loop nodes, add cycle_vars to condition options
-                          if (selectedNode?.data?.type === 'loop') {
-                            const cycleVars = values?.cycle_vars || [];
-                            const cycleVarSuggestions: Suggestion[] = cycleVars.map((cycleVar: any) => ({
-                              key: `${selectedNode.id}_cycle_${cycleVar.name}`,
-                              label: cycleVar.name,
-                              type: 'variable',
-                              dataType: cycleVar.type || 'String',
-                              value: `${selectedNode.getData().id}.${cycleVar.name}`,
-                              nodeData: selectedNode.getData(),
-                            }));
-                            return [...getFilteredVariableList(selectedNode?.data?.type).filter(variable => {
-                              // Keep conversation variables
-                              if (variable.group === 'CONVERSATION') return true;
-                              // Keep sys variables from start nodes
-                              if (variable.nodeData?.type === 'start' && variable.value?.startsWith('sys.')) return true;
-                              // Keep variables from non-start nodes
-                              if (variable.nodeData?.type !== 'start') return true;
-                              // Filter out custom variables from start nodes
-                              return false;
-                            }), ...cycleVarSuggestions];
-                          }
-                          // Filter options for condition list: only sys variables from start nodes and conversation variables
-                          return getFilteredVariableList(selectedNode?.data?.type).filter(variable => {
+                          const cycleVars = values?.cycle_vars || [];
+                          const cycleVarSuggestions: Suggestion[] = cycleVars.filter(vo => vo.name && vo.name.trim() !== '').map((cycleVar: any) => ({
+                            key: `${selectedNode.id}_cycle_${cycleVar.name}`,
+                            label: cycleVar.name,
+                            type: 'variable',
+                            dataType: cycleVar.type || 'String',
+                            value: `${selectedNode.getData().id}.${cycleVar.name}`,
+                            nodeData: selectedNode.getData(),
+                          }));
+                          return [...variableList.filter(variable => {
                             // Keep conversation variables
                             if (variable.group === 'CONVERSATION') return true;
                             // Keep sys variables from start nodes
                             if (variable.nodeData?.type === 'start' && variable.value?.startsWith('sys.')) return true;
                             // Keep variables from non-start nodes
-                            if (variable.nodeData?.type !== 'start') return true;
+                            if (variable.nodeData?.type !== 'start' && variable.nodeData?.type !== 'http-request' && variable.dataType !== 'boolean') return true;
                             // Filter out custom variables from start nodes
                             return false;
-                          });
+                          }), ...cycleVarSuggestions];
                         })()
                       }
                         selectedNode={selectedNode}

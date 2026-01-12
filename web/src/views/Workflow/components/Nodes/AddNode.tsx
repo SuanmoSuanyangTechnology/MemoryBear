@@ -56,7 +56,8 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       graph.addEdge({
         source: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'right')?.id || 'right' },
         target: { cell: edge.getTargetCellId(), port: targetPortId },
-        attrs: edge.getAttrs()
+        attrs: edge.getAttrs(),
+        zIndex: 3
       });
     });
 

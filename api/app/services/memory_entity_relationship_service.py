@@ -490,17 +490,19 @@ class MemoryEmotion:
             # 如果created_at是字符串格式，尝试格式化
             if isinstance(created_at, str):
                 formatted_created_at = self._format_datetime(created_at)
-                
             emotion_type = record.get('emotion_type')
             emotion_intensity = record.get('emotion_intensity')
             if emotion_type !=None:
                 length_data.append(emotion_intensity)
-
-            
             if emotion_type is not None and emotion_intensity is not None and formatted_created_at is not None:
                 # 使用(emotion_type, created_at)作为分组键
+                if emotion_type in {"joy", "surprise"}:
+                    emotion_type='positive'
+                elif emotion_type in {"sadness", "fear", "anger"}:
+                    emotion_type='negative'
+                elif emotion_type=='neutral':
+                    emotion_type='neutral'
                 group_key = (emotion_type, formatted_created_at)
-                
                 # 累加emotion_intensity
                 try:
                     emotion_groups[group_key] += float(emotion_intensity)

@@ -23,10 +23,20 @@ export function parseSSEToJSON(sseString: string) {
         currentEvent.event = line.substring(6).trim()
       } else if (line.startsWith('data:')) {
         const dataStr = line.substring(5).trim()
-        try {
-          currentEvent.data = JSON.parse(dataStr.replace(/"/g, '"'))
-        } catch {
-          currentEvent.data = dataStr
+        if (dataStr) {
+          try {
+            // 尝试解析为 JSON
+            currentEvent.data = JSON.parse(dataStr)
+          } catch {
+            // JSON 解析失败时，检查是否是被转义的 JSON 字符串
+            try {
+              const unescaped = dataStr.replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+              currentEvent.data = JSON.parse(unescaped)
+            } catch {
+              // 如果仍然失败，保存为原始字符串
+              currentEvent.data = dataStr
+            }
+          }
         }
       }
     }

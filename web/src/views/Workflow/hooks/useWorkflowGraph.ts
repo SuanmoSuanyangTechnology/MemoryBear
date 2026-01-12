@@ -342,7 +342,7 @@ export const useWorkflowGraph = ({
                 },
               },
             },
-            zIndex: 0
+            zIndex: targetCell.getData()?.cycle ? 3 : 0
           }
 
           return edgeConfig
@@ -434,13 +434,13 @@ export const useWorkflowGraph = ({
     );
   };
   // 显示/隐藏连接桩
-  const showPorts = (show: boolean) => {
-    const container = containerRef.current!;
-    const ports = container.querySelectorAll('.x6-port-body') as NodeListOf<SVGElement>;
-    for (let i = 0, len = ports.length; i < len; i += 1) {
-      ports[i].style.visibility = show ? 'visible' : 'hidden';
-    }
-  };
+  // const showPorts = (show: boolean) => {
+  //   const container = containerRef.current!;
+  //   const ports = container.querySelectorAll('.x6-port-body') as NodeListOf<SVGElement>;
+  //   for (let i = 0, len = ports.length; i < len; i += 1) {
+  //     ports[i].style.visibility = show ? 'visible' : 'hidden';
+  //   }
+  // };
   // 节点选择事件
   const nodeClick = ({ node }: { node: Node }) => {
     // 忽略 add-node 类型的节点点击
