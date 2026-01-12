@@ -121,7 +121,7 @@ class ConversationService:
             user_id: uuid.UUID
     ) -> list[Conversation]:
         """
-        Retrieve recent conversations for a specific user within a workspace.
+        Retrieve recent conversations for a specific user
 
         This method delegates persistence logic to the repository layer and
         applies service-level defaults (e.g. recent conversation limit).
