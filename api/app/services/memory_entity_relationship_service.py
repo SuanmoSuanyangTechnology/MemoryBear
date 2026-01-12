@@ -498,9 +498,9 @@ class MemoryEmotion:
 
             if emotion_type is not None and emotion_intensity is not None and formatted_created_at is not None:
                 # 使用(emotion_type, created_at)作为分组键
-                if emotion_type=='joy' or emotion_type=='surprise':
+                if emotion_type in {"joy", "surprise"}:
                     emotion_type='positive'
-                elif emotion_type=='sadness' or emotion_type=='fear'  or emotion_type=='anger':
+                elif emotion_type in {"sadness", "fear", "anger"}:
                     emotion_type='negative'
                 elif emotion_type=='neutral':
                     emotion_type='neutral'
