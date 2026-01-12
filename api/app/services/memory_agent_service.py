@@ -529,7 +529,6 @@ class MemoryAgentService:
 
             workflow_duration = time.time() - start
             logger.info(f"Read graph workflow completed in {workflow_duration}s")
-
             # Extract final answer
             final_answer = ""
             for messages in outputs:
