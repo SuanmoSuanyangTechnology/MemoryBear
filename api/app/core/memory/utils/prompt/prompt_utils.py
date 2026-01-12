@@ -386,3 +386,26 @@ async def render_memory_insight_prompt(
     })
     
     return rendered_prompt
+
+
+async def render_episodic_title_and_type_prompt(content: str) -> str:
+    """
+    Renders the episodic title and type classification prompt using the episodic_type_classification.jinja2 template.
+
+    Args:
+        content: The content of the episodic memory summary to analyze
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("episodic_type_classification.jinja2")
+    rendered_prompt = template.render(content=content)
+    
+    # 记录渲染结果到提示日志
+    log_prompt_rendering('episodic title and type classification', rendered_prompt)
+    # 可选：记录模板渲染信息
+    log_template_rendering('episodic_type_classification.jinja2', {
+        'content_len': len(content) if content else 0
+    })
+    
+    return rendered_prompt

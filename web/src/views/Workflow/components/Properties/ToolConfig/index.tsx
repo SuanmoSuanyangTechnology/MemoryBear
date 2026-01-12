@@ -197,7 +197,14 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                 : parameter.type === 'boolean'
                 ? <Switch />
                 : parameter.type === 'integer' || parameter.type === 'number'
-                ? <InputNumber min={parameter.minimum} max={parameter.maximum} step={parameter.type === 'integer' ? 1 : 0.01} placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+                ? <InputNumber
+                    min={parameter.minimum}
+                    max={parameter.maximum}
+                    step={parameter.type === 'integer' ? 1 : 0.01}
+                    placeholder={t('common.pleaseEnter')}
+                    className="rb:w-full!"
+                    onChange={(value) => form.setFieldValue(['tool_parameters', parameter.name], value)}
+                  />
                 : <Editor
                     height={32}
                     variant="outlined"

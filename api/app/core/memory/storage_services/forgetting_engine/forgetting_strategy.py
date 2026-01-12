@@ -247,6 +247,9 @@ class ForgettingStrategy:
         entity_activation = entity_node['entity_activation']
         entity_importance = entity_node['entity_importance']
         
+        # 获取 group_id（从 statement 或 entity 节点）
+        group_id = statement_node.get('group_id') or entity_node.get('group_id')
+        
         # 生成摘要内容
         summary_text = await self._generate_summary(
             statement_text=statement_text,
@@ -255,6 +258,19 @@ class ForgettingStrategy:
             config_id=config_id,
             db=db
         )
+        
+        # 生成标题和类型（使用LLM）
+        from app.services.user_memory_service import UserMemoryService
+        try:
+            title, episodic_type = await UserMemoryService.generate_title_and_type_for_summary(
+                content=summary_text,
+                end_user_id=group_id
+            )
+            logger.info(f"成功为MemorySummary生成标题和类型: title={title}, type={episodic_type}")
+        except Exception as e:
+            logger.error(f"生成标题和类型失败，使用默认值: {str(e)}")
+            title = "未命名"
+            episodic_type = "其他"
         
         # 计算继承的激活值和重要性（取较高值）
         inherited_activation = max(statement_activation, entity_activation)
@@ -267,9 +283,6 @@ class ForgettingStrategy:
         # 生成新的 MemorySummary ID
         import uuid
         summary_id = f"summary_{uuid.uuid4().hex[:16]}"
-        
-        # 获取 group_id（从 statement 或 entity 节点）
-        group_id = statement_node.get('group_id') or entity_node.get('group_id')
         
         # 使用事务创建 MemorySummary 并删除原节点
         async def merge_transaction(tx, **params):
@@ -287,6 +300,8 @@ class ForgettingStrategy:
             CREATE (ms:MemorySummary {
                 id: $summary_id,
                 summary: $summary_text,
+                name: $title,
+                memory_type: $episodic_type,
                 original_statement_id: $statement_id,
                 original_entity_id: $entity_id,
                 activation_value: $inherited_activation,
@@ -386,6 +401,8 @@ class ForgettingStrategy:
         params = {
             'summary_id': summary_id,
             'summary_text': summary_text,
+            'title': title,
+            'episodic_type': episodic_type,
             'statement_id': statement_id,
             'entity_id': entity_id,
             'inherited_activation': inherited_activation,

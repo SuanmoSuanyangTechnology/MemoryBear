@@ -72,7 +72,10 @@ const VariableSelect: FC<VariableSelectProps> = ({
 
   const groupedOptions = Object.entries(groupedSuggestions).map(([_nodeId, suggestions]) => ({
     label: suggestions[0].nodeData.name,
-    options: suggestions.map(s => ({ label: s.label, value: `{{${s.value}}}` }))
+    options: suggestions.map(s => ({ 
+      label: <div className="rb:flex rb:items-center rb:gap-1 rb:justify-between"> { s.label } <span>{s.dataType}</span></div>, 
+      value: `{{${s.value}}}` 
+    }))
   }));
   
   return (

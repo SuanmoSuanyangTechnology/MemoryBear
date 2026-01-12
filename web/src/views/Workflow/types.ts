@@ -74,7 +74,8 @@ export interface WorkflowConfig {
     type: string;
     required: boolean;
     description: string;
-    default: string;
+    default?: string;
+    defaultValue: string;
   }>,
   execution_config: {
     max_execution_time: number;
@@ -114,7 +115,8 @@ export interface ChatVariable {
   type: string;
   required: boolean;
   description: string;
-  default: string;
+  default?: string;
+  defaultValue: string;
 }
 export interface AddChatVariableRef {
   handleOpen: (value?: ChatVariable) => void;

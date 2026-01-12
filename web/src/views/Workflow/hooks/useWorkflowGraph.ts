@@ -63,7 +63,17 @@ export const useWorkflowGraph = ({
     if (!id) return
     getWorkflowConfig(id)
       .then(res => {
-        setConfig(res as WorkflowConfig)
+        const { variables, ...rest } = res as WorkflowConfig
+        setConfig({
+          ...rest,
+          variables: variables.map(v => {
+            const { default: _, ...cleanV } = v
+            return {
+              ...cleanV,
+              defaultValue: v.default ?? ''
+            }
+          })
+        })
       })
   }
 
@@ -332,6 +342,7 @@ export const useWorkflowGraph = ({
                 },
               },
             },
+            zIndex: 0
           }
 
           return edgeConfig
@@ -906,6 +917,13 @@ export const useWorkflowGraph = ({
 
       const params = {
         ...config,
+        variables: config.variables.map(v => {
+            const { defaultValue, ...cleanV } = v
+            return {
+              ...cleanV,
+              default: defaultValue ?? ''
+            }
+          }),
         nodes: nodes.map((node: Node) => {
           const data = node.getData();
           const position = node.getPosition();

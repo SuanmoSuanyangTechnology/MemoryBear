@@ -11,8 +11,8 @@ export interface VariableFormData {
   name: string;
   type: ChatVariable['type'];
   description?: string;
-  required?: boolean;
-  defaultValue?: any;
+  defaultValue?: string;
+  default?: string;
 }
 
 export interface ChatVariableModalRef {

@@ -7,12 +7,13 @@ import dayjs from 'dayjs'
 import RbCard from '@/components/RbCard/Card'
 import ReactEcharts from 'echarts-for-react'
 import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
-import type { Node, Edge, GraphData, StatementNodeProperties, ExtractedEntityNodeProperties } from '../types'
+import type { Node, Edge, GraphData, StatementNodeProperties, ExtractedEntityNodeProperties, GraphDetailRef } from '../types'
 import {
   getMemorySearchEdges,
 } from '@/api/memory'
 import Empty from '@/components/Empty'
 import Tag from '@/components/Tag'
+import GraphDetail from '../components/GraphDetail'
 
 const colors = ['#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
 const RelationshipNetwork:FC = () => {
@@ -25,6 +26,7 @@ const RelationshipNetwork:FC = () => {
   const [categories, setCategories] = useState<{ name: string }[]>([])
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   // const [fullScreen, setFullScreen] = useState<boolean>(false)
+  const graphDetailRef = useRef<GraphDetailRef>(null)
 
   console.log('categories', categories)
   // 关系网络
@@ -139,7 +141,7 @@ const RelationshipNetwork:FC = () => {
 
   const handleViewAll = () => {
     if (!selectedNode) return
-    window.open(`/#/graph/${selectedNode.id}`);
+    graphDetailRef.current?.handleOpen(selectedNode)
   }
 
   return (
@@ -332,6 +334,8 @@ const RelationshipNetwork:FC = () => {
           </div>
         </RbCard>
       </Col>
+
+      <GraphDetail ref={graphDetailRef} />
     </Row>
   )
 }
