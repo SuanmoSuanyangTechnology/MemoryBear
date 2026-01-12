@@ -169,8 +169,12 @@ const ConditionList: FC<CaseListProps> = ({
                                     variant="borderless"
                                     className="rb:w-full!"
                                   />
-                                  : <InputNumber placeholder={t('common.pleaseEnter')}
-                                    variant="borderless" className="rb:w-full!" />
+                                  : <InputNumber
+                                      placeholder={t('common.pleaseEnter')}
+                                      variant="borderless"
+                                      className="rb:w-full!"
+                                      onChange={(value) => form.setFieldValue([parentName, 'expressions', index, 'right'], value)}
+                                    />
                                 }
                               </Form.Item>
                             </Col>

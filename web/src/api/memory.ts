@@ -181,6 +181,20 @@ export const getEpisodicOverview = (data: { end_user_id: string; time_range: str
 export const getEpisodicDetail = (data: { end_user_id: string; summary_id: string; } ) => {
   return request.post(`/memory-storage/classifications/episodic-memory-details`, data)
 }
+// 关系演化
+export const getRelationshipEvolution = (data: { id: string; label: string; } ) => {
+  return request.get(`/memory-storage/memory_space/relationship_evolution`, data)
+}
+// 共同记忆时间线
+export const getTimelineMemories = (data: { id: string; label: string; }) => {
+  return request.get(`/memory-storage/memory_space/timeline_memories`, data)
+}
+export const getExplicitMemory = (end_user_id: string) => {
+  return request.post(`/memory-storage/classifications/explicit-memory`, { end_user_id })
+}
+export const getExplicitMemoryDetails = (data: { end_user_id: string, memory_id: string; }) => {
+  return request.post(`/memory-storage/classifications/explicit-memory-details`, data)
+}
 
 
 /*************** end 用户记忆 相关接口 ******************************/

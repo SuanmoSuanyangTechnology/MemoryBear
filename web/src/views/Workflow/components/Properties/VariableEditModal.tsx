@@ -141,7 +141,11 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
             name="max_length"
             label={t('workflow.config.start.max_length')}
           >
-            <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
+            <InputNumber
+              placeholder={t('common.enter')}
+              style={{ width: '100%' }}
+              onChange={(value) => form.setFieldValue('max_length', value)}
+            />
           </FormItem>
         )}
         {/* 默认值 */}
@@ -151,7 +155,13 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
             label={t('workflow.config.start.default')}
           >
             {['string'].includes(values.type) && <Input placeholder={t('common.enter')} />}
-            {['number'].includes(values.type) && <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />}
+            {['number'].includes(values.type) && (
+              <InputNumber
+                placeholder={t('common.enter')}
+                style={{ width: '100%' }}
+                onChange={(value) => form.setFieldValue('default', value)}
+              />
+            )}
             {['boolean'].includes(values.type) && <Select placeholder={t('common.pleaseSelect')} options={[{ value: true, label: t('workflow.config.start.defaultChecked') }, { value: false, label: t('workflow.config.start.notDefaultChecked') }]} />}
           </FormItem>
         )}
