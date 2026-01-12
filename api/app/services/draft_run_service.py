@@ -315,8 +315,8 @@ class DraftRunService:
                 web_tools = agent_config.tools
                 web_search_choice = web_tools.get("web_search", {})
                 web_search_enable = web_search_choice.get("enabled", False)
-                if web_search == True:
-                    if web_search_enable == True:
+                if web_search:
+                    if web_search_enable:
                         search_tool = create_web_search_tool({})
                         tools.append(search_tool)
 
@@ -523,7 +523,7 @@ class DraftRunService:
             tool_service = ToolService(self.db)
 
             # 从配置中获取启用的工具
-            if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, dict):
+            if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, list):
                 for tool_config in agent_config.tools:
                     if tool_config.get("enabled", False):
                         # 根据工具名称查找工具实例
@@ -540,8 +540,8 @@ class DraftRunService:
                 web_tools = agent_config.tools
                 web_search_choice = web_tools.get("web_search", {})
                 web_search_enable = web_search_choice.get("enabled", False)
-                if web_search == True:
-                    if web_search_enable == True:
+                if web_search:
+                    if web_search_enable:
                         search_tool = create_web_search_tool({})
                         tools.append(search_tool)
 

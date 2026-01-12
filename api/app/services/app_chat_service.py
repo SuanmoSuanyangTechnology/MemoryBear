@@ -113,8 +113,8 @@ class AppChatService:
             web_tools = config.tools
             web_search_choice = web_tools.get("web_search", {})
             web_search_enable = web_search_choice.get("enabled", False)
-            if web_search == True:
-                if web_search_enable == True:
+            if web_search:
+                if web_search_enable:
                     search_tool = create_web_search_tool({})
                     tools.append(search_tool)
 
@@ -263,8 +263,8 @@ class AppChatService:
                 web_tools = config.tools
                 web_search_choice = web_tools.get("web_search", {})
                 web_search_enable = web_search_choice.get("enabled", False)
-                if web_search == True:
-                    if web_search_enable == True:
+                if web_search:
+                    if web_search_enable:
                         search_tool = create_web_search_tool({})
                         tools.append(search_tool)
 
