@@ -33,6 +33,7 @@ from app.services.agent_config_converter import AgentConfigConverter
 from app.models import AppShare, Workspace
 from app.services.model_service import ModelApiKeyService
 from app.services.workflow_service import WorkflowService
+from app.utils.app_config_utils import model_parameters_to_dict
 
 # 获取业务日志器
 logger = get_business_logger()
@@ -1175,7 +1176,7 @@ class AppService:
 
             config = {
                 "system_prompt": agent_cfg.system_prompt,
-                "model_parameters": agent_cfg.model_parameters,
+                "model_parameters": model_parameters_to_dict(agent_cfg.model_parameters),
                 "knowledge_retrieval": agent_cfg.knowledge_retrieval,
                 "memory": agent_cfg.memory,
                 "variables": agent_cfg.variables or [],
@@ -1204,8 +1205,10 @@ class AppService:
             default_model_config_id = multi_agent_cfg.default_model_config_id
 
             # 4. 构建配置快照
+            
+            
             config = {
-                "model_parameters":multi_agent_cfg.model_parameters,
+                "model_parameters": model_parameters_to_dict(multi_agent_cfg.model_parameters),
                 "master_agent_id": str(multi_agent_cfg.master_agent_id),
                 "orchestration_mode": multi_agent_cfg.orchestration_mode,
                 "sub_agents": multi_agent_cfg.sub_agents,

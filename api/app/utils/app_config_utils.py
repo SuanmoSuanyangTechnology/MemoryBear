@@ -5,12 +5,65 @@ Utility functions for converting between dict and model objects for different ap
 """
 
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from datetime import datetime
 
 from app.models import AppRelease, WorkflowConfig
 from app.models.agent_app_config_model import AgentConfig
 from app.models.multi_agent_model import MultiAgentConfig
+
+
+def model_parameters_to_dict(model_parameters: Any) -> Optional[Dict[str, Any]]:
+    """将 ModelParameters 对象转换为字典
+    
+    Args:
+        model_parameters: ModelParameters 对象、字典或 None
+        
+    Returns:
+        字典格式的模型参数，如果输入为 None 则返回 None
+    """
+    if model_parameters is None:
+        return None
+    
+    if isinstance(model_parameters, dict):
+        return model_parameters
+    
+    # Pydantic v2
+    if hasattr(model_parameters, 'model_dump'):
+        return model_parameters.model_dump()
+    
+    # Pydantic v1
+    if hasattr(model_parameters, 'dict'):
+        return model_parameters.dict()
+    
+    # 其他情况尝试转换
+    try:
+        return dict(model_parameters)
+    except (TypeError, ValueError):
+        return None
+
+
+def dict_to_model_parameters(data: Optional[Dict[str, Any]]) -> Optional[Any]:
+    """将字典转换为 ModelParameters 对象
+    
+    Args:
+        data: 字典格式的模型参数或 None
+        
+    Returns:
+        ModelParameters 对象，如果输入为 None 则返回 None
+    """
+    if data is None:
+        return None
+    
+    from app.schemas import ModelParameters
+    
+    if isinstance(data, ModelParameters):
+        return data
+    
+    if isinstance(data, dict):
+        return ModelParameters(**data)
+    
+    return None
 
 class AgentConfigProxy:
     """Proxy class for AgentConfig (legacy compatibility)"""
