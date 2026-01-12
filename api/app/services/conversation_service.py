@@ -468,7 +468,7 @@ class ConversationService:
                 conversation.updated_at
                 and datetime.now() - conversation.updated_at > timedelta(days=1)
         )
-        if conversation_detail and not is_stable:
+        if conversation_detail and is_stable:
             logger.info(f"Conversation detail found in repository for conversation_id={conversation_id}")
             return ConversationOut(
                 theme=conversation_detail.theme,
@@ -555,7 +555,7 @@ class ConversationService:
         takeaways = result.get("takeaways") or []
         info_score = result.get("info_score", 50)
 
-        if is_stable:
+        if not is_stable:
             if not conversation_detail:
                 logger.info(f"Creating conversation detail in DB for conversation_id={conversation_id}")
                 conversation_detail = ConversationDetail(
