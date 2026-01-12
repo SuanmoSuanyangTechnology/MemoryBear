@@ -175,7 +175,8 @@ class MemoryConfigValidation(BaseModel):
     reflexion_iteration_period: int = Field(default=3, ge=1, le=100)
     reflexion_range: Literal["partial", "all"] = Field(default="partial")
     reflexion_baseline: Literal["TIME", "FACT", "HYBRID"] = Field(default="TIME")
-    
+
+
     llm_params: Dict[str, Any] = Field(default_factory=dict)
     embedding_params: Dict[str, Any] = Field(default_factory=dict)
     config_version: str = Field(default="2.0", min_length=1, max_length=10)
