@@ -31,5 +31,8 @@ def get_workspace_list(
 
 @router.get("/version", response_model=ApiResponse)
 def get_system_version():
-    """获取系统版本号"""
-    return success(data={"version": settings.SYSTEM_VERSION}, msg="系统版本获取成功")
+    """获取系统版本号+说明"""
+    return success(data={
+        "version": settings.SYSTEM_VERSION,
+        "introduction": settings.SYSTEM_INTRODUCTION
+    }, msg="系统版本获取成功")

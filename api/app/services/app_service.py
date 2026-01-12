@@ -812,6 +812,37 @@ class AppService:
         )
         return items, int(total)
 
+    def get_apps_by_ids(
+        self,
+        app_ids: List[str],
+        workspace_id: uuid.UUID
+    ) -> List[App]:
+        """根据ID列表获取应用
+
+        Args:
+            app_ids: 应用ID列表
+            workspace_id: 工作空间ID（用于权限验证）
+
+        Returns:
+            List[App]: 应用列表
+        """
+        if not app_ids:
+            return []
+
+        # 转换字符串ID为UUID
+        try:
+            uuid_ids = [uuid.UUID(app_id) for app_id in app_ids]
+        except ValueError:
+            return []
+
+        # 查询本工作空间的应用 + 分享给本工作空间的应用
+        stmt = select(App).where(
+            App.id.in_(uuid_ids),
+            App.workspace_id == workspace_id
+        )
+
+        return list(self.db.scalars(stmt).all())
+
     # ==================== Agent 配置管理 ====================
 
     def update_agent_config(
@@ -2066,6 +2097,16 @@ def list_apps(
         page=page,
         pagesize=pagesize,
     )
+
+
+def get_apps_by_ids(
+    db: Session,
+    app_ids: List[str],
+    workspace_id: uuid.UUID
+) -> List[App]:
+    """根据ID列表获取应用（向后兼容接口）"""
+    service = AppService(db)
+    return service.get_apps_by_ids(app_ids, workspace_id)
 
 
 # ==================== 向后兼容的函数接口 ====================
