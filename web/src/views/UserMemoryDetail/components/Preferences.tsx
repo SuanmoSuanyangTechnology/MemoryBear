@@ -8,6 +8,7 @@ import 'echarts-wordcloud'
 import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
 import { getImplicitPreferences } from '@/api/memory'
+import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
 
 interface PreferenceItem {
   tag_name: string;
@@ -164,7 +165,12 @@ const Preferences: FC = () => {
             bodyClassName='rb:p-3! rb:h-[326px]'
           >
             {selectedWord === null
-              ? <Empty size={88} className="rb:h-full!" />
+              ? <Empty
+                url={detailEmpty}
+                subTitle={t('implicitDetail.wordEmpty')}
+                className="rb:h-full rb:mx-10 rb:text-center"
+                size={[197.81, 150]}
+              />
               : <>
                 <div className="rb:leading-5 rb:mb-1 rb:font-medium">{t('implicitDetail.context_details')}</div>
                 <div className="rb:text-[#5B6167] rb:leading-5 rb:font-regular">{data[selectedWord].context_details}</div>

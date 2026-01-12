@@ -14,6 +14,8 @@ import AutocompletePlugin, { type Suggestion } from './plugin/AutocompletePlugin
 import CharacterCountPlugin from './plugin/CharacterCountPlugin'
 import InitialValuePlugin from './plugin/InitialValuePlugin';
 import CommandPlugin from './plugin/CommandPlugin';
+import Jinja2HighlightPlugin from './plugin/Jinja2HighlightPlugin';
+import LineNumberPlugin from './plugin/LineNumberPlugin';
 import { VariableNode } from './nodes/VariableNode'
 
 interface LexicalEditorProps {
@@ -88,6 +90,35 @@ const Editor: FC<LexicalEditorProps> =({
           .editor-paragraph:has-text('[') .editor-text {
             font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
           }
+          .editor-with-line-numbers {
+            display: flex;
+          }
+          .line-numbers {
+            background-color: #f8f9fa;
+            border-right: 1px solid #e1e4e8;
+            color: #656d76;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 12px;
+            line-height: 20px;
+            padding: 4px 8px;
+            text-align: right;
+            user-select: none;
+            display: flex;
+            flex-direction: column;
+          }
+          .line-numbers > div {
+            min-height: 20px;
+            display: flex;
+            align-items: flex-start;
+          }
+          .editor-content-with-numbers {
+            flex: 1;
+            white-space: pre-wrap;
+          }
+          .editor-content-with-numbers p {
+            margin: 0;
+            min-height: 20px;
+          }
         `;
         document.head.appendChild(style);
       }
@@ -117,25 +148,49 @@ const Editor: FC<LexicalEditorProps> =({
       <div style={{ position: 'relative' }}>
         <RichTextPlugin
           contentEditable={
-            <ContentEditable
-              style={{
-                minHeight: `${height}px`,
-                padding: variant === 'borderless' ? '0' : '4px 11px',
+            enableJinja2 ? (
+              <div className="editor-with-line-numbers" style={{
                 border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
                 borderRadius: '6px',
-                outline: 'none',
-                resize: 'none',
-                fontSize: '14px',
-                lineHeight: '20px',
-              }}
-            />
+                minHeight: `${height}px`,
+              }}>
+                <div className="line-numbers">
+                  <div>1</div>
+                </div>
+                <ContentEditable
+                  className="editor-content-with-numbers"
+                  style={{
+                    minHeight: `${height}px`,
+                    padding: '4px 11px',
+                    outline: 'none',
+                    resize: 'none',
+                    fontSize: '14px',
+                    lineHeight: '20px',
+                    border: 'none',
+                  }}
+                />
+              </div>
+            ) : (
+              <ContentEditable
+                style={{
+                  minHeight: `${height}px`,
+                  padding: variant === 'borderless' ? '0' : '4px 11px',
+                  border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
+                  borderRadius: '6px',
+                  outline: 'none',
+                  resize: 'none',
+                  fontSize: '14px',
+                  lineHeight: '20px',
+                }}
+              />
+            )
           }
           placeholder={
             <div
               style={{
                 position: 'absolute',
                 top: variant === 'borderless' ? '0' : '6px',
-                left: variant === 'borderless' ? '0' : '11px',
+                left: enableJinja2 ? '59px' : (variant === 'borderless' ? '0' : '11px'),
                 color: '#5B6167',
                 fontSize: '14px',
                 lineHeight: '20px',
@@ -149,6 +204,8 @@ const Editor: FC<LexicalEditorProps> =({
         />
         <HistoryPlugin />
         <CommandPlugin />
+        {enableJinja2 && <Jinja2HighlightPlugin />}
+        {enableJinja2 && <LineNumberPlugin />}
         <AutocompletePlugin options={options} enableJinja2={enableJinja2} />
         <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
         <InitialValuePlugin value={value} options={options} enableJinja2={enableJinja2} />

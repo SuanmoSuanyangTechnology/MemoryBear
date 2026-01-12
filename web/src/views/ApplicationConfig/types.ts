@@ -186,6 +186,7 @@ export interface SubAgentItem {
   name: string;
   role: string;
   capabilities: string[];
+  is_active?: boolean;
 }
 export interface SubAgentModalRef {
   handleOpen: (agent?: SubAgentItem) => void;
