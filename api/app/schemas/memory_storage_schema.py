@@ -409,7 +409,7 @@ class ForgettingTriggerRequest(BaseModel):
     """手动触发遗忘周期请求模型"""
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     
-    group_id: str = Field(..., description="组ID（即终端用户ID，必填）")
+    end_user_id: str = Field(..., description="组ID（即终端用户ID，必填）")
     max_merge_batch_size: int = Field(100, ge=1, le=1000, description="单次最大融合节点对数（默认100）")
     min_days_since_access: int = Field(30, ge=1, le=365, description="最小未访问天数（默认30天）")
 
