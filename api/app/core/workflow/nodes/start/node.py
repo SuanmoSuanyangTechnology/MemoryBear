@@ -7,6 +7,7 @@ Start 节点实现
 import logging
 from typing import Any
 
+from app.core.workflow.nodes.base_config import VariableType
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.start.config import StartNodeConfig
 
@@ -113,6 +114,18 @@ class StartNode(BaseNode):
                 logger.debug(
                     f"变量 '{var_name}' 使用默认值: {var_def.default}"
                 )
+            else:
+                match var_def.type:
+                    case VariableType.STRING:
+                        processed[var_name] = ""
+                    case VariableType.NUMBER:
+                        processed[var_name] = 0
+                    case VariableType.OBJECT:
+                        processed[var_name] = {}
+                    case VariableType.BOOLEAN:
+                        processed[var_name] = False
+                    case VariableType.ARRAY_NUMBER | VariableType.ARRAY_OBJECT | VariableType.ARRAY_BOOLEAN | VariableType.ARRAY_STRING:
+                        processed[var_name] = []
 
         return processed
 
