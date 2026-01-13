@@ -401,5 +401,5 @@ class MemoryEpisodicService(MemoryBaseService):
             raise
 
 
-# 创建全局服务实例
+# 创建全局服务实例（供控制器层使用）
 memory_episodic_service = MemoryEpisodicService()
