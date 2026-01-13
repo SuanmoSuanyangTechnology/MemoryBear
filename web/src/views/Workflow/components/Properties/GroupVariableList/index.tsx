@@ -18,8 +18,22 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
   isCanAdd = false
 }) => {
   const { t } = useTranslation();
+  const form = Form.useFormInstance();
+  const value = form.getFieldValue(name) || [];
+
+  console.log('GroupVariableList', value)
 
   if (!isCanAdd) {
+    // Filter options based on first variable's dataType if value exists
+    let filteredOptions = options;
+    if (value.length > 0) {
+      const firstVariableValue = value[0];
+      const firstVariable = options.find(opt => `{{${opt.value}}}` === firstVariableValue);
+      if (firstVariable) {
+        filteredOptions = options.filter(opt => opt.dataType === firstVariable.dataType);
+      }
+    }
+    
     return (
       <div className="rb:mb-4">
         <Row gutter={12} className="rb:mb-2!">
@@ -38,7 +52,7 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
         >
           <VariableSelect
             placeholder={t('common.pleaseSelect')}
-            options={options}
+            options={filteredOptions}
             mode="multiple"
           />
         </Form.Item>
@@ -77,7 +91,18 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
                 >
                   <VariableSelect
                     placeholder={t('common.pleaseSelect')}
-                    options={options}
+                    options={(() => {
+                      const currentGroupValue = value[name]?.value || [];
+                      if (currentGroupValue.length > 0) {
+                        const firstVariableValue = currentGroupValue[0];
+                        const firstVariable = options.find(opt => `{{${opt.value}}}` === firstVariableValue);
+                        if (firstVariable) {
+                          return options.filter(opt => opt.dataType === firstVariable.dataType);
+                        }
+                      }
+                      return options;
+                    })()
+                    }
                     mode="multiple"
                   />
                 </Form.Item>

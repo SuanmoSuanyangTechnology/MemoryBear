@@ -1,19 +1,18 @@
 import React, { type FC, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { Col, Row, Space, Button } from 'antd'
 import dayjs from 'dayjs'
 
 import RbCard from '@/components/RbCard/Card'
 import ReactEcharts from 'echarts-for-react'
 import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
-import type { Node, Edge, GraphData, StatementNodeProperties, ExtractedEntityNodeProperties, GraphDetailRef } from '../types'
+import type { Node, Edge, GraphData, StatementNodeProperties, ExtractedEntityNodeProperties } from '../types'
 import {
   getMemorySearchEdges,
 } from '@/api/memory'
 import Empty from '@/components/Empty'
 import Tag from '@/components/Tag'
-import GraphDetail from '../components/GraphDetail'
 
 const colors = ['#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
 const RelationshipNetwork:FC = () => {
@@ -26,7 +25,7 @@ const RelationshipNetwork:FC = () => {
   const [categories, setCategories] = useState<{ name: string }[]>([])
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   // const [fullScreen, setFullScreen] = useState<boolean>(false)
-  const graphDetailRef = useRef<GraphDetailRef>(null)
+  const navigate = useNavigate()
 
   console.log('categories', categories)
   // 关系网络
@@ -133,15 +132,14 @@ const RelationshipNetwork:FC = () => {
     }
   }, [nodes])
 
-  // const handleFullScreen = () => {
-  //   setFullScreen(prev => !prev)
-  // }
-
-  console.log('selectedNode', selectedNode)
-
   const handleViewAll = () => {
     if (!selectedNode) return
-    graphDetailRef.current?.handleOpen(selectedNode)
+    const params = new URLSearchParams({
+      nodeId: selectedNode.id,
+      nodeLabel: selectedNode.label,
+      nodeName: selectedNode.name || ''
+    })
+    navigate(`/user-memory/detail/${id}/GRAPH?${params.toString()}`)
   }
 
   return (
@@ -336,8 +334,6 @@ const RelationshipNetwork:FC = () => {
           </div>
         </RbCard>
       </Col>
-
-      <GraphDetail ref={graphDetailRef} />
     </Row>
   )
 }
