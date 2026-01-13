@@ -4,12 +4,10 @@
 """
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
-from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.schemas.response_schema import ApiResponse
@@ -32,7 +30,6 @@ router = APIRouter(
 async def get_episodic_memory_overview_api(
     request: EpisodicMemoryOverviewRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ) -> dict:
     """
     获取情景记忆总览
@@ -70,7 +67,7 @@ async def get_episodic_memory_overview_api(
     try:
         # 调用Service层方法
         result = await memory_episodic_service.get_episodic_memory_overview(
-            db, request.end_user_id, request.time_range, request.episodic_type, title_keyword
+            request.end_user_id, request.time_range, request.episodic_type, title_keyword
         )
         
         api_logger.info(
@@ -88,7 +85,6 @@ async def get_episodic_memory_overview_api(
 async def get_episodic_memory_details_api(
     request: EpisodicMemoryDetailsRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ) -> dict:
     """
     获取情景记忆详情
@@ -111,7 +107,6 @@ async def get_episodic_memory_details_api(
     try:
         # 调用Service层方法
         result = await memory_episodic_service.get_episodic_memory_details(
-            db=db,
             end_user_id=request.end_user_id,
             summary_id=request.summary_id
         )
