@@ -53,7 +53,7 @@ nodes:
     type: end
     name: 结束
     config:
-      output: "{{llm_qa.output}}"
+      output: "{{ llm_qa.output }}"
     position:
       x: 900
       y: 100
