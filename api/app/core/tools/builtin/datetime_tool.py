@@ -95,7 +95,7 @@ class DateTimeTool(BuiltinTool):
             
             execution_time = time.time() - start_time
             return ToolResult.success_result(
-                data=result,
+                data=result["result_data"],
                 execution_time=execution_time
             )
             
@@ -123,12 +123,14 @@ class DateTimeTool(BuiltinTool):
         utc_now = datetime.now(timezone.utc)
         
         return {
-            "datetime": now.strftime(output_format),
-            "timestamp": int(now.timestamp()),
             "timezone": timezone_str,
             "iso_format": now.isoformat(),
-            "timestamp_ms": int(now.timestamp() * 1000),
-            "utc_datetime": utc_now.strftime(output_format)
+            "result_data": {
+                "datetime": now.strftime(output_format),
+                "timestamp": int(now.timestamp()),
+                "timestamp_ms": int(now.timestamp() * 1000),
+                "utc_datetime": utc_now.strftime(output_format),
+            }
         }
 
     @staticmethod
@@ -148,7 +150,8 @@ class DateTimeTool(BuiltinTool):
             "original": input_value,
             "formatted": dt.strftime(output_format),
             "timestamp": int(dt.timestamp()),
-            "iso_format": dt.isoformat()
+            "iso_format": dt.isoformat(),
+            "result_data": dt.strftime(output_format)
         }
 
     @staticmethod
@@ -189,7 +192,8 @@ class DateTimeTool(BuiltinTool):
             "original_timezone": from_timezone,
             "converted": converted_dt.strftime(output_format),
             "converted_timezone": to_timezone,
-            "timestamp": int(converted_dt.timestamp())
+            "timestamp": int(converted_dt.timestamp()),
+            "result_data": converted_dt.strftime(output_format)
         }
 
     @staticmethod
@@ -219,7 +223,8 @@ class DateTimeTool(BuiltinTool):
             "timestamp": timestamp,
             "datetime": dt.strftime(output_format),
             "timezone": timezone_str,
-            "iso_format": dt.isoformat()
+            "iso_format": dt.isoformat(),
+            "result_data": dt.strftime(output_format)
         }
 
     @staticmethod
@@ -249,7 +254,8 @@ class DateTimeTool(BuiltinTool):
             "datetime": input_value,
             "timezone": timezone_str,
             "timestamp": int(dt.timestamp()),
-            "iso_format": dt.isoformat()
+            "iso_format": dt.isoformat(),
+            "result_data": int(dt.timestamp())
         }
 
     def _calculate_datetime(self, kwargs) -> dict:
@@ -287,7 +293,8 @@ class DateTimeTool(BuiltinTool):
             "calculation": calculation,
             "result": calculated_dt.strftime(output_format),
             "timezone": timezone_str,
-            "timestamp": int(calculated_dt.timestamp())
+            "timestamp": int(calculated_dt.timestamp()),
+            "result_data": calculated_dt.strftime(output_format)
         }
 
     @staticmethod
