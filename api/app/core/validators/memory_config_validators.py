@@ -11,16 +11,28 @@ Functions:
 """
 
 import time
+import uuid
 from typing import Optional, Union
 from uuid import UUID
 
+from langchain_core.prompts import ChatPromptTemplate
+
 from app.core.logging_config import get_config_logger
+from app.core.models import RedBearEmbeddings, RedBearModelConfig, RedBearLLM
+from app.core.response_utils import success
+from app.schemas import model_schema
 from app.schemas.memory_config_schema import (
     InvalidConfigError,
     ModelInactiveError,
     ModelNotFoundError,
 )
+from app.models.models_model import ModelApiKey
 from sqlalchemy.orm import Session
+
+from fastapi import Depends, Query
+
+from app.schemas.response_schema import PageData
+from app.services.model_service import ModelConfigService
 
 logger = get_config_logger()
 
@@ -224,25 +236,26 @@ def validate_embedding_model(
             config_id=config_id,
             workspace_id=workspace_id
         )
-    
+
+    embd = emb_model_config(embedding_id, db)
+    if embd != "测试成功":
+        models=models_list(db=db,type=model_schema.ModelType.EMBEDDING,tenant_id=tenant_id)
+        models_id=models[0]
+        models_name=models[1]
+        for embedding_id,embedding_name in zip(models_id,models_name):
+            embd = emb_model_config(embedding_id, db)
+            if "测试成功"==embd:
+                embedding_id=embedding_id
+                update_data_config_model_field(db, config_id, "embedding_id", embedding_id)
+                logger.info("已替换失效的embedding_id配置")
+                break
+
     embedding_uuid, _ = validate_and_resolve_model_id(
         embedding_id, "embedding", db, tenant_id, required=True,
         config_id=config_id, workspace_id=workspace_id
     )
-    print(100*'-')
-    print(embedding_uuid)
-    print(_)
-    print(100*'-')
-    
     if embedding_uuid is None:
-        raise InvalidConfigError(
-            f"Configuration {config_id} has no embedding model configured",
-            field_name="embedding_model_id",
-            invalid_value=embedding_id,
-            config_id=config_id,
-            workspace_id=workspace_id
-        )
-    
+        return success(data="缺少可用Embedding配置", msg="模型状态")
     return embedding_uuid
 
 
@@ -254,7 +267,7 @@ def validate_llm_model(
     workspace_id: Optional[UUID] = None
 ) -> UUID:
     """Validate that LLM model is available and return its UUID.
-    
+
     Raises:
         InvalidConfigError: If llm_id is not provided or invalid
         ModelNotFoundError: If LLM model does not exist
@@ -268,19 +281,182 @@ def validate_llm_model(
             config_id=config_id,
             workspace_id=workspace_id
         )
-    
+
+    llm = llm_model_config(llm_id, db)
+    if llm != "测试成功":
+        models=models_list(db=db,type=model_schema.ModelType.LLM,tenant_id=tenant_id)
+        models_id=models[0]
+        models_name=models[1]
+        for llm_id,llm_name in zip(models_id,models_name):
+            llm = emb_model_config(llm_id, db)
+            if "测试成功"==llm:
+                llm_id=llm_id
+                update_data_config_model_field(db, config_id, "llm_id", llm_id)
+                update_data_config_model_field(db, config_id, "llm", llm_id)
+                logger.info("已替换失效的embedding_id配置")
+                break
+
     llm_uuid, _ = validate_and_resolve_model_id(
         llm_id, "llm", db, tenant_id, required=True,
         config_id=config_id, workspace_id=workspace_id
     )
-    
+
     if llm_uuid is None:
-        raise InvalidConfigError(
-            f"Configuration {config_id} has no LLM model configured",
-            field_name="llm_model_id",
-            invalid_value=llm_id,
-            config_id=config_id,
-            workspace_id=workspace_id
-        )
-    
+        return success(data="缺少可用llm配置", msg="模型状态")
     return llm_uuid
+
+def models_list(type: str, db: Session, tenant_id: Optional[UUID] = None):
+    """获取模型列表，返回model_config_id和model_name"""
+    try:
+        from app.services.model_service import ModelConfigService
+        
+        # 将字符串转换为对应的枚举值
+        type_mapping = {
+            "embedding": model_schema.ModelType.EMBEDDING,
+            "llm": model_schema.ModelType.LLM,
+            "chat": model_schema.ModelType.CHAT,
+            "rerank": model_schema.ModelType.RERANK
+        }
+        
+        model_type_enum = type_mapping.get(type.lower())
+        if not model_type_enum:
+            return [], []
+        
+        query = model_schema.ModelConfigQuery(
+            type=[model_type_enum],  # 使用正确的枚举值
+            provider=None,
+            is_active=True,  # 只获取激活的模型
+            is_public=None,
+            search=None,
+            page=1,
+            pagesize=100
+        )
+        
+        get_model = ModelConfigService.get_model_list(db=db, query=query, tenant_id=tenant_id)
+        
+        model_config_ids = []
+        model_names = []
+        
+
+        for model_config in get_model.items:
+            # 模型配置ID (ModelConfig的ID)
+            config_id = model_config.id
+            config_name = model_config.name
+
+            # 从每个API Key中提取信息
+            if model_config.api_keys:
+                for api_key in model_config.api_keys:
+                    model_config_ids.append(config_id)  # 使用ModelConfig的ID
+                    model_names.append(api_key.model_name)  # 使用API Key的model_name
+            else:
+                # 如果没有API Key，也添加配置信息
+                model_config_ids.append(config_id)
+                model_names.append(config_name)
+        return model_config_ids, model_names
+        
+    except Exception as e:
+        print(f"获取模型列表失败: {e}")
+        return [], []
+def emb_model_config(model_id: uuid.UUID, db: Session ):
+    try:
+        config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
+    except Exception as e:
+        return "模型ID不存在"
+    if not config:
+        return "模型ID不存在"
+    try:
+        apiConfig: ModelApiKey = config.api_keys[0]
+        model = RedBearEmbeddings(RedBearModelConfig(
+            model_name=apiConfig.model_name,
+            provider=apiConfig.provider,
+            api_key=apiConfig.api_key,
+            base_url=apiConfig.api_base
+        ))
+        query = "我想找一个适合学习的地方。"
+        query_embedding = model.embed_query(query)
+        return "测试成功"
+    except Exception as e:
+        return "测试失败"
+def llm_model_config(model_id: uuid.UUID, db: Session ):
+    try:
+        config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
+    except Exception as e:
+        return "模型ID不存在"
+    if not config:
+        return "模型ID不存在"
+
+    try:
+        apiConfig: ModelApiKey = config.api_keys[0]
+        llm = RedBearLLM(RedBearModelConfig(
+            model_name=apiConfig.model_name,
+            provider=apiConfig.provider,
+            api_key=apiConfig.api_key,
+            base_url=apiConfig.api_base
+        ), type=config.type)
+        template = """Question: {question}
+
+    Answer: Let's think step by step."""
+        prompt = ChatPromptTemplate.from_template(template)
+        chain = prompt | llm
+        answer = chain.invoke({"question": "What is LangChain?"})
+        print("Answer:", answer)
+        return "测试成功"
+
+    except Exception as e:
+        return "测试失败"
+
+def update_data_config_model_field(db: Session, config_id: int, field_name: str, model_id: UUID) -> bool:
+    """
+    更新data_config表中的模型字段
+    
+    Args:
+        db: 数据库会话
+        config_id: data_config表的config_id
+        field_name: 要更新的字段名 ('embedding_id', 'llm_id', 'rerank_id')
+        model_id: 新的模型ID
+        
+    Returns:
+        bool: 更新成功返回True，失败返回False
+    """
+    try:
+        from app.repositories.data_config_repository import DataConfigRepository
+        from app.services.model_service import ModelConfigService
+        
+        # 验证字段名
+        valid_fields = ['embedding_id', 'llm_id', 'rerank_id']
+        if field_name not in valid_fields:
+            logger.info(f"无效的字段名: {field_name}，支持的字段: {', '.join(valid_fields)}")
+        # 验证模型是否存在
+        try:
+            model = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
+        except Exception as e:
+            logger.info(f"指定的模型不存在: {model_id}")
+            return False
+        
+        # 验证模型类型是否匹配字段
+        field_type_mapping = {
+            'embedding_id': ['embedding'],
+            'llm_id': ['llm', 'chat'],
+            'rerank_id': ['rerank']
+        }
+        
+        expected_types = field_type_mapping.get(field_name, [])
+        if model.type.lower() not in expected_types:
+            logger.info(f"模型类型不匹配: 字段 {field_name} 需要 {'/'.join(expected_types)} 类型的模型，但提供的是 {model.type} 类型")
+            return False
+        
+        # 获取data_config记录
+        config_record = DataConfigRepository.get_by_id(db, config_id)
+        if not config_record:
+            logger.info(f"配置记录不存在: config_id={config_id}")
+            return False
+        # 更新字段
+        setattr(config_record, field_name, str(model_id))
+        db.commit()
+        return True
+        
+    except Exception as e:
+        db.rollback()
+        logger.info(f"数据库更新失败: {str(e)}")
+        return False
+

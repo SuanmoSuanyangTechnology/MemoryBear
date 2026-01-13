@@ -602,7 +602,6 @@ class MemoryAgentService:
             repo = ShortTermMemoryRepository(db)
             if str(search_switch)!="2":
                 for intermediate in intermediate_outputs:
-                    print(intermediate)
                     intermediate_type=intermediate['type']
                     if intermediate_type=="search_result":
                         query=intermediate['query']
