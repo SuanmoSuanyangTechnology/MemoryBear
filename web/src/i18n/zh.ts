@@ -17,6 +17,11 @@ export const zh = {
       spaceTitle:'记忆熊智能空间管理平台',
       spaceSubTitle: '使智能模型的实施变得更加容易——一个集模型管理、知识构建、工作流程编排以及空间操作于一体的综合性平台',
     },
+    version:{
+      releaseDate: '发布日',
+      version: '版本',
+      name: '代号'
+    },
     quickActions:{
       title: '快速操作',
       spaceManagement: '空间管理',
