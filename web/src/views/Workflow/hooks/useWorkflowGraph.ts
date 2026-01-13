@@ -954,7 +954,10 @@ export const useWorkflowGraph = ({
                 itemConfig = {
                   ...itemConfig,
                   ...data.config[key].defaultValue,
-                  knowledge_bases: knowledge_bases?.map((vo: any) => ({ kb_id: vo.id, ...vo.config }))
+                  knowledge_bases: knowledge_bases?.map((vo: any) => {
+                    const kb_config = vo.config || { similarity_threshold: vo.similarity_threshold, strategy: vo.strategy, top_k: vo.top_k, weight: vo.weight }
+                    return { kb_id: vo.kb_id || vo.id, ...kb_config, }
+                  })
                 }
               }
             })
