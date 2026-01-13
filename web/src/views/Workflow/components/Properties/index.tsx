@@ -22,7 +22,7 @@ import ConditionList from './ConditionList'
 import CycleVarsList from './CycleVarsList'
 import AssignmentList from './AssignmentList'
 import ToolConfig from './ToolConfig'
-import { calculateVariableList } from './utils/variableListCalculator'
+// import { calculateVariableList } from './utils/variableListCalculator'
 
 interface PropertiesProps {
   selectedNode?: Node | null; 
@@ -1022,10 +1022,10 @@ const Properties: FC<PropertiesProps> = ({
     return addParentIterationVars(baseList);
   };
 
-  const defaultVariableList = calculateVariableList(selectedNode as Node, graphRef, workflowConfig )
+  // const defaultVariableList = calculateVariableList(selectedNode as Node, graphRef, workflowConfig )
 
   console.log('values', values)
-  console.log('variableList', variableList, defaultVariableList)
+  // console.log('variableList', variableList, defaultVariableList)
 
   return (
     <div className="rb:w-75 rb:fixed rb:right-0 rb:top-16 rb:bottom-0 rb:p-3">
