@@ -37,7 +37,7 @@ class EndNode(BaseNode):
 
         # 如果配置了输出模板，使用模板渲染；否则使用默认输出
         if output_template:
-            output = self._render_template(output_template, state, struct=False)
+            output = self._render_template(output_template, state, strict=False)
         else:
             output = "工作流已完成"
 
@@ -156,6 +156,16 @@ class EndNode(BaseNode):
 
         if not output_template:
             output = "工作流已完成"
+            from langgraph.config import get_stream_writer
+            writer = get_stream_writer()
+            writer({
+                "type": "message",  # End node output uses message type
+                "node_id": self.node_id,
+                "chunk": "",
+                "full_content": output,
+                "chunk_index": 1,
+                "is_suffix": False
+            })
             yield {"__final__": True, "result": output}
             return
 
@@ -190,7 +200,7 @@ class EndNode(BaseNode):
 
         if upstream_llm_ref_index is None:
             # No reference to direct upstream LLM node, output complete template content
-            output = self._render_template(output_template, state)
+            output = self._render_template(output_template, state, strict=False)
             logger.info(f"节点 {self.node_id} 没有引用直接上游 LLM 节点，输出完整内容: '{output[:50]}...'")
 
             # Send complete content via writer (as a single message chunk)
@@ -246,7 +256,7 @@ class EndNode(BaseNode):
         suffix = "".join(suffix_parts)
 
         # 构建完整输出（用于返回，包含前缀 + 动态内容 + 后缀）
-        full_output = self._render_template(output_template, state)
+        full_output = self._render_template(output_template, state, strict=False)
 
         logger.info(f"[后缀调试] 节点 {self.node_id} 后缀部分数量: {len(suffix_parts)}")
         logger.info(f"[后缀调试] 后缀内容: '{suffix}'")

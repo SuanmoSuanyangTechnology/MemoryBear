@@ -45,6 +45,7 @@ class AssignerNode(BaseNode):
 
             # Get the value or expression to assign
             value = assignment.value
+            logger.debug(f"left:{variable_selector}, right: {value}")
             pattern = r"\{\{\s*(.*?)\s*\}\}"
             if isinstance(value, str):
                 expression = re.match(pattern, value)
@@ -85,4 +86,3 @@ class AssignerNode(BaseNode):
                 case _:
                     raise ValueError(f"Invalid Operator: {assignment.operation}")
             logger.info(f"Node {self.node_id}: execution completed")
-
