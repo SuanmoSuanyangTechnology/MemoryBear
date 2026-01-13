@@ -110,7 +110,7 @@ class BaiduSearchTool(BuiltinTool):
             
             execution_time = time.time() - start_time
             return ToolResult.success_result(
-                data=result,
+                data=result["results"],
                 execution_time=execution_time
             )
             
