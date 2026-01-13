@@ -38,7 +38,11 @@ class JinjaRenderNode(BaseNode):
 
         context = {}
         for variable in self.typed_config.mapping:
-            context[variable.name] = self._render_template(variable.value, state)
+            try:
+                context[variable.name] = self.get_variable(variable.value, state)
+            except Exception:
+                logger.info(f"variable not found, var: {variable.value}")
+                continue
 
         try:
             res = render.env.from_string(self.typed_config.template).render(**context)
