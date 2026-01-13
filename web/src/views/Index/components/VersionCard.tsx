@@ -4,11 +4,11 @@
  * @Author: yujiangping
  * @Date: 2026-01-12 16:34:59
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-01-13 17:23:31
+ * @LastEditTime: 2026-01-13 19:14:30
  */
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-// import { Button } from 'antd';
+import { Button, Divider } from 'antd';
 // import arrowRight from '@/assets/images/index/arrow_right.svg'
 import { getVersion, type versionResponse } from '@/api/common'
 
@@ -36,27 +36,29 @@ const GuideCard: React.FC = () => {
   return (
     <div className='rb:w-full rb:p-4 rb:border-1 rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded-xl'>
         <div className='rb:flex rb:items-center rb:justify-start rb:text-[#5B6167] rb:text-base rb:font-semibold rb:gap-2'>
-            { t('index.latestUpdate')}
-            {versionInfo && (<>              
-              <span className='rb:text-sm rb:text-[#1890FF]'>
-                {versionInfo.version}
-              </span>
-              
-            </>)}
+            { t('index.latestUpdate')} 
+            <span className='rb:text-xs rb:text-[#1890FF]'>
+              {versionInfo?.version}
+            </span>
         </div>
-        <div className='rb:flex rb:flex-col rb:text-xs rb:text-[#5B6167] rb:leading-[18px] rb:mt-3 rb:pl-2'>
+        <div className='rb:flex rb:flex-col rb:text-[#5B6167]'>
             {versionInfo && (<>  
-              <p className='rb:text-xs rb:text-[#5B6167]'>
-                  {/* <span className='rb:text-sm rb:text-[#1890FF]'> */}
-                    {versionInfo.introduction?.releaseDate}
-                  {/* </span> */}
-              </p>
-              <p className='rb:text-xs rb:text-[#5B6167]'>  
+              <div className='rb:flex rb:items-center rb:gap-2 rb:text-sm rb:text-[#5B6167] rb:leading-5 '>
+                 
+                  <span className='rb:text-xs rb:text-[#5B6167]'>
+                    {t('version.releaseDate')}: {versionInfo.introduction?.releaseDate}
+                  </span>
+                  <Divider type='vertical' />
+                  <span className='rb:text-xs rb:text-[#5B6167]'>
+                    {t('version.name')}: {versionInfo.introduction?.codeName}
+                  </span>
+              </div>
+              <p className='rb:text-sm rb:text-[#5B6167] rb:leading-5 rb:mt-2 '>  
                   {versionInfo.introduction?.upgradePosition}
               </p>
-              {versionInfo.introduction?.coreUpgrades?.map((item) => (
-                  <p className='rb:text-xs rb:text-[#5B6167]'>
-                    {item}
+              {versionInfo.introduction?.coreUpgrades?.map((item,index) => (
+                  <p className='rb:text-sm rb:text-[#5B6167] rb:leading-5'>
+                    {index + 1}. {item}
                   </p>
               ))}
             </>)}
