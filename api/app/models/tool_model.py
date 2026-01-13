@@ -211,12 +211,11 @@ class ToolExecution(Base):
     token_usage = Column(JSON)
     
     # 用户信息
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
+    user_id = Column(UUID(as_uuid=True), index=True, nullable=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False, index=True)
     
     # 关联关系
     tool_config = relationship("ToolConfig", back_populates="executions")
-    user = relationship("User")
     workspace = relationship("Workspace")
     
     def __repr__(self):
