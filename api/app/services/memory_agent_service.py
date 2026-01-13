@@ -1246,3 +1246,132 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     
     logger.info(f"Successfully retrieved connected config: memory_config_id={memory_config_id}, config_name={config_name}")
     return result
+
+
+def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) -> Dict[str, Dict[str, Any]]:
+    """
+    批量获取多个终端用户关联的记忆配置
+    
+    通过优化的查询减少数据库往返次数：
+    1. 一次性查询所有 end_user 及其 app_id
+    2. 批量查询所有相关的 app_release
+    3. 批量查询所有相关的 data_config
+    
+    Args:
+        end_user_ids: 终端用户ID列表
+        db: 数据库会话
+        
+    Returns:
+        字典，key 为 end_user_id，value 为配置信息字典
+        对于查询失败的用户，value 包含 error 字段
+    """
+    from app.models.app_release_model import AppRelease
+    from app.models.end_user_model import EndUser
+    from app.models.data_config_model import DataConfig
+    from sqlalchemy import select
+    
+    logger.info(f"Batch getting connected configs for {len(end_user_ids)} end users")
+    
+    result = {}
+    
+    # 1. 批量查询所有 end_user 及其 app_id
+    end_users = db.query(EndUser).filter(EndUser.id.in_(end_user_ids)).all()
+    
+    # 构建 end_user_id -> end_user 的映射
+    end_user_map = {str(user.id): user for user in end_users}
+    
+    # 记录不存在的用户
+    for user_id in end_user_ids:
+        if user_id not in end_user_map:
+            result[user_id] = {
+                "end_user_id": user_id,
+                "memory_config_id": None,
+                "memory_config_name": None,
+                "error": f"终端用户不存在: {user_id}"
+            }
+    
+    if not end_users:
+        logger.warning("No valid end users found")
+        return result
+    
+    # 2. 批量查询所有相关应用的最新发布版本
+    app_ids = [user.app_id for user in end_users]
+    
+    # 使用子查询找到每个 app 的最新版本
+    from sqlalchemy import and_
+    
+    # 查询所有相关的活跃发布版本
+    releases = db.query(AppRelease).filter(
+        and_(
+            AppRelease.app_id.in_(app_ids),
+            AppRelease.is_active.is_(True)
+        )
+    ).order_by(AppRelease.app_id, AppRelease.version.desc()).all()
+    
+    # 构建 app_id -> latest_release 的映射（每个 app 只保留最新版本）
+    app_release_map = {}
+    for release in releases:
+        app_id_str = str(release.app_id)
+        if app_id_str not in app_release_map:
+            app_release_map[app_id_str] = release
+    
+    # 3. 收集所有 memory_config_id
+    memory_config_ids = []
+    for release in app_release_map.values():
+        config = release.config or {}
+        memory_obj = config.get('memory', {})
+        memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
+        if memory_config_id:
+            try:
+                config_id = int(memory_config_id) if isinstance(memory_config_id, str) else memory_config_id
+                memory_config_ids.append(config_id)
+            except (ValueError, TypeError):
+                pass
+    
+    # 4. 批量查询所有 data_config
+    config_name_map = {}
+    if memory_config_ids:
+        data_configs = db.query(DataConfig).filter(
+            DataConfig.config_id.in_(memory_config_ids)
+        ).all()
+        config_name_map = {config.config_id: config.config_name for config in data_configs}
+    
+    # 5. 组装结果
+    for user in end_users:
+        user_id = str(user.id)
+        app_id = str(user.app_id)
+        
+        # 检查是否有发布版本
+        if app_id not in app_release_map:
+            result[user_id] = {
+                "end_user_id": user_id,
+                "memory_config_id": None,
+                "memory_config_name": None,
+                "error": f"应用未发布: {app_id}"
+            }
+            continue
+        
+        release = app_release_map[app_id]
+        
+        # 提取 memory_config_id
+        config = release.config or {}
+        memory_obj = config.get('memory', {})
+        memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
+        
+        # 获取 config_name
+        config_name = None
+        if memory_config_id:
+            try:
+                config_id = int(memory_config_id) if isinstance(memory_config_id, str) else memory_config_id
+                config_name = config_name_map.get(config_id)
+            except (ValueError, TypeError):
+                pass
+        
+        result[user_id] = {
+            "end_user_id": user_id,
+            "memory_config_id": memory_config_id,
+            "memory_config_name": config_name
+        }
+    
+    logger.info(f"Successfully retrieved batch configs: total={len(result)}, with_config={sum(1 for v in result.values() if v.get('memory_config_id'))}")
+    return result

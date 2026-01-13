@@ -9,6 +9,7 @@ from app.schemas.memory_agent_schema import End_User_Information
 from app.schemas.response_schema import ApiResponse
 
 from app.services import memory_dashboard_service, memory_storage_service, workspace_service
+from app.services.memory_agent_service import get_end_users_connected_configs_batch
 from app.core.logging_config import get_api_logger
 
 # 获取API专用日志器
@@ -101,8 +102,6 @@ async def get_workspace_end_users(
     返回格式与原 memory_list 接口中的 end_users 字段相同，
     并包含每个用户的记忆配置信息（memory_config_id 和 memory_config_name）
     """
-    from app.services.memory_agent_service import get_end_user_connected_config
-    
     workspace_id = current_user.current_workspace_id
     # 获取当前空间类型
     current_workspace_type = memory_dashboard_service.get_current_workspace_type(db, workspace_id, current_user)
@@ -112,6 +111,17 @@ async def get_workspace_end_users(
         workspace_id=workspace_id,
         current_user=current_user
     )
+    
+    # 批量获取所有用户的记忆配置信息（优化：一次查询而非 N 次）
+    end_user_ids = [str(user.id) for user in end_users]
+    memory_configs_map = {}
+    if end_user_ids:
+        try:
+            memory_configs_map = get_end_users_connected_configs_batch(end_user_ids, db)
+        except Exception as e:
+            api_logger.error(f"批量获取记忆配置失败: {str(e)}")
+            # 失败时使用空字典，不影响其他数据返回
+    
     result = []
     for end_user in end_users:
         memory_num = {}
@@ -123,29 +133,24 @@ async def get_workspace_end_users(
                 "total":memory_dashboard_service.get_current_user_total_chunk(str(end_user.id), db, current_user)
             }
         
-        # 获取记忆配置信息
-        memory_config_info = {
+        # 从批量查询结果中获取配置信息
+        user_id = str(end_user.id)
+        memory_config_info = memory_configs_map.get(user_id, {
             "memory_config_id": None,
             "memory_config_name": None
+        })
+        
+        # 只保留需要的字段，移除 error 字段（如果有）
+        memory_config = {
+            "memory_config_id": memory_config_info.get("memory_config_id"),
+            "memory_config_name": memory_config_info.get("memory_config_name")
         }
-        try:
-            config_data = get_end_user_connected_config(str(end_user.id), db)
-            memory_config_info = {
-                "memory_config_id": config_data.get("memory_config_id"),
-                "memory_config_name": config_data.get("memory_config_name")
-            }
-        except ValueError as e:
-            # 用户没有配置或应用未发布，记录警告但不影响其他数据
-            api_logger.warning(f"获取用户 {end_user.id} 的记忆配置失败: {str(e)}")
-        except Exception as e:
-            # 其他异常也记录但不中断
-            api_logger.warning(f"获取用户 {end_user.id} 的记忆配置异常: {str(e)}")
         
         result.append(
             {
                 'end_user': end_user,
                 'memory_num': memory_num,
-                'memory_config': memory_config_info
+                'memory_config': memory_config
             }
         )
         
