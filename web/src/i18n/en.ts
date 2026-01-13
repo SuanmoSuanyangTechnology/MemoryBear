@@ -1448,6 +1448,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       quickReply: 'Quick Reply',
       web_search: 'Online search',
       memory: 'Memory',
+      memoryConversationAnalysisEmpty: 'There is currently no dialogue analysis content available',
+      memoryConversationAnalysisEmptySubTitle: 'After entering your user ID, click on "Test Memory" to view the conversation memory',
     },
     login: {
       title: 'Red Bear Memory Science',

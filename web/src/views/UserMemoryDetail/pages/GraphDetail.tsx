@@ -117,7 +117,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
         <RbCard>
           <Tabs
             activeKey={activeTab}
-            items={['timelines_memory', 'ExtractedEntity', 'Statement', 'MemorySummary'].map(key => ({
+            items={['timelines_memory', 'Statement', 'MemorySummary'].map(key => ({
               label: t(`userMemory.${key}`),
               key
             }))}
