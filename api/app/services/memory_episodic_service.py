@@ -9,18 +9,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
 from app.core.logging_config import get_logger
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from sqlalchemy.orm import Session
+from app.services.memory_base_service import MemoryBaseService
 
 logger = get_logger(__name__)
 
 
-class MemoryEpisodicService:
+class MemoryEpisodicService(MemoryBaseService):
     """情景记忆服务类"""
     
     def __init__(self):
+        super().__init__()
         logger.info("MemoryEpisodicService initialized")
-        self.neo4j_connector = Neo4jConnector()
     
     async def _get_title_and_type(
         self,
@@ -156,56 +155,6 @@ class MemoryEpisodicService:
             logger.error(f"提取内容记录时出错: {str(e)}", exc_info=True)
             return []
     
-    async def _extract_episodic_emotion(
-        self,
-        summary_id: str,
-        end_user_id: str
-    ) -> Optional[str]:
-        """
-        提取情景记忆的主要情绪
-        
-        Args:
-            summary_id: Summary节点的ID
-            end_user_id: 终端用户ID (group_id)
-            
-        Returns:
-            最大emotion_intensity对应的emotion_type,如果没有则返回None
-        """
-        try:
-            # 查询Summary节点指向的所有Statement节点
-            # 筛选具有emotion_type属性的节点
-            # 按emotion_intensity降序排序,返回第一个
-            query = """
-            MATCH (s:MemorySummary)
-            WHERE elementId(s) = $summary_id AND s.group_id = $group_id
-            MATCH (s)-[:DERIVED_FROM_STATEMENT]->(stmt:Statement)
-            WHERE stmt.emotion_type IS NOT NULL 
-              AND stmt.emotion_intensity IS NOT NULL
-            RETURN stmt.emotion_type AS emotion_type, 
-                   stmt.emotion_intensity AS emotion_intensity
-            ORDER BY emotion_intensity DESC
-            LIMIT 1
-            """
-            
-            result = await self.neo4j_connector.execute_query(
-                query,
-                summary_id=summary_id,
-                group_id=end_user_id
-            )
-            
-            # 提取emotion_type
-            if result and len(result) > 0:
-                emotion_type = result[0].get("emotion_type")
-                logger.info(f"成功提取 summary_id={summary_id} 的情绪: {emotion_type}")
-                return emotion_type
-            else:
-                logger.info(f"summary_id={summary_id} 没有情绪信息")
-                return None
-            
-        except Exception as e:
-            logger.error(f"提取情景记忆情绪时出错: {str(e)}", exc_info=True)
-            return None
-    
     def _calculate_time_filter(self, time_range: str) -> Optional[str]:
         """
         根据时间范围计算过滤的起始时间
@@ -242,7 +191,6 @@ class MemoryEpisodicService:
     
     async def get_episodic_memory_overview(
         self,
-        db: Session,
         end_user_id: str,
         time_range: str = "all",
         episodic_type: str = "all",
@@ -252,7 +200,6 @@ class MemoryEpisodicService:
         获取情景记忆总览信息
         
         Args:
-            db: 数据库会话
             end_user_id: 终端用户ID
             time_range: 时间范围筛选
             episodic_type: 情景类型筛选
@@ -346,14 +293,8 @@ class MemoryEpisodicService:
                     if memory_type != episodic_type and memory_type != chinese_type:
                         continue
                 
-                # 转换时间戳
-                created_at_timestamp = None
-                if created_at_str:
-                    try:
-                        dt_object = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                        created_at_timestamp = int(dt_object.timestamp() * 1000)
-                    except (ValueError, TypeError, AttributeError) as e:
-                        logger.warning(f"无法解析时间戳: {created_at_str}, error={str(e)}")
+                # 使用基类方法转换时间戳
+                created_at_timestamp = self.parse_timestamp(created_at_str)
                 
                 episodic_memories.append({
                     "id": summary_id,
@@ -379,7 +320,6 @@ class MemoryEpisodicService:
     
     async def get_episodic_memory_details(
         self,
-        db: Session,
         end_user_id: str,
         summary_id: str
     ) -> Dict[str, Any]:
@@ -412,14 +352,8 @@ class MemoryEpisodicService:
             record = result[0]
             created_at_str = record.get("created_at")
             
-            # 转换时间戳
-            created_at_timestamp = None
-            if created_at_str:
-                try:
-                    dt_object = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                    created_at_timestamp = int(dt_object.timestamp() * 1000)
-                except (ValueError, TypeError, AttributeError) as e:
-                    logger.warning(f"无法解析时间戳: {created_at_str}, error={str(e)}")
+            # 使用基类方法转换时间戳
+            created_at_timestamp = self.parse_timestamp(created_at_str)
             
             # 4. 调用_get_title_and_type读取标题和类型
             title, episodic_type = await self._get_title_and_type(
@@ -439,8 +373,8 @@ class MemoryEpisodicService:
                 end_user_id=end_user_id
             )
             
-            # 7. 调用_extract_episodic_emotion提取情绪
-            emotion = await self._extract_episodic_emotion(
+            # 7. 使用基类方法提取情绪
+            emotion = await self.extract_episodic_emotion(
                 summary_id=summary_id,
                 end_user_id=end_user_id
             )

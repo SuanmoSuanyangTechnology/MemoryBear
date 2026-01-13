@@ -4,25 +4,23 @@
 处理显性记忆相关的业务逻辑，包括情景记忆和语义记忆的查询。
 """
 
-from typing import Any, Dict, Optional
-from sqlalchemy.orm import Session
+from typing import Any, Dict
 
 from app.core.logging_config import get_logger
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.services.memory_base_service import MemoryBaseService
 
 logger = get_logger(__name__)
 
 
-class MemoryExplicitService:
+class MemoryExplicitService(MemoryBaseService):
     """显性记忆服务类"""
     
     def __init__(self):
+        super().__init__()
         logger.info("MemoryExplicitService initialized")
-        self.neo4j_connector = Neo4jConnector()
     
     async def get_explicit_memory_overview(
         self,
-        db: Session,
         end_user_id: str
     ) -> Dict[str, Any]:
         """
@@ -33,7 +31,6 @@ class MemoryExplicitService:
         2. 语义记忆（semantic_memories）- 来自ExtractedEntity节点（is_explicit_memory=true）
         
         Args:
-            db: 数据库会话
             end_user_id: 终端用户ID
         
         Returns:
@@ -86,15 +83,8 @@ class MemoryExplicitService:
                     content = record.get("content") or ""
                     created_at_str = record.get("created_at")
                     
-                    # 转换时间戳
-                    created_at_timestamp = None
-                    if created_at_str:
-                        try:
-                            from datetime import datetime
-                            dt_object = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                            created_at_timestamp = int(dt_object.timestamp() * 1000)
-                        except (ValueError, TypeError, AttributeError) as e:
-                            logger.warning(f"无法解析时间戳: {created_at_str}, error={str(e)}")
+                    # 使用基类方法转换时间戳
+                    created_at_timestamp = self.parse_timestamp(created_at_str)
                     
                     # 注意：总览接口不返回 emotion 字段
                     episodic_memories.append({
@@ -133,15 +123,8 @@ class MemoryExplicitService:
                     core_definition = record.get("core_definition") or ""
                     created_at_str = record.get("created_at")
                     
-                    # 转换时间戳
-                    created_at_timestamp = None
-                    if created_at_str:
-                        try:
-                            from datetime import datetime
-                            dt_object = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                            created_at_timestamp = int(dt_object.timestamp() * 1000)
-                        except (ValueError, TypeError, AttributeError) as e:
-                            logger.warning(f"无法解析时间戳: {created_at_str}, error={str(e)}")
+                    # 使用基类方法转换时间戳
+                    created_at_timestamp = self.parse_timestamp(created_at_str)
                     
                     # 注意：总览接口不返回 detailed_notes 字段
                     semantic_memories.append({
@@ -173,7 +156,6 @@ class MemoryExplicitService:
 
     async def get_explicit_memory_details(
         self,
-        db: Session,
         end_user_id: str,
         memory_id: str
     ) -> Dict[str, Any]:
@@ -184,7 +166,6 @@ class MemoryExplicitService:
         先尝试查询情景记忆，如果找不到再查询语义记忆。
         
         Args:
-            db: 数据库会话
             end_user_id: 终端用户ID
             memory_id: 记忆ID（可以是情景记忆或语义记忆的ID）
         
@@ -234,18 +215,11 @@ class MemoryExplicitService:
                 content = record.get("content") or ""
                 created_at_str = record.get("created_at")
                 
-                # 转换时间戳
-                created_at_timestamp = None
-                if created_at_str:
-                    try:
-                        from datetime import datetime
-                        dt_object = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                        created_at_timestamp = int(dt_object.timestamp() * 1000)
-                    except (ValueError, TypeError, AttributeError) as e:
-                        logger.warning(f"无法解析时间戳: {created_at_str}, error={str(e)}")
+                # 使用基类方法转换时间戳
+                created_at_timestamp = self.parse_timestamp(created_at_str)
                 
-                # 获取情绪信息
-                emotion = await self._extract_episodic_emotion(
+                # 使用基类方法获取情绪信息
+                emotion = await self.extract_episodic_emotion(
                     summary_id=memory_id,
                     end_user_id=end_user_id
                 )
@@ -284,15 +258,8 @@ class MemoryExplicitService:
                 detailed_notes = record.get("detailed_notes") or ""
                 created_at_str = record.get("created_at")
                 
-                # 转换时间戳
-                created_at_timestamp = None
-                if created_at_str:
-                    try:
-                        from datetime import datetime
-                        dt_object = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                        created_at_timestamp = int(dt_object.timestamp() * 1000)
-                    except (ValueError, TypeError, AttributeError) as e:
-                        logger.warning(f"无法解析时间戳: {created_at_str}, error={str(e)}")
+                # 使用基类方法转换时间戳
+                created_at_timestamp = self.parse_timestamp(created_at_str)
                 
                 logger.info(f"成功获取语义记忆详情: memory_id={memory_id}")
                 return {
@@ -313,53 +280,3 @@ class MemoryExplicitService:
         except Exception as e:
             logger.error(f"获取显性记忆详情时出错: {str(e)}", exc_info=True)
             raise
-
-    async def _extract_episodic_emotion(
-        self,
-        summary_id: str,
-        end_user_id: str
-    ) -> Optional[str]:
-        """
-        提取情景记忆的主要情绪
-        
-        Args:
-            summary_id: Summary节点的ID
-            end_user_id: 终端用户ID (group_id)
-            
-        Returns:
-            最大emotion_intensity对应的emotion_type,如果没有则返回None
-        """
-        try:
-            # 查询Summary节点指向的所有Statement节点
-            # 筛选具有emotion_type属性的节点
-            # 按emotion_intensity降序排序,返回第一个
-            query = """
-            MATCH (s:MemorySummary)
-            WHERE elementId(s) = $summary_id AND s.group_id = $group_id
-            MATCH (s)-[:DERIVED_FROM_STATEMENT]->(stmt:Statement)
-            WHERE stmt.emotion_type IS NOT NULL 
-              AND stmt.emotion_intensity IS NOT NULL
-            RETURN stmt.emotion_type AS emotion_type, 
-                   stmt.emotion_intensity AS emotion_intensity
-            ORDER BY emotion_intensity DESC
-            LIMIT 1
-            """
-            
-            result = await self.neo4j_connector.execute_query(
-                query,
-                summary_id=summary_id,
-                group_id=end_user_id
-            )
-            
-            # 提取emotion_type
-            if result and len(result) > 0:
-                emotion_type = result[0].get("emotion_type")
-                logger.info(f"成功提取 summary_id={summary_id} 的情绪: {emotion_type}")
-                return emotion_type
-            else:
-                logger.info(f"summary_id={summary_id} 没有情绪信息")
-                return None
-            
-        except Exception as e:
-            logger.error(f"提取情景记忆情绪时出错: {str(e)}", exc_info=True)
-            return None

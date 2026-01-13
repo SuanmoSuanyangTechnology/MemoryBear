@@ -4,10 +4,8 @@
 处理显性记忆相关的API接口，包括情景记忆和语义记忆的查询。
 """
 
-from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends
 
-from app.db import get_db
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
@@ -36,7 +34,6 @@ router = APIRouter(
 async def get_explicit_memory_overview_api(
     request: ExplicitMemoryOverviewRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ) -> dict:
     """
     获取显性记忆总览
@@ -58,7 +55,7 @@ async def get_explicit_memory_overview_api(
     try:
         # 调用Service层方法
         result = await memory_explicit_service.get_explicit_memory_overview(
-            db, request.end_user_id
+            request.end_user_id
         )
         
         api_logger.info(
@@ -76,7 +73,6 @@ async def get_explicit_memory_overview_api(
 async def get_explicit_memory_details_api(
     request: ExplicitMemoryDetailsRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ) -> dict:
     """
     获取显性记忆详情
@@ -100,7 +96,6 @@ async def get_explicit_memory_details_api(
     try:
         # 调用Service层方法
         result = await memory_explicit_service.get_explicit_memory_details(
-            db=db,
             end_user_id=request.end_user_id,
             memory_id=request.memory_id
         )
