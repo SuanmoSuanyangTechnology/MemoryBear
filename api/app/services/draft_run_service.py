@@ -55,7 +55,7 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
         长期记忆工具
     """
     # search_switch = memory_config.get("search_switch", "2")
-    config_id= memory_config.get("memory_content",'17')
+    config_id= memory_config.get("memory_content",None)
     logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
     @tool(args_schema=LongTermMemoryInput)
     def long_term_memory(question: str) -> str:
@@ -94,7 +94,7 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                         group_id=end_user_id,
                         message=question,
                         history=[],
-                        search_switch="1",
+                        search_switch="2",
                         config_id=config_id,
                         db=db,
                         storage_type=storage_type,
