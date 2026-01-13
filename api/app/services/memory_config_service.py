@@ -21,7 +21,7 @@ from app.schemas.memory_config_schema import (
     InvalidConfigError,
     MemoryConfig,
     ModelInactiveError,
-    ModelNotFoundError,
+    ModelNotFoundError, ModelValidationStatus,
 )
 from sqlalchemy.orm import Session
 
@@ -150,11 +150,11 @@ class MemoryConfigService:
             model_without_tenant_llm_id = ModelConfigRepository.get_by_id(self.db, memory_config.llm_id)
             model_without_tenant_rerank_id = ModelConfigRepository.get_by_id(self.db, memory_config.rerank_id)
             if model_without_tenant_embedding_id==None:
-                return "缺少Embedding配置"
+                return ModelValidationStatus.EMBEDDING_MISSING
             if model_without_tenant_llm_id==None:
-                return "缺少LLM配置"
+                return ModelValidationStatus.LLM_MISSING
             if model_without_tenant_rerank_id==None:
-                return "缺少RERANK配置"
+                return ModelValidationStatus.RERANK_MISSING
             # Validate embedding model
             embedding_uuid = validate_embedding_model(
                 validated_config_id,

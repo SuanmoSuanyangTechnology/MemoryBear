@@ -26,7 +26,7 @@ from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.memory_short_repository import ShortTermMemoryRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.schemas.memory_config_schema import ConfigurationError
+from app.schemas.memory_config_schema import ConfigurationError, ModelValidationStatus
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
@@ -428,7 +428,7 @@ class MemoryAgentService:
                     config_id=config_id,
                     service_name="MemoryAgentService"
                 )
-                if "缺少" not in memory_config:
+                if memory_config not in [ModelValidationStatus.EMBEDDING_MISSING, ModelValidationStatus.LLM_MISSING, ModelValidationStatus.RERANK_MISSING]:
                     logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
             except ConfigurationError as e:
                 error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
@@ -447,9 +447,11 @@ class MemoryAgentService:
                     )
 
                 raise ValueError(error_msg)
-            if memory_config in ['缺少Embedding配置',"缺少LLM配置","缺少RERANK配置"]:
+            if memory_config in [ModelValidationStatus.EMBEDDING_MISSING, ModelValidationStatus.LLM_MISSING, ModelValidationStatus.RERANK_MISSING]:
                 return {"fail": f"cconfig_id的记忆，{memory_config}"}
-
+            print(100*'-')
+            print(ModelValidationStatus.EMBEDDING_MISSING)
+            print(100*'_')
             # Step 2: Prepare history
             history.append({"role": "user", "content": message})
             logger.debug(f"Group ID:{group_id}, Message:{message}, History:{history}, Config ID:{config_id}")

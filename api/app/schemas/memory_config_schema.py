@@ -17,12 +17,34 @@ Classes:
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Dict, Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 # ==================== Configuration Exception Classes ====================
+class ModelValidationStatus(StrEnum):
+    """模型验证状态枚举"""
+    SUCCESS = "success"
+    FAILED = "failed"
+    MODEL_NOT_FOUND = "model_not_found"
+    EMBEDDING_MISSING = "embedding_missing"
+    LLM_MISSING = "llm_missing"
+    RERANK_MISSING = "rerank_missing"
+
+    @classmethod
+    def get_chinese_message(cls, status: 'ModelValidationStatus') -> str:
+        """获取状态的中文描述"""
+        messages = {
+            cls.SUCCESS: "测试成功",
+            cls.FAILED: "测试失败",
+            cls.MODEL_NOT_FOUND: "模型ID不存在",
+            cls.EMBEDDING_MISSING: "缺少Embedding配置",
+            cls.LLM_MISSING: "缺少LLM配置",
+            cls.RERANK_MISSING: "缺少RERANK配置",
+        }
+        return messages.get(status, str(status))
 
 
 class ConfigurationError(Exception):

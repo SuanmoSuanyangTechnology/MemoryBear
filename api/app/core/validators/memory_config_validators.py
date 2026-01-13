@@ -24,7 +24,7 @@ from app.schemas import model_schema
 from app.schemas.memory_config_schema import (
     InvalidConfigError,
     ModelInactiveError,
-    ModelNotFoundError,
+    ModelNotFoundError, COnfigType,
 )
 from app.models.models_model import ModelApiKey
 from sqlalchemy.orm import Session
@@ -239,13 +239,13 @@ def validate_embedding_model(
     model_without_tenant = ModelConfigRepository.get_by_id(db, embedding_id)
     model_without_tenant_name=model_without_tenant.name
     embd = emb_model_config(embedding_id, db)
-    if embd != "测试成功" :
+    if embd != COnfigType.SUCCESS :
         models=models_list(db=db,type=model_schema.ModelType.EMBEDDING,tenant_id=tenant_id)
         models_id=models[0]
         models_name=models[1]
         for embedding_id,embedding_name in zip(models_id,models_name):
             embd = emb_model_config(embedding_id, db)
-            if "测试成功"==embd and model_without_tenant_name==embedding_name:
+            if COnfigType.SUCCESS==embd and model_without_tenant_name==embedding_name:
                 embedding_id=embedding_id
                 update_data_config_model_field(db, config_id, "embedding_id", embedding_id)
                 logger.info("已替换失效的embedding_id配置")
@@ -375,9 +375,9 @@ def emb_model_config(model_id: uuid.UUID, db: Session ):
     try:
         config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
     except Exception as e:
-        return "模型ID不存在"
+        return COnfigType.MODEL_FAIL
     if not config:
-        return "模型ID不存在"
+        return COnfigType.MODEL_FAIL
     try:
         apiConfig: ModelApiKey = config.api_keys[0]
         model = RedBearEmbeddings(RedBearModelConfig(
@@ -388,16 +388,16 @@ def emb_model_config(model_id: uuid.UUID, db: Session ):
         ))
         query = "我想找一个适合学习的地方。"
         query_embedding = model.embed_query(query)
-        return "测试成功"
+        return COnfigType.SUCCESS
     except Exception as e:
-        return "测试失败"
+        return COnfigType.FAIL
 def llm_model_config(model_id: uuid.UUID, db: Session ):
     try:
         config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
     except Exception as e:
-        return "模型ID不存在"
+        return COnfigType.MODEL_FAIL
     if not config:
-        return "模型ID不存在"
+        return COnfigType.MODEL_FAIL
 
     try:
         apiConfig: ModelApiKey = config.api_keys[0]
@@ -414,10 +414,10 @@ def llm_model_config(model_id: uuid.UUID, db: Session ):
         chain = prompt | llm
         answer = chain.invoke({"question": "What is LangChain?"})
         print("Answer:", answer)
-        return "测试成功"
+        return COnfigType.SUCCESS
 
     except Exception as e:
-        return "测试失败"
+        return COnfigType.FAIL
 
 def update_data_config_model_field(db: Session, config_id: int, field_name: str, model_id: UUID) -> bool:
     """
