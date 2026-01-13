@@ -20,10 +20,6 @@ from app.services.user_memory_service import (
 from app.services.memory_entity_relationship_service import MemoryEntityService,MemoryEmotion,MemoryInteraction
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import GenerateCacheRequest
-from app.schemas.user_memory_schema import (
-    ExplicitMemoryOverviewRequest,
-    ExplicitMemoryDetailsRequest,
-)
 
 from app.schemas.end_user_schema import (
     EndUserProfileResponse,
@@ -438,96 +434,3 @@ async def memory_space_relationship_evolution(id: str, label: str,
     except Exception as e:
         api_logger.error(f"关系演变查询失败: id={id}, table={label}, error={str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "关系演变查询失败", str(e))
-
-
-
-
-
-@router.post("/classifications/explicit-memory", response_model=ApiResponse)
-async def get_explicit_memory_overview_api(
-    request: ExplicitMemoryOverviewRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    """
-    获取显性记忆总览
-    
-    返回指定用户的所有显性记忆列表，包括标题、完整内容、创建时间和情绪信息。
-    """
-    workspace_id = current_user.current_workspace_id
-    
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试查询显性记忆总览但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
-    api_logger.info(
-        f"显性记忆总览查询请求: end_user_id={request.end_user_id}, user={current_user.username}, "
-        f"workspace={workspace_id}"
-    )
-    
-    try:
-        # 调用Service层方法
-        result = await user_memory_service.get_explicit_memory_overview(
-            db, request.end_user_id
-        )
-        
-        api_logger.info(
-            f"成功获取显性记忆总览: end_user_id={request.end_user_id}, "
-            f"total={result['total']}"
-        )
-        return success(data=result, msg="查询成功")
-        
-    except Exception as e:
-        api_logger.error(f"显性记忆总览查询失败: end_user_id={request.end_user_id}, error={str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "显性记忆总览查询失败", str(e))
-
-
-@router.post("/classifications/explicit-memory-details", response_model=ApiResponse)
-async def get_explicit_memory_details_api(
-    request: ExplicitMemoryDetailsRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    """
-    获取显性记忆详情
-    
-    根据 memory_id 返回情景记忆或语义记忆的详细信息。
-    - 情景记忆：包括标题、内容、情绪、创建时间
-    - 语义记忆：包括名称、核心定义、详细笔记、创建时间
-    """
-    workspace_id = current_user.current_workspace_id
-    
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试查询显性记忆详情但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
-    api_logger.info(
-        f"显性记忆详情查询请求: end_user_id={request.end_user_id}, memory_id={request.memory_id}, "
-        f"user={current_user.username}, workspace={workspace_id}"
-    )
-    
-    try:
-        # 调用Service层方法
-        result = await user_memory_service.get_explicit_memory_details(
-            db=db,
-            end_user_id=request.end_user_id,
-            memory_id=request.memory_id
-        )
-        
-        api_logger.info(
-            f"成功获取显性记忆详情: end_user_id={request.end_user_id}, memory_id={request.memory_id}, "
-            f"memory_type={result.get('memory_type')}"
-        )
-        return success(data=result, msg="查询成功")
-        
-    except ValueError as e:
-        # 处理记忆不存在的情况
-        api_logger.warning(f"显性记忆不存在: end_user_id={request.end_user_id}, memory_id={request.memory_id}, error={str(e)}")
-        return fail(BizCode.INVALID_PARAMETER, "显性记忆不存在", str(e))
-    except Exception as e:
-        api_logger.error(f"显性记忆详情查询失败: end_user_id={request.end_user_id}, memory_id={request.memory_id}, error={str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "显性记忆详情查询失败", str(e))
-
-
