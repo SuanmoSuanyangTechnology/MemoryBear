@@ -1,6 +1,7 @@
 import asyncio
+import json
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from uuid import uuid4
 
 from app.core.logging_config import get_memory_logger
@@ -27,6 +28,120 @@ class MemorySummaryResponse(RobustLLMResponse):
         max_length=5000
     )
 
+
+async def generate_title_and_type_for_summary(
+    content: str,
+    end_user_id: str,
+    llm_client
+) -> Tuple[str, str]:
+    """
+    为MemorySummary生成标题和类型
+    
+    此方法应该在创建MemorySummary节点时调用，生成title和type
+    
+    Args:
+        content: Summary的内容文本
+        end_user_id: 终端用户ID (group_id)
+        llm_client: LLM客户端实例
+        
+    Returns:
+        (标题, 类型)元组
+    """
+    from app.core.memory.utils.prompt.prompt_utils import render_episodic_title_and_type_prompt
+    
+    # 定义有效的类型集合
+    VALID_TYPES = {
+        "conversation",      # 对话
+        "project_work",      # 项目/工作
+        "learning",          # 学习
+        "decision",          # 决策
+        "important_event"    # 重要事件
+    }
+    DEFAULT_TYPE = "conversation"  # 默认类型
+    
+    try:
+        if not content:
+            logger.warning("content为空，无法生成标题和类型")
+            return ("空内容", DEFAULT_TYPE)
+        
+        # 1. 渲染Jinja2提示词模板
+        prompt = await render_episodic_title_and_type_prompt(content)
+        
+        # 2. 调用LLM生成标题和类型
+        messages = [
+            {"role": "user", "content": prompt}
+        ]
+        
+        response = await llm_client.chat(messages=messages)
+        
+        # 3. 解析LLM响应
+        content_response = response.content
+        if isinstance(content_response, list):
+            if len(content_response) > 0:
+                if isinstance(content_response[0], dict):
+                    text = content_response[0].get('text', content_response[0].get('content', str(content_response[0])))
+                    full_response = str(text)
+                else:
+                    full_response = str(content_response[0])
+            else:
+                full_response = ""
+        elif isinstance(content_response, dict):
+            full_response = str(content_response.get('text', content_response.get('content', str(content_response))))
+        else:
+            full_response = str(content_response) if content_response is not None else ""
+        
+        # 4. 解析JSON响应
+        try:
+            # 尝试从响应中提取JSON
+            # 移除可能的markdown代码块标记
+            json_str = full_response.strip()
+            if json_str.startswith("```json"):
+                json_str = json_str[7:]
+            if json_str.startswith("```"):
+                json_str = json_str[3:]
+            if json_str.endswith("```"):
+                json_str = json_str[:-3]
+            json_str = json_str.strip()
+            
+            result_data = json.loads(json_str)
+            title = result_data.get("title", "未知标题")
+            episodic_type_raw = result_data.get("type", DEFAULT_TYPE)
+            
+            # 5. 校验和归一化类型
+            # 将类型转换为小写并去除空格
+            episodic_type_normalized = str(episodic_type_raw).lower().strip()
+            
+            # 检查是否在有效类型集合中
+            if episodic_type_normalized in VALID_TYPES:
+                episodic_type = episodic_type_normalized
+            else:
+                # 尝试映射常见的中文类型到英文
+                type_mapping = {
+                    "对话": "conversation",
+                    "项目": "project_work",
+                    "工作": "project_work",
+                    "项目/工作": "project_work",
+                    "学习": "learning",
+                    "决策": "decision",
+                    "重要事件": "important_event",
+                    "事件": "important_event"
+                }
+                episodic_type = type_mapping.get(episodic_type_raw, DEFAULT_TYPE)
+                logger.warning(
+                    f"LLM返回的类型 '{episodic_type_raw}' 不在有效集合中，"
+                    f"已归一化为 '{episodic_type}'"
+                )
+            
+            logger.info(f"成功生成标题和类型: title={title}, type={episodic_type}")
+            return (title, episodic_type)
+            
+        except json.JSONDecodeError:
+            logger.error(f"无法解析LLM响应为JSON: {full_response}")
+            return ("解析失败", DEFAULT_TYPE)
+        
+    except Exception as e:
+        logger.error(f"生成标题和类型时出错: {str(e)}", exc_info=True)
+        return ("错误", DEFAULT_TYPE)
 
 async def _process_chunk_summary(
     dialog: DialogData,
@@ -63,10 +178,10 @@ async def _process_chunk_summary(
         title = None
         episodic_type = None
         try:
-            from app.services.user_memory_service import UserMemoryService
-            title, episodic_type = await UserMemoryService.generate_title_and_type_for_summary(
+            title, episodic_type = await generate_title_and_type_for_summary(
                 content=summary_text,
-                end_user_id=dialog.group_id
+                end_user_id=dialog.group_id,
+                llm_client=llm_client
             )
             logger.info(f"Generated title and type for MemorySummary: title={title}, type={episodic_type}")
         except Exception as e:
