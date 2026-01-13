@@ -29,6 +29,7 @@ export interface versionResponse{
     releaseDate: string;
     upgradePosition: string;
     coreUpgrades: string[];
+    codeName: string;
   };
 }
 // 首页数据统计

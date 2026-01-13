@@ -17,6 +17,11 @@ export const en = {
       spaceTitle:'Memory Bear Intelligent Space Management Platform',
       spaceSubTitle: 'Making it easier to implement intelligent models - a one-stop platform for model management, knowledge building, workflow orchestration, and spatial operations',
     },
+    version:{
+      releaseDate: 'Release Date',
+      version: 'Version',
+      name: 'Code Name'
+    },
     quickActions:{
       title: 'Quick Actions',
       spaceManagement: 'Space Management',
