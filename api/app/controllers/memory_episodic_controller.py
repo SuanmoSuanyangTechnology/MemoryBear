@@ -13,9 +13,9 @@ from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.schemas.response_schema import ApiResponse
-from app.schemas.user_memory_schema import (
-    EpisodicMemoryDetailsRequest,
+from app.schemas.memory_episodic_schema import (
     EpisodicMemoryOverviewRequest,
+    EpisodicMemoryDetailsRequest,
 )
 from app.services.memory_episodic_service import memory_episodic_service
 
