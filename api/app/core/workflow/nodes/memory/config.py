@@ -11,7 +11,7 @@ class MemoryReadNodeConfig(BaseNodeConfig):
         ...
     )
 
-    config_id: str = Field(
+    config_id: int = Field(
         ...
     )
 
@@ -26,6 +26,6 @@ class MemoryWriteNodeConfig(BaseNodeConfig):
         ...
     )
 
-    config_id: str = Field(
+    config_id: int = Field(
         ...
     )

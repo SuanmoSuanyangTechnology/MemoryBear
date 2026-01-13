@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 from app.core.memory.analytics.implicit_memory.llm_client import ImplicitMemoryLLMClient
 from app.core.memory.llm_tools.llm_client import LLMClientException
 from app.schemas.implicit_memory_schema import (
-    ConfidenceLevel,
     DimensionPortrait,
     DimensionScore,
     UserMemorySummary,
@@ -28,7 +27,7 @@ class DimensionData(BaseModel):
     percentage: float = Field(ge=0.0, le=100.0)
     evidence: List[str] = Field(default_factory=list)
     reasoning: str = ""
-    confidence_level: str = "medium"
+    confidence_level: int = 50  # Default to medium confidence
 
 
 class DimensionAnalysisResponse(BaseModel):
@@ -147,8 +146,7 @@ class DimensionAnalyzer:
         percentage = max(0.0, min(100.0, float(percentage)))
         
         # Validate confidence level
-        confidence_level_str = dimension_data.get("confidence_level", "low")
-        confidence_level = self._validate_confidence_level(confidence_level_str)
+        confidence_level = self._validate_confidence_level(dimension_data.get("confidence_level", 50))
         
         # Ensure evidence is not empty
         evidence = dimension_data.get("evidence", [])
@@ -182,32 +180,41 @@ class DimensionAnalyzer:
             percentage=0.0,
             evidence=["Insufficient data for analysis"],
             reasoning=f"No clear evidence found for {dimension_name} dimension",
-            confidence_level=ConfidenceLevel.LOW
+            confidence_level=20  # Low confidence as numerical value
         )
     
-    def _validate_confidence_level(self, confidence_str: str) -> ConfidenceLevel:
-        """Validate and convert confidence level string.
+    def _validate_confidence_level(self, confidence_level) -> int:
+        """Return confidence level as integer, handling both string and numeric inputs.
         
         Args:
-            confidence_str: Confidence level as string
+            confidence_level: Confidence level (string or numeric)
             
         Returns:
-            ConfidenceLevel enum value
+            Confidence level as integer (0-100)
         """
-        if not confidence_str:
-            return ConfidenceLevel.MEDIUM
+        # If it's already a number, return it as int
+        if isinstance(confidence_level, (int, float)):
+            return int(confidence_level)
         
-        confidence_str = str(confidence_str).lower().strip()
+        # If it's a string, convert common values to numbers
+        if isinstance(confidence_level, str):
+            confidence_str = confidence_level.lower().strip()
+            if confidence_str in ["high", "높음"]:
+                return 85
+            elif confidence_str in ["medium", "중간"]:
+                return 50
+            elif confidence_str in ["low", "낮음"]:
+                return 20
+            else:
+                # Try to parse as number
+                try:
+                    return int(float(confidence_str))
+                except ValueError:
+                    logger.warning(f"Unknown confidence level: {confidence_level}, defaulting to medium")
+                    return 50
         
-        if confidence_str in ["high", "높음"]:
-            return ConfidenceLevel.HIGH
-        elif confidence_str in ["medium", "중간"]:
-            return ConfidenceLevel.MEDIUM
-        elif confidence_str in ["low", "낮음"]:
-            return ConfidenceLevel.LOW
-        else:
-            logger.warning(f"Unknown confidence level: {confidence_str}, defaulting to medium")
-            return ConfidenceLevel.MEDIUM
+        # Default fallback
+        return 50
     
     def _create_empty_portrait(self, user_id: str) -> DimensionPortrait:
         """Create an empty dimension portrait when no data is available.

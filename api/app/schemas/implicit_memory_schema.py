@@ -7,14 +7,7 @@ import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-
-class ConfidenceLevel(str, Enum):
-    """Confidence levels for analysis results."""
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class FrequencyPattern(str, Enum):
@@ -41,6 +34,14 @@ class TimeRange(BaseModel):
             raise ValueError('end_date must be after start_date')
         return v
 
+    @field_serializer("start_date", when_used="json")
+    def _serialize_start_date(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
+    @field_serializer("end_date", when_used="json")
+    def _serialize_end_date(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
 
 class DateRange(BaseModel):
     """Date range for filtering."""
@@ -53,6 +54,14 @@ class DateRange(BaseModel):
         if v and 'start_date' in info.data and info.data['start_date'] and v <= info.data['start_date']:
             raise ValueError('end_date must be after start_date')
         return v
+
+    @field_serializer("start_date", when_used="json")
+    def _serialize_start_date(self, dt: Optional[datetime.datetime]):
+        return int(dt.timestamp() * 1000) if dt else None
+
+    @field_serializer("end_date", when_used="json")
+    def _serialize_end_date(self, dt: Optional[datetime.datetime]):
+        return int(dt.timestamp() * 1000) if dt else None
 
 
 class AnalysisConfig(BaseModel):
@@ -79,6 +88,14 @@ class PreferenceTagResponse(BaseModel):
     conversation_references: List[str]
     category: Optional[str] = None
 
+    @field_serializer("created_at", when_used="json")
+    def _serialize_created_at(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
+    @field_serializer("updated_at", when_used="json")
+    def _serialize_updated_at(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
 
 class DimensionScoreResponse(BaseModel):
     """Score for a personality dimension."""
@@ -88,7 +105,7 @@ class DimensionScoreResponse(BaseModel):
     percentage: float = Field(ge=0.0, le=100.0)
     evidence: List[str]
     reasoning: str
-    confidence_level: ConfidenceLevel
+    confidence_level: int = Field(ge=0, le=100)
 
 
 class DimensionPortraitResponse(BaseModel):
@@ -103,6 +120,10 @@ class DimensionPortraitResponse(BaseModel):
     analysis_timestamp: datetime.datetime
     total_summaries_analyzed: int
     historical_trends: Optional[List[Dict[str, Any]]] = None
+
+    @field_serializer("analysis_timestamp", when_used="json")
+    def _serialize_analysis_timestamp(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
 
 
 class InterestCategoryResponse(BaseModel):
@@ -132,6 +153,10 @@ class InterestAreaDistributionResponse(BaseModel):
         """Calculate total percentage across all interest areas."""
         return self.tech.percentage + self.lifestyle.percentage + self.music.percentage + self.art.percentage
 
+    @field_serializer("analysis_timestamp", when_used="json")
+    def _serialize_analysis_timestamp(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
 
 class BehaviorHabitResponse(BaseModel):
     """A behavioral habit identified from conversations."""
@@ -140,12 +165,19 @@ class BehaviorHabitResponse(BaseModel):
     habit_description: str
     frequency_pattern: FrequencyPattern
     time_context: str
-    confidence_level: ConfidenceLevel
-    supporting_summaries: List[str]
+    confidence_level: int = Field(ge=0, le=100)
     first_observed: datetime.datetime
     last_observed: datetime.datetime
     is_current: bool = True
     specific_examples: List[str]
+
+    @field_serializer("first_observed", when_used="json")
+    def _serialize_first_observed(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
+    @field_serializer("last_observed", when_used="json")
+    def _serialize_last_observed(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
 
 
 class UserProfileResponse(BaseModel):
@@ -163,6 +195,14 @@ class UserProfileResponse(BaseModel):
     total_summaries_analyzed: int
     analysis_completeness_score: float = Field(ge=0.0, le=1.0)
 
+    @field_serializer("created_at", when_used="json")
+    def _serialize_created_at(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
+    @field_serializer("updated_at", when_used="json")
+    def _serialize_updated_at(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
 
 # Internal/Business Logic Schemas
 
@@ -176,6 +216,10 @@ class MemorySummary(BaseModel):
     participants: List[str]
     summary_type: str
 
+    @field_serializer("timestamp", when_used="json")
+    def _serialize_timestamp(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
 
 class UserMemorySummary(BaseModel):
     """Memory summary filtered for specific user content."""
@@ -187,6 +231,10 @@ class UserMemorySummary(BaseModel):
     timestamp: datetime.datetime
     confidence_score: float = Field(ge=0.0, le=1.0)
     summary_type: str
+
+    @field_serializer("timestamp", when_used="json")
+    def _serialize_timestamp(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
 
 
 class SummaryAnalysisResult(BaseModel):
@@ -200,6 +248,10 @@ class SummaryAnalysisResult(BaseModel):
     habit_evidence: List[Dict[str, Any]]
     analysis_timestamp: datetime.datetime
     summaries_analyzed: List[str]
+
+    @field_serializer("analysis_timestamp", when_used="json")
+    def _serialize_analysis_timestamp(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
 
 
 # Aliases for backward compatibility with existing code

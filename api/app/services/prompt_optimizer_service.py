@@ -3,9 +3,8 @@ import uuid
 from typing import Any, AsyncGenerator
 
 import json_repair
-from langchain_core.prompts import ChatPromptTemplate
-from sqlalchemy.orm import Session
 from jinja2 import Template
+from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -177,11 +176,11 @@ class PromptOptimizerService:
             base_url=api_config.api_base
         ), type=ModelType(model_config.type))
         try:
-            with open('app/templates/prompt/prompt_optimizer_system.jinja2', 'r', encoding='utf-8') as f:
+            with open('app/services/prompt/prompt_optimizer_system.jinja2', 'r', encoding='utf-8') as f:
                 opt_system_prompt = f.read()
             rendered_system_message = Template(opt_system_prompt).render()
 
-            with open('app/templates/prompt/prompt_optimizer_user.jinja2', 'r', encoding='utf-8') as f:
+            with open('app/services/prompt/prompt_optimizer_user.jinja2', 'r', encoding='utf-8') as f:
                 opt_user_prompt = f.read()
         except FileNotFoundError:
             raise BusinessException(message="System prompt template not found", code=BizCode.NOT_FOUND)

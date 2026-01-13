@@ -1,0 +1,57 @@
+=== Task ===
+Generate a concise title and classify the episodic memory into the most appropriate category.
+
+=== Requirements ===
+- Extract a clear, concise title (10-20 characters) that captures the core content
+- Classify into exactly one category based on the primary theme
+- Be specific and avoid ambiguity
+- Output must be valid JSON conforming to the schema below
+
+=== Input ===
+{{ content }}
+
+=== Category Definitions ===
+
+1. **conversation**: Daily communication, chat, discussion, and social interactions
+   - Keywords: chat, communication, discussion, dialogue, exchange
+
+2. **project_work**: Work-related tasks, projects, meetings, and collaboration
+   - Keywords: project, task, work, meeting, collaboration, business, client
+
+3. **learning**: Acquiring new knowledge, skill development, reading, and research
+   - Keywords: learning, reading, research, knowledge, skill, course, training
+
+4. **decision**: Making important decisions, choices, and planning
+   - Keywords: decision, choice, planning, consideration, evaluation, weighing
+
+5. **important_event**: Major events, milestones, and special experiences
+   - Keywords: important, major, milestone, special, memorable, celebration
+
+=== Analysis Steps ===
+1. Read the episodic memory content carefully
+2. Identify the core theme and context
+3. Extract a concise title
+4. Compare against category definitions and keywords
+5. Select the best matching category
+6. If multiple categories apply, choose the primary one
+
+=== Output Schema ===
+**CRITICAL JSON FORMATTING REQUIREMENTS:**
+1. Use only standard ASCII double quotes (") for JSON structure
+2. Escape any quotation marks within string values using backslashes (\")
+3. Ensure all JSON strings are properly closed and comma-separated
+4. Do not include line breaks within JSON string values
+
+Return only a JSON object with title and type fields:
+{
+  "title": "Generated title here",
+  "type": "Category type here"
+}
+
+The type field must be exactly one of:
+- conversation
+- project_work
+- learning
+- decision
+- important_event
+

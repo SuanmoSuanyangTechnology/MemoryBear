@@ -5,7 +5,7 @@ import Card from './components/Card'
 import { Form, Space, Row, Col, Button, Flex, App, Select } from 'antd'
 import Tag, { type TagProps } from './components/Tag'
 import CustomSelect from '@/components/CustomSelect';
-import { getMultiAgentConfig, saveMultiAgentConfig } from '@/api/application';
+import { getMultiAgentConfig, saveMultiAgentConfig, getApplicationList } from '@/api/application';
 import type { 
   Config,
   SubAgentModalRef,
@@ -21,6 +21,7 @@ import Empty from '@/components/Empty'
 import RadioGroupCard from '@/components/RadioGroupCard'
 import { getModelListUrl } from '@/api/models'
 import ModelConfigModal from './components/ModelConfigModal'
+import type { Application } from '@/views/ApplicationManagement/types'
 
 
 const tagColors = ['processing', 'warning', 'default']
@@ -91,7 +92,27 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
       form.setFieldsValue({
         ...response,
       })
-      setSubAgents(response.sub_agents || [])
+      let sub_agents = response.sub_agents || []
+      if (sub_agents.length > 0) {
+        console.log({ ids: sub_agents?.map(item => item.agent_id) })
+        getApplicationList({ ids: sub_agents?.map(item => item.agent_id).join(',')})
+          .then(res => {
+            const applicationList = (res as Application[]) || []
+            setSubAgents(sub_agents.map(vo => {
+              const filterVO = applicationList.find(item => item.id === vo.agent_id)
+              if (filterVO) {
+                return {
+                  ...vo,
+                  name: filterVO.name,
+                  is_active: filterVO.is_active
+                }
+              }
+              return vo
+            }))
+          })
+      } else {
+        setSubAgents(sub_agents)
+      }
     })
   }
   const handleSubAgentModal = (agent?: SubAgentItem) => {
@@ -138,7 +159,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
         </div>
         <Form form={form} layout="vertical">
           <Space size={20} direction="vertical" style={{width: '100%'}}>
-            <Card title={t('application.handoffs')}>
+            <Card title={t('application.collaboration')}>
               <Form.Item
                 name="orchestration_mode"
                 noStyle
@@ -171,7 +192,12 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                         {agent.name?.[0]}
                       </div>
                       <div className="rb:flex rb:flex-col rb:justify-center rb:max-w-[calc(100%-60px)]">
-                        {agent.name}
+                        
+                        <div>{agent.name}
+                          <Tag color={agent.is_active ? 'success' : 'warning'} className="rb:ml-2">
+                            {agent.is_active ? t('common.enable') : t('common.deleted')}
+                          </Tag>
+                        </div>
                         {agent.role && <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167] rb:mt-1.5">{agent.role || '-'}</div>}
                         {agent.capabilities && <Flex wrap gap={8} className="rb:mt-4">{agent.capabilities.map((tag, tagIndex) => <Tag key={tagIndex} color={tagColors[tagIndex % tagColors.length] as TagProps['color']}>{tag}</Tag>)}</Flex>}
                       </div>

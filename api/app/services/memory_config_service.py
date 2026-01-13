@@ -205,8 +205,8 @@ class MemoryConfigService:
                 chunker_strategy=memory_config.chunker_strategy or "RecursiveChunker",
                 reflexion_enabled=memory_config.enable_self_reflexion or False,
                 reflexion_iteration_period=int(memory_config.iteration_period or "3"),
-                reflexion_range=memory_config.reflexion_range or "retrieval",
-                reflexion_baseline=memory_config.baseline or "time",
+                reflexion_range=memory_config.reflexion_range or "partial",
+                reflexion_baseline=memory_config.baseline or "Time",
                 loaded_at=datetime.now(),
                 # Pipeline config: Deduplication
                 enable_llm_dedup_blockwise=bool(memory_config.enable_llm_dedup_blockwise) if memory_config.enable_llm_dedup_blockwise is not None else False,

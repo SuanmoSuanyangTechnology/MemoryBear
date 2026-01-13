@@ -203,15 +203,34 @@ class KnowledgeRetrievalNode(BaseNode):
                         rs2 = vector_service.search_by_full_text(query=query, top_k=kb_config.top_k,
                                                                  indices=indices,
                                                                  score_threshold=kb_config.similarity_threshold)
+
                         # Deduplicate hy    brid retrieval results
                         unique_rs = self._deduplicate_docs(rs1, rs2)
-                        vector_service.reranker = self.get_reranker_model()
-                        rs.extend(vector_service.rerank(query=query, docs=unique_rs, top_k=kb_config.top_k))
+                        if not unique_rs:
+                            continue
+                        if self.typed_config.reranker_id:
+                            vector_service.reranker = self.get_reranker_model()
+                            rs.extend(vector_service.rerank(query=query, docs=unique_rs, top_k=kb_config.top_k))
+                        else:
+                            rs.extend(sorted(
+                                unique_rs,
+                                key=lambda d: d.metadata.get("score", 0),
+                                reverse=True
+                            )[:kb_config.top_k])
                     case _:
                         raise RuntimeError("Unknown retrieval type")
-            vector_service.reranker = self.get_reranker_model()
-            # TODO：其他重排序方式支持
-            final_rs = vector_service.rerank(query=query, docs=rs, top_k=self.typed_config.reranker_top_k)
+            if not rs:
+                return []
+            if self.typed_config.reranker_id:
+                vector_service.reranker = self.get_reranker_model()
+                final_rs = vector_service.rerank(query=query, docs=rs, top_k=self.typed_config.reranker_top_k)
+            else:
+                final_rs = sorted(
+                    rs,
+                    key=lambda d: d.metadata.get("score", 0),
+                    reverse=True
+                )[:self.typed_config.reranker_top_k]
+
             logger.info(
                 f"Node {self.node_id}: knowledge base retrieval completed, results count: {len(final_rs)}"
             )

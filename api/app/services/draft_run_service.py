@@ -61,12 +61,12 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
     def long_term_memory(question: str) -> str:
         """
         从用户的历史记忆中检索相关信息。这是一个强大的工具，可以帮助你了解用户的背景、偏好和历史对话内容。
-        
+
          以下场景不需要使用此工具：
         1. 情绪/社交问候场景（如"你好"、"谢谢"、"再见"等简单寒暄）
         2. 纯任务性场景（如"帮我写代码"、"翻译这段文字"等不需要历史上下文的任务）
         3. 处理外部内容时（如用户提供的文本、代码、RAG数据等，这些内容本身已经包含所需信息）
-        
+
         除上述场景外的所有其他情况都应该使用此工具，特别是：
         - 用户询问个人信息或历史对话内容
         - 需要了解用户偏好、习惯或背景
@@ -300,6 +300,9 @@ class DraftRunService:
             if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, list):
                 if hasattr(agent_config, 'tools') and agent_config.tools:
                     for tool_config in agent_config.tools:
+                        print("+"*50)
+                        print(f"agent_config:{agent_config}")
+                        print(f"tool_config:{tool_config}")
                         if tool_config.get("enabled", False):
                             # 根据工具名称查找工具实例
                             tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
@@ -315,8 +318,8 @@ class DraftRunService:
                 web_tools = agent_config.tools
                 web_search_choice = web_tools.get("web_search", {})
                 web_search_enable = web_search_choice.get("enabled", False)
-                if web_search == True:
-                    if web_search_enable == True:
+                if web_search:
+                    if web_search_enable:
                         search_tool = create_web_search_tool({})
                         tools.append(search_tool)
 
@@ -523,8 +526,11 @@ class DraftRunService:
             tool_service = ToolService(self.db)
 
             # 从配置中获取启用的工具
-            if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, dict):
+            if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, list):
                 for tool_config in agent_config.tools:
+                    # print("+"*50)
+                    # print(f"agent_config:{agent_config}")
+                    # print(f"tool_config:{tool_config}")
                     if tool_config.get("enabled", False):
                         # 根据工具名称查找工具实例
                         tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
@@ -540,8 +546,8 @@ class DraftRunService:
                 web_tools = agent_config.tools
                 web_search_choice = web_tools.get("web_search", {})
                 web_search_enable = web_search_choice.get("enabled", False)
-                if web_search == True:
-                    if web_search_enable == True:
+                if web_search:
+                    if web_search_enable:
                         search_tool = create_web_search_tool({})
                         tools.append(search_tool)
 
@@ -677,7 +683,7 @@ class DraftRunService:
             )
 
         except Exception as e:
-            logger.error("流式 Agent 调用失败", extra={"error": str(e)})
+            logger.error("流式 Agent 调用失败", extra={"error": str(e)}, exc_info=True)
             # 发送错误事件
             yield self._format_sse_event("error", {
                 "error": str(e),

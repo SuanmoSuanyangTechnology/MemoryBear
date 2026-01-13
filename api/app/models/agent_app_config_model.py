@@ -3,8 +3,9 @@ import uuid
 from sqlalchemy import Column, String, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
+
+from app.base.type import PydanticType
 from app.db import Base
-from app.models.multi_agent_model import PydanticType
 from app.schemas import ModelParameters
 
 

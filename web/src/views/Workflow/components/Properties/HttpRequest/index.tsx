@@ -101,8 +101,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         <EditableTable
           parentName="headers"
           title="HEADERS"
-          options={options}
-          filterBooleanType={true}
+          options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
         />
       </Form.Item>
 
@@ -110,8 +109,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         <EditableTable
           parentName="params"
           title="PARAMS"
-          options={options}
-          filterBooleanType={true}
+          options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
         />
       </Form.Item>
 
@@ -134,8 +132,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           <Form.Item name={['body', 'data']} noStyle>
             <EditableTable
               parentName={['body', 'data']}
-              options={options}
-              filterBooleanType={true}
+              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
               typeOptions={[
                 { label: 'text', value: 'text' },
                 { label: 'file', value: 'file' }
@@ -168,7 +165,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             <MessageEditor
               key="raw"
               parentName={['body', 'data']}
-              options={options}
+              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
               isArray={false}
               title="RAW TEXT"
             />
@@ -177,7 +174,8 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         {values?.body?.content_type === 'binary' &&
           <Form.Item name={['body', 'data']}>
             <VariableSelect
-              options={options}
+              placeholder={t('common.pleaseSelect')}
+              options={options.filter(vo => vo.dataType.includes('file'))}
               filterBooleanType={true}
             />
           </Form.Item>
@@ -194,19 +192,31 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         name={['timeouts', 'connect_timeout']}
         label={t('workflow.config.http-request.connect_timeout')}
       >
-        <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+        <InputNumber
+          placeholder={t('common.pleaseEnter')}
+          className="rb:w-full!"
+          onChange={(value) => form.setFieldValue(['timeouts', 'connect_timeout'], value)}
+        />
       </Form.Item>
       <Form.Item
         name={['timeouts', 'read_timeout']}
         label={t('workflow.config.http-request.read_timeout')}
       >
-        <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+        <InputNumber
+          placeholder={t('common.pleaseEnter')}
+          className="rb:w-full!"
+          onChange={(value) => form.setFieldValue(['timeouts', 'read_timeout'], value)}
+        />
       </Form.Item>
       <Form.Item
         name={['timeouts', 'write_timeout']}
         label={t('workflow.config.http-request.write_timeout')}
       >
-        <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+        <InputNumber
+          placeholder={t('common.pleaseEnter')}
+          className="rb:w-full!"
+          onChange={(value) => form.setFieldValue(['timeouts', 'write_timeout'], value)}
+        />
       </Form.Item>
 
       <Divider />
@@ -219,13 +229,21 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             name={['retry', 'max_attempts']}
             label={t('workflow.config.http-request.max_attempts')}
           >
-            <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+            <InputNumber
+              placeholder={t('common.pleaseEnter')}
+              className="rb:w-full!"
+              onChange={(value) => form.setFieldValue(['retry', 'max_attempts'], value)}
+            />
           </Form.Item>
           <Form.Item
             name={['retry', 'retry_interval']}
             label={<>{t('workflow.config.http-request.retry_interval')} <span className="rb:text-[#5B6167]">(ms)</span></>}
           >
-            <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+            <InputNumber
+              placeholder={t('common.pleaseEnter')}
+              className="rb:w-full!"
+              onChange={(value) => form.setFieldValue(['retry', 'retry_interval'], value)}
+            />
           </Form.Item>
         </>
       }
@@ -254,7 +272,11 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             name={['error_handle', 'status_code']}
             label={<>status_code <span className="rb:text-[#5B6167] rb:ml-1">number</span></>}
           >
-            <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+            <InputNumber
+              placeholder={t('common.pleaseEnter')}
+              className="rb:w-full!"
+              onChange={(value) => form.setFieldValue(['error_handle', 'status_code'], value)}
+            />
           </Form.Item>
           <Form.Item
             name={['error_handle', 'headers']}

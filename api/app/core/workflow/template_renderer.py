@@ -5,6 +5,7 @@
 """
 
 import logging
+from collections import defaultdict
 from typing import Any
 
 from jinja2 import TemplateSyntaxError, UndefinedError, Environment, StrictUndefined, Undefined
@@ -12,26 +13,39 @@ from jinja2 import TemplateSyntaxError, UndefinedError, Environment, StrictUndef
 logger = logging.getLogger(__name__)
 
 
+class SafeUndefined(Undefined):
+    """访问未定义属性不会报错，返回空字符串"""
+    __slots__ = ()
+
+    def _fail_with_undefined_error(self, *args, **kwargs):
+        return ""
+
+    __add__ = __radd__ = __mul__ = __rmul__ = __div__ = __rdiv__ = __truediv__ = __rtruediv__ = _fail_with_undefined_error
+    __getitem__ = __getattr__ = _fail_with_undefined_error
+    __str__ = __repr__ = lambda self: ""
+
+
 class TemplateRenderer:
     """模板渲染器"""
-    
+
     def __init__(self, strict: bool = True):
         """初始化渲染器
         
         Args:
             strict: 是否使用严格模式（未定义变量会抛出异常）
         """
+        self.strict = strict
         self.env = Environment(
-            undefined=StrictUndefined if strict else Undefined,
+            undefined=StrictUndefined if strict else SafeUndefined,
             autoescape=False  # 不自动转义，因为我们处理的是文本而非 HTML
         )
-    
+
     def render(
-        self,
-        template: str,
-        variables: dict[str, Any],
-        node_outputs: dict[str, Any],
-        system_vars: dict[str, Any] | None = None
+            self,
+            template: str,
+            variables: dict[str, Any],
+            node_outputs: dict[str, Any],
+            system_vars: dict[str, Any] | None = None
     ) -> str:
         """渲染模板
         
@@ -69,40 +83,45 @@ class TemplateRenderer:
         # variables 的结构：{"sys": {...}, "conv": {...}}
         sys_vars = variables.get("sys", {}) if isinstance(variables, dict) else {}
         conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
-        
-        context = {
-            "conv": conv_vars,                   # 会话变量：{{conv.user_name}}
-            "node": node_outputs,                # 节点输出：{{node.node_1.output}}
-            "sys": {**(system_vars or {}), **sys_vars},  # 系统变量：{{sys.execution_id}}（合并两个来源）
-        }
-        
+        if self.strict:
+            context = defaultdict(dict)
+            context["conv"] = conv_vars
+            context["node"] = node_outputs
+            context["sys"] = {**(system_vars or {}), **sys_vars}
+        else:
+            context = {
+                "conv": conv_vars,  # 会话变量：{{conv.user_name}}
+                "node": node_outputs,  # 节点输出：{{node.node_1.output}}
+                "sys": {**(system_vars or {}), **sys_vars},  # 系统变量：{{sys.execution_id}}（合并两个来源）
+            }
+
         # 支持直接通过节点ID访问节点输出：{{llm_qa.output}}
         # 将所有节点输出添加到顶层上下文
         if node_outputs:
             context.update(node_outputs)
-        
+
         # 支持直接访问会话变量（不需要 conv. 前缀）：{{user_name}}
         if conv_vars:
             context.update(conv_vars)
-        
+
         context["nodes"] = node_outputs or {}  # 旧语法兼容
-        
+
         try:
             tmpl = self.env.from_string(template)
             return tmpl.render(**context)
-            
+
         except TemplateSyntaxError as e:
             logger.error(f"模板语法错误: {template}, 错误: {e}")
             raise ValueError(f"模板语法错误: {e}")
-            
+
         except UndefinedError as e:
             logger.error(f"模板中引用了未定义的变量: {template}, 错误: {e}")
             raise ValueError(f"未定义的变量: {e}")
-            
+
         except Exception as e:
             logger.error(f"模板渲染异常: {template}, 错误: {e}")
             raise ValueError(f"模板渲染失败: {e}")
-    
+
     def validate(self, template: str) -> list[str]:
         """验证模板语法
         
@@ -121,14 +140,14 @@ class TemplateRenderer:
             ['模板语法错误: ...']
         """
         errors = []
-        
+
         try:
             self.env.from_string(template)
         except TemplateSyntaxError as e:
             errors.append(f"模板语法错误: {e}")
         except Exception as e:
             errors.append(f"模板验证失败: {e}")
-        
+
         return errors
 
 
@@ -137,14 +156,16 @@ _default_renderer = TemplateRenderer(strict=True)
 
 
 def render_template(
-    template: str,
-    variables: dict[str, Any],
-    node_outputs: dict[str, Any],
-    system_vars: dict[str, Any] | None = None
+        template: str,
+        variables: dict[str, Any],
+        node_outputs: dict[str, Any],
+        system_vars: dict[str, Any] | None = None,
+        strict: bool = True
 ) -> str:
     """渲染模板（便捷函数）
     
     Args:
+        strict: 严格模式
         template: 模板字符串
         variables: 用户变量
         node_outputs: 节点输出
@@ -162,7 +183,8 @@ def render_template(
         ... )
         '请分析: 这是一段文本'
     """
-    return _default_renderer.render(template, variables, node_outputs, system_vars)
+    renderer = TemplateRenderer(strict=strict)
+    return renderer.render(template, variables, node_outputs, system_vars)
 
 
 def validate_template(template: str) -> list[str]:

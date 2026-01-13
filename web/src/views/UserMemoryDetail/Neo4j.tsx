@@ -1,4 +1,4 @@
-import { type FC, useEffect, useRef, useState } from 'react'
+import { type FC, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Row, Col, Space, Button } from 'antd'
 import { useTranslation } from 'react-i18next';
@@ -25,7 +25,7 @@ const Neo4j: FC = () => {
   const aboutMeRef = useRef<AboutMeRef>(null)
 
   const handleNameUpdate = (data: { other_name?: string; id: string }) => {
-    setName(data.other_name ?? data.id)
+    setName(data.other_name && data.other_name !== '' ? data.other_name : data.id)
   }
 
   const handleRefresh = () => {

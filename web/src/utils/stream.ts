@@ -12,33 +12,57 @@ export function parseSSEToJSON(sseString: string) {
   const lines = sseString.trim().split('\n')
   
   let currentEvent: SSEMessage = {}
+  let dataContent = ''
   
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      if (currentEvent.event && dataContent) {
+        currentEvent.data = parseDataContent(dataContent)
+        events.push(currentEvent)
+      }
+      currentEvent = { event: line.substring(6).trim() }
+      dataContent = ''
+    } else if (line.startsWith('data:')) {
+      if (dataContent) dataContent += '\n'
+      dataContent += line.substring(5).trim()
+    }
+  }
+
+  
+  if (currentEvent.event && dataContent) {
+    currentEvent.data = parseDataContent(dataContent)
+    console.log('currentEvent', currentEvent)
+    events.push(currentEvent)
+  }
+  
+  return events
+}
+
+function parseDataContent(dataContent: string): string | object {
   try {
-    for (const line of lines) {
-      if (line.startsWith('event:')) {
-        if (Object.keys(currentEvent).length > 0) {
-          events.push(currentEvent)
-          currentEvent = {}
-        }
-        currentEvent.event = line.substring(6).trim()
-      } else if (line.startsWith('data:')) {
-        const dataStr = line.substring(5).trim()
-        try {
-          currentEvent.data = JSON.parse(dataStr.replace(/"/g, '"'))
-        } catch {
-          currentEvent.data = dataStr
-        }
+    // 第一层解码：HTML实体
+    let unescaped = dataContent
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#39;/g, "'")
+    
+    // 解析第一层JSON
+    const firstParse = JSON.parse(unescaped)
+    
+    // 如果data字段是字符串且包含JSON，解析data层但保持chunk为字符串
+    if (firstParse.data && typeof firstParse.data === 'string' && firstParse.data.includes("{")) {
+      try {
+        firstParse.data = JSON.parse(firstParse.data)
+      } catch {
+        // 保持原字符串
       }
     }
     
-    if (Object.keys(currentEvent).length > 0) {
-      events.push(currentEvent)
-    }
-    
-    return events
-  } catch (error) {
-    console.error('Parse stream error:', error)
-    return []
+    return firstParse
+  } catch {
+    return dataContent
   }
 }
 
@@ -70,15 +94,29 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
         
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let buffer = ''; // 添加缓冲区来处理不完整的消息
         
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           
           const chunk = decoder.decode(value, { stream: true });
-          if (onMessage) {
-            onMessage(parseSSEToJSON(chunk) ?? {});
+          buffer += chunk;
+          
+          // 处理完整的事件
+          const events = buffer.split('\n\n');
+          buffer = events.pop() || ''; // 保留最后一个可能不完整的事件
+          
+          for (const event of events) {
+            if (event.trim() && onMessage) {
+              onMessage(parseSSEToJSON(event) ?? {});
+            }
           }
+        }
+        
+        // 处理剩余的缓冲区内容
+        if (buffer.trim() && onMessage) {
+          onMessage(parseSSEToJSON(buffer) ?? {});
         }
         break;
     }

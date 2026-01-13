@@ -70,24 +70,25 @@ async def trigger_forgetting_cycle(
         ApiResponse: 包含遗忘报告的响应
     """
     workspace_id = current_user.current_workspace_id
+    end_user_id = payload.end_user_id  # 从 payload 中获取 end_user_id
     
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试触发遗忘周期但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
     
-    # 通过 group_id 获取关联的 config_id
+    # 通过 end_user_id 获取关联的 config_id
     try:
         from app.services.memory_agent_service import get_end_user_connected_config
         
-        connected_config = get_end_user_connected_config(payload.group_id, db)
+        connected_config = get_end_user_connected_config(end_user_id, db)
         config_id = connected_config.get("memory_config_id")
         
         if config_id is None:
-            api_logger.warning(f"终端用户 {payload.group_id} 未关联记忆配置")
-            return fail(BizCode.INVALID_PARAMETER, f"终端用户 {payload.group_id} 未关联记忆配置", "memory_config_id is None")
+            api_logger.warning(f"终端用户 {end_user_id} 未关联记忆配置")
+            return fail(BizCode.INVALID_PARAMETER, f"终端用户 {end_user_id} 未关联记忆配置", "memory_config_id is None")
         
-        api_logger.debug(f"通过 group_id={payload.group_id} 获取到 config_id={config_id}")
+        api_logger.debug(f"通过 end_user_id={end_user_id} 获取到 config_id={config_id}")
     except ValueError as e:
         api_logger.warning(f"获取终端用户配置失败: {str(e)}")
         return fail(BizCode.INVALID_PARAMETER, str(e), "ValueError")
@@ -97,7 +98,7 @@ async def trigger_forgetting_cycle(
     
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求触发遗忘周期: "
-        f"group_id={payload.group_id}, config_id={config_id}, max_batch={payload.max_merge_batch_size}, "
+        f"end_user_id={end_user_id}, config_id={config_id}, max_batch={payload.max_merge_batch_size}, "
         f"min_days={payload.min_days_since_access}"
     )
     
@@ -105,7 +106,7 @@ async def trigger_forgetting_cycle(
         # 调用服务层执行遗忘周期
         report = await forget_service.trigger_forgetting_cycle(
             db=db,
-            group_id=payload.group_id,
+            group_id=end_user_id,  # 服务层方法的参数名是 group_id
             max_merge_batch_size=payload.max_merge_batch_size,
             min_days_since_access=payload.min_days_since_access,
             config_id=config_id

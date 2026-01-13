@@ -69,7 +69,7 @@ class JsonTool(BuiltinTool):
             ToolParameter(
                 name="json_path",
                 type=ParameterType.STRING,
-                description="JSON路径表达式（用于extract、insert、replace、delete、parse操作，如：$.user.name或users[0].name）",
+                description="JSON路径表达式（用于insert、replace、delete、parse操作，如：$.user.name或users[0].name）",
                 required=False
             ),
             ToolParameter(
@@ -136,7 +136,7 @@ class JsonTool(BuiltinTool):
             
             execution_time = time.time() - start_time
             return ToolResult.success_result(
-                data=result,
+                data=result["result_data"],
                 execution_time=execution_time
             )
             
@@ -671,7 +671,8 @@ class JsonTool(BuiltinTool):
                 "success": True,
                 "value": current,
                 "value_type": type(current).__name__,
-                "value_json": json.dumps(current, indent=2, ensure_ascii=False) if isinstance(current, (dict, list)) else str(current)
+                "value_json": json.dumps(current, indent=2, ensure_ascii=False) if isinstance(current, (dict, list)) else str(current),
+                "result_data": json.dumps(current, indent=2, ensure_ascii=False) if isinstance(current, (dict, list)) else str(current)
             }
             
         except (KeyError, IndexError, TypeError) as e:
@@ -680,7 +681,8 @@ class JsonTool(BuiltinTool):
                 "json_path": json_path,
                 "success": False,
                 "error": str(e),
-                "value": None
+                "value": None,
+                "result_data": None
             }
     
     def _analyze_json_structure(self, data: Any, depth: int = 0) -> Dict[str, Any]:

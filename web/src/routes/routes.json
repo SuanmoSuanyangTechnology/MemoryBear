@@ -43,7 +43,8 @@
       { "path": "/application/config/:id", "element": "ApplicationConfig" },
       { "path": "/conversation/:token", "element": "Conversation" },
       { "path": "/user-memory/neo4j/:id", "element": "Neo4jUserMemoryDetail" },
-      { "path": "/statement/:id", "element": "StatementDetail" }
+      { "path": "/statement/:id", "element": "StatementDetail" },
+      { "path": "/user-memory/detail/:id/:type", "element": "MemoryNodeDetail" }
     ]
   },
   {

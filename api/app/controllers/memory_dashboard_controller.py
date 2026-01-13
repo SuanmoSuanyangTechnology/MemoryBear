@@ -1,18 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
-import uuid
-from app.repositories.end_user_repository import update_end_user_other_name
-import uuid
+from typing import Optional
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.schemas.memory_agent_schema import End_User_Information
 from app.schemas.response_schema import ApiResponse
-from app.schemas.app_schema import App as AppSchema
 
 from app.services import memory_dashboard_service, memory_storage_service, workspace_service
+from app.services.memory_agent_service import get_end_users_connected_configs_batch
 from app.core.logging_config import get_api_logger
 
 # 获取API专用日志器
@@ -102,7 +99,8 @@ async def get_workspace_end_users(
     """
     获取工作空间的宿主列表
     
-    返回格式与原 memory_list 接口中的 end_users 字段相同
+    返回格式与原 memory_list 接口中的 end_users 字段相同，
+    并包含每个用户的记忆配置信息（memory_config_id 和 memory_config_name）
     """
     workspace_id = current_user.current_workspace_id
     # 获取当前空间类型
@@ -113,6 +111,17 @@ async def get_workspace_end_users(
         workspace_id=workspace_id,
         current_user=current_user
     )
+    
+    # 批量获取所有用户的记忆配置信息（优化：一次查询而非 N 次）
+    end_user_ids = [str(user.id) for user in end_users]
+    memory_configs_map = {}
+    if end_user_ids:
+        try:
+            memory_configs_map = get_end_users_connected_configs_batch(end_user_ids, db)
+        except Exception as e:
+            api_logger.error(f"批量获取记忆配置失败: {str(e)}")
+            # 失败时使用空字典，不影响其他数据返回
+    
     result = []
     for end_user in end_users:
         memory_num = {}
@@ -123,10 +132,25 @@ async def get_workspace_end_users(
             memory_num = {
                 "total":memory_dashboard_service.get_current_user_total_chunk(str(end_user.id), db, current_user)
             }
+        
+        # 从批量查询结果中获取配置信息
+        user_id = str(end_user.id)
+        memory_config_info = memory_configs_map.get(user_id, {
+            "memory_config_id": None,
+            "memory_config_name": None
+        })
+        
+        # 只保留需要的字段，移除 error 字段（如果有）
+        memory_config = {
+            "memory_config_id": memory_config_info.get("memory_config_id"),
+            "memory_config_name": memory_config_info.get("memory_config_name")
+        }
+        
         result.append(
             {
-                'end_user':end_user,
-                'memory_num':memory_num
+                'end_user': end_user,
+                'memory_num': memory_num,
+                'memory_config': memory_config
             }
         )
         
@@ -465,7 +489,6 @@ async def dashboard_data(
     if storage_type is None:
         storage_type = 'neo4j'
     
-    user_rag_memory_id = None
     
     # 根据 storage_type 决定返回哪个数据对象
     # 如果是 'rag'，neo4j_data 为 null；否则 rag_data 为 null

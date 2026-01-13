@@ -36,7 +36,7 @@ interface PropertiesProps {
 const Properties: FC<PropertiesProps> = ({
   selectedNode,
   graphRef,
-  config,
+  config: workflowConfig,
 }) => {
   const { t } = useTranslation()
   const { modal } = App.useApp()
@@ -47,7 +47,7 @@ const Properties: FC<PropertiesProps> = ({
   const [editIndex, setEditIndex] = useState<number | null>(null)
   const prevMappingNamesRef = useRef<string[]>([])
   const prevTemplateVarsRef = useRef<string[]>([])
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const syncTimeoutRef = useRef<number | null>(null)
   const isSyncingRef = useRef(false)
   const lastSyncSourceRef = useRef<'mapping' | 'template' | null>(null)
 
@@ -64,7 +64,7 @@ const Properties: FC<PropertiesProps> = ({
   useEffect(() => {
     if (isSyncingRef.current || lastSyncSourceRef.current === 'mapping' || selectedNode?.data?.type !== 'jinja-render' || !values?.mapping || !values?.template) return
     
-    const currentMappingNames = values.mapping.map((item: any) => item.name).filter(Boolean)
+    const currentMappingNames = Array.isArray(values.mapping) ? values.mapping.filter(item => item && item.name).map((item: any) => item.name) : []
     const prevNames = prevMappingNamesRef.current
     
     if (prevNames.length === 0) {
@@ -121,8 +121,8 @@ const Properties: FC<PropertiesProps> = ({
       return
     }
     
-    const updatedMapping = [...values.mapping]
-    const existingNames = updatedMapping.map(item => item.name)
+    const updatedMapping = Array.isArray(values.mapping) ? [...values.mapping.filter(item => item)] : []
+    const existingNames = updatedMapping.filter(item => item && item.name).map(item => item.name)
     let updatedTemplate = String(values.template)
     
     if (prevTemplateVarsRef.current.length > 0) {
@@ -157,7 +157,7 @@ const Properties: FC<PropertiesProps> = ({
     
     isSyncingRef.current = true
     lastSyncSourceRef.current = 'template'
-    prevMappingNamesRef.current = finalMapping.map((item: any) => item.name).filter(Boolean)
+    prevMappingNamesRef.current = finalMapping.filter(item => item && item.name).map((item: any) => item.name)
     prevTemplateVarsRef.current = templateVars
     
     if (JSON.stringify(finalMapping) !== JSON.stringify(values.mapping)) {
@@ -343,11 +343,12 @@ const Properties: FC<PropertiesProps> = ({
     // Add parent loop/iteration node variables if current node is a child
     if (parentLoopNode) {
       const parentData = parentLoopNode.getData();
+      const parentNodeId = parentLoopNode.getData().id;
       
       if (parentData.type === 'loop') {
         const cycleVars = parentData.cycle_vars || [];
         cycleVars.forEach((cycleVar: any) => {
-          const key = `${parentLoopNode.getData().id}_cycle_${cycleVar.name}`;
+          const key = `${parentNodeId}_cycle_${cycleVar.name}`;
           if (!addedKeys.has(key)) {
             addedKeys.add(key);
             variableList.push({
@@ -355,15 +356,15 @@ const Properties: FC<PropertiesProps> = ({
               label: cycleVar.name,
               type: 'variable',
               dataType: cycleVar.type || 'String',
-              value: `${parentLoopNode.getData().id}.${cycleVar.name}`,
+              value: `${parentNodeId}.${cycleVar.name}`,
               nodeData: parentData,
             });
           }
         });
       } else if (parentData.type === 'iteration') {
         // Add item and index variables for iteration parent
-        const itemKey = `${parentLoopNode.getData().id}_item`;
-        const indexKey = `${parentLoopNode.getData().id}_index`;
+        const itemKey = `${parentNodeId}_item`;
+        const indexKey = `${parentNodeId}_index`;
         
         if (!addedKeys.has(itemKey)) {
           addedKeys.add(itemKey);
@@ -372,7 +373,7 @@ const Properties: FC<PropertiesProps> = ({
             label: 'item',
             type: 'variable',
             dataType: 'Object',
-            value: `${parentLoopNode.getData().id}.item`,
+            value: `${parentNodeId}.item`,
             nodeData: parentData,
           });
         }
@@ -384,10 +385,58 @@ const Properties: FC<PropertiesProps> = ({
             label: 'index',
             type: 'variable',
             dataType: 'Number',
-            value: `${parentLoopNode.getData().id}.index`,
+            value: `${parentNodeId}.index`,
             nodeData: parentData,
           });
         }
+      }
+      
+      // Check if parent loop/iteration is connected to http-request via ERROR connection
+      if (parentData.type === 'loop' || parentData.type === 'iteration') {
+        const parentPreviousNodeIds = getAllPreviousNodes(parentLoopNode.id);
+        parentPreviousNodeIds.forEach(prevNodeId => {
+          const prevNode = nodes.find(n => n.id === prevNodeId);
+          if (!prevNode) return;
+          
+          const prevNodeData = prevNode.getData();
+          if (prevNodeData.type === 'http-request') {
+            // Check if connected via ERROR connection point
+            const errorEdges = edges.filter(edge => {
+              return edge.getTargetCellId() === parentLoopNode.id && 
+              edge.getSourceCellId() === prevNodeId &&
+              edge.getSourcePortId() === 'ERROR'
+            });
+            
+            if (errorEdges.length > 0) {
+              const errorMessageKey = `${prevNodeData.id}_error_message`;
+              const errorTypeKey = `${prevNodeData.id}_error_type`;
+              
+              if (!addedKeys.has(errorMessageKey)) {
+                addedKeys.add(errorMessageKey);
+                variableList.push({
+                  key: errorMessageKey,
+                  label: 'error_message',
+                  type: 'variable',
+                  dataType: 'string',
+                  value: `${prevNodeData.id}.error_message`,
+                  nodeData: prevNodeData,
+                });
+              }
+              
+              if (!addedKeys.has(errorTypeKey)) {
+                addedKeys.add(errorTypeKey);
+                variableList.push({
+                  key: errorTypeKey,
+                  label: 'error_type',
+                  type: 'variable',
+                  dataType: 'string',
+                  value: `${prevNodeData.id}.error_type`,
+                  nodeData: prevNodeData,
+                });
+              }
+            }
+          }
+        });
       }
       
       // Add variables from nodes preceding the parent loop/iteration node
@@ -400,6 +449,7 @@ const Properties: FC<PropertiesProps> = ({
       if (!node) return;
       
       const nodeData = node.getData();
+      const dataNodeId = nodeData.id; // Use the data.id instead of node.id for consistency
 
       switch(nodeData.type) {
         case 'start':
@@ -409,7 +459,7 @@ const Properties: FC<PropertiesProps> = ({
           ]
           list.forEach((variable: any) => {
             if (!variable || !variable?.name) return;
-            const key = `${nodeId}_${variable.name}`;
+            const key = `${dataNodeId}_${variable.name}`;
             if (!addedKeys.has(key)) {
               addedKeys.add(key);
               variableList.push({
@@ -417,14 +467,14 @@ const Properties: FC<PropertiesProps> = ({
                 label: variable.name,
                 type: 'variable',
                 dataType: variable.type,
-                value: `${node.getData().id}.${variable.name}`,
+                value: `${dataNodeId}.${variable.name}`,
                 nodeData: nodeData,
               });
             }
           });
           nodeData.config?.variables?.sys?.forEach((variable: any) => {
             if (!variable || !variable?.name) return;
-            const key = `${nodeId}_sys_${variable.name}`;
+            const key = `${dataNodeId}_sys_${variable.name}`;
             if (!addedKeys.has(key)) {
               addedKeys.add(key);
               variableList.push({
@@ -439,7 +489,7 @@ const Properties: FC<PropertiesProps> = ({
           });
           break
         case 'llm':
-          const llmKey = `${nodeId}_output`;
+          const llmKey = `${dataNodeId}_output`;
           if (!addedKeys.has(llmKey)) {
             addedKeys.add(llmKey);
             variableList.push({
@@ -447,28 +497,28 @@ const Properties: FC<PropertiesProps> = ({
               label: 'output',
               type: 'variable',
               dataType: 'String',
-              value: `${node.getData().id}.output`,
+              value: `${dataNodeId}.output`,
               nodeData: nodeData,
             });
           }
           break
         case 'knowledge-retrieval':
-          const knowledgeKey = `${nodeId}_message`;
+          const knowledgeKey = `${dataNodeId}_output`;
           if (!addedKeys.has(knowledgeKey)) {
             addedKeys.add(knowledgeKey);
             variableList.push({
               key: knowledgeKey,
-              label: 'message',
+              label: 'output',
               type: 'variable',
               dataType: 'array[object]',
-              value: `${node.getData().id}.message`,
+              value: `${dataNodeId}.output`,
               nodeData: nodeData,
             });
           }
           break
         case 'parameter-extractor':
-          const successKey = `${nodeId}___is_success`;
-          const reasonKey = `${nodeId}___reason`;
+          const successKey = `${dataNodeId}___is_success`;
+          const reasonKey = `${dataNodeId}___reason`;
           if (!addedKeys.has(successKey)) {
             addedKeys.add(successKey);
             variableList.push({
@@ -476,7 +526,7 @@ const Properties: FC<PropertiesProps> = ({
               label: '__is_success',
               type: 'variable',
               dataType: 'number',
-              value: `${node.getData().id}.__is_success`,
+              value: `${dataNodeId}.__is_success`,
               nodeData: nodeData,
             });
           }
@@ -487,7 +537,7 @@ const Properties: FC<PropertiesProps> = ({
               label: '__reason',
               type: 'variable',
               dataType: 'string',
-              value: `${node.getData().id}.__reason`,
+              value: `${dataNodeId}.__reason`,
               nodeData: nodeData,
             });
           }
@@ -495,7 +545,7 @@ const Properties: FC<PropertiesProps> = ({
           const paramsList = nodeData.config?.params?.defaultValue || [];
           paramsList.forEach((param: any) => {
             if (!param || !param?.name) return;
-            const paramKey = `${nodeId}_${param.name}`;
+            const paramKey = `${dataNodeId}_${param.name}`;
             if (!addedKeys.has(paramKey)) {
               addedKeys.add(paramKey);
               variableList.push({
@@ -503,29 +553,50 @@ const Properties: FC<PropertiesProps> = ({
                 label: param.name,
                 type: 'variable',
                 dataType: param.type || 'string',
-                value: `${node.getData().id}.${param.name}`,
+                value: `${dataNodeId}.${param.name}`,
                 nodeData: nodeData,
               });
             }
           });
           break
         case 'var-aggregator':
-          const varAggregatorKey = `${nodeId}_output`;
-          if (!addedKeys.has(varAggregatorKey)) {
-            addedKeys.add(varAggregatorKey);
-            variableList.push({
-              key: varAggregatorKey,
-              label: 'output',
-              type: 'variable',
-              dataType: 'string',
-              value: `${node.getData().id}.output`,
-              nodeData: nodeData,
+          if (nodeData.config.group.defaultValue) {
+            // If group=true, add variables from group_variables with key as variable name
+            const groupVariables = nodeData.config.group_variables.defaultValue || [];
+            groupVariables?.forEach((groupVar: any) => {
+              if (!groupVar || !groupVar.key) return;
+              const groupVarKey = `${dataNodeId}_${groupVar.key}`;
+              if (!addedKeys.has(groupVarKey)) {
+                addedKeys.add(groupVarKey);
+                variableList.push({
+                  key: groupVarKey,
+                  label: groupVar.key,
+                  type: 'variable',
+                  dataType: 'string',
+                  value: `${dataNodeId}.${groupVar.key}`,
+                  nodeData: nodeData,
+                });
+              }
             });
+          } else {
+            // If group=false, add output variable
+            const varAggregatorKey = `${dataNodeId}_output`;
+            if (!addedKeys.has(varAggregatorKey)) {
+              addedKeys.add(varAggregatorKey);
+              variableList.push({
+                key: varAggregatorKey,
+                label: 'output',
+                type: 'variable',
+                dataType: 'string',
+                value: `${dataNodeId}.output`,
+                nodeData: nodeData,
+              });
+            }
           }
           break
         case 'http-request':
-          const httpBodyKey = `${nodeId}_body`;
-          const httpStatusKey = `${nodeId}_status_code`;
+          const httpBodyKey = `${dataNodeId}_body`;
+          const httpStatusKey = `${dataNodeId}_status_code`;
           if (!addedKeys.has(httpBodyKey)) {
             addedKeys.add(httpBodyKey);
             variableList.push({
@@ -533,7 +604,7 @@ const Properties: FC<PropertiesProps> = ({
               label: 'body',
               type: 'variable',
               dataType: 'string',
-              value: `${node.getData().id}.body`,
+              value: `${dataNodeId}.body`,
               nodeData: nodeData,
             });
           }
@@ -544,13 +615,49 @@ const Properties: FC<PropertiesProps> = ({
               label: 'status_code',
               type: 'variable',
               dataType: 'number',
-              value: `${node.getData().id}.status_code`,
+              value: `${dataNodeId}.status_code`,
               nodeData: nodeData,
             });
           }
+          
+          // Check if connected via ERROR connection point
+          const errorEdges = edges.filter(edge => 
+            edge.getTargetCellId() === selectedNode.id && 
+            edge.getSourceCellId() === nodeId &&
+            edge.getSourcePortId() === 'ERROR'
+          );
+          
+          if (errorEdges.length > 0) {
+            const errorMessageKey = `${dataNodeId}_error_message`;
+            const errorTypeKey = `${dataNodeId}_error_type`;
+            
+            if (!addedKeys.has(errorMessageKey)) {
+              addedKeys.add(errorMessageKey);
+              variableList.push({
+                key: errorMessageKey,
+                label: 'error_message',
+                type: 'variable',
+                dataType: 'string',
+                value: `${dataNodeId}.error_message`,
+                nodeData: nodeData,
+              });
+            }
+            
+            if (!addedKeys.has(errorTypeKey)) {
+              addedKeys.add(errorTypeKey);
+              variableList.push({
+                key: errorTypeKey,
+                label: 'error_type',
+                type: 'variable',
+                dataType: 'string',
+                value: `${dataNodeId}.error_type`,
+                nodeData: nodeData,
+              });
+            }
+          }
           break
         case 'jinja-render':
-          const jinjaOutputKey = `${nodeId}_output`;
+          const jinjaOutputKey = `${dataNodeId}_output`;
           if (!addedKeys.has(jinjaOutputKey)) {
             addedKeys.add(jinjaOutputKey);
             variableList.push({
@@ -558,14 +665,14 @@ const Properties: FC<PropertiesProps> = ({
               label: 'output',
               type: 'variable',
               dataType: 'string',
-              value: `${node.getData().id}.output`,
+              value: `${dataNodeId}.output`,
               nodeData: nodeData,
             });
           }
           break
         case 'question-classifier':
-          const classNameKey = `${nodeId}_class_name`;
-          const outputKey = `${nodeId}_output`;
+          const classNameKey = `${dataNodeId}_class_name`;
+          const outputKey = `${dataNodeId}_output`;
           if (!addedKeys.has(classNameKey)) {
             addedKeys.add(classNameKey);
             variableList.push({
@@ -573,7 +680,7 @@ const Properties: FC<PropertiesProps> = ({
               label: 'class_name',
               type: 'variable',
               dataType: 'string',
-              value: `${node.getData().id}.class_name`,
+              value: `${dataNodeId}.class_name`,
               nodeData: nodeData,
             });
           }
@@ -584,13 +691,14 @@ const Properties: FC<PropertiesProps> = ({
               label: 'output',
               type: 'variable',
               dataType: 'string',
-              value: `${node.getData().id}.output`,
+              value: `${dataNodeId}.output`,
               nodeData: nodeData,
             });
           }
           break
         case 'iteration':
-          const iterationOutputKey = `${nodeId}_output`;
+          const iterationOutputKey = `${dataNodeId}_output`;
+          const iterationItemKey = `${dataNodeId}_item`;
           if (!addedKeys.has(iterationOutputKey)) {
             addedKeys.add(iterationOutputKey);
             // Get the data type from the output configuration, default to string
@@ -608,30 +716,44 @@ const Properties: FC<PropertiesProps> = ({
               label: 'output',
               type: 'variable',
               dataType: outputDataType,
-              value: `${node.getData().id}.output`,
+              value: `${dataNodeId}.output`,
+              nodeData: nodeData,
+            });
+          }
+          if (!addedKeys.has(iterationItemKey)) {
+            addedKeys.add(iterationItemKey);
+            variableList.push({
+              key: iterationItemKey,
+              label: 'item',
+              type: 'variable',
+              dataType: 'string',
+              value: `${dataNodeId}.item`,
               nodeData: nodeData,
             });
           }
           break
         case 'loop':
-          const cycleVars = nodeData.cycle_vars || [];
+          const cycleVars = nodeData.config.cycle_vars.defaultValue || [];
+          console.log('cycleVars', cycleVars)
           cycleVars.forEach((cycleVar: any) => {
-            const cycleVarKey = `${nodeId}_cycle_${cycleVar.name}`;
+            const cycleVarKey = `${dataNodeId}_cycle_${cycleVar.name}`;
             if (!addedKeys.has(cycleVarKey)) {
               addedKeys.add(cycleVarKey);
-              variableList.push({
-                key: cycleVarKey,
-                label: cycleVar.name,
-                type: 'variable',
-                dataType: cycleVar.type || 'string',
-                value: `${node.getData().id}.${cycleVar.name}`,
-                nodeData: nodeData,
-              });
+              if (cycleVar.name && cycleVar.name.trim() !== '') {
+                variableList.push({
+                  key: cycleVarKey,
+                  label: cycleVar.name,
+                  type: 'variable',
+                  dataType: cycleVar.type || 'string',
+                  value: `${dataNodeId}.${cycleVar.name}`,
+                  nodeData: nodeData,
+                });
+              }
             }
           });
           break
         case 'tool':
-          const toolDataKey = `${nodeId}_data`;
+          const toolDataKey = `${dataNodeId}_data`;
           if (!addedKeys.has(toolDataKey)) {
             addedKeys.add(toolDataKey);
             variableList.push({
@@ -639,7 +761,7 @@ const Properties: FC<PropertiesProps> = ({
               label: 'data',
               type: 'variable',
               dataType: 'object',
-              value: `${node.getData().id}.data`,
+              value: `${dataNodeId}.data`,
               nodeData: nodeData,
             });
           }
@@ -648,7 +770,7 @@ const Properties: FC<PropertiesProps> = ({
     });
 
     // Add conversation variables from global config
-    const conversationVariables = config?.variables || [];
+    const conversationVariables = workflowConfig?.variables || [];
     
     conversationVariables.forEach((variable: any) => {
       const key = `CONVERSATION_${variable.name}`;
@@ -667,7 +789,7 @@ const Properties: FC<PropertiesProps> = ({
     });
 
     return variableList;
-  }, [selectedNode, graphRef]);
+  }, [selectedNode, graphRef, workflowConfig?.variables]);
 
   // Filter out boolean type variables for loop and llm nodes
   const getFilteredVariableList = (nodeType?: string) => {
@@ -782,7 +904,11 @@ const Properties: FC<PropertiesProps> = ({
                   
                   return (
                     <Form.Item key={key} name={key}>
-                      <MessageEditor key={key} options={contextVariableList} parentName={key} />
+                      <MessageEditor
+                        key={key} 
+                        options={contextVariableList.filter(variable => variable.nodeData?.type !== 'knowledge-retrieval')} 
+                        parentName={key}
+                      />
                     </Form.Item>
                   )
                 }
@@ -885,67 +1011,7 @@ const Properties: FC<PropertiesProps> = ({
                         parentName={key}
                         options={(() => {
                           if (config.filterLoopIterationVars) {
-                            // Add loop cycle variables and iteration item/index variables
                             const loopIterationVars: Suggestion[] = [];
-                            const graph = graphRef.current;
-                            if (graph && selectedNode) {
-                              const nodes = graph.getNodes();
-                              
-                              // Find parent loop/iteration nodes
-                              const findParentLoopIteration = (nodeId: string): string[] => {
-                                const node = nodes.find(n => n.id === nodeId);
-                                if (!node) return [];
-                                
-                                const nodeData = node.getData();
-                                const cycle = nodeData?.cycle;
-                                
-                                if (cycle) {
-                                  const parentNode = nodes.find(n => n.getData().id === cycle);
-                                  if (parentNode) {
-                                    const parentData = parentNode.getData();
-                                    if (parentData?.type === 'loop') {
-                                      console.log('parentData', parentData)
-                                      // Add cycle variables from loop node
-                                      const cycleVars = parentData.cycle_vars || [];
-                                      cycleVars.forEach((cycleVar: any) => {
-                                        loopIterationVars.push({
-                                          key: `${cycle}_cycle_${cycleVar.name}`,
-                                          label: cycleVar.name,
-                                          type: 'variable',
-                                          dataType: 'String',
-                                          value: `${cycle}.${cycleVar.name}`,
-                                          nodeData: parentData,
-                                        });
-                                      });
-                                    } else if (parentData?.type === 'iteration') {
-                                      // Add item and index variables from iteration node
-                                      loopIterationVars.push(
-                                        {
-                                          key: `${cycle}_item`,
-                                          label: 'item',
-                                          type: 'variable',
-                                          dataType: 'Object',
-                                          value: `${cycle}.item`,
-                                          nodeData: parentData,
-                                        },
-                                        {
-                                          key: `${cycle}_index`,
-                                          label: 'index',
-                                          type: 'variable',
-                                          dataType: 'Number',
-                                          value: `${cycle}.index`,
-                                          nodeData: parentData,
-                                        }
-                                      );
-                                    }
-                                    return [cycle, ...findParentLoopIteration(cycle)];
-                                  }
-                                }
-                                return [];
-                              };
-                              
-                              findParentLoopIteration(selectedNode.id);
-                            }
                             
                             return [...getFilteredVariableList(selectedNode?.data?.type), ...loopIterationVars];
                           }
@@ -974,7 +1040,11 @@ const Properties: FC<PropertiesProps> = ({
                         placeholder={t('common.pleaseSelect')}
                       />
                       : config.type === 'inputNumber'
-                      ? <InputNumber />
+                      ? <InputNumber
+                          placeholder={t('common.pleaseEnter')}
+                          className="rb:w-full!"
+                          onChange={(value) => form.setFieldValue(key, value)}
+                        />
                       : config.type === 'slider'
                       ? <Slider min={config.min} max={config.max} step={config.step} />
                       : config.type === 'customSelect'
@@ -1030,20 +1100,25 @@ const Properties: FC<PropertiesProps> = ({
                       ? <ConditionList
                         parentName={key}
                         options={(() => {
-                          // For loop nodes, add cycle_vars to condition options
-                          if (selectedNode?.data?.type === 'loop') {
-                            const cycleVars = values?.cycle_vars || [];
-                            const cycleVarSuggestions: Suggestion[] = cycleVars.map((cycleVar: any) => ({
-                              key: `${selectedNode.id}_cycle_${cycleVar.name}`,
-                              label: cycleVar.name,
-                              type: 'variable',
-                              dataType: cycleVar.type || 'String',
-                              value: `${selectedNode.getData().id}.${cycleVar.name}`,
-                              nodeData: selectedNode.getData(),
-                            }));
-                            return [...getFilteredVariableList(selectedNode?.data?.type), ...cycleVarSuggestions];
-                          }
-                          return getFilteredVariableList(selectedNode?.data?.type);
+                          const cycleVars = values?.cycle_vars || [];
+                          const cycleVarSuggestions: Suggestion[] = cycleVars.filter(vo => vo.name && vo.name.trim() !== '').map((cycleVar: any) => ({
+                            key: `${selectedNode.id}_cycle_${cycleVar.name}`,
+                            label: cycleVar.name,
+                            type: 'variable',
+                            dataType: cycleVar.type || 'String',
+                            value: `${selectedNode.getData().id}.${cycleVar.name}`,
+                            nodeData: selectedNode.getData(),
+                          }));
+                          return [...variableList.filter(variable => {
+                            // Keep conversation variables
+                            if (variable.group === 'CONVERSATION') return true;
+                            // Keep sys variables from start nodes
+                            if (variable.nodeData?.type === 'start' && variable.value?.startsWith('sys.')) return true;
+                            // Keep variables from non-start nodes
+                            if (variable.nodeData?.type !== 'start' && variable.nodeData?.type !== 'http-request' && variable.dataType !== 'boolean') return true;
+                            // Filter out custom variables from start nodes
+                            return false;
+                          }), ...cycleVarSuggestions];
                         })()
                       }
                         selectedNode={selectedNode}

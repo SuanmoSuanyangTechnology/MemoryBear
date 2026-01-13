@@ -14,6 +14,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from app.core.workflow.graph_builder import GraphBuilder
 from app.core.workflow.nodes import WorkflowState
+from app.core.workflow.nodes.base_config import VariableType
 from app.core.workflow.nodes.enums import NodeType
 
 # from app.core.tools.registry import ToolRegistry
@@ -78,9 +79,21 @@ class WorkflowExecutor:
                 var_name = var_def.get("name")
                 var_default = var_def.get("default")
                 if var_name:
-                    # TODO: 入参类型校验
-                    conversation_vars[var_name] = var_default
-
+                    if var_default:
+                        conversation_vars[var_name] = var_default
+                    else:
+                        var_type = var_def.get("type")
+                        match var_type:
+                            case VariableType.STRING:
+                                conversation_vars[var_name] = ""
+                            case VariableType.NUMBER:
+                                conversation_vars[var_name] = 0
+                            case VariableType.OBJECT:
+                                conversation_vars[var_name] = {}
+                            case VariableType.BOOLEAN:
+                                conversation_vars[var_name] = False
+                            case VariableType.ARRAY_NUMBER | VariableType.ARRAY_OBJECT | VariableType.ARRAY_BOOLEAN | VariableType.ARRAY_STRING:
+                                conversation_vars[var_name] = []
         input_variables = input_data.get("variables") or {}  # Start 节点的自定义变量
 
         # 构建分层的变量结构
@@ -338,7 +351,6 @@ class WorkflowExecutor:
                     chunk_count += 1
                     event_type = data.get("type", "node_chunk")  # "message" or "node_chunk"
                     logger.info(f"[CUSTOM] ✅ 收到 {event_type} #{chunk_count} from {data.get('node_id')}")
-
                     yield {
                         "event": event_type,  # "message" or "node_chunk"
                         "data": {
@@ -347,7 +359,8 @@ class WorkflowExecutor:
                             "full_content": data.get("full_content"),
                             "chunk_index": data.get("chunk_index"),
                             "is_prefix": data.get("is_prefix"),
-                            "is_suffix": data.get("is_suffix")
+                            "is_suffix": data.get("is_suffix"),
+                            "conversation_id": input_data.get("conversation_id"),
                         }
                     }
 
@@ -362,7 +375,7 @@ class WorkflowExecutor:
                         inputv = payload.get("input", {})
                         variables = inputv.get("variables", {})
                         variables_sys = variables.get("sys", {})
-                        conversation_id = variables_sys.get("conversation_id")
+                        conversation_id = input_data.get("conversation_id")
                         execution_id = variables_sys.get("execution_id")
                         logger.info(f"[DEBUG] Node starts execution: {node_name}")
 
@@ -381,7 +394,7 @@ class WorkflowExecutor:
                         inputv = result.get("input", {})
                         variables = inputv.get("variables", {})
                         variables_sys = variables.get("sys", {})
-                        conversation_id = variables_sys.get("conversation_id")
+                        conversation_id = input_data.get("conversation_id")
                         execution_id = variables_sys.get("execution_id")
                         logger.info(f"[DEBUG] Node execution completed: {node_name}")
 

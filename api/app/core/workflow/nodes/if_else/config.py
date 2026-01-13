@@ -23,7 +23,7 @@ class ConditionDetail(BaseModel):
     )
 
     input_type: ValueInputType = Field(
-        ...,
+        default=ValueInputType.CONSTANT,
         description="Value input type for comparison"
     )
 

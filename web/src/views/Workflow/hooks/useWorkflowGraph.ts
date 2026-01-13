@@ -63,7 +63,17 @@ export const useWorkflowGraph = ({
     if (!id) return
     getWorkflowConfig(id)
       .then(res => {
-        setConfig(res as WorkflowConfig)
+        const { variables, ...rest } = res as WorkflowConfig
+        setConfig({
+          ...rest,
+          variables: variables.map(v => {
+            const { default: _, ...cleanV } = v
+            return {
+              ...cleanV,
+              defaultValue: v.default ?? ''
+            }
+          })
+        })
       })
   }
 
@@ -272,9 +282,21 @@ export const useWorkflowGraph = ({
       }, 100)
     }
     if (edges.length) {
-      // 去重处理：相同节点之间的连线仅连一次
+      // 去重处理：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
       const uniqueEdges = edges.filter((edge, index, arr) => {
-        return arr.findIndex(e => e.source === edge.source && e.target === edge.target) === index;
+        return arr.findIndex(e => {
+          const sourceCell = graphRef.current?.getCellById(e.source);
+          const sourceType = sourceCell?.getData()?.type;
+          const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
+          
+          if (isMultiPortNode) {
+            // 多端口节点需要同时比较source、target和label
+            return e.source === edge.source && e.target === edge.target && e.label === edge.label;
+          } else {
+            // 其他节点只比较source和target
+            return e.source === edge.source && e.target === edge.target;
+          }
+        }) === index;
       });
       
       const edgeList = uniqueEdges.map(edge => {
@@ -332,6 +354,7 @@ export const useWorkflowGraph = ({
                 },
               },
             },
+            zIndex: targetCell.getData()?.cycle ? 3 : 0
           }
 
           return edgeConfig
@@ -423,13 +446,13 @@ export const useWorkflowGraph = ({
     );
   };
   // 显示/隐藏连接桩
-  const showPorts = (show: boolean) => {
-    const container = containerRef.current!;
-    const ports = container.querySelectorAll('.x6-port-body') as NodeListOf<SVGElement>;
-    for (let i = 0, len = ports.length; i < len; i += 1) {
-      ports[i].style.visibility = show ? 'visible' : 'hidden';
-    }
-  };
+  // const showPorts = (show: boolean) => {
+  //   const container = containerRef.current!;
+  //   const ports = container.querySelectorAll('.x6-port-body') as NodeListOf<SVGElement>;
+  //   for (let i = 0, len = ports.length; i < len; i += 1) {
+  //     ports[i].style.visibility = show ? 'visible' : 'hidden';
+  //   }
+  // };
   // 节点选择事件
   const nodeClick = ({ node }: { node: Node }) => {
     // 忽略 add-node 类型的节点点击
@@ -906,6 +929,13 @@ export const useWorkflowGraph = ({
 
       const params = {
         ...config,
+        variables: config.variables.map(v => {
+            const { defaultValue, ...cleanV } = v
+            return {
+              ...cleanV,
+              default: defaultValue ?? ''
+            }
+          }),
         nodes: nodes.map((node: Node) => {
           const data = node.getData();
           const position = node.getPosition();
@@ -936,7 +966,10 @@ export const useWorkflowGraph = ({
                 itemConfig = {
                   ...itemConfig,
                   ...data.config[key].defaultValue,
-                  knowledge_bases: knowledge_bases?.map((vo: any) => ({ kb_id: vo.id, ...vo.config }))
+                  knowledge_bases: knowledge_bases?.map((vo: any) => {
+                    const kb_config = vo.config || { similarity_threshold: vo.similarity_threshold, strategy: vo.strategy, top_k: vo.top_k, weight: vo.weight }
+                    return { kb_id: vo.kb_id || vo.id, ...kb_config, }
+                  })
                 }
               }
             })
@@ -1007,8 +1040,21 @@ export const useWorkflowGraph = ({
         })
         .filter(edge => edge !== null)
         .filter((edge, index, arr) => {
-          // 去重：相同节点之间的连线仅保留一次
-          return arr.findIndex(e => e && e.source === edge?.source && e.target === edge?.target) === index;
+          // 去重：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
+          return arr.findIndex(e => {
+            if (!e || !edge) return false;
+            const sourceCell = graphRef.current?.getCellById(e.source);
+            const sourceType = sourceCell?.getData()?.type;
+            const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
+            
+            if (isMultiPortNode) {
+              // 多端口节点需要同时比较source、target和label
+              return e.source === edge.source && e.target === edge.target && e.label === edge.label;
+            } else {
+              // 其他节点只比较source和target
+              return e.source === edge.source && e.target === edge.target;
+            }
+          }) === index;
         }),
       }
       saveWorkflowConfig(config.app_id, params as WorkflowConfig)

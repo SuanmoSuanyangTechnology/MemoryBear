@@ -114,6 +114,7 @@ const AssignmentList: FC<AssignmentListProps> = ({
                           ? <InputNumber
                             placeholder={t('common.pleaseEnter')}
                             className="rb:w-full!"
+                            onChange={(value) => form.setFieldValue([name, 'value'], value)}
                           />
                           : operation === 'assign'
                           ? <>

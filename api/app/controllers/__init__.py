@@ -20,6 +20,8 @@ from . import (
     knowledgeshare_controller,
     memory_agent_controller,
     memory_dashboard_controller,
+    memory_episodic_controller,
+    memory_explicit_controller,
     memory_forget_controller,
     memory_reflection_controller,
     memory_short_term_controller,
@@ -40,7 +42,8 @@ from . import (
     workspace_controller,
     memory_forget_controller,
     home_page_controller,
-    memory_perceptual_controller
+    memory_perceptual_controller,
+    memory_working_controller,
 )
 
 # 创建管理端 API 路由器
@@ -66,6 +69,8 @@ manager_router.include_router(memory_agent_controller.router)
 manager_router.include_router(memory_dashboard_controller.router)
 manager_router.include_router(memory_storage_controller.router)
 manager_router.include_router(user_memory_controllers.router)
+manager_router.include_router(memory_episodic_controller.router)
+manager_router.include_router(memory_explicit_controller.router)
 manager_router.include_router(api_key_controller.router)
 manager_router.include_router(release_share_controller.router)
 manager_router.include_router(public_share_controller.router)  # 公开路由（无需认证）
@@ -82,5 +87,6 @@ manager_router.include_router(memory_forget_controller.router)
 manager_router.include_router(home_page_controller.router)
 manager_router.include_router(implicit_memory_controller.router)
 manager_router.include_router(memory_perceptual_controller.router)
+manager_router.include_router(memory_working_controller.router)
 
 __all__ = ["manager_router"]

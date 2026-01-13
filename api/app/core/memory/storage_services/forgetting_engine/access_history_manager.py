@@ -641,6 +641,7 @@ class AccessHistoryManager:
                 n.access_count = $access_count,
                 n.version = $new_version
             RETURN n.id as id,
+                   n.statement as statement,
                    n.activation_value as activation_value,
                    n.access_history as access_history,
                    n.last_access_time as last_access_time,
