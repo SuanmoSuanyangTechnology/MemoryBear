@@ -386,7 +386,10 @@ class ArrayComparisonOperator(ConditionBase):
         return self.right_value not in self.left_value
 
 
-class NoneObjectComparisonOperator(ConditionBase):
+class NoneObjectComparisonOperator:
+    def __init__(self, *arg, **kwargs):
+        pass
+
     def __getattr__(self, name):
         return lambda *args, **kwargs: False
 

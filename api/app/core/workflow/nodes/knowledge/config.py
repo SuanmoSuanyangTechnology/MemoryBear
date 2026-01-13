@@ -45,7 +45,7 @@ class KnowledgeRetrievalNodeConfig(BaseNodeConfig):
     )
 
     reranker_id: UUID = Field(
-        ...,
+        default="",
         description="Reranker top k"
     )
 
