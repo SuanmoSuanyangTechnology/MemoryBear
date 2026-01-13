@@ -1524,6 +1524,8 @@ export const zh = {
       quickReply: '快速回复',
       web_search: '联网搜索',
       memory: '记忆',
+      memoryConversationAnalysisEmpty: '目前没有可用的对话分析内容',
+      memoryConversationAnalysisEmptySubTitle: '输入您的用户ID后，点击"测试记忆"查看对话记忆',
     },
     login: {
       title: '红熊记忆科学',

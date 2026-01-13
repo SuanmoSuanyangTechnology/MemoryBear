@@ -117,26 +117,26 @@ export const getRagContent = (end_user_id: string) => {
 }
 // 情感分布分析
 export const getWordCloud = (group_id: string) => {
-  return request.post(`/memory/emotion/wordcloud`, { group_id, limit: 20 })
+  return request.post(`/memory/emotion-memory/wordcloud`, { group_id, limit: 20 })
 }
 // 高频情绪关键词
 export const getEmotionTags = (group_id: string) => {
-  return request.post(`/memory/emotion/tags`, { group_id, limit: 20 })
+  return request.post(`/memory/emotion-memory/tags`, { group_id, limit: 20 })
 }
 // 情绪健康指数
 export const getEmotionHealth = (group_id: string) => {
-  return request.post(`/memory/emotion/health`, { group_id, limit: 20 })
+  return request.post(`/memory/emotion-memory/health`, { group_id, limit: 20 })
 }
 // 个性化建议
 export const getEmotionSuggestions = (group_id: string) => {
-  return request.post(`/memory/emotion/suggestions`, { group_id, limit: 20 })
+  return request.post(`/memory/emotion-memory/suggestions`, { group_id, limit: 20 })
 }
 export const analyticsRefresh = (end_user_id: string) => {
   return request.post('/memory-storage/analytics/generate_cache', { end_user_id })
 }
 // 遗忘
 export const getForgetStats = (group_id: string) => {
-  return request.get(`/memory/forget/stats`, { group_id })
+  return request.get(`/memory/forget-memory/stats`, { group_id })
 }
 // 隐性记忆-偏好
 export const getImplicitPreferences = (end_user_id: string) => {
@@ -205,7 +205,7 @@ export const getConversationDetail = (end_user: string, conversation_id: string)
   return request.get(`/memory/work/${end_user}/detail`, { conversation_id })
 }
 export const forgetTrigger = (data: { max_merge_batch_size: number; min_days_since_access: number; end_user_id: string;}) => {
-  return request.post(`/memory/forget/trigger`, data)
+  return request.post(`/memory/forget-memory/trigger`, data)
 }
 /*************** end 用户记忆 相关接口 ******************************/
 
@@ -229,11 +229,11 @@ export const deleteMemoryConfig = (config_id: number) => {
 }
 // 遗忘引擎-获取配置
 export const getMemoryForgetConfig = (config_id: number | string) => {
-  return request.get('/memory/forget/read_config', { config_id })
+  return request.get('/memory/forget-memory/read_config', { config_id })
 }
 // 遗忘引擎-更新配置
 export const updateMemoryForgetConfig = (values: ForgetConfigForm) => {
-  return request.post('/memory/forget/update_config', values)
+  return request.post('/memory/forget-memory/update_config', values)
 }
 // 记忆萃取引擎-获取配置
 export const getMemoryExtractionConfig = (config_id: number | string) => {
