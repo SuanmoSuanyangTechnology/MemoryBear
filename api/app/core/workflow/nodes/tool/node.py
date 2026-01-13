@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import uuid
@@ -70,14 +71,15 @@ class ToolNode(BaseNode):
         if result.success:
             logger.info(f"节点 {self.node_id} 工具执行成功")
             return {
-                "success": True,
+                "text": json.dumps(result.data, ensure_ascii=False),
                 "data": result.data,
+                "error_code": "",
                 "execution_time": result.execution_time
             }
         else:
             logger.error(f"节点 {self.node_id} 工具执行失败: {result.error}")
             return {
-                "success": False,
+                "text": json.dumps(result.error, ensure_ascii=False),
                 "data": result.error,
                 "error_code": result.error_code,
                 "execution_time": result.execution_time
