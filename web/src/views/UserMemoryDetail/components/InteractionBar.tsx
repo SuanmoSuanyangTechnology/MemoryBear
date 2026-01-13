@@ -1,4 +1,4 @@
-import { type FC } from 'react'
+import { type FC, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react'
 import Empty from '@/components/Empty'
@@ -14,11 +14,13 @@ const Colors = ['#155EEF', '#369F21', '#FF5D34']
 const InteractionBar: FC<InteractionBarProps> = ({ chartData, loading }) => {
   const { t } = useTranslation()
 
-  const series = [{
-    name: 'Interaction Count',
-    type: 'bar',
-    data: chartData.map(item => item.count)
-  }]
+  const series = useMemo(() => {
+    return [{
+      name: t('userMemory.interactionCountData'),
+      type: 'bar',
+      data: chartData.map(item => item.count)
+    }]
+  }, [chartData, t])
 
   return (
     <>
@@ -80,6 +82,7 @@ const InteractionBar: FC<InteractionBarProps> = ({ chartData, loading }) => {
               },
               yAxis: {
                 type: 'value',
+                minInterval: 1,
                 axisLabel: {
                   color: '#A8A9AA',
                   fontFamily: 'PingFangSC, PingFang SC'
@@ -104,8 +107,6 @@ const InteractionBar: FC<InteractionBarProps> = ({ chartData, loading }) => {
                     type: 'solid'
                   }
                 },
-                max: 1,
-                min: 0
               },
               series
             }}

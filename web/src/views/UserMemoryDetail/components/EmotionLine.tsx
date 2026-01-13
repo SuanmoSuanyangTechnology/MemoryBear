@@ -4,6 +4,7 @@ import ReactEcharts from 'echarts-for-react';
 import Empty from '@/components/Empty'
 import Loading from '@/components/Empty/Loading'
 import type { Emotion } from './GraphDetail'
+import { format } from 'echarts';
 
 interface EmotionLineProps {
   chartData: Emotion[];
@@ -26,7 +27,7 @@ const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
       const seriesData = timePoints.map(time => dataMap.get(time) || 0)
       
       return {
-        name: emotionType,
+        name: t(`userMemory.${emotionType}`),
         type: 'line',
         smooth: true,
         lineStyle: {
@@ -71,7 +72,7 @@ const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
                 formatter: function(params: any) {
                   let result = `${params[0].axisValue}<br/>`
                   params.forEach((param: any) => {
-                    result += `${param.marker}${param.seriesName}: ${param.value}<br/>`
+                    result += `${param.marker}${param.seriesName}: ${param.value}%<br/>`
                   })
                   return result
                 }
@@ -92,7 +93,7 @@ const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
               },
               grid: {
                 top: 16,
-                left: 30,
+                left: 40,
                 right: 36,
                 bottom: 48,
                 // containLabel: false
@@ -103,7 +104,7 @@ const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
                 boundaryGap: false,
                 axisLabel: {
                   color: '#A8A9AA',
-                  fontFamily: 'PingFangSC, PingFang SC'
+                  fontFamily: 'PingFangSC, PingFang SC',
                 },
                 axisLine: {
                   show: true,
@@ -130,7 +131,8 @@ const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
                 type: 'value',
                 axisLabel: {
                   color: '#A8A9AA',
-                  fontFamily: 'PingFangSC, PingFang SC'
+                  fontFamily: 'PingFangSC, PingFang SC',
+                  formatter: '{value}%'
                 },
                 axisLine: {
                   show: true,
@@ -152,7 +154,7 @@ const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
                     type: 'solid'
                   }
                 },
-                max: 1,
+                max: 100,
                 min: 0
               },
               series: getSeries()
