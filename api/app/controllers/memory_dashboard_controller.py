@@ -1,16 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
-import uuid
-from app.repositories.end_user_repository import update_end_user_other_name
-import uuid
+from typing import Optional
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.schemas.memory_agent_schema import End_User_Information
 from app.schemas.response_schema import ApiResponse
-from app.schemas.app_schema import App as AppSchema
 
 from app.services import memory_dashboard_service, memory_storage_service, workspace_service
 from app.core.logging_config import get_api_logger
@@ -102,8 +98,11 @@ async def get_workspace_end_users(
     """
     获取工作空间的宿主列表
     
-    返回格式与原 memory_list 接口中的 end_users 字段相同
+    返回格式与原 memory_list 接口中的 end_users 字段相同，
+    并包含每个用户的记忆配置信息（memory_config_id 和 memory_config_name）
     """
+    from app.services.memory_agent_service import get_end_user_connected_config
+    
     workspace_id = current_user.current_workspace_id
     # 获取当前空间类型
     current_workspace_type = memory_dashboard_service.get_current_workspace_type(db, workspace_id, current_user)
@@ -123,10 +122,30 @@ async def get_workspace_end_users(
             memory_num = {
                 "total":memory_dashboard_service.get_current_user_total_chunk(str(end_user.id), db, current_user)
             }
+        
+        # 获取记忆配置信息
+        memory_config_info = {
+            "memory_config_id": None,
+            "memory_config_name": None
+        }
+        try:
+            config_data = get_end_user_connected_config(str(end_user.id), db)
+            memory_config_info = {
+                "memory_config_id": config_data.get("memory_config_id"),
+                "memory_config_name": config_data.get("memory_config_name")
+            }
+        except ValueError as e:
+            # 用户没有配置或应用未发布，记录警告但不影响其他数据
+            api_logger.warning(f"获取用户 {end_user.id} 的记忆配置失败: {str(e)}")
+        except Exception as e:
+            # 其他异常也记录但不中断
+            api_logger.warning(f"获取用户 {end_user.id} 的记忆配置异常: {str(e)}")
+        
         result.append(
             {
-                'end_user':end_user,
-                'memory_num':memory_num
+                'end_user': end_user,
+                'memory_num': memory_num,
+                'memory_config': memory_config_info
             }
         )
         
@@ -465,7 +484,6 @@ async def dashboard_data(
     if storage_type is None:
         storage_type = 'neo4j'
     
-    user_rag_memory_id = None
     
     # 根据 storage_type 决定返回哪个数据对象
     # 如果是 'rag'，neo4j_data 为 null；否则 rag_data 为 null
