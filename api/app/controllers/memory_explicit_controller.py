@@ -25,12 +25,12 @@ api_logger = get_api_logger()
 memory_explicit_service = MemoryExplicitService()
 
 router = APIRouter(
-    prefix="/memory-storage",
+    prefix="/memory/classifications",
     tags=["Explicit Memory"],
 )
 
 
-@router.post("/classifications/explicit-memory", response_model=ApiResponse)
+@router.post("/explicit-memory", response_model=ApiResponse)
 async def get_explicit_memory_overview_api(
     request: ExplicitMemoryOverviewRequest,
     current_user: User = Depends(get_current_user),
@@ -69,7 +69,7 @@ async def get_explicit_memory_overview_api(
         return fail(BizCode.INTERNAL_ERROR, "显性记忆总览查询失败", str(e))
 
 
-@router.post("/classifications/explicit-memory-details", response_model=ApiResponse)
+@router.post("/explicit-memory-details", response_model=ApiResponse)
 async def get_explicit_memory_details_api(
     request: ExplicitMemoryDetailsRequest,
     current_user: User = Depends(get_current_user),

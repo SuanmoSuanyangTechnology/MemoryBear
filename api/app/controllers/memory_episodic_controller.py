@@ -21,12 +21,12 @@ from app.services.memory_episodic_service import memory_episodic_service
 api_logger = get_api_logger()
 
 router = APIRouter(
-    prefix="/memory-storage",
+    prefix="/memory/classifications",
     tags=["Episodic Memory"],
 )
 
 
-@router.post("/classifications/episodic-memory", response_model=ApiResponse)
+@router.post("/episodic-memory", response_model=ApiResponse)
 async def get_episodic_memory_overview_api(
     request: EpisodicMemoryOverviewRequest,
     current_user: User = Depends(get_current_user),
@@ -81,7 +81,7 @@ async def get_episodic_memory_overview_api(
         return fail(BizCode.INTERNAL_ERROR, "情景记忆总览查询失败", str(e))
 
 
-@router.post("/classifications/episodic-memory-details", response_model=ApiResponse)
+@router.post("/episodic-memory-details", response_model=ApiResponse)
 async def get_episodic_memory_details_api(
     request: EpisodicMemoryDetailsRequest,
     current_user: User = Depends(get_current_user),
