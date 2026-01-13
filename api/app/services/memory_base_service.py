@@ -9,6 +9,7 @@ from typing import Optional
 
 from app.core.logging_config import get_logger
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.services.emotion_analytics_service import EmotionAnalyticsService
 
 logger = get_logger(__name__)
 
@@ -220,7 +221,6 @@ class MemoryBaseService:
         """
         try:
             if end_user_id:
-                from app.services.emotion_analytics_service import EmotionAnalyticsService
                 emotion_service = EmotionAnalyticsService()
                 
                 emotion_data = await emotion_service.get_emotion_tags(

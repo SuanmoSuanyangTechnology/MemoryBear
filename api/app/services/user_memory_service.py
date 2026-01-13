@@ -1272,11 +1272,32 @@ async def analytics_memory_types(
     entity_count = node_counts.get("Entity", 0)
     chunk_count = node_counts.get("Chunk", 0)
     
+    # 获取用户的遗忘阈值配置
+    forgetting_threshold = 0.3  # 默认值
+    if end_user_id:
+        try:
+            from app.services.memory_agent_service import get_end_user_connected_config
+            from app.core.memory.storage_services.forgetting_engine.config_utils import load_actr_config_from_db
+            
+            # 获取用户关联的 config_id
+            connected_config = get_end_user_connected_config(end_user_id, db)
+            config_id = connected_config.get('memory_config_id')
+            
+            if config_id:
+                # 从数据库加载配置
+                config = load_actr_config_from_db(db, config_id)
+                forgetting_threshold = config.get('forgetting_threshold', 0.3)
+                logger.debug(f"使用用户配置的遗忘阈值: {forgetting_threshold} (end_user_id={end_user_id}, config_id={config_id})")
+            else:
+                logger.debug(f"用户未关联配置，使用默认遗忘阈值: {forgetting_threshold} (end_user_id={end_user_id})")
+        except Exception as e:
+            logger.warning(f"获取用户遗忘阈值配置失败，使用默认值 {forgetting_threshold}: {str(e)}")
+    
     # 使用 MemoryBaseService 的共享方法获取特殊记忆类型的数量
     episodic_count = await base_service.get_episodic_memory_count(end_user_id)
     explicit_count = await base_service.get_explicit_memory_count(end_user_id)
     emotion_count = await base_service.get_emotional_memory_count(end_user_id, statement_count)
-    forget_count = await base_service.get_forget_memory_count(end_user_id, forgetting_threshold=0.3)
+    forget_count = await base_service.get_forget_memory_count(end_user_id, forgetting_threshold)
     
     # 按规则计算9种记忆类型的数量（使用英文枚举作为key）
     memory_counts = {

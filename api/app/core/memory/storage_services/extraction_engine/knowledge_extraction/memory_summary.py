@@ -31,7 +31,6 @@ class MemorySummaryResponse(RobustLLMResponse):
 
 async def generate_title_and_type_for_summary(
     content: str,
-    end_user_id: str,
     llm_client
 ) -> Tuple[str, str]:
     """
@@ -41,7 +40,6 @@ async def generate_title_and_type_for_summary(
     
     Args:
         content: Summary的内容文本
-        end_user_id: 终端用户ID (group_id)
         llm_client: LLM客户端实例
         
     Returns:
@@ -180,7 +178,6 @@ async def _process_chunk_summary(
         try:
             title, episodic_type = await generate_title_and_type_for_summary(
                 content=summary_text,
-                end_user_id=dialog.group_id,
                 llm_client=llm_client
             )
             logger.info(f"Generated title and type for MemorySummary: title={title}, type={episodic_type}")

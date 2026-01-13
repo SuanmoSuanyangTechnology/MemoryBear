@@ -275,7 +275,6 @@ class ForgettingStrategy:
             if llm_client is not None:
                 title, episodic_type = await generate_title_and_type_for_summary(
                     content=summary_text,
-                    end_user_id=group_id,
                     llm_client=llm_client
                 )
                 logger.info(f"成功为MemorySummary生成标题和类型: title={title}, type={episodic_type}")
