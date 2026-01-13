@@ -260,17 +260,33 @@ class ForgettingStrategy:
         )
         
         # 生成标题和类型（使用LLM）
-        from app.services.user_memory_service import UserMemoryService
+        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import generate_title_and_type_for_summary
+        
+        # 获取 LLM 客户端
+        llm_client = None
+        if config_id is not None and db is not None:
+            try:
+                llm_client = await self._get_llm_client(db, config_id)
+            except Exception as e:
+                logger.warning(f"获取 LLM 客户端失败: {str(e)}")
+        
+        # 生成标题和类型
         try:
-            title, episodic_type = await UserMemoryService.generate_title_and_type_for_summary(
-                content=summary_text,
-                end_user_id=group_id
-            )
-            logger.info(f"成功为MemorySummary生成标题和类型: title={title}, type={episodic_type}")
+            if llm_client is not None:
+                title, episodic_type = await generate_title_and_type_for_summary(
+                    content=summary_text,
+                    end_user_id=group_id,
+                    llm_client=llm_client
+                )
+                logger.info(f"成功为MemorySummary生成标题和类型: title={title}, type={episodic_type}")
+            else:
+                logger.warning("LLM 客户端不可用，使用默认标题和类型")
+                title = "未命名"
+                episodic_type = "conversation"
         except Exception as e:
             logger.error(f"生成标题和类型失败，使用默认值: {str(e)}")
             title = "未命名"
-            episodic_type = "其他"
+            episodic_type = "conversation"
         
         # 计算继承的激活值和重要性（取较高值）
         inherited_activation = max(statement_activation, entity_activation)
