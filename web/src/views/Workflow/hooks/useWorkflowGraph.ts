@@ -282,9 +282,21 @@ export const useWorkflowGraph = ({
       }, 100)
     }
     if (edges.length) {
-      // 去重处理：相同节点之间的连线仅连一次
+      // 去重处理：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
       const uniqueEdges = edges.filter((edge, index, arr) => {
-        return arr.findIndex(e => e.source === edge.source && e.target === edge.target) === index;
+        return arr.findIndex(e => {
+          const sourceCell = graphRef.current?.getCellById(e.source);
+          const sourceType = sourceCell?.getData()?.type;
+          const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
+          
+          if (isMultiPortNode) {
+            // 多端口节点需要同时比较source、target和label
+            return e.source === edge.source && e.target === edge.target && e.label === edge.label;
+          } else {
+            // 其他节点只比较source和target
+            return e.source === edge.source && e.target === edge.target;
+          }
+        }) === index;
       });
       
       const edgeList = uniqueEdges.map(edge => {
@@ -1028,8 +1040,21 @@ export const useWorkflowGraph = ({
         })
         .filter(edge => edge !== null)
         .filter((edge, index, arr) => {
-          // 去重：相同节点之间的连线仅保留一次
-          return arr.findIndex(e => e && e.source === edge?.source && e.target === edge?.target) === index;
+          // 去重：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
+          return arr.findIndex(e => {
+            if (!e || !edge) return false;
+            const sourceCell = graphRef.current?.getCellById(e.source);
+            const sourceType = sourceCell?.getData()?.type;
+            const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
+            
+            if (isMultiPortNode) {
+              // 多端口节点需要同时比较source、target和label
+              return e.source === edge.source && e.target === edge.target && e.label === edge.label;
+            } else {
+              // 其他节点只比较source和target
+              return e.source === edge.source && e.target === edge.target;
+            }
+          }) === index;
         }),
       }
       saveWorkflowConfig(config.app_id, params as WorkflowConfig)
