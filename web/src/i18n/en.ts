@@ -95,6 +95,7 @@ export const en = {
       pricing: 'Pricing Management',
       orderPayment: 'Order Payment',
       orderHistory: 'Order History',
+      spaceConfig: 'Space Configuration'
     },
     dashboard: {
       total_models: 'Total number of available models',
@@ -1250,6 +1251,12 @@ export const en = {
       negative: 'Negative Emotion',
       neutral: 'Neutral Emotion',
       interactionCountData: 'Interaction Count',
+      capacity: 'Capacity',
+      type: 'Type',
+      person: 'Personal',
+      memoryNum: 'memories',
+      memory_config_name: 'Memory Engine',
+      searchPlaceholder: 'Search memory store name',
     },
     space: {
       createSpace: 'Create Space',
@@ -1265,7 +1272,8 @@ export const en = {
       neo4jDesc: 'Based on knowledge graph, suitable for relational reasoning and path query',
       llmModel: 'LLM Model',
       embeddingModel: 'Embedding Model',
-      rerankModel: 'Rerank Model'
+      rerankModel: 'Rerank Model',
+      configAlert: 'Space model configuration ensures that the space can correctly call the corresponding models to process business data during runtime.',
     },
     memoryExtractionEngine: {
       title: 'Memory Engine Module Configuration Center',
@@ -1594,10 +1602,10 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
 
       JsonTool_desc: 'Data Format Conversion',
       JsonTool_features: 'JSON formatting, compression, validation and conversion functions',
-      jsonFormat: 'JSON Formatting',
-      jsonGzip: 'JSON Compression',
-      jsonCheck: 'JSON Validation',
-      jsonConversion: 'Format Conversion',
+      jsonParse: 'JSON Parse',
+      jsonInsert: 'JSON Insert',
+      jsonReplace: 'JSON Validation',
+      jsonDelete: 'JSON Delete',
       jsonEg: 'Example JSON',
       enterJson: 'Enter JSON',
       jsonPlaceholder: 'Enter JSON data, e.g.: {"name": "test", "value": 123}',

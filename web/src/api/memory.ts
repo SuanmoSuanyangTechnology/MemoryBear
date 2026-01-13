@@ -176,10 +176,10 @@ export const getPerceptualTimeline = (end_user: string) => {
 }
 // 情景记忆-总览
 export const getEpisodicOverview = (data: { end_user_id: string; time_range: string; episodic_type: string; } ) => {
-  return request.post(`/memory-storage/classifications/episodic-memory`, data)
+  return request.post(`/memory/episodic-memory/overview`, data)
 }
 export const getEpisodicDetail = (data: { end_user_id: string; summary_id: string; } ) => {
-  return request.post(`/memory-storage/classifications/episodic-memory-details`, data)
+  return request.post(`/memory/episodic-memory/details`, data)
 }
 // 关系演化
 export const getRelationshipEvolution = (data: { id: string; label: string; } ) => {
@@ -190,10 +190,10 @@ export const getTimelineMemories = (data: { id: string; label: string; }) => {
   return request.get(`/memory-storage/memory_space/timeline_memories`, data)
 }
 export const getExplicitMemory = (end_user_id: string) => {
-  return request.post(`/memory-storage/classifications/explicit-memory`, { end_user_id })
+  return request.post(`/memory/explicit-memory/overview`, { end_user_id })
 }
 export const getExplicitMemoryDetails = (data: { end_user_id: string, memory_id: string; }) => {
-  return request.post(`/memory-storage/classifications/explicit-memory-details`, data)
+  return request.post(`/memory/explicit-memory/details`, data)
 }
 export const getConversations = (end_user: string) => {
   return request.get(`/memory/work/${end_user}/conversations`)

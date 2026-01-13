@@ -95,6 +95,7 @@ export const zh = {
       pricing: '收费管理',
       orderPayment: '订单支付',
       orderHistory: '订单记录',
+      spaceConfig: '空间配置'
     },
     knowledgeBase: {
       home: '首页',
@@ -1328,6 +1329,12 @@ export const zh = {
       negative: '负向情绪',
       neutral: '中性情绪',
       interactionCountData: '互动次数',
+      capacity: '容量',
+      type: '类型',
+      person: '个人',
+      memoryNum: '条记忆',
+      memory_config_name: '记忆引擎',
+      searchPlaceholder: '搜索记忆库名称',
     },
     space: {
       createSpace: '创建空间',
@@ -1343,7 +1350,8 @@ export const zh = {
       neo4jDesc: '基于知识图谱，适合关系推理和路径查询',
       llmModel: 'LLM 模型',
       embeddingModel: 'Embedding 模型',
-      rerankModel: 'Rerank 模型'
+      rerankModel: 'Rerank 模型',
+      configAlert: '空间模型配置为空间的模型模型，保障空间运行时能正确的调用到相应的模型来处理业务数据。',
     },
     memoryExtractionEngine: {
       title: '记忆引擎模块配置中心',
@@ -1690,10 +1698,10 @@ export const zh = {
 
       JsonTool_desc: '数据格式转换',
       JsonTool_features: 'JSON格式化、压缩、验证和转换功能',
-      jsonFormat: 'JSON格式化',
-      jsonGzip: 'JSON压缩',
-      jsonCheck: 'JSON验证',
-      jsonConversion: '格式转换',
+      jsonParse: 'JSON解析',
+      jsonInsert: 'JSON插入',
+      jsonReplace: 'JSON验证',
+      jsonDelete: 'JSON删除',
       jsonEg: '示例JSON',
       enterJson: '输入JSON',
       jsonPlaceholder: '输入JSON数据，例如：{"name": "测试", "value": 123}',
