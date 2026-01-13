@@ -1068,7 +1068,7 @@ const Properties: FC<PropertiesProps> = ({
                                   (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
                                 const variableNameMatch = !config.filterVariableNames || 
                                   (Array.isArray(config.filterVariableNames) && config.filterVariableNames.includes(variable.label));
-                                return nodeTypeMatch && variableNameMatch;
+                                return nodeTypeMatch || variableNameMatch;
                               });
                             }
                             // Filter child nodes for iteration output
