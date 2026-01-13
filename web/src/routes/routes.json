@@ -33,6 +33,7 @@
       { "path": "/api-key", "element": "ApiKeyManagement" },
       { "path": "/emotion-engine/:id", "element": "EmotionEngine" },
       { "path": "/reflection-engine/:id", "element": "SelfReflectionEngine" },
+      { "path": "/space-config", "element": "SpaceConfig" },
       { "path": "/no-permission", "element": "NoPermission" },
       { "path": "/*", "element": "NotFound" }
     ]

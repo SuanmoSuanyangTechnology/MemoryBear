@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react'
 import Empty from '@/components/Empty'
 import Loading from '@/components/Empty/Loading'
-import type { Interaction } from './GraphDetail'
+import type { Interaction } from '../pages/GraphDetail'
 
 interface InteractionBarProps {
   chartData: Interaction[];
