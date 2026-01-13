@@ -19,7 +19,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.logging_config import get_config_logger
 from app.core.models import RedBearEmbeddings, RedBearModelConfig, RedBearLLM
-from app.core.response_utils import success
+from app.repositories.model_repository import ModelConfigRepository
 from app.schemas import model_schema
 from app.schemas.memory_config_schema import (
     InvalidConfigError,
@@ -96,7 +96,6 @@ def validate_model_exists_and_active(
         ModelNotFoundError: If model does not exist or belongs to different tenant
         ModelInactiveError: If model exists but is inactive
     """
-    from app.repositories.model_repository import ModelConfigRepository
     
     start_time = time.time()
     
@@ -237,14 +236,16 @@ def validate_embedding_model(
             workspace_id=workspace_id
         )
 
+    model_without_tenant = ModelConfigRepository.get_by_id(db, embedding_id)
+    model_without_tenant_name=model_without_tenant.name
     embd = emb_model_config(embedding_id, db)
-    if embd != "测试成功":
+    if embd != "测试成功" :
         models=models_list(db=db,type=model_schema.ModelType.EMBEDDING,tenant_id=tenant_id)
         models_id=models[0]
         models_name=models[1]
         for embedding_id,embedding_name in zip(models_id,models_name):
             embd = emb_model_config(embedding_id, db)
-            if "测试成功"==embd:
+            if "测试成功"==embd and model_without_tenant_name==embedding_name:
                 embedding_id=embedding_id
                 update_data_config_model_field(db, config_id, "embedding_id", embedding_id)
                 logger.info("已替换失效的embedding_id配置")
@@ -255,7 +256,13 @@ def validate_embedding_model(
         config_id=config_id, workspace_id=workspace_id
     )
     if embedding_uuid is None:
-        return success(data="缺少可用Embedding配置", msg="模型状态")
+        raise InvalidConfigError(
+            f"Configuration {config_id} has no embedding model configured",
+            field_name="embedding_model_id",
+            invalid_value=embedding_id,
+            config_id=config_id,
+            workspace_id=workspace_id
+        )
     return embedding_uuid
 
 
@@ -282,19 +289,19 @@ def validate_llm_model(
             workspace_id=workspace_id
         )
 
-    llm = llm_model_config(llm_id, db)
-    if llm != "测试成功":
-        models=models_list(db=db,type=model_schema.ModelType.LLM,tenant_id=tenant_id)
-        models_id=models[0]
-        models_name=models[1]
-        for llm_id,llm_name in zip(models_id,models_name):
-            llm = emb_model_config(llm_id, db)
-            if "测试成功"==llm:
-                llm_id=llm_id
-                update_data_config_model_field(db, config_id, "llm_id", llm_id)
-                update_data_config_model_field(db, config_id, "llm", llm_id)
-                logger.info("已替换失效的embedding_id配置")
-                break
+    # llm = llm_model_config(llm_id, db)
+    # if llm != "测试成功":
+    #     models=models_list(db=db,type=model_schema.ModelType.LLM,tenant_id=tenant_id)
+    #     models_id=models[0]
+    #     models_name=models[1]
+    #     for llm_id,llm_name in zip(models_id,models_name):
+    #         llm = emb_model_config(llm_id, db)
+    #         if "测试成功"==llm:
+    #             llm_id=llm_id
+    #             update_data_config_model_field(db, config_id, "llm_id", llm_id)
+    #             update_data_config_model_field(db, config_id, "llm", llm_id)
+    #             logger.info("已替换失效的embedding_id配置")
+    #             break
 
     llm_uuid, _ = validate_and_resolve_model_id(
         llm_id, "llm", db, tenant_id, required=True,
@@ -302,7 +309,14 @@ def validate_llm_model(
     )
 
     if llm_uuid is None:
-        return success(data="缺少可用llm配置", msg="模型状态")
+        raise InvalidConfigError(
+            f"Configuration {config_id} has no LLM model configured",
+            field_name="llm_model_id",
+            invalid_value=llm_id,
+            config_id=config_id,
+            workspace_id=workspace_id
+        )
+
     return llm_uuid
 
 def models_list(type: str, db: Session, tenant_id: Optional[UUID] = None):
@@ -333,7 +347,7 @@ def models_list(type: str, db: Session, tenant_id: Optional[UUID] = None):
         )
         
         get_model = ModelConfigService.get_model_list(db=db, query=query, tenant_id=tenant_id)
-        
+
         model_config_ids = []
         model_names = []
         

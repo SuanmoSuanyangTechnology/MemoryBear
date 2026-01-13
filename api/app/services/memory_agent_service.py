@@ -428,7 +428,8 @@ class MemoryAgentService:
                     config_id=config_id,
                     service_name="MemoryAgentService"
                 )
-                logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
+                if "缺少" not in memory_config:
+                    logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
             except ConfigurationError as e:
                 error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
                 logger.error(error_msg)
@@ -446,6 +447,8 @@ class MemoryAgentService:
                     )
 
                 raise ValueError(error_msg)
+            if memory_config in ['缺少Embedding配置',"缺少LLM配置","缺少RERANK配置"]:
+                return {"fail": f"cconfig_id的记忆，{memory_config}"}
 
             # Step 2: Prepare history
             history.append({"role": "user", "content": message})

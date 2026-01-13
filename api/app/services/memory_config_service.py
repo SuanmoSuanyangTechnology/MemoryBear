@@ -15,6 +15,7 @@ from app.core.validators.memory_config_validators import (
     validate_model_exists_and_active,
 )
 from app.repositories.data_config_repository import DataConfigRepository
+from app.repositories.model_repository import ModelConfigRepository
 from app.schemas.memory_config_schema import (
     ConfigurationError,
     InvalidConfigError,
@@ -126,6 +127,7 @@ class MemoryConfigService:
             validated_config_id = _validate_config_id(config_id)
             
             result = DataConfigRepository.get_config_with_workspace(self.db, validated_config_id)
+
             if not result:
                 elapsed_ms = (time.time() - start_time) * 1000
                 config_logger.error(
@@ -143,7 +145,16 @@ class MemoryConfigService:
                 )
             
             memory_config, workspace = result
-            
+
+            model_without_tenant_embedding_id = ModelConfigRepository.get_by_id(self.db, memory_config.embedding_id)
+            model_without_tenant_llm_id = ModelConfigRepository.get_by_id(self.db, memory_config.llm_id)
+            model_without_tenant_rerank_id = ModelConfigRepository.get_by_id(self.db, memory_config.rerank_id)
+            if model_without_tenant_embedding_id==None:
+                return "缺少Embedding配置"
+            if model_without_tenant_llm_id==None:
+                return "缺少LLM配置"
+            if model_without_tenant_rerank_id==None:
+                return "缺少RERANK配置"
             # Validate embedding model
             embedding_uuid = validate_embedding_model(
                 validated_config_id,
