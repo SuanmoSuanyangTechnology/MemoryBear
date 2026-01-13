@@ -86,7 +86,7 @@ class TemplateRenderer:
         if self.strict:
             context = defaultdict(dict)
             context["conv"] = conv_vars
-            context["nodes"] = node_outputs
+            context["node"] = node_outputs
             context["sys"] = {**(system_vars or {}), **sys_vars}
         else:
             context = {
