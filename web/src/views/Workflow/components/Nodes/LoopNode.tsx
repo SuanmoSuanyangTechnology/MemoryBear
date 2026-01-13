@@ -61,7 +61,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
             },
           },
         },
-        zIndex: 3
+        zIndex: 10
       });
     }
   }
@@ -128,7 +128,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
           },
         },
       },
-      zIndex: 3
+      zIndex: 10
     }
 
     graph.addEdge(edgeConfig)
