@@ -49,8 +49,7 @@ class MemoryExplicitService(MemoryBaseService):
                         "id": str,
                         "name": str,
                         "entity_type": str,
-                        "core_definition": str,
-                        "created_at": int
+                        "core_definition": str
                     }
                 ]
             }
@@ -102,10 +101,8 @@ class MemoryExplicitService(MemoryBaseService):
             RETURN elementId(e) AS id, 
                    e.name AS name,
                    e.entity_type AS entity_type,
-                   e.description AS core_definition,
-                   e.example AS detailed_notes,
-                   e.created_at AS created_at
-            ORDER BY e.created_at DESC
+                   e.description AS core_definition
+            ORDER BY e.name ASC
             """
             
             semantic_result = await self.neo4j_connector.execute_query(
@@ -121,18 +118,13 @@ class MemoryExplicitService(MemoryBaseService):
                     name = record.get("name") or "未命名"
                     entity_type = record.get("entity_type") or "未分类"
                     core_definition = record.get("core_definition") or ""
-                    created_at_str = record.get("created_at")
                     
-                    # 使用基类方法转换时间戳
-                    created_at_timestamp = self.parse_timestamp(created_at_str)
-                    
-                    # 注意：总览接口不返回 detailed_notes 字段
+                    # 注意：总览接口不返回 detailed_notes 和 created_at 字段
                     semantic_memories.append({
                         "id": entity_id,
                         "name": name,
                         "entity_type": entity_type,
-                        "core_definition": core_definition,
-                        "created_at": created_at_timestamp
+                        "core_definition": core_definition
                     })
             
             # ========== 3. 返回结果 ==========

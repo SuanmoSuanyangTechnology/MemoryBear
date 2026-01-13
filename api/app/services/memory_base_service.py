@@ -20,24 +20,45 @@ class MemoryBaseService:
         self.neo4j_connector = Neo4jConnector()
     
     @staticmethod
-    def parse_timestamp(timestamp_str: Optional[str]) -> Optional[int]:
+    def parse_timestamp(timestamp_value) -> Optional[int]:
         """
-        将ISO格式的时间戳字符串转换为毫秒级时间戳
+        将时间戳转换为毫秒级时间戳
+        
+        支持多种输入格式：
+        - Neo4j DateTime 对象
+        - ISO格式的时间戳字符串
+        - Python datetime 对象
         
         Args:
-            timestamp_str: ISO格式的时间戳字符串
+            timestamp_value: 时间戳值（可以是多种类型）
             
         Returns:
             毫秒级时间戳，如果解析失败则返回None
         """
-        if not timestamp_str:
+        if not timestamp_value:
             return None
         
         try:
-            dt_object = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            # 处理 Neo4j DateTime 对象
+            if hasattr(timestamp_value, 'to_native'):
+                dt_object = timestamp_value.to_native()
+                return int(dt_object.timestamp() * 1000)
+            
+            # 处理 Python datetime 对象
+            if isinstance(timestamp_value, datetime):
+                return int(timestamp_value.timestamp() * 1000)
+            
+            # 处理字符串格式
+            if isinstance(timestamp_value, str):
+                dt_object = datetime.fromisoformat(timestamp_value.replace("Z", "+00:00"))
+                return int(dt_object.timestamp() * 1000)
+            
+            # 其他情况尝试转换为字符串再解析
+            dt_object = datetime.fromisoformat(str(timestamp_value).replace("Z", "+00:00"))
             return int(dt_object.timestamp() * 1000)
+            
         except (ValueError, TypeError, AttributeError) as e:
-            logger.warning(f"无法解析时间戳: {timestamp_str}, error={str(e)}")
+            logger.warning(f"无法解析时间戳: {timestamp_value}, error={str(e)}")
             return None
     
     async def extract_episodic_emotion(
