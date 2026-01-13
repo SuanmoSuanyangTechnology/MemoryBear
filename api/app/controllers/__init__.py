@@ -20,6 +20,7 @@ from . import (
     knowledgeshare_controller,
     memory_agent_controller,
     memory_dashboard_controller,
+    memory_episodic_controller,
     memory_forget_controller,
     memory_reflection_controller,
     memory_short_term_controller,
@@ -67,6 +68,7 @@ manager_router.include_router(memory_agent_controller.router)
 manager_router.include_router(memory_dashboard_controller.router)
 manager_router.include_router(memory_storage_controller.router)
 manager_router.include_router(user_memory_controllers.router)
+manager_router.include_router(memory_episodic_controller.router)
 manager_router.include_router(api_key_controller.router)
 manager_router.include_router(release_share_controller.router)
 manager_router.include_router(public_share_controller.router)  # 公开路由（无需认证）
