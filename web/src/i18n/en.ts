@@ -1260,6 +1260,10 @@ export const en = {
       MemorySummary: 'Long-term Accumulation',
       Statement: 'Emotional Memory',
       ExtractedEntity: 'Episodic Memory',
+      positive: 'Positive Emotion',
+      negative: 'Negative Emotion',
+      neutral: 'Neutral Emotion',
+      interactionCountData: 'Interaction Count',
     },
     space: {
       createSpace: 'Create Space',
@@ -2219,6 +2223,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       node_type: 'Node Type',
       last_access_time: 'Last Activation Time',
       activation_value: 'Current Activation Value',
+      refreshSuccess: 'Forgetting Execution Successful',
     },
     episodicDetail: {
       title: 'Record every important scene you have truly experienced',

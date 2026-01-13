@@ -1340,6 +1340,10 @@ export const zh = {
       MemorySummary: '长期沉淀',
       Statement: '情绪记忆',
       ExtractedEntity: '情景记忆',
+      positive: '正向情绪',
+      negative: '负向情绪',
+      neutral: '中性情绪',
+      interactionCountData: '互动次数',
     },
     space: {
       createSpace: '创建空间',
@@ -2318,6 +2322,7 @@ export const zh = {
       node_type: '节点类型',
       last_access_time: '最后激活时间',
       activation_value: '当前激活值',
+      refreshSuccess: '遗忘执行成功',
     },
     episodicDetail: {
       title: '记录你真实经历过的每一个重要场景',
