@@ -204,8 +204,9 @@ export const getConversationMessages = (end_user: string, conversation_id: strin
 export const getConversationDetail = (end_user: string, conversation_id: string) => {
   return request.get(`/memory/work/${end_user}/detail`, { conversation_id })
 }
-
-
+export const forgetTrigger = (data: { max_merge_batch_size: number; min_days_since_access: number; end_user_id: string;}) => {
+  return request.post(`/memory/forget/trigger`, data)
+}
 /*************** end 用户记忆 相关接口 ******************************/
 
 /****************** 记忆管理 相关接口 *******************************/
