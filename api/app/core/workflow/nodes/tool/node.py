@@ -71,16 +71,14 @@ class ToolNode(BaseNode):
         if result.success:
             logger.info(f"节点 {self.node_id} 工具执行成功")
             return {
-                "text": json.dumps(result.data, ensure_ascii=False),
-                "data": result.data,
+                "data": result.data if isinstance(result.data, str) else json.dumps(result.data, ensure_ascii=False),
                 "error_code": "",
                 "execution_time": result.execution_time
             }
         else:
             logger.error(f"节点 {self.node_id} 工具执行失败: {result.error}")
             return {
-                "text": json.dumps(result.error, ensure_ascii=False),
-                "data": result.error,
+                "data": result.error if isinstance(result.error, str) else  json.dumps(result.error, ensure_ascii=False),
                 "error_code": result.error_code,
                 "execution_time": result.execution_time
             }
