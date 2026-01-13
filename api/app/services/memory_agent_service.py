@@ -4,7 +4,6 @@ Memory Agent Service
 Handles business logic for memory agent operations including read/write services,
 health checks, and message type classification.
 """
-import datetime
 import json
 import os
 import re
@@ -27,7 +26,7 @@ from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.memory_short_repository import ShortTermMemoryRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.schemas.memory_config_schema import ConfigurationError, MemoryConfig
+from app.schemas.memory_config_schema import ConfigurationError
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
@@ -610,7 +609,7 @@ class MemoryAgentService:
                         reranked_results=raw_results.get('reranked_results',[])
                         try:
                             statements=[statement['statement'] for statement in reranked_results.get('statements', [])]
-                        except Exception as e:
+                        except Exception:
                             statements=[]
                         statements=list(set(statements))
                         retrieved_content.append({query:statements})
@@ -832,7 +831,6 @@ class MemoryAgentService:
                 # 获取当前空间下的所有宿主
                 from app.repositories import app_repository, end_user_repository
                 from app.schemas.app_schema import App as AppSchema
-                from app.schemas.end_user_schema import EndUser as EndUserSchema
                 
                 # 查询应用并转换为 Pydantic 模型
                 apps_orm = app_repository.get_apps_by_workspace_id(db, current_workspace_id)
@@ -1175,19 +1173,21 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     1. 根据 end_user_id 获取用户的 app_id
     2. 获取该应用的最新发布版本
     3. 从发布版本的 config 字段中提取 memory_config_id
+    4. 根据 memory_config_id 查询配置名称
     
     Args:
         end_user_id: 终端用户ID
         db: 数据库会话
         
     Returns:
-        包含 memory_config_id 和相关信息的字典
+        包含 memory_config_id、config_name 和相关信息的字典
         
     Raises:
         ValueError: 当终端用户不存在或应用未发布时
     """
     from app.models.app_release_model import AppRelease
     from app.models.end_user_model import EndUser
+    from app.models.data_config_model import DataConfig
     from sqlalchemy import select
     
     logger.info(f"Getting connected config for end_user: {end_user_id}")
@@ -1220,13 +1220,29 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     memory_obj = config.get('memory', {})
     memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
     
+    # 4. 根据 memory_config_id 查询配置名称
+    config_name = None
+    if memory_config_id:
+        try:
+            # memory_config_id 可能是整数或字符串，需要转换
+            config_id = int(memory_config_id) if isinstance(memory_config_id, str) else memory_config_id
+            data_config = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+            if data_config:
+                config_name = data_config.config_name
+                logger.debug(f"Found config_name: {config_name} for config_id: {config_id}")
+            else:
+                logger.warning(f"DataConfig not found for config_id: {config_id}")
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Invalid memory_config_id format: {memory_config_id}, error: {str(e)}")
+    
     result = {
         "end_user_id": str(end_user_id),
         "app_id": str(app_id),
         "release_id": str(latest_release.id),
         "release_version": latest_release.version,
-        "memory_config_id": memory_config_id
+        "memory_config_id": memory_config_id,
+        "memory_config_name": config_name
     }
     
-    logger.info(f"Successfully retrieved connected config: memory_config_id={memory_config_id}")
+    logger.info(f"Successfully retrieved connected config: memory_config_id={memory_config_id}, config_name={config_name}")
     return result
