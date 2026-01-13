@@ -83,7 +83,7 @@ class HomePageService:
         :return: 对应版本的详细介绍
         """
         # 1. 定义 JSON 文件路径（使用 Path 处理跨平台路径问题）
-        json_file_path = Path(__file__).parent.parent.parent / "version_info.json"
+        json_file_path = Path(__file__).parent.parent / "version_info.json"
         # 转换为绝对路径，便于调试
         json_abs_path = json_file_path.resolve()
 
