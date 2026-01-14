@@ -68,7 +68,7 @@ class DataConfig(Base):
     decay_constant = Column(Float, default=0.5, comment="ACT-R衰减常数d，默认0.5")
     forgetting_threshold = Column(Float, default=0.3, comment="遗忘阈值，默认0.3")
     forgetting_interval_hours = Column(Integer, default=24, comment="遗忘周期间隔（小时），默认24")
-    enable_llm_summary = Column(Boolean, default=True, nullable=False, comment="是否使用LLM生成摘要，默认True")
+    enable_llm_summary = Column(Boolean, default=True, comment="是否使用LLM生成摘要，默认True")
     max_merge_batch_size = Column(Integer, default=100, comment="单次最大融合节点对数，默认100")
     max_history_length = Column(Integer, default=100, comment="访问历史最大长度，默认100")
     min_days_since_access = Column(Integer, default=30, comment="最小未访问天数，默认30")
