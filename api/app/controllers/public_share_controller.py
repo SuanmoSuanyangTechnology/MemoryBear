@@ -583,7 +583,7 @@ async def chat(
                     event_data = event.get("data", {})
 
                     # 转换为标准 SSE 格式（字符串）
-                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
                     yield sse_message
 
             return StreamingResponse(
