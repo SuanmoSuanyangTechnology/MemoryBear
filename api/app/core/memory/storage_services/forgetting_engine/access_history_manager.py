@@ -642,6 +642,7 @@ class AccessHistoryManager:
                 n.version = $new_version
             RETURN n.id as id,
                    n.statement as statement,
+                   n.content as content,
                    n.activation_value as activation_value,
                    n.access_history as access_history,
                    n.last_access_time as last_access_time,
@@ -671,7 +672,22 @@ class AccessHistoryManager:
                     f"Expected version {current_version}, but node was modified by another transaction."
                 )
             
-            return dict(updated_node)
+            # 转换为字典并根据节点类型清理字段
+            result_dict = dict(updated_node)
+            
+            # 根据节点类型保留正确的内容字段
+            if node_label == 'Statement':
+                # Statement 节点：保留 statement 字段，移除 content 字段
+                result_dict.pop('content', None)
+            elif node_label == 'MemorySummary':
+                # MemorySummary 节点：保留 content 字段，移除 statement 字段
+                result_dict.pop('statement', None)
+            elif node_label == 'ExtractedEntity':
+                # ExtractedEntity 节点：移除 statement 和 content 字段
+                result_dict.pop('statement', None)
+                result_dict.pop('content', None)
+            
+            return result_dict
         
         # 执行事务
         try:
