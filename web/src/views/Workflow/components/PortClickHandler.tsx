@@ -85,6 +85,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
             },
           },
         },
+        zIndex: 0
       });
       
       // 循环节点内子节点通过连接桩添加时，调整循环节点大小

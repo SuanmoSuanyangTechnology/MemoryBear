@@ -566,42 +566,6 @@ const Properties: FC<PropertiesProps> = ({
               nodeData: nodeData,
             });
           }
-          
-          // Check if connected via ERROR connection point
-          const errorEdges = edges.filter(edge => 
-            edge.getTargetCellId() === selectedNode.id && 
-            edge.getSourceCellId() === nodeId &&
-            edge.getSourcePortId() === 'ERROR'
-          );
-          
-          if (errorEdges.length > 0) {
-            const errorMessageKey = `${dataNodeId}_error_message`;
-            const errorTypeKey = `${dataNodeId}_error_type`;
-            
-            if (!addedKeys.has(errorMessageKey)) {
-              addedKeys.add(errorMessageKey);
-              variableList.push({
-                key: errorMessageKey,
-                label: 'error_message',
-                type: 'variable',
-                dataType: 'string',
-                value: `${dataNodeId}.error_message`,
-                nodeData: nodeData,
-              });
-            }
-            
-            if (!addedKeys.has(errorTypeKey)) {
-              addedKeys.add(errorTypeKey);
-              variableList.push({
-                key: errorTypeKey,
-                label: 'error_type',
-                type: 'variable',
-                dataType: 'string',
-                value: `${dataNodeId}.error_type`,
-                nodeData: nodeData,
-              });
-            }
-          }
           break
         case 'jinja-render':
           const jinjaOutputKey = `${dataNodeId}_output`;
@@ -793,54 +757,6 @@ const Properties: FC<PropertiesProps> = ({
           }
         }
       }
-
-      // Check if parent loop/iteration is connected to http-request via ERROR connection
-      if (parentData.type === 'loop' || parentData.type === 'iteration') {
-        const parentPreviousNodeIds = getAllPreviousNodes(parentLoopNode.id);
-        parentPreviousNodeIds.forEach(prevNodeId => {
-          const prevNode = nodes.find(n => n.id === prevNodeId);
-          if (!prevNode) return;
-
-          const prevNodeData = prevNode.getData();
-          if (prevNodeData.type === 'http-request') {
-            // Check if connected via ERROR connection point
-            const errorEdges = edges.filter(edge => {
-              return edge.getTargetCellId() === parentLoopNode.id &&
-                edge.getSourceCellId() === prevNodeId &&
-                edge.getSourcePortId() === 'ERROR'
-            });
-
-            if (errorEdges.length > 0) {
-              const errorMessageKey = `${prevNodeData.id}_error_message`;
-              const errorTypeKey = `${prevNodeData.id}_error_type`;
-
-              if (!addedKeys.has(errorMessageKey)) {
-                addedKeys.add(errorMessageKey);
-                variableList.push({
-                  key: errorMessageKey,
-                  label: 'error_message',
-                  type: 'variable',
-                  dataType: 'string',
-                  value: `${prevNodeData.id}.error_message`,
-                  nodeData: prevNodeData,
-                });
-              }
-
-              if (!addedKeys.has(errorTypeKey)) {
-                addedKeys.add(errorTypeKey);
-                variableList.push({
-                  key: errorTypeKey,
-                  label: 'error_type',
-                  type: 'variable',
-                  dataType: 'string',
-                  value: `${prevNodeData.id}.error_type`,
-                  nodeData: prevNodeData,
-                });
-              }
-            }
-          }
-        });
-      }
     }
 
     return variableList;
@@ -999,12 +915,12 @@ const Properties: FC<PropertiesProps> = ({
       return filteredList;
     }
     if (nodeType === 'knowledge-retrieval' || nodeType === 'parameter-extractor' && key !== 'prompt' || nodeType === 'memory-read' || nodeType === 'memory-write' || nodeType === 'question-classifier') {
-      let filteredList = variableList.filter(variable => variable.dataType === 'string');
-      return addParentIterationVars(filteredList);
+      let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string');
+      return filteredList;
     }
     if (nodeType === 'parameter-extractor' && key === 'prompt') {
-      let filteredList = variableList.filter(variable => variable.dataType === 'string' || variable.dataType === 'number');
-      return addParentIterationVars(filteredList);
+      let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string' || variable.dataType === 'number');
+      return filteredList;
     }
     if (nodeType === 'iteration' && key === 'output') {
       return variableList.filter(variable => variable.value.includes('sys.'));
@@ -1013,8 +929,71 @@ const Properties: FC<PropertiesProps> = ({
       return variableList.filter(variable => variable.dataType.includes('array'));
     }
     if (nodeType === 'loop' && key === 'condition') {
-      let filteredList = variableList.filter(variable => variable.nodeData.type !== 'loop');
-      return addParentIterationVars(filteredList);
+      let filteredList = addParentIterationVars(variableList).filter(variable => variable.nodeData.type !== 'loop');
+      
+      // Add child node output variables for loop nodes
+      if (selectedNode) {
+        const graph = graphRef.current;
+        if (graph) {
+          const nodes = graph.getNodes();
+          const childNodes = nodes.filter(node => {
+            const nodeData = node.getData();
+            return nodeData?.cycle === selectedNode.id;
+          });
+          
+          // Add output variables from child nodes
+          childNodes.forEach(childNode => {
+            const childData = childNode.getData();
+            const childNodeId = childData.id;
+            
+            // Add child node output variables based on their type
+            switch(childData.type) {
+              case 'llm':
+              case 'jinja-render':
+              case 'tool':
+                const outputKey = `${childNodeId}_output`;
+                const existingOutput = filteredList.find(v => v.key === outputKey);
+                if (!existingOutput) {
+                  filteredList.push({
+                    key: outputKey,
+                    label: 'output',
+                    type: 'variable',
+                    dataType: 'string',
+                    value: `${childNodeId}.output`,
+                    nodeData: childData,
+                  });
+                }
+                break;
+              case 'http-request':
+                const bodyKey = `${childNodeId}_body`;
+                const statusKey = `${childNodeId}_status_code`;
+                if (!filteredList.find(v => v.key === bodyKey)) {
+                  filteredList.push({
+                    key: bodyKey,
+                    label: 'body',
+                    type: 'variable',
+                    dataType: 'string',
+                    value: `${childNodeId}.body`,
+                    nodeData: childData,
+                  });
+                }
+                if (!filteredList.find(v => v.key === statusKey)) {
+                  filteredList.push({
+                    key: statusKey,
+                    label: 'status_code',
+                    type: 'variable',
+                    dataType: 'number',
+                    value: `${childNodeId}.status_code`,
+                    nodeData: childData,
+                  });
+                }
+                break;
+            }
+          });
+        }
+      }
+      
+      return filteredList;
     }
     
     // For all other node types, add parent iteration variables if applicable
@@ -1025,7 +1004,7 @@ const Properties: FC<PropertiesProps> = ({
   // const defaultVariableList = calculateVariableList(selectedNode as Node, graphRef, workflowConfig )
 
   console.log('values', values)
-  // console.log('variableList', variableList, defaultVariableList)
+  console.log('variableList', variableList)
 
   return (
     <div className="rb:w-75 rb:fixed rb:right-0 rb:top-16 rb:bottom-0 rb:p-3">
