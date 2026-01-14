@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.celery_app import celery_app
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -22,6 +23,7 @@ from app.core.rag.nlp.search import knowledge_retrieval
 from app.models import AgentConfig, ModelApiKey, ModelConfig
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
+from app.services import task_service
 from app.services.langchain_tool_server import Search
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
@@ -101,6 +103,14 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                         user_rag_memory_id=user_rag_memory_id
                     )
                 )
+                task = celery_app.send_task(
+                    "app.core.memory.agent.read_message",
+                    args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
+                )
+                result = task_service.get_task_memory_read_result(task.id)
+                status = result.get("status")
+                logger.info(f"读取任务状态：{status}")
+
             finally:
                 db.close()
             logger.info(f'用户ID：Agent:{end_user_id}')

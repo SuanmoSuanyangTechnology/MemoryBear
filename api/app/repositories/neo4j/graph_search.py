@@ -66,24 +66,38 @@ async def _update_activation_values_batch(
         max_retries=max_retries
     )
     
-    # 提取节点ID列表
-    node_ids = [node.get('id') for node in nodes if node.get('id')]
+    # 提取节点ID列表并去重（保持原始顺序）
+    seen_ids = set()
+    unique_node_ids = []
+    for node in nodes:
+        node_id = node.get('id')
+        if node_id and node_id not in seen_ids:
+            seen_ids.add(node_id)
+            unique_node_ids.append(node_id)
     
-    if not node_ids:
+    if not unique_node_ids:
         logger.warning(f"批量更新激活值：没有有效的节点ID")
         return nodes
+
+    # 记录去重信息（仅针对具有有效 ID 的节点）
+    id_nodes_count = sum(1 for n in nodes if n.get("id"))
+    if len(unique_node_ids) < id_nodes_count:
+        logger.info(
+            f"批量更新激活值：检测到重复节点，具有有效ID的节点数量={id_nodes_count}, "
+            f"去重后唯一ID数量={len(unique_node_ids)}"
+        )
     
     # 批量记录访问
     try:
         updated_nodes = await access_manager.record_batch_access(
-            node_ids=node_ids,
+            node_ids=unique_node_ids,
             node_label=node_label,
             group_id=group_id
         )
         
         logger.info(
             f"批量更新激活值成功: {node_label}, "
-            f"更新数量={len(updated_nodes)}/{len(node_ids)}"
+            f"更新数量={len(updated_nodes)}/{len(unique_node_ids)}"
         )
         
         return updated_nodes
@@ -153,19 +167,38 @@ async def _update_search_results_activation(
             original_nodes = results[key]
             updated_nodes = update_result
             
-            # 创建 ID 到原始节点的映射（用于快速查找 score）
-            original_map = {node.get('id'): node for node in original_nodes if node.get('id')}
+            # 创建 ID 到更新节点的映射（用于快速查找激活值数据）
+            updated_map = {node.get('id'): node for node in updated_nodes if node.get('id')}
             
-            # 合并数据：激活值来自更新结果，score 来自原始结果
+            # 合并数据：保留所有原始节点（包括重复的），用更新后的激活值数据填充
             merged_nodes = []
-            for updated_node in updated_nodes:
-                node_id = updated_node.get('id')
-                if node_id and node_id in original_map:
-                    # 保留原始的 score 字段
-                    original_score = original_map[node_id].get('score')
-                    if original_score is not None:
-                        updated_node['score'] = original_score
-                merged_nodes.append(updated_node)
+            for original_node in original_nodes:
+                node_id = original_node.get('id')
+                if node_id and node_id in updated_map:
+                    # 从原始节点开始，用更新后的激活值数据覆盖
+                    merged_node = original_node.copy()
+                    
+                    # 更新激活值相关字段
+                    activation_fields = {
+                        'activation_value',
+                        'access_history',
+                        'last_access_time',
+                        'access_count',
+                        'importance_score',
+                        'version',
+                        'statement',  # Statement 节点的内容字段
+                        'content'     # MemorySummary 节点的内容字段
+                    }
+                    
+                    # 只更新激活值相关字段，保留原始节点的其他字段
+                    for field in activation_fields:
+                        if field in updated_map[node_id]:
+                            merged_node[field] = updated_map[node_id][field]
+                    
+                    merged_nodes.append(merged_node)
+                else:
+                    # 如果没有更新数据，保留原始节点
+                    merged_nodes.append(original_node)
             
             updated_results[key] = merged_nodes
         else:

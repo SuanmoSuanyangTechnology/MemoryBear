@@ -32,7 +32,7 @@ class HttpRequestNode(BaseNode):
 
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = HttpRequestNodeConfig(**self.config)
+        self.typed_config: HttpRequestNodeConfig | None = None
 
     def _build_timeout(self) -> Timeout:
         """
@@ -181,6 +181,7 @@ class HttpRequestNode(BaseNode):
             - dict: Serialized HttpRequestNodeOutput on success
             - str: Branch identifier (e.g. "ERROR") when branching is enabled
         """
+        self.typed_config = HttpRequestNodeConfig(**self.config)
         async with httpx.AsyncClient(
                 verify=self.typed_config.verify_ssl,
                 timeout=self._build_timeout(),
