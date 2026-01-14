@@ -1621,6 +1621,5 @@ def _clean_neo4j_value(value: Any) -> Any:
             return str(value)
         except Exception:
             return None
-    
     # 返回原始值
     return value
