@@ -68,7 +68,7 @@ const ChatContent: FC<ChatContentProps> = ({
                 </div>
                 {/* 底部标签（如时间戳、用户名等） */}
                 {labelPosition === 'bottom' &&
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
+                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular rb:mt-2">
                     {labelFormat(item)}
                   </div>
                 }
