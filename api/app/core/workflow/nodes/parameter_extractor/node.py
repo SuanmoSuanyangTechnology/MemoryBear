@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class ParameterExtractorNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = ParameterExtractorNodeConfig(**self.config)
+        self.typed_config: ParameterExtractorNodeConfig | None = None
 
     @staticmethod
     def _get_prompt():
@@ -145,6 +145,7 @@ class ParameterExtractorNode(BaseNode):
         Raises:
             BusinessException: If LLM output cannot be parsed as valid JSON.
         """
+        self.typed_config = ParameterExtractorNodeConfig(**self.config)
         llm = self._get_llm_instance()
         system_prompt, user_prompt = self._get_prompt()
 

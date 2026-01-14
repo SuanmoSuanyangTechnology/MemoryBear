@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class VariableAggregatorNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = VariableAggregatorNodeConfig(**self.config)
+        self.typed_config: VariableAggregatorNodeConfig | None = None
 
     @staticmethod
     def _get_express(variable_string: str) -> Any:
@@ -37,6 +37,7 @@ class VariableAggregatorNode(BaseNode):
             - str: In non-group mode, returns the first non-None variable value.
             - dict: In group mode, returns a mapping of group_name -> first non-None variable value.
         """
+        self.typed_config = VariableAggregatorNodeConfig(**self.config)
         if not self.typed_config.group:
             # --------------------------
             # Non-group mode

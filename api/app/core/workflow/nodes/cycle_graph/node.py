@@ -30,7 +30,6 @@ class CycleGraphNode(BaseNode):
 
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config: LoopNodeConfig | IterationNodeConfig | None = None
 
         self.cycle_nodes = list()  # Nodes belonging to this cycle
         self.cycle_edges = list()  # Edges connecting nodes within the cycle

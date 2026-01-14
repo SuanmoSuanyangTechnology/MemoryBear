@@ -25,7 +25,7 @@ class WorkflowState(TypedDict):
     The state object passed between nodes in a workflow, containing messages, variables, node outputs, etc.
     """
     # List of messages (append mode)
-    messages: Annotated[list[AnyMessage], add]
+    messages: Annotated[list[tuple[str, str]], add]
 
     # Set of loop node IDs, used for assigning values in loop nodes
     cycle_nodes: list
@@ -203,6 +203,7 @@ class BaseNode(ABC):
             # 返回包装后的输出和运行时变量
             return {
                 **wrapped_output,
+                "variables": state["variables"],
                 "runtime_vars": {
                     self.node_id: runtime_var
                 },
@@ -355,6 +356,7 @@ class BaseNode(ABC):
             # Build complete state update (including node_outputs, runtime_vars, and final streaming buffer)
             state_update = {
                 **final_output,
+                "variables": state["variables"],
                 "runtime_vars": {
                     self.node_id: runtime_var
                 },

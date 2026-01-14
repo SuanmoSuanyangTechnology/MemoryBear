@@ -19,10 +19,11 @@ class ToolNode(BaseNode):
     
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = ToolNodeConfig(**self.config)
+        self.typed_config: ToolNodeConfig | None = None
     
     async def execute(self, state: WorkflowState) -> dict[str, Any]:
         """执行工具"""
+        self.typed_config = ToolNodeConfig(**self.config)
         # 获取租户ID和用户ID
         tenant_id = self.get_variable("sys.tenant_id", state)
         user_id = self.get_variable("sys.user_id", state)

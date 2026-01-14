@@ -21,8 +21,8 @@ class QuestionClassifierNode(BaseNode):
     
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = QuestionClassifierNodeConfig(**self.config)
-        self.category_to_case_map = self._build_category_case_map()
+        self.typed_config: QuestionClassifierNodeConfig | None = None
+        self.category_to_case_map = {}
     
     def _get_llm_instance(self) -> RedBearLLM:
         """获取LLM实例"""
@@ -67,6 +67,8 @@ class QuestionClassifierNode(BaseNode):
     
     async def execute(self, state: WorkflowState) -> dict:
         """执行问题分类"""
+        self.typed_config = QuestionClassifierNodeConfig(**self.config)
+        self.category_to_case_map = self._build_category_case_map()
         question = self.typed_config.input_variable
         supplement_prompt = self.typed_config.user_supplement_prompt or ""
         categories = self.typed_config.categories or []
