@@ -1,6 +1,6 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next';
-import { Form, Button, Select, Row, Col, InputNumber, Radio, type SelectProps } from 'antd'
+import { Form, Button, Select, Row, Col, InputNumber, Radio, Input, type SelectProps } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons';
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
@@ -114,7 +114,7 @@ const ConditionList: FC<CaseListProps> = ({
                       <Col span={14}>
                         <Form.Item name={[field.name, 'left']} noStyle>
                           <VariableSelect
-                            options={options}
+                            options={options.filter(vo => vo.value.includes('sys.') || vo.value.includes('conv.') || vo.nodeData.type === 'loop')}
                             size="small"
                             allowClear={false}
                             popupMatchSelectWidth={false}
@@ -186,7 +186,7 @@ const ConditionList: FC<CaseListProps> = ({
                                   <Radio.Button value={true}>True</Radio.Button>
                                   <Radio.Button value={false}>False</Radio.Button>
                                 </Radio.Group>
-                                : <Editor options={options} />
+                                : <Input placeholder={t('common.pleaseEnter')} />
                               }
                             </Form.Item>
                           </Col>

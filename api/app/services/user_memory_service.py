@@ -15,6 +15,7 @@ from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.services.memory_base_service import MemoryBaseService
 from app.services.memory_config_service import MemoryConfigService
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -1195,17 +1196,18 @@ async def analytics_memory_types(
     end_user_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    统计8种记忆类型的数量和百分比
+    统计9种记忆类型的数量和百分比
     
     计算规则：
     1. 感知记忆 (PERCEPTUAL_MEMORY) = statement + entity
     2. 工作记忆 (WORKING_MEMORY) = chunk + entity
     3. 短期记忆 (SHORT_TERM_MEMORY) = chunk
     4. 长期记忆 (LONG_TERM_MEMORY) = entity
-    5. 显性记忆 (EXPLICIT_MEMORY) = 1/2 * entity
+    5. 显性记忆 (EXPLICIT_MEMORY) = 情景记忆 + 语义记忆（通过 MemoryBaseService.get_explicit_memory_count 获取）
     6. 隐性记忆 (IMPLICIT_MEMORY) = 1/3 * entity
-    7. 情绪记忆 (EMOTIONAL_MEMORY) = statement
-    8. 情景记忆 (EPISODIC_MEMORY) = memory_summary
+    7. 情绪记忆 (EMOTIONAL_MEMORY) = 情绪标签统计总数（通过 MemoryBaseService.get_emotional_memory_count 获取）
+    8. 情景记忆 (EPISODIC_MEMORY) = memory_summary（通过 MemoryBaseService.get_episodic_memory_count 获取）
+    9. 遗忘记忆 (FORGET_MEMORY) = 激活值低于阈值的节点数（通过 MemoryBaseService.get_forget_memory_count 获取）
     
     Args:
         db: 数据库会话
@@ -1230,13 +1232,16 @@ async def analytics_memory_types(
         - IMPLICIT_MEMORY: 隐性记忆
         - EMOTIONAL_MEMORY: 情绪记忆
         - EPISODIC_MEMORY: 情景记忆
+        - FORGET_MEMORY: 遗忘记忆
     """
-    # 定义需要查询的节点类型
+    # 初始化基础服务
+    base_service = MemoryBaseService()
+    
+    # 定义需要查询的基础节点类型
     node_types = {
         "Statement": "Statement",
         "Entity": "ExtractedEntity",
-        "Chunk": "Chunk",
-        "MemorySummary": "MemorySummary"
+        "Chunk": "Chunk"
     }
     
     # 存储每种节点类型的计数
@@ -1266,18 +1271,45 @@ async def analytics_memory_types(
     statement_count = node_counts.get("Statement", 0)
     entity_count = node_counts.get("Entity", 0)
     chunk_count = node_counts.get("Chunk", 0)
-    memory_summary_count = node_counts.get("MemorySummary", 0)
     
-    # 按规则计算8种记忆类型的数量（使用英文枚举作为key）
+    # 获取用户的遗忘阈值配置
+    forgetting_threshold = 0.3  # 默认值
+    if end_user_id:
+        try:
+            from app.services.memory_agent_service import get_end_user_connected_config
+            from app.core.memory.storage_services.forgetting_engine.config_utils import load_actr_config_from_db
+            
+            # 获取用户关联的 config_id
+            connected_config = get_end_user_connected_config(end_user_id, db)
+            config_id = connected_config.get('memory_config_id')
+            
+            if config_id:
+                # 从数据库加载配置
+                config = load_actr_config_from_db(db, config_id)
+                forgetting_threshold = config.get('forgetting_threshold', 0.3)
+                logger.debug(f"使用用户配置的遗忘阈值: {forgetting_threshold} (end_user_id={end_user_id}, config_id={config_id})")
+            else:
+                logger.debug(f"用户未关联配置，使用默认遗忘阈值: {forgetting_threshold} (end_user_id={end_user_id})")
+        except Exception as e:
+            logger.warning(f"获取用户遗忘阈值配置失败，使用默认值 {forgetting_threshold}: {str(e)}")
+    
+    # 使用 MemoryBaseService 的共享方法获取特殊记忆类型的数量
+    episodic_count = await base_service.get_episodic_memory_count(end_user_id)
+    explicit_count = await base_service.get_explicit_memory_count(end_user_id)
+    emotion_count = await base_service.get_emotional_memory_count(end_user_id, statement_count)
+    forget_count = await base_service.get_forget_memory_count(end_user_id, forgetting_threshold)
+    
+    # 按规则计算9种记忆类型的数量（使用英文枚举作为key）
     memory_counts = {
         "PERCEPTUAL_MEMORY": statement_count + entity_count,      # 感知记忆
         "WORKING_MEMORY": chunk_count + entity_count,             # 工作记忆
         "SHORT_TERM_MEMORY": chunk_count,                         # 短期记忆
         "LONG_TERM_MEMORY": entity_count,                         # 长期记忆
-        "EXPLICIT_MEMORY": entity_count // 2,                     # 显性记忆 (1/2 entity)
+        "EXPLICIT_MEMORY": explicit_count,                        # 显性记忆（情景记忆 + 语义记忆）
         "IMPLICIT_MEMORY": entity_count // 3,                     # 隐性记忆 (1/3 entity)
-        "EMOTIONAL_MEMORY": statement_count,                      # 情绪记忆
-        "EPISODIC_MEMORY": memory_summary_count                   # 情景记忆
+        "EMOTIONAL_MEMORY": emotion_count,                        # 情绪记忆（使用情绪标签统计）
+        "EPISODIC_MEMORY": episodic_count,                        # 情景记忆
+        "FORGET_MEMORY": forget_count                             # 遗忘记忆（激活值低于阈值）
     }
     
     # 计算总数

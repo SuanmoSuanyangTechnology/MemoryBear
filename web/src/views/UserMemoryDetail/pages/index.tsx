@@ -1,7 +1,7 @@
 import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Dropdown, Space, Button } from 'antd'
+import { Dropdown, Button } from 'antd'
 
 import PageHeader from '../components/PageHeader'
 import StatementDetail from './StatementDetail'
@@ -16,6 +16,7 @@ import {
   getEndUserProfile,
 } from '@/api/memory'
 import refreshIcon from '@/assets/images/refresh_hover.svg'
+import GraphDetail from './GraphDetail'
 
 const Detail: FC = () => {
   const { t } = useTranslation()
@@ -45,6 +46,10 @@ const Detail: FC = () => {
   }
   const handleRefresh = () => {
     forgetDetailRef.current?.handleRefresh()
+  }
+
+  if (type === 'GRAPH') {
+    return <GraphDetail />
   }
 
   return (

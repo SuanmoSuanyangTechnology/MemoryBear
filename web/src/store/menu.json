@@ -376,6 +376,21 @@
       "icon": null,
       "iconActive": null,
       "subs": null
+    },
+    {
+      "id": 12,
+      "parent": 0,
+      "code": "spaceConfig",
+      "label": "空间配置",
+      "i18nKey": "menu.spaceConfig",
+      "path": "/space-config",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "icon": null,
+      "iconActive": null,
+      "subs": null
     }
   ]
 }

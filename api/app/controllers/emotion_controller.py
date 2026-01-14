@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 api_logger = get_api_logger()
 
 router = APIRouter(
-    prefix="/memory/emotion",
+    prefix="/memory/emotion-memory",
     tags=["Emotion Analysis"],
     dependencies=[Depends(get_current_user)]  # 所有路由都需要认证
 )
