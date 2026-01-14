@@ -54,6 +54,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
   const handleClose = () => {
     setOpen(false)
     setChatList([])
+    setVariables([])
   }
   const handleEditVariables = () => {
     variableConfigModalRef.current?.handleOpen(variables)
