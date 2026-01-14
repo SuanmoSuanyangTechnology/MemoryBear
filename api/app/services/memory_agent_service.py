@@ -634,7 +634,7 @@ class MemoryAgentService:
                         retrieved_content.append({query:statements})
             if retrieved_content==[]:
                 retrieved_content=''
-            if   '信息不足，无法回答。' != str(final_answer) :#and retrieved_content!=[]
+            if   '信息不足，无法回答。' != str(final_answer) and str(search_switch).strip() != "2":#and retrieved_content!=[]
                 # 使用 upsert 方法
                 repo.upsert(
                     end_user_id=end_user_id,  # 确保这个变量在作用域内
