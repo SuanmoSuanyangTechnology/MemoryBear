@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.graph import START, END
+from langgraph.checkpoint.memory import InMemorySaver
 
 from app.core.workflow.expression_evaluator import evaluate_condition
 from app.core.workflow.nodes import WorkflowState, NodeFactory
@@ -249,4 +250,5 @@ class GraphBuilder:
         self.graph = StateGraph(WorkflowState)
         self.add_nodes()
         self.add_edges()  # 添加边必须在添加节点之后
-        return self.graph.compile()
+        checkpointer = InMemorySaver()
+        return self.graph.compile(checkpointer=checkpointer)
