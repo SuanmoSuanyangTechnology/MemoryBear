@@ -14,6 +14,7 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.db import get_db, get_db_context
 from app.models import MultiAgentConfig, AgentConfig, WorkflowConfig
+from app.schemas import DraftRunRequest
 from app.services.tool_service import ToolService
 from app.repositories.tool_repository import ToolRepository
 from app.db import get_db
@@ -59,7 +60,7 @@ class AppChatService:
 
         # 获取模型配置ID
         model_config_id = config.default_model_config_id
-        api_key_obj = ModelApiKeyService.get_a_api_key(self.db ,model_config_id)
+        api_key_obj = ModelApiKeyService.get_a_api_key(self.db, model_config_id)
         # 处理系统提示词（支持变量替换）
         system_prompt = config.system_prompt
         if variables:
@@ -210,7 +211,7 @@ class AppChatService:
 
             # 获取模型配置ID
             model_config_id = config.default_model_config_id
-            api_key_obj = ModelApiKeyService.get_a_api_key(self.db ,model_config_id)
+            api_key_obj = ModelApiKeyService.get_a_api_key(self.db, model_config_id)
             # 处理系统提示词（支持变量替换）
             system_prompt = config.system_prompt
             if variables:
@@ -511,7 +512,6 @@ class AppChatService:
                 }
             )
 
-
         except (GeneratorExit, asyncio.CancelledError):
             # 生成器被关闭或任务被取消，正常退出
             logger.debug("多 Agent 流式聊天被中断")
@@ -537,83 +537,19 @@ class AppChatService:
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
         workflow_service = WorkflowService(self.db)
-
-        input_data = {"message":message, "variables": variables,
-                      "conversation_id": str(conversation_id)}
-        inconfig = workflow_service.get_workflow_config(app_id)
-
-        # 2. 创建执行记录
-        execution = workflow_service.create_execution(
-            workflow_config_id=inconfig.id,
-            app_id=app_id,
-            trigger_type="manual",
-            triggered_by=None,
-            conversation_id=conversation_id,
-            input_data=input_data
+        payload = DraftRunRequest(
+            message=message,
+            variables=variables,
+            conversation_id=str(conversation_id),
+            stream=True,
+            user_id=user_id
         )
-
-        # 3. 构建工作流配置字典
-        workflow_config_dict = {
-            "nodes": config.nodes,
-            "edges": config.edges,
-            "variables": config.variables,
-            "execution_config": config.execution_config
-        }
-
-        # 4. 获取工作空间 ID（从 app 获取）
-
-        # 5. 执行工作流
-        from app.core.workflow.executor import execute_workflow
-
-        try:
-            # 更新状态为运行中
-            workflow_service.update_execution_status(execution.execution_id, "running")
-
-            result = await execute_workflow(
-                workflow_config=workflow_config_dict,
-                input_data=input_data,
-                execution_id=execution.execution_id,
-                workspace_id=str(workspace_id),
-                user_id=user_id
-            )
-
-            # 更新执行结果
-            if result.get("status") == "completed":
-                workflow_service.update_execution_status(
-                    execution.execution_id,
-                    "completed",
-                    output_data=result.get("node_outputs", {})
-                )
-            else:
-                workflow_service.update_execution_status(
-                    execution.execution_id,
-                    "failed",
-                    error_message=result.get("error")
-                )
-
-            # 返回增强的响应结构
-            return {
-                "execution_id": execution.execution_id,
-                "status": result.get("status"),
-                "output": result.get("output"),  # 最终输出（字符串）
-                "output_data": result.get("node_outputs", {}),  # 所有节点输出（详细数据）
-                "conversation_id": result.get("conversation_id"),  # 所有节点输出（详细数据）payload.,  # 会话 ID
-                "error_message": result.get("error"),
-                "elapsed_time": result.get("elapsed_time"),
-                "token_usage": result.get("token_usage")
-            }
-
-        except Exception as e:
-            logger.error(f"工作流执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
-            workflow_service.update_execution_status(
-                execution.execution_id,
-                "failed",
-                error_message=str(e)
-            )
-            raise BusinessException(
-                code=BizCode.INTERNAL_ERROR,
-                message=f"工作流执行失败: {str(e)}"
-            )
+        return await workflow_service.run(
+            app_id=app_id,
+            payload=payload,
+            config=config,
+            workspace_id=workspace_id,
+        )
 
     async def workflow_chat_stream(
             self,
@@ -632,62 +568,21 @@ class AppChatService:
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
         workflow_service = WorkflowService(self.db)
-        input_data = {"message": message, "variables": variables,
-                      "conversation_id": str(conversation_id)}
-        inconfig = workflow_service.get_workflow_config(app_id)
-        # 2. 创建执行记录
-        execution = workflow_service.create_execution(
-            workflow_config_id=inconfig.id,
-            app_id=app_id,
-            trigger_type="manual",
-            triggered_by=None,
-            conversation_id=conversation_id,
-            input_data=input_data
+        payload = DraftRunRequest(
+            message=message,
+            variables=variables,
+            conversation_id=str(conversation_id),
+            stream=True,
+            user_id=user_id
         )
+        async for event in workflow_service.run_stream(
+                app_id=app_id,
+                payload=payload,
+                config=config,
+                workspace_id=workspace_id,
+        ):
+            yield event
 
-        # 3. 构建工作流配置字典
-        workflow_config_dict = {
-            "nodes": config.nodes,
-            "edges": config.edges,
-            "variables": config.variables,
-            "execution_config": config.execution_config
-        }
-
-        # 4. 获取工作空间 ID（从 app 获取）
-
-        # 5. 流式执行工作流
-
-        try:
-            # 更新状态为运行中
-            workflow_service.update_execution_status(execution.execution_id, "running")
-
-
-            # 调用流式执行（executor 会发送 workflow_start 和 workflow_end 事件）
-            async for event in workflow_service._run_workflow_stream(
-                    workflow_config=workflow_config_dict,
-                    input_data=input_data,
-                    execution_id=execution.execution_id,
-                    workspace_id=str(workspace_id),
-                    user_id=user_id
-            ):
-                # 直接转发 executor 的事件（已经是正确的格式）
-                yield event
-
-        except Exception as e:
-            logger.error(f"工作流流式执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
-            workflow_service.update_execution_status(
-                execution.execution_id,
-                "failed",
-                error_message=str(e)
-            )
-            # 发送错误事件
-            yield {
-                "event": "error",
-                "data": {
-                    "execution_id": execution.execution_id,
-                    "error": str(e)
-                }
-            }
 
 # ==================== 依赖注入函数 ====================
 

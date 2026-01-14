@@ -6,7 +6,6 @@ End 节点实现
 
 import logging
 import re
-import asyncio
 
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.enums import NodeType
@@ -38,7 +37,23 @@ class EndNode(BaseNode):
         # 如果配置了输出模板，使用模板渲染；否则使用默认输出
         if output_template:
             output = self._render_template(output_template, state, strict=False)
+            state['messages'].extend([
+                {
+                    "role": "user",
+                    "content": self.get_variable("sys.message", state)
+                },
+                {
+                    "role": "assistant",
+                    "content": output
+                }
+            ])
         else:
+            state['messages'].extend([
+                {
+                    "role": "user",
+                    "content": self.get_variable("sys.message", state)
+                },
+            ])
             output = "工作流已完成"
 
         # 统计信息（用于日志）
@@ -166,6 +181,12 @@ class EndNode(BaseNode):
                 "chunk_index": 1,
                 "is_suffix": False
             })
+            state['messages'].extend([
+                {
+                    "role": "user",
+                    "content": self.get_variable("sys.message", state)
+                }
+            ])
             yield {"__final__": True, "result": output}
             return
 
@@ -176,7 +197,6 @@ class EndNode(BaseNode):
                 source_node_id = edge.get("source")
                 # Check if the source node is an LLM node
                 for node in self.workflow_config.get("nodes", []):
-                    print("="*50)
                     logger.info(f"节点 {self.node_id} 的类型 {node.get("type")}")
                     if node.get("id") == source_node_id and node.get("type") == NodeType.LLM:
                         direct_upstream_llm_nodes.append(source_node_id)
@@ -216,12 +236,24 @@ class EndNode(BaseNode):
             })
             logger.info(f"节点 {self.node_id} 已通过 writer 发送完整内容")
 
+            state['messages'].extend([
+                {
+                    "role": "user",
+                    "content": self.get_variable("sys.message", state)
+                },
+                {
+                    "role": "assistant",
+                    "content": output
+                }
+            ])
+
             # yield completion marker
             yield {"__final__": True, "result": output}
             return
 
         # Has reference to direct upstream LLM node, only output the part after that reference (suffix)
-        logger.info(f"节点 {self.node_id} 检测到直接上游 LLM 节点引用，只输出后缀部分（从索引 {upstream_llm_ref_index + 1} 开始）")
+        logger.info(
+            f"节点 {self.node_id} 检测到直接上游 LLM 节点引用，只输出后缀部分（从索引 {upstream_llm_ref_index + 1} 开始）")
 
         # Collect suffix parts
         suffix_parts = []
@@ -258,6 +290,17 @@ class EndNode(BaseNode):
         # 构建完整输出（用于返回，包含前缀 + 动态内容 + 后缀）
         full_output = self._render_template(output_template, state, strict=False)
 
+        state['messages'].extend([
+            {
+                "role": "user",
+                "content": self.get_variable("sys.message", state)
+            },
+            {
+                "role": "assistant",
+                "content": full_output
+            }
+        ])
+
         logger.info(f"[后缀调试] 节点 {self.node_id} 后缀部分数量: {len(suffix_parts)}")
         logger.info(f"[后缀调试] 后缀内容: '{suffix}'")
         logger.info(f"[后缀调试] 后缀长度: {len(suffix)}")
@@ -280,7 +323,8 @@ class EndNode(BaseNode):
             })
             logger.info(f"节点 {self.node_id} 已通过 writer 发送后缀，full_content 长度: {len(full_output)}")
         else:
-            logger.warning(f"[后缀调试] 节点 {self.node_id} 后缀为空，不发送！upstream_llm_ref_index={upstream_llm_ref_index}, parts数量={len(parts)}")
+            logger.warning(f"[后缀调试] 节点 {self.node_id} 后缀为空，不发送！"
+                           f"upstream_llm_ref_index={upstream_llm_ref_index}, parts数量={len(parts)}")
 
         # 统计信息
         node_outputs = state.get("node_outputs", {})
