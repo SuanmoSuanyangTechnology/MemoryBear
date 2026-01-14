@@ -102,7 +102,7 @@ class LLMNode(BaseNode):
                 elif role in ["user", "human"]:
                     messages.append({"role": "user", "content": content})
                 elif role in ["ai", "assistant"]:
-                    messages.append({"role": "user", "content": content})
+                    messages.append({"role": "assistant", "content": content})
                 else:
                     logger.warning(f"未知的消息角色: {role}，默认使用 user")
                     messages.append({"role": "user", "content": content})
