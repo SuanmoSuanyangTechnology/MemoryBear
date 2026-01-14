@@ -40,6 +40,12 @@ class EmotionType(ABC):
         "anger":"生气",
         "neutral":"中性"
     }
+class EmotionSubject(ABC):
+    SUBJECT_MAPPING={
+        "self":"自己",
+        "other":"别人",
+        "object":"事物对象"
+    }
 
 class EpisodicMemoryOverviewRequest(BaseModel):
     """情景记忆总览查询请求"""
