@@ -80,7 +80,7 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
                       field.type === 'string' && <Input placeholder={t('common.pleaseEnter')} />
                     }
                     {
-                      field.type === 'number' && <InputNumber placeholder={t('common.pleaseEnter')} style={{ width: '100%' }} />
+                      field.type === 'number' && <InputNumber placeholder={t('common.pleaseEnter')} style={{ width: '100%' }} onChange={(value) => form.setFieldValue(['variables', name, 'value'], value)} />
                     }
                     {
                       field.type === 'boolean' && <Checkbox>{`${field.name}·${field.description}`}</Checkbox>
