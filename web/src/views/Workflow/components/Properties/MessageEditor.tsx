@@ -127,7 +127,7 @@ const MessageEditor: FC<MessageEditor> = ({
               </Space>
             );
           })}
-          <Form.Item>
+          <Form.Item noStyle>
             <Button type="dashed" onClick={() => handleAdd(add)} block>
               +{t('workflow.addMessage')}
             </Button>

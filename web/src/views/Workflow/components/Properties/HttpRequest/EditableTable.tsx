@@ -131,7 +131,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
           const AddButton = ({ block = false }: { block?: boolean }) => (
             <Button 
               type={block ? "dashed" : "text"} 
-              icon={<PlusOutlined />} 
+              icon={block ? undefined : <PlusOutlined />} 
               onClick={() => add(createNewRow())} 
               size="small"
               block={block}
