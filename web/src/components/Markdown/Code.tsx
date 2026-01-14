@@ -81,7 +81,7 @@ const Code: FC<ICodeProps> = (props) => {
     </div>
     )
   }
-  return <span className="rb:bg-[#F0F3F8] rb:px-1 rb:py-0.5 rb:rounded rb:text-sm rb:font-mono">{children}</span>
+  return <code className="rb:bg-[#F0F3F8] rb:px-1 rb:py-0.5 rb:rounded rb:text-sm rb:font-mono rb:whitespace-break-spaces">{children}</code>
 }
 
 export default Code
