@@ -78,12 +78,13 @@ async def _update_activation_values_batch(
     if not unique_node_ids:
         logger.warning(f"批量更新激活值：没有有效的节点ID")
         return nodes
-    
-    # 记录去重信息
-    if len(unique_node_ids) < len(nodes):
+
+    # 记录去重信息（仅针对具有有效 ID 的节点）
+    id_nodes_count = sum(1 for n in nodes if n.get("id"))
+    if len(unique_node_ids) < id_nodes_count:
         logger.info(
-            f"批量更新激活值：检测到重复节点，原始数量={len(nodes)}, "
-            f"去重后数量={len(unique_node_ids)}"
+            f"批量更新激活值：检测到重复节点，具有有效ID的节点数量={id_nodes_count}, "
+            f"去重后唯一ID数量={len(unique_node_ids)}"
         )
     
     # 批量记录访问
