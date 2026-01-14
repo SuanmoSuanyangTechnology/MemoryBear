@@ -11,6 +11,26 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator, model_valida
 # ============================================================================
 # 原 UserInput 相关 Schema (保留原有功能)
 # ============================================================================
+type_mapping = {
+            "Person": "人物实体节点",
+            "Organization": "组织实体节点",
+            "ORG": "组织实体节点",
+            "Location": "地点实体节点",
+            "LOC": "地点实体节点",
+            "Event": "事件实体节点",
+            "Concept": "概念实体节点",
+            "Time": "时间实体节点",
+            "Position": "职位实体节点",
+            "WorkRole": "职业实体节点",
+            "System": "系统实体节点",
+            "Policy": "政策实体节点",
+            "HistoricalPeriod": "历史时期实体节点",
+            "HistoricalState": "历史国家实体节点",
+            "HistoricalEvent": "历史事件实体节点",
+            "EconomicFactor": "经济因素实体节点",
+            "Condition": "条件实体节点",
+            "Numeric": "数值实体节点"
+        }
 class UserInput(BaseModel):
     message: str
     history: list[dict]

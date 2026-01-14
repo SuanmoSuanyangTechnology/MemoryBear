@@ -123,7 +123,7 @@ class MemoryEntityService:
         extracted_entity_list = self._deduplicate_dict_list(extracted_entity_list)
         
         # 合并所有数据并处理相同text的合并
-        all_timeline_data = memory_summary_list + statement_list + extracted_entity_list
+        all_timeline_data = memory_summary_list + statement_list
         all_timeline_data = self._merge_same_text_items(all_timeline_data)
         
         result = {
