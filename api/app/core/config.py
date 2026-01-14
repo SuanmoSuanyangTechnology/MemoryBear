@@ -169,7 +169,7 @@ class Settings:
     SYSTEM_VERSION: str = os.getenv("SYSTEM_VERSION", "v0.2.0")
 
     # workflow config
-    WORKFLOW_NODE_TIMEOUT: int = os.getenv("WORKFLOW_NODE_TIMEOUT", 600)
+    WORKFLOW_NODE_TIMEOUT: int = int(os.getenv("WORKFLOW_NODE_TIMEOUT", 600))
 
     def get_memory_output_path(self, filename: str = "") -> str:
         """
