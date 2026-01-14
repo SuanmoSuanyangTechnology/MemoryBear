@@ -1201,7 +1201,7 @@ async def analytics_memory_types(
     end_user_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    统计9种记忆类型的数量和百分比
+    统计8种记忆类型的数量和百分比
     
     计算规则：
     1. 感知记忆 (PERCEPTUAL_MEMORY) = 通过 MemoryPerceptualService.get_memory_count 获取的 total_count
@@ -1321,7 +1321,7 @@ async def analytics_memory_types(
     emotion_count = await base_service.get_emotional_memory_count(end_user_id, perceptual_count)
     forget_count = await base_service.get_forget_memory_count(end_user_id, forgetting_threshold)
     
-    # 按规则计算9种记忆类型的数量（使用英文枚举作为key）
+    # 按规则计算8种记忆类型的数量（使用英文枚举作为key）
     memory_counts = {
         "PERCEPTUAL_MEMORY": perceptual_count,                    # 感知记忆
         "WORKING_MEMORY": work_count,                             # 工作记忆（基于会话数量）
