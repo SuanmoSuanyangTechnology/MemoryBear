@@ -8,14 +8,16 @@ Classes:
     AccessHistoryManager: 访问历史管理器，提供并发安全的访问记录和一致性检查
 """
 
+import asyncio
 import logging
-from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
+from app.core.memory.storage_services.forgetting_engine.actr_calculator import (
+    ACTRCalculator,
+)
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
-
 
 logger = logging.getLogger(__name__)
 
@@ -188,30 +190,43 @@ class AccessHistoryManager:
         Returns:
             List[Dict[str, Any]]: 成功更新的节点列表
         """
+        import time
+        batch_start = time.time()
+        
         if current_time is None:
             current_time = datetime.now()
         
+        # PERFORMANCE FIX: Process all nodes in parallel instead of sequentially
+        tasks = []
+        for node_id in node_ids:
+            task = self.record_access(
+                node_id=node_id,
+                node_label=node_label,
+                group_id=group_id,
+                current_time=current_time
+            )
+            tasks.append(task)
+        
+        # Execute all tasks in parallel
+        task_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Collect successful results and count failures
         results = []
         failed_count = 0
         
-        for node_id in node_ids:
-            try:
-                updated_node = await self.record_access(
-                    node_id=node_id,
-                    node_label=node_label,
-                    group_id=group_id,
-                    current_time=current_time
-                )
-                results.append(updated_node)
-            except Exception as e:
+        for node_id, result in zip(node_ids, task_results):
+            if isinstance(result, Exception):
                 failed_count += 1
                 logger.warning(
-                    f"批量访问记录失败: {node_label}[{node_id}], 错误: {str(e)}"
+                    f"批量访问记录失败: {node_label}[{node_id}], 错误: {str(result)}"
                 )
+            else:
+                results.append(result)
         
+        batch_duration = time.time() - batch_start
         logger.info(
-            f"批量访问记录完成: 成功 {len(results)}/{len(node_ids)}, "
-            f"失败 {failed_count}"
+            f"[PERF] 批量访问记录完成: 成功 {len(results)}/{len(node_ids)}, "
+            f"失败 {failed_count}, 耗时 {batch_duration:.4f}s"
         )
         
         return results
@@ -531,7 +546,10 @@ class AccessHistoryManager:
             Dict[str, Any]: 更新数据，包含所有需要更新的字段
         """
         access_history = node_data.get('access_history') or []
-        importance_score = node_data.get('importance_score', 0.5)
+        # Handle None importance_score - default to 0.5
+        importance_score = node_data.get('importance_score')
+        if importance_score is None:
+            importance_score = 0.5
         
         # 追加新的访问时间
         new_access_history = access_history + [current_time_iso]

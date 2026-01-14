@@ -842,7 +842,7 @@ async def run_hybrid_search(
 
         if search_type in ["keyword", "hybrid"]:
             # Keyword-based search
-            logger.info("Starting keyword search...")
+            logger.info("[PERF] Starting keyword search...")
             keyword_start = time.time()
             keyword_task = asyncio.create_task(
                 search_graph(
@@ -856,7 +856,7 @@ async def run_hybrid_search(
 
         if search_type in ["embedding", "hybrid"]:
             # Embedding-based search
-            logger.info("Starting embedding search...")
+            logger.info("[PERF] Starting embedding search...")
             embedding_start = time.time()
             
             # 从数据库读取嵌入器配置（按 ID）并构建 RedBearModelConfig
@@ -872,13 +872,13 @@ async def run_hybrid_search(
                 type="llm"
             )
             config_load_time = time.time() - config_load_start
-            logger.info(f"Config loading took {config_load_time:.4f}s")
+            logger.info(f"[PERF] Config loading took {config_load_time:.4f}s")
 
             # Init embedder
             embedder_init_start = time.time()
             embedder = OpenAIEmbedderClient(model_config=rb_config)
             embedder_init_time = time.time() - embedder_init_start
-            logger.info(f"Embedder init took {embedder_init_time:.4f}s")
+            logger.info(f"[PERF] Embedder init took {embedder_init_time:.4f}s")
             
             embedding_task = asyncio.create_task(
                 search_graph_by_embedding(
@@ -895,7 +895,7 @@ async def run_hybrid_search(
             keyword_results = await keyword_task
             keyword_latency = time.time() - keyword_start
             latency_metrics["keyword_search_latency"] = round(keyword_latency, 4)
-            logger.info(f"Keyword search completed in {keyword_latency:.4f}s")
+            logger.info(f"[PERF] Keyword search completed in {keyword_latency:.4f}s")
             if search_type == "keyword":
                 results = keyword_results
             else:
@@ -905,7 +905,7 @@ async def run_hybrid_search(
             embedding_results = await embedding_task
             embedding_latency = time.time() - embedding_start
             latency_metrics["embedding_search_latency"] = round(embedding_latency, 4)
-            logger.info(f"Embedding search completed in {embedding_latency:.4f}s")
+            logger.info(f"[PERF] Embedding search completed in {embedding_latency:.4f}s")
             if search_type == "embedding":
                 results = embedding_results
             else:
@@ -922,17 +922,21 @@ async def run_hybrid_search(
 
             # Apply two-stage reranking with ACTR activation calculation
             rerank_start = time.time()
-            logger.info("Using two-stage reranking with ACTR activation")
+            logger.info("[PERF] Using two-stage reranking with ACTR activation")
             
             # 加载遗忘引擎配置
+            config_start = time.time()
             try:
                 pc = get_pipeline_config(memory_config)
                 forgetting_cfg = pc.forgetting_engine
             except Exception as e:
                 logger.debug(f"Failed to load forgetting config, using defaults: {e}")
                 forgetting_cfg = ForgettingEngineConfig()
+            config_time = time.time() - config_start
+            logger.info(f"[PERF] Forgetting config loading took {config_time:.4f}s")
             
             # 统一使用激活度重排序（两阶段：检索 + ACTR计算）
+            rerank_compute_start = time.time()
             reranked_results = rerank_with_activation(
                 keyword_results=keyword_results,
                 embedding_results=embedding_results,
@@ -941,10 +945,12 @@ async def run_hybrid_search(
                 forgetting_config=forgetting_cfg,
                 activation_boost_factor=activation_boost_factor,
             )
+            rerank_compute_time = time.time() - rerank_compute_start
+            logger.info(f"[PERF] Rerank computation took {rerank_compute_time:.4f}s")
             
             rerank_latency = time.time() - rerank_start
             latency_metrics["reranking_latency"] = round(rerank_latency, 4)
-            logger.info(f"Reranking completed in {rerank_latency:.4f}s")
+            logger.info(f"[PERF] Total reranking completed in {rerank_latency:.4f}s")
             
             # Optional: apply reranker placeholder if enabled via config
             reranked_results = apply_reranker_placeholder(reranked_results, query_text)
@@ -985,8 +991,10 @@ async def run_hybrid_search(
         else:
             results["latency_metrics"] = latency_metrics
         
-        logger.info(f"Total search completed in {total_latency:.4f}s")
-        logger.info(f"Latency breakdown: {latency_metrics}")
+        logger.info(f"[PERF] ===== SEARCH PERFORMANCE SUMMARY =====")
+        logger.info(f"[PERF] Total search completed in {total_latency:.4f}s")
+        logger.info(f"[PERF] Latency breakdown: {json.dumps(latency_metrics, indent=2)}")
+        logger.info(f"[PERF] =========================================")
 
         # Sanitize results: drop large/unused fields
         _remove_keys_recursive(results, ["name_embedding"])  # drop entity name embeddings from outputs
