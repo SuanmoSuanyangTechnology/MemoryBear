@@ -40,7 +40,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
       const curVariables = startNodes[0].config.variables?.defaultValue
 
       curVariables.forEach((vo: StartVariableItem) => {
-        if (vo.default) {
+        if (typeof vo.default !== 'undefined') {
           vo.value = vo.default
         }
         const lastVo = variables.find(item => item.name === vo.name)
