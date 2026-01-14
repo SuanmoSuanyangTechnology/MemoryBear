@@ -181,10 +181,15 @@ const Conversation: FC = () => {
             currentConversationId = newId
             break
           case 'message':
-            const { content } = item.data as { content: string  }
-            updateAssistantMessage(content)
+            const { content, chunk, conversation_id: curId } = item.data as { content: string; chunk: string; conversation_id: string;  }
+            updateAssistantMessage(content ?? chunk)
+
+            if (curId) {
+              currentConversationId = curId;
+            }
             break
           case 'end':
+          case 'workflow_end':
             setLoading(false)
             if (currentConversationId && currentConversationId !== conversation_id) {
               setConversationId(currentConversationId)
