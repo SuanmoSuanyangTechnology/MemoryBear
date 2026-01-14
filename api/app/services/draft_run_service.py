@@ -110,6 +110,7 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                 result = task_service.get_task_memory_read_result(task.id)
                 status = result.get("status")
                 logger.info(f"读取任务状态：{status}")
+
             finally:
                 db.close()
             logger.info(f'用户ID：Agent:{end_user_id}')
