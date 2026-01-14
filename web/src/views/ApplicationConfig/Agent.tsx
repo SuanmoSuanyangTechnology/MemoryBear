@@ -176,6 +176,9 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
       if (response?.knowledge_retrieval?.knowledge_bases?.length) {
         getDefaultKnowledgeList(response)
       }
+      if (response?.tools?.length) {
+        setToolList(response?.tools)
+      }
     }).finally(() => {
       setLoading(false)
     })
