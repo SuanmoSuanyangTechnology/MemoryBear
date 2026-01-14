@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, type FC, type Key } from 'react';
+import { useEffect, useState, type FC, type Key } from 'react';
 import { Select } from 'antd'
 import type { SelectProps, DefaultOptionType } from 'antd/es/select'
 import { useTranslation } from 'react-i18next';
@@ -26,7 +26,7 @@ interface CustomSelectProps extends Omit<SelectProps, 'filterOption'> {
   disabled?: boolean;
   style?: React.CSSProperties;
   className?: string;
-  filterOption?: (inputValue: string, option: DefaultOptionType) => boolean;
+  filterOption?: (inputValue: string, option?: DefaultOptionType) => boolean;
 }
 interface OptionType {
   [key: string]: Key | string | number;
@@ -48,44 +48,27 @@ const CustomSelect: FC<CustomSelectProps> = ({
 }) => {
   const { t } = useTranslation();
   const [options, setOptions] = useState<OptionType[]>([]); 
-  // 创建防抖定时器引用
-  const debounceRef = useRef<number>();
   
-  // 防抖搜索函数
-  const handleSearch = useCallback((value?: string) => {
-    // 清除之前的定时器
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
-    
-    // 设置新的定时器
-    debounceRef.current = window.setTimeout(() => {
-      request.get<ApiResponse<OptionType>>(url, {...params, [optionFilterProp]: value}).then((res) => {
-        const data = res;
-        setOptions(Array.isArray(data) ? data || [] : Array.isArray(data?.items) ? data.items || [] : []);
-      });
-    }, 300); // 300毫秒防抖延迟
-  }, [url, params, optionFilterProp]);
-  
+  // 默认模糊搜索函数
+  const defaultFilterOption = (inputValue: string, option?: DefaultOptionType) => {
+    if (!option || !inputValue) return true;
+    const label = String(option.children || option.label || '');
+    return label.toLowerCase().includes(inputValue.toLowerCase());
+  };
   // 组件挂载时获取初始数据
   useEffect(() => {
-    handleSearch();
-    
-    // 组件卸载时清除定时器
-    return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-    };
-  }, [url, handleSearch]);
+    request.get<ApiResponse<OptionType>>(url, params).then((res) => {
+      const data = res;
+      setOptions(Array.isArray(data) ? data || [] : Array.isArray(data?.items) ? data.items || [] : []);
+    });
+  }, []);
   return (
     <Select 
       placeholder={placeholder ? placeholder : t('common.select')} 
       onChange={onChange}
       defaultValue={hasAll ? null : undefined}
       showSearch={showSearch}
-      onSearch={handleSearch}
-      filterOption={filterOption || false} // 禁用本地过滤，使用服务器端过滤
+      filterOption={filterOption || defaultFilterOption}
       {...props}
     >
       {hasAll && (<Select.Option>{allTitle || t('common.all')}</Select.Option>)}

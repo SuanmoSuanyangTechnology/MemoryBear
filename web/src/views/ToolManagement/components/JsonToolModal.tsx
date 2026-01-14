@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, Button, Space, Tree } from 'antd';
+import { Form, Input, Button, Space } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { TreeDataNode } from 'antd';
 
@@ -12,7 +12,7 @@ import { execute } from '@/api/tools';
 const JsonToolModal = forwardRef<JsonToolModalRef>((_props, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
-  const [form] = Form.useForm<{ json: string; }>();
+  const [form] = Form.useForm<{ json: string; json_path: string; }>();
   const [data, setData] = useState<ToolItem>({} as ToolItem)
   const [formatValue, setFormatValue] = useState<string | Record<string, any> | null>(null)
 
@@ -60,44 +60,29 @@ const JsonToolModal = forwardRef<JsonToolModalRef>((_props, ref) => {
   }
   const handleOperate = (type: string) => {
     const json = form.getFieldValue('json')
+    const json_path = form.getFieldValue('json_path')
     if (!json || !data.id) return
     let params: ExecuteData = {
       tool_id: data.id,
       parameters: {
         operation: type,
-        input_data: json
+        input_data: json,
+        json_path
       }
     }
-    if (type === 'format') {
+    if (type === 'parse') {
       params = {
         ...params,
         parameters: {
           ...params.parameters,
-          indent: 2,
-          ensure_ascii: false,
-          sort_keys: false
         }
       }
     }
 
     execute(params)
       .then(res => {
-        const { data } = res as {data: {
-          formatted_json: string;
-          minified_json: string;
-          is_valid: boolean;
-          converted_json: string;
-          error: string;
-          structure: Record<string, string | number>
-        }}
-        switch (type) {
-          case 'format':
-            setFormatValue(data.formatted_json);
-            break
-          case 'minify':
-            setFormatValue(data.minified_json)
-            break
-        }
+        const { data } = res as { data: string; }
+        setFormatValue(data);
       })
   }
   const clear = () => {
@@ -126,15 +111,20 @@ const JsonToolModal = forwardRef<JsonToolModalRef>((_props, ref) => {
           label={<Space size={8}>
             {t('tool.enterJson')}
             <Button onClick={clear}>{t('tool.clear')}</Button>
-            <Button onClick={handleParse}>{t('tool.parse')}</Button>
+            <Button onClick={handleParse}>{t('tool.paste')}</Button>
           </Space>}
         >
           <Input.TextArea rows={10} placeholder={t('tool.jsonPlaceholder')} />
         </FormItem>
+        <FormItem
+          name="json_path"
+          label={t('tool.json_path')}
+        >
+          <Input placeholder={t('common.pleaseEnter')} />
+        </FormItem>
 
         <Space size={8} className="rb:mb-3">
-          <Button onClick={() => handleOperate('format')}>{t('tool.format')}</Button>
-          <Button onClick={() => handleOperate('minify')}>{t('tool.minify')}</Button>
+          <Button onClick={() => handleOperate('parse')}>{t('tool.parse')}</Button>
         </Space>
         <FormItem
           label={t('tool.outputResult')}

@@ -91,6 +91,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
       showSearch
       allowClear={allowClear}
       filterOption={(input, option) => {
+        if (input === '/') return true;
         if (option?.options) {
           return option.label?.toLowerCase().includes(input.toLowerCase()) ||
                  option.options.some((opt: any) => 

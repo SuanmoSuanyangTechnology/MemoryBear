@@ -17,6 +17,11 @@ export const en = {
       spaceTitle:'Memory Bear Intelligent Space Management Platform',
       spaceSubTitle: 'Making it easier to implement intelligent models - a one-stop platform for model management, knowledge building, workflow orchestration, and spatial operations',
     },
+    version:{
+      releaseDate: 'Release Date',
+      version: 'Version',
+      name: 'Code Name'
+    },
     quickActions:{
       title: 'Quick Actions',
       spaceManagement: 'Space Management',
@@ -82,7 +87,7 @@ export const en = {
       modelManagement: 'Model Management',
       memoryStore: 'Memory Store',
       apiParameters: 'API Parameters',
-      userMemory: 'User Memory',
+      userMemory: 'Memory Store',
       memberManagement: 'Member Management',
       memorySummary: 'Memory Summary',
       memoryConversation: 'Memory Validation',
@@ -105,6 +110,7 @@ export const en = {
       pricing: 'Pricing Management',
       orderPayment: 'Order Payment',
       orderHistory: 'Order History',
+      spaceConfig: 'Space Configuration'
     },
     dashboard: {
       total_models: 'Total number of available models',
@@ -1227,6 +1233,8 @@ export const en = {
       hire_date: 'Hire Date',
       memoryContent: 'Memory Content',
       created_at: 'Created At',
+      updated_at: 'Updated At',
+      fullScreen: 'Full Screen',
 
       memoryWindow: "{{name}}'s Window of Memory",
       memory_insight: 'Overall Overview',
@@ -1253,7 +1261,7 @@ export const en = {
       unix: 'items',
       completeMemory: 'Complete Memory',
       relationshipEvolution: 'Relationship Evolution',
-      timelineMemories: 'Shared Memory Timeline',
+      timelineMemories: 'Long-term Memory',
       emotionLine: 'Emotion Changes Over Time',
       interaction: 'Interaction Frequency & Relationship Stages',
       timelines_memory: 'All',
@@ -1264,6 +1272,12 @@ export const en = {
       negative: 'Negative Emotion',
       neutral: 'Neutral Emotion',
       interactionCountData: 'Interaction Count',
+      capacity: 'Capacity',
+      type: 'Type',
+      person: 'Personal',
+      memoryNum: 'memories',
+      memory_config_name: 'Memory Engine',
+      searchPlaceholder: 'Search memory store name',
     },
     space: {
       createSpace: 'Create Space',
@@ -1279,7 +1293,8 @@ export const en = {
       neo4jDesc: 'Based on knowledge graph, suitable for relational reasoning and path query',
       llmModel: 'LLM Model',
       embeddingModel: 'Embedding Model',
-      rerankModel: 'Rerank Model'
+      rerankModel: 'Rerank Model',
+      configAlert: 'Space model configuration ensures that the space can correctly call the corresponding models to process business data during runtime.',
     },
     memoryExtractionEngine: {
       title: 'Memory Engine Module Configuration Center',
@@ -1454,6 +1469,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       quickReply: 'Quick Reply',
       web_search: 'Online search',
       memory: 'Memory',
+      memoryConversationAnalysisEmpty: 'There is currently no dialogue analysis content available',
+      memoryConversationAnalysisEmptySubTitle: 'After entering your user ID, click on "Test Memory" to view the conversation memory',
     },
     login: {
       title: 'Red Bear Memory Science',
@@ -1608,19 +1625,17 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
 
       JsonTool_desc: 'Data Format Conversion',
       JsonTool_features: 'JSON formatting, compression, validation and conversion functions',
-      jsonFormat: 'JSON Formatting',
-      jsonGzip: 'JSON Compression',
-      jsonCheck: 'JSON Validation',
-      jsonConversion: 'Format Conversion',
+      jsonParse: 'JSON Parse',
+      jsonInsert: 'JSON Insert',
+      jsonReplace: 'JSON Validation',
+      jsonDelete: 'JSON Delete',
       jsonEg: 'Example JSON',
       enterJson: 'Enter JSON',
       jsonPlaceholder: 'Enter JSON data, e.g.: {"name": "test", "value": 123}',
       clear: 'Clear',
-      parse: 'Paste',
-      format: 'Format',
-      minify: 'Minify',
-      validate: 'Validate',
-      convert: 'Escape',
+      paste: 'Paste',
+      parse: 'Parse',
+      json_path: 'JSON Path Parameters',
       outputResult: 'Output Result',
       validJosn: 'JSON format is correct, validation passed!',
 
@@ -1939,7 +1954,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       variableConfig: 'Variable Configuration',
       variableRequired: 'Required',
       addMessage: 'Add Message',
-      answerDesc: 'Reply'
+      answerDesc: 'Reply',
+      addNode: 'Add Node',
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',

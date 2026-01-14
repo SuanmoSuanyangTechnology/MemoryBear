@@ -1,6 +1,6 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next';
-import { Form, Button, Select, Row, Col, Input } from 'antd'
+import { Form, Select, Row, Col, Input } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import VariableSelect from '../VariableSelect'
 
@@ -36,7 +36,6 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
   value = [],
   options,
   parentName,
-  onChange,
   selectedNode,
   graphRef
 }) => {
@@ -139,12 +138,17 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
                   <Form.Item name={[name, 'value']} noStyle>
                     {currentInputType === 'variable' ? (
                       <VariableSelect
-                        placeholder="选择变量"
-                        options={availableOptions}
+                        placeholder={t('common.pleaseSelect')}
+                        options={availableOptions.filter(option => {
+                          const currentType = value?.[index]?.type;
+                          if (!currentType) return true;
+
+                          return option.dataType === currentType
+                        })}
                       />
                     ) : (
                       <Input.TextArea
-                        placeholder="输入值"
+                        placeholder={t('common.pleaseEnter')}
                         rows={3}
                         className="rb:w-full"
                       />
