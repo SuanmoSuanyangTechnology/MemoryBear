@@ -223,7 +223,7 @@ class OpenAPISchemaParser:
                 operations[operation_id] = {
                     "method": method.upper(),
                     "path": path,
-                    "summary": operation.get("summary", ""),
+                    "summary": operation_id,
                     "description": operation.get("description", ""),
                     "parameters": self._extract_parameters(operation),
                     "request_body": self._extract_request_body(operation),
