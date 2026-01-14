@@ -11,12 +11,12 @@ class MessageConfig(BaseModel):
     """消息配置"""
 
     role: str = Field(
-        ...,
+        default='user',
         description="消息角色：system, user, assistant"
     )
 
     content: str = Field(
-        ...,
+        default="",
         description="消息内容，支持模板变量，如：{{ sys.message }}"
     )
 
@@ -28,6 +28,23 @@ class MessageConfig(BaseModel):
         if v.lower() not in allowed_roles:
             raise ValueError(f"角色必须是以下之一: {', '.join(allowed_roles)}")
         return v.lower()
+
+
+class MemoryWindowSetting(BaseModel):
+    enable: bool = Field(
+        default=False,
+        description="启用记忆"
+    )
+
+    enable_window: bool = Field(
+        default=False,
+        description="启用记忆窗口"
+    )
+
+    window_size: int = Field(
+        default=20,
+        description="记忆窗口大小"
+    )
 
 
 class LLMNodeConfig(BaseNodeConfig):
@@ -46,6 +63,11 @@ class LLMNodeConfig(BaseNodeConfig):
     context: Any = Field(
         default="",
         description="上下文"
+    )
+
+    memory: MemoryWindowSetting = Field(
+        ...,
+        description="对话上下文窗口"
     )
 
     # 简单模式
