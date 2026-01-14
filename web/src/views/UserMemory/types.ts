@@ -17,13 +17,10 @@ export interface Data {
       entity: number;
     }
   },
+  memory_config: {
+    memory_config_id: string;
+    memory_config_name: string;
+  },
+  type: string;
   name?: string;
-}
-export interface ConfigModalData {
-  llm: string;
-  embedding: string;
-  rerank: string;
-}
-export interface ConfigModalRef {
-  handleOpen: () => void;
 }

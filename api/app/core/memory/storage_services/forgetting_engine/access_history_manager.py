@@ -8,14 +8,16 @@ Classes:
     AccessHistoryManager: 访问历史管理器，提供并发安全的访问记录和一致性检查
 """
 
+import asyncio
 import logging
-from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
+from app.core.memory.storage_services.forgetting_engine.actr_calculator import (
+    ACTRCalculator,
+)
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
-
 
 logger = logging.getLogger(__name__)
 
@@ -188,30 +190,43 @@ class AccessHistoryManager:
         Returns:
             List[Dict[str, Any]]: 成功更新的节点列表
         """
+        import time
+        batch_start = time.time()
+        
         if current_time is None:
             current_time = datetime.now()
         
+        # PERFORMANCE FIX: Process all nodes in parallel instead of sequentially
+        tasks = []
+        for node_id in node_ids:
+            task = self.record_access(
+                node_id=node_id,
+                node_label=node_label,
+                group_id=group_id,
+                current_time=current_time
+            )
+            tasks.append(task)
+        
+        # Execute all tasks in parallel
+        task_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Collect successful results and count failures
         results = []
         failed_count = 0
         
-        for node_id in node_ids:
-            try:
-                updated_node = await self.record_access(
-                    node_id=node_id,
-                    node_label=node_label,
-                    group_id=group_id,
-                    current_time=current_time
-                )
-                results.append(updated_node)
-            except Exception as e:
+        for node_id, result in zip(node_ids, task_results):
+            if isinstance(result, Exception):
                 failed_count += 1
                 logger.warning(
-                    f"批量访问记录失败: {node_label}[{node_id}], 错误: {str(e)}"
+                    f"批量访问记录失败: {node_label}[{node_id}], 错误: {str(result)}"
                 )
+            else:
+                results.append(result)
         
+        batch_duration = time.time() - batch_start
         logger.info(
-            f"批量访问记录完成: 成功 {len(results)}/{len(node_ids)}, "
-            f"失败 {failed_count}"
+            f"[PERF] 批量访问记录完成: 成功 {len(results)}/{len(node_ids)}, "
+            f"失败 {failed_count}, 耗时 {batch_duration:.4f}s"
         )
         
         return results
@@ -531,7 +546,10 @@ class AccessHistoryManager:
             Dict[str, Any]: 更新数据，包含所有需要更新的字段
         """
         access_history = node_data.get('access_history') or []
-        importance_score = node_data.get('importance_score', 0.5)
+        # Handle None importance_score - default to 0.5
+        importance_score = node_data.get('importance_score')
+        if importance_score is None:
+            importance_score = 0.5
         
         # 追加新的访问时间
         new_access_history = access_history + [current_time_iso]
@@ -620,34 +638,52 @@ class AccessHistoryManager:
             new_version = current_version + 1
             
             # 步骤2：使用乐观锁更新节点
-            # 只有当版本号匹配时才更新
-            update_query = f"""
-            MATCH (n:{node_label} {{id: $node_id}})
-            """
+            # 根据节点类型构建完整的查询语句
+            content_field_map = {
+                'Statement': 'n.statement as statement',
+                'MemorySummary': 'n.content as content',
+                'ExtractedEntity': 'null as content_placeholder'  # 占位符，后续会被过滤
+            }
+            
+            # 显式检查节点类型，不支持的类型抛出错误
+            if node_label not in content_field_map:
+                raise ValueError(
+                    f"Unsupported node_label: {node_label}. "
+                    f"Supported labels are: {list(content_field_map.keys())}"
+                )
+            
+            content_field = content_field_map[node_label]
+            
+            # 构建 WHERE 子句
+            where_conditions = []
             if group_id:
-                update_query += " WHERE n.group_id = $group_id"
+                where_conditions.append("n.group_id = $group_id")
             
             # 添加版本检查
             if current_version > 0:
-                update_query += " AND n.version = $current_version"
+                where_conditions.append("n.version = $current_version")
             else:
-                # 如果节点没有版本号，检查是否为首次更新
-                update_query += " AND (n.version IS NULL OR n.version = 0)"
+                where_conditions.append("(n.version IS NULL OR n.version = 0)")
             
-            update_query += """
+            where_clause = " AND ".join(where_conditions) if where_conditions else "true"
+            
+            # 构建完整的更新查询
+            update_query = f"""
+            MATCH (n:{node_label} {{id: $node_id}})
+            WHERE {where_clause}
             SET n.activation_value = $activation_value,
                 n.access_history = $access_history,
                 n.last_access_time = $last_access_time,
                 n.access_count = $access_count,
                 n.version = $new_version
             RETURN n.id as id,
-                   n.statement as statement,
                    n.activation_value as activation_value,
                    n.access_history as access_history,
                    n.last_access_time as last_access_time,
                    n.access_count as access_count,
                    n.importance_score as importance_score,
-                   n.version as version
+                   n.version as version,
+                   {content_field}
             """
             
             update_params = {
@@ -671,7 +707,11 @@ class AccessHistoryManager:
                     f"Expected version {current_version}, but node was modified by another transaction."
                 )
             
-            return dict(updated_node)
+            # 转换为字典并移除占位符字段
+            result_dict = dict(updated_node)
+            result_dict.pop('content_placeholder', None)
+            
+            return result_dict
         
         # 执行事务
         try:

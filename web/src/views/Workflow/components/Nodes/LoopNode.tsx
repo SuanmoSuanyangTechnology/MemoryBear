@@ -33,7 +33,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         y: cycleStartBBox.y,
         data: {
           type: 'add-node',
-          label: '添加节点',
+          label: t('workflow.addNode'),
           icon: '+',
           parentId: node.id,
           cycle: data.id,
@@ -61,7 +61,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
             },
           },
         },
-        zIndex: 3
+        zIndex: 10
       });
     }
   }
@@ -97,7 +97,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       y: centerY,
       data: {
         type: 'add-node',
-        label: '添加节点',
+        label: t('workflow.addNode'),
         icon: '+',
         parentId: node.id,
         cycle: data.id,
@@ -128,7 +128,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
           },
         },
       },
-      zIndex: 3
+      zIndex: 10
     }
 
     graph.addEdge(edgeConfig)

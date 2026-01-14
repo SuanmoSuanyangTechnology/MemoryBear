@@ -10,9 +10,10 @@ from app.services.memory_agent_service import MemoryAgentService
 class MemoryReadNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = MemoryReadNodeConfig(**self.config)
+        self.typed_config: MemoryReadNodeConfig | None = None
 
     async def execute(self, state: WorkflowState) -> Any:
+        self.typed_config = MemoryReadNodeConfig(**self.config)
         with get_db_read() as db:
             workspace_id = self.get_variable('sys.workspace_id', state)
             end_user_id = self.get_variable("sys.user_id", state)
