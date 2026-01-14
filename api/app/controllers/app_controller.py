@@ -60,14 +60,14 @@ def list_apps(
     """
     workspace_id = current_user.current_workspace_id
     service = app_service.AppService(db)
-    
+
     # 当 ids 存在且不为 None 时，根据 ids 获取应用
     if ids is not None:
         app_ids = [id.strip() for id in ids.split(',') if id.strip()]
         items_orm = app_service.get_apps_by_ids(db, app_ids, workspace_id)
         items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
         return success(data=items)
-    
+
     # 正常分页查询
     items_orm, total = app_service.list_apps(
         db,
