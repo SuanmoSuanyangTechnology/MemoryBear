@@ -15,7 +15,7 @@ from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.schemas.memory_episodic_schema import type_mapping, EmotionType
+from app.schemas.memory_episodic_schema import type_mapping, EmotionType, EmotionSubject
 
 from app.services.memory_base_service import MemoryBaseService
 from app.services.memory_config_service import MemoryConfigService
@@ -1584,6 +1584,8 @@ async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_
                 value=type_mapping.get(value,'')
             if str(field)=="emotion_type":
                 value=EmotionType.EMOTION_MAPPING.get(value)
+            if str(field)=="emotion_subject":
+                value=EmotionSubject.SUBJECT_MAPPING.get(value)
             # 清理 Neo4j 特殊类型
             filtered_props[field] = _clean_neo4j_value(value)
     filtered_props['associative_memory']=[i['rel_count'] for i in node_results][0]
