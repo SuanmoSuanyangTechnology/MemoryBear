@@ -1343,6 +1343,7 @@ export const zh = {
       emotionLine: '情绪随时间变化',
       interaction: '互动频率 & 关系阶段',
       timelines_memory: '全部',
+      Chunk: '工作记忆',
       MemorySummary: '长期沉淀',
       Statement: '情绪记忆',
       ExtractedEntity: '情景记忆',
@@ -1883,6 +1884,9 @@ export const zh = {
           temperature: '温度',
           max_tokens: '最大令牌数',
           context: '上下文',
+          memory: '记忆',
+          enable_window: '记忆窗口',
+          inner: '内置',
         },
         start: {
           variables: '输入字段',

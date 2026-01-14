@@ -79,8 +79,6 @@ const ToolList: FC<{ data: ToolOption[]; onUpdate: (config: ToolOption[]) => voi
     }
   }, [data])
 
-  console.log('toolList', toolList)
-
   const handleAddTool = () => {
     toolModalRef.current?.handleOpen()
   }
