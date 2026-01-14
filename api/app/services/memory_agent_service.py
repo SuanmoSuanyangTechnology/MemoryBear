@@ -456,23 +456,36 @@ class MemoryAgentService:
             client = MultiServerMCPClient(mcp_config)
 
             async with client.session('data_flow') as session:
+                session_start = time.time()
                 logger.debug("Connected to MCP Server: data_flow")
+                
+                tools_start = time.time()
                 tools = await load_mcp_tools(session)
+                tools_time = time.time() - tools_start
+                logger.info(f"[PERF] MCP tools loading took: {tools_time:.4f}s")
+                
                 outputs = []
                 intermediate_outputs = []
                 seen_intermediates = set()  # Track seen intermediate outputs to avoid duplicates
 
                 # Pass memory_config to the graph workflow
+                graph_start = time.time()
                 async with make_read_graph(group_id, tools, search_switch, group_id, group_id, memory_config=memory_config, storage_type=storage_type, user_rag_memory_id=user_rag_memory_id) as graph:
+                    graph_init_time = time.time() - graph_start
+                    logger.info(f"[PERF] Graph initialization took: {graph_init_time:.4f}s")
+                    
                     start = time.time()
                     config = {"configurable": {"thread_id": group_id}}
                     workflow_errors = []  # Track errors from workflow
-
+                    
+                    event_count = 0
                     async for event in graph.astream(
                             {"messages": history, "memory_config": memory_config, "errors": []},
                             stream_mode="values",
                             config=config
                     ):
+                        event_count += 1
+                        event_start = time.time()
                         messages = event.get('messages')
                         # Capture any errors from the state
                         if event.get('errors'):
@@ -525,9 +538,15 @@ class MemoryAgentService:
                                             pass
                                 except Exception as e:
                                     logger.debug(f"Failed to extract intermediate output: {e}")
+                        
+                        event_time = time.time() - event_start
+                        logger.info(f"[PERF] Event {event_count} processing took: {event_time:.4f}s")
 
             workflow_duration = time.time() - start
-            logger.info(f"Read graph workflow completed in {workflow_duration}s")
+            session_duration = time.time() - session_start
+            logger.info(f"[PERF] Read graph workflow completed in {workflow_duration}s")
+            logger.info(f"[PERF] Total session duration: {session_duration:.4f}s")
+            logger.info(f"[PERF] Total events processed: {event_count}")
             # Extract final answer
             final_answer = ""
             for messages in outputs:
@@ -1186,8 +1205,8 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
         ValueError: 当终端用户不存在或应用未发布时
     """
     from app.models.app_release_model import AppRelease
-    from app.models.end_user_model import EndUser
     from app.models.data_config_model import DataConfig
+    from app.models.end_user_model import EndUser
     from sqlalchemy import select
     
     logger.info(f"Getting connected config for end_user: {end_user_id}")
@@ -1266,8 +1285,8 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
         对于查询失败的用户，value 包含 error 字段
     """
     from app.models.app_release_model import AppRelease
-    from app.models.end_user_model import EndUser
     from app.models.data_config_model import DataConfig
+    from app.models.end_user_model import EndUser
     from sqlalchemy import select
     
     logger.info(f"Batch getting connected configs for {len(end_user_ids)} end users")
