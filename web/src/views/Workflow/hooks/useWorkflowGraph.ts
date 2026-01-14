@@ -5,7 +5,7 @@ import { App } from 'antd'
 import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs } from '../constant';
 import type { WorkflowConfig, NodeProperties } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import type { PortMetadata } from '@antv/x6/lib/model/port';
@@ -39,7 +39,6 @@ export interface UseWorkflowGraphReturn {
 
 export const edge_color = '#155EEF';
 const edge_selected_color = '#4DA8FF'
-
 export const useWorkflowGraph = ({
   containerRef,
   miniMapRef,
@@ -128,12 +127,6 @@ export const useWorkflowGraph = ({
           const baseHeight = 88;
           const newHeight = baseHeight + (totalPorts - 2) * 30;
           
-          const portAttrs = {
-            circle: {
-              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
-            },
-          };
-          
           const portItems: PortMetadata[] = [
             { group: 'left' },
             { group: 'right', id: 'CASE1', args: { dy: 24 }, attrs: { text: { text: 'IF', fontSize: 12, fill: '#5B6167' }} }
@@ -157,8 +150,8 @@ export const useWorkflowGraph = ({
           
           nodeConfig.ports = {
             groups: {
-              right: { position: 'right', attrs: portAttrs },
-              left: { position: 'left', attrs: portAttrs },
+              right: { position: 'right', markup: portMarkup, attrs: portAttrs },
+              left: { position: 'left', markup: portMarkup, attrs: portAttrs },
             },
             items: portItems
           };
@@ -171,12 +164,6 @@ export const useWorkflowGraph = ({
           const categoryCount = config.categories.length;
           const baseHeight = 88;
           const newHeight = baseHeight + (categoryCount - 1) * 30;
-          
-          const portAttrs = {
-            circle: {
-              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
-            },
-          };
           
           const portItems: PortMetadata[] = [
             { group: 'left' }
@@ -194,8 +181,8 @@ export const useWorkflowGraph = ({
           
           nodeConfig.ports = {
             groups: {
-              right: { position: 'right', attrs: portAttrs },
-              left: { position: 'left', attrs: portAttrs },
+              right: { position: 'right', markup: portMarkup, attrs: portAttrs },
+              left: { position: 'left', markup: portMarkup, attrs: portAttrs },
             },
             items: portItems
           };
@@ -205,16 +192,10 @@ export const useWorkflowGraph = ({
         
         // 如果是http-request节点，检查error_handle.method配置
         if (type === 'http-request' && (config as any).error_handle?.method === 'branch') {
-          const portAttrs = {
-            circle: {
-              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
-            },
-          };
-          
           nodeConfig.ports = {
             groups: {
-              right: { position: 'right', attrs: portAttrs },
-              left: { position: 'left', attrs: portAttrs },
+              right: { position: 'right', markup: portMarkup, attrs: portAttrs },
+              left: { position: 'left', markup: portMarkup, attrs: portAttrs },
             },
             items: [
               { group: 'left' },
@@ -344,13 +325,15 @@ export const useWorkflowGraph = ({
               cell: targetCell.id,
               port: targetPorts.find((port: any) => port.group === 'left')?.id || 'left'
             },
+            connector: { name: 'smooth' },
             attrs: {
               line: {
                 stroke: edge_color,
                 strokeWidth: 1,
                 targetMarker: {
-                  name: 'block',
-                  size: 8,
+                  name: 'diamond',
+                  width: 4,
+                  height: 4,
                 },
               },
             },
@@ -703,7 +686,7 @@ export const useWorkflowGraph = ({
         // router: 'orth',
         // router: 'manhattan',
         connector: {
-          name: 'rounded',
+          name: 'smooth',
           args: {
             radius: 8,
           },
@@ -723,6 +706,11 @@ export const useWorkflowGraph = ({
               line: {
                 stroke: edge_color,
                 strokeWidth: 1,
+                targetMarker: {
+                  name: 'diamond',
+                  width: 4,
+                  height: 4,
+                },
               },
             },
             zIndex: 0,
