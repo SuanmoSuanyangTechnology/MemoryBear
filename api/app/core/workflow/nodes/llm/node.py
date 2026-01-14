@@ -68,7 +68,7 @@ class LLMNode(BaseNode):
 
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = LLMNodeConfig(**self.config)
+        self.typed_config: LLMNodeConfig | None = None
 
     def _render_context(self, message, state):
         context = f"<context>{self._render_template(self.typed_config.context, state)}</context>"
@@ -164,6 +164,7 @@ class LLMNode(BaseNode):
         Returns:
             LLM 响应消息
         """
+        self.typed_config = LLMNodeConfig(**self.config)
         llm, prompt_or_messages = self._prepare_llm(state, True)
 
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（非流式）")

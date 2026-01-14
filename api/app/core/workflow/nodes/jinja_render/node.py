@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class JinjaRenderNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = JinjaRenderNodeConfig(**self.config)
+        self.typed_config: JinjaRenderNodeConfig | None = None
 
     async def execute(self, state: WorkflowState) -> Any:
         """
@@ -34,6 +34,7 @@ class JinjaRenderNode(BaseNode):
             RuntimeError: If Jinja2 template rendering fails due to invalid template
                 syntax or missing variables.
         """
+        self.typed_config = JinjaRenderNodeConfig(**self.config)
         render = TemplateRenderer(strict=False)
 
         context = {}

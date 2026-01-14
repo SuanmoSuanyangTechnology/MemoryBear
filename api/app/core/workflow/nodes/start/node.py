@@ -35,7 +35,7 @@ class StartNode(BaseNode):
         super().__init__(node_config, workflow_config)
 
         # 解析并验证配置
-        self.typed_config = StartNodeConfig(**self.config)
+        self.typed_config: StartNodeConfig | None = None
 
     async def execute(self, state: WorkflowState) -> dict[str, Any]:
         """执行 start 节点业务逻辑
@@ -48,6 +48,7 @@ class StartNode(BaseNode):
         Returns:
             包含系统参数、会话变量和自定义变量的字典
         """
+        self.typed_config = StartNodeConfig(**self.config)
         logger.info(f"节点 {self.node_id} (Start) 开始执行")
 
         # 创建变量池实例（在方法内复用）
