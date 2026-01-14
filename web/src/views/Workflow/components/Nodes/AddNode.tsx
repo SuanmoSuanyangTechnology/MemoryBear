@@ -13,11 +13,12 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
   const handleNodeSelect = (selectedNodeType: any) => {
     const parentBBox = node.getBBox();
     const cycleId = data.cycle;
+    const horizontalSpacing = 20;
 
     const id = `${selectedNodeType.type.replace(/-/g, '_') }_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const newNode = graph.addNode({
       ...(graphNodeLibrary[selectedNodeType.type] || graphNodeLibrary.default),
-      x: parentBBox.x,
+      x: parentBBox.x + horizontalSpacing,
       y: parentBBox.y,
       id,
       data: {
@@ -35,7 +36,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     if (cycleId) {
       const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
       if (parentNode) {
-        parentNode.addChild(newNode);
+        parentNode.insertChild(newNode);
       }
     }
 
@@ -47,7 +48,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         source: { cell: edge.getSourceCellId(), port: edge.getSourcePortId() },
         target: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'left')?.id || 'left' },
         attrs: edge.getAttrs(),
-        zIndex: 3
+        zIndex: 1,
       });
     });
 
@@ -58,7 +59,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         source: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'right')?.id || 'right' },
         target: { cell: edge.getTargetCellId(), port: targetPortId },
         attrs: edge.getAttrs(),
-        zIndex: 3
+        zIndex: 1,
       });
     });
 
