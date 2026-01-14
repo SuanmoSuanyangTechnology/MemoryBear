@@ -135,6 +135,14 @@ export const nodeLibrary: NodeLibrary[] = [
                 readonly: true
               },
             ]
+          },
+          memory: {
+            type: 'memoryConfig',
+            defaultValue: {
+              enable: false,
+              enable_window: false,
+              window_size: 20
+            }
           }
         }
       },
@@ -750,10 +758,6 @@ export const outputVariable: { [key: string]: OutputVariable } = {
       { name: "body", type: "string" },
       { name: "status_code", type: "number" },
     ],
-    error: [
-      { name: "error_message", type: "string" },
-      { name: "error_type", type: "string" },
-    ]
   },
   'tool': {
     default: [

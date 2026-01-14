@@ -1265,6 +1265,7 @@ export const en = {
       emotionLine: 'Emotion Changes Over Time',
       interaction: 'Interaction Frequency & Relationship Stages',
       timelines_memory: 'All',
+      Chunk: 'Chunk',
       MemorySummary: 'Long-term Accumulation',
       Statement: 'Emotional Memory',
       ExtractedEntity: 'Episodic Memory',
@@ -1786,6 +1787,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           temperature: 'Temperature',
           max_tokens: 'Max Tokens',
           context: 'Context',
+          memory: 'Memory',
+          enable_window: 'Memory Window',
+          inner: 'Built-in',
         },
         start: {
           variables: 'Input Fields',
