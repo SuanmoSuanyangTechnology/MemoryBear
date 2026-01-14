@@ -59,7 +59,7 @@ const GuideCard: React.FC = () => {
 
   return (
     <>
-    <div className='rb:w-full rb:h-[204px] rb:p-4' style={{ backgroundImage: `url(${guideBgImg})`, backgroundSize: '100% 100%' }}>
+    <div className='rb:w-full rb:p-4' style={{ backgroundImage: `url(${guideBgImg})`, backgroundSize: '100% 100%' }}>
         <div className='rb:flex rb:justify-start rb:text-white rb:text-base rb:font-semibold' >
             { t('index.getStarted')}
         </div>

@@ -23,6 +23,7 @@ interface CurrentTimeObj {
   iso_format: string;
   timestamp: string;
   timestamp_ms: string;
+  utc_datetime: string;
 }
 const TimeToolModal = forwardRef<TimeToolModalRef>((_props, ref) => {
   const { t } = useTranslation();
@@ -88,8 +89,8 @@ const TimeToolModal = forwardRef<TimeToolModalRef>((_props, ref) => {
       }
     })
     .then(res => {
-      const response = res as { data: CurrentTimeObj }
-      setTimestampFormat(response.data.datetime)
+      const response = res as { data: string }
+      setTimestampFormat(response.data)
     })
   }
   const handleChangeFormatType = () => {
@@ -149,7 +150,7 @@ const TimeToolModal = forwardRef<TimeToolModalRef>((_props, ref) => {
               <Input disabled value={currentTime?.datetime} />
             </FormItem>
             <FormItem label={t('tool.utcTime')} >
-              <Input disabled value={currentTime?.iso_format} />
+              <Input disabled value={currentTime?.utc_datetime} />
             </FormItem>
             <FormItem label={t('tool.secondsTimestamp')} >
             <Input disabled value={currentTime?.timestamp} />

@@ -59,7 +59,6 @@ const list = [
 ]
 const TopCardList: FC<{data?: DataResponse}> = ({ data }) => {
   const { t } = useTranslation()
-  debugger
   return (
     <div className="rb:grid rb:grid-cols-4 rb:gap-[16px]">
       {list.map((item) => {

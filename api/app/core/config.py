@@ -167,7 +167,6 @@ class Settings:
 
     # official environment system version
     SYSTEM_VERSION: str = os.getenv("SYSTEM_VERSION", "v0.2.0")
-    SYSTEM_INTRODUCTION: str = os.getenv("SYSTEM_INTRODUCTION", "")
     
     def get_memory_output_path(self, filename: str = "") -> str:
         """

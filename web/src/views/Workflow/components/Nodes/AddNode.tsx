@@ -107,7 +107,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     <div style={{ maxHeight: '300px', overflowY: 'auto', minWidth: '240px' }}>
       {nodeLibrary.map((category, categoryIndex) => {
         const filteredNodes = category.nodes.filter(nodeType => 
-          nodeType.type !== 'start' && nodeType.type !== 'end' && nodeType.type !== 'loop' && nodeType.type !== 'cycle-start'
+          nodeType.type !== 'start' && nodeType.type !== 'end' && nodeType.type !== 'iteration' && nodeType.type !== 'loop' && nodeType.type !== 'cycle-start'
         );
         
         if (filteredNodes.length === 0) return null;

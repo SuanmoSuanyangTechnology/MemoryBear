@@ -25,7 +25,12 @@ export interface DataResponse {
 }
 export interface versionResponse{
   version: string;
-  introduction: string;
+  introduction: {
+    releaseDate: string;
+    upgradePosition: string;
+    coreUpgrades: string[];
+    codeName: string;
+  };
 }
 // 首页数据统计
 export const getDashboardData = `/home-page/workspaces`

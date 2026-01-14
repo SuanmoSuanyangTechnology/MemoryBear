@@ -1,20 +1,22 @@
 import { type FC, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Layout } from 'antd';
+import { Layout, Space, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
-import logoutIcon from '@/assets/images/logout.svg'
+import logoutIcon from '@/assets/images/logout_hover.svg'
 
 const { Header } = Layout;
 
 interface ConfigHeaderProps {
   name?: string;
   operation?: ReactNode;
-  source?: 'detail' | 'node'
+  source?: 'detail' | 'node';
+  extra?: ReactNode;
 }
 const PageHeader: FC<ConfigHeaderProps> = ({ 
   name,
   operation,
-  source = 'detail'
+  source = 'detail',
+  extra
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -33,10 +35,13 @@ const PageHeader: FC<ConfigHeaderProps> = ({
         {operation}
       </div>
 
-      <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goBack}>
-        <img src={logoutIcon} className="rb:mr-2 rb:w-4 rb:h-4" />
-        {t('common.return')}
-      </div>
+      <Space size={12}>
+        <Button type="primary" ghost className="rb:group rb:h-6! rb:px-2!" onClick={goBack}>
+          <img src={logoutIcon} className="rb:w-4 rb:h-4" />
+          {t('common.return')}
+        </Button>
+        {extra}
+      </Space>
     </Header>
   );
 };

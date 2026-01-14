@@ -1,5 +1,7 @@
+import json
 import logging
 import re
+import uuid
 from typing import Any
 
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
@@ -25,10 +27,10 @@ class ToolNode(BaseNode):
         # 获取租户ID和用户ID
         tenant_id = self.get_variable("sys.tenant_id", state)
         user_id = self.get_variable("sys.user_id", state)
+        workspace_id = self.get_variable("sys.workspace_id", state)
         
         # 如果没有租户ID，尝试从工作流ID获取
         if not tenant_id:
-            workspace_id = self.get_variable("sys.workspace_id", state)
             if workspace_id:
                 from app.repositories.tool_repository import ToolRepository
                 with get_db_read() as db:
@@ -63,21 +65,21 @@ class ToolNode(BaseNode):
                 tool_id=self.typed_config.tool_id,
                 parameters=rendered_parameters,
                 tenant_id=tenant_id,
-                user_id=user_id
+                user_id=uuid.UUID(user_id),
+                workspace_id=uuid.UUID(workspace_id)
             )
 
         if result.success:
             logger.info(f"节点 {self.node_id} 工具执行成功")
             return {
-                "success": True,
-                "data": result.data,
+                "data": result.data if isinstance(result.data, str) else json.dumps(result.data, ensure_ascii=False),
+                "error_code": "",
                 "execution_time": result.execution_time
             }
         else:
             logger.error(f"节点 {self.node_id} 工具执行失败: {result.error}")
             return {
-                "success": False,
-                "data": result.error,
+                "data": result.error if isinstance(result.error, str) else  json.dumps(result.error, ensure_ascii=False),
                 "error_code": result.error_code,
                 "execution_time": result.execution_time
             }
