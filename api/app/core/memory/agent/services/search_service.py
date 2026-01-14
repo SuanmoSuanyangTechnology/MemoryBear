@@ -4,31 +4,21 @@ Search Service for executing hybrid search and processing results.
 This service provides clean search result processing with content extraction
 and deduplication.
 """
-
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import List, Tuple, Optional
 
 from app.core.logging_config import get_agent_logger
 from app.core.memory.src.search import run_hybrid_search
 from app.core.memory.utils.data.text_utils import escape_lucene_query
 
-if TYPE_CHECKING:
-    from app.schemas.memory_config_schema import MemoryConfig
 
 logger = get_agent_logger(__name__)
 
 
 class SearchService:
     """Service for executing hybrid search and processing results."""
-
-    def __init__(self, memory_config: "MemoryConfig" = None):
-        """
-        Initialize the search service.
-        
-        Args:
-            memory_config: Optional MemoryConfig for embedding model configuration.
-                          If not provided, must be passed to execute_hybrid_search.
-        """
-        self.memory_config = memory_config
+    
+    def __init__(self):
+        """Initialize the search service."""
         logger.info("SearchService initialized")
     
     def extract_content_from_result(self, result: dict) -> str:
@@ -103,49 +93,40 @@ class SearchService:
         self,
         group_id: str,
         question: str,
-        limit: int = 15,
+        limit: int = 5,
         search_type: str = "hybrid",
         include: Optional[List[str]] = None,
-        rerank_alpha: float = 0.6,
-        activation_boost_factor: float = 0.8,
+        rerank_alpha: float = 0.4,
         output_path: str = "search_results.json",
         return_raw_results: bool = False,
-        memory_config: "MemoryConfig" = None,
+        memory_config = None
     ) -> Tuple[str, str, Optional[dict]]:
         """
-        Execute hybrid search with two-stage ranking.
-        
-        Stage 1: Filter by content relevance (BM25 + Embedding)
-        Stage 2: Rerank by activation values (ACTR)
+        Execute hybrid search and return clean content.
         
         Args:
-            group_id: Group identifier for filtering
+            group_id: Group identifier for filtering results
             question: Search query text
-            limit: Max results per category (default: 15)
-            search_type: "hybrid", "keyword", or "embedding" (default: "hybrid")
-            include: Result types (default: ["statements", "chunks", "entities", "summaries"])
-            rerank_alpha: BM25 weight (default: 0.6)
-            activation_boost_factor: Activation impact on memory strength (default: 0.8)
-            output_path: JSON output path (default: "search_results.json")
-            return_raw_results: Return full metadata (default: False)
-            memory_config: MemoryConfig for embedding model
+            limit: Maximum number of results to return (default: 5)
+            search_type: Type of search - "hybrid", "keyword", or "embedding" (default: "hybrid")
+            include: List of result types to include (default: ["statements", "chunks", "entities", "summaries"])
+            rerank_alpha: Weight for BM25 scores in reranking (default: 0.4)
+            output_path: Path to save search results (default: "search_results.json")
+            return_raw_results: If True, also return the raw search results as third element (default: False)
+            memory_config: Memory configuration object (required)
         
         Returns:
-            Tuple[str, str, Optional[dict]]: (clean_content, cleaned_query, raw_results)
+            Tuple of (clean_content, cleaned_query, raw_results)
+            raw_results is None if return_raw_results=False
         """
         if include is None:
             include = ["statements", "chunks", "entities", "summaries"]
-
-        # Use provided memory_config or fall back to instance config
-        config = memory_config or self.memory_config
-        if not config:
-            raise ValueError("memory_config is required for search - either pass it to __init__ or execute_hybrid_search")
-
+        
         # Clean query
         cleaned_query = self.clean_query(question)
-
+        
         try:
-            # Execute search using memory_config
+            # Execute search
             answer = await run_hybrid_search(
                 query_text=cleaned_query,
                 search_type=search_type,
@@ -153,9 +134,8 @@ class SearchService:
                 limit=limit,
                 include=include,
                 output_path=output_path,
-                memory_config=config,
-                rerank_alpha=rerank_alpha,
-                activation_boost_factor=activation_boost_factor,
+                memory_config=memory_config,
+                rerank_alpha=rerank_alpha
             )
             
             # Extract results based on search type and include parameter
