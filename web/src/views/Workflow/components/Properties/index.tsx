@@ -242,6 +242,7 @@ const Properties: FC<PropertiesProps> = ({
   }, [values, selectedNode, form])
 
   const handleAddVariable = () => {
+    setEditIndex(null)
     variableModalRef.current?.handleOpen()
   }
   const handleEditVariable = (index: number, vo: StartVariableItem) => {
@@ -250,6 +251,7 @@ const Properties: FC<PropertiesProps> = ({
   }
   const handleRefreshVariable = (value: StartVariableItem) => {
     if (!selectedNode) return
+
     if (editIndex !== null) {
       const defaultValue = selectedNode.data.config.variables.defaultValue ?? []
       defaultValue[editIndex] = value
@@ -260,7 +262,7 @@ const Properties: FC<PropertiesProps> = ({
     }
     selectedNode?.setData({ ...selectedNode.data})
 
-    setConfigs({ ...selectedNode.data.config})
+    setConfigs({ ...selectedNode.data.config })
   }
   const handleDeleteVariable = (index: number, vo: StartVariableItem) => {
     if (!selectedNode) return
