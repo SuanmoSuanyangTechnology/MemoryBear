@@ -558,7 +558,7 @@ class AppChatService:
             config: WorkflowConfig,
             app_id: uuid.UUID,
             workspace_id: uuid.UUID,
-            user_id: Optional[str] = None,
+            user_id: str = None,
             variables: Optional[Dict[str, Any]] = None,
             web_search: bool = False,
             memory: bool = True,
