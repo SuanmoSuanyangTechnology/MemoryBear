@@ -16,6 +16,7 @@ from app.db import get_db_context
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
 from app.services.implicit_memory_service import ImplicitMemoryService
 from app.services.memory_base_service import MemoryBaseService
 from app.services.memory_config_service import MemoryConfigService
