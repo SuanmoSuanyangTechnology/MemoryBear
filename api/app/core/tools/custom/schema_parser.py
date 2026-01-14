@@ -10,9 +10,6 @@ from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
 
-# 为了兼容性，创建别名
-# SchemaParser = OpenAPISchemaParser = None
-
 
 class OpenAPISchemaParser:
     """OpenAPI Schema解析器 - 解析OpenAPI 3.0规范"""
@@ -213,7 +210,9 @@ class OpenAPISchemaParser:
                 
                 if not isinstance(operation, dict):
                     continue
-                
+
+                summary = operation.get("summary", "")
+
                 # 生成操作ID
                 operation_id = operation.get("operationId")
                 if not operation_id:
@@ -223,7 +222,7 @@ class OpenAPISchemaParser:
                 operations[operation_id] = {
                     "method": method.upper(),
                     "path": path,
-                    "summary": operation_id,
+                    "summary": summary if summary else operation_id,
                     "description": operation.get("description", ""),
                     "parameters": self._extract_parameters(operation),
                     "request_body": self._extract_request_body(operation),
