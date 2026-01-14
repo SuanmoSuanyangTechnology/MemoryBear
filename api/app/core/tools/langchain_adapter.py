@@ -232,7 +232,7 @@ class LangchainAdapter:
             # 添加验证约束
             if param.enum:
                 # 枚举值约束
-                field_kwargs["regex"] = f"^({'|'.join(map(str, param.enum))})$"
+                field_kwargs["pattern"] = f"^({'|'.join(map(str, param.enum))})$"
             
             if param.minimum is not None:
                 field_kwargs["ge"] = param.minimum
@@ -241,7 +241,7 @@ class LangchainAdapter:
                 field_kwargs["le"] = param.maximum
             
             if param.pattern:
-                field_kwargs["regex"] = param.pattern
+                field_kwargs["pattern"] = param.pattern
             
             fields[param.name] = Field(**field_kwargs)
             annotations[param.name] = python_type
