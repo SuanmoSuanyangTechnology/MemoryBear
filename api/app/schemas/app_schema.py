@@ -41,6 +41,7 @@ class ToolConfig(BaseModel):
     tool_id: Optional[str] = Field(default=None, description="工具ID")
     operation: Optional[str] = Field(default=None, description="工具特定配置")
 
+
 class ToolOldConfig(BaseModel):
     """工具配置"""
     enabled: bool = Field(default=False, description="是否启用该工具")
@@ -347,6 +348,7 @@ class AppChatRequest(BaseModel):
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
+
 
 class DraftRunRequest(BaseModel):
     """试运行请求"""

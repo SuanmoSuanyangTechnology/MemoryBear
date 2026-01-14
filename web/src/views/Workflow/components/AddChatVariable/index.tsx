@@ -1,6 +1,5 @@
-import React, { useState, useImperativeHandle, forwardRef, useRef } from 'react';
-import { Button, Input, Space, Typography, Tooltip, message, List } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useState, useImperativeHandle, forwardRef, useRef } from 'react';
+import { Button, Space, List } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ChatVariable, AddChatVariableRef } from '../../types';
 import type { ChatVariableModalRef } from './types'
