@@ -1,7 +1,7 @@
-import { type FC, useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, forwardRef, useImperativeHandle, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Progress } from 'antd'
+import { Row, Col, Progress, App } from 'antd'
 import RbCard from '@/components/RbCard/Card'
 import {
   getForgetStats,
@@ -12,6 +12,7 @@ import RecentTrendsLineCard from '../components/RecentTrendsLineCard'
 import Table from '@/components/Table'
 import { formatDateTime } from '@/utils/format'
 import StatusTag from '@/components/StatusTag'
+import ForgetRefreshModal from '../components/ForgetRefreshModal'
 
 const statusTagColors: Record<string, 'success' | 'purple' | 'default' | 'warning' | 'error' | 'lightBlue'> = {
   statement: 'success',
@@ -20,24 +21,33 @@ const statusTagColors: Record<string, 'success' | 'purple' | 'default' | 'warnin
   chunk: 'warning',
 }
 
-const ForgetDetail: FC = () => {
+export interface ForgetRefreshModalRef {
+  handleOpen: () => void;
+}
+
+const ForgetDetail = forwardRef((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
+  const { message } = App.useApp()
   const [loading, setLoading] = useState<boolean>(false)
   const [data, setData] = useState<ForgetData>({} as ForgetData)
+  const forgetRefreshModalRef = useRef<ForgetRefreshModalRef>(null)
 
   useEffect(() => {
     if (!id) return
     getData()
   }, [id])
 
-  const getData = () => {
+  const getData = (flag: boolean = false) => {
     if (!id) return
     setLoading(true)
     getForgetStats(id).then((res) => {
       const response = res as ForgetData
       setData(response)
       setLoading(false)
+      if (flag) {
+        message.success(t('forgetDetail.refreshSuccess'))
+      }
     })
     .finally(() => {
       setLoading(false)
@@ -66,6 +76,14 @@ const ForgetDetail: FC = () => {
       seriesList: ['merged_count', 'average_activation']
     }
   }, [data.recent_trends])
+
+  const handleRefresh = () => {
+    forgetRefreshModalRef.current?.handleOpen()
+  }
+
+  useImperativeHandle(ref, () => ({
+    handleRefresh
+  }));
 
   return (
     <div className="rb:h-full rb:max-w-266 rb:mx-auto">
@@ -152,7 +170,12 @@ const ForgetDetail: FC = () => {
         ]}
         pagination={false}
       />
+
+      <ForgetRefreshModal
+        ref={forgetRefreshModalRef}
+        refresh={getData}
+      />
     </div>
   )
-}
+})
 export default ForgetDetail

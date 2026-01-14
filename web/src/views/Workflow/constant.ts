@@ -270,7 +270,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           input: {
             type: 'variableList',
-            filterNodeTypes: ['knowledge-retrieval'],
+            filterNodeTypes: ['knowledge-retrieval', 'iteration', 'loop'],
             filterVariableNames: ['message']
           },
           parallel: {
@@ -334,8 +334,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      {
-        type: "assigner", icon: assignerIcon,
+      { type: "assigner", icon: assignerIcon,
         config: {
           assignments: {
             type: 'assignmentList',
@@ -628,4 +627,114 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       items: [{ group: 'left' }],
     },
   }
+}
+
+
+export interface OutputVariable {
+  default?: Array<{
+    name: string;
+    type: string;
+  }>;
+  define?: string[];
+  sys?: Array<{
+    name: string;
+    type: string;
+  }>;
+  error?: Array<{
+    name: string;
+    type: string;
+  }>;
+}
+export const outputVariable: { [key: string]: OutputVariable } = {
+  start: {
+    sys: [
+      { name: "message", type: "string" },
+      { name: "conversation_id", type: "string" },
+      { name: "execution_id", type: "string", },
+      { name: "workspace_id", type: "string" },
+      { name: "user_id", type: "string" },
+    ],
+    define: ['variables']
+  },
+  end: {
+  },
+  llm: {
+    default: [
+      { name: "output", type: "string" },
+    ]
+  },
+  'knowledge-retrieval': {
+    default: [
+      { name: "output", type: "array[object]" },
+    ]
+  },
+  'parameter-extractor': {
+    default: [
+      { name: "__is_success", type: "number" },
+      { name: "__reason", type: "string" },
+    ],
+    define: ['params']
+  },
+  'memory-read': {
+    default: [
+      { name: "answer", type: "string" },
+      { name: "intermediate_outputs", type: "array[object]" },
+    ],
+  },
+  'memory-write': {
+
+  },
+  'if-else': {
+
+  },
+  'question-classifier': {
+    default: [
+      { name: "class_name", type: "string" },
+      // { name: "output", type: "string" },
+    ],
+  },
+  'iteration': {
+    default: [
+      // { name: "item", type: "string" }, // 仅内部使用
+      { name: "output", type: "array[string]" },
+    ],
+  },
+  'loop': {
+    define: ['cycle_vars']
+  },
+  'cycle-start': {
+
+  },
+  'break': {
+
+  },
+  'var-aggregator': {
+    // default: [
+    //   { name: "output", type: "string" },
+    // ],
+    define: ['group_variables']
+  },
+  'assigner': {
+
+  },
+  'http-request': {
+    default: [
+      { name: "body", type: "string" },
+      { name: "status_code", type: "number" },
+    ],
+    error: [
+      { name: "error_message", type: "string" },
+      { name: "error_type", type: "string" },
+    ]
+  },
+  'tool': {
+    default: [
+      { name: "data", type: "string" },
+    ],
+  },
+  'jinja-render': {
+    default: [
+      { name: "output", type: "string" },
+    ],
+  },
 }

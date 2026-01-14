@@ -9,6 +9,7 @@ import {
 } from '@/api/memory'
 import { formatDateTime } from '@/utils/format';
 import Empty from '@/components/Empty'
+import Tag from '@/components/Tag'
 
 interface TimelineItem {
   id: string;
@@ -18,6 +19,9 @@ interface TimelineItem {
   summary: string;
   storage_type: number;
   created_time: string | number;
+  domain: string;
+  topic: string;
+  keywords: string[]
 }
 
 const KEYS = {
@@ -68,9 +72,14 @@ const Timeline: FC = () => {
                   {formatDateTime(vo.created_time)}
                   {index !== data.length - 1 && <Divider type="vertical" className="rb:flex-1 rb:w-px rb:border-[#155EEF]!" />}
                 </div>
-                <div className="rb:flex rb:justify-between rb:flex-1 rb:mb-4">
-                  <div className="rb:w-150 rb:leading-5">{vo.summary}</div>
-                  <div className="rb:text-[#5B6167] rb:font-medium">{t(`perceptualDetail.${perceptual_type[vo.perceptual_type]}`)}</div>
+                <div className="rb:flex-1 rb:pb-4">
+                  <div className="rb:flex rb:justify-between">
+                    <div className="rb:w-150 rb:leading-5 rb:font-medium">{vo.summary}</div>
+                    <div className="rb:text-[#5B6167] rb:font-medium rb:flex-1 rb:text-right">{t(`perceptualDetail.${perceptual_type[vo.perceptual_type]}`)}</div>
+                  </div>
+                  <div className="rb:text-[#5B6167] rb:leading-5 rb:mt-2">{[vo.domain, vo.topic].join(' | ')}</div>
+                  
+                  <Space size={8} className="rb:mt-2">{vo.keywords.map(tag => <Tag>{tag}</Tag>)}</Space>
                 </div>
               </div>
             ))}

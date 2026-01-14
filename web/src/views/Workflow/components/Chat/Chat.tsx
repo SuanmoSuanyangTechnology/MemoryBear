@@ -26,6 +26,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
   const [chatList, setChatList] = useState<ChatItem[]>([])
   const [variables, setVariables] = useState<StartVariableItem[]>([])
   const [streamLoading, setStreamLoading] = useState(false)
+  const [conversationId, setConversationId] = useState<string | null>(null)
 
   const handleOpen = () => {
     setOpen(true)
@@ -100,7 +101,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
       setStreamLoading(false)
 
       data.forEach(item => {
-        const { chunk } = item.data as { chunk: string; };
+        const { chunk, conversation_id } = item.data as { chunk: string; conversation_id: string | null; };
 
         switch(item.event) {
           case 'message':
@@ -131,6 +132,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
             setStreamLoading(false)
             break
         }
+
+        if (conversation_id && conversationId !== conversation_id) {
+          setConversationId(conversation_id)
+        }
       })
     }
 
@@ -138,7 +143,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     draftRun(appId, {
       message: message,
       variables: params,
-      stream: true
+      stream: true,
+      conversation_id: conversationId
     }, handleStreamMessage)
       .finally(() => {
         setLoading(false)

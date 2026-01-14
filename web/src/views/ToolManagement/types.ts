@@ -130,6 +130,7 @@ export interface ExecuteData {
     ensure_ascii?: boolean;
     sort_keys?: boolean;
     input_data?: string;
+    json_path?: string;
   }
 }
 export interface CustomToolModalRef {

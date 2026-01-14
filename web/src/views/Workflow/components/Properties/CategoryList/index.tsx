@@ -1,17 +1,19 @@
 import { type FC } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Input, Button, Form, Space } from 'antd';
-import { PlusOutlined, CopyOutlined, DeleteOutlined, ExpandOutlined } from '@ant-design/icons';
+import { Button, Form, Space } from 'antd';
+import { DeleteOutlined } from '@ant-design/icons';
 import { Graph, Node } from '@antv/x6';
-import type { PortMetadata } from '@antv/x6/lib/model/port';
+import Editor from '../../Editor';
+import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 
 interface CategoryListProps {
   parentName: string;
+  options: Suggestion[];
   selectedNode?: Node | null;
   graphRef?: React.MutableRefObject<Graph | undefined>;
 }
 
-const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRef }) => {
+const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRef, options }) => {
   const { t } = useTranslation();
   const form = Form.useFormInstance();
   const formValues = Form.useWatch([parentName], form);
@@ -167,9 +169,9 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
                   name={[name, 'class_name']}
                 noStyle
               >
-                <Input.TextArea
+                <Editor
                   placeholder={t('common.pleaseEnter')}
-                  rows={2}
+                  options={options}
                 />
               </Form.Item>
             </div>

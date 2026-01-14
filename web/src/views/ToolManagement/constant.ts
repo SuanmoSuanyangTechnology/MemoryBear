@@ -10,10 +10,10 @@ export const InnerConfigData: Record<string, InnerConfigItem> = {
   },
   JsonTool: {
     features: [
-      'jsonFormat',
-      'jsonGzip',
-      'jsonCheck',
-      'jsonConversion'
+      'jsonParse',
+      'jsonInsert',
+      'jsonReplace',
+      'jsonDelete'
     ],
     eg: '{"name":"工具","tool_class":"内置"}'
   },

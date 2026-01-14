@@ -39,7 +39,7 @@ from app.services.memory_forget_service import MemoryForgetService
 api_logger = get_api_logger()
 
 router = APIRouter(
-    prefix="/memory/forget",
+    prefix="/memory/forget-memory",
     tags=["Memory Forgetting Engine"],
     dependencies=[Depends(get_current_user)]  # 所有路由都需要认证
 )
