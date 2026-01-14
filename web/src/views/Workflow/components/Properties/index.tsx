@@ -22,6 +22,7 @@ import ConditionList from './ConditionList'
 import CycleVarsList from './CycleVarsList'
 import AssignmentList from './AssignmentList'
 import ToolConfig from './ToolConfig'
+import MemoryConfig from './MemoryConfig'
 // import { calculateVariableList } from './utils/variableListCalculator'
 
 interface PropertiesProps {
@@ -1227,6 +1228,20 @@ const Properties: FC<PropertiesProps> = ({
                         })()
                       }
                     />
+                    </Form.Item>
+                  )
+                }
+                if (config.type === 'memoryConfig') {
+                  return (
+                    <Form.Item
+                      key={key}
+                      name={key}
+                      noStyle
+                    >
+                      <MemoryConfig
+                        parentName={key}
+                        options={getFilteredVariableList('llm')}
+                      />
                     </Form.Item>
                   )
                 }
