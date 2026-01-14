@@ -175,11 +175,26 @@ async def _update_search_results_activation(
             for original_node in original_nodes:
                 node_id = original_node.get('id')
                 if node_id and node_id in updated_map:
-                    # 使用更新后的激活值数据
-                    merged_node = updated_map[node_id].copy()
-                    # 保留原始的 score 字段（搜索相关性分数）
-                    if 'score' in original_node:
-                        merged_node['score'] = original_node['score']
+                    # 从原始节点开始，用更新后的激活值数据覆盖
+                    merged_node = original_node.copy()
+                    
+                    # 更新激活值相关字段
+                    activation_fields = {
+                        'activation_value',
+                        'access_history',
+                        'last_access_time',
+                        'access_count',
+                        'importance_score',
+                        'version',
+                        'statement',  # Statement 节点的内容字段
+                        'content'     # MemorySummary 节点的内容字段
+                    }
+                    
+                    # 只更新激活值相关字段，保留原始节点的其他字段
+                    for field in activation_fields:
+                        if field in updated_map[node_id]:
+                            merged_node[field] = updated_map[node_id][field]
+                    
                     merged_nodes.append(merged_node)
                 else:
                     # 如果没有更新数据，保留原始节点

@@ -626,7 +626,15 @@ class AccessHistoryManager:
                 'MemorySummary': 'n.content as content',
                 'ExtractedEntity': 'null as content_placeholder'  # 占位符，后续会被过滤
             }
-            content_field = content_field_map.get(node_label, 'null as content_placeholder')
+            
+            # 显式检查节点类型，不支持的类型抛出错误
+            if node_label not in content_field_map:
+                raise ValueError(
+                    f"Unsupported node_label: {node_label}. "
+                    f"Supported labels are: {list(content_field_map.keys())}"
+                )
+            
+            content_field = content_field_map[node_label]
             
             # 构建 WHERE 子句
             where_conditions = []
