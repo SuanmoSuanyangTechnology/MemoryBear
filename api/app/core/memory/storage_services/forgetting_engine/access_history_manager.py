@@ -620,35 +620,44 @@ class AccessHistoryManager:
             new_version = current_version + 1
             
             # 步骤2：使用乐观锁更新节点
-            # 只有当版本号匹配时才更新
-            update_query = f"""
-            MATCH (n:{node_label} {{id: $node_id}})
-            """
+            # 根据节点类型构建完整的查询语句
+            content_field_map = {
+                'Statement': 'n.statement as statement',
+                'MemorySummary': 'n.content as content',
+                'ExtractedEntity': 'null as content_placeholder'  # 占位符，后续会被过滤
+            }
+            content_field = content_field_map.get(node_label, 'null as content_placeholder')
+            
+            # 构建 WHERE 子句
+            where_conditions = []
             if group_id:
-                update_query += " WHERE n.group_id = $group_id"
+                where_conditions.append("n.group_id = $group_id")
             
             # 添加版本检查
             if current_version > 0:
-                update_query += " AND n.version = $current_version"
+                where_conditions.append("n.version = $current_version")
             else:
-                # 如果节点没有版本号，检查是否为首次更新
-                update_query += " AND (n.version IS NULL OR n.version = 0)"
+                where_conditions.append("(n.version IS NULL OR n.version = 0)")
             
-            update_query += """
+            where_clause = " AND ".join(where_conditions) if where_conditions else "true"
+            
+            # 构建完整的更新查询
+            update_query = f"""
+            MATCH (n:{node_label} {{id: $node_id}})
+            WHERE {where_clause}
             SET n.activation_value = $activation_value,
                 n.access_history = $access_history,
                 n.last_access_time = $last_access_time,
                 n.access_count = $access_count,
                 n.version = $new_version
             RETURN n.id as id,
-                   n.statement as statement,
-                   n.content as content,
                    n.activation_value as activation_value,
                    n.access_history as access_history,
                    n.last_access_time as last_access_time,
                    n.access_count as access_count,
                    n.importance_score as importance_score,
-                   n.version as version
+                   n.version as version,
+                   {content_field}
             """
             
             update_params = {
@@ -672,20 +681,9 @@ class AccessHistoryManager:
                     f"Expected version {current_version}, but node was modified by another transaction."
                 )
             
-            # 转换为字典并根据节点类型清理字段
+            # 转换为字典并移除占位符字段
             result_dict = dict(updated_node)
-            
-            # 根据节点类型保留正确的内容字段
-            if node_label == 'Statement':
-                # Statement 节点：保留 statement 字段，移除 content 字段
-                result_dict.pop('content', None)
-            elif node_label == 'MemorySummary':
-                # MemorySummary 节点：保留 content 字段，移除 statement 字段
-                result_dict.pop('statement', None)
-            elif node_label == 'ExtractedEntity':
-                # ExtractedEntity 节点：移除 statement 和 content 字段
-                result_dict.pop('statement', None)
-                result_dict.pop('content', None)
+            result_dict.pop('content_placeholder', None)
             
             return result_dict
         
