@@ -502,16 +502,44 @@ interface NodeConfig {
   ports?: PortsConfig;
 }
 
-const portAttrs = {
-  circle: {
-    r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
+// 统一的端口 markup 配置
+export const portMarkup = [
+  {
+    tagName: 'circle',
+    selector: 'body',
   },
+  {
+    tagName: 'text',
+    selector: 'label',
+  },
+];
+
+// 统一的端口属性配置
+export const portAttrs = {
+  body: {
+    r: 6, 
+    magnet: true, 
+    stroke: '#155EEF', 
+    strokeWidth: 2, 
+    fill: '#155EEF',
+  },
+  label: {
+    text: '+',
+    fontSize: 12,
+    fontWeight: 'bold',
+    fill: '#FFFFFF',
+    textAnchor: 'middle',
+    textVerticalAnchor: 'middle',
+    pointerEvents: 'none',
+  }
 }
+
+// 统一的端口组配置
 const defaultPortGroups = {
-  // top: { position: 'top', attrs: portAttrs },
-  right: { position: 'right', attrs: portAttrs },
-  // bottom: { position: 'bottom', attrs: portAttrs },
-  left: { position: 'left', attrs: portAttrs },
+  // top: { position: 'top', markup: portMarkup, attrs: portAttrs },
+  right: { position: 'right', markup: portMarkup, attrs: portAttrs },
+  // bottom: { position: 'bottom', markup: portMarkup, attrs: portAttrs },
+  left: { position: 'left', markup: portMarkup, attrs: portAttrs },
 }
 const defaultPortItems = [
   // { group: 'top' },
@@ -569,7 +597,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 64,
     shape: 'normal-node',
     ports: {
-      groups: {right: { position: 'right', attrs: portAttrs }},
+      groups: {right: { position: 'right', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'right' }],
     },
   },
@@ -578,7 +606,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 64,
     shape: 'normal-node',
     ports: {
-      groups: {left: { position: 'left', attrs: portAttrs }},
+      groups: {left: { position: 'left', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'left' }],
     },
   },
@@ -587,7 +615,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 44,
     shape: 'cycle-start',
     ports: {
-      groups: {right: { position: 'right', attrs: portAttrs }},
+      groups: {right: { position: 'right', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'right' }],
     },
   },
@@ -596,7 +624,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 44,
     shape: 'add-node',
     ports: {
-      groups: {left: { position: 'left', attrs: portAttrs }},
+      groups: {left: { position: 'left', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'left' }],
     },
   },
@@ -614,7 +642,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 44,
     shape: 'cycle-start',
     ports: {
-      groups: {right: { position: 'right', attrs: portAttrs }},
+      groups: {right: { position: 'right', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'right' }],
     },
   },
@@ -623,7 +651,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 44,
     shape: 'add-node',
     ports: {
-      groups: {left: { position: 'left', attrs: portAttrs }},
+      groups: {left: { position: 'left', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'left' }],
     },
   }

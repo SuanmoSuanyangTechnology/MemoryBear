@@ -1416,11 +1416,10 @@ async def analytics_graph_data(
                 elementId(n) as id,
                 labels(n)[0] as label,
                 properties(n) as properties
-            LIMIT $limit
             """
             node_params = {
                 "group_id": end_user_id,
-                "limit": limit
+                # "limit": limit
             }
 
         # 执行节点查询
