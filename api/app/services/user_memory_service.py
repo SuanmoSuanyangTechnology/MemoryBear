@@ -1416,11 +1416,10 @@ async def analytics_graph_data(
                 elementId(n) as id,
                 labels(n)[0] as label,
                 properties(n) as properties
-            LIMIT $limit
             """
             node_params = {
                 "group_id": end_user_id,
-                "limit": limit
+                # "limit": limit
             }
 
         # 执行节点查询
@@ -1567,9 +1566,9 @@ async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_
     allowed_fields = field_whitelist.get(label, [])
     
     # 如果没有定义白名单，返回空字典（或者可以返回所有字段）
-    if not allowed_fields:
-        # 对于未定义的节点类型，只返回基本字段
-        allowed_fields = ["name", "created_at", "caption"]
+    # if not allowed_fields:
+    #     # 对于未定义的节点类型，只返回基本字段
+    #     allowed_fields = ["name", "created_at", "caption"]
     count_neo4j=f"""MATCH (n)-[r]-(m) WHERE elementId(n) ="{node_id}" RETURN count(r) AS rel_count;"""
     node_results = await (_neo4j_connector.execute_query(count_neo4j))
     # 提取白名单中的字段
