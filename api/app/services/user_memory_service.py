@@ -15,6 +15,7 @@ from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.memory_storage_schema import type_mapping
 from app.services.memory_base_service import MemoryBaseService
 from app.services.memory_config_service import MemoryConfigService
 from pydantic import BaseModel, Field
@@ -1332,7 +1333,7 @@ async def analytics_graph_data(
     db: Session,
     end_user_id: str,
     node_types: Optional[List[str]] = None,
-    limit: int = 100,
+    limit: int = 130,
     depth: int = 1,
     center_node_id: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -1576,10 +1577,11 @@ async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_
     for field in allowed_fields:
         if field in properties:
             value = properties[field]
+            if str(field) == 'entity_type':
+                value=type_mapping.get(value,'')
             # 清理 Neo4j 特殊类型
             filtered_props[field] = _clean_neo4j_value(value)
     filtered_props['associative_memory']=[i['rel_count'] for i in node_results][0]
-    print(filtered_props)
     return filtered_props
 
 
