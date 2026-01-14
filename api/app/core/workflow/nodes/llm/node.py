@@ -226,6 +226,7 @@ class LLMNode(BaseNode):
         Yields:
             文本片段（chunk）或完成标记
         """
+        self.typed_config = LLMNodeConfig(**self.config)
         from langgraph.config import get_stream_writer
 
         llm, prompt_or_messages = self._prepare_llm(state, True)

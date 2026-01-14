@@ -53,6 +53,7 @@ const operatorsObj: { [key: string]: SelectProps['options'] } = {
 const ConditionList: FC<CaseListProps> = ({
   options,
   parentName,
+  selectedNode,
 }) => {
   const { t } = useTranslation();
   const form = Form.useFormInstance();
@@ -114,7 +115,12 @@ const ConditionList: FC<CaseListProps> = ({
                       <Col span={14}>
                         <Form.Item name={[field.name, 'left']} noStyle>
                           <VariableSelect
-                            options={options.filter(vo => vo.value.includes('sys.') || vo.value.includes('conv.') || vo.nodeData.type === 'loop')}
+                            options={options.filter(vo => 
+                              vo.value.includes('sys.') || 
+                              vo.value.includes('conv.') || 
+                              vo.nodeData.type === 'loop' ||
+                              (vo.nodeData.cycle && vo.nodeData.cycle === selectedNode?.id)
+                            )}
                             size="small"
                             allowClear={false}
                             popupMatchSelectWidth={false}
