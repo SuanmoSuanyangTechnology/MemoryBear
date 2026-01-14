@@ -40,8 +40,6 @@ const operatorsObj: { [key: string]: SelectProps['options'] } = {
   boolean: [
     { value: 'eq', label: 'workflow.config.if-else.boolean.eq' },
     { value: 'ne', label: 'workflow.config.if-else.boolean.ne' },
-    { value: 'empty', label: 'workflow.config.if-else.empty' },
-    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
   ]
 }
 
@@ -85,11 +83,14 @@ const CaseList: FC<CaseListProps> = ({
 
     selectedNode.prop('size', { width: 240, height: newHeight })
     
+    // 计算端口间距
+    const dy = totalPorts;
+    
     // 添加 IF 端口
     selectedNode.addPort({
       id: 'CASE1',
       group: 'right',
-      args: { dy: 24 },
+      // args: { dy },
       attrs: { text: { text: 'IF', fontSize: 12, fill: '#5B6167' }}
     });
     
@@ -98,6 +99,7 @@ const CaseList: FC<CaseListProps> = ({
       selectedNode.addPort({
         id: `CASE${i + 1}`,
         group: 'right',
+        // args: { dy },
         attrs: { text: { text: 'ELIF', fontSize: 12, fill: '#5B6167' }}
       });
     }
@@ -106,11 +108,22 @@ const CaseList: FC<CaseListProps> = ({
     selectedNode.addPort({
       id: `CASE${caseCount + 1}`,
       group: 'right',
+      // args: { dy },
       attrs: { text: { text: 'ELSE', fontSize: 12, fill: '#5B6167' }}
     });
     
     // 恢复仍然存在的端口连线
     setTimeout(() => {
+      // 计算删除前的总端口数来确定原ELSE端口编号
+      const originalCaseCount = removedCaseIndex !== undefined ? caseCount + 1 : caseCount;
+      const originalElsePortNumber = originalCaseCount + 1;
+      
+      // 检查ELSE端口是否有连线
+      const elseHasConnection = edgeConnections.some(({ sourcePortId, isIncoming }: any) => {
+        const caseNumber = parseInt(sourcePortId.match(/CASE(\d+)/)?.[1] || '0');
+        return !isIncoming && caseNumber === originalElsePortNumber;
+      });
+      
       edgeConnections.forEach(({ edge, sourcePortId, targetCellId, targetPortId, sourceCellId, isIncoming }: any) => {
         // 如果是进入连线（左侧端口），直接恢复
         if (isIncoming) {
@@ -138,7 +151,7 @@ const CaseList: FC<CaseListProps> = ({
         // 处理右侧端口连线
         const originalCaseNumber = parseInt(sourcePortId.match(/CASE(\d+)/)?.[1] || '0');
         
-        // 如果是被删除的端口，不重新创建连线
+        // 如果是被删除的端口，只删除该端口的连线
         if (removedCaseIndex !== undefined && originalCaseNumber === removedCaseIndex + 1) {
           graphRef.current?.removeCell(edge);
           return;
@@ -146,15 +159,8 @@ const CaseList: FC<CaseListProps> = ({
         
         let newPortId = sourcePortId;
         
-        // 如果是原来的ELSE端口，重新映射到新的ELSE端口
-        const maxOriginalCaseNumber = Math.max(...edgeConnections
-          .filter(({ isIncoming }: any) => !isIncoming)
-          .map(({ sourcePortId }: any) => {
-            const match = sourcePortId.match(/CASE(\d+)/);
-            return match ? parseInt(match[1]) : 0;
-          }));
-        
-        if (originalCaseNumber === maxOriginalCaseNumber) {
+        // 如果是原来的ELSE端口且有连线，重新映射到新的ELSE端口
+        if (originalCaseNumber === originalElsePortNumber && elseHasConnection) {
           newPortId = `CASE${caseCount + 1}`; // 新的ELSE端口
         } else if (removedCaseIndex !== undefined && originalCaseNumber > removedCaseIndex + 1) {
           // 如果是被删除端口之后的端口，编号向前移动
