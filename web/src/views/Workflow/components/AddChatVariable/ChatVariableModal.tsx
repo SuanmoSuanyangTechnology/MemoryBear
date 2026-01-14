@@ -103,7 +103,11 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
           label={t('workflow.config.parameter-extractor.default')}
         >
           {type === 'number'
-            ? <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
+            ? <InputNumber 
+              placeholder={t('common.enter')} 
+              style={{ width: '100%' }}
+              onChange={(value) => form.setFieldValue('defaultValue', value)}
+            />
             : type === 'boolean'
             ? <Select
               placeholder={t('common.pleaseSelect')}
