@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class KnowledgeRetrievalNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = KnowledgeRetrievalNodeConfig(**self.config)
+        self.typed_config: KnowledgeRetrievalNodeConfig | None = None
 
     @staticmethod
     def _build_kb_filter(kb_ids: list[uuid.UUID], permission: knowledge_model.PermissionType):
@@ -171,6 +171,7 @@ class KnowledgeRetrievalNode(BaseNode):
         Raises:
             RuntimeError: If no valid knowledge base is found or access is denied.
         """
+        self.typed_config = KnowledgeRetrievalNodeConfig(**self.config)
         query = self._render_template(self.typed_config.query, state)
         with get_db_read() as db:
             knowledge_bases = self.typed_config.knowledge_bases

@@ -7,6 +7,7 @@ Start 节点实现
 import logging
 from typing import Any
 
+from app.core.workflow.nodes.base_config import VariableType
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.start.config import StartNodeConfig
 
@@ -34,7 +35,7 @@ class StartNode(BaseNode):
         super().__init__(node_config, workflow_config)
 
         # 解析并验证配置
-        self.typed_config = StartNodeConfig(**self.config)
+        self.typed_config: StartNodeConfig | None = None
 
     async def execute(self, state: WorkflowState) -> dict[str, Any]:
         """执行 start 节点业务逻辑
@@ -47,6 +48,7 @@ class StartNode(BaseNode):
         Returns:
             包含系统参数、会话变量和自定义变量的字典
         """
+        self.typed_config = StartNodeConfig(**self.config)
         logger.info(f"节点 {self.node_id} (Start) 开始执行")
 
         # 创建变量池实例（在方法内复用）
@@ -113,6 +115,18 @@ class StartNode(BaseNode):
                 logger.debug(
                     f"变量 '{var_name}' 使用默认值: {var_def.default}"
                 )
+            else:
+                match var_def.type:
+                    case VariableType.STRING:
+                        processed[var_name] = ""
+                    case VariableType.NUMBER:
+                        processed[var_name] = 0
+                    case VariableType.OBJECT:
+                        processed[var_name] = {}
+                    case VariableType.BOOLEAN:
+                        processed[var_name] = False
+                    case VariableType.ARRAY_NUMBER | VariableType.ARRAY_OBJECT | VariableType.ARRAY_BOOLEAN | VariableType.ARRAY_STRING:
+                        processed[var_name] = []
 
         return processed
 
