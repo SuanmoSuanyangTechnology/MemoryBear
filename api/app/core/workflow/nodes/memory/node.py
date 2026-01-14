@@ -16,11 +16,8 @@ class MemoryReadNode(BaseNode):
     async def execute(self, state: WorkflowState) -> Any:
         self.typed_config = MemoryReadNodeConfig(**self.config)
         with get_db_read() as db:
-            workspace_id = self.get_variable('sys.workspace_id', state)
             end_user_id = self.get_variable("sys.user_id", state)
 
-            if not workspace_id:
-                raise RuntimeError("Workspace id is required")
             if not end_user_id:
                 raise RuntimeError("End user id is required")
 
@@ -42,11 +39,8 @@ class MemoryWriteNode(BaseNode):
         self.typed_config = MemoryWriteNodeConfig(**self.config)
 
     async def execute(self, state: WorkflowState) -> Any:
-        workspace_id = self.get_variable('sys.workspace_id', state)
         end_user_id = self.get_variable("sys.user_id", state)
 
-        if not workspace_id:
-            raise RuntimeError("Workspace id is required")
         if not end_user_id:
             raise RuntimeError("End user id is required")
 
