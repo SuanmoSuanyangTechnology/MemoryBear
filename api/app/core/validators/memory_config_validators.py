@@ -24,7 +24,7 @@ from app.schemas import model_schema
 from app.schemas.memory_config_schema import (
     InvalidConfigError,
     ModelInactiveError,
-    ModelNotFoundError, COnfigType,
+    ModelNotFoundError, ModelValidationStatus,
 )
 from app.models.models_model import ModelApiKey
 from sqlalchemy.orm import Session
@@ -35,7 +35,7 @@ from app.schemas.response_schema import PageData
 from app.services.model_service import ModelConfigService
 
 logger = get_config_logger()
-
+COnfigType=ModelValidationStatus
 
 def _parse_model_id(model_id: Union[str, UUID, None], model_type: str,
                     config_id: Optional[int] = None, workspace_id: Optional[UUID] = None) -> Optional[UUID]:
@@ -288,6 +288,7 @@ def validate_llm_model(
             config_id=config_id,
             workspace_id=workspace_id
         )
+
 
     # llm = llm_model_config(llm_id, db)
     # if llm != "测试成功":

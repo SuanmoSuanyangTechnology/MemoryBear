@@ -484,7 +484,8 @@ class MemoryConfig:
             "embedding": self.embedding_model_name,
             "rerank": self.rerank_model_name,
         }
-    
+
+
     def is_model_configured(self, model_type: str) -> bool:
         """Check if a specific model type is configured."""
         if model_type == "llm":
