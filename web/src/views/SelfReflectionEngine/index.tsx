@@ -256,7 +256,7 @@ const SelfReflectionEngine: React.FC = () => {
               {t('reflectionEngine.exampleText')}
             </div>
 
-            <Button type="primary" block loading={runLoading} onClick={handleRun}>{t('reflectionEngine.run')}</Button>
+            <Button type="primary" block loading={runLoading} disabled={!values?.reflection_enabled} onClick={handleRun}>{t('reflectionEngine.run')}</Button>
           </RbCard>
           {result && <>
             <RbCard
