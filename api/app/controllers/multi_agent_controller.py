@@ -74,7 +74,7 @@ def get_multi_agent_configs(
             "app_id": str(app_id),
             "default_model_config_id": None,
             "model_parameters": None,
-            "orchestration_mode": "conditional",
+            "orchestration_mode": "supervisor",
             "sub_agents": [],
             "routing_rules": [],
             "execution_config": {
