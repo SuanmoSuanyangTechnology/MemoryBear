@@ -4,7 +4,7 @@
 import datetime
 import logging
 import uuid
-from typing import Any, Annotated, AsyncGenerator
+from typing import Any, Annotated, AsyncGenerator, Optional
 
 from deprecated import deprecated
 from fastapi import Depends
@@ -266,6 +266,7 @@ class WorkflowService:
             workflow_config_id: uuid.UUID,
             app_id: uuid.UUID,
             trigger_type: str,
+            release_id: uuid.UUID | None = None,
             triggered_by: uuid.UUID | None = None,
             conversation_id: uuid.UUID | None = None,
             input_data: dict[str, Any] | None = None
@@ -273,6 +274,7 @@ class WorkflowService:
         """创建工作流执行记录
 
         Args:
+            release_id: 应用发布 ID
             workflow_config_id: 工作流配置 ID
             app_id: 应用 ID
             trigger_type: 触发类型
@@ -289,6 +291,7 @@ class WorkflowService:
         execution = WorkflowExecution(
             workflow_config_id=workflow_config_id,
             app_id=app_id,
+            release_id=release_id,
             conversation_id=conversation_id,
             execution_id=execution_id,
             trigger_type=trigger_type,
@@ -414,12 +417,14 @@ class WorkflowService:
             payload: DraftRunRequest,
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
+            release_id: uuid.UUID | None = None,
     ):
         """运行工作流
 
         Args:
-            workspace_id:
-            config:
+            release_id: 发布 ID
+            workspace_id:工作空间 ID
+            config: 配置
             payload:
             app_id: 应用 ID
 
@@ -463,7 +468,8 @@ class WorkflowService:
             trigger_type="manual",
             triggered_by=None,
             conversation_id=conversation_id_uuid,
-            input_data=input_data
+            input_data=input_data,
+            release_id=release_id,
         )
 
         # 3. 构建工作流配置字典
@@ -562,10 +568,12 @@ class WorkflowService:
             payload: DraftRunRequest,
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
+            release_id: Optional[uuid.UUID] = None,
     ):
         """运行工作流（流式）
 
         Args:
+            release_id: 发布id
             workspace_id:
             app_id: 应用 ID
             payload: 请求对象（包含 message, variables, conversation_id 等）
@@ -611,7 +619,8 @@ class WorkflowService:
             trigger_type="manual",
             triggered_by=None,
             conversation_id=conversation_id_uuid,
-            input_data=input_data
+            input_data=input_data,
+            release_id=release_id,
         )
 
         # 3. 构建工作流配置字典

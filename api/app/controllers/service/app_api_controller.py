@@ -242,8 +242,9 @@ async def chat(
                     memory=payload.memory,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
-                    app_id=app.app_id,
-                    workspace_id=workspace_id
+                    app_id=app.id,
+                    workspace_id=workspace_id,
+                    release_id=app.current_release.id,
                 ):
                     event_type = event.get("event", "message")
                     event_data = event.get("data", {})
@@ -274,8 +275,9 @@ async def chat(
             memory=payload.memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
-            app_id=app.app_id,
-            workspace_id=workspace_id
+            app_id=app.id,
+            workspace_id=workspace_id,
+            release_id=app.current_release.id
         )
         logger.debug(
             "工作流试运行返回结果",
