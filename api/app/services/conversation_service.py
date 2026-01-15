@@ -516,8 +516,16 @@ class ConversationService:
 
         conversation_messages = self.get_conversation_history(
             conversation_id=conversation_id,
-            max_history=30
+            max_history=20
         )
+        if len(conversation_messages) == 0:
+            return ConversationOut(
+                theme="",
+                question=[],
+                summary="",
+                takeaways=[],
+                info_score=0,
+            )
 
         with open('app/services/prompt/conversation_summary_system.jinja2', 'r', encoding='utf-8') as f:
             system_prompt = f.read()
@@ -536,6 +544,7 @@ class ConversationService:
         ]
         logger.info(f"Invoking LLM for conversation_id={conversation_id}")
         model_resp = await llm.ainvoke(messages)
+
         try:
             if isinstance(model_resp.content, str):
                 result = json_repair.repair_json(model_resp.content, return_objects=True)
@@ -548,7 +557,7 @@ class ConversationService:
         except Exception as e:
             logger.exception(f"Failed to parse LLM response for conversation_id={conversation_id}")
             raise BusinessException("Failed to parse LLM response", code=BizCode.LLM_ERROR) from e
-
+        print(result)
         summary = result.get('summary', "")
         theme = result.get('theme', "")
         question = result.get("question") or []
