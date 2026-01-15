@@ -245,7 +245,8 @@ class DraftRunService:
         storage_type: Optional[str] = None,
         user_rag_memory_id: Optional[str] = None,
         web_search: bool = True,
-        memory: bool = True
+        memory: bool = True,
+        sub_agent: bool = False
     ) -> Dict[str, Any]:
         """执行试运行（使用 LangChain Agent）
 
@@ -435,7 +436,7 @@ class DraftRunService:
             elapsed_time = time.time() - start_time
 
             # 8. 保存会话消息
-            if agent_config.memory and agent_config.memory.get("enabled"):
+            if not sub_agent and agent_config.memory and agent_config.memory.get("enabled"):
                 await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
