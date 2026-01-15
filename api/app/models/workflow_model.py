@@ -75,6 +75,14 @@ class WorkflowExecution(Base):
         nullable=False,
         index=True
     )
+
+    release_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_releases.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
+
     app_id = Column(
         UUID(as_uuid=True),
         ForeignKey("apps.id", ondelete="CASCADE"),
