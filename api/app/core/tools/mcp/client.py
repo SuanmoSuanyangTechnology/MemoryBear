@@ -96,10 +96,7 @@ class SimpleMCPClient:
         """初始化 SSE MCP 会话 - 参考 Dify 实现"""
         try:
             # 建立 SSE 连接
-            response = await self._session.get(
-                self.server_url,
-                headers={"Accept": "text/event-stream"}
-            )
+            response = await self._session.get(self.server_url)
             
             if response.status != 200:
                 error_text = await response.text()
