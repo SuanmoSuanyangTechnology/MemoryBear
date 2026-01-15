@@ -91,6 +91,7 @@ export const en = {
       memberManagement: 'Member Management',
       memorySummary: 'Memory Summary',
       memoryConversation: 'Memory Validation',
+      helpCenter: 'Help Center',
       memorySummaryHandlers: 'Memory Summary Handlers',
       createMemorySummary: 'Create Memory Summary',
       memoryManagement: 'Memory Management',
@@ -183,14 +184,15 @@ export const en = {
       createNewMemorySummary: 'Create New Memory Entry',
 
       createNewApplication: 'Create New Application',
-      createNewApplicationDesc: 'Create New Space Application',
+      createNewApplicationDesc: 'Build an app in just 3 minutes with zero-code drag-and-drop.',
 
       createNewKnowledge: 'Create New Knowledge',
-      createNewKnowledgeDesc: 'Create a new memory entry',
+      createNewKnowledgeDesc: 'Transform your data into a fully searchable, dedicated knowledge base in seconds.',
 
       memoryConversation: 'Memory Conversation',
-      memoryConversationDesc: 'Memory Conversation',
-
+      memoryConversationDesc: 'The more you use it, the better AI understands you.',
+      helpCenter: 'Help Center',
+      helpCenterDesc: 'One-stop support to answer your questions and get you started fast.',
       memorySummary: 'View Memory Summary',
       memorySummaryDesc: 'View Memory Summary Report',
 
@@ -413,6 +415,8 @@ export const en = {
       reset: 'Reset',
       refresh: 'Refresh',
       return: 'Return',
+      statusEnabled: 'Available',
+      statusDisabled: 'Unavailable'
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -616,6 +620,7 @@ export const en = {
       retrieve:'Retrieve',
       processing: 'Processing',
       processingMode: 'Processing Mode',
+      processMsg: 'Processing Message',
       dataSize: 'Data Size',
       createUpdateTime: 'Create/Update Time',
       operation: 'Operation',
@@ -1221,7 +1226,7 @@ export const en = {
       IMPLICIT_MEMORY: 'Implicit Memory',
       EMOTIONAL_MEMORY: 'Emotional Memory',
       EPISODIC_MEMORY: 'Episodic Memory',
-      FORGETTING_MANAGEMENT: 'Forgetting Management',
+      FORGET_MEMORY: 'Forget Memory',
 
       endUserProfile: 'Core Profile',
       editEndUserProfile: 'Edit',
@@ -1446,6 +1451,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       deduplication_desc: 'Deduplication and disambiguation completed, {{count}} unique entities in total'
     },
     memoryConversation: {
+      chatEmpty:'Is there anything I can help you with？',
       searchPlaceholder: 'Input user ID...',
       userID: 'User ID',
       testMemoryConversation: 'Test Memory Conversation',
@@ -1577,6 +1583,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       configured_disabled_desc: 'API is configured but not enabled',
       error_desc: 'API is configured but connection error',
 
+      testConnectionSuccess: 'Test Connection Successful',
       serviceEndpoint: 'Service Endpoint URL',
       serviceEndpointPlaceholder: 'URL of the service endpoint',
       serviceEndpointExtra: 'Complete access address of the MCP service',
@@ -1726,6 +1733,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       method: 'Method',
       path: 'Path',
       viewDetail: 'View Details',
+      textLink: 'Test Connection',
       noResult: 'Processing results will be displayed here'
     },
     workflow: {

@@ -782,14 +782,15 @@ export const zh = {
       createNewMemorySummary: '创建新记忆条目',
 
       createNewApplication: '创建新应用',
-      createNewApplicationDesc: '创建新空间应用',
+      createNewApplicationDesc: '零代码拖拽3分钟创应用',
 
-      createNewKnowledge: '创建新知识',
-      createNewKnowledgeDesc: '创建新记忆条目',
+      createNewKnowledge: '创建知识库',
+      createNewKnowledgeDesc: '秒变可搜索的专属知识库',
 
       memoryConversation: '记忆对话',
-      memoryConversationDesc: '记忆对话',
-
+      memoryConversationDesc: '让AI越用越懂你',
+      helpCenter: '帮助中心',
+      helpCenterDesc: '一站式解决疑问快速上手',
       memorySummary: '查看记忆摘要',
       memorySummaryDesc: '查看记忆摘要报告',
 
@@ -962,6 +963,8 @@ export const zh = {
       reset: '重置',
       refresh: '刷新',
       return: '返回',
+      statusEnabled: '可用',
+      statusDisabled: '不可用'
     },
     product: {
       applicationManagement: '应用管理',
@@ -1299,8 +1302,8 @@ export const zh = {
       IMPLICIT_MEMORY: '隐性记忆',
       EMOTIONAL_MEMORY: '情绪记忆',
       EPISODIC_MEMORY: '情景记忆',
-      FORGETTING_MANAGEMENT: '遗忘',
-
+      FORGET_MEMORY: '遗忘记忆',
+      
       endUserProfile: '核心档案',
       editEndUserProfile: '编辑',
       other_name: '姓名',
@@ -1522,6 +1525,7 @@ export const zh = {
       deduplication_desc: '去重消歧完成，最终{{count}}个唯一实体'
     },
     memoryConversation: {
+      chatEmpty:'有什么我可以帮您的吗？',
       searchPlaceholder: '输入用户ID...',
       userID: '用户ID',
       testMemoryConversation: '测试记忆对话',

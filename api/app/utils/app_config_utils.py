@@ -107,7 +107,7 @@ def multi_agent_config_4_app_release(release: AppRelease) -> MultiAgentConfig:
         model_parameters=config_dict.get("model_parameters"),
         master_agent_id=config_dict.get("master_agent_id"),
         master_agent_name=config_dict.get("master_agent_name"),
-        orchestration_mode=config_dict.get("orchestration_mode", "conditional"),
+        orchestration_mode=config_dict.get("orchestration_mode", "supervisor"),
         sub_agents=config_dict.get("sub_agents", []),
         routing_rules=config_dict.get("routing_rules"),
         execution_config=config_dict.get("execution_config", {}),
@@ -152,7 +152,7 @@ def dict_to_multi_agent_config(config_dict: Dict[str, Any], app_id: Optional[uui
         ...     "app_id": "uuid-here",
         ...     "master_agent_id": "master-uuid",
         ...     "master_agent_name": "Master Agent",
-        ...     "orchestration_mode": "conditional",
+        ...     "orchestration_mode": "supervisor",
         ...     "sub_agents": [
         ...         {"agent_id": "sub1-uuid", "name": "Sub Agent 1", "role": "specialist", "priority": 1},
         ...         {"agent_id": "sub2-uuid", "name": "Sub Agent 2", "role": "specialist", "priority": 2}
@@ -189,7 +189,7 @@ def dict_to_multi_agent_config(config_dict: Dict[str, Any], app_id: Optional[uui
         app_id=final_app_id,
         master_agent_id=master_agent_id,
         master_agent_name=config_dict.get("master_agent_name"),
-        orchestration_mode=config_dict.get("orchestration_mode", "conditional"),
+        orchestration_mode=config_dict.get("orchestration_mode", "supervisor"),
         sub_agents=config_dict.get("sub_agents", []),
         routing_rules=config_dict.get("routing_rules"),
         execution_config=config_dict.get("execution_config", {}),
