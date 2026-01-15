@@ -1299,8 +1299,8 @@ export const zh = {
       IMPLICIT_MEMORY: '隐性记忆',
       EMOTIONAL_MEMORY: '情绪记忆',
       EPISODIC_MEMORY: '情景记忆',
-      FORGETTING_MANAGEMENT: '遗忘',
-
+      FORGET_MEMORY: '遗忘记忆',
+      
       endUserProfile: '核心档案',
       editEndUserProfile: '编辑',
       other_name: '姓名',
