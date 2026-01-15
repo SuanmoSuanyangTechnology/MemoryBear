@@ -54,7 +54,7 @@ export const useWorkflowGraph = ({
   const historyRef = useRef<{ undoStack: string[], redoStack: string[] }>({ undoStack: [], redoStack: [] });
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [isHandMode, setIsHandMode] = useState(false);
+  const [isHandMode, setIsHandMode] = useState(true);
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
 
@@ -275,6 +275,11 @@ export const useWorkflowGraph = ({
       }, 100)
     }
     if (edges.length) {
+      // 计算loop和iteration类型节点的数量
+      const loopIterationCount = nodes.filter(node => 
+        node.type === 'loop' || node.type === 'iteration'
+      ).length;
+      
       // 去重处理：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
       const uniqueEdges = edges.filter((edge, index, arr) => {
         return arr.findIndex(e => {
@@ -349,7 +354,7 @@ export const useWorkflowGraph = ({
                 },
               },
             },
-            zIndex: targetCell.getData()?.cycle ? 3 : 0
+            // zIndex: loopIterationCount
           }
 
           return edgeConfig
@@ -689,10 +694,9 @@ export const useWorkflowGraph = ({
           thickness: 1, // 网点大小
         }
       },
-      panning: false,
+      panning: isHandMode,
       mousewheel: {
         enabled: true,
-        modifiers: ['ctrl', 'meta'],
       },
       connecting: {
         // router: 'orth',
@@ -725,7 +729,6 @@ export const useWorkflowGraph = ({
                 },
               },
             },
-            zIndex: 0,
           });
         },
         validateConnection({ sourceCell, targetCell, targetMagnet }) {
@@ -762,9 +765,8 @@ export const useWorkflowGraph = ({
       },
       embedding: {
         enabled: true,
-        validate (this, { parent }) {
-        const parentData = parent.getData()
-          return parentData.type === 'iteration' || parentData.type === 'loop'
+        validate (this) {
+          return false
         }
       },
       translating: {

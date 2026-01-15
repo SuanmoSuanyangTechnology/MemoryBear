@@ -1960,6 +1960,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       addMessage: 'Add Message',
       answerDesc: 'Reply',
       addNode: 'Add Node',
+      arrange: 'Arrange',
+      redo: 'Redo',
+      undo: 'Undo',
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',
