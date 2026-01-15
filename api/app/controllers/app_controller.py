@@ -406,7 +406,7 @@ async def draft_run(
     # 只读操作，允许访问共享应用
     service._validate_app_accessible(app, workspace_id)
 
-    if not payload.user_id:
+    if payload.user_id is None:
         end_user_repo = EndUserRepository(db)
         new_end_user = end_user_repo.get_or_create_end_user(
             app_id=app_id,
