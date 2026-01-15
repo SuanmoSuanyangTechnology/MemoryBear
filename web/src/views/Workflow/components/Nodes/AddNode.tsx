@@ -36,7 +36,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     if (cycleId) {
       const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
       if (parentNode) {
-        parentNode.insertChild(newNode);
+        parentNode.addChild(newNode);
       }
     }
 
@@ -48,7 +48,6 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         source: { cell: edge.getSourceCellId(), port: edge.getSourcePortId() },
         target: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'left')?.id || 'left' },
         attrs: edge.getAttrs(),
-        zIndex: 1,
       });
     });
 
@@ -59,7 +58,6 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         source: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'right')?.id || 'right' },
         target: { cell: edge.getTargetCellId(), port: targetPortId },
         attrs: edge.getAttrs(),
-        zIndex: 1,
       });
     });
 

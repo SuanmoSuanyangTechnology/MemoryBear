@@ -54,7 +54,7 @@ export const useWorkflowGraph = ({
   const historyRef = useRef<{ undoStack: string[], redoStack: string[] }>({ undoStack: [], redoStack: [] });
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [isHandMode, setIsHandMode] = useState(false);
+  const [isHandMode, setIsHandMode] = useState(true);
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
 
@@ -235,7 +235,7 @@ export const useWorkflowGraph = ({
           if (parentNode) {
             const addedChild = graphRef.current?.addNode(childNode)
             if (addedChild) {
-              parentNode.insertChild(addedChild)
+              parentNode.addChild(addedChild)
             }
           }
         }
@@ -354,7 +354,7 @@ export const useWorkflowGraph = ({
                 },
               },
             },
-            zIndex: loopIterationCount
+            // zIndex: loopIterationCount
           }
 
           return edgeConfig
@@ -694,10 +694,9 @@ export const useWorkflowGraph = ({
           thickness: 1, // 网点大小
         }
       },
-      panning: false,
+      panning: isHandMode,
       mousewheel: {
         enabled: true,
-        modifiers: ['ctrl', 'meta'],
       },
       connecting: {
         // router: 'orth',
