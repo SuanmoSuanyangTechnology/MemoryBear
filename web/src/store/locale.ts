@@ -1,3 +1,11 @@
+/*
+ * @Description: 
+ * @Version: 0.0.1
+ * @Author: yujiangping
+ * @Date: 2026-01-05 17:22:23
+ * @LastEditors: yujiangping
+ * @LastEditTime: 2026-01-15 21:02:43
+ */
 import { create } from 'zustand'
 import enUS from 'antd/locale/en_US';
 import zhCN from 'antd/locale/zh_CN';
@@ -12,6 +20,28 @@ import { timezoneToAntdLocaleMap } from '@/utils/timezones';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+// 自定义中文 locale，修改 Tour 组件的按钮文字
+const customZhCN: Locale = {
+  ...zhCN,
+  Tour: {
+    ...zhCN.Tour,
+    Next: '下一步',
+    Previous: '上一步',
+    Finish: '立即体验',
+  },
+};
+
+// 自定义英文 locale，修改 Tour 组件的按钮文字
+const customEnUS: Locale = {
+  ...enUS,
+  Tour: {
+    ...enUS.Tour,
+    Next: 'Next',
+    Previous: 'Previous',
+    Finish: 'Try it now',
+  },
+};
+
 
 interface I18nState {
   language: string;
@@ -23,7 +53,7 @@ interface I18nState {
 
 const initialTimeZone = localStorage.getItem('timeZone') || 'Asia/Shanghai'
 const initialLanguage = localStorage.getItem('language') || 'en'
-const initialLocale = initialLanguage === 'en' ? enUS : zhCN
+const initialLocale = initialLanguage === 'en' ? customEnUS : customZhCN
 i18n.changeLanguage(initialLanguage)
 
 export const useI18n = create<I18nState>((set, get) => ({
@@ -32,7 +62,7 @@ export const useI18n = create<I18nState>((set, get) => ({
   timeZone: initialTimeZone,
   changeLanguage: (language: string) => {
     i18n.changeLanguage(language)
-    const localeName = timezoneToAntdLocaleMap[language] || enUS;
+    const localeName = language === 'en' ? customEnUS : customZhCN;
     set({ language: language, locale: localeName })
   },
   changeTimeZone: (timeZone: string) => {
