@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
 import { Form, Input, Button, Select, InputNumber, Slider, Space, Divider, App, Switch } from 'antd'
 
-import type { NodeConfig, NodeProperties, StartVariableItem, VariableEditModalRef } from '../../types'
+import type { NodeConfig, NodeProperties, StartVariableItem, VariableEditModalRef, ChatVariable } from '../../types'
 import Empty from '@/components/Empty';
 import emptyIcon from '@/assets/images/workflow/empty.png'
 import CustomSelect from "@/components/CustomSelect";
@@ -34,11 +34,12 @@ interface PropertiesProps {
   copyEvent: () => void;
   parseEvent: () => void;
   config?: any;
+  chatVariables: ChatVariable[];
 }
 const Properties: FC<PropertiesProps> = ({
   selectedNode,
   graphRef,
-  config: workflowConfig,
+  chatVariables
 }) => {
   const { t } = useTranslation()
   const { modal } = App.useApp()
@@ -47,6 +48,7 @@ const Properties: FC<PropertiesProps> = ({
   const values = Form.useWatch([], form);
   const variableModalRef = useRef<VariableEditModalRef>(null)
   const [editIndex, setEditIndex] = useState<number | null>(null)
+  const [graphUpdateTrigger, setGraphUpdateTrigger] = useState(0)
   const prevMappingNamesRef = useRef<string[]>([])
   const prevTemplateVarsRef = useRef<string[]>([])
   const syncTimeoutRef = useRef<number | null>(null)
@@ -242,6 +244,7 @@ const Properties: FC<PropertiesProps> = ({
   }, [values, selectedNode, form])
 
   const handleAddVariable = () => {
+    setEditIndex(null)
     variableModalRef.current?.handleOpen()
   }
   const handleEditVariable = (index: number, vo: StartVariableItem) => {
@@ -250,6 +253,7 @@ const Properties: FC<PropertiesProps> = ({
   }
   const handleRefreshVariable = (value: StartVariableItem) => {
     if (!selectedNode) return
+
     if (editIndex !== null) {
       const defaultValue = selectedNode.data.config.variables.defaultValue ?? []
       defaultValue[editIndex] = value
@@ -260,7 +264,7 @@ const Properties: FC<PropertiesProps> = ({
     }
     selectedNode?.setData({ ...selectedNode.data})
 
-    setConfigs({ ...selectedNode.data.config})
+    setConfigs({ ...selectedNode.data.config })
   }
   const handleDeleteVariable = (index: number, vo: StartVariableItem) => {
     if (!selectedNode) return
@@ -347,11 +351,9 @@ const Properties: FC<PropertiesProps> = ({
       const parentPreviousNodeIds = getAllPreviousNodes(parentLoopNode.id);
       allRelevantNodeIds.push(...parentPreviousNodeIds);
     }
-    
-
 
     // Add conversation variables from global config
-    const conversationVariables = workflowConfig?.variables || [];
+    const conversationVariables = chatVariables || [];
 
     conversationVariables.forEach((variable: any) => {
       const key = `CONVERSATION_${variable.name}`;
@@ -761,7 +763,36 @@ const Properties: FC<PropertiesProps> = ({
     }
 
     return variableList;
-  }, [selectedNode, graphRef, workflowConfig?.variables]);
+  }, [selectedNode, graphRef, graphUpdateTrigger, chatVariables]);
+
+  // Trigger variableList update when graph edges or nodes change
+  useEffect(() => {
+    if (!graphRef?.current) return;
+    
+    const graph = graphRef.current;
+    const handleGraphChange = () => {
+      console.log('handleGraphChange')
+      // Force variableList recalculation by updating trigger
+      setGraphUpdateTrigger(prev => prev + 1);
+    };
+    
+    // Listen to graph changes
+    graph.on('edge:added', handleGraphChange);
+    graph.on('edge:removed', handleGraphChange);
+    graph.on('edge:changed', handleGraphChange);
+    graph.on('node:added', handleGraphChange);
+    graph.on('node:removed', handleGraphChange);
+    graph.on('node:change:data', handleGraphChange);
+    
+    return () => {
+      graph.off('edge:added', handleGraphChange);
+      graph.off('edge:removed', handleGraphChange);
+      graph.off('edge:changed', handleGraphChange);
+      graph.off('node:added', handleGraphChange);
+      graph.off('node:removed', handleGraphChange);
+      graph.off('node:change:data', handleGraphChange);
+    };
+  }, [graphRef]);
 
   // Filter out boolean type variables for loop and llm nodes
   const getFilteredVariableList = (nodeType?: string, key?: string) => {

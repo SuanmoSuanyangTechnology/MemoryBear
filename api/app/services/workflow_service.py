@@ -13,11 +13,10 @@ from sqlalchemy.orm import Session
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.workflow.validator import validate_workflow_config
-from app.db import get_db, get_db_context
+from app.db import get_db
+from app.models.conversation_model import Message
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
 from app.repositories.conversation_repository import MessageRepository
-from app.models.conversation_model import Message
-from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
@@ -483,14 +482,6 @@ class WorkflowService:
         try:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
-            with get_db_context() as db:
-                end_user_repo = EndUserRepository(db)
-                new_end_user = end_user_repo.get_or_create_end_user(
-                    app_id=app_id,
-                    other_id=payload.user_id,
-                    original_user_id=payload.user_id  # Save original user_id to other_id
-                )
-                end_user_id = str(new_end_user.id)
 
             executions = self.execution_repo.get_by_conversation_id(conversation_id=conversation_id_uuid)
 
@@ -511,7 +502,7 @@ class WorkflowService:
                 input_data=input_data,
                 execution_id=execution.execution_id,
                 workspace_id=str(workspace_id),
-                user_id=end_user_id
+                user_id=payload.user_id
             )
 
             # 更新执行结果
@@ -638,14 +629,6 @@ class WorkflowService:
         try:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
-            with get_db_context() as db:
-                end_user_repo = EndUserRepository(db)
-                new_end_user = end_user_repo.get_or_create_end_user(
-                    app_id=app_id,
-                    other_id=payload.user_id,
-                    original_user_id=payload.user_id  # Save original user_id to other_id
-                )
-                end_user_id = str(new_end_user.id)
             executions = self.execution_repo.get_by_conversation_id(conversation_id=conversation_id_uuid)
 
             for exec_res in executions:
@@ -665,7 +648,7 @@ class WorkflowService:
                     input_data=input_data,
                     execution_id=execution.execution_id,
                     workspace_id=str(workspace_id),
-                    user_id=end_user_id
+                    user_id=payload.user_id
             ):
                 if event.get("event") == "workflow_end":
 

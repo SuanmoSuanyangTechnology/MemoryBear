@@ -91,6 +91,7 @@ export const en = {
       memberManagement: 'Member Management',
       memorySummary: 'Memory Summary',
       memoryConversation: 'Memory Validation',
+      helpCenter: 'Help Center',
       memorySummaryHandlers: 'Memory Summary Handlers',
       createMemorySummary: 'Create Memory Summary',
       memoryManagement: 'Memory Management',
@@ -190,7 +191,8 @@ export const en = {
 
       memoryConversation: 'Memory Conversation',
       memoryConversationDesc: 'Memory Conversation',
-
+      helpCenter: 'Help Center',
+      helpCenterDesc: 'Help Center',
       memorySummary: 'View Memory Summary',
       memorySummaryDesc: 'View Memory Summary Report',
 
@@ -616,6 +618,7 @@ export const en = {
       retrieve:'Retrieve',
       processing: 'Processing',
       processingMode: 'Processing Mode',
+      processMsg: 'Processing Message',
       dataSize: 'Data Size',
       createUpdateTime: 'Create/Update Time',
       operation: 'Operation',
@@ -1960,6 +1963,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       addMessage: 'Add Message',
       answerDesc: 'Reply',
       addNode: 'Add Node',
+      arrange: 'Arrange',
+      redo: 'Redo',
+      undo: 'Undo',
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',

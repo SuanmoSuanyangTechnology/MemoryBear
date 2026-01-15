@@ -30,15 +30,12 @@ import 'dayjs/plugin/utc'
 import { cookieUtils } from './utils/request';
 
 
-
-
-
 function App() {
   const { t } = useTranslation();
   const { locale, language, timeZone } = useI18n()
   useEffect(() => {
     const authToken = cookieUtils.get('authToken')
-    if (!authToken && !window.location.hash.includes('#/login')) {
+    if (!authToken && !window.location.hash.includes('#/login') && !window.location.hash.includes('#/conversation/')) {
       window.location.href = `/#/login`;
     }
   }, [])
