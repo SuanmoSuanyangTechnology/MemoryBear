@@ -267,14 +267,14 @@ class MemoryForgetService:
             elif node_type_label == 'memorysummary':
                 node_type_label = 'summary'
             
-            # 将 Neo4j DateTime 对象转换为时间戳
+            # 将 Neo4j DateTime 对象转换为时间戳（毫秒）
             last_access_time = result['last_access_time']
             last_access_dt = convert_neo4j_datetime_to_python(last_access_time)
             # 确保 datetime 带有时区信息(假定为 UTC),避免 naive datetime 导致的时区偏差
             if last_access_dt:
                 if last_access_dt.tzinfo is None:
                     last_access_dt = last_access_dt.replace(tzinfo=timezone.utc)
-                last_access_timestamp = int(last_access_dt.timestamp())
+                last_access_timestamp = int(last_access_dt.timestamp() * 1000)
             else:
                 last_access_timestamp = 0
             
@@ -520,7 +520,7 @@ class MemoryForgetService:
                 'average_activation_value': result['average_activation'],
                 'low_activation_nodes': result['low_activation_nodes'] or 0,
                 'forgetting_threshold': forgetting_threshold,
-                'timestamp': int(datetime.now().timestamp())
+                'timestamp': int(datetime.now().timestamp() * 1000)
             }
         else:
             activation_metrics = {
@@ -530,7 +530,7 @@ class MemoryForgetService:
                 'average_activation_value': None,
                 'low_activation_nodes': 0,
                 'forgetting_threshold': forgetting_threshold,
-                'timestamp': int(datetime.now().timestamp())
+                'timestamp': int(datetime.now().timestamp() * 1000)
             }
         
         # 收集节点类型分布
@@ -620,7 +620,7 @@ class MemoryForgetService:
                         'merged_count': record.merged_count,
                         'average_activation': record.average_activation_value,
                         'total_nodes': record.total_nodes,
-                        'execution_time': int(record.execution_time.timestamp())
+                        'execution_time': int(record.execution_time.timestamp() * 1000)
                     })
                 
                 api_logger.info(f"成功获取最近 {len(recent_trends)} 个日期的历史趋势数据")
@@ -661,7 +661,7 @@ class MemoryForgetService:
             'node_distribution': node_distribution,
             'recent_trends': recent_trends,
             'pending_nodes': pending_nodes,
-            'timestamp': int(datetime.now().timestamp())
+            'timestamp': int(datetime.now().timestamp() * 1000)
         }
         
         api_logger.info(
