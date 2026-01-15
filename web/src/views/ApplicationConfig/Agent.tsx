@@ -201,7 +201,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
             ...item,
             ...filterItem
           }
-        }) 
+        })
+        setKnowledgeConfig(prev => ({
+          ...prev,
+          knowledge_bases: [...knowledge_bases]
+        }))
         setData((prev) => {
           prev = prev as Config
           const knowledge_retrieval: KnowledgeConfig = {

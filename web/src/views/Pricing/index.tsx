@@ -10,6 +10,7 @@ import commerce from '@/assets/images/order/commerce.png'
 import checkIcon from '@/assets/images/login/checkBg.png'
 import alertIcon from '@/assets/images/order/alert.svg';
 import { useUser } from '@/store/user'
+import { useI18n } from '@/store/locale'
 
 interface PriceItem {
   type: string;
@@ -116,6 +117,7 @@ const PricingView: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { user } = useUser();
+  const { language } = useI18n()
 
   const handleChoosePlan = (type: string) => {
     switch(type) {
@@ -127,6 +129,7 @@ const PricingView: React.FC = () => {
         navigate(user.current_workspace_id ? '/' : '/space');
         break
       case 'commerce':
+        window.open(`https://docs.redbearai.com/s/${language || 'en'}-memorybear`, '_blank')
         break
     }
   };

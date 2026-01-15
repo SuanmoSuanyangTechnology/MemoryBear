@@ -234,9 +234,9 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
           filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'loop', 'cycle-start', 'iteration'].includes(nodeType.type));
         } else {
           // Original filtering for non-loop child nodes
-          filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'break', 'cycle-start'].includes(nodeType.type));
+          filteredNodes = category.nodes.filter(nodeType => !['start', 'break', 'cycle-start'].includes(nodeType.type));
           filteredNodes = category.nodes.filter(nodeType =>
-            nodeType.type !== 'start' && nodeType.type !== 'end' && nodeType.type !== 'cycle-start' && nodeType.type !== 'break'
+            nodeType.type !== 'start' && nodeType.type !== 'cycle-start' && nodeType.type !== 'break'
           );
         }
         

@@ -47,7 +47,7 @@ const QuickActions: FC<QuickActionsProps> = ({ onNavigate }) => {
       key: 'space-management',
       icon: spaceIcon,
       title: t('quickActions.spaceManagement'),
-      onClick: () => onNavigate?.('/spce')
+      onClick: () => onNavigate?.('/space')
     },
     // {
     //   key: 'workflow-orchestration', 
