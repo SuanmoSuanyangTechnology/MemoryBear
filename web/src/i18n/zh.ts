@@ -789,7 +789,8 @@ export const zh = {
 
       memoryConversation: '记忆对话',
       memoryConversationDesc: '记忆对话',
-
+      helpCenter: '帮助中心',
+      helpCenterDesc: '帮助中心',
       memorySummary: '查看记忆摘要',
       memorySummaryDesc: '查看记忆摘要报告',
 
