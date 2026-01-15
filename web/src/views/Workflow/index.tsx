@@ -107,6 +107,7 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
         copyEvent={copyEvent}
         parseEvent={parseEvent}
         config={config}
+        chatVariables={chatVariables}
       />
       <Chat
         ref={chatRef}

@@ -129,7 +129,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     if (sourceNodeData.cycle) {
       const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle);
       if (parentNode) {
-        parentNode.insertChild(newNode);
+        parentNode.addChild(newNode);
       }
     }
 
@@ -159,7 +159,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
             },
           },
         },
-        zIndex: sourceNodeData.cycle && sourceNodeType == 'cycle-start' ? 1 : sourceNodeData.cycle ? 2 : 0
+        // zIndex: sourceNodeData.cycle && sourceNodeType == 'cycle-start' ? 1 : sourceNodeData.cycle ? 2 : 0
       });
       
       // 循环节点内子节点通过连接桩添加时，调整循环节点大小

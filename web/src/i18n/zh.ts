@@ -2057,6 +2057,9 @@ export const zh = {
       addMessage: '添加消息',
       answerDesc: '回复',
       addNode: '添加节点',
+      arrange: '整理',
+      redo: '重做',
+      undo: '撤销',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',

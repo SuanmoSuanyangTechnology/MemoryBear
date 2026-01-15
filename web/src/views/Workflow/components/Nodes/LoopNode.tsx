@@ -18,7 +18,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     }, 50)
     
     return () => clearTimeout(timer)
-  }, [])
+  }, [graph])
 
   const checkAndAddAddNode = () => {
     if (!graph) return;
@@ -44,15 +44,15 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         },
       });
       
-      node.insertChild(addNode);
+      node.addChild(addNode);
       
       // 连接cycle-start和add-node
       const sourcePorts = cycleStartNode.getPorts();
       const targetPorts = addNode.getPorts();
       const sourcePort = sourcePorts.find((port: any) => port.group === 'right')?.id || 'right';
       const targetPort = targetPorts.find((port: any) => port.group === 'left')?.id || 'left';
-      
-      // 直接创建连线，不使用异步
+
+      // 然后创建连线
       graph.addEdge({
         source: { cell: cycleStartNode.id, port: sourcePort },
         target: { cell: addNode.id, port: targetPort },
@@ -107,8 +107,8 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         cycle: data.id,
       },
     });
-    node.insertChild(cycleStartNode)
-    node.insertChild(addNode)
+    node.addChild(cycleStartNode)
+    node.addChild(addNode)
     const sourcePorts = cycleStartNode.getPorts()
     const targetPorts = addNode.getPorts()
     let sourcePort = sourcePorts.find((port: any) => port.group === 'right')?.id || 'right';
@@ -133,7 +133,6 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         },
       },
     }
-
     graph.addEdge(edgeConfig)
   }
 
