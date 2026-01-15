@@ -81,12 +81,14 @@ const RelationshipNetwork:FC = () => {
           name: displayName,
           category: categoryIndex >= 0 ? categoryIndex : 0,
           symbolSize: symbolSize, // 根据连接数调整节点大小
-          itemStyle: {
-            color: colors[categoryIndex % 8]
-          }
         })
       })
       
+      // 创建节点ID到标签的映射
+      const nodeIdToLabel: Record<string, string> = {}
+      nodes.forEach(node => {
+        nodeIdToLabel[node.id] = node.label
+      })
       // 处理边数据
       edges.forEach(edge => {
         curEdges.push({
