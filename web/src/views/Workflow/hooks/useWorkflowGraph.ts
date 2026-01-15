@@ -422,7 +422,7 @@ export const useWorkflowGraph = ({
     graphRef.current.use(
       new MiniMap({
         container: miniMapRef.current,
-        width: 100,
+        width: 170,
         height: 80,
         padding: 5,
       }),
