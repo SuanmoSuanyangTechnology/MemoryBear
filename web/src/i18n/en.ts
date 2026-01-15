@@ -71,6 +71,7 @@ export const en = {
       stepTwoDescription: 'Here you can create and manage spaces to organize models and data for different use cases.Once your spaces are ready, head to User Management to invite members and manage access.👉 Click User Management in the left menu to continue.',
       stepThree: 'This is User Management',
       stepThreeDescription: 'Here you can create users, assign roles, and manage access for your team.Once users are set up, the basic configuration is complete and you’re ready to start using the platform 🎉',
+      finishButtonText: 'Get Started',
     },
     menu: {
       home: 'Home',

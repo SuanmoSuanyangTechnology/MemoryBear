@@ -71,6 +71,7 @@ export const zh = {
       stepTwoDescription: '你可以在这里创建和管理不同的空间，把模型和数据组织到具体的使用场景中。空间创建完成后，可以去 User Management 邀请成员、分配权限，一起协作使用。👉 点击左侧 User Management 继续。',
       stepThree: '这里是用户管理页',
       stepThreeDescription: '你可以在这里创建用户、分配角色，并管理团队成员的访问权限。完成用户设置后，基础配置就准备好了，可以开始实际使用平台的各项功能了 🎉',
+      finishButtonText: '开始使用',
     },
     menu: {
       home: '首页',
