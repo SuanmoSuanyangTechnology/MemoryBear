@@ -41,7 +41,9 @@ export default function UserMemory() {
         navigate(`/user-memory/${id}`)
     }
   }
-  const handleViewMemoryConfig = () => {
+  const handleViewMemoryConfig = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     navigate(`/memory`)
   }
 
@@ -84,8 +86,9 @@ export default function UserMemory() {
                     title={name || '-'}
                     extra={<div
                       className="rb:w-7 rb:h-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/goto.svg')]"
-                      onClick={() => handleViewDetail(end_user.id)}
                     ></div>}
+                    className="rb:cursor-pointer"
+                    onClick={() => handleViewDetail(end_user.id)}
                   >
                     <div className="rb:flex rb:justify-between rb:items-center">
                       <div>{t('userMemory.capacity')}</div>
@@ -96,7 +99,7 @@ export default function UserMemory() {
                       <div>{t(`userMemory.${item.type || 'person'}`)}</div>
                     </div>
 
-                    <div className="rb:mt-3 rb:bg-[#F6F8FC] rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:py-2 rb:px-3" onClick={handleViewMemoryConfig}>
+                    <div className="rb:relative rb:z-2 rb:mt-3 rb:bg-[#F6F8FC] rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:py-2 rb:px-3" onClick={handleViewMemoryConfig}>
                       <div className="rb:text-[#5B6167] rb:leading-5 rb:flex rb:justify-between rb:items-center">
                         {t('userMemory.memory_config_name')}
                         <div
