@@ -415,6 +415,8 @@ export const en = {
       reset: 'Reset',
       refresh: 'Refresh',
       return: 'Return',
+      statusEnabled: 'Available',
+      statusDisabled: 'Unavailable'
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -1581,6 +1583,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       configured_disabled_desc: 'API is configured but not enabled',
       error_desc: 'API is configured but connection error',
 
+      testConnectionSuccess: 'Test Connection Successful',
       serviceEndpoint: 'Service Endpoint URL',
       serviceEndpointPlaceholder: 'URL of the service endpoint',
       serviceEndpointExtra: 'Complete access address of the MCP service',
@@ -1730,6 +1733,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       method: 'Method',
       path: 'Path',
       viewDetail: 'View Details',
+      textLink: 'Test Connection',
       noResult: 'Processing results will be displayed here'
     },
     workflow: {

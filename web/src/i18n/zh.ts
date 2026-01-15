@@ -963,6 +963,8 @@ export const zh = {
       reset: '重置',
       refresh: '刷新',
       return: '返回',
+      statusEnabled: '可用',
+      statusDisabled: '不可用'
     },
     product: {
       applicationManagement: '应用管理',
