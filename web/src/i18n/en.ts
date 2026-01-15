@@ -184,15 +184,15 @@ export const en = {
       createNewMemorySummary: 'Create New Memory Entry',
 
       createNewApplication: 'Create New Application',
-      createNewApplicationDesc: 'Create New Space Application',
+      createNewApplicationDesc: 'Build an app in just 3 minutes with zero-code drag-and-drop.',
 
       createNewKnowledge: 'Create New Knowledge',
-      createNewKnowledgeDesc: 'Create a new memory entry',
+      createNewKnowledgeDesc: 'Transform your data into a fully searchable, dedicated knowledge base in seconds.',
 
       memoryConversation: 'Memory Conversation',
-      memoryConversationDesc: 'Memory Conversation',
+      memoryConversationDesc: 'The more you use it, the better AI understands you.',
       helpCenter: 'Help Center',
-      helpCenterDesc: 'Help Center',
+      helpCenterDesc: 'One-stop support to answer your questions and get you started fast.',
       memorySummary: 'View Memory Summary',
       memorySummaryDesc: 'View Memory Summary Report',
 
