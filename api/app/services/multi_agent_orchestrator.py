@@ -1327,7 +1327,8 @@ class MultiAgentOrchestrator:
             web_search=web_search,
             memory=memory,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id
+            user_rag_memory_id=user_rag_memory_id,
+            sub_agent=True
         )
 
         return result
