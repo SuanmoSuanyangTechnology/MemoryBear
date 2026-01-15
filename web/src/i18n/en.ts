@@ -1449,6 +1449,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       deduplication_desc: 'Deduplication and disambiguation completed, {{count}} unique entities in total'
     },
     memoryConversation: {
+      chatEmpty:'Is there anything I can help you with？',
       searchPlaceholder: 'Input user ID...',
       userID: 'User ID',
       testMemoryConversation: 'Test Memory Conversation',

@@ -1523,6 +1523,7 @@ export const zh = {
       deduplication_desc: '去重消歧完成，最终{{count}}个唯一实体'
     },
     memoryConversation: {
+      chatEmpty:'有什么我可以帮您的吗？',
       searchPlaceholder: '输入用户ID...',
       userID: '用户ID',
       testMemoryConversation: '测试记忆对话',

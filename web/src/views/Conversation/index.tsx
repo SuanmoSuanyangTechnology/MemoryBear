@@ -262,7 +262,7 @@ const Conversation: FC = () => {
       <div className="rb:relative rb:h-screen rb:px-4 rb:flex-[1_1_auto]">
         <div className='rb:w-[760px]  rb:h-screen rb:mx-auto rb:pt-10'>
         <Chat
-          empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} subTitle={t('memoryConversation.emptyDesc')} />}
+          empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
           contentClassName="rb:h-[calc(100%-152px)] "
           data={chatList}
           streamLoading={streamLoading}
