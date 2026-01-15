@@ -789,7 +789,8 @@ export const zh = {
 
       memoryConversation: '记忆对话',
       memoryConversationDesc: '记忆对话',
-
+      helpCenter: '帮助中心',
+      helpCenterDesc: '帮助中心',
       memorySummary: '查看记忆摘要',
       memorySummaryDesc: '查看记忆摘要报告',
 
@@ -2057,6 +2058,9 @@ export const zh = {
       addMessage: '添加消息',
       answerDesc: '回复',
       addNode: '添加节点',
+      arrange: '整理',
+      redo: '重做',
+      undo: '撤销',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',
