@@ -1,7 +1,8 @@
 import type { FC } from 'react';
-import { Select, Button } from 'antd';
-import { Node } from '@antv/x6';
+import { Select } from 'antd';
+// import { Node } from '@antv/x6';
 import type { GraphRef } from '../types'
+import { PlusOutlined, MinusOutlined } from '@ant-design/icons'
 
 interface CanvasToolbarProps {
   miniMapRef: React.RefObject<HTMLDivElement>;
@@ -18,15 +19,16 @@ interface CanvasToolbarProps {
 const CanvasToolbar: FC<CanvasToolbarProps> = ({
   miniMapRef,
   graphRef,
-  isHandMode,
-  setIsHandMode,
+  // isHandMode,
+  // setIsHandMode,
   zoomLevel,
-  canUndo,
-  canRedo,
-  onUndo,
-  onRedo,
+  // canUndo,
+  // canRedo,
+  // onUndo,
+  // onRedo,
 }) => {
   // 整理布局函数
+  /*
   const handleLayout = () => {
     if (!graphRef.current) return;
     const nodes = graphRef.current.getNodes();
@@ -144,28 +146,14 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
       currentY += 300; // 不同树之间的间距
     });
   };
-
+  */
   return (
     <>
       {/* 小地图 */}
-      <div ref={miniMapRef} className="rb:absolute rb:bottom-17 rb:left-5 rb:z-1000"></div>
+      <div ref={miniMapRef} className="rb:absolute rb:bottom-15  rb:right-8 rb:z-1000 rb:rounded-lg rb:overflow-hidden"></div>
       {/* 缩放控制按钮 */}
-      <div className="rb:absolute rb:bottom-5 rb:left-5 rb:flex rb:flex-row rb:gap-2 rb:z-1000">
-        <Button 
-          type={isHandMode ? 'primary' : 'default'}
-          onClick={() => {
-            const newHandMode = !isHandMode;
-            setIsHandMode(newHandMode);
-            if (newHandMode) {
-              graphRef.current?.enablePanning();
-            } else {
-              graphRef.current?.disablePanning();
-            }
-          }}
-        >
-          {isHandMode ? '✋' : '👆'}
-        </Button>
-        <Button onClick={() => graphRef.current?.zoom(0.1)}>+</Button>
+      <div className="rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3 rb:py-2 rb:absolute rb:bottom-5 rb:right-8 rb:flex rb:flex-row rb:gap-4 rb:z-1000">
+        <MinusOutlined className="rb:text-[16px] rb:cursor-pointer" onClick={() => graphRef.current?.zoom(-0.1)} />
         <Select
           value={Math.round(zoomLevel * 100)}
           onChange={(value: number | string) => {
@@ -179,7 +167,7 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
             console.log('props', props)
             return `${props.value}%`
           }}
-          className="rb:w-20"
+          className="rb:w-20 rb:h-4!"
           options={[
             { label: '25%', value: 25 },
             { label: '50%', value: 50 },
@@ -190,11 +178,10 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
             { label: '200%', value: 200 },
             { label: '自适应', value: 'fit' },
           ]}
+          variant='borderless'
+          size="small"
         />
-        <Button onClick={() => graphRef.current?.zoom(-0.1)}>-</Button>
-        <Button disabled={!canUndo} onClick={onUndo}>撤销</Button>
-        <Button disabled={!canRedo} onClick={onRedo}>重做</Button>
-        <Button onClick={handleLayout}>整理</Button>
+        <PlusOutlined className="rb:text-[16px] rb:cursor-pointer" onClick={() => graphRef.current?.zoom(0.1)} />
       </div>
     </>
   );
