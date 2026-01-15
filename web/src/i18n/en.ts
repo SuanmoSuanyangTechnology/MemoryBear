@@ -1224,7 +1224,7 @@ export const en = {
       IMPLICIT_MEMORY: 'Implicit Memory',
       EMOTIONAL_MEMORY: 'Emotional Memory',
       EPISODIC_MEMORY: 'Episodic Memory',
-      FORGETTING_MANAGEMENT: 'Forgetting Management',
+      FORGET_MEMORY: 'Forget Memory',
 
       endUserProfile: 'Core Profile',
       editEndUserProfile: 'Edit',
