@@ -508,7 +508,7 @@ export const zh = {
       VersionInformation: '版本信息',
       publishedOn: '发布于',
       publisher: '发布者',
-      DetailsOfVersion: 'v{{version}}版本详情',
+      DetailsOfVersion: '{{version}}版本详情',
       exportDSLFile: '导出DSL文件',
       willRollToThisVersion: '将回滚到此版本',
       share: '分享',
