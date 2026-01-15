@@ -13,11 +13,10 @@ from sqlalchemy.orm import Session
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.workflow.validator import validate_workflow_config
-from app.db import get_db, get_db_context
+from app.db import get_db
+from app.models.conversation_model import Message
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
 from app.repositories.conversation_repository import MessageRepository
-from app.models.conversation_model import Message
-from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
