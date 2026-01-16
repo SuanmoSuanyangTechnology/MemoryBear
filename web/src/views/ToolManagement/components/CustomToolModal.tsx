@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, Select, Row, Col, App, Button } from 'antd';
+import { Form, Input, Select, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { CustomToolItem, CustomToolModalRef, ToolItem } from '../types'
@@ -134,9 +134,9 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
         <Form.Item
           name="name"
           label={t('tool.name')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[{ required: true, message: t('common.enterNamePlaceholder') }]}
         >
-          <Input placeholder={t('common.pleaseEnter')} />
+          <Input placeholder={t('tool.enterNamePlaceholder')} />
         </Form.Item>
         {/* 名称和图标 */}
         {/* <Form.Item label={t('tool.nameAndIcon')} required>
@@ -195,6 +195,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
             ]}
             initialData={parseSchemaData.operations || []}
             emptySize={88}
+            emptyText={t('tool.toolEmpty')}
           />
         </Form.Item>
 
@@ -269,7 +270,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
           <Select
             mode="tags"
             style={{ width: '100%' }}
-            placeholder={t('common.pleaseEnter')}
+            placeholder={t('tool.tagDesc')}
           />
         </FormItem>
       </Form>
