@@ -597,7 +597,7 @@ class MemoryInteraction:
                 group_id = ori_data[0]['group_id']
                 Space_User = await self.connector.execute_query(Memory_Space_User, group_id=group_id)
                 if not Space_User:
-                    return '不存在用户'
+                    return []
                 user_id=Space_User[0]['id']
 
                 results = await self.connector.execute_query(Memory_Space_Associative, id=self.id,user_id=user_id)
