@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { ApiExtensionModalData, ApiExtensionModalRef } from '../types'
+import type { ApiExtensionModalData, ApiExtensionModalRef } from './types'
 import RbModal from '@/components/RbModal'
 
 const FormItem = Form.Item;

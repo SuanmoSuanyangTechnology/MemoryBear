@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Form, Input, Select, InputNumber, Checkbox, Tag, Divider, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { ApiExtensionModalRef, Variable, VariableEditModalRef } from '../types'
+import type { ApiExtensionModalRef, Variable, VariableEditModalRef } from './types'
 import RbModal from '@/components/RbModal'
 import SortableList from '@/components/SortableList'
 import ApiExtensionModal from './ApiExtensionModal'
@@ -137,7 +137,14 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               { pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/, message: t('application.invalidVariableName') },
             ]}
           >
-            <Input placeholder={t('common.enter')} />
+            <Input 
+              placeholder={t('common.enter')} 
+              onBlur={(e) => {
+                if (!form.getFieldValue('display_name')) {
+                  form.setFieldValue('display_name', e.target.value)
+                }
+              }}
+            />
           </FormItem>
           {/* 显示名称 */}
           <FormItem
