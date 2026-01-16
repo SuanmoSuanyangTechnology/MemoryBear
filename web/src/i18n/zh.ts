@@ -1820,6 +1820,8 @@ export const zh = {
       tagDesc: '多个标签用逗号分隔',
       availableTools: '可用工具',
       name: '名称',
+      enterNamePlaceholder: '请输入名称',
+      toolEmpty: '未检测到工具',
       desc: '描述',
       method: '方法',
       path: '路径',
