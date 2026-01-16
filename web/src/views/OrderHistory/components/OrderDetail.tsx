@@ -67,8 +67,8 @@ const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) 
       onCancel={handleClose}
       width={1000}
     >
-      <Descriptions title={t('pricing.orderInfo')} column={2} items={formatItems()} classNames={{ label: 'rb:w-40' }} />
-      <Descriptions title={t('pricing.orderPayInfo')} column={2} items={formatPayItems()} classNames={{ label: 'rb:w-40' }} className="rb:mt-6!" />
+      <Descriptions title={t('pricing.orderInfo')} column={2} items={formatItems()} classNames={{ label: 'rb:w-50' }} />
+      <Descriptions title={t('pricing.orderPayInfo')} column={2} items={formatPayItems()} classNames={{ label: 'rb:w-50' }} className="rb:mt-6!" />
     </RbModal>
   );
 });
