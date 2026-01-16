@@ -303,8 +303,7 @@ async def generate_emotion_suggestions(
             f"用户 {current_user.username} 请求生成个性化情绪建议",
             extra={
                 "group_id": request.group_id,
-                "config_id": config_id,
-                "force_refresh": request.force_refresh
+                "config_id": config_id
             }
         )
         
