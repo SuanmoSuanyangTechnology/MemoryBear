@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { Space, List } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
-import type { KnowledgeModalRef, KnowledgeBase } from '../types'
+import type { KnowledgeModalRef, KnowledgeBase } from './types'
 import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types'
 import RbModal from '@/components/RbModal'
 import { getKnowledgeBaseList } from '@/api/knowledgeBase'
@@ -39,12 +39,13 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     setQuery({})
     setSelectedIds([])
     setSelectedRows([])
-    getList()
   };
 
   useEffect(() => {
-    getList()
-  }, [query.keywords])
+    if (visible) {
+      getList()
+    }
+  }, [query.keywords, visible])
   const getList = () => {
     getKnowledgeBaseList(undefined, {
       ...query,
@@ -124,15 +125,15 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
               dataSource={filterList}
               renderItem={(item: KnowledgeBase) => (
                 <List.Item>
-                  <div key={item.id} className={clsx("rb:flex rb:items-center rb:justify-between rb:border rb:rounded-[8px] rb:p-[17px_16px] rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
+                  <div key={item.id} className={clsx("rb:flex rb:items-center rb:justify-between rb:border rb:rounded-lg rb:p-[17px_16px] rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
                     "rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF] rb:text-[#155EEF]": selectedIds.includes(item.id),
                     "rb:border-[#DFE4ED] rb:text-[#212332]": !selectedIds.includes(item.id),
                   })} onClick={() => handleSelect(item)}>
-                    <div className="rb:text-[16px] rb:leading-[22px]">
+                    <div className="rb:text-[16px] rb:leading-5.5">
                       {item.name}
-                      <div className="rb:text-[12px] rb:leading-[16px] rb:text-[#5B6167] rb:mt-[8px]">{t('application.contains', {include_count: item.doc_num})}</div>
+                      <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167] rb:mt-2">{t('application.contains', {include_count: item.doc_num})}</div>
                     </div>
-                    <div className="rb:text-[12px] rb:leading-[16px] rb:text-[#5B6167]">{formatDateTime(item.created_at, 'YYYY-MM-DD HH:mm:ss')}</div>
+                    <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167]">{formatDateTime(item.created_at, 'YYYY-MM-DD HH:mm:ss')}</div>
                   </div>
                 </List.Item>
               )}

@@ -1,22 +1,22 @@
 import { type FC, useRef, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Space, Button, List, Switch } from 'antd'
-import Card from './Card'
+import Card from '../Card'
 import type {
   ToolModalRef,
   ToolOption
-} from '../types'
+} from './types'
 import Empty from '@/components/Empty'
 import ToolModal from './ToolModal'
 import { getToolMethods, getToolDetail } from '@/api/tools'
 
-const ToolList: FC<{ data: ToolOption[]; onUpdate: (config: ToolOption[]) => void}> = ({data, onUpdate}) => {
+const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => void}> = ({value, onChange}) => {
   const { t } = useTranslation()
   const toolModalRef = useRef<ToolModalRef>(null)
   const [toolList, setToolList] = useState<ToolOption[]>([])
   useEffect(() => {
-    if (data) {
-      const processedData = data.map(async (item) => {
+    if (value) {
+      const processedData = value.map(async (item) => {
         if (!item.label && item.tool_id) {
           try {
             const [toolDetail, methods] = await Promise.all([
@@ -77,7 +77,7 @@ const ToolList: FC<{ data: ToolOption[]; onUpdate: (config: ToolOption[]) => voi
       
       Promise.all(processedData).then(setToolList)
     }
-  }, [data])
+  }, [value])
 
   const handleAddTool = () => {
     toolModalRef.current?.handleOpen()
@@ -85,12 +85,12 @@ const ToolList: FC<{ data: ToolOption[]; onUpdate: (config: ToolOption[]) => voi
   const updateTools = (tool: ToolOption) => {
     const list = [...toolList, tool]
     setToolList(list)
-    onUpdate(list)
+    onChange && onChange(list)
   }
   const handleDeleteTool = (index: number) => {
     const list = toolList.filter((_item, idx) => idx !== index)
     setToolList([...list])
-    onUpdate(list)
+    onChange && onChange(list)
   }
   const handleChangeEnabled = (index: number) => {
     const list = toolList.map((item, idx) => {
@@ -103,7 +103,7 @@ const ToolList: FC<{ data: ToolOption[]; onUpdate: (config: ToolOption[]) => voi
       return item
     })
     setToolList([...list])
-    onUpdate(list)
+    onChange && onChange(list)
   }
   return (
     <Card 
@@ -112,7 +112,6 @@ const ToolList: FC<{ data: ToolOption[]; onUpdate: (config: ToolOption[]) => voi
         <Button style={{ padding: '0 8px', height: '24px' }} onClick={handleAddTool}>+{t('application.addTool')}</Button>
       }
     >
-
       {toolList.length === 0
         ? <Empty size={88} />
         : 
