@@ -2173,7 +2173,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         typeDesc: 'Enterprise Growth Plan',
         solution: "Scale your organization with a powerful, enterprise-ready second-brain system.",
         targetAudience: 'Growing teams, startups, and SMBs requiring advanced memory capabilities.',
-        priceDesc: 'per workspace / month',
+        priceDesc: '/per workspace / month',
         supportServices: 'Priority customer service support',
       },
       commerce: {
