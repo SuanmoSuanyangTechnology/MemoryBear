@@ -445,7 +445,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
 
             <Space size={10}>
               <Button type="primary" ghost onClick={handleAddModel}>
-                +{t('application.addModel')}
+                + {t('application.addModel')}
               </Button>
               <div className="rb:w-8 rb:h-8 rb:cursor-pointer rb:bg-[url('@/assets/images/application/clean.svg')]" onClick={handleClearDebugging}></div>
             </Space>

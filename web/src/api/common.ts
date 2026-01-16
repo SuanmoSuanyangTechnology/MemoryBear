@@ -31,6 +31,12 @@ export interface versionResponse{
     coreUpgrades: string[];
     codeName: string;
   };
+  introduction_en?: {
+    releaseDate: string;
+    upgradePosition: string;
+    coreUpgrades: string[];
+    codeName: string;
+  };
 }
 // 首页数据统计
 export const getDashboardData = `/home-page/workspaces`
