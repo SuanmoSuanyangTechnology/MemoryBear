@@ -74,6 +74,7 @@ class WorkflowExecutor:
             初始化的工作流状态
         """
         user_message = input_data.get("message") or ""
+        conversation_messages = input_data.get("conv_messages") or []
 
         # 会话变量处理：从配置文件获取变量定义列表，转换为字典（name -> default value）
         config_variables_list = self.workflow_config.get("variables") or []
@@ -114,7 +115,7 @@ class WorkflowExecutor:
         }
 
         return {
-            "messages": [('user', user_message)],
+            "messages": conversation_messages,
             "variables": variables,
             "node_outputs": {},
             "runtime_vars": {},  # 运行时节点变量（简化版，供快速访问）
