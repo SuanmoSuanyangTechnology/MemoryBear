@@ -1,33 +1,68 @@
 {
   "v0.2.0": {
-    "codeName": "启知",
-    "releaseDate": "2026-1-16",
-    "upgradePosition": "本次为架构升级，核心目标是把“被动存储”升级为“主动认知”，让系统具备情绪感知、情景理解与类人记忆机制，为后续多智能体协作与专业场景落地奠定底座。",
-    "coreUpgrades": [
-      "记忆详情：拟人记忆——情绪引擎、情景记忆、短期记忆、工作记忆、感知记忆、显性记忆、隐性记忆，并配套类脑遗忘机制，实现从感知→情绪→情景→长期沉淀的完整人类记忆闭环",
-      "可视化工作流：拖拽式节点编排（LLM、知识库、逻辑、工具），业务落地周期由天缩至小时。",
-      "多模态知识处理：PDF、PPT、MP3、MP4 一键解析，时间感知检索准确率 94.3%，问答对数据即插即用。",
-      "Agent集群内置“记忆-知识-工具-审核”四类角色模板，用户一键生成；主控Agent把复杂任务拆为子任务并行分发，再靠情景记忆统一消解冲突、校验一致性，输出完整报告。"
-    ]
+    "introduction": {
+      "codeName": "启知",
+      "releaseDate": "2026-1-16",
+      "upgradePosition": "本次为架构升级，核心目标是把\"被动存储\"升级为\"主动认知\"，让系统具备情绪感知、情景理解与类人记忆机制，为后续多智能体协作与专业场景落地奠定底座。",
+      "coreUpgrades": [
+        "记忆详情：拟人记忆——情绪引擎、情景记忆、短期记忆、工作记忆、感知记忆、显性记忆、隐性记忆，并配套类脑遗忘机制，实现从感知→情绪→情景→长期沉淀的完整人类记忆闭环",
+        "可视化工作流：拖拽式节点编排（LLM、知识库、逻辑、工具），业务落地周期由天缩至小时。",
+        "多模态知识处理：PDF、PPT、MP3、MP4 一键解析，时间感知检索准确率 94.3%，问答对数据即插即用。",
+        "Agent集群内置\"记忆-知识-工具-审核\"四类角色模板，用户一键生成；主控Agent把复杂任务拆为子任务并行分发，再靠情景记忆统一消解冲突、校验一致性，输出完整报告。"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "Qizhi",
+      "releaseDate": "2026-1-16",
+      "upgradePosition": "This release marks a foundational upgrade to the system’s cognitive architecture. The core objective is to evolve the platform from passive information storage into active cognitive intelligence—enabling emotional awareness, situational understanding, and human-like memory mechanisms. This upgrade lays the groundwork for future multi-agent collaboration and domain-specific, production-grade AI applications.",
+      "coreUpgrades": [
+        "Human-Like Memory Architecture: A comprehensive, human-inspired memory system is introduced, encompassing emotional processing, situational memory, short-term and working memory, perceptual memory, as well as explicit and implicit memory. Combined with brain-inspired forgetting mechanisms, the system now supports a complete cognitive loop—from perception → emotion → context → long-term consolidation, closely mirroring human memory formation.",
+        "Visual Workflow Orchestration: A fully visual, drag-and-drop workflow enables modular composition of LLMs, knowledge bases, logic, and tools. This dramatically reduces the time required to move from experimentation to production—from days to hours.",
+        "Multimodal Knowledge Processing: The system now supports one-click parsing and ingestion of PDF, PPT, MP3, and MP4 content. With time-aware retrieval accuracy reaching 94.3%, structured Q&A data becomes instantly usable for downstream reasoning and generation.",
+        "Built-in Agent Clusters: Predefined role templates across four categories—Memory, Knowledge, Tools, and Review—can be generated with a single click. A Coordinator Agent decomposes complex tasks into parallel subtasks, while situational memory is used to resolve conflicts, validate consistency, and synthesize outputs into a coherent, end-to-end report."
+      ]
+    }
   },
   "v0.1.0": {
-    "codeName": "初心",
-    "releaseDate": "2025-12-01",
-    "upgradePosition": "这是一款专注于管理和利用AI记忆的工具，支持RAG和知识图谱两种主流存储方式，旨在为AI应用提供持久化、结构化的“记忆”能力。",
-    "coreUpgrades": [
-      "记忆空间：用户可以创建独立的空间来隔离不同记忆，并灵活选择存储方式。",
-      "记忆配置：简化了配置流程，内置自动提取关键信息的“记忆萃取”和管理生命周期的\"遗忘\"引擎。",
-      "知识检索：提供语义、分词和混合三种检索模式，并支持多种参数微调和结果重排序，以提升召回效果。",
-      "全局管理：支持统一设置默认检索参数，并可一键应用到所有知识库。",
-      "测试与调试：内置\"召回测试\"功能，方便用户实时验证检索效果并调整参数，支持通过分享码与他人协作。",
-      "记忆洞察：可查看详细的对话记录、用户画像和分析报告，帮助理解AI的\"记忆\"内容。",
-      "集成与管理：提供API Key用于系统集成，并包含基本的用户管理功能。",
-      "界面与体验：采用现代化的卡片式布局和渐变色设计，注重交互的流畅性和视觉美感。",
-      "起步与使用：文档中提供了清晰的基础使用流程，引导用户从创建空间、配置记忆到测试检索快速上手。",
-      "版本说明与限制: 记忆熊 v0.1.0 版本\"初心\"囊括智能记忆管理的核心思路和基础能力，为后续开发奠定了基础。",
-      "文档资源：用户手册、API文档、FAQ",
-      "问题反馈：GitHub Issues、邮件支持",
-      "致谢：感谢所有参与测试和提供反馈的用户！"
-    ]
+    "introduction": {
+      "codeName": "初心",
+      "releaseDate": "2025-12-01",
+      "upgradePosition": "这是一款专注于管理和利用AI记忆的工具，支持RAG和知识图谱两种主流存储方式，旨在为AI应用提供持久化、结构化的\"记忆\"能力。",
+      "coreUpgrades": [
+        "记忆空间：用户可以创建独立的空间来隔离不同记忆，并灵活选择存储方式。",
+        "记忆配置：简化了配置流程，内置自动提取关键信息的\"记忆萃取\"和管理生命周期的\"遗忘\"引擎。",
+        "知识检索：提供语义、分词和混合三种检索模式，并支持多种参数微调和结果重排序，以提升召回效果。",
+        "全局管理：支持统一设置默认检索参数，并可一键应用到所有知识库。",
+        "测试与调试：内置\"召回测试\"功能，方便用户实时验证检索效果并调整参数，支持通过分享码与他人协作。",
+        "记忆洞察：可查看详细的对话记录、用户画像和分析报告，帮助理解AI的\"记忆\"内容。",
+        "集成与管理：提供API Key用于系统集成，并包含基本的用户管理功能。",
+        "界面与体验：采用现代化的卡片式布局和渐变色设计，注重交互的流畅性和视觉美感。",
+        "起步与使用：文档中提供了清晰的基础使用流程，引导用户从创建空间、配置记忆到测试检索快速上手。",
+        "版本说明与限制: 记忆熊 v0.1.0 版本\"初心\"囊括智能记忆管理的核心思路和基础能力，为后续开发奠定了基础。",
+        "文档资源：用户手册、API文档、FAQ",
+        "问题反馈：GitHub Issues、邮件支持",
+        "致谢：感谢所有参与测试和提供反馈的用户！"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "Original Intent",
+      "releaseDate": "2025-12-01",
+      "upgradePosition": "A tool focused on managing and utilizing AI memory, supporting both RAG and knowledge graph storage methods, aiming to provide persistent and structured 'memory' capabilities for AI applications.",
+      "coreUpgrades": [
+        "Memory Space: Users can create independent spaces to isolate different memories and flexibly choose storage methods.",
+        "Memory Configuration: Simplified configuration process with built-in 'memory extraction' for automatic key information extraction and 'forgetting' engine for lifecycle management.",
+        "Knowledge Retrieval: Provides semantic, tokenization, and hybrid retrieval modes with various parameter tuning and result reranking to improve recall.",
+        "Global Management: Supports unified default retrieval parameter settings with one-click application to all knowledge bases.",
+        "Testing & Debugging: Built-in 'recall testing' for real-time verification of retrieval effects and parameter adjustment, with sharing code support for collaboration.",
+        "Memory Insights: View detailed conversation records, user profiles, and analysis reports to understand AI 'memory' content.",
+        "Integration & Management: Provides API Key for system integration with basic user management features.",
+        "Interface & Experience: Modern card-based layout with gradient design, focusing on interaction fluidity and visual aesthetics.",
+        "Getting Started: Documentation provides clear basic usage flow, guiding users from creating spaces, configuring memory to testing retrieval.",
+        "Version Notes: MemoryBear v0.1.0 'Original Intent' encompasses core concepts and basic capabilities of intelligent memory management, laying foundation for future development.",
+        "Documentation: User Manual, API Documentation, FAQ",
+        "Feedback: GitHub Issues, Email Support",
+        "Acknowledgments: Thanks to all users who participated in testing and provided feedback!"
+      ]
+    }
   }
 }
