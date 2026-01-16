@@ -17,11 +17,11 @@ class ImplicitMemoryCacheRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_by_user_id(self, user_id: str) -> Optional[ImplicitMemoryCache]:
-        """根据用户ID获取缓存
+    def get_by_end_user_id(self, end_user_id: str) -> Optional[ImplicitMemoryCache]:
+        """根据终端用户ID获取缓存
         
         Args:
-            user_id: 用户ID
+            end_user_id: 终端用户ID
             
         Returns:
             缓存记录，如果不存在返回 None
@@ -29,37 +29,35 @@ class ImplicitMemoryCacheRepository:
         try:
             cache = (
                 self.db.query(ImplicitMemoryCache)
-                .filter(ImplicitMemoryCache.user_id == user_id)
+                .filter(ImplicitMemoryCache.end_user_id == end_user_id)
                 .first()
             )
             if cache:
-                db_logger.info(f"成功获取用户 {user_id} 的隐性记忆缓存")
+                db_logger.info(f"成功获取用户 {end_user_id} 的隐性记忆缓存")
             else:
-                db_logger.info(f"用户 {user_id} 的隐性记忆缓存不存在")
+                db_logger.info(f"用户 {end_user_id} 的隐性记忆缓存不存在")
             return cache
         except Exception as e:
-            db_logger.error(f"获取用户 {user_id} 的隐性记忆缓存失败: {str(e)}")
+            db_logger.error(f"获取用户 {end_user_id} 的隐性记忆缓存失败: {str(e)}")
             raise
 
     def create_or_update(
         self,
-        user_id: str,
+        end_user_id: str,
         preferences: list,
         portrait: dict,
         interest_areas: dict,
         habits: list,
-        config_id: Optional[int] = None,
         expires_hours: int = 168  # 默认7天
     ) -> ImplicitMemoryCache:
         """创建或更新缓存
         
         Args:
-            user_id: 用户ID
+            end_user_id: 终端用户ID
             preferences: 偏好标签列表
             portrait: 四维画像对象
             interest_areas: 兴趣领域分布对象
             habits: 行为习惯列表
-            config_id: 配置ID
             expires_hours: 过期时间（小时），默认168小时（7天）
             
         Returns:
@@ -67,7 +65,7 @@ class ImplicitMemoryCacheRepository:
         """
         try:
             # 查找现有记录
-            cache = self.get_by_user_id(user_id)
+            cache = self.get_by_end_user_id(end_user_id)
             
             now = datetime.datetime.now()
             expires_at = now + datetime.timedelta(hours=expires_hours)
@@ -78,59 +76,58 @@ class ImplicitMemoryCacheRepository:
                 cache.portrait = portrait
                 cache.interest_areas = interest_areas
                 cache.habits = habits
-                cache.config_id = config_id
                 cache.generated_at = now
                 cache.expires_at = expires_at
                 cache.updated_at = now
-                db_logger.info(f"更新用户 {user_id} 的隐性记忆缓存")
+                db_logger.info(f"更新用户 {end_user_id} 的隐性记忆缓存")
             else:
                 # 创建新记录
                 cache = ImplicitMemoryCache(
-                    user_id=user_id,
+                    end_user_id=end_user_id,
                     preferences=preferences,
                     portrait=portrait,
                     interest_areas=interest_areas,
                     habits=habits,
-                    config_id=config_id,
                     generated_at=now,
                     expires_at=expires_at,
                     created_at=now,
                     updated_at=now
                 )
                 self.db.add(cache)
-                db_logger.info(f"创建用户 {user_id} 的隐性记忆缓存")
+                db_logger.info(f"创建用户 {end_user_id} 的隐性记忆缓存")
             
             self.db.commit()
             self.db.refresh(cache)
             return cache
         except Exception as e:
             self.db.rollback()
-            db_logger.error(f"创建或更新用户 {user_id} 的隐性记忆缓存失败: {str(e)}")
+            db_logger.error(f"创建或更新用户 {end_user_id} 的隐性记忆缓存失败: {str(e)}")
             raise
 
-    def delete_by_user_id(self, user_id: str) -> bool:
+    def delete_by_end_user_id(self, end_user_id: str) -> bool:
         """删除缓存
         
         Args:
-            user_id: 用户ID
+            end_user_id: 终端用户ID
             
         Returns:
             是否删除成功
         """
         try:
-            cache = self.get_by_user_id(user_id)
+            cache = self.get_by_end_user_id(end_user_id)
             if cache:
                 self.db.delete(cache)
                 self.db.commit()
-                db_logger.info(f"删除用户 {user_id} 的隐性记忆缓存")
+                db_logger.info(f"删除用户 {end_user_id} 的隐性记忆缓存")
                 return True
             return False
         except Exception as e:
             self.db.rollback()
-            db_logger.error(f"删除用户 {user_id} 的隐性记忆缓存失败: {str(e)}")
+            db_logger.error(f"删除用户 {end_user_id} 的隐性记忆缓存失败: {str(e)}")
             raise
 
-    def is_expired(self, cache: ImplicitMemoryCache) -> bool:
+    @staticmethod
+    def is_expired(cache: ImplicitMemoryCache) -> bool:
         """检查缓存是否过期
         
         Args:
@@ -145,36 +142,34 @@ class ImplicitMemoryCacheRepository:
 
 
 # 便捷函数
-def get_cache_by_user_id(db: Session, user_id: str) -> Optional[ImplicitMemoryCache]:
-    """根据用户ID获取缓存"""
+def get_cache_by_end_user_id(db: Session, end_user_id: str) -> Optional[ImplicitMemoryCache]:
+    """根据终端用户ID获取缓存"""
     repo = ImplicitMemoryCacheRepository(db)
-    return repo.get_by_user_id(user_id)
+    return repo.get_by_end_user_id(end_user_id)
 
 
 def create_or_update_cache(
     db: Session,
-    user_id: str,
+    end_user_id: str,
     preferences: list,
     portrait: dict,
     interest_areas: dict,
     habits: list,
-    config_id: Optional[int] = None,
     expires_hours: int = 168
 ) -> ImplicitMemoryCache:
     """创建或更新缓存"""
     repo = ImplicitMemoryCacheRepository(db)
     return repo.create_or_update(
-        user_id, preferences, portrait, interest_areas, habits, config_id, expires_hours
+        end_user_id, preferences, portrait, interest_areas, habits, expires_hours
     )
 
 
-def delete_cache_by_user_id(db: Session, user_id: str) -> bool:
+def delete_cache_by_end_user_id(db: Session, end_user_id: str) -> bool:
     """删除缓存"""
     repo = ImplicitMemoryCacheRepository(db)
-    return repo.delete_by_user_id(user_id)
+    return repo.delete_by_end_user_id(end_user_id)
 
 
 def is_cache_expired(cache: ImplicitMemoryCache) -> bool:
     """检查缓存是否过期"""
-    repo = ImplicitMemoryCacheRepository(None)
-    return repo.is_expired(cache)
+    return ImplicitMemoryCacheRepository.is_expired(cache)

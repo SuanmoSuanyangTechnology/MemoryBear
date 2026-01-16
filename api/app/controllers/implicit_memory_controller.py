@@ -156,7 +156,7 @@ async def get_preference_tags(
         service = ImplicitMemoryService(db=db, end_user_id=user_id)
         
         # Get cached profile
-        cached_profile = await service.get_cached_profile(user_id=user_id, db=db)
+        cached_profile = await service.get_cached_profile(end_user_id=user_id, db=db)
         
         if cached_profile is None:
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
@@ -227,7 +227,7 @@ async def get_dimension_portrait(
         service = ImplicitMemoryService(db=db, end_user_id=user_id)
         
         # Get cached profile
-        cached_profile = await service.get_cached_profile(user_id=user_id, db=db)
+        cached_profile = await service.get_cached_profile(end_user_id=user_id, db=db)
         
         if cached_profile is None:
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
@@ -275,7 +275,7 @@ async def get_interest_area_distribution(
         service = ImplicitMemoryService(db=db, end_user_id=user_id)
         
         # Get cached profile
-        cached_profile = await service.get_cached_profile(user_id=user_id, db=db)
+        cached_profile = await service.get_cached_profile(end_user_id=user_id, db=db)
         
         if cached_profile is None:
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
@@ -327,7 +327,7 @@ async def get_behavior_habits(
         service = ImplicitMemoryService(db=db, end_user_id=user_id)
         
         # Get cached profile
-        cached_profile = await service.get_cached_profile(user_id=user_id, db=db)
+        cached_profile = await service.get_cached_profile(end_user_id=user_id, db=db)
         
         if cached_profile is None:
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
@@ -389,45 +389,43 @@ async def generate_implicit_memory_profile(
     Generate complete user profile (all 4 modules) and cache it.
     
     Args:
-        request: Generate profile request with user_id, config_id, and force_refresh
+        request: Generate profile request with end_user_id
         db: Database session
         current_user: Current authenticated user
         
     Returns:
         Complete user profile with all modules
     """
-    user_id = request.user_id
-    api_logger.info(f"Generate profile requested for user: {user_id}")
+    end_user_id = request.end_user_id
+    api_logger.info(f"Generate profile requested for user: {end_user_id}")
     
     try:
         # Validate inputs
-        validate_user_id(user_id)
+        validate_user_id(end_user_id)
         
         # Create service with user-specific config
-        service = ImplicitMemoryService(db=db, end_user_id=user_id)
+        service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
         
         # Generate complete profile (calls LLM for all 4 modules)
-        api_logger.info(f"开始生成完整用户画像: user={user_id}")
-        profile_data = await service.generate_complete_profile(user_id=user_id)
+        api_logger.info(f"开始生成完整用户画像: user={end_user_id}")
+        profile_data = await service.generate_complete_profile(user_id=end_user_id)
         
         # Save to cache
-        config_id = request.config_id or service.memory_config.config_id
         await service.save_profile_cache(
-            user_id=user_id,
+            end_user_id=end_user_id,
             profile_data=profile_data,
-            config_id=config_id,
             db=db,
             expires_hours=168  # 7 days
         )
         
-        api_logger.info(f"用户画像生成并缓存成功: user={user_id}")
+        api_logger.info(f"用户画像生成并缓存成功: user={end_user_id}")
         
         # Add metadata
-        profile_data["user_id"] = user_id
+        profile_data["end_user_id"] = end_user_id
         profile_data["cached"] = False
         
         return success(data=profile_data, msg="用户画像生成成功")
         
     except Exception as e:
-        api_logger.error(f"生成用户画像失败: user={user_id}, error={str(e)}", exc_info=True)
-        return handle_implicit_memory_error(e, "用户画像生成", user_id)
+        api_logger.error(f"生成用户画像失败: user={end_user_id}, error={str(e)}", exc_info=True)
+        return handle_implicit_memory_error(e, "用户画像生成", end_user_id)
