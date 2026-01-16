@@ -173,7 +173,7 @@ async def get_preference_tags(
         filtered_preferences = []
         for pref in preferences:
             # Filter by confidence threshold
-            if pref.get("confidence_score", 0) < confidence_threshold:
+            if confidence_threshold is not None and pref.get("confidence_score", 0) < confidence_threshold:
                 continue
             
             # Filter by category if specified

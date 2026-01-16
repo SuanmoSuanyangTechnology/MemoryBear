@@ -7,6 +7,7 @@ user profiles from memory summaries.
 """
 
 import logging
+import asyncio
 from datetime import datetime
 from typing import List, Optional
 
@@ -390,10 +391,12 @@ class ImplicitMemoryService:
         
         try:
             # 并行调用4个分析方法
-            preferences = await self.get_preference_tags(user_id=user_id)
-            portrait = await self.get_dimension_portrait(user_id=user_id)
-            interest_areas = await self.get_interest_area_distribution(user_id=user_id)
-            habits = await self.get_behavior_habits(user_id=user_id)
+            preferences, portrait, interest_areas, habits = await asyncio.gather(
+                self.get_preference_tags(user_id=user_id),
+                self.get_dimension_portrait(user_id=user_id),
+                self.get_interest_area_distribution(user_id=user_id),
+                self.get_behavior_habits(user_id=user_id)
+            )
             
             # 转换为可序列化的格式
             profile_data = {
