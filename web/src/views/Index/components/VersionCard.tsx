@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2026-01-12 16:34:59
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-01-16 13:00:22
+ * @LastEditTime: 2026-01-16 15:38:35
  */
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -44,7 +44,7 @@ const GuideCard: React.FC = () => {
               {versionInfo?.version}
             </span>
         </div>
-        <div className='rb:flex rb:flex-col rb:max-h-[420px] rb:overflow-y-auto rb:text-[#5B6167]'>
+        <div className='rb:flex rb:flex-col rb:max-h-[400px] rb:overflow-y-auto rb:text-[#5B6167]'>
             {versionInfo && (() => {
               const introduction = getIntroduction();
               return introduction ? (<>  
