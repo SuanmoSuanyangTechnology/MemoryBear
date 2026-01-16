@@ -972,10 +972,10 @@ export const useWorkflowGraph = ({
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
                 itemConfig[key] = data.config[key].defaultValue
               } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
-                const { knowledge_bases } = data.config[key].defaultValue
+                const { knowledge_bases } = data.config[key].defaultValue || {}
                 itemConfig = {
                   ...itemConfig,
-                  ...data.config[key].defaultValue,
+                  ...(data.config[key].defaultValue || {}),
                   knowledge_bases: knowledge_bases?.map((vo: any) => {
                     const kb_config = vo.config || { similarity_threshold: vo.similarity_threshold, strategy: vo.strategy, top_k: vo.top_k, weight: vo.weight }
                     return { kb_id: vo.kb_id || vo.id, ...kb_config, }
