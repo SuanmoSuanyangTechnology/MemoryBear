@@ -81,7 +81,7 @@ class DataConfigRepository:
         n.description AS description, 
         n.entity_type AS entity_type, 
         n.name AS name,
-        n.fact_summary AS fact_summary,
+        COALESCE(n.fact_summary, '') AS fact_summary,
         n.group_id AS group_id,
         n.apply_id AS apply_id,
         n.user_id AS user_id,
@@ -115,7 +115,7 @@ class DataConfigRepository:
         description: n.description,
         entity_type: n.entity_type,
         name: n.name,
-        fact_summary: n.fact_summary,
+        fact_summary: COALESCE(n.fact_summary, ''),
         id: n.id
       } AS sourceNode,
       {
@@ -132,7 +132,7 @@ class DataConfigRepository:
         description: m.description,
         entity_type: m.entity_type,
         name: m.name,
-        fact_summary: m.fact_summary,
+        fact_summary: COALESCE(m.fact_summary, ''),
         id: m.id
       } AS targetNode
     """
