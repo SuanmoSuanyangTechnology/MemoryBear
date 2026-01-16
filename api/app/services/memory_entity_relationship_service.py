@@ -15,6 +15,8 @@ from neo4j.time import DateTime as Neo4jDateTime
 import json
 from datetime import datetime
 
+from app.schemas.memory_episodic_schema import EmotionType
+
 logger = logging.getLogger(__name__)
 
 class MemoryEntityService:
@@ -123,7 +125,7 @@ class MemoryEntityService:
         extracted_entity_list = self._deduplicate_dict_list(extracted_entity_list)
         
         # 合并所有数据并处理相同text的合并
-        all_timeline_data = memory_summary_list + statement_list + extracted_entity_list
+        all_timeline_data = memory_summary_list + statement_list
         all_timeline_data = self._merge_same_text_items(all_timeline_data)
         
         result = {
@@ -496,11 +498,11 @@ class MemoryEmotion:
                 length_data.append(emotion_intensity)
             if emotion_type is not None and emotion_intensity is not None and formatted_created_at is not None:
                 # 使用(emotion_type, created_at)作为分组键
-                if emotion_type in {"joy", "surprise"}:
+                if emotion_type in {EmotionType.JOY_TYPE, EmotionType.SURPRISE_TYPE}:
                     emotion_type='positive'
-                elif emotion_type in {"sadness", "fear", "anger"}:
+                elif emotion_type in {EmotionType.SANDROWNESS_TYPE, EmotionType.FEAR_TYPE, EmotionType.ANGET_TYPE}:
                     emotion_type='negative'
-                elif emotion_type=='neutral':
+                elif emotion_type==EmotionType.NEUTRAL_TYPE:
                     emotion_type='neutral'
                 group_key = (emotion_type, formatted_created_at)
                 # 累加emotion_intensity
@@ -595,7 +597,7 @@ class MemoryInteraction:
                 group_id = ori_data[0]['group_id']
                 Space_User = await self.connector.execute_query(Memory_Space_User, group_id=group_id)
                 if not Space_User:
-                    return '不存在用户'
+                    return []
                 user_id=Space_User[0]['id']
 
                 results = await self.connector.execute_query(Memory_Space_Associative, id=self.id,user_id=user_id)

@@ -425,14 +425,8 @@ async def Input_Summary(
 
     try:
         # Extract services from context
-        template_service = get_context_resource(ctx, "template_service")
         session_service = get_context_resource(ctx, "session_service")
         search_service = get_context_resource(ctx, "search_service")
-
-        # Get LLM client from memory_config
-        with get_db_context() as db:
-            factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client_from_config(memory_config)
 
         # Resolve session ID
         sessionid = Resolve_username(usermessages) or ""
@@ -539,31 +533,11 @@ async def Input_Summary(
             )
             retrieve_info, question, raw_results = "", query, []
 
+        # Return retrieved information directly without LLM processing
+        # Use the raw retrieved info as the answer
+        aimessages = retrieve_info if retrieve_info else "信息不足，无法回答"
 
-        # Render template
-        system_prompt = await template_service.render_template(
-            template_name='Retrieve_Summary_prompt.jinja2',
-            operation_name='input_summary',
-            query=query,
-            history=history,
-            retrieve_info=retrieve_info
-        )
-
-        # Call LLM with structured response
-        try:
-            structured = await llm_client.response_structured(
-                messages=[{"role": "system", "content": system_prompt}],
-                response_model=RetrieveSummaryResponse
-            )
-            aimessages = structured.data.query_answer or "信息不足，无法回答"
-        except Exception as e:
-            logger.error(
-                f"Input_Summary: response_structured failed, using default answer: {e}",
-                exc_info=True
-            )
-            aimessages = "信息不足，无法回答"
-
-        logger.info(f"Quick answer summary: {storage_type}--{user_rag_memory_id}--{aimessages}")
+        logger.info(f"Quick answer (no LLM): {storage_type}--{user_rag_memory_id}--{aimessages[:500]}...")
 
         # Emit intermediate output for frontend
         return {

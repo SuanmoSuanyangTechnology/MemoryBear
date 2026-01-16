@@ -2,29 +2,28 @@
 工作流服务层
 """
 import datetime
-import json
 import logging
 import uuid
-import datetime
 from typing import Any, Annotated, AsyncGenerator
 
+from deprecated import deprecated
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.workflow.validator import validate_workflow_config
-from app.db import get_db, get_db_context
+from app.db import get_db
+from app.models.conversation_model import Message
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
-from app.repositories.end_user_repository import EndUserRepository
-from app.services.multi_agent_service import convert_uuids_to_str
+from app.repositories.conversation_repository import MessageRepository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
     WorkflowNodeExecutionRepository
 )
 from app.schemas import DraftRunRequest
-from app.utils.sse_utils import format_sse_message
+from app.services.multi_agent_service import convert_uuids_to_str
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +36,7 @@ class WorkflowService:
         self.config_repo = WorkflowConfigRepository(db)
         self.execution_repo = WorkflowExecutionRepository(db)
         self.node_execution_repo = WorkflowNodeExecutionRepository(db)
+        self.message_repo = MessageRepository(db)
 
     # ==================== 配置管理 ====================
 
@@ -418,14 +418,13 @@ class WorkflowService:
         """运行工作流
 
         Args:
+            workspace_id:
+            config:
+            payload:
             app_id: 应用 ID
-            input_data: 输入数据（包含 message 和 variables）
-            triggered_by: 触发用户 ID
-            conversation_id: 会话 ID（可选）
-            stream: 是否流式返回
 
         Returns:
-            执行结果（非流式）或生成器（流式）
+            执行结果（非流式）
 
         Raises:
             BusinessException: 配置不存在或执行失败时抛出
@@ -438,7 +437,8 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
-        input_data = {"message": payload.message, "variables": payload.variables, "conversation_id": payload.conversation_id}
+        input_data = {"message": payload.message, "variables": payload.variables,
+                      "conversation_id": payload.conversation_id}
 
         # 转换 user_id 为 UUID
         triggered_by_uuid = None
@@ -461,7 +461,7 @@ class WorkflowService:
             workflow_config_id=config.id,
             app_id=app_id,
             trigger_type="manual",
-            triggered_by=triggered_by_uuid,
+            triggered_by=None,
             conversation_id=conversation_id_uuid,
             input_data=input_data
         )
@@ -482,14 +482,6 @@ class WorkflowService:
         try:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
-            with get_db_context() as db:
-                end_user_repo = EndUserRepository(db)
-                new_end_user = end_user_repo.get_or_create_end_user(
-                    app_id=app_id,
-                    other_id=payload.user_id,
-                    original_user_id=payload.user_id  # Save original user_id to other_id
-                )
-                end_user_id = str(new_end_user.id)
 
             executions = self.execution_repo.get_by_conversation_id(conversation_id=conversation_id_uuid)
 
@@ -500,14 +492,17 @@ class WorkflowService:
                         variables = last_state.get("variables", {})
                         conv_vars = variables.get("conv", {})
                         input_data["conv"] = conv_vars
+                        input_data["conv_messages"] = last_state.get("messages") or []
                         break
+
+            init_message_length = len(input_data.get("conv_messages", []))
 
             result = await execute_workflow(
                 workflow_config=workflow_config_dict,
                 input_data=input_data,
                 execution_id=execution.execution_id,
                 workspace_id=str(workspace_id),
-                user_id=end_user_id
+                user_id=payload.user_id
             )
 
             # 更新执行结果
@@ -517,6 +512,17 @@ class WorkflowService:
                     "completed",
                     output_data=result
                 )
+                final_messages = result.get("messages", [])[init_message_length:]
+                for message in final_messages:
+                    message_obj = Message(
+                        conversation_id=conversation_id_uuid,
+                        role=message["role"],
+                        content=message["content"],
+                    )
+                    self.message_repo.add_message(message_obj)
+                self.db.commit()
+                logger.info(f"Workflow Run Success, "
+                            f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
             else:
                 self.update_execution_status(
                     execution.execution_id,
@@ -529,6 +535,7 @@ class WorkflowService:
                 "execution_id": execution.execution_id,
                 "status": result.get("status"),
                 "variables": result.get("variables"),
+                "messages": result.get("messages"),
                 "output": result.get("output"),  # 最终输出（字符串）
                 "output_data": result.get("node_outputs", {}),  # 所有节点输出（详细数据）
                 "conversation_id": result.get("conversation_id"),  # 所有节点输出（详细数据）payload.,  # 会话 ID
@@ -559,6 +566,7 @@ class WorkflowService:
         """运行工作流（流式）
 
         Args:
+            workspace_id:
             app_id: 应用 ID
             payload: 请求对象（包含 message, variables, conversation_id 等）
             config: 存储类型（可选）
@@ -601,7 +609,7 @@ class WorkflowService:
             workflow_config_id=config.id,
             app_id=app_id,
             trigger_type="manual",
-            triggered_by=triggered_by_uuid,
+            triggered_by=None,
             conversation_id=conversation_id_uuid,
             input_data=input_data
         )
@@ -621,14 +629,6 @@ class WorkflowService:
         try:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
-            with get_db_context() as db:
-                end_user_repo = EndUserRepository(db)
-                new_end_user = end_user_repo.get_or_create_end_user(
-                    app_id=app_id,
-                    other_id=payload.user_id,
-                    original_user_id=payload.user_id  # Save original user_id to other_id
-                )
-                end_user_id = str(new_end_user.id)
             executions = self.execution_repo.get_by_conversation_id(conversation_id=conversation_id_uuid)
 
             for exec_res in executions:
@@ -638,17 +638,46 @@ class WorkflowService:
                         variables = last_state.get("variables", {})
                         conv_vars = variables.get("conv", {})
                         input_data["conv"] = conv_vars
+                        input_data["conv_messages"] = last_state.get("messages") or []
                         break
+            init_message_length = len(input_data.get("conv_messages", []))
+            from app.core.workflow.executor import execute_workflow_stream
 
-            # 调用流式执行（executor 会发送 workflow_start 和 workflow_end 事件）
-            async for event in self._run_workflow_stream(
+            async for event in execute_workflow_stream(
                     workflow_config=workflow_config_dict,
                     input_data=input_data,
                     execution_id=execution.execution_id,
                     workspace_id=str(workspace_id),
-                    user_id=end_user_id
+                    user_id=payload.user_id
             ):
-                # 直接转发 executor 的事件（已经是正确的格式）
+                if event.get("event") == "workflow_end":
+
+                    status = event.get("data", {}).get("status")
+                    if status == "completed":
+                        self.update_execution_status(
+                            execution.execution_id,
+                            "completed",
+                            output_data=event.get("data")
+                        )
+                        final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
+                        for message in final_messages:
+                            message_obj = Message(
+                                conversation_id=conversation_id_uuid,
+                                role=message["role"],
+                                content=message["content"],
+                            )
+                            self.message_repo.add_message(message_obj)
+                        self.db.commit()
+                        logger.info(f"Workflow Run Success, "
+                                    f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
+                    elif status == "failed":
+                        self.update_execution_status(
+                            execution.execution_id,
+                            "failed",
+                            output_data=event.get("data")
+                        )
+                    else:
+                        logger.error(f"unexpect workflow run status, status: {status}")
                 yield event
 
         except Exception as e:
@@ -667,6 +696,8 @@ class WorkflowService:
                 }
             }
 
+    @deprecated(reason="This method is deprecated. "
+                       "Please use WorkflowService.run / run_stream instead.")
     async def run_workflow(
             self,
             app_id: uuid.UUID,
@@ -819,6 +850,7 @@ class WorkflowService:
 
         return clean_value(event)
 
+    @deprecated(reason="This method is deprecated. Please use WorkflowService.run_stream instead.")
     async def _run_workflow_stream(
             self,
             workflow_config: dict[str, Any],

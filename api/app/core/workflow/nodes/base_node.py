@@ -7,13 +7,13 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from operator import add
 from typing import Any
 
-from langchain_core.messages import AnyMessage, AIMessage
+from langchain_core.messages import AIMessage
 from langgraph.config import get_stream_writer
 from typing_extensions import TypedDict, Annotated
 
+from app.core.config import settings
 from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ class WorkflowState(TypedDict):
     The state object passed between nodes in a workflow, containing messages, variables, node outputs, etc.
     """
     # List of messages (append mode)
-    messages: Annotated[list[tuple[str, str]], add]
+    messages: list[dict[str, str]]
 
     # Set of loop node IDs, used for assigning values in loop nodes
     cycle_nodes: list
@@ -154,7 +154,7 @@ class BaseNode(ABC):
         Returns:
             超时时间
         """
-        return 60
+        return settings.WORKFLOW_NODE_TIMEOUT
         # return self.error_handling.get("timeout", 60)
 
     async def run(self, state: WorkflowState) -> dict[str, Any]:
@@ -203,6 +203,7 @@ class BaseNode(ABC):
             # 返回包装后的输出和运行时变量
             return {
                 **wrapped_output,
+                "messages": state["messages"],
                 "variables": state["variables"],
                 "runtime_vars": {
                     self.node_id: runtime_var
@@ -356,6 +357,7 @@ class BaseNode(ABC):
             # Build complete state update (including node_outputs, runtime_vars, and final streaming buffer)
             state_update = {
                 **final_output,
+                "messages": state["messages"],
                 "variables": state["variables"],
                 "runtime_vars": {
                     self.node_id: runtime_var

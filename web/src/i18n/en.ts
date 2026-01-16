@@ -71,6 +71,7 @@ export const en = {
       stepTwoDescription: 'Here you can create and manage spaces to organize models and data for different use cases.Once your spaces are ready, head to User Management to invite members and manage access.👉 Click User Management in the left menu to continue.',
       stepThree: 'This is User Management',
       stepThreeDescription: 'Here you can create users, assign roles, and manage access for your team.Once users are set up, the basic configuration is complete and you’re ready to start using the platform 🎉',
+      finishButtonText: 'Get Started',
     },
     menu: {
       home: 'Home',
@@ -91,6 +92,7 @@ export const en = {
       memberManagement: 'Member Management',
       memorySummary: 'Memory Summary',
       memoryConversation: 'Memory Validation',
+      helpCenter: 'Help Center',
       memorySummaryHandlers: 'Memory Summary Handlers',
       createMemorySummary: 'Create Memory Summary',
       memoryManagement: 'Memory Management',
@@ -183,14 +185,15 @@ export const en = {
       createNewMemorySummary: 'Create New Memory Entry',
 
       createNewApplication: 'Create New Application',
-      createNewApplicationDesc: 'Create a new application for this space',
+      createNewApplicationDesc: 'Build an app in just 3 minutes with zero-code drag-and-drop.',
 
       createNewKnowledge: 'Create New Knowledge',
-      createNewKnowledgeDesc: 'Create a new memory entry',
+      createNewKnowledgeDesc: 'Transform your data into a fully searchable, dedicated knowledge base in seconds.',
 
       memoryConversation: 'Memory Conversation',
-      memoryConversationDesc: 'Create a new memory conversation',
-
+      memoryConversationDesc: 'The more you use it, the better AI understands you.',
+      helpCenter: 'Help Center',
+      helpCenterDesc: 'One-stop support to answer your questions and get you started fast.',
       memorySummary: 'View Memory Summary',
       memorySummaryDesc: 'View Memory Summary Report',
 
@@ -618,6 +621,7 @@ export const en = {
       retrieve:'Retrieve',
       processing: 'Processing',
       processingMode: 'Processing Mode',
+      processMsg: 'Processing Message',
       dataSize: 'Data Size',
       createUpdateTime: 'Create/Update Time',
       operation: 'Operation',
@@ -1449,6 +1453,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
     },
     memoryConversation: {
       searchPlaceholder: 'Enter user ID...',
+      chatEmpty:'Is there anything I can help you with？',
       userID: 'User ID',
       testMemoryConversation: 'Test Memory Conversation',
       conversationContent: 'Conversation Content',

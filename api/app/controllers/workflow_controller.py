@@ -39,11 +39,11 @@ router = APIRouter(prefix="/apps", tags=["workflow"])
 @router.post("/{app_id}/workflow")
 @cur_workspace_access_guard()
 async def create_workflow_config(
-    app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
-    config: WorkflowConfigCreate,
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    service: Annotated[WorkflowService, Depends(get_workflow_service)]
+        app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
+        config: WorkflowConfigCreate,
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        service: Annotated[WorkflowService, Depends(get_workflow_service)]
 ):
     """创建工作流配置
 
@@ -95,6 +95,7 @@ async def create_workflow_config(
             code=BizCode.INTERNAL_ERROR,
             msg=f"创建工作流配置失败: {str(e)}"
         )
+
 
 #
 # @router.get("/{app_id}/workflow")
@@ -199,10 +200,10 @@ async def create_workflow_config(
 
 @router.delete("/{app_id}/workflow")
 async def delete_workflow_config(
-    app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    service: Annotated[WorkflowService, Depends(get_workflow_service)]
+        app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        service: Annotated[WorkflowService, Depends(get_workflow_service)]
 ):
     """删除工作流配置
 
@@ -243,11 +244,11 @@ async def delete_workflow_config(
 
 @router.post("/{app_id}/workflow/validate")
 async def validate_workflow_config(
-    app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    service: Annotated[WorkflowService, Depends(get_workflow_service)],
-    for_publish: Annotated[bool, Query(description="是否为发布验证")] = False
+        app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        service: Annotated[WorkflowService, Depends(get_workflow_service)],
+        for_publish: Annotated[bool, Query(description="是否为发布验证")] = False
 ):
     """验证工作流配置
 
@@ -312,12 +313,12 @@ async def validate_workflow_config(
 
 @router.get("/{app_id}/workflow/executions")
 async def get_workflow_executions(
-    app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    service: Annotated[WorkflowService, Depends(get_workflow_service)],
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0
+        app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        service: Annotated[WorkflowService, Depends(get_workflow_service)],
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0
 ):
     """获取工作流执行记录列表
 
@@ -365,10 +366,10 @@ async def get_workflow_executions(
 
 @router.get("/workflow/executions/{execution_id}")
 async def get_workflow_execution(
-    execution_id: Annotated[str, Path(description="执行 ID")],
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    service: Annotated[WorkflowService, Depends(get_workflow_service)]
+        execution_id: Annotated[str, Path(description="执行 ID")],
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        service: Annotated[WorkflowService, Depends(get_workflow_service)]
 ):
     """获取工作流执行详情
 
@@ -417,16 +418,14 @@ async def get_workflow_execution(
         )
 
 
-
 # ==================== 工作流执行 ====================
-
 @router.post("/{app_id}/workflow/run")
 async def run_workflow(
-    app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
-    request: WorkflowExecutionRequest,
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    service: Annotated[WorkflowService, Depends(get_workflow_service)]
+        app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
+        request: WorkflowExecutionRequest,
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        service: Annotated[WorkflowService, Depends(get_workflow_service)]
 ):
     """执行工作流
 
@@ -487,22 +486,22 @@ async def run_workflow(
                 """
                 try:
                     async for event in await service.run_workflow(
-                        app_id=app_id,
-                        input_data=input_data,
-                        triggered_by=current_user.id,
-                        conversation_id=uuid.UUID(request.conversation_id) if request.conversation_id else None,
-                        stream=True
+                            app_id=app_id,
+                            input_data=input_data,
+                            triggered_by=current_user.id,
+                            conversation_id=uuid.UUID(request.conversation_id) if request.conversation_id else None,
+                            stream=True
                     ):
                         # 提取事件类型和数据
                         event_type = event.get("event", "message")
                         event_data = event.get("data", {})
-                        
+
                         # 转换为标准 SSE 格式（字符串）
                         # event: <type>
                         # data: <json>
                         sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
                         yield sse_message
-                        
+
                 except Exception as e:
                     logger.error(f"流式执行异常: {e}", exc_info=True)
                     # 发送错误事件
@@ -554,10 +553,10 @@ async def run_workflow(
 
 @router.post("/workflow/executions/{execution_id}/cancel")
 async def cancel_workflow_execution(
-    execution_id: Annotated[str, Path(description="执行 ID")],
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    service: Annotated[WorkflowService, Depends(get_workflow_service)]
+        execution_id: Annotated[str, Path(description="执行 ID")],
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        service: Annotated[WorkflowService, Depends(get_workflow_service)]
 ):
     """取消工作流执行
 
@@ -602,7 +601,7 @@ async def cancel_workflow_execution(
 
     except BusinessException as e:
         logger.warning(f"取消工作流执行失败: {e.message}")
-        return fail(code=e.error_code, msg=e.message)
+        return fail(code=e.code, msg=e.message)
     except Exception as e:
         logger.error(f"取消工作流执行异常: {e}", exc_info=True)
         return fail(

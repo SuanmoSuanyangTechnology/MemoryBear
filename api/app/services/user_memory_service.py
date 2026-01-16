@@ -13,10 +13,15 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.core.logging_config import get_logger
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
+from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
+from app.services.implicit_memory_service import ImplicitMemoryService
 from app.services.memory_base_service import MemoryBaseService
 from app.services.memory_config_service import MemoryConfigService
+from app.services.memory_perceptual_service import MemoryPerceptualService
+from app.services.memory_short_service import ShortService
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -1196,18 +1201,17 @@ async def analytics_memory_types(
     end_user_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    统计9种记忆类型的数量和百分比
+    统计8种记忆类型的数量和百分比
     
     计算规则：
-    1. 感知记忆 (PERCEPTUAL_MEMORY) = statement + entity
-    2. 工作记忆 (WORKING_MEMORY) = chunk + entity
-    3. 短期记忆 (SHORT_TERM_MEMORY) = chunk
-    4. 长期记忆 (LONG_TERM_MEMORY) = entity
-    5. 显性记忆 (EXPLICIT_MEMORY) = 情景记忆 + 语义记忆（通过 MemoryBaseService.get_explicit_memory_count 获取）
-    6. 隐性记忆 (IMPLICIT_MEMORY) = 1/3 * entity
-    7. 情绪记忆 (EMOTIONAL_MEMORY) = 情绪标签统计总数（通过 MemoryBaseService.get_emotional_memory_count 获取）
-    8. 情景记忆 (EPISODIC_MEMORY) = memory_summary（通过 MemoryBaseService.get_episodic_memory_count 获取）
-    9. 遗忘记忆 (FORGET_MEMORY) = 激活值低于阈值的节点数（通过 MemoryBaseService.get_forget_memory_count 获取）
+    1. 感知记忆 (PERCEPTUAL_MEMORY) = 通过 MemoryPerceptualService.get_memory_count 获取的 total_count
+    2. 工作记忆 (WORKING_MEMORY) = 会话数量（通过 ConversationRepository.get_conversation_by_user_id 获取）
+    3. 短期记忆 (SHORT_TERM_MEMORY) = /short_term 接口返回的问答对数量
+    4. 显性记忆 (EXPLICIT_MEMORY) = 情景记忆 + 语义记忆（通过 MemoryBaseService.get_explicit_memory_count 获取）
+    5. 隐性记忆 (IMPLICIT_MEMORY) = Statement 节点数量的三分之一
+    6. 情绪记忆 (EMOTIONAL_MEMORY) = 情绪标签统计总数（通过 MemoryBaseService.get_emotional_memory_count 获取）
+    7. 情景记忆 (EPISODIC_MEMORY) = memory_summary（通过 MemoryBaseService.get_episodic_memory_count 获取）
+    8. 遗忘记忆 (FORGET_MEMORY) = 激活值低于阈值的节点数（通过 MemoryBaseService.get_forget_memory_count 获取）
     
     Args:
         db: 数据库会话
@@ -1227,7 +1231,6 @@ async def analytics_memory_types(
         - PERCEPTUAL_MEMORY: 感知记忆
         - WORKING_MEMORY: 工作记忆
         - SHORT_TERM_MEMORY: 短期记忆
-        - LONG_TERM_MEMORY: 长期记忆
         - EXPLICIT_MEMORY: 显性记忆
         - IMPLICIT_MEMORY: 隐性记忆
         - EMOTIONAL_MEMORY: 情绪记忆
@@ -1237,40 +1240,78 @@ async def analytics_memory_types(
     # 初始化基础服务
     base_service = MemoryBaseService()
     
-    # 定义需要查询的基础节点类型
-    node_types = {
-        "Statement": "Statement",
-        "Entity": "ExtractedEntity",
-        "Chunk": "Chunk"
-    }
+    # 初始化感知记忆服务
+    perceptual_service = MemoryPerceptualService(db)
     
-    # 存储每种节点类型的计数
-    node_counts = {}
+    # 获取感知记忆数量
+    if end_user_id:
+        perceptual_stats = perceptual_service.get_memory_count(uuid.UUID(end_user_id))
+        perceptual_count = perceptual_stats.get("total", 0)
+    else:
+        perceptual_count = 0
     
-    # 查询每种节点类型的数量
-    for key, node_type in node_types.items():
-        if end_user_id:
-            query = f"""
-            MATCH (n:{node_type})
+    # 获取工作记忆数量（基于会话数量）
+    work_count = 0
+    if end_user_id:
+        try:
+            conversation_repo = ConversationRepository(db)
+            conversations = conversation_repo.get_conversation_by_user_id(
+                user_id=uuid.UUID(end_user_id),
+                limit=100,  # 获取更多会话以准确统计
+                is_activate=True
+            )
+            work_count = len(conversations)
+            logger.debug(f"工作记忆数量（会话数）: {work_count} (end_user_id={end_user_id})")
+        except Exception as e:
+            logger.warning(f"获取会话数量失败，工作记忆数量设为0: {str(e)}")
+            work_count = 0
+    
+    # 获取隐性记忆数量（基于 Statement 节点数量的三分之一）
+    implicit_count = 0
+    if end_user_id:
+        try:
+            # 查询 Statement 节点数量
+            query = """
+            MATCH (n:Statement)
             WHERE n.group_id = $group_id
             RETURN count(n) as count
             """
             result = await _neo4j_connector.execute_query(query, group_id=end_user_id)
-        else:
-            query = f"""
-            MATCH (n:{node_type})
-            RETURN count(n) as count
-            """
-            result = await _neo4j_connector.execute_query(query)
-        
-        # 提取计数结果
-        count = result[0]["count"] if result and len(result) > 0 else 0
-        node_counts[key] = count
+            statement_count = result[0]["count"] if result and len(result) > 0 else 0
+            # 取三分之一作为隐性记忆数量
+            implicit_count = round(statement_count / 3)
+            logger.debug(f"隐性记忆数量（Statement数量的1/3）: {implicit_count} (Statement总数={statement_count}, end_user_id={end_user_id})")
+        except Exception as e:
+            logger.warning(f"获取Statement数量失败，隐性记忆数量设为0: {str(e)}")
+            implicit_count = 0
     
-    # 获取各节点类型的数量
-    statement_count = node_counts.get("Statement", 0)
-    entity_count = node_counts.get("Entity", 0)
-    chunk_count = node_counts.get("Chunk", 0)
+    # 原有的基于行为习惯的统计方式（已注释）
+    # implicit_count = 0
+    # if end_user_id:
+    #     try:
+    #         implicit_service = ImplicitMemoryService(db, end_user_id)
+    #         behavior_habits = await implicit_service.get_behavior_habits(
+    #             user_id=end_user_id
+    #         )
+    #         implicit_count = len(behavior_habits)
+    #         logger.debug(f"隐性记忆数量（行为习惯数）: {implicit_count} (end_user_id={end_user_id})")
+    #     except Exception as e:
+    #         logger.warning(f"获取行为习惯数量失败，隐性记忆数量设为0: {str(e)}")
+    #         implicit_count = 0
+    
+    # 获取短期记忆数量（基于 /short_term 接口返回的问答对数量）
+    short_term_count = 0
+    if end_user_id:
+        try:
+            short_term_service = ShortService(end_user_id)
+            short_term_data = short_term_service.get_short_databasets()
+            # 统计 short_term 数组的长度
+            if short_term_data:
+                short_term_count = len(short_term_data)
+            logger.debug(f"短期记忆数量（问答对数）: {short_term_count} (end_user_id={end_user_id})")
+        except Exception as e:
+            logger.warning(f"获取短期记忆数量失败，短期记忆数量设为0: {str(e)}")
+            short_term_count = 0
     
     # 获取用户的遗忘阈值配置
     forgetting_threshold = 0.3  # 默认值
@@ -1296,17 +1337,16 @@ async def analytics_memory_types(
     # 使用 MemoryBaseService 的共享方法获取特殊记忆类型的数量
     episodic_count = await base_service.get_episodic_memory_count(end_user_id)
     explicit_count = await base_service.get_explicit_memory_count(end_user_id)
-    emotion_count = await base_service.get_emotional_memory_count(end_user_id, statement_count)
+    emotion_count = await base_service.get_emotional_memory_count(end_user_id, perceptual_count)
     forget_count = await base_service.get_forget_memory_count(end_user_id, forgetting_threshold)
     
-    # 按规则计算9种记忆类型的数量（使用英文枚举作为key）
+    # 按规则计算8种记忆类型的数量（使用英文枚举作为key）
     memory_counts = {
-        "PERCEPTUAL_MEMORY": statement_count + entity_count,      # 感知记忆
-        "WORKING_MEMORY": chunk_count + entity_count,             # 工作记忆
-        "SHORT_TERM_MEMORY": chunk_count,                         # 短期记忆
-        "LONG_TERM_MEMORY": entity_count,                         # 长期记忆
+        "PERCEPTUAL_MEMORY": perceptual_count,                    # 感知记忆
+        "WORKING_MEMORY": work_count,                             # 工作记忆（基于会话数量）
+        "SHORT_TERM_MEMORY": short_term_count,                    # 短期记忆（基于问答对数量）
         "EXPLICIT_MEMORY": explicit_count,                        # 显性记忆（情景记忆 + 语义记忆）
-        "IMPLICIT_MEMORY": entity_count // 3,                     # 隐性记忆 (1/3 entity)
+        "IMPLICIT_MEMORY": implicit_count,                        # 隐性记忆（Statement数量的1/3）
         "EMOTIONAL_MEMORY": emotion_count,                        # 情绪记忆（使用情绪标签统计）
         "EPISODIC_MEMORY": episodic_count,                        # 情景记忆
         "FORGET_MEMORY": forget_count                             # 遗忘记忆（激活值低于阈值）
@@ -1332,7 +1372,7 @@ async def analytics_graph_data(
     db: Session,
     end_user_id: str,
     node_types: Optional[List[str]] = None,
-    limit: int = 100,
+    limit: int = 130,
     depth: int = 1,
     center_node_id: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -1416,11 +1456,13 @@ async def analytics_graph_data(
                 elementId(n) as id,
                 labels(n)[0] as label,
                 properties(n) as properties
+            LIMIT $limit
             """
             node_params = {
                 "group_id": end_user_id,
-                # "limit": limit
+                "limit": limit
             }
+
 
         # 执行节点查询
         node_results = await _neo4j_connector.execute_query(node_query, **node_params)
@@ -1576,10 +1618,15 @@ async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_
     for field in allowed_fields:
         if field in properties:
             value = properties[field]
+            if str(field) == 'entity_type':
+                value=type_mapping.get(value,'')
+            if str(field)=="emotion_type":
+                value=EmotionType.EMOTION_MAPPING.get(value)
+            if str(field)=="emotion_subject":
+                value=EmotionSubject.SUBJECT_MAPPING.get(value)
             # 清理 Neo4j 特殊类型
             filtered_props[field] = _clean_neo4j_value(value)
     filtered_props['associative_memory']=[i['rel_count'] for i in node_results][0]
-    print(filtered_props)
     return filtered_props
 
 
