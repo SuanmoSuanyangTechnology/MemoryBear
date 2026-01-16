@@ -262,3 +262,27 @@ InterestCategory = InterestCategoryResponse
 InterestAreaDistribution = InterestAreaDistributionResponse
 BehaviorHabit = BehaviorHabitResponse
 UserProfile = UserProfileResponse
+
+
+# Cache-related Schemas
+
+class GenerateProfileRequest(BaseModel):
+    """生成完整用户画像请求"""
+    user_id: str = Field(..., description="用户ID")
+    config_id: Optional[int] = Field(None, description="配置ID（用于指定LLM模型）")
+    force_refresh: bool = Field(False, description="是否强制刷新缓存")
+
+
+class CompleteProfileResponse(BaseModel):
+    """完整用户画像响应（包含所有模块）"""
+    user_id: str
+    preferences: List[PreferenceTagResponse]
+    portrait: DimensionPortraitResponse
+    interest_areas: InterestAreaDistributionResponse
+    habits: List[BehaviorHabitResponse]
+    generated_at: datetime.datetime
+    cached: bool = Field(False, description="是否来自缓存")
+    
+    @field_serializer("generated_at", when_used="json")
+    def _serialize_generated_at(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
