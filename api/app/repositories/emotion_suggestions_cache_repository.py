@@ -46,7 +46,6 @@ class EmotionSuggestionsCacheRepository:
         end_user_id: str,
         health_summary: str,
         suggestions: list,
-        config_id: Optional[int] = None,
         expires_hours: int = 24
     ) -> EmotionSuggestionsCache:
         """创建或更新缓存
@@ -55,7 +54,6 @@ class EmotionSuggestionsCacheRepository:
             end_user_id: 终端用户ID（组ID）
             health_summary: 健康状态摘要
             suggestions: 建议列表
-            config_id: 配置ID
             expires_hours: 过期时间（小时），默认24小时
             
         Returns:
@@ -72,7 +70,6 @@ class EmotionSuggestionsCacheRepository:
                 # 更新现有记录
                 cache.health_summary = health_summary
                 cache.suggestions = suggestions
-                cache.config_id = config_id
                 cache.generated_at = now
                 cache.expires_at = expires_at
                 cache.updated_at = now
@@ -83,7 +80,6 @@ class EmotionSuggestionsCacheRepository:
                     end_user_id=end_user_id,
                     health_summary=health_summary,
                     suggestions=suggestions,
-                    config_id=config_id,
                     generated_at=now,
                     expires_at=expires_at,
                     created_at=now,
@@ -122,7 +118,8 @@ class EmotionSuggestionsCacheRepository:
             db_logger.error(f"删除用户 {end_user_id} 的情绪建议缓存失败: {str(e)}")
             raise
 
-    def is_expired(self, cache: EmotionSuggestionsCache) -> bool:
+    @staticmethod
+    def is_expired(cache: EmotionSuggestionsCache) -> bool:
         """检查缓存是否过期
         
         Args:
@@ -148,12 +145,11 @@ def create_or_update_cache(
     end_user_id: str,
     health_summary: str,
     suggestions: list,
-    config_id: Optional[int] = None,
     expires_hours: int = 24
 ) -> EmotionSuggestionsCache:
     """创建或更新缓存"""
     repo = EmotionSuggestionsCacheRepository(db)
-    return repo.create_or_update(end_user_id, health_summary, suggestions, config_id, expires_hours)
+    return repo.create_or_update(end_user_id, health_summary, suggestions, expires_hours)
 
 
 def delete_cache_by_end_user_id(db: Session, end_user_id: str) -> bool:
@@ -164,5 +160,4 @@ def delete_cache_by_end_user_id(db: Session, end_user_id: str) -> bool:
 
 def is_cache_expired(cache: EmotionSuggestionsCache) -> bool:
     """检查缓存是否过期"""
-    repo = EmotionSuggestionsCacheRepository(None)
-    return repo.is_expired(cache)
+    return EmotionSuggestionsCacheRepository.is_expired(cache)

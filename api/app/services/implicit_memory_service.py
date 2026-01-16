@@ -412,13 +412,13 @@ class ImplicitMemoryService:
     
     async def get_cached_profile(
         self,
-        user_id: str,
+        end_user_id: str,
         db: Session
     ) -> Optional[dict]:
         """从缓存获取完整用户画像
         
         Args:
-            user_id: 用户ID
+            end_user_id: 终端用户ID
             db: 数据库会话
             
         Returns:
@@ -429,24 +429,24 @@ class ImplicitMemoryService:
                 ImplicitMemoryCacheRepository,
             )
             
-            logger.info(f"尝试从缓存获取用户画像: user={user_id}")
+            logger.info(f"尝试从缓存获取用户画像: user={end_user_id}")
             
             cache_repo = ImplicitMemoryCacheRepository(db)
-            cache = cache_repo.get_by_user_id(user_id)
+            cache = cache_repo.get_by_end_user_id(end_user_id)
             
             if cache is None:
-                logger.info(f"用户 {user_id} 的画像缓存不存在")
+                logger.info(f"用户 {end_user_id} 的画像缓存不存在")
                 return None
             
             # 检查是否过期
             if cache_repo.is_expired(cache):
-                logger.info(f"用户 {user_id} 的画像缓存已过期")
+                logger.info(f"用户 {end_user_id} 的画像缓存已过期")
                 return None
             
-            logger.info(f"成功从缓存获取用户画像: user={user_id}")
+            logger.info(f"成功从缓存获取用户画像: user={end_user_id}")
             
             return {
-                "user_id": cache.user_id,
+                "end_user_id": cache.end_user_id,
                 "preferences": cache.preferences,
                 "portrait": cache.portrait,
                 "interest_areas": cache.interest_areas,
@@ -461,18 +461,16 @@ class ImplicitMemoryService:
     
     async def save_profile_cache(
         self,
-        user_id: str,
+        end_user_id: str,
         profile_data: dict,
-        config_id: Optional[int],
         db: Session,
         expires_hours: int = 168  # 默认7天
     ) -> None:
         """保存用户画像到缓存
         
         Args:
-            user_id: 用户ID
+            end_user_id: 终端用户ID
             profile_data: 画像数据
-            config_id: 配置ID
             db: 数据库会话
             expires_hours: 过期时间（小时），默认168小时（7天）
         """
@@ -481,20 +479,19 @@ class ImplicitMemoryService:
                 ImplicitMemoryCacheRepository,
             )
             
-            logger.info(f"保存用户画像到缓存: user={user_id}")
+            logger.info(f"保存用户画像到缓存: user={end_user_id}")
             
             cache_repo = ImplicitMemoryCacheRepository(db)
             cache_repo.create_or_update(
-                user_id=user_id,
+                end_user_id=end_user_id,
                 preferences=profile_data["preferences"],
                 portrait=profile_data["portrait"],
                 interest_areas=profile_data["interest_areas"],
                 habits=profile_data["habits"],
-                config_id=config_id,
                 expires_hours=expires_hours
             )
             
-            logger.info(f"用户画像缓存保存成功: user={user_id}")
+            logger.info(f"用户画像缓存保存成功: user={end_user_id}")
             
         except Exception as e:
             logger.error(f"保存用户画像缓存失败: {str(e)}", exc_info=True)

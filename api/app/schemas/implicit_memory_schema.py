@@ -268,9 +268,7 @@ UserProfile = UserProfileResponse
 
 class GenerateProfileRequest(BaseModel):
     """生成完整用户画像请求"""
-    user_id: str = Field(..., description="用户ID")
-    config_id: Optional[int] = Field(None, description="配置ID（用于指定LLM模型）")
-    force_refresh: bool = Field(False, description="是否强制刷新缓存")
+    end_user_id: str = Field(..., description="终端用户ID")
 
 
 class CompleteProfileResponse(BaseModel):

@@ -18,7 +18,6 @@ class EmotionSuggestionsCache(Base):
     end_user_id = Column(String(255), nullable=False, unique=True, index=True, comment="终端用户ID（组ID）")
     health_summary = Column(Text, nullable=False, comment="健康状态摘要")
     suggestions = Column(JSON, nullable=False, comment="建议列表（JSON格式）")
-    config_id = Column(Integer, nullable=True, comment="关联的配置ID")
     generated_at = Column(DateTime, nullable=False, default=datetime.datetime.now, comment="生成时间")
     expires_at = Column(DateTime, nullable=True, comment="过期时间")
     created_at = Column(DateTime, default=datetime.datetime.now)

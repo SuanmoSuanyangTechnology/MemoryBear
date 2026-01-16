@@ -756,7 +756,6 @@ class EmotionAnalyticsService:
         self,
         end_user_id: str,
         suggestions_data: Dict[str, Any],
-        config_id: Optional[int],
         db: Session,
         expires_hours: int = 24
     ) -> None:
@@ -765,7 +764,6 @@ class EmotionAnalyticsService:
         Args:
             end_user_id: 宿主ID（用户组ID）
             suggestions_data: 建议数据
-            config_id: 配置ID
             db: 数据库会话
             expires_hours: 过期时间（小时）
         """
@@ -781,7 +779,6 @@ class EmotionAnalyticsService:
                 end_user_id=end_user_id,
                 health_summary=suggestions_data["health_summary"],
                 suggestions=suggestions_data["suggestions"],
-                config_id=config_id,
                 expires_hours=expires_hours
             )
             
