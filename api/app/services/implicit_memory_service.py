@@ -373,3 +373,129 @@ class ImplicitMemoryService:
             logger.error(f"Failed to get behavior habits for user {user_id}: {e}")
             raise
     
+
+    async def generate_complete_profile(
+        self,
+        user_id: str
+    ) -> dict:
+        """生成完整的用户画像（包含所有4个模块）
+        
+        Args:
+            user_id: 用户ID
+            
+        Returns:
+            Dict: 包含所有模块的完整画像数据
+        """
+        logger.info(f"生成完整用户画像: user={user_id}")
+        
+        try:
+            # 并行调用4个分析方法
+            preferences = await self.get_preference_tags(user_id=user_id)
+            portrait = await self.get_dimension_portrait(user_id=user_id)
+            interest_areas = await self.get_interest_area_distribution(user_id=user_id)
+            habits = await self.get_behavior_habits(user_id=user_id)
+            
+            # 转换为可序列化的格式
+            profile_data = {
+                "preferences": [tag.model_dump(mode='json') for tag in preferences],
+                "portrait": portrait.model_dump(mode='json'),
+                "interest_areas": interest_areas.model_dump(mode='json'),
+                "habits": [habit.model_dump(mode='json') for habit in habits]
+            }
+            
+            logger.info(f"完整用户画像生成完成: user={user_id}")
+            return profile_data
+            
+        except Exception as e:
+            logger.error(f"生成完整用户画像失败: {str(e)}", exc_info=True)
+            raise
+    
+    async def get_cached_profile(
+        self,
+        user_id: str,
+        db: Session
+    ) -> Optional[dict]:
+        """从缓存获取完整用户画像
+        
+        Args:
+            user_id: 用户ID
+            db: 数据库会话
+            
+        Returns:
+            Dict: 缓存的画像数据，如果不存在或已过期返回 None
+        """
+        try:
+            from app.repositories.implicit_memory_cache_repository import (
+                ImplicitMemoryCacheRepository,
+            )
+            
+            logger.info(f"尝试从缓存获取用户画像: user={user_id}")
+            
+            cache_repo = ImplicitMemoryCacheRepository(db)
+            cache = cache_repo.get_by_user_id(user_id)
+            
+            if cache is None:
+                logger.info(f"用户 {user_id} 的画像缓存不存在")
+                return None
+            
+            # 检查是否过期
+            if cache_repo.is_expired(cache):
+                logger.info(f"用户 {user_id} 的画像缓存已过期")
+                return None
+            
+            logger.info(f"成功从缓存获取用户画像: user={user_id}")
+            
+            return {
+                "user_id": cache.user_id,
+                "preferences": cache.preferences,
+                "portrait": cache.portrait,
+                "interest_areas": cache.interest_areas,
+                "habits": cache.habits,
+                "generated_at": cache.generated_at.isoformat(),
+                "cached": True
+            }
+            
+        except Exception as e:
+            logger.error(f"从缓存获取用户画像失败: {str(e)}", exc_info=True)
+            return None
+    
+    async def save_profile_cache(
+        self,
+        user_id: str,
+        profile_data: dict,
+        config_id: Optional[int],
+        db: Session,
+        expires_hours: int = 168  # 默认7天
+    ) -> None:
+        """保存用户画像到缓存
+        
+        Args:
+            user_id: 用户ID
+            profile_data: 画像数据
+            config_id: 配置ID
+            db: 数据库会话
+            expires_hours: 过期时间（小时），默认168小时（7天）
+        """
+        try:
+            from app.repositories.implicit_memory_cache_repository import (
+                ImplicitMemoryCacheRepository,
+            )
+            
+            logger.info(f"保存用户画像到缓存: user={user_id}")
+            
+            cache_repo = ImplicitMemoryCacheRepository(db)
+            cache_repo.create_or_update(
+                user_id=user_id,
+                preferences=profile_data["preferences"],
+                portrait=profile_data["portrait"],
+                interest_areas=profile_data["interest_areas"],
+                habits=profile_data["habits"],
+                config_id=config_id,
+                expires_hours=expires_hours
+            )
+            
+            logger.info(f"用户画像缓存保存成功: user={user_id}")
+            
+        except Exception as e:
+            logger.error(f"保存用户画像缓存失败: {str(e)}", exc_info=True)
+            # 不抛出异常，缓存失败不应影响主流程
