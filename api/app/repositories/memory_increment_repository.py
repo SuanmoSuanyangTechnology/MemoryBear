@@ -25,7 +25,7 @@ class MemoryIncrementRepository:
                     MemoryIncrement,
                     func.row_number().over(
                         partition_by=func.date(MemoryIncrement.created_at),  # 按日期分区
-                        order_by=MemoryIncrement.created_at.desc()  # 按时间戳升序排序
+                        order_by=MemoryIncrement.created_at.desc()  # 按时间戳降序排序，取每天最新的
                     ).label('row_num')
                 )
                 .filter(MemoryIncrement.workspace_id == workspace_id)
@@ -34,14 +34,19 @@ class MemoryIncrementRepository:
 
             memory_increment_alias = aliased(MemoryIncrement, subquery)
 
+            # 先按时间降序取最近的limit条记录
             memory_increments = (
                 self.db.query(memory_increment_alias)
                 .filter(subquery.c.row_num == 1)  # 只取每个日期的第一条（最新的）
-                .order_by(memory_increment_alias.created_at.asc())  # 按时间戳降序排序
+                .order_by(memory_increment_alias.created_at.desc())  # 按时间戳降序排序，取最近的
                 .limit(limit)
                 .all()
             )
-            db_logger.info(f"成功查询工作空间 {workspace_id} 下的内存增量")
+            
+            # 反转列表，使其按时间升序排列（从旧到新）
+            memory_increments.reverse()
+            
+            db_logger.info(f"成功查询工作空间 {workspace_id} 下的内存增量，返回最近 {len(memory_increments)} 条记录")
             return memory_increments
         except Exception as e:
             db_logger.error(f"查询工作空间 {workspace_id} 下内存增量时出错: {str(e)}")
