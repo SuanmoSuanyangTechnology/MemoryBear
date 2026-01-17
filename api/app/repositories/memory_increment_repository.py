@@ -34,17 +34,22 @@ class MemoryIncrementRepository:
 
             memory_increment_alias = aliased(MemoryIncrement, subquery)
 
-            # 先按时间降序取最近的limit条记录
-            memory_increments = (
+            # 先取最近的limit条记录的子查询
+            recent_records_subquery = (
                 self.db.query(memory_increment_alias)
                 .filter(subquery.c.row_num == 1)  # 只取每个日期的第一条（最新的）
                 .order_by(memory_increment_alias.created_at.desc())  # 按时间戳降序排序，取最近的
                 .limit(limit)
-                .all()
+                .subquery()
             )
             
-            # 反转列表，使其按时间升序排列（从旧到新）
-            memory_increments.reverse()
+            # 在外层按升序排列（从旧到新）
+            recent_alias = aliased(MemoryIncrement, recent_records_subquery)
+            memory_increments = (
+                self.db.query(recent_alias)
+                .order_by(recent_alias.created_at.asc())  # 按时间戳升序排序
+                .all()
+            )
             
             db_logger.info(f"成功查询工作空间 {workspace_id} 下的内存增量，返回最近 {len(memory_increments)} 条记录")
             return memory_increments
