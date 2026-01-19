@@ -7,6 +7,7 @@ user profiles from memory summaries.
 """
 
 import logging
+import asyncio
 from datetime import datetime
 from typing import List, Optional
 
@@ -373,3 +374,113 @@ class ImplicitMemoryService:
             logger.error(f"Failed to get behavior habits for user {user_id}: {e}")
             raise
     
+
+    async def generate_complete_profile(
+        self,
+        user_id: str
+    ) -> dict:
+        """生成完整的用户画像（包含所有4个模块）
+        
+        Args:
+            user_id: 用户ID
+            
+        Returns:
+            Dict: 包含所有模块的完整画像数据
+        """
+        logger.info(f"生成完整用户画像: user={user_id}")
+        
+        try:
+            # 并行调用4个分析方法
+            preferences, portrait, interest_areas, habits = await asyncio.gather(
+                self.get_preference_tags(user_id=user_id),
+                self.get_dimension_portrait(user_id=user_id),
+                self.get_interest_area_distribution(user_id=user_id),
+                self.get_behavior_habits(user_id=user_id)
+            )
+            
+            # 转换为可序列化的格式
+            profile_data = {
+                "preferences": [tag.model_dump(mode='json') for tag in preferences],
+                "portrait": portrait.model_dump(mode='json'),
+                "interest_areas": interest_areas.model_dump(mode='json'),
+                "habits": [habit.model_dump(mode='json') for habit in habits]
+            }
+            
+            logger.info(f"完整用户画像生成完成: user={user_id}")
+            return profile_data
+            
+        except Exception as e:
+            logger.error(f"生成完整用户画像失败: {str(e)}", exc_info=True)
+            raise
+    
+    async def get_cached_profile(
+        self,
+        end_user_id: str,
+        db: Session
+    ) -> Optional[dict]:
+        """从 Redis 缓存获取完整用户画像
+        
+        Args:
+            end_user_id: 终端用户ID
+            db: 数据库会话（保留参数以保持接口兼容性）
+            
+        Returns:
+            Dict: 缓存的画像数据，如果不存在或已过期返回 None
+        """
+        try:
+            from app.cache.memory.implicit_memory import ImplicitMemoryCache
+            
+            logger.info(f"尝试从 Redis 缓存获取用户画像: user={end_user_id}")
+            
+            # 从 Redis 获取缓存
+            cached_data = await ImplicitMemoryCache.get_user_profile(end_user_id)
+            
+            if cached_data is None:
+                logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
+                return None
+            
+            logger.info(f"成功从 Redis 缓存获取用户画像: user={end_user_id}")
+            return cached_data
+            
+        except Exception as e:
+            logger.error(f"从 Redis 缓存获取用户画像失败: {str(e)}", exc_info=True)
+            return None
+    
+    async def save_profile_cache(
+        self,
+        end_user_id: str,
+        profile_data: dict,
+        db: Session,
+        expires_hours: int = 168  # 默认7天
+    ) -> None:
+        """保存用户画像到 Redis 缓存
+        
+        Args:
+            end_user_id: 终端用户ID
+            profile_data: 画像数据
+            db: 数据库会话（保留参数以保持接口兼容性）
+            expires_hours: 过期时间（小时），默认168小时（7天）
+        """
+        try:
+            from app.cache.memory.implicit_memory import ImplicitMemoryCache
+            
+            logger.info(f"保存用户画像到 Redis 缓存: user={end_user_id}, expires={expires_hours}小时")
+            
+            # 计算过期时间（秒）
+            expire_seconds = expires_hours * 3600
+            
+            # 保存到 Redis
+            success = await ImplicitMemoryCache.set_user_profile(
+                user_id=end_user_id,
+                profile_data=profile_data,
+                expire=expire_seconds
+            )
+            
+            if success:
+                logger.info(f"用户画像缓存保存成功: user={end_user_id}")
+            else:
+                logger.warning(f"用户画像缓存保存失败: user={end_user_id}")
+            
+        except Exception as e:
+            logger.error(f"保存用户画像缓存失败: {str(e)}", exc_info=True)
+            # 不抛出异常，缓存失败不应影响主流程

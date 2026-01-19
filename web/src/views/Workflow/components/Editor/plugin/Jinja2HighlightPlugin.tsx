@@ -9,12 +9,21 @@ const Jinja2HighlightPlugin = () => {
     return editor.registerNodeTransform(TextNode, (textNode: TextNode) => {
       const text = textNode.getTextContent();
       
-      if (containsJinja2Patterns(text)) {
-        const parent = textNode.getParent();
-        if (!parent) return;
+      // Skip if node already has styling (prevent infinite recursion)
+      if (textNode.getStyle()) return;
+      
+      // Skip if no Jinja2 patterns found
+      if (!containsJinja2Patterns(text)) return;
+      
+      const parent = textNode.getParent();
+      if (!parent) return;
 
-        const tokens = tokenizeJinja2(text);
-        const newNodes = tokens.map(token => {
+      const tokens = tokenizeJinja2(text);
+      
+      // Skip if no meaningful tokenization (only one text token)
+      if (tokens.length <= 1 || (tokens.length === 1 && tokens[0].type === 'text')) return;
+      
+      const newNodes = tokens.map(token => {
           const newNode = $createTextNode(token.text);
           
           switch (token.type) {
@@ -30,16 +39,16 @@ const Jinja2HighlightPlugin = () => {
               newNode.setStyle('color: #008000');
               break;
             case 'brace-0':
-              newNode.setStyle('color: #d73a49; font-family: monospace; font-weight: bold;');
+              newNode.setStyle('color: #155EEF; font-family: monospace; font-weight: bold;');
               break;
             case 'brace-1':
-              newNode.setStyle('color: #0366d6; font-family: monospace; font-weight: bold;');
+              newNode.setStyle('color: #369F21; font-family: monospace; font-weight: bold;');
               break;
             case 'brace-2':
-              newNode.setStyle('color: #28a745; font-family: monospace; font-weight: bold;');
+              newNode.setStyle('color: #FF5D34; font-family: monospace; font-weight: bold;');
               break;
             case 'brace-3':
-              newNode.setStyle('color: #6f42c1; font-family: monospace; font-weight: bold;');
+              newNode.setStyle('color: #5B6167; font-family: monospace; font-weight: bold;');
               break;
             case 'expression-0':
             case 'expression-1':
@@ -77,7 +86,6 @@ const Jinja2HighlightPlugin = () => {
             newNodes[i - 1].insertAfter(newNodes[i]);
           }
         }
-      }
     });
   }, [editor]);
 

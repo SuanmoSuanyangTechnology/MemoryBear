@@ -76,5 +76,5 @@ __all__ = [
     "ToolStatus",
     "AuthType",
     "ExecutionStatus",
-    "MemoryPerceptualModel"
+    "MemoryPerceptualModel",
 ]

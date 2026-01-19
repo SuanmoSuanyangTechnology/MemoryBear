@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Form, App, Button, Switch, Space, Select } from 'antd';
+import { Row, Col, Form, App, Button, Space, Select } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -11,6 +11,7 @@ import CustomSelect from '@/components/CustomSelect';
 import { getModelListUrl } from '@/api/models'
 import Tag from '@/components/Tag'
 import { useI18n } from '@/store/locale';
+import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 
 const configList = [
   // 启用反思引擎
@@ -219,21 +220,16 @@ const SelfReflectionEngine: React.FC = () => {
               }
 
               return (
-                <div className="rb:flex rb:items-center rb:justify-between rb:mb-6">
-                  <div>
-                    <span className="rb:text-[14px] rb:font-medium rb:leading-5">{t(`reflectionEngine.${config.key}`)}</span>
+                <SwitchFormItem
+                  title={t(`reflectionEngine.${config.key}`)}
+                  name={config.key}
+                  desc={<>
                     {(config as any).hasSubTitle && <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`reflectionEngine.${config.key}_subTitle`)}</div>}
                     <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`reflectionEngine.${config.key}_desc`)}</div>
-                  </div>
-                  <Form.Item
-                    name={config.key}
-                    valuePropName="checked"
-                    className="rb:ml-2 rb:mb-0!"
-                  >
-                    <Switch
-                      disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'} />
-                  </Form.Item>
-                </div>
+                  </>}
+                  className="rb:mb-6"
+                  disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
+                />
               )
             })}
             <Row gutter={16} className="rb:mt-3">

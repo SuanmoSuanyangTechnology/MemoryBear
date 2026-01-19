@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Form, Slider, Button, Alert, message, Switch, Space } from 'antd';
+import { Row, Col, Form, Slider, Button, Alert, message, Space } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import RbCard from '@/components/RbCard/Card';
@@ -9,6 +9,7 @@ import type { ConfigForm } from './types'
 import CustomSelect from '@/components/CustomSelect';
 import { getModelListUrl } from '@/api/models'
 import Tag from '@/components/Tag'
+import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 
 const configList = [
   {
@@ -158,23 +159,17 @@ const EmotionEngine: React.FC = () => {
                   </div>
                 )
               }
-
               return (
-                <div className="rb:flex rb:items-center rb:justify-between rb:mb-6">
-                  <div>
-                    <span className="rb:text-[14px] rb:font-medium rb:leading-5">{t(`emotionEngine.${config.key}`)}</span>
+                <SwitchFormItem
+                  title={t(`emotionEngine.${config.key}`)}
+                  name={config.key}
+                  desc={<>
                     {config.hasSubTitle && <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`emotionEngine.${config.key}_subTitle`)}</div>}
                     <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`emotionEngine.${config.key}_desc`)}</div>
-                  </div>
-                  <Form.Item
-                    name={config.key}
-                    valuePropName="checked"
-                    className="rb:ml-2 rb:mb-0!"
-                  >
-                    <Switch
-                      disabled={!values?.emotion_enabled && config.key !== 'emotion_enabled'} />
-                  </Form.Item>
-                </div>
+                  </>}
+                  className="rb:mb-6"
+                  disabled={!values?.emotion_enabled && config.key !== 'emotion_enabled'}
+                />
               )
             })}
             <Row gutter={16} className="rb:mt-3">

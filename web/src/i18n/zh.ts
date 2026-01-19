@@ -509,7 +509,7 @@ export const zh = {
       VersionInformation: '版本信息',
       publishedOn: '发布于',
       publisher: '发布者',
-      DetailsOfVersion: 'v{{version}}版本详情',
+      DetailsOfVersion: '{{version}}版本详情',
       exportDSLFile: '导出DSL文件',
       willRollToThisVersion: '将回滚到此版本',
       share: '分享',
@@ -965,7 +965,8 @@ export const zh = {
       refresh: '刷新',
       return: '返回',
       statusEnabled: '可用',
-      statusDisabled: '不可用'
+      statusDisabled: '不可用',
+      remove: '删除',
     },
     product: {
       applicationManagement: '应用管理',
@@ -1823,6 +1824,8 @@ export const zh = {
       tagDesc: '多个标签用逗号分隔',
       availableTools: '可用工具',
       name: '名称',
+      enterNamePlaceholder: '请输入名称',
+      toolEmpty: '未检测到工具',
       desc: '描述',
       method: '方法',
       path: '路径',
@@ -1889,9 +1892,11 @@ export const zh = {
           temperature: '温度',
           max_tokens: '最大令牌数',
           context: '上下文',
+          contextPlaceholder: '{x} 设置变量',
           memory: '记忆',
           enable_window: '记忆窗口',
           inner: '内置',
+          messagesPlaceholder: '在此处编写提示，输入“{”插入变量，输入“insert”插入',
         },
         start: {
           variables: '输入字段',
@@ -1902,7 +1907,6 @@ export const zh = {
           array: '下拉选项',
           object: '对象',
 
-          addVariable: '添加变量',
           editVariable: '编辑变量',
           variableType: '变量类型',
           variableName: '变量名称',
@@ -1922,10 +1926,12 @@ export const zh = {
           query: '查询变量',
           knowledge_retrieval: '知识库',
           recallConfig: '召回测试',
+          addKnowledge: '添加知识库'
         },
         'parameter-extractor': {
           model_id: '模型',
           text: '输入变量',
+          textPlaceholder: '{x} 设置变量',
           params: '提取参数',
           prompt: '指令',
 
@@ -1946,6 +1952,8 @@ export const zh = {
           'array[number]': 'Array[Number]',
           'array[boolean]': 'Array[Boolean]',
           'array[object]': 'Array[Object]',
+          addParams: '添加提取变量',
+          promptPlaceholder: '在此处编写提示，输入“{”插入变量，输入“insert”插入',
         },
         'var-aggregator': {
           group: '聚合分组',
@@ -2015,6 +2023,7 @@ export const zh = {
         loop: {
           cycle_vars: '循环变量',
           condition: '循环终止条件',
+          addCondition: '添加条件',
           max_loop: '最大循环次数',
         },
         assigner: {
@@ -2051,6 +2060,7 @@ export const zh = {
         type: '类型',
         value: '值',
         addCase: '添加条件',
+        addVariable: '添加变量',
       },
 
       clear: '清空',
