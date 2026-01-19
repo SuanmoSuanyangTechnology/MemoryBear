@@ -11,6 +11,7 @@ import { getModelList } from '@/api/models';
 import type { Model } from '@/views/ModelManagement/types'
 import { configList } from './constant'
 import Result from './components/Result'
+import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 
 const keys = [
   // 'example', 
@@ -173,25 +174,18 @@ const MemoryExtractionEngine: FC = () => {
                           }
                         )}
                       >
-                        <div className="rb:text-[16px] rb:font-medium rb:leading-[22px]">{t(`memoryExtractionEngine.${vo.title}`)}</div>
+                        <div className="rb:text-[16px] rb:font-medium rb:leading-5.5">{t(`memoryExtractionEngine.${vo.title}`)}</div>
                         <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`memoryExtractionEngine.${vo.title}SubTitle`)}</div>
 
                         {vo.list.map(config => (
                           <div key={config.label}>
                             {config.control === 'button' &&
-                              <div className="rb:flex rb:items-center rb:justify-between rb:mt-6">
-                                <div>
-                                  <span className="rb:text-[14px] rb:font-medium rb:leading-5">-{t(`memoryExtractionEngine.${config.label}`)}</span>
-                                  <ConfigDesc config={config} className="rb:ml-2" />
-                                </div>
-                                <Form.Item
-                                  name={config.variableName}
-                                  valuePropName="checked"
-                                  className="rb:ml-2 rb:mb-0!"
-                                >
-                                  <Switch />
-                                </Form.Item>
-                              </div>
+                              <SwitchFormItem
+                                title={<>-{t(`memoryExtractionEngine.${config.label}`)}</>}
+                                name={config.variableName}
+                                desc={<ConfigDesc config={config} className="rb:ml-2" />}
+                                className="rb:mt-6"
+                              />
                             }
                             {config.control === 'select' &&
                               <>

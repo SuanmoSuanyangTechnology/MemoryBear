@@ -90,7 +90,7 @@ export const nodeLibrary: NodeLibrary[] = [
         type: "end", icon: endIcon,
         config: {
           output: {
-            type: 'define'
+            type: 'editor'
           }
         }
       },
@@ -125,6 +125,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           context: {
             type: 'variableList',
+            placeholder: 'workflow.config.llm.contextPlaceholder'
           },
           messages: {
             type: 'define',
@@ -134,7 +135,8 @@ export const nodeLibrary: NodeLibrary[] = [
                 content: undefined,
                 readonly: true
               },
-            ]
+            ],
+            placeholder: 'workflow.config.llm.messagesPlaceholder'
           },
           memory: {
             type: 'memoryConfig',
@@ -170,7 +172,8 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           text: {
             type: 'variableList',
-            filterLoopIterationVars: true
+            filterLoopIterationVars: true,
+            placeholder: 'workflow.config.parameter-extractor.textPlaceholder'
           },
           params: {
             type: 'paramList',
@@ -178,6 +181,8 @@ export const nodeLibrary: NodeLibrary[] = [
           prompt: {
             type: 'messageEditor',
             isArray: false,
+            titleVariant: 'borderless',
+            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
           },
         }
       }
@@ -189,7 +194,7 @@ export const nodeLibrary: NodeLibrary[] = [
       { type: "memory-read", icon: memoryReadIcon,
         config: {
           message: {
-            type: 'messageEditor',
+            type: 'editor',
             isArray: false
           },
           config_id: {
@@ -212,7 +217,7 @@ export const nodeLibrary: NodeLibrary[] = [
       { type: "memory-write", icon: memoryWriteIcon,
         config: {
           message: {
-            type: 'messageEditor',
+            type: 'editor',
             isArray: false
           },
           config_id: {
@@ -270,7 +275,8 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           user_supplement_prompt: {
             type: 'messageEditor',
-            isArray: false
+            isArray: false,
+            titleVariant: 'borderless'
           }
         }
       },
@@ -436,6 +442,7 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'messageEditor',
             isArray: false,
             enableJinja2: true,
+            titleVariant: 'borderless',
             defaultValue: "{{arg1}}"
           },
         }

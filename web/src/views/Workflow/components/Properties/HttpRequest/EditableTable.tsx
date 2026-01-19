@@ -1,7 +1,6 @@
-import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
 import { Button, Select, Table, Form, type TableProps } from 'antd';
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
 import Empty from '@/components/Empty';
 import VariableSelect from '../VariableSelect';
@@ -19,6 +18,7 @@ interface EditableTableProps {
   options?: Suggestion[];
   typeOptions?: { value: string, label: string }[]
   filterBooleanType?: boolean;
+  size?: "small"
 }
 
 const EditableTable: React.FC<EditableTableProps> = ({
@@ -26,7 +26,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
   title,
   options = [],
   typeOptions = [],
-  filterBooleanType = false
+  filterBooleanType = false,
+  size = 'small'
 }) => {
   const { t } = useTranslation();
 
@@ -38,21 +39,24 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   const getColumns = (remove: (index: number) => void): TableProps<TableRow>['columns'] => {
     const hasType = typeOptions.length > 0;
-    const baseWidth = hasType ? '35%' : '45%';
+    const cellClassName="rb:p-1!"
+    const contentClassName ="rb:w-[108px]! rb:text-[12px]!"
 
     return [
       {
         title: t('workflow.config.name'),
         dataIndex: 'name',
-        width: baseWidth,
+        className: cellClassName,
         render: (_: any, __: TableRow, index: number) => (
           <Form.Item name={[index, 'name']} noStyle>
             <VariableSelect 
               placeholder={t('common.pleaseSelect')} 
-              size="small" 
+              // size="small" 
               options={options}
               filterBooleanType={filterBooleanType}
               popupMatchSelectWidth={false}
+              className={contentClassName}
+              size={size}
             />
           </Form.Item>
         )
@@ -61,18 +65,20 @@ const EditableTable: React.FC<EditableTableProps> = ({
         title: t('workflow.config.type'),
         dataIndex: 'type',
         width: '20%',
+        className: cellClassName,
         render: (_: any, __: TableRow, index: number) => (
           <Form.Item shouldUpdate noStyle>
             {(form) => (
               <Form.Item name={[index, 'type']} noStyle>
                 <Select 
                   placeholder={t('common.pleaseSelect')} 
-                  size="small" 
+                  // size="small" 
                   options={typeOptions}
                   popupMatchSelectWidth={false}
                   onChange={() => {
                     form.setFieldValue([...Array.isArray(parentName) ? parentName : [parentName], index, 'value'], undefined);
                   }}
+                  size={size}
                 />
               </Form.Item>
             )}
@@ -82,7 +88,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       {
         title: t('workflow.config.value'),
         dataIndex: 'value',
-        width: baseWidth,
+        className: cellClassName,
         render: (_: any, __: TableRow, index: number) => (
           <Form.Item 
             shouldUpdate={(prevValues, currentValues) => {
@@ -102,10 +108,12 @@ const EditableTable: React.FC<EditableTableProps> = ({
                 <Form.Item name={[index, 'value']} noStyle>
                   <VariableSelect 
                     placeholder={t('common.pleaseSelect')} 
-                    size="small" 
+                    // size="small" 
                     options={filteredOptions}
                     filterBooleanType={filterBooleanType}
                     popupMatchSelectWidth={false}
+                    className={contentClassName}
+                    size={size}
                   />
                 </Form.Item>
               );
@@ -116,9 +124,12 @@ const EditableTable: React.FC<EditableTableProps> = ({
       {
         title: '',
         dataIndex: 'actions',
-        width: '10%',
+        className: cellClassName,
         render: (_: any, __: TableRow, index: number) => (
-          <Button type="text" icon={<DeleteOutlined />} onClick={() => remove(index)} />
+          <div
+            className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+            onClick={() => remove(index)}
+          ></div>
         )
       }
     ];
@@ -129,13 +140,11 @@ const EditableTable: React.FC<EditableTableProps> = ({
       <Form.List name={parentName}>
         {(fields, { add, remove }) => {
           const AddButton = ({ block = false }: { block?: boolean }) => (
-            <Button 
-              type={block ? "dashed" : "text"} 
+            <Button
               icon={block ? undefined : <PlusOutlined />} 
               onClick={() => add(createNewRow())} 
               size="small"
-              block={block}
-              className={block ? "rb:mt-1" : ""}
+              className={block ? "rb:mt-1 rb:text-[12px]! rb:bg-transparent!" : "rb:text-[12px]!"}
             >
               {block && `+${t('common.add')}`}
             </Button>
@@ -145,8 +154,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
             <>
               {title && (
                 <div className="rb:flex rb:items-center rb:mb-2 rb:justify-between">
-                  <div className="rb:font-medium">{title}</div>
-                  <AddButton />
+                  <div className="rb:font-medium rb:text-[12px] rb:leading-4.5">{title}</div>
+                  <AddButton block={true} />
                 </div>
               )}
               
@@ -161,8 +170,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
                 columns={getColumns(remove)}
                 pagination={false}
                 size="small"
+                rowClassName="rb:p-0! rb:bg-[#F6F8FC]!"
                 locale={{ emptyText: <Empty size={88} /> }}
-                scroll={{ x: 'max-content' }}
+                style={{ width: '274px' }}
               />
               
               {!title && <AddButton block />}

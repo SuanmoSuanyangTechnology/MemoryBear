@@ -1,13 +1,13 @@
 import { type FC, useEffect, useState, useRef, useMemo } from "react";
+import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
-import { Form, Input, Button, Select, InputNumber, Slider, Space, Divider, App, Switch } from 'antd'
+import { Form, Input, Select, InputNumber, Switch } from 'antd'
 
-import type { NodeConfig, NodeProperties, StartVariableItem, VariableEditModalRef, ChatVariable } from '../../types'
+import type { NodeConfig, NodeProperties, ChatVariable } from '../../types'
 import Empty from '@/components/Empty';
 import emptyIcon from '@/assets/images/workflow/empty.png'
 import CustomSelect from "@/components/CustomSelect";
-import VariableEditModal from './VariableEditModal';
 import MessageEditor from './MessageEditor'
 import Knowledge from './Knowledge/Knowledge';
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
@@ -23,7 +23,11 @@ import CycleVarsList from './CycleVarsList'
 import AssignmentList from './AssignmentList'
 import ToolConfig from './ToolConfig'
 import MemoryConfig from './MemoryConfig'
+import VariableList from './VariableList'
 // import { calculateVariableList } from './utils/variableListCalculator'
+import styles from './properties.module.css'
+import Editor from "../Editor";
+import RbSlider from './RbSlider'
 
 interface PropertiesProps {
   selectedNode?: Node | null; 
@@ -42,12 +46,9 @@ const Properties: FC<PropertiesProps> = ({
   chatVariables
 }) => {
   const { t } = useTranslation()
-  const { modal } = App.useApp()
   const [form] = Form.useForm<NodeConfig>();
   const [configs, setConfigs] = useState<Record<string,NodeConfig>>({} as Record<string,NodeConfig>)
   const values = Form.useWatch([], form);
-  const variableModalRef = useRef<VariableEditModalRef>(null)
-  const [editIndex, setEditIndex] = useState<number | null>(null)
   const [graphUpdateTrigger, setGraphUpdateTrigger] = useState(0)
   const prevMappingNamesRef = useRef<string[]>([])
   const prevTemplateVarsRef = useRef<string[]>([])
@@ -242,49 +243,6 @@ const Properties: FC<PropertiesProps> = ({
       })
     }
   }, [values, selectedNode, form])
-
-  const handleAddVariable = () => {
-    setEditIndex(null)
-    variableModalRef.current?.handleOpen()
-  }
-  const handleEditVariable = (index: number, vo: StartVariableItem) => {
-    variableModalRef.current?.handleOpen(vo)
-    setEditIndex(index)
-  }
-  const handleRefreshVariable = (value: StartVariableItem) => {
-    if (!selectedNode) return
-
-    if (editIndex !== null) {
-      const defaultValue = selectedNode.data.config.variables.defaultValue ?? []
-      defaultValue[editIndex] = value
-      selectedNode.data.config.variables.defaultValue = [...defaultValue]
-    } else {
-      const defaultValue = selectedNode.data.config.variables.defaultValue ?? []
-      selectedNode.data.config.variables.defaultValue = [...defaultValue, value]
-    }
-    selectedNode?.setData({ ...selectedNode.data})
-
-    setConfigs({ ...selectedNode.data.config })
-  }
-  const handleDeleteVariable = (index: number, vo: StartVariableItem) => {
-    if (!selectedNode) return
-
-    modal.confirm({
-      title: t('common.confirmDeleteDesc', { name: vo.name }),
-      okText: t('common.delete'),
-      cancelText: t('common.cancel'),
-      okType: 'danger',
-      onOk: () => {
-        const defaultValue = selectedNode.data.config.variables.defaultValue ?? []
-        defaultValue.splice(index, 1)
-        selectedNode.data.config.variables.defaultValue = [...defaultValue]
-
-        selectedNode?.setData({ ...selectedNode.data })
-
-        setConfigs({ ...selectedNode.data.config })
-      }
-    })
-  }
 
   const variableList = useMemo(() => {
     if (!selectedNode || !graphRef?.current) return [];
@@ -586,7 +544,7 @@ const Properties: FC<PropertiesProps> = ({
           break
         case 'question-classifier':
           const classNameKey = `${dataNodeId}_class_name`;
-          const outputKey = `${dataNodeId}_output`;
+          // const outputKey = `${dataNodeId}_output`;
           if (!addedKeys.has(classNameKey)) {
             addedKeys.add(classNameKey);
             variableList.push({
@@ -1039,11 +997,11 @@ const Properties: FC<PropertiesProps> = ({
   console.log('variableList', variableList)
 
   return (
-    <div className="rb:w-75 rb:fixed rb:right-0 rb:top-16 rb:bottom-0 rb:p-3">
-      <div className="rb:font-medium rb:leading-5 rb:mb-3">{t('workflow.nodeProperties')}</div>
+    <div className={clsx("rb:w-75 rb:fixed rb:right-0 rb:top-16 rb:bottom-0 rb:p-3 rb:pb-6", styles.properties)}>
+      <div className="rb:font-medium rb:leading-5 rb:pb-3 rb:mb-3 rb:border-b rb:border-b-[#DFE4ED]">{t('workflow.nodeProperties')}</div>
       {!selectedNode
         ? <Empty url={emptyIcon} size={140} className="rb:h-full rb:mx-15" title={t('workflow.empty')} />
-        : <Form form={form} layout="vertical" className="rb:h-[calc(100%-20px)] rb:overflow-y-auto">
+        : <Form form={form} size="small" layout="vertical" className="rb:h-[calc(100%-20px)] rb:overflow-x-hidden rb:overflow-y-auto">
             <Form.Item name="name" label={t('workflow.nodeName')}>
               <Input
                 placeholder={t('common.pleaseEnter')}
@@ -1073,46 +1031,13 @@ const Properties: FC<PropertiesProps> = ({
 
                 if (selectedNode?.data?.type === 'start' && key === 'variables' && config.type === 'define') {
                   return (
-                    <div key={key}>
-                      <div className="rb:flex rb:items-center rb:justify-between rb:mb-2.75">
-                        <div className="rb:leading-5">
-                          {t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
-                        </div>
-                        <Button style={{padding: '0 8px', height: '24px'}} onClick={handleAddVariable}>+{t('application.addVariables')}</Button>
-                      </div>
-
-                      <Space size={4} direction="vertical" className="rb:w-full">
-                        {Array.isArray(config.defaultValue) && config.defaultValue?.map((vo, index) =>
-                          <div key={`${vo.name}}-${index}`} className="rb:p-[4px_8px] rb:text-[12px] rb:text-[#5B6167] rb:flex rb:items-center rb:justify-between rb:border rb:border-[#DFE4ED] rb:rounded-md rb:group rb:cursor-pointer">
-                            <span>{vo.name}·{vo.description}</span>
-
-                            <div className="rb:group-hover:hidden rb:flex rb:items-center rb:gap-1">
-                              {vo.required && <span>{t('workflow.config.start.required')}</span>}
-                              {vo.type}
-                            </div>
-                            <Space className="rb:hidden! rb:group-hover:flex!">
-                              <div
-                                className="rb:w-4.5 rb:h-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]"
-                                onClick={() => handleEditVariable(index, vo)}
-                              ></div>
-                              <div
-                                className="rb:w-4.5 rb:h-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
-                                onClick={() => handleDeleteVariable(index, vo)}
-                              ></div>
-                            </Space>
-                          </div>
-                        )}
-                        <Divider size="small" />
-                        {config.sys?.map((vo, index) =>
-                          <div key={index} className="rb:p-[4px_8px] rb:text-[12px] rb:text-[#5B6167] rb:flex rb:items-center rb:justify-between rb:border rb:border-[#DFE4ED] rb:rounded-md">
-                            <div>
-                              <span>sys.{vo.name}</span>
-                            </div>
-                            {vo.type}
-                          </div>
-                        )}
-                      </Space>
-                    </div>
+                    <Form.Item key={key} name={key}>
+                      <VariableList
+                        parentName={key}
+                        selectedNode={selectedNode}
+                        config={config}
+                      />
+                    </Form.Item>
                   )
                 }
 
@@ -1143,23 +1068,12 @@ const Properties: FC<PropertiesProps> = ({
                         key={key}
                         options={contextVariableList.filter(variable => variable.nodeData?.type !== 'knowledge-retrieval')} 
                         parentName={key}
+                        placeholder={t(config.placeholder || 'common.pleaseSelect')}
+                        size="small"
                       />
                     </Form.Item>
                   )
                 }
-                if (selectedNode?.data?.type === 'end' && key === 'output') {
-                  return (
-                    <Form.Item key={key} name={key}>
-                      <MessageEditor
-                        key={key}
-                        isArray={false}
-                        parentName={key}
-                        options={variableList.filter(variable => variable.nodeData?.type !== 'knowledge-retrieval')} 
-                      />
-                    </Form.Item>
-                  )
-                }
-
                 if (config.type === 'define') {
                   return null
                 }
@@ -1184,6 +1098,8 @@ const Properties: FC<PropertiesProps> = ({
                         parentName={key}
                         enableJinja2={config.enableJinja2 as boolean}
                         options={getFilteredVariableList(selectedNode?.data?.type, key)}
+                        titleVariant={config.titleVariant}
+                        size="small"
                       />
                     </Form.Item>
                   )
@@ -1206,9 +1122,9 @@ const Properties: FC<PropertiesProps> = ({
                         name={key}
                         options={getFilteredVariableList(selectedNode?.data?.type, key)}
                         isCanAdd={!!(values as any)?.group}
+                        size="small"
                       />
                     </Form.Item>
-                  
                   )
                 }
                 if (config.type === 'caseList') {
@@ -1226,9 +1142,7 @@ const Properties: FC<PropertiesProps> = ({
 
                 if (config.type === 'mappingList') {
                   return (
-                    <Form.Item key={key} name={key}
-                      label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
-                    >
+                    <Form.Item key={key} name={key} noStyle>
                       <MappingList name={key} options={getFilteredVariableList(selectedNode?.data?.type, key)} />
                     </Form.Item>
                   
@@ -1238,6 +1152,7 @@ const Properties: FC<PropertiesProps> = ({
                   return (
                     <Form.Item key={key} name={key}>
                       <CycleVarsList
+                        size="small"
                         parentName={key}
                         options={getFilteredVariableList(selectedNode?.data?.type, key)}
                       />
@@ -1276,87 +1191,14 @@ const Properties: FC<PropertiesProps> = ({
                     </Form.Item>
                   )
                 }
-
-                return (
-                  <Form.Item 
-                    key={key} 
-                    name={key} 
-                    label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
-                    layout={config.type === 'switch' ? 'horizontal' : 'vertical'}
-                  >
-                    {config.type === 'input'
-                      ? <Input placeholder={t('common.pleaseEnter')} />
-                      : config.type === 'textarea'
-                      ? <Input.TextArea placeholder={t('common.pleaseEnter')} />
-                      : config.type === 'select'
-                      ? <Select
-                        options={config.needTranslation ? (config.options || []).map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
-                        placeholder={t('common.pleaseSelect')}
-                      />
-                      : config.type === 'inputNumber'
-                      ? <InputNumber
-                          placeholder={t('common.pleaseEnter')}
-                          className="rb:w-full!"
-                          onChange={(value) => form.setFieldValue(key, value)}
-                        />
-                      : config.type === 'slider'
-                      ? <Slider min={config.min} max={config.max} step={config.step} />
-                      : config.type === 'customSelect'
-                      ? <CustomSelect
-                        placeholder={t('common.pleaseSelect')}
-                        url={config.url as string}
-                        params={config.params}
-                        hasAll={false}
-                        valueKey={config.valueKey}
-                        labelKey={config.labelKey}
-                      />
-                      : config.type === 'variableList'
-                      ? <VariableSelect
-                          placeholder={t('common.pleaseSelect')}
-                          options={(() => {
-                            const baseVariableList = getFilteredVariableList(selectedNode?.data?.type, key);
-                            // Apply filtering if specified in config
-                            if (config.filterNodeTypes || config.filterVariableNames) {
-                              return baseVariableList.filter(variable => {
-                                const nodeTypeMatch = !config.filterNodeTypes || 
-                                  (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
-                                const variableNameMatch = !config.filterVariableNames || 
-                                  (Array.isArray(config.filterVariableNames) && config.filterVariableNames.includes(variable.label));
-                                return nodeTypeMatch || variableNameMatch;
-                              });
-                            }
-                            // Filter child nodes for iteration output
-                            if (config.filterChildNodes && selectedNode) {
-                              const graph = graphRef.current;
-                              if (!graph) return [];
-                              
-                              const nodes = graph.getNodes();
-                              
-                              // Find child nodes whose cycle field equals parent node's ID
-                              const childNodes = nodes.filter(node => {
-                                const nodeData = node.getData();
-                                return nodeData?.cycle === selectedNode.id;
-                              });
-                              
-                              return baseVariableList.filter(variable => 
-                                childNodes.some(node => node.id === variable.nodeData?.id) || selectedNode?.data?.type === 'iteration' && key === 'output' && variable.value.includes('sys.')
-                              );
-                            }
-                            return baseVariableList;
-                          })()
-                        }
-                        />
-                      : config.type === 'switch'
-                      ? <Switch onChange={key === 'group' ? () => { form.setFieldValue('group_variables', []) } : undefined} />
-                      : config.type === 'categoryList'
-                      ? <CategoryList 
-                        parentName={key} 
-                        selectedNode={selectedNode}
-                        graphRef={graphRef}
-                        options={getFilteredVariableList(selectedNode?.data?.type, key)}
-                      />
-                      : config.type === 'conditionList'
-                      ? <ConditionList
+                if (config.type === 'conditionList') {
+                  return (
+                    <Form.Item
+                      key={key}
+                      name={key}
+                      noStyle
+                    >
+                      <ConditionList
                         parentName={key}
                         options={(() => {
                           const cycleVars = values?.cycle_vars || [];
@@ -1375,6 +1217,93 @@ const Properties: FC<PropertiesProps> = ({
                         graphRef={graphRef}
                         addBtnText={t('workflow.config.addCase')}
                       />
+                    </Form.Item>
+                  )
+                }
+
+                return (
+                  <Form.Item 
+                    key={key} 
+                    name={key}
+                    label={key === 'parallel_count' ? <span className="rb:text-[10px] rb:text-[#5B6167] rb:leading-3.5 rb:-mb-1!">{t(`workflow.config.${selectedNode?.data?.type}.${key}`)}</span> : t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
+                    layout={config.type === 'switch' ? 'horizontal' : 'vertical'}
+                    className={key === 'parallel_count' ? 'rb:-mt-3! rb:leading-3.5!' : ''}
+                  >
+                    {config.type === 'input'
+                      ? <Input placeholder={t('common.pleaseEnter')} />
+                      : config.type === 'textarea'
+                      ? <Input.TextArea placeholder={t('common.pleaseEnter')} />
+                      : config.type === 'select'
+                      ? <Select
+                        options={config.needTranslation ? (config.options || []).map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
+                        placeholder={t('common.pleaseSelect')}
+                      />
+                      : config.type === 'inputNumber'
+                      ? <InputNumber
+                          placeholder={t('common.pleaseEnter')}
+                          className="rb:w-full!"
+                          onChange={(value) => form.setFieldValue(key, value)}
+                        />
+                      : config.type === 'slider'
+                      ? <RbSlider min={config.min} max={config.max} step={config.step} />
+                      : config.type === 'customSelect'
+                      ? <CustomSelect
+                        placeholder={t('common.pleaseSelect')}
+                        url={config.url as string}
+                        params={config.params}
+                        hasAll={false}
+                        valueKey={config.valueKey}
+                        labelKey={config.labelKey}
+                        size="small"
+                      />
+                      : config.type === 'variableList'
+                      ? <VariableSelect
+                        placeholder={t(config.placeholder || 'common.pleaseSelect')}
+                        options={(() => {
+                          const baseVariableList = getFilteredVariableList(selectedNode?.data?.type, key);
+                          // Apply filtering if specified in config
+                          if (config.filterNodeTypes || config.filterVariableNames) {
+                            return baseVariableList.filter(variable => {
+                              const nodeTypeMatch = !config.filterNodeTypes || 
+                                (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
+                              const variableNameMatch = !config.filterVariableNames || 
+                                (Array.isArray(config.filterVariableNames) && config.filterVariableNames.includes(variable.label));
+                              return nodeTypeMatch || variableNameMatch;
+                            });
+                          }
+                          // Filter child nodes for iteration output
+                          if (config.filterChildNodes && selectedNode) {
+                            const graph = graphRef.current;
+                            if (!graph) return [];
+                            
+                            const nodes = graph.getNodes();
+                            
+                            // Find child nodes whose cycle field equals parent node's ID
+                            const childNodes = nodes.filter(node => {
+                              const nodeData = node.getData();
+                              return nodeData?.cycle === selectedNode.id;
+                            });
+                            
+                            return baseVariableList.filter(variable => 
+                              childNodes.some(node => node.id === variable.nodeData?.id) || selectedNode?.data?.type === 'iteration' && key === 'output' && variable.value.includes('sys.')
+                            );
+                          }
+                          return baseVariableList;
+                        })()
+                        }
+                        size="small"
+                      />
+                      : config.type === 'switch'
+                      ? <Switch onChange={key === 'group' ? () => { form.setFieldValue('group_variables', []) } : undefined} />
+                      : config.type === 'categoryList'
+                      ? <CategoryList 
+                        parentName={key} 
+                        selectedNode={selectedNode}
+                        graphRef={graphRef}
+                        options={getFilteredVariableList(selectedNode?.data?.type, key)}
+                      />
+                      : config.type === 'editor'
+                      ? <Editor options={variableList} variant="outlined" size="small" />
                       : null
                     }
                   </Form.Item>
@@ -1383,11 +1312,6 @@ const Properties: FC<PropertiesProps> = ({
             }
           </Form>
       }
-
-      <VariableEditModal
-        ref={variableModalRef}
-        refresh={handleRefreshVariable}
-      />
     </div>
   );
 };

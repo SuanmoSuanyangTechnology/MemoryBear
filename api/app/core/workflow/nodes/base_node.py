@@ -25,7 +25,7 @@ class WorkflowState(TypedDict):
     The state object passed between nodes in a workflow, containing messages, variables, node outputs, etc.
     """
     # List of messages (append mode)
-    messages: list[dict[str, str]]
+    messages: Annotated[list[dict[str, str]], lambda x, y: y]
 
     # Set of loop node IDs, used for assigning values in loop nodes
     cycle_nodes: list

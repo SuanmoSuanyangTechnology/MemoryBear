@@ -18,6 +18,7 @@ from app.models.user_model import User
 from app.schemas.emotion_schema import (
     EmotionHealthRequest,
     EmotionSuggestionsRequest,
+    EmotionGenerateSuggestionsRequest,
     EmotionTagsRequest,
     EmotionWordcloudRequest,
 )
@@ -58,7 +59,7 @@ async def get_emotion_tags(
                 "limit": request.limit
             }
         )
-        
+
         # 调用服务层
         data = await emotion_service.get_emotion_tags(
             end_user_id=request.group_id,
@@ -67,7 +68,7 @@ async def get_emotion_tags(
             end_date=request.end_date,
             limit=request.limit
         )
-        
+
         api_logger.info(
             "情绪标签统计获取成功",
             extra={
@@ -76,9 +77,9 @@ async def get_emotion_tags(
                 "tags_count": len(data.get("tags", []))
             }
         )
-        
+
         return success(data=data, msg="情绪标签获取成功")
-        
+
     except Exception as e:
         api_logger.error(
             f"获取情绪标签统计失败: {str(e)}",
@@ -107,14 +108,14 @@ async def get_emotion_wordcloud(
                 "limit": request.limit
             }
         )
-        
+
         # 调用服务层
         data = await emotion_service.get_emotion_wordcloud(
             end_user_id=request.group_id,
             emotion_type=request.emotion_type,
             limit=request.limit
         )
-        
+
         api_logger.info(
             "情绪词云数据获取成功",
             extra={
@@ -122,9 +123,9 @@ async def get_emotion_wordcloud(
                 "total_keywords": data.get("total_keywords", 0)
             }
         )
-        
+
         return success(data=data, msg="情绪词云获取成功")
-        
+
     except Exception as e:
         api_logger.error(
             f"获取情绪词云数据失败: {str(e)}",
@@ -151,7 +152,7 @@ async def get_emotion_health(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="时间范围参数无效，必须是 7d、30d 或 90d"
             )
-        
+
         api_logger.info(
             f"用户 {current_user.username} 请求获取情绪健康指数",
             extra={
@@ -159,13 +160,13 @@ async def get_emotion_health(
                 "time_range": request.time_range
             }
         )
-        
+
         # 调用服务层
         data = await emotion_service.calculate_emotion_health_index(
             end_user_id=request.group_id,
             time_range=request.time_range
         )
-        
+
         api_logger.info(
             "情绪健康指数获取成功",
             extra={
@@ -174,9 +175,9 @@ async def get_emotion_health(
                 "level": data.get("level", "未知")
             }
         )
-        
+
         return success(data=data, msg="情绪健康指数获取成功")
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -198,15 +199,80 @@ async def get_emotion_suggestions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取个性化情绪建议
-    
+    """获取个性化情绪建议（从缓存读取）
+
     Args:
         request: 包含 group_id 和可选的 config_id
         db: 数据库会话
         current_user: 当前用户
-        
+
     Returns:
-        个性化情绪建议响应
+        缓存的个性化情绪建议响应
+    """
+    try:
+        api_logger.info(
+            f"用户 {current_user.username} 请求获取个性化情绪建议（缓存）",
+            extra={
+                "group_id": request.group_id,
+                "config_id": request.config_id
+            }
+        )
+
+        # 从缓存获取建议
+        data = await emotion_service.get_cached_suggestions(
+            end_user_id=request.group_id,
+            db=db
+        )
+
+        if data is None:
+            # 缓存不存在或已过期
+            api_logger.info(
+                f"用户 {request.group_id} 的建议缓存不存在或已过期",
+                extra={"group_id": request.group_id}
+            )
+            return fail(
+                BizCode.NOT_FOUND,
+                "建议缓存不存在或已过期，请调用 /generate_suggestions 接口生成新建议",
+                ""
+            )
+
+        api_logger.info(
+            "个性化建议获取成功（缓存）",
+            extra={
+                "group_id": request.group_id,
+                "suggestions_count": len(data.get("suggestions", []))
+            }
+        )
+
+        return success(data=data, msg="个性化建议获取成功（缓存）")
+
+    except Exception as e:
+        api_logger.error(
+            f"获取个性化建议失败: {str(e)}",
+            extra={"group_id": request.group_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取个性化建议失败: {str(e)}"
+        )
+
+
+@router.post("/generate_suggestions", response_model=ApiResponse)
+async def generate_emotion_suggestions(
+    request: EmotionGenerateSuggestionsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """生成个性化情绪建议（调用LLM并缓存）
+
+    Args:
+        request: 包含 group_id、可选的 config_id 和 force_refresh
+        db: 数据库会话
+        current_user: 当前用户
+
+    Returns:
+        新生成的个性化情绪建议响应
     """
     try:
         # 验证 config_id（如果提供）
@@ -232,38 +298,46 @@ async def get_emotion_suggestions(
                     return fail(BizCode.INVALID_PARAMETER, "配置ID无效", f"配置 {config_id} 不存在")
             except Exception as e:
                 return fail(BizCode.INVALID_PARAMETER, "配置ID验证失败", str(e))
-        
+
         api_logger.info(
-            f"用户 {current_user.username} 请求获取个性化情绪建议",
+            f"用户 {current_user.username} 请求生成个性化情绪建议",
             extra={
                 "group_id": request.group_id,
                 "config_id": config_id
             }
         )
-        
-        # 调用服务层
+
+        # 调用服务层生成建议
         data = await emotion_service.generate_emotion_suggestions(
             end_user_id=request.group_id,
             db=db
         )
-        
+
+        # 保存到缓存
+        await emotion_service.save_suggestions_cache(
+            end_user_id=request.group_id,
+            suggestions_data=data,
+            db=db,
+            expires_hours=24
+        )
+
         api_logger.info(
-            "个性化建议获取成功",
+            "个性化建议生成成功",
             extra={
                 "group_id": request.group_id,
                 "suggestions_count": len(data.get("suggestions", []))
             }
         )
-        
-        return success(data=data, msg="个性化建议获取成功")
-        
+
+        return success(data=data, msg="个性化建议生成成功")
+
     except Exception as e:
         api_logger.error(
-            f"获取个性化建议失败: {str(e)}",
+            f"生成个性化建议失败: {str(e)}",
             extra={"group_id": request.group_id},
             exc_info=True
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取个性化建议失败: {str(e)}"
+            detail=f"生成个性化建议失败: {str(e)}"
         )

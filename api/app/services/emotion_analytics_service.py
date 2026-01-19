@@ -705,3 +705,75 @@ class EmotionAnalyticsService:
             health_summary=summary,
             suggestions=suggestions
         )
+    
+    async def get_cached_suggestions(
+        self,
+        end_user_id: str,
+        db: Session,
+    ) -> Optional[Dict[str, Any]]:
+        """从 Redis 缓存获取个性化情绪建议
+        
+        Args:
+            end_user_id: 宿主ID（用户组ID）
+            db: 数据库会话（保留参数以保持接口兼容性）
+            
+        Returns:
+            Dict: 缓存的建议数据，如果不存在或已过期返回 None
+        """
+        try:
+            from app.cache.memory.emotion_memory import EmotionMemoryCache
+            
+            logger.info(f"尝试从 Redis 缓存获取情绪建议: user={end_user_id}")
+            
+            # 从 Redis 获取缓存
+            cached_data = await EmotionMemoryCache.get_emotion_suggestions(end_user_id)
+            
+            if cached_data is None:
+                logger.info(f"用户 {end_user_id} 的建议缓存不存在或已过期")
+                return None
+            
+            logger.info(f"成功从 Redis 缓存获取建议: user={end_user_id}")
+            return cached_data
+            
+        except Exception as e:
+            logger.error(f"从 Redis 缓存获取建议失败: {str(e)}", exc_info=True)
+            return None
+    
+    async def save_suggestions_cache(
+        self,
+        end_user_id: str,
+        suggestions_data: Dict[str, Any],
+        db: Session,
+        expires_hours: int = 24
+    ) -> None:
+        """保存建议到 Redis 缓存
+        
+        Args:
+            end_user_id: 宿主ID（用户组ID）
+            suggestions_data: 建议数据
+            db: 数据库会话（保留参数以保持接口兼容性）
+            expires_hours: 过期时间（小时），默认24小时
+        """
+        try:
+            from app.cache.memory.emotion_memory import EmotionMemoryCache
+            
+            logger.info(f"保存建议到 Redis 缓存: user={end_user_id}, expires={expires_hours}小时")
+            
+            # 计算过期时间（秒）
+            expire_seconds = expires_hours * 3600
+            
+            # 保存到 Redis
+            success = await EmotionMemoryCache.set_emotion_suggestions(
+                user_id=end_user_id,
+                suggestions_data=suggestions_data,
+                expire=expire_seconds
+            )
+            
+            if success:
+                logger.info(f"建议缓存保存成功: user={end_user_id}")
+            else:
+                logger.warning(f"建议缓存保存失败: user={end_user_id}")
+            
+        except Exception as e:
+            logger.error(f"保存建议缓存失败: {str(e)}", exc_info=True)
+            # 不抛出异常，缓存失败不应影响主流程
