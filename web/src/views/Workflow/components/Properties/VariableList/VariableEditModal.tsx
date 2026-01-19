@@ -2,14 +2,14 @@ import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, Select, InputNumber, Checkbox, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { StartVariableItem, VariableEditModalRef } from '../../types'
+import type { Variable, VariableEditModalRef } from './types'
 import RbModal from '@/components/RbModal'
 import SortableList from '@/components/SortableList'
 
 const FormItem = Form.Item;
 
 interface VariableEditModalProps {
-  refresh: (values: StartVariableItem) => void;
+  refresh: (values: Variable) => void;
 }
 
 const types = [
@@ -36,9 +36,9 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
-  const [form] = Form.useForm<StartVariableItem>();
+  const [form] = Form.useForm<Variable>();
   const [loading, setLoading] = useState(false)
-  const [editVo, setEditVo] = useState<StartVariableItem | null>(null)
+  const [editVo, setEditVo] = useState<Variable | null>(null)
 
   const values = Form.useWatch([], form);
 
@@ -50,7 +50,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
     setEditVo(null)
   };
 
-  const handleOpen = (variable?: StartVariableItem) => {
+  const handleOpen = (variable?: Variable) => {
     setVisible(true);
     if (variable) {
       setEditVo(variable || null)
@@ -85,7 +85,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
 
   return (
     <RbModal
-      title={editVo ? t('workflow.config.start.editVariable') : t('workflow.config.start.addVariable')}
+      title={editVo ? t('workflow.config.start.editVariable') : t('workflow.config.addVariable')}
       open={visible}
       onCancel={handleClose}
       okText={t('common.save')}
@@ -96,6 +96,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
         form={form}
         layout="vertical"
         initialValues={initialValues}
+        size="middle"
         scrollToFirstError={{ behavior: 'instant', block: 'end', focus: true }}
       >
         {/* 变量类型 */}

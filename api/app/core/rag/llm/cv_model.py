@@ -243,6 +243,33 @@ class QWenCV(GptV4):
             tmp_path = tmp.name
 
             video_path = f"file://{tmp_path}"
+            prompt_ch = """
+                    你是一名专业的视频转录助手，能够将视频文件的内容转写为文本，并**精确标记每句话或每个段落对应的时间戳**（开始时间-结束时间）。\n
+                    **任务要求**：
+                    1.输入是MP4等视频文件,解析带时间戳的文本。
+                    2.时间戳格式为 `[HH:MM:SS.mmm]`（毫秒可选），例如 `[00:01:23.456]`。
+                    3.时间戳需尽可能贴近实际视频的起止时间，误差不超过1秒。
+                    4.如果无法确定具体时间，请根据上下文合理估算。
+                    5.最后总结:这段视频的内容是什么?,并用恰当的句子总结这个视频。
+
+                    **示例输出**：
+                    [00:00:00.000] 今天天气真好，
+                    [00:00:02.500] 我们一起去公园散步吧。
+                    [00:00:05.800] 公园里的花开得非常漂亮。
+                    这段视频的内容是关于如何在CREAMS系统中进行楼宇管理集合的编辑或删除操作。视频演示了 ..."""
+            prompt_en = """
+                    You are a professional video transcription assistant, capable of transcribing the content of video files into text and **precisely marking the timestamp (start time-end time) corresponding to each sentence or paragraph**. 
+                    **Task requirements**: 
+                    1. Input is MP4 or other video files, and parse the text with timestamps.
+                    2. The timestamp format is `[HH:MM:SS.mmm]` (milliseconds are optional), for example, `[00:01:23.456]`.
+                    3. The timestamp should be as close as possible to the actual start and end time of the video, with an error not exceeding 1 second.
+                    4. If the specific time cannot be determined, please make a reasonable estimation based on the context.
+                    5. Final summary: What is the content of this video? Summarize this video in an appropriate sentence.
+                    
+                    **Example output**: 
+                    [00:00:00.000] The weather is really nice today, [00:00:02.500] let's go for a walk in the park together.
+                    [00:00:05.800] The flowers in the park are blooming beautifully.
+                    The content of this video is about how to edit or delete building management collections in the CREAMS system. The video demonstrates .."""
             messages = [
                 {
                     "role": "user",
@@ -252,7 +279,7 @@ class QWenCV(GptV4):
                             "fps": 2,
                         },
                         {
-                            "text": "视频的内容是什么?,并且，请用恰当的句子总结这个视频。" if self.lang.lower() == "chinese" else "What is the content of the video? And please summarize this video in proper sentences.",
+                            "text": prompt_ch if self.lang.lower() == "chinese" else prompt_en,
                         },
                     ],
                 }

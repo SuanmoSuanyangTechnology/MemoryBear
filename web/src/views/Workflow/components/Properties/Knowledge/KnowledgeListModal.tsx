@@ -117,6 +117,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
             placeholder={t('knowledgeBase.searchPlaceholder')}
             onSearch={handleSearch}
             style={{ width: '100%' }}
+            size="middle"
           />
           {filterList.length === 0 
             ? <Empty />

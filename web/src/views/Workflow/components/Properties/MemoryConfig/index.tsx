@@ -30,7 +30,7 @@ const MemoryConfig: FC<{ options: Suggestion[]; parentName: string; }> = ({
   return (
     <>
       {values?.memory?.enable && <>
-        <div className="rb:flex rb:items-center rb:justify-between rb:py-1.5 rb:px-2 rb:bg-[#F6F8FC] rb:rounded-md rb:mb-2">
+        <div className="rb:flex rb:items-center rb:justify-between rb:py-1.5 rb:px-2 rb:text-[12px] rb:bg-[#F6F8FC] rb:rounded-md rb:mb-2">
           {t('workflow.config.llm.memory')}
           <span>{t('workflow.config.llm.inner')}</span>
         </div>
@@ -40,6 +40,7 @@ const MemoryConfig: FC<{ options: Suggestion[]; parentName: string; }> = ({
             isArray={false}
             parentName={[parentName, 'messages']}
             options={options}
+            size="small"
           />
         </Form.Item>
 

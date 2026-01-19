@@ -417,7 +417,8 @@ export const en = {
       refresh: 'Refresh',
       return: 'Return',
       statusEnabled: 'Available',
-      statusDisabled: 'Unavailable'
+      statusDisabled: 'Unavailable',
+      remove: 'Remove',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -1798,9 +1799,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           temperature: 'Temperature',
           max_tokens: 'Max Tokens',
           context: 'Context',
+          contextPlaceholder: '{x} Set Variable',
           memory: 'Memory',
           enable_window: 'Memory Window',
           inner: 'Built-in',
+          messagesPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
         },
         start: {
           variables: 'Input Fields',
@@ -1811,7 +1814,6 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           array: 'Dropdown Options',
           object: 'Object',
 
-          addVariable: 'Add Variable',
           editVariable: 'Edit Variable',
           variableType: 'Variable Type',
           variableName: 'Variable Name',
@@ -1835,6 +1837,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'parameter-extractor': {
           model_id: 'Model',
           text: 'Input Variable',
+          textPlaceholder: '{x} Set Variable',
           params: 'Extract Parameters',
           prompt: 'Instruction',
 
@@ -1855,6 +1858,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           'array[number]': 'Array[Number]',
           'array[boolean]': 'Array[Boolean]',
           'array[object]': 'Array[Object]',
+          addParams: 'Add Extract Variable',
+          promptPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
         },
         'var-aggregator': {
           group: 'Aggregation Group',
@@ -1924,6 +1929,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         loop: {
           cycle_vars: 'Loop Variables',
           condition: 'Loop Termination Condition',
+          addCondition: 'Add Condition',
           max_loop: 'Maximum Loop Count',
         },
         assigner: {
@@ -1960,6 +1966,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         type: 'Type',
         value: 'Value',
         addCase: 'Add Condition',
+        addVariable: 'Add Variables',
       },
 
       clear: 'Clear',

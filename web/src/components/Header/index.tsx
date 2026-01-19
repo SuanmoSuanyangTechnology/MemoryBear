@@ -54,7 +54,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
       key: '1',
       label: (<>
         <div>{user.username}</div>
-        <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-[8px]">{user.email}</div>
+        <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2">{user.email}</div>
       </>),
     },
     {

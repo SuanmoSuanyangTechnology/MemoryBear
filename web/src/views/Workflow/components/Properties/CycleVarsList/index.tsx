@@ -1,7 +1,6 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next';
-import { Form, Select, Row, Col, Input } from 'antd'
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { Form, Select, Input, Button } from 'antd'
 import VariableSelect from '../VariableSelect'
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
@@ -20,6 +19,7 @@ interface CycleVarsListProps {
   parentName: string;
   selectedNode?: any;
   graphRef?: any;
+  size?: 'small' | 'middle'
 }
 
 const types = [
@@ -37,7 +37,8 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
   options,
   parentName,
   selectedNode,
-  graphRef
+  graphRef,
+  size = 'middle'
 }) => {
   const { t } = useTranslation();
   const form = Form.useFormInstance();
@@ -78,62 +79,56 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
   const availableOptions = getChildNodeVariables();
 
   return (
-    <div>
-      
-      <Form.List name={parentName}>
-        {(fields, { add, remove }) => (
-          <>
-            <div className="rb:flex rb:items-center rb:justify-between rb:mb-3">
-              <span className="rb:text-sm rb:font-medium">循环变量</span>
-              <PlusOutlined className="rb:text-gray-400 rb:cursor-pointer rb:hover:text-blue-500" onClick={() => add({ name: '', type: 'string', input_type: 'constant', value: '' })} />
-            </div>
-            {fields.map(({ key, name, ...field }, index) => {
-              const currentInputType = value?.[index]?.input_type;
-              
-              return (
-                <div key={key} className="rb:mb-3 rb:border rb:border-[#DFE4ED] rb:rounded-md rb:p-3 rb:bg-white">
-                  <Row gutter={8} align="middle" className="rb:mb-2">
-                    <Col span={8}>
-                      <Form.Item name={[name, 'name']} noStyle>
-                        <Input size="small" />
-                      </Form.Item>
-                    </Col>
-                    <Col span={6}>
-                      <Form.Item name={[name, 'type']} noStyle>
-                        <Select
-                          options={types.map(key => ({
-                            value: key,
-                            label: t(`workflow.config.parameter-extractor.${key}`),
-                          }))}
-                          size="small"
-                          popupMatchSelectWidth={false}
-                        />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item name={[name, 'input_type']} noStyle>
-                        <Select
-                          placeholder="Constant"
-                          options={[
-                            { label: 'Constant', value: 'constant' },
-                            { label: 'Variable', value: 'variable' }
-                          ]}
-                          size="small"
-                          popupMatchSelectWidth={false}
-                          onChange={() => {
-                            // 重置 value 字段
-                            form.setFieldValue([parentName, index, 'value'], undefined);
-                          }}
-                        />
-                      </Form.Item>
-                    </Col>
-                    <Col span={2}>
-                      <DeleteOutlined
-                        className="rb:text-gray-400 rb:cursor-pointer rb:hover:text-red-500"
-                        onClick={() => remove(name)}
+    <Form.List name={parentName}>
+      {(fields, { add, remove }) => (
+        <>
+          <div className="rb:flex rb:items-center rb:justify-between rb:mb-3">
+            <span className="rb:text-[12px] rb:font-medium">{t('workflow.config.loop.cycle_vars')}</span>
+            <Button
+              onClick={() => add({ name: '', type: 'string', input_type: 'constant', value: '' })}
+              className="rb:py-0! rb:px-1! rb:text-[12px]!"
+              size="small"
+            >
+              + {t('workflow.config.addVariable')}
+            </Button>
+          </div>
+          {fields.map(({ key, name }, index) => {
+            const currentInputType = value?.[index]?.input_type;
+            
+            return (
+              <div key={key} className="rb:flex rb:items-start rb:mb-2">
+                <div className="rb:flex-1 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-md">
+                  <div className="rb:flex rb:gap-1 rb:p-1 rb:border-b rb:border-b-[#DFE4ED]">
+                    <Form.Item name={[name, 'name']} noStyle>
+                      <Input size={size} className="rb:w-23!" placeholder={t('common.pleaseEnter')} />
+                    </Form.Item>
+                    <Form.Item name={[name, 'type']} noStyle>
+                      <Select
+                        options={types.map(key => ({
+                          value: key,
+                          label: t(`workflow.config.parameter-extractor.${key}`),
+                        }))}
+                        size={size}
+                        popupMatchSelectWidth={false}
+                        className="rb:w-18.5!"
                       />
-                    </Col>
-                  </Row>
+                    </Form.Item>
+                    <Form.Item name={[name, 'input_type']} noStyle>
+                      <Select
+                        placeholder="Constant"
+                        options={[
+                          { label: 'Constant', value: 'constant' },
+                          { label: 'Variable', value: 'variable' }
+                        ]}
+                        size={size}
+                        popupMatchSelectWidth={false}
+                        onChange={() => {
+                          form.setFieldValue([parentName, index, 'value'], undefined);
+                        }}
+                        className="rb:w-18!"
+                      />
+                    </Form.Item>
+                  </div>
                   
                   <Form.Item name={[name, 'value']} noStyle>
                     {currentInputType === 'variable' ? (
@@ -145,22 +140,29 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
 
                           return option.dataType === currentType
                         })}
+                        variant="borderless"
+                        size="small"
                       />
                     ) : (
                       <Input.TextArea
                         placeholder={t('common.pleaseEnter')}
                         rows={3}
                         className="rb:w-full"
+                        variant="borderless"
                       />
                     )}
                   </Form.Item>
                 </div>
-              )
-            })}
-          </>
-        )}
-      </Form.List>
-    </div>
+                <div
+                  className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+                  onClick={() => remove(name)}
+                ></div>
+              </div>
+            )
+          })}
+        </>
+      )}
+    </Form.List>
   )
 }
 
