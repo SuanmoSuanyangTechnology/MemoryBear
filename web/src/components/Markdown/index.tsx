@@ -150,9 +150,19 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
     )
   }
 
+  // 处理键盘快捷键
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+      const selection = window.getSelection()
+      if (selection && selection.toString()) {
+        navigator.clipboard.writeText(selection.toString())
+      }
+    }
+  }
+
   // 预览模式
   return (
-    <div className="rb:relative">
+    <div className="rb:relative" onKeyDown={handleKeyDown} tabIndex={0}>
       <style>{`
         .html-comment {
           color: #999;

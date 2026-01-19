@@ -1,6 +1,7 @@
-import { type FC, useRef } from "react";
+import { type FC, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
 import { Form, Row, Col, Select, Button, Divider, InputNumber, Switch, Input } from 'antd'
+import { CaretDownOutlined, CaretRightOutlined, SettingOutlined } from '@ant-design/icons';
 import Editor from '../../Editor'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import AuthConfigModal from './AuthConfigModal'
@@ -65,15 +66,23 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
     }
   }
 
-  console.log('HttpRequest', values)
+  const [collapsed, setCollapsed] = useState(true)
+  const handleToggle = () => {
+    setCollapsed((prev: boolean) => !prev)
+  }
 
   return (
     <>
-      <div className="rb:flex rb:items-center rb:justify-between rb:mb-4">
-        <div>API</div>
-        <Button onClick={handleChangeAuth}>{t('workflow.config.http-request.auth')}</Button>
+      <div className="rb:flex rb:items-center rb:justify-between rb:mb-1">
+        <div className="rb:font-medium rb:text-[12px] rb:leading-4.5">API</div>
+        <Button onClick={handleChangeAuth}
+          size="small"
+          type="text"
+          icon={<SettingOutlined />}
+          className="rb:mt-1 rb:text-[12px]!"
+        >{t('workflow.config.http-request.auth')}: {!values?.auth?.auth_type || values?.auth?.auth_type === 'none' ? t('workflow.config.http-request.none') : t('workflow.config.http-request.apiKey')}</Button>
       </div>
-      <Row gutter={16}>
+      <Row gutter={4}>
         <Col span={8}>
           <Form.Item name="method">
             <Select
@@ -85,35 +94,43 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
                 { label: 'PUT', value: 'PUT' },
                 { label: 'DELETE', value: 'DELETE' },
               ]}
+              className="rb:bg-transparent!"
             />
           </Form.Item>
         </Col>
         <Col span={16}>
           <Form.Item name="url">
-            <Editor options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')} variant="outlined" />
+            <Editor 
+              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')} 
+              variant="outlined"
+              type="input"
+              size="small"
+            />
           </Form.Item>
         </Col>
       </Row>
       <Form.Item name="auth" hidden>
       </Form.Item>
 
-      <Form.Item name="headers">
+      <Form.Item name="headers" noStyle>
         <EditableTable
+          size="small"
           parentName="headers"
           title="HEADERS"
           options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
         />
       </Form.Item>
 
-      <Form.Item name="params">
+      <Form.Item name="params" noStyle>
         <EditableTable
+          size="small"
           parentName="params"
           title="PARAMS"
           options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
         />
       </Form.Item>
 
-      <Form.Item label="BODY">
+      <Form.Item label="BODY" className="rb:mb-0!">
         <Form.Item name={['body', 'content_type']}>
           <Select
             placeholder={t('common.pleaseSelect')}
@@ -131,6 +148,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         {values?.body?.content_type === 'form-data' &&
           <Form.Item name={['body', 'data']} noStyle>
             <EditableTable
+              size="small"
               parentName={['body', 'data']}
               options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
               typeOptions={[
@@ -143,6 +161,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         {values?.body?.content_type === 'x-www-form-urlencoded' &&
           <Form.Item name={['body', 'data']} noStyle>
             <EditableTable
+              size="small"
               parentName={['body', 'data']}
               options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
               filterBooleanType={true}
@@ -150,7 +169,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           </Form.Item>
         }
         {values?.body?.content_type === 'json' &&
-          <Form.Item name={['body', 'data']}>
+          <Form.Item name={['body', 'data']} noStyle>
             <MessageEditor
               key="json"
               parentName={['body', 'data']}
@@ -161,7 +180,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           </Form.Item>
         }
         {values?.body?.content_type === 'raw' &&
-          <Form.Item name={['body', 'data']}>
+          <Form.Item name={['body', 'data']} noStyle>
             <MessageEditor
               key="raw"
               parentName={['body', 'data']}
@@ -172,7 +191,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           </Form.Item>
         }
         {values?.body?.content_type === 'binary' &&
-          <Form.Item name={['body', 'data']}>
+          <Form.Item name={['body', 'data']} noStyle>
             <VariableSelect
               placeholder={t('common.pleaseSelect')}
               options={options.filter(vo => vo.dataType.includes('file'))}
@@ -182,15 +201,19 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         }
       </Form.Item>
       <Divider />
-      <Form.Item layout="horizontal" name="verify_ssl" label={t('workflow.config.http-request.verify_ssl')}>
+      <Form.Item layout="horizontal" name="verify_ssl" label={t('workflow.config.http-request.verify_ssl')} className="rb:mb-0!">
         <Switch />
       </Form.Item>
 
       <Divider />
-      <div>{t('workflow.config.http-request.timeouts')}</div>
+      <div className="rb:font-medium rb:text-[12px] rb:leading-4.5 rb:mb-2.5 rb:cursor-pointer" onClick={handleToggle}>
+        {t('workflow.config.http-request.timeouts')}
+        {collapsed ? <CaretRightOutlined /> : <CaretDownOutlined />}
+      </div>
       <Form.Item
         name={['timeouts', 'connect_timeout']}
         label={t('workflow.config.http-request.connect_timeout')}
+        hidden={collapsed}
       >
         <InputNumber
           placeholder={t('common.pleaseEnter')}
@@ -201,6 +224,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
       <Form.Item
         name={['timeouts', 'read_timeout']}
         label={t('workflow.config.http-request.read_timeout')}
+        hidden={collapsed}
       >
         <InputNumber
           placeholder={t('common.pleaseEnter')}
@@ -211,6 +235,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
       <Form.Item
         name={['timeouts', 'write_timeout']}
         label={t('workflow.config.http-request.write_timeout')}
+        hidden={collapsed}
       >
         <InputNumber
           placeholder={t('common.pleaseEnter')}

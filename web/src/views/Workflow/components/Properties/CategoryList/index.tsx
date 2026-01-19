@@ -1,8 +1,8 @@
 import { type FC } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Form, Space } from 'antd';
-import { DeleteOutlined } from '@ant-design/icons';
 import { Graph, Node } from '@antv/x6';
+
 import Editor from '../../Editor';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 
@@ -151,17 +151,15 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
             const contentLength = (currentItem.class_name || '').length;
             
             return (
-            <div key={key} className="rb:border rb:border-[#DFE4ED] rb:rounded-md rb:p-3 rb:bg-[#F8F9FB]">
+            <div key={key} className="rb:border rb:border-[#DFE4ED] rb:rounded-md rb:p-2 rb:bg-[#F8F9FB]">
               <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
-                <div>{t('workflow.config.question-classifier.class_name')} {index + 1}</div>
+                <div className="rb:text-[12px] rb:font-medium rb:py-1 rb:leading-2">{t('workflow.config.question-classifier.class_name')} {index + 1}</div>
                 <div className="rb:flex rb:items-center rb:gap-1">
                   <span className="rb:text-xs rb:text-gray-500">{contentLength}</span>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<DeleteOutlined />}
+                  <div
+                    className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
                     onClick={() => handleRemoveCategory(remove, name, index)}
-                  />
+                  ></div>
                 </div>
               </div>
               <Form.Item
@@ -172,6 +170,7 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
                 <Editor
                   placeholder={t('common.pleaseEnter')}
                   options={options}
+                  size="small"
                 />
               </Form.Item>
             </div>
@@ -179,8 +178,10 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
           
           <Button
             type="dashed"
+            size="middle"
+            block
             onClick={() => handleAddCategory(add)}
-            className="rb:w-full"
+            className="rb:text-[12px]!"
           >
             + {t('workflow.config.question-classifier.addClassName')}
           </Button>
