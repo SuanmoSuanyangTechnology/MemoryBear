@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Form, Slider, Button, Space, message, Switch } from 'antd';
+import { Row, Col, Form, Slider, Button, Space, message } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import RbCard from '@/components/RbCard/Card';
@@ -7,6 +7,7 @@ import strategyImpactSimulator from '@/assets/images/memory/strategyImpactSimula
 import LineChart from './components/LineChart'
 import { getMemoryForgetConfig, updateMemoryForgetConfig } from '@/api/memory'
 import type { ConfigForm } from './types'
+import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 
 const configList = [
   {
@@ -155,26 +156,12 @@ const ForgettingEngine: React.FC = () => {
               {configList.map(config => {
                 if (config.type === 'button') {
                   return (
-                    <div key={config.key} className="rb:mb-2">
-                      <div className="rb:flex rb:items-center rb:justify-between">
-                        <div>
-                          <span className="rb:text-[14px] rb:font-medium rb:leading-5">{t(`forgettingEngine.${config.key}`)}</span>
-                        </div>
-                        <Form.Item
-                          name={config.name}
-                          valuePropName="checked"
-                          className="rb:ml-2 rb:mb-0!"
-                        >
-                          <Switch />
-                        </Form.Item>
-                      </div>
-                      <div className="rb:flex rb:text-[12px] rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5">
-                        <Space size={4}>
-                          {config.range && <span>{t(`forgettingEngine.range`)}: {config.range?.join('-')}</span>}
-                          {config.type && <span>{t(`forgettingEngine.type`)}: {config.type}</span>}
-                        </Space>
-                      </div>
-                    </div>
+                    <SwitchFormItem
+                      title={t(`forgettingEngine.${config.key}`)}
+                      name={config.name}
+                      desc={config.type && <span>{t(`forgettingEngine.type`)}: {config.type}</span>}
+                      className="rb:mb-2"
+                    />
                   )
                 }
                 return (
@@ -191,8 +178,6 @@ const ForgettingEngine: React.FC = () => {
                     >
                       {config.type === 'decimal'
                         ? <Slider tooltip={{ open: false }} max={config.range?.[1] || 1} min={config.range?.[0] || 0} step={config.step ?? 0.01} style={{ margin: '0' }} />
-                        : config.type === 'button'
-                        ? <Switch />
                         : null
                       }
                     </Form.Item>

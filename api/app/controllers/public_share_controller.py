@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
-from app.db import get_db
+from app.db import get_db, get_db_read
 from app.dependencies import get_share_user_id, ShareTokenData
 from app.repositories import knowledge_repository
+from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import release_share_schema, conversation_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.services import workspace_service
@@ -19,7 +20,8 @@ from app.services.conversation_service import ConversationService
 from app.services.release_share_service import ReleaseShareService
 from app.services.shared_chat_service import SharedChatService
 from app.services.app_chat_service import AppChatService, get_app_chat_service
-from app.utils.app_config_utils import dict_to_multi_agent_config, workflow_config_4_app_release, agent_config_4_app_release, multi_agent_config_4_app_release
+from app.utils.app_config_utils import dict_to_multi_agent_config, workflow_config_4_app_release, \
+    agent_config_4_app_release, multi_agent_config_4_app_release
 
 router = APIRouter(prefix="/public/share", tags=["Public Share"])
 logger = get_business_logger()
@@ -65,10 +67,10 @@ def get_or_generate_user_id(payload_user_id: str, request: Request) -> str:
     summary="获取访问 token"
 )
 def get_access_token(
-    share_token: str,
-    payload: release_share_schema.TokenRequest,
-    request: Request,
-    db: Session = Depends(get_db),
+        share_token: str,
+        payload: release_share_schema.TokenRequest,
+        request: Request,
+        db: Session = Depends(get_db),
 ):
     """获取访问 token
 
@@ -113,9 +115,9 @@ def get_access_token(
     response_model=None
 )
 def get_shared_release(
-    password: str = Query(None, description="访问密码（如果需要）"),
-    share_data: ShareTokenData = Depends(get_share_user_id),
-    db: Session = Depends(get_db),
+        password: str = Query(None, description="访问密码（如果需要）"),
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
 ):
     """获取公开分享的发布版本信息
 
@@ -137,9 +139,9 @@ def get_shared_release(
     summary="验证访问密码"
 )
 def verify_password(
-    payload: release_share_schema.PasswordVerifyRequest,
-    share_data: ShareTokenData = Depends(get_share_user_id),
-    db: Session = Depends(get_db),
+        payload: release_share_schema.PasswordVerifyRequest,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
 ):
     """验证分享的访问密码
 
@@ -159,11 +161,11 @@ def verify_password(
     summary="获取嵌入代码"
 )
 def get_embed_code(
-    width: str = Query("100%", description="iframe 宽度"),
-    height: str = Query("600px", description="iframe 高度"),
-    request: Request = None,
-    share_data: ShareTokenData = Depends(get_share_user_id),
-    db: Session = Depends(get_db),
+        width: str = Query("100%", description="iframe 宽度"),
+        height: str = Query("600px", description="iframe 高度"),
+        request: Request = None,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
 ):
     """获取嵌入代码
 
@@ -183,7 +185,6 @@ def get_embed_code(
     return success(data=embed_code)
 
 
-
 # ---------- 会话管理接口 ----------
 
 @router.get(
@@ -191,11 +192,11 @@ def get_embed_code(
     summary="获取会话列表"
 )
 def list_conversations(
-    password: str = Query(None, description="访问密码"),
-    page: int = Query(1, ge=1),
-    pagesize: int = Query(20, ge=1, le=100),
-    share_data: ShareTokenData = Depends(get_share_user_id),
-    db: Session = Depends(get_db),
+        password: str = Query(None, description="访问密码"),
+        page: int = Query(1, ge=1),
+        pagesize: int = Query(20, ge=1, le=100),
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
 ):
     """获取分享应用的会话列表
 
@@ -209,9 +210,9 @@ def list_conversations(
     from app.repositories.end_user_repository import EndUserRepository
     end_user_repo = EndUserRepository(db)
     new_end_user = end_user_repo.get_or_create_end_user(
-            app_id=share.app_id,
-            other_id=other_id
-        )
+        app_id=share.app_id,
+        other_id=other_id
+    )
     logger.debug(new_end_user.id)
     service = SharedChatService(db)
     conversations, total = service.list_conversations(
@@ -233,10 +234,10 @@ def list_conversations(
     summary="获取会话详情（含消息）"
 )
 def get_conversation(
-    conversation_id: uuid.UUID,
-    password: str = Query(None, description="访问密码"),
-    share_data: ShareTokenData = Depends(get_share_user_id),
-    db: Session = Depends(get_db),
+        conversation_id: uuid.UUID,
+        password: str = Query(None, description="访问密码"),
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
 ):
     """获取会话详情和消息历史"""
     chat_service = SharedChatService(db)
@@ -266,10 +267,10 @@ def get_conversation(
     summary="发送消息（支持流式和非流式）"
 )
 async def chat(
-    payload: conversation_schema.ChatRequest,
-    share_data: ShareTokenData = Depends(get_share_user_id),
-    db: Session = Depends(get_db),
-    app_chat_service: Annotated[AppChatService, Depends(get_app_chat_service)] = None,
+        payload: conversation_schema.ChatRequest,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+        app_chat_service: Annotated[AppChatService, Depends(get_app_chat_service)] = None,
 ):
     """发送消息并获取回复
 
@@ -313,7 +314,7 @@ async def chat(
         )
         end_user_id = str(new_end_user.id)
 
-        appid=share.app_id
+        appid = share.app_id
         """获取存储类型和工作空间的ID"""
 
         # 直接通过 SQLAlchemy 查询 app
@@ -425,16 +426,16 @@ async def chat(
             # )
             async def event_generator():
                 async for event in app_chat_service.agnet_chat_stream(
-                    message=payload.message,
-                    conversation_id=conversation.id,  # 使用已创建的会话 ID
-                    user_id= str(new_end_user.id),  # 转换为字符串
-                    variables=payload.variables,
-                    web_search=payload.web_search,
-                    config=agent_config,
-                    memory=payload.memory,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    workspace_id=workspace_id
+                        message=payload.message,
+                        conversation_id=conversation.id,  # 使用已创建的会话 ID
+                        user_id=str(new_end_user.id),  # 转换为字符串
+                        variables=payload.variables,
+                        web_search=payload.web_search,
+                        config=agent_config,
+                        memory=payload.memory,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        workspace_id=workspace_id
                 ):
                     yield event
 
@@ -481,15 +482,15 @@ async def chat(
             async def event_generator():
                 async for event in app_chat_service.multi_agent_chat_stream(
 
-                    message=payload.message,
-                    conversation_id=conversation.id,  # 使用已创建的会话 ID
-                    user_id=str(new_end_user.id),  # 转换为字符串
-                    variables=payload.variables,
-                    config=config,
-                    web_search=payload.web_search,
-                    memory=payload.memory,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+                        message=payload.message,
+                        conversation_id=conversation.id,  # 使用已创建的会话 ID
+                        user_id=str(new_end_user.id),  # 转换为字符串
+                        variables=payload.variables,
+                        config=config,
+                        web_search=payload.web_search,
+                        memory=payload.memory,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id
                 ):
                     yield event
 
@@ -561,24 +562,27 @@ async def chat(
 
         # return success(data=conversation_schema.ChatResponse(**result))
     elif app_type == AppType.WORKFLOW:
-
         config = workflow_config_4_app_release(release)
+        if not config.id:
+            with get_db_read() as db:
+                source_config = WorkflowConfigRepository(db).get_by_app_id(release.app_id)
+                config.id = source_config.id
+        config.id = uuid.UUID(config.id)
         if payload.stream:
             async def event_generator():
-
                 async for event in app_chat_service.workflow_chat_stream(
-
-                    message=payload.message,
-                    conversation_id=conversation.id,  # 使用已创建的会话 ID
-                    user_id=end_user_id,  # 转换为字符串
-                    variables=payload.variables,
-                    config=config,
-                    web_search=payload.web_search,
-                    memory=payload.memory,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    app_id=release.app_id,
-                    workspace_id=workspace_id
+                        message=payload.message,
+                        conversation_id=conversation.id,  # 使用已创建的会话 ID
+                        user_id=end_user_id,  # 转换为字符串
+                        variables=payload.variables,
+                        config=config,
+                        web_search=payload.web_search,
+                        memory=payload.memory,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        app_id=release.app_id,
+                        workspace_id=workspace_id,
+                        release_id=release.id
                 ):
                     event_type = event.get("event", "message")
                     event_data = event.get("data", {})
@@ -610,7 +614,8 @@ async def chat(
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
             app_id=release.app_id,
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
+            release_id=release.id
         )
         logger.debug(
             "工作流试运行返回结果",

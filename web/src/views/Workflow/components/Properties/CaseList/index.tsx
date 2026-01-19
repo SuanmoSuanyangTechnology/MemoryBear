@@ -1,8 +1,7 @@
 import { type FC } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next';
-import { Form, Button, Select, Space, Row, Col, Divider, InputNumber, Radio, type SelectProps } from 'antd'
-import { DeleteOutlined } from '@ant-design/icons';
+import { Form, Button, Select, Space, Divider, InputNumber, Radio, type SelectProps } from 'antd'
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
@@ -247,37 +246,40 @@ const CaseList: FC<CaseListProps> = ({
                   {(conditionFields, { add: addCondition, remove: removeCondition }) => {
                     const logicalOperator = form.getFieldValue(name)?.[caseIndex]?.logical_operator || 'and'
                     return (
-                      <div className={clsx("rb:relative rb:mb-4 rb:border rb:border-gray-200 rb:rounded rb:p-3 rb:pl-5")}>
-                        <div className="rb:flex rb:items-center rb:justify-between rb:mb-3">
-                          <span className="rb:font-medium">
-                            {caseIndex === 0 ? 'IF' : 'ELIF'}<br/>
-                            {caseFields.length > 1 && <span className="rb:text-[10px] rb:text-[#5B6167]">{`CASE ${caseIndex + 1}`}</span>}
-                          </span>
+                      <div className={clsx("rb:relative")}>
+                        <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
+                          <div className="rb:text-[12px] rb:leading-4.5">
+                            <span className="rb:font-medium ">{caseIndex === 0 ? 'IF' : 'ELIF'}</span>
+                            {caseFields.length > 1 && <span className="rb:text-[10px] rb:text-[#5B6167]"> ({`CASE ${caseIndex + 1}`})</span>}
+                          </div>
 
                           <Space>
                             <Button
-                              type="dashed"
                               onClick={() => addCondition({})}
+                              className="rb:py-0! rb:px-1! rb:text-[12px]!"
                               size="small"
                             >
                               + {t('workflow.config.addCase')}
                             </Button>
-                            {caseFields.length > 1 && <DeleteOutlined
-                              className="rb:text-[12px]"
-                              onClick={() => handleRemoveCase(removeCase, caseField.name, caseIndex)}
-                            />}
+                            {caseFields.length > 1 &&
+                              <Button
+                                className="rb:py-0! rb:px-1! rb:text-[12px]!"
+                                onClick={() => handleRemoveCase(removeCase, caseField.name, caseIndex)}
+                              >
+                                {t('common.remove')}
+                              </Button>
+                            }
                           </Space>
                         </div>
-                        {conditionFields?.length > 1 &&
-                        <>
-                          <div className="rb:absolute rb:w-3 rb:left-2 rb:top-15 rb:bottom-6 rb:z-10 rb:border rb:border-[#DFE4ED] rb:rounded-l-md rb:border-r-0"></div>
-                          <div className="rb:absolute rb:z-10 rb:left-0 rb:top-[50%] rb:transform-[translateY(-50%)]]">
+                        {conditionFields?.length > 1 && <div className="rb:absolute rb:top-8 rb:bottom-4 rb:w-8.5 rb:h-[calc(100%-32px)]">
+                          <div className="rb:absolute rb:w-2.5 rb:h-[calc(50%-30px)] rb:left-5 rb:top-4 rb:z-10 rb:border-l rb:border-t rb:border-[#DFE4ED] rb:rounded-tl-[10px] rb:border-r-0"></div>
+                          <div className="rb:absolute rb:z-10 rb:left-0 rb:top-[calc(50%-13px)]">
                             <Form.Item name={[caseField.name, 'logical_operator']} noStyle >
-                              <Button size="small" className="rb:cursor-pointer" onClick={() => handleChangeLogicalOperator(caseIndex)}>{logicalOperator}</Button>
+                              <Button size="small" className="rb:text-[12px]! rb:py-px! rb:px-1! rb:w-8.5! rb:h-5!" onClick={() => handleChangeLogicalOperator(caseIndex)}>{logicalOperator}</Button>
                             </Form.Item>
                           </div>
-                        </>
-                        }
+                          <div className="rb:absolute rb:w-2.5 rb:h-[calc(50%-30px)] rb:left-5 rb:bottom-4 rb:z-10 rb:border-l rb:border-b rb:border-[#DFE4ED] rb:rounded-bl-[10px] rb:border-r-0"></div>
+                        </div>}
                         {conditionFields.map((conditionField, conditionIndex) => {
                           const cases = form.getFieldValue(name) || [];
                           const currentCase = cases[caseIndex] || {};
@@ -290,91 +292,86 @@ const CaseList: FC<CaseListProps> = ({
                           const operatorList = operatorsObj[leftFieldType || 'default'] || operatorsObj.default || [];
                           const inputType = leftFieldType === 'number' ? currentExpression.input_type : undefined;
                           return (
-                            <div key={conditionField.key} className={clsx({
-                              "rb:mb-3": conditionIndex !== conditionFields.length - 1
-                            })}>
-                              <div className="rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5 rb:bg-white">
-                                <Row gutter={12} className="rb:mb-1">
-                                  <Col span={14}>
-                                    <Form.Item name={[conditionField.name, 'left']} noStyle>
-                                      <VariableSelect
-                                        placeholder={t('common.pleaseSelect')}
-                                        options={options}
-                                        size="small"
-                                        allowClear={false}
-                                        popupMatchSelectWidth={false}
-                                        onChange={(val) => handleLeftFieldChange(caseIndex, conditionIndex, val)}
-                                      />
-                                    </Form.Item>
-                                  </Col>
-                                  <Col span={8}>
-                                    <Form.Item name={[conditionField.name, 'operator']} noStyle>
-                                      <Select
-                                        options={operatorList.map(vo => ({
-                                          ...vo,
-                                          label: t(String(vo?.label || ''))
-                                        }))}
-                                        size="small"
-                                        popupMatchSelectWidth={false}
-                                        placeholder={t('common.pleaseSelect')}
-                                      />
-                                    </Form.Item>
-                                  </Col>
-                                  <Col span={2}>
-                                    <DeleteOutlined
-                                      className="rb:text-[12px]"
-                                      onClick={() => removeCondition(conditionField.name)}
+                            <div key={conditionField.key} className="rb:flex rb:items-start rb:ml-9.5 rb:mb-4">
+                              <div className="rb:flex-1 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-md">
+                                <div className={clsx("rb:flex rb:gap-1 rb:p-1", {
+                                  'rb:border-b rb:border-b-[#DFE4ED]': !hideRightField
+                                })}>
+                                  <Form.Item name={[conditionField.name, 'left']} noStyle>
+                                    <VariableSelect
+                                      placeholder={t('common.pleaseSelect')}
+                                      options={options}
+                                      size="small"
+                                      allowClear={false}
+                                      popupMatchSelectWidth={false}
+                                      onChange={(val) => handleLeftFieldChange(caseIndex, conditionIndex, val)}
+                                      className="rb:bg-white! rb:w-29.5!"
                                     />
-                                  </Col>
-                                </Row>
+                                  </Form.Item>
+                                  <Form.Item name={[conditionField.name, 'operator']} noStyle>
+                                    <Select
+                                      options={operatorList.map(vo => ({
+                                        ...vo,
+                                        label: t(String(vo?.label || ''))
+                                      }))}
+                                      size="small"
+                                      popupMatchSelectWidth={false}
+                                      placeholder={t('common.pleaseSelect')}
+                                      className="rb:bg-white! rb:w-22!"
+                                    />
+                                  </Form.Item>
+                                </div>
                                 
-                                {!hideRightField && <>
+                                {!hideRightField && <div className="rb:p-1">
                                   {leftFieldType === 'number'
-                                    ? <Row>
-                                      <Col span={12}>
-                                        <Form.Item name={[conditionField.name, 'input_type']} noStyle>
-                                          <Select
+                                    ? <div className="rb:flex rb:items-center">
+                                      <Form.Item name={[conditionField.name, 'input_type']} noStyle>
+                                        <Select
+                                          placeholder={t('common.pleaseSelect')}
+                                          options={[{ value: 'Variable', label: 'Variable' }, { value: 'Constant', label: 'Constant' }]}
+                                          popupMatchSelectWidth={false}
+                                          variant="borderless"
+                                          onChange={() => handleInputTypeChange(caseIndex, conditionIndex)}
+                                          className="rb:w-18!"
+                                        />
+                                      </Form.Item>
+                                      <Divider type="vertical" />
+                                      <Form.Item name={[conditionField.name, 'right']} noStyle>
+                                        {inputType === 'Variable'
+                                          ?
+                                          <VariableSelect
                                             placeholder={t('common.pleaseSelect')}
-                                            options={[{ value: 'Variable', label: 'Variable' }, { value: 'Constant', label: 'Constant' }]}
+                                            options={options.filter(vo => vo.dataType === 'number')}
+                                            allowClear={false}
                                             popupMatchSelectWidth={false}
                                             variant="borderless"
-                                            onChange={() => handleInputTypeChange(caseIndex, conditionIndex)}
+                                            size="small"
                                           />
-                                        </Form.Item>
-                                      </Col>
-                                      <Col span={12}>
-                                        <Form.Item name={[conditionField.name, 'right']} noStyle>
-                                          {inputType === 'Variable'
-                                            ?
-                                            <VariableSelect
-                                              placeholder={t('common.pleaseSelect')}
-                                              options={options.filter(vo => vo.dataType === 'number')}
-                                              allowClear={false}
-                                              popupMatchSelectWidth={false}
+                                          : <InputNumber
+                                              placeholder={t('common.pleaseEnter')}
                                               variant="borderless"
+                                              className="rb:w-full!"
+                                              onChange={(value) => form.setFieldValue([name, caseIndex, 'expressions', conditionIndex, 'right'], value)}
                                             />
-                                            : <InputNumber
-                                                placeholder={t('common.pleaseEnter')}
-                                                variant="borderless"
-                                                className="rb:w-full!"
-                                                onChange={(value) => form.setFieldValue([name, caseIndex, 'expressions', conditionIndex, 'right'], value)}
-                                              />
-                                          }
-                                        </Form.Item>
-                                      </Col>
-                                    </Row>
+                                        }
+                                      </Form.Item>
+                                    </div>
                                     : <Form.Item name={[conditionField.name, 'right']} noStyle>
                                       {leftFieldType === 'boolean'
                                           ? <Radio.Group block>
                                             <Radio.Button value={true}>True</Radio.Button>
                                             <Radio.Button value={false}>False</Radio.Button>
                                           </Radio.Group>
-                                          : <Editor options={options} />
+                                          : <Editor options={options} size="small" type="input" />
                                       }
                                     </Form.Item>
                                   }
-                                </>}
+                                </div>}
                               </div>
+                              <div
+                                className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+                                onClick={() => removeCondition(conditionField.name)}
+                              ></div>
                             </div>
                           )
                         })}
@@ -388,6 +385,8 @@ const CaseList: FC<CaseListProps> = ({
             <Button 
               type="dashed" 
               block
+              size="middle"
+              className="rb:text-[12px]!"
               onClick={() => handleAddCase(addCase)}
             >
               + ELIF
@@ -395,9 +394,9 @@ const CaseList: FC<CaseListProps> = ({
           </>
         )}
       </Form.List>
-      <Divider />
-      <div className="rb:font-medium">ELSE</div>
-      <div className="rb:text-[12px] rb:text-[#5B6167] ">{t('workflow.config.if-else.else_desc')}</div>
+      
+      <div className="rb:font-medium rb:text-[12px] rb:mt-4 rb:leading-4.5">ELSE</div>
+      <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2 rb:leading-4.5">{t('workflow.config.if-else.else_desc')}</div>
     </>
   )
 }

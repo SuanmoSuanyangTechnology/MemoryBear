@@ -60,6 +60,34 @@ class QWenSeq2txt(Base):
         from dashscope import MultiModalConversation
 
         audio_path = f"file://{audio_path}"
+        prompt_ch = """
+        你是一名专业的音频转录助手，能够将MP3音频文件的内容转写为文本，并**精确标记每句话或每个段落对应的时间戳**（开始时间-结束时间）。\n
+        **任务要求**：
+        1.输入是MP3,解析带时间戳的文本。
+        2.时间戳格式为 `[HH:MM:SS.mmm]`（毫秒可选），例如 `[00:01:23.456]`。
+        3.时间戳需尽可能贴近实际语音的起止时间，误差不超过1秒。
+        4.如果无法确定具体时间，请根据上下文合理估算。
+        5.最后总结:这段音频在说什么?
+        
+        **示例输出**：
+        [00:00:00.000] 今天天气真好，
+        [00:00:02.500] 我们一起去公园散步吧。
+        [00:00:05.800] 公园里的花开得非常漂亮。
+        这段音频讲述的是一个关于**“吃水不忘挖井人”**的感人故事，主 ..."""
+        prompt_en = """
+        You are a professional audio transcription assistant, capable of transcribing the content of MP3 audio files into text and **precisely marking the timestamps (start time - end time) corresponding to each sentence or paragraph**. 
+        **Task requirements**: 
+        1. Input is MP3, parse text with timestamps.
+        2. The timestamp format is `[HH:MM:SS.mmm]` (milliseconds are optional), for example, `[00:01:23.456]`.
+        3. The timestamp should be as close as possible to the actual start and end time of the voice, with an error not exceeding 1 second.
+        4. If a specific time cannot be determined, please make a reasonable estimation based on the context.
+        5. Final summary: What is this audio talking about?
+        
+        **Example Output**: 
+        [00:00:00.000] The weather is really nice today, 
+        [00:00:02.500] let's go for a walk in the park together.
+        [00:00:05.800] The flowers in the park are blooming beautifully.
+        This audio tells a touching story about **"Remembering the one who dug the well when drinking water"** .."""
         messages = [
             {
                 "role": "user",
@@ -68,7 +96,7 @@ class QWenSeq2txt(Base):
                         "audio": audio_path
                     },
                     {
-                        "text": "这段音频在说什么?" if self.lang.lower() == "chinese" else "What is this audio saying?",
+                        "text": prompt_ch if self.lang.lower() == "chinese" else prompt_en,
                     },
                 ],
             }

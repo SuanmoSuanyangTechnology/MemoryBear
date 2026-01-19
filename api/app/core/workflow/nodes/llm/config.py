@@ -66,7 +66,7 @@ class LLMNodeConfig(BaseNodeConfig):
     )
 
     memory: MemoryWindowSetting = Field(
-        ...,
+        default_factory=MemoryWindowSetting,
         description="对话上下文窗口"
     )
 

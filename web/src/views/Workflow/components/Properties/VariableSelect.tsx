@@ -10,6 +10,7 @@ interface VariableSelectProps extends SelectProps {
   onChange?: (value: string) => void;
   allowClear?: boolean;
   filterBooleanType?: boolean;
+  size?: 'small' | 'middle' | 'large'
 }
 
 const VariableSelect: FC<VariableSelectProps> = ({
@@ -18,7 +19,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   value,
   allowClear = true,
   onChange,
-  size,
+  size = 'middle',
   filterBooleanType = false,
   ...resetPorps
 }) => {

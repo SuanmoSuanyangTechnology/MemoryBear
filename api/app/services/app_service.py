@@ -129,7 +129,7 @@ class AppService:
         Raises:
             ResourceNotFoundException: 当应用不存在时
         """
-        app = get_apps_by_id(self.db,app_id)
+        app = get_apps_by_id(self.db, app_id)
         if not app:
             logger.warning("应用不存在", extra={"app_id": str(app_id)})
             raise ResourceNotFoundException("应用", str(app_id))
@@ -227,7 +227,6 @@ class AppService:
             if not model_api_key:
                 raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
 
-
         # 3. 检查子 Agent 配置
         if not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0:
             raise BusinessException(
@@ -281,10 +280,10 @@ class AppService:
         )
 
     def _create_agent_config(
-        self,
-        app_id: uuid.UUID,
-        config_data: app_schema.AgentConfigCreate,
-        now: datetime.datetime
+            self,
+            app_id: uuid.UUID,
+            config_data: app_schema.AgentConfigCreate,
+            now: datetime.datetime
     ) -> None:
         """创建 Agent 配置（内部方法）
 
@@ -313,10 +312,10 @@ class AppService:
         logger.debug("Agent 配置已创建", extra={"app_id": str(app_id)})
 
     def _create_multi_agent_config(
-        self,
-        app_id: uuid.UUID,
-        config_data: Dict[str, Any],
-        now: datetime.datetime
+            self,
+            app_id: uuid.UUID,
+            config_data: Dict[str, Any],
+            now: datetime.datetime
     ) -> None:
         """创建多 Agent 配置（内部方法）
 
@@ -411,9 +410,9 @@ class AppService:
         return 1 if max_ver is None else int(max_ver) + 1
 
     def _convert_to_schema(
-        self,
-        app: App,
-        current_workspace_id: uuid.UUID
+            self,
+            app: App,
+            current_workspace_id: uuid.UUID
     ) -> app_schema.App:
         """将 App 模型转换为 Schema，并设置 is_shared 字段
 
@@ -447,9 +446,9 @@ class AppService:
     # ==================== 应用管理 ====================
 
     def get_app(
-        self,
-        app_id: uuid.UUID,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            app_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> App:
         """获取应用详情
 
@@ -469,11 +468,11 @@ class AppService:
         return app
 
     def create_app(
-        self,
-        *,
-        user_id: uuid.UUID,
-        workspace_id: uuid.UUID,
-        data: app_schema.AppCreate
+            self,
+            *,
+            user_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            data: app_schema.AppCreate
     ) -> App:
         """创建应用
 
@@ -535,11 +534,11 @@ class AppService:
             raise BusinessException(f"应用创建失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
 
     def update_app(
-        self,
-        *,
-        app_id: uuid.UUID,
-        data: app_schema.AppUpdate,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            data: app_schema.AppUpdate,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> App:
         """更新应用基本信息
 
@@ -578,10 +577,10 @@ class AppService:
         return app
 
     def delete_app(
-        self,
-        *,
-        app_id: uuid.UUID,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> None:
         """删除应用
 
@@ -612,12 +611,12 @@ class AppService:
         )
 
     def copy_app(
-        self,
-        *,
-        app_id: uuid.UUID,
-        user_id: uuid.UUID,
-        workspace_id: Optional[uuid.UUID] = None,
-        new_name: Optional[str] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            user_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None,
+            new_name: Optional[str] = None
     ) -> App:
         """复制应用（包括基础信息和配置）
 
@@ -716,16 +715,16 @@ class AppService:
             raise BusinessException(f"应用复制失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
 
     def list_apps(
-        self,
-        *,
-        workspace_id: uuid.UUID,
-        type: Optional[str] = None,
-        visibility: Optional[str] = None,
-        status: Optional[str] = None,
-        search: Optional[str] = None,
-        include_shared: bool = True,
-        page: int = 1,
-        pagesize: int = 10,
+            self,
+            *,
+            workspace_id: uuid.UUID,
+            type: Optional[str] = None,
+            visibility: Optional[str] = None,
+            status: Optional[str] = None,
+            search: Optional[str] = None,
+            include_shared: bool = True,
+            page: int = 1,
+            pagesize: int = 10,
     ) -> Tuple[List[App], int]:
         """列出工作空间中的应用（分页）
 
@@ -759,8 +758,7 @@ class AppService:
         )
 
         # 构建查询条件
-        filters = []
-        filters.append(App.is_active == True)
+        filters = [App.is_active == True]
         if type:
             filters.append(App.type == type)
         if visibility:
@@ -813,9 +811,9 @@ class AppService:
         return items, int(total)
 
     def get_apps_by_ids(
-        self,
-        app_ids: List[str],
-        workspace_id: uuid.UUID
+            self,
+            app_ids: List[str],
+            workspace_id: uuid.UUID
     ) -> List[App]:
         """根据ID列表获取应用
 
@@ -846,11 +844,11 @@ class AppService:
     # ==================== Agent 配置管理 ====================
 
     def update_agent_config(
-        self,
-        *,
-        app_id: uuid.UUID,
-        data: app_schema.AgentConfigUpdate,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            data: app_schema.AgentConfigUpdate,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> AgentConfig:
         """更新 Agent 配置
 
@@ -875,7 +873,8 @@ class AppService:
 
         self._validate_workspace_access(app, workspace_id)
 
-        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active==True).order_by(AgentConfig.updated_at.desc())
+        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active == True).order_by(
+            AgentConfig.updated_at.desc())
         agent_cfg: Optional[AgentConfig] = self.db.scalars(stmt).first()
         now = datetime.datetime.now()
 
@@ -918,10 +917,10 @@ class AppService:
         return agent_cfg
 
     def get_agent_config(
-        self,
-        *,
-        app_id: uuid.UUID,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> AgentConfig:
         """获取 Agent 配置
 
@@ -948,7 +947,12 @@ class AppService:
         # 只读操作，允许访问共享应用
         self._validate_app_accessible(app, workspace_id)
 
-        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active == True).order_by(AgentConfig.updated_at.desc())
+        stmt = select(AgentConfig).where(
+            AgentConfig.app_id == app_id,
+            AgentConfig.is_active.is_(True)
+        ).order_by(
+            AgentConfig.updated_at.desc()
+        )
         config = self.db.scalars(stmt).first()
 
         if config:
@@ -1166,13 +1170,13 @@ class AppService:
     # ==================== 应用发布管理 ====================
 
     def publish(
-        self,
-        *,
-        app_id: uuid.UUID,
-        publisher_id: uuid.UUID,
-        version_name: str,
-        workspace_id: Optional[uuid.UUID] = None,
-        release_notes: Optional[str] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            publisher_id: uuid.UUID,
+            version_name: str,
+            workspace_id: Optional[uuid.UUID] = None,
+            release_notes: Optional[str] = None
     ) -> AppRelease:
         """发布应用（创建不可变快照）
 
@@ -1200,7 +1204,8 @@ class AppService:
         default_model_config_id = None
 
         if app.type == AppType.AGENT:
-            stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active == True).order_by(AgentConfig.updated_at.desc())
+            stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active == True).order_by(
+                AgentConfig.updated_at.desc())
             agent_cfg = self.db.scalars(stmt).first()
             if not agent_cfg:
                 raise BusinessException("Agent 应用缺少配置，无法发布", BizCode.AGENT_CONFIG_MISSING)
@@ -1236,8 +1241,7 @@ class AppService:
             default_model_config_id = multi_agent_cfg.default_model_config_id
 
             # 4. 构建配置快照
-            
-            
+
             config = {
                 "model_parameters": model_parameters_to_dict(multi_agent_cfg.model_parameters),
                 "master_agent_id": str(multi_agent_cfg.master_agent_id),
@@ -1264,6 +1268,7 @@ class AppService:
                 raise BusinessException("应用缺少有效配置，无法发布", BizCode.CONFIG_MISSING)
 
             config = {
+                "id": str(workflow_cfg.id),
                 "nodes": workflow_cfg.nodes,
                 "edges": workflow_cfg.edges,
                 "variables": workflow_cfg.variables,
@@ -1285,7 +1290,7 @@ class AppService:
             id=uuid.uuid4(),
             app_id=app_id,
             version=version,
-            version_name = version_name,
+            version_name=version_name,
             release_notes=release_notes,
             name=app.name,
             description=app.description,
@@ -1319,10 +1324,10 @@ class AppService:
         return release
 
     def get_current_release(
-        self,
-        *,
-        app_id: uuid.UUID,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> Optional[AppRelease]:
         """获取当前发布版本
 
@@ -1349,10 +1354,10 @@ class AppService:
         return self.db.get(AppRelease, app.current_release_id)
 
     def list_releases(
-        self,
-        *,
-        app_id: uuid.UUID,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> List[AppRelease]:
         """列出应用的所有发布版本（倒序）
 
@@ -1381,11 +1386,11 @@ class AppService:
         return list(self.db.scalars(stmt).all())
 
     def rollback(
-        self,
-        *,
-        app_id: uuid.UUID,
-        version: int,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            version: int,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> AppRelease:
         """回滚到指定版本
 
@@ -1434,12 +1439,12 @@ class AppService:
     # ==================== 应用分享功能 ====================
 
     def share_app(
-        self,
-        *,
-        app_id: uuid.UUID,
-        target_workspace_ids: List[uuid.UUID],
-        user_id: uuid.UUID,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            target_workspace_ids: List[uuid.UUID],
+            user_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> AppShare:
         """分享应用到其他工作空间
 
@@ -1456,7 +1461,6 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
             BusinessException: 当应用不在指定工作空间或目标工作空间无效时
         """
-
 
         logger.info(
             "分享应用",
@@ -1536,11 +1540,11 @@ class AppService:
         return shares
 
     def unshare_app(
-        self,
-        *,
-        app_id: uuid.UUID,
-        target_workspace_id: uuid.UUID,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            target_workspace_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> None:
         """取消应用分享
 
@@ -1594,10 +1598,10 @@ class AppService:
         )
 
     def list_app_shares(
-        self,
-        *,
-        app_id: uuid.UUID,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> List[AppShare]:
         """列出应用的所有分享记录
 
@@ -1637,14 +1641,14 @@ class AppService:
     # ==================== 试运行功能 ====================
 
     async def draft_run(
-        self,
-        *,
-        app_id: uuid.UUID,
-        message: str,
-        conversation_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        variables: Optional[Dict[str, Any]] = None,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            message: str,
+            conversation_id: Optional[str] = None,
+            user_id: Optional[str] = None,
+            variables: Optional[Dict[str, Any]] = None,
+            workspace_id: Optional[uuid.UUID] = None
     ) -> Dict[str, Any]:
         """试运行 Agent（使用当前草稿配置）
 
@@ -1736,14 +1740,14 @@ class AppService:
         return result
 
     async def draft_run_stream(
-        self,
-        *,
-        app_id: uuid.UUID,
-        message: str,
-        conversation_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        variables: Optional[Dict[str, Any]] = None,
-        workspace_id: Optional[uuid.UUID] = None
+            self,
+            *,
+            app_id: uuid.UUID,
+            message: str,
+            conversation_id: Optional[str] = None,
+            user_id: Optional[str] = None,
+            variables: Optional[Dict[str, Any]] = None,
+            workspace_id: Optional[uuid.UUID] = None
     ):
         """试运行 Agent（流式返回）
 
@@ -1794,30 +1798,30 @@ class AppService:
         # 4. 调用流式试运行服务
         draft_service = DraftRunService(self.db)
         async for event in draft_service.run_stream(
-            agent_config=agent_cfg,
-            model_config=model_config,
-            message=message,
-            workspace_id=workspace_id,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            variables=variables
+                agent_config=agent_cfg,
+                model_config=model_config,
+                message=message,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                variables=variables
         ):
             yield event
 
     # ==================== 多模型对比试运行 ====================
 
     async def draft_run_compare(
-        self,
-        *,
-        app_id: uuid.UUID,
-        message: str,
-        models: List[app_schema.ModelCompareItem],
-        conversation_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        variables: Optional[Dict[str, Any]] = None,
-        workspace_id: Optional[uuid.UUID] = None,
-        parallel: bool = True,
-        timeout: int = 60
+            self,
+            *,
+            app_id: uuid.UUID,
+            message: str,
+            models: List[app_schema.ModelCompareItem],
+            conversation_id: Optional[str] = None,
+            user_id: Optional[str] = None,
+            variables: Optional[Dict[str, Any]] = None,
+            workspace_id: Optional[uuid.UUID] = None,
+            parallel: bool = True,
+            timeout: int = 60
     ) -> Dict[str, Any]:
         """多模型对比试运行
 
@@ -1907,17 +1911,17 @@ class AppService:
         return result
 
     async def draft_run_compare_stream(
-        self,
-        *,
-        app_id: uuid.UUID,
-        message: str,
-        models: List[app_schema.ModelCompareItem],
-        conversation_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        variables: Optional[Dict[str, Any]] = None,
-        workspace_id: Optional[uuid.UUID] = None,
-        parallel: bool = True,
-        timeout: int = 60
+            self,
+            *,
+            app_id: uuid.UUID,
+            message: str,
+            models: List[app_schema.ModelCompareItem],
+            conversation_id: Optional[str] = None,
+            user_id: Optional[str] = None,
+            variables: Optional[Dict[str, Any]] = None,
+            workspace_id: Optional[uuid.UUID] = None,
+            parallel: bool = True,
+            timeout: int = 60
     ):
         """多模型对比试运行（流式返回）
 
@@ -1982,15 +1986,15 @@ class AppService:
         # 4. 调用 DraftRunService 的流式对比方法
         draft_service = DraftRunService(self.db)
         async for event in draft_service.run_compare_stream(
-            agent_config=agent_cfg,
-            models=model_configs,
-            message=message,
-            workspace_id=workspace_id,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            variables=variables,
-            parallel=parallel,
-            timeout=timeout
+                agent_config=agent_cfg,
+                models=model_configs,
+                message=message,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                variables=variables,
+                parallel=parallel,
+                timeout=timeout
         ):
             yield event
 
@@ -2009,7 +2013,8 @@ def create_app(db: Session, *, user_id: uuid.UUID, workspace_id: uuid.UUID, data
     return service.create_app(user_id=user_id, workspace_id=workspace_id, data=data)
 
 
-def update_app(db: Session, *, app_id: uuid.UUID, data: app_schema.AppUpdate, workspace_id: uuid.UUID | None = None) -> App:
+def update_app(db: Session, *, app_id: uuid.UUID, data: app_schema.AppUpdate,
+               workspace_id: uuid.UUID | None = None) -> App:
     """更新应用（向后兼容接口）"""
     service = AppService(db)
     return service.update_app(app_id=app_id, data=data, workspace_id=workspace_id)
@@ -2021,12 +2026,15 @@ def delete_app(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UUID | None
     return service.delete_app(app_id=app_id, workspace_id=workspace_id)
 
 
-def update_agent_config(db: Session, *, app_id: uuid.UUID, data: app_schema.AgentConfigUpdate, workspace_id: uuid.UUID | None = None) -> AgentConfig:
+def update_agent_config(db: Session, *, app_id: uuid.UUID, data: app_schema.AgentConfigUpdate,
+                        workspace_id: uuid.UUID | None = None) -> AgentConfig:
     """更新 Agent 配置（向后兼容接口）"""
     service = AppService(db)
     return service.update_agent_config(app_id=app_id, data=data, workspace_id=workspace_id)
 
-def update_workflow_config(db: Session, *, app_id: uuid.UUID, data: WorkflowConfigUpdate, workspace_id: uuid.UUID | None = None) -> WorkflowConfig:
+
+def update_workflow_config(db: Session, *, app_id: uuid.UUID, data: WorkflowConfigUpdate,
+                           workspace_id: uuid.UUID | None = None) -> WorkflowConfig:
     """更新 Agent 配置（向后兼容接口）"""
     service = AppService(db)
     return service.update_workflow_config(app_id=app_id, data=data, workspace_id=workspace_id)
@@ -2040,6 +2048,7 @@ def get_agent_config(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UUID 
     service = AppService(db)
     return service.get_agent_config(app_id=app_id, workspace_id=workspace_id)
 
+
 def get_workflow_config(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UUID | None = None) -> WorkflowConfig:
     """获取 Agent 配置（向后兼容接口）
 
@@ -2049,13 +2058,20 @@ def get_workflow_config(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UU
     return service.get_workflow_config(app_id=app_id, workspace_id=workspace_id)
 
 
-def publish(db: Session, *, app_id: uuid.UUID, publisher_id: uuid.UUID, workspace_id: uuid.UUID | None = None,version_name:str, release_notes: Optional[str] = None) -> AppRelease:
+def publish(db: Session, *, app_id: uuid.UUID, publisher_id: uuid.UUID, workspace_id: uuid.UUID | None = None,
+            version_name: str, release_notes: Optional[str] = None) -> AppRelease:
     """发布应用（向后兼容接口）"""
     service = AppService(db)
-    return service.publish(app_id=app_id, publisher_id=publisher_id,version_name = version_name, workspace_id=workspace_id, release_notes=release_notes)
+    return service.publish(app_id=app_id, publisher_id=publisher_id, version_name=version_name,
+                           workspace_id=workspace_id, release_notes=release_notes)
 
 
-def get_current_release(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UUID | None = None) -> Optional[AppRelease]:
+def get_current_release(
+        db: Session,
+        *,
+        app_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None
+) -> Optional[AppRelease]:
     """获取当前发布版本（向后兼容接口）"""
     service = AppService(db)
     return service.get_current_release(app_id=app_id, workspace_id=workspace_id)
@@ -2074,16 +2090,16 @@ def rollback(db: Session, *, app_id: uuid.UUID, version: int, workspace_id: uuid
 
 
 def list_apps(
-    db: Session,
-    *,
-    workspace_id: uuid.UUID,
-    type: Optional[str] = None,
-    visibility: Optional[str] = None,
-    status: Optional[str] = None,
-    search: Optional[str] = None,
-    include_shared: bool = True,
-    page: int = 1,
-    pagesize: int = 10,
+        db: Session,
+        *,
+        workspace_id: uuid.UUID,
+        type: Optional[str] = None,
+        visibility: Optional[str] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+        include_shared: bool = True,
+        page: int = 1,
+        pagesize: int = 10,
 ) -> Tuple[List[App], int]:
     """列出应用（向后兼容接口）"""
     service = AppService(db)
@@ -2100,9 +2116,9 @@ def list_apps(
 
 
 def get_apps_by_ids(
-    db: Session,
-    app_ids: List[str],
-    workspace_id: uuid.UUID
+        db: Session,
+        app_ids: List[str],
+        workspace_id: uuid.UUID
 ) -> List[App]:
     """根据ID列表获取应用（向后兼容接口）"""
     service = AppService(db)
@@ -2112,14 +2128,14 @@ def get_apps_by_ids(
 # ==================== 向后兼容的函数接口 ====================
 
 async def draft_run(
-    db: Session,
-    *,
-    app_id: uuid.UUID,
-    message: str,
-    conversation_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    variables: Optional[Dict[str, Any]] = None,
-    workspace_id: Optional[uuid.UUID] = None
+        db: Session,
+        *,
+        app_id: uuid.UUID,
+        message: str,
+        conversation_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        workspace_id: Optional[uuid.UUID] = None
 ) -> Dict[str, Any]:
     """试运行 Agent（向后兼容接口）"""
     service = AppService(db)
@@ -2134,28 +2150,26 @@ async def draft_run(
 
 
 async def draft_run_stream(
-    db: Session,
-    *,
-    app_id: uuid.UUID,
-    message: str,
-    conversation_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    variables: Optional[Dict[str, Any]] = None,
-    workspace_id: Optional[uuid.UUID] = None
+        db: Session,
+        *,
+        app_id: uuid.UUID,
+        message: str,
+        conversation_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        workspace_id: Optional[uuid.UUID] = None
 ):
     """试运行 Agent 流式返回（向后兼容接口）"""
     service = AppService(db)
     async for event in service.draft_run_stream(
-        app_id=app_id,
-        message=message,
-        conversation_id=conversation_id,
-        user_id=user_id,
-        variables=variables,
-        workspace_id=workspace_id
+            app_id=app_id,
+            message=message,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            variables=variables,
+            workspace_id=workspace_id
     ):
         yield event
-
-
 
 
 # ==================== 依赖注入函数 ====================

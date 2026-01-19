@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Row, Col, Skeleton } from 'antd'
@@ -31,7 +31,7 @@ const generateCategoryColors = (categories: string[]) => {
   return colors
 }
 
-const Preferences: FC = () => {
+const Preferences = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const chartRef = useRef<HTMLDivElement>(null)
@@ -138,6 +138,9 @@ const Preferences: FC = () => {
     return selectedWord !== null && data[selectedWord].tag_name ? <>{data[selectedWord].tag_name}{t('implicitDetail.preferencesDetail')}</> : ''
   }, [selectedWord, data, t])
 
+  useImperativeHandle(ref, () => ({
+    handleRefresh: getData
+  }));
   return (
     <>
       <div className="rb:bg-[rgba(21,94,239,0.12)] rb:px-4 rb:py-2.5 rb:font-medium rb:leading-5 rb:mb-4 rb:mt-6 rb:rounded-md">{t('forgetDetail.overviewTitle')}</div>
@@ -184,6 +187,6 @@ const Preferences: FC = () => {
       </Row>
     </>
   )
-}
+})
 
 export default Preferences

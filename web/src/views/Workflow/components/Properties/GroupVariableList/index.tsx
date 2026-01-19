@@ -1,7 +1,7 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next';
 import { Form, Input, Button, Row, Col } from 'antd'
-import { MinusCircleOutlined } from '@ant-design/icons';
+
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
 
@@ -9,13 +9,15 @@ interface GroupVariableListProps {
   value?: Array<{ key: string; value: string[]; }>;
   name: string;
   options: Suggestion[];
-  isCanAdd: boolean
+  isCanAdd: boolean;
+  size: 'small' | 'middle'
 }
 
 const GroupVariableList: FC<GroupVariableListProps> = ({
   name,
   options = [],
-  isCanAdd = false
+  isCanAdd = false,
+  size = "middle"
 }) => {
   const { t } = useTranslation();
   const form = Form.useFormInstance();
@@ -54,6 +56,7 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
             placeholder={t('common.pleaseSelect')}
             options={filteredOptions}
             mode="multiple"
+            size={size}
           />
         </Form.Item>
       </div>
@@ -76,11 +79,15 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
                       ]}
                       noStyle
                     >
-                      {isCanAdd ? <Input placeholder={t('common.pleaseEnter')} /> : t('workflow.config.var-aggregator.variable')}
+                      {isCanAdd ? <Input placeholder={t('common.pleaseEnter')} size={size} /> : t('workflow.config.var-aggregator.variable')}
                     </Form.Item>
                   </Col>
+
                   {isCanAdd && <Col span={12} className="rb:flex! rb:items-center rb:justify-end">
-                    <MinusCircleOutlined onClick={() => remove(name)} />
+                    <div
+                      className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+                      onClick={() => remove(name)}
+                    ></div>
                   </Col>}
                 </Row>
 
@@ -104,16 +111,22 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
                     })()
                     }
                     mode="multiple"
+                    size={size}
                   />
                 </Form.Item>
               </div>
             )
           })}
-          {isCanAdd && <Form.Item noStyle>
-            <Button type="dashed" onClick={() => add({ key: `Group${fields.length + 1}` })} block>
-              + {t('workflow.config.var-aggregator.addGroup')}
-            </Button>
-          </Form.Item>}
+
+          {isCanAdd && <Button 
+            type="dashed" 
+            block
+            size="middle"
+            className="rb:text-[12px]!"
+            onClick={() => add({ key: `Group${fields.length + 1}` })}
+          >
+            + {t('workflow.config.var-aggregator.addGroup')}
+          </Button>}
         </>
       )}
     </Form.List>
