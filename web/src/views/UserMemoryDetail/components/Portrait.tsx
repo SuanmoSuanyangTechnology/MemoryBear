@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState } from 'react'
+import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Progress } from 'antd';
@@ -25,7 +25,7 @@ interface PortraitItem {
   literature: Item;
 }
 
-const Portrait: FC = () => {
+const Portrait = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
@@ -49,6 +49,9 @@ const Portrait: FC = () => {
     })
   }
 
+  useImperativeHandle(ref, () => ({
+    handleRefresh: getData
+  }));
   return (
     <RbCard
       title={t('implicitDetail.portrait')}
@@ -73,5 +76,5 @@ const Portrait: FC = () => {
         }
     </RbCard>
   )
-}
+})
 export default Portrait
