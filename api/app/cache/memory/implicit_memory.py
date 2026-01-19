@@ -37,7 +37,7 @@ class ImplicitMemoryCache:
         cls,
         user_id: str,
         profile_data: Dict[str, Any],
-        expire: int = 604800
+        expire: int = 86400
     ) -> bool:
         """设置用户完整画像缓存
         
