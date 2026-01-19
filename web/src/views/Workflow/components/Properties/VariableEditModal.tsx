@@ -110,6 +110,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               value: key,
               label: t(`workflow.config.start.${key}`),
             }))}
+            onChange={() => form.setFieldValue('default', undefined)}
             labelRender={(props) => <div className="rb:flex rb:justify-between rb:items-center">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></div>}
             optionRender={(props) => <div className="rb:flex rb:justify-between rb:items-center">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></div>}
           />

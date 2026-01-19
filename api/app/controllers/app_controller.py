@@ -11,15 +11,16 @@ from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.models import User
-from app.models.app_model import AppType, App
+from app.models.app_model import AppType
 from app.repositories import knowledge_repository
+from app.repositories.end_user_repository import EndUserRepository
 from app.schemas import app_schema
 from app.schemas.response_schema import PageData, PageMeta
+from app.schemas.workflow_schema import WorkflowConfig as WorkflowConfigSchema
 from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services import app_service, workspace_service
 from app.services.agent_config_helper import enrich_agent_config
 from app.services.app_service import AppService
-from app.schemas.workflow_schema import WorkflowConfig as WorkflowConfigSchema
 from app.services.workflow_service import WorkflowService, get_workflow_service
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
@@ -60,14 +61,14 @@ def list_apps(
     """
     workspace_id = current_user.current_workspace_id
     service = app_service.AppService(db)
-    
+
     # 当 ids 存在且不为 None 时，根据 ids 获取应用
     if ids is not None:
         app_ids = [id.strip() for id in ids.split(',') if id.strip()]
         items_orm = app_service.get_apps_by_ids(db, app_ids, workspace_id)
         items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
         return success(data=items)
-    
+
     # 正常分页查询
     items_orm, total = app_service.list_apps(
         db,
@@ -404,6 +405,15 @@ async def draft_run(
 
     # 只读操作，允许访问共享应用
     service._validate_app_accessible(app, workspace_id)
+
+    if payload.user_id is None:
+        end_user_repo = EndUserRepository(db)
+        new_end_user = end_user_repo.get_or_create_end_user(
+            app_id=app_id,
+            other_id=str(current_user.id),
+            original_user_id=str(current_user.id)  # Save original user_id to other_id
+        )
+        payload.user_id = str(new_end_user.id)
 
     # 处理会话ID（创建或验证）
     conversation_id = await draft_service._ensure_conversation(

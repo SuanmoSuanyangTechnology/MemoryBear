@@ -1,56 +1,28 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom'
-import { Row, Col, Radio, Button, List, Skeleton, Space } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import type { RadioChangeEvent } from 'antd';
-import { AppstoreOutlined, MenuOutlined } from '@ant-design/icons';
+import { Row, Col, List, Skeleton } from 'antd';
 import Empty from '@/components/Empty'
 
-import type { Data, ConfigModalRef } from './types'
-import totalNum from '@/assets/images/memory/totalNum.svg'
-import onlineNum from '@/assets/images/memory/onlineNum.svg'
-import Table from '@/components/Table'
-import { getTotalEndUsers, userMemoryListUrl, getUserMemoryList } from '@/api/memory';
-import ConfigModal from './components/ConfigModal';
+import type { Data } from './types'
+import { getUserMemoryList } from '@/api/memory';
 import { useUser } from '@/store/user'
+import RbCard from '@/components/RbCard/Card'
+import SearchInput from '@/components/SearchInput';
 
-const bgList = [
-  'linear-gradient( 180deg, #F1F6FE 0%, #FBFDFF 100%)',
-  'linear-gradient( 180deg, #F1F9FE 0%, #FBFDFF 100%)',
-  'linear-gradient( 180deg, #FEFBF7 0%, #FBFDFF 100%)',
-  'linear-gradient( 180deg, #F1F9FE 0%, #FBFDFF 100%)',
-]
-
-const countList = [
-  'total_num', 'online_num',
-]
-const IconList: Record<string, string> = {
-  total_num: totalNum,
-  online_num: onlineNum,
-}
 export default function UserMemory() {
   const { t } = useTranslation();
   const navigate = useNavigate()
   const { storageType } = useUser()
-  const configModalRef = useRef<ConfigModalRef>(null)
   const [loading, setLoading] = useState<boolean>(false);
   const [data, setData] = useState<Data[]>([]);
-  const [countData, setCountData] = useState<Record<string, number>>({});
-  const [layout, setLayout] = useState<'card' | 'list'>('card');
+  const [search, setSearch] = useState<string | undefined>(undefined);
 
   // 获取数据
   useEffect(() => {
-    getCountData()
     getData()
   }, []);
 
-  // 用户记忆统计
-  const getCountData = () => {
-    getTotalEndUsers().then((res) => {
-      setCountData(res as Record<string, number> || {})
-    })
-  }
   const getData = () => {
     setLoading(true)
     getUserMemoryList().then((res) => {
@@ -60,7 +32,6 @@ export default function UserMemory() {
       setLoading(false)
     })
   }
-  console.log('storageType', storageType)
   const handleViewDetail = (id: string | number) => {
     switch (storageType) {
       case 'neo4j':
@@ -70,112 +41,80 @@ export default function UserMemory() {
         navigate(`/user-memory/${id}`)
     }
   }
-  const handleChangeLayout = (e: RadioChangeEvent) => {
-    const type = e.target.value
-    setLayout(type)
+  const handleViewMemoryConfig = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigate(`/memory`)
   }
-  // 表格列配置
-  const columns: ColumnsType = [
-    {
-      title: t('userMemory.user'),
-      dataIndex: 'end_user',
-      key: 'end_user',
-      render: (value) => value?.other_name && value?.other_name !== '' ? value?.other_name : value?.id || '-'
-    },
-    {
-      title: t('userMemory.knowledgeEntryCount'),
-      dataIndex: 'memory_num',
-      key: 'memory_num',
-      render: (value) => value?.total || 0
-    },
-    {
-      title: t('common.operation'),
-      key: 'action',
-      render: (_, record) => (
-          <Button
-            type="link"
-            onClick={() => handleViewDetail(record.end_user?.id)}
-          >
-            {t('common.viewDetail')}
-          </Button>
-      ),
-    },
-  ];
+
+  const filterData = useMemo(() => {
+    if (search && search.trim() !== '') {
+      return data.filter((item) => {
+        const { end_user } = item as Data;
+        const name = end_user?.other_name && end_user?.other_name !== '' ? end_user?.other_name : end_user?.id
+        return name?.includes(search)
+      })
+    }
+
+    return data
+  }, [search, data])
 
   return (
     <div>
       <Row gutter={16} className="rb:mb-4">
-        {countList.map(key => (
-          <Col key={key} span={6}>
-            <div className="rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-xl rb:p-[18px_20px_20px_20px]">
-              <div className="rb:text-[28px] rb:font-extrabold rb:leading-8.75 rb:flex rb:items-center rb:justify-between rb:mb-3">
-                {countData[key] || 0}{key === 'avgInteractionTime' ? 's' : ''}
-                <img className="rb:w-6 rb:h-6" src={IconList[key]} />
-              </div>
-              <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`userMemory.${key}`)}</div>
-            </div>
-          </Col>
-        ))}
-        <Col span={12} className="rb:text-right">
-          <Space>
-            <Button type="primary" onClick={() => configModalRef?.current?.handleOpen()}>{t('userMemory.chooseModel')}</Button>
-            <Radio.Group value={layout} onChange={handleChangeLayout}>
-              <Radio.Button value="card" disabled={layout === 'card'}><AppstoreOutlined /></Radio.Button>
-              <Radio.Button value="list" disabled={layout === 'list'}><MenuOutlined /></Radio.Button>
-            </Radio.Group>
-          </Space>
+        <Col span={8}>
+          <SearchInput
+            placeholder={t('userMemory.searchPlaceholder')}
+            onSearch={(value) => setSearch(value)}
+            style={{ width: '100%' }}
+          />
         </Col>
       </Row>
-      {layout === 'card' &&
-        <>
-          {loading ? 
-            <Skeleton active />
-          : data.length > 0 ? (
-            <List
-              grid={{ gutter: 16, column: 4 }}
-              dataSource={data}
-              renderItem={(item, index) => {
-                const { end_user, memory_num } = item as Data;
-                const name = end_user?.other_name && end_user?.other_name !== '' ? end_user?.other_name : end_user?.id
-                return (
-                  <List.Item key={index}>
-                    <div
-                      className="rb:p-5 rb:rounded-xl rb:border rb:border-[#DFE4ED] rb:cursor-pointer"
-                      style={{
-                        background: bgList[index % bgList.length],
-                      }}
-                      onClick={() => handleViewDetail(end_user.id)}
-                    >
-                      <div className="rb:flex rb:items-center">
-                        <div className="rb:w-12 rb:h-12 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-12 rb:rounded-lg rb:text-[#FBFDFF] rb:bg-[#155EEF]">{name[0]}</div>
-                        <div className="rb:max-w-[calc(100%-60px)] rb:text-base rb:font-medium rb:leading-6 rb:ml-3 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
-                          {name || '-'}<br/>
-                        </div>
-                      </div>
-                      <div className="rb:grid rb:grid-cols-1 rb:gap-3 rb:mt-7 rb:mb-7">
-                        <div className="rb:text-center">
-                          <div className="rb:text-[24px] rb:leading-7.5 rb:font-extrabold">{memory_num.total || 0}</div>
-                          <div className="rb:wrap-break-word">{t(`userMemory.knowledgeEntryCount`)}</div>
-                        </div>
-                      </div>
+      {loading ?
+        <Skeleton active />
+        : filterData.length > 0 ? (
+          <List
+            grid={{ gutter: 16, column: 3 }}
+            dataSource={filterData}
+            renderItem={(item, index) => {
+              const { end_user, memory_num, memory_config } = item as Data;
+              const name = end_user?.other_name && end_user?.other_name !== '' ? end_user?.other_name : end_user?.id
+              return (
+                <List.Item key={index}>
+                  <RbCard
+                    avatar={<div className="rb:w-12 rb:h-12 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-12 rb:rounded-lg rb:text-[#FBFDFF] rb:bg-[#155EEF] rb:mr-2">{name[0]}</div>}
+                    title={name || '-'}
+                    extra={<div
+                      className="rb:w-7 rb:h-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/goto.svg')]"
+                    ></div>}
+                    className="rb:cursor-pointer"
+                    onClick={() => handleViewDetail(end_user.id)}
+                  >
+                    <div className="rb:flex rb:justify-between rb:items-center">
+                      <div>{t('userMemory.capacity')}</div>
+                      <div>{memory_num?.total || 0} {t('userMemory.memoryNum')}</div>
                     </div>
-                  </List.Item>
-                )
-              }}
-            />
-          ) : <Empty />}
-        </>
-      }
+                    <div className="rb:flex rb:justify-between rb:items-center rb:mt-2.5">
+                      <div>{t('userMemory.type')}</div>
+                      <div>{t(`userMemory.${item.type || 'person'}`)}</div>
+                    </div>
 
-      {layout === 'list' &&
-        <Table
-          apiUrl={userMemoryListUrl}
-          columns={columns}
-          rowKey="end_user.id"
-          pagination={false}
-        />
+                    <div className="rb:relative rb:z-2 rb:mt-3 rb:bg-[#F6F8FC] rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:py-2 rb:px-3" onClick={handleViewMemoryConfig}>
+                      <div className="rb:text-[#5B6167] rb:leading-5 rb:flex rb:justify-between rb:items-center">
+                        {t('userMemory.memory_config_name')}
+                        <div
+                          className="rb:w-7 rb:h-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/arrow_right.svg')]"
+                        ></div>
+                      </div>
+                      <div className="rb:font-medium rb:leading-5 rb:mt-1">{memory_config?.memory_config_name || '-'}</div>
+                    </div>
+                  </RbCard>
+                </List.Item>
+              )
+            }}
+          />
+        ) : <Empty />
       }
-      <ConfigModal ref={configModalRef} />
     </div>
   );
 }

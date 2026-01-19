@@ -176,6 +176,9 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
       if (response?.knowledge_retrieval?.knowledge_bases?.length) {
         getDefaultKnowledgeList(response)
       }
+      if (response?.tools?.length) {
+        setToolList(response?.tools)
+      }
     }).finally(() => {
       setLoading(false)
     })
@@ -198,7 +201,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
             ...item,
             ...filterItem
           }
-        }) 
+        })
+        setKnowledgeConfig(prev => ({
+          ...prev,
+          knowledge_bases: [...knowledge_bases]
+        }))
         setData((prev) => {
           prev = prev as Config
           const knowledge_retrieval: KnowledgeConfig = {
@@ -438,7 +445,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
 
             <Space size={10}>
               <Button type="primary" ghost onClick={handleAddModel}>
-                +{t('application.addModel')}
+                + {t('application.addModel')}
               </Button>
               <div className="rb:w-8 rb:h-8 rb:cursor-pointer rb:bg-[url('@/assets/images/application/clean.svg')]" onClick={handleClearDebugging}></div>
             </Space>

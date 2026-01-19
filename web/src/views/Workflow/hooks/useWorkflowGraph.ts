@@ -5,8 +5,8 @@ import { App } from 'antd'
 import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary } from '../constant';
-import type { WorkflowConfig, NodeProperties } from '../types';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs } from '../constant';
+import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
@@ -35,11 +35,12 @@ export interface UseWorkflowGraphReturn {
   copyEvent: () => boolean | void;
   parseEvent: () => boolean | void;
   handleSave: (flag?: boolean) => Promise<unknown>;
+  chatVariables: ChatVariable[];
+  setChatVariables: React.Dispatch<React.SetStateAction<ChatVariable[]>>;
 }
 
 export const edge_color = '#155EEF';
 const edge_selected_color = '#4DA8FF'
-
 export const useWorkflowGraph = ({
   containerRef,
   miniMapRef,
@@ -53,8 +54,9 @@ export const useWorkflowGraph = ({
   const historyRef = useRef<{ undoStack: string[], redoStack: string[] }>({ undoStack: [], redoStack: [] });
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [isHandMode, setIsHandMode] = useState(false);
+  const [isHandMode, setIsHandMode] = useState(true);
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
+  const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
 
   useEffect(() => {
     getConfig()
@@ -64,16 +66,15 @@ export const useWorkflowGraph = ({
     getWorkflowConfig(id)
       .then(res => {
         const { variables, ...rest } = res as WorkflowConfig
-        setConfig({
-          ...rest,
-          variables: variables.map(v => {
-            const { default: _, ...cleanV } = v
-            return {
-              ...cleanV,
-              defaultValue: v.default ?? ''
-            }
-          })
+        const initChatVariables = variables.map(v => {
+          const { default: _, ...cleanV } = v
+          return {
+            ...cleanV,
+            defaultValue: v.default ?? ''
+          }
         })
+        setChatVariables(initChatVariables)
+        setConfig({ ...rest, variables: initChatVariables })
       })
   }
 
@@ -95,7 +96,17 @@ export const useWorkflowGraph = ({
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
-            if (key === 'knowledge_retrieval' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+            if (key === 'memory' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+              const { memory, messages } = config as any;
+              if (memory?.enable && messages && messages.length > 0) {
+                const lastMessage = messages[messages.length - 1]
+                nodeLibraryConfig.config[key].defaultValue = {
+                  ...memory,
+                  messages: lastMessage.content
+                }
+                nodeLibraryConfig.config.messages.defaultValue.splice(-1, 1)
+              }
+            } else if (key === 'knowledge_retrieval' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
               const { query, ...rest } = config
               nodeLibraryConfig.config[key].defaultValue = {
                 ...rest
@@ -128,12 +139,6 @@ export const useWorkflowGraph = ({
           const baseHeight = 88;
           const newHeight = baseHeight + (totalPorts - 2) * 30;
           
-          const portAttrs = {
-            circle: {
-              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
-            },
-          };
-          
           const portItems: PortMetadata[] = [
             { group: 'left' },
             { group: 'right', id: 'CASE1', args: { dy: 24 }, attrs: { text: { text: 'IF', fontSize: 12, fill: '#5B6167' }} }
@@ -157,8 +162,8 @@ export const useWorkflowGraph = ({
           
           nodeConfig.ports = {
             groups: {
-              right: { position: 'right', attrs: portAttrs },
-              left: { position: 'left', attrs: portAttrs },
+              right: { position: 'right', markup: portMarkup, attrs: portAttrs },
+              left: { position: 'left', markup: portMarkup, attrs: portAttrs },
             },
             items: portItems
           };
@@ -171,12 +176,6 @@ export const useWorkflowGraph = ({
           const categoryCount = config.categories.length;
           const baseHeight = 88;
           const newHeight = baseHeight + (categoryCount - 1) * 30;
-          
-          const portAttrs = {
-            circle: {
-              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
-            },
-          };
           
           const portItems: PortMetadata[] = [
             { group: 'left' }
@@ -194,8 +193,8 @@ export const useWorkflowGraph = ({
           
           nodeConfig.ports = {
             groups: {
-              right: { position: 'right', attrs: portAttrs },
-              left: { position: 'left', attrs: portAttrs },
+              right: { position: 'right', markup: portMarkup, attrs: portAttrs },
+              left: { position: 'left', markup: portMarkup, attrs: portAttrs },
             },
             items: portItems
           };
@@ -205,16 +204,10 @@ export const useWorkflowGraph = ({
         
         // 如果是http-request节点，检查error_handle.method配置
         if (type === 'http-request' && (config as any).error_handle?.method === 'branch') {
-          const portAttrs = {
-            circle: {
-              r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
-            },
-          };
-          
           nodeConfig.ports = {
             groups: {
-              right: { position: 'right', attrs: portAttrs },
-              left: { position: 'left', attrs: portAttrs },
+              right: { position: 'right', markup: portMarkup, attrs: portAttrs },
+              left: { position: 'left', markup: portMarkup, attrs: portAttrs },
             },
             items: [
               { group: 'left' },
@@ -282,6 +275,11 @@ export const useWorkflowGraph = ({
       }, 100)
     }
     if (edges.length) {
+      // 计算loop和iteration类型节点的数量
+      const loopIterationCount = nodes.filter(node => 
+        node.type === 'loop' || node.type === 'iteration'
+      ).length;
+      
       // 去重处理：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
       const uniqueEdges = edges.filter((edge, index, arr) => {
         return arr.findIndex(e => {
@@ -344,17 +342,19 @@ export const useWorkflowGraph = ({
               cell: targetCell.id,
               port: targetPorts.find((port: any) => port.group === 'left')?.id || 'left'
             },
+            connector: { name: 'smooth' },
             attrs: {
               line: {
                 stroke: edge_color,
                 strokeWidth: 1,
                 targetMarker: {
-                  name: 'block',
-                  size: 8,
+                  name: 'diamond',
+                  width: 4,
+                  height: 4,
                 },
               },
             },
-            zIndex: targetCell.getData()?.cycle ? 3 : 0
+            // zIndex: loopIterationCount
           }
 
           return edgeConfig
@@ -422,7 +422,7 @@ export const useWorkflowGraph = ({
     graphRef.current.use(
       new MiniMap({
         container: miniMapRef.current,
-        width: 100,
+        width: 170,
         height: 80,
         padding: 5,
       }),
@@ -694,16 +694,15 @@ export const useWorkflowGraph = ({
           thickness: 1, // 网点大小
         }
       },
-      panning: false,
+      panning: isHandMode,
       mousewheel: {
         enabled: true,
-        modifiers: ['ctrl', 'meta'],
       },
       connecting: {
         // router: 'orth',
         // router: 'manhattan',
         connector: {
-          name: 'rounded',
+          name: 'smooth',
           args: {
             radius: 8,
           },
@@ -723,9 +722,13 @@ export const useWorkflowGraph = ({
               line: {
                 stroke: edge_color,
                 strokeWidth: 1,
+                targetMarker: {
+                  name: 'diamond',
+                  width: 4,
+                  height: 4,
+                },
               },
             },
-            zIndex: 0,
           });
         },
         validateConnection({ sourceCell, targetCell, targetMagnet }) {
@@ -762,9 +765,8 @@ export const useWorkflowGraph = ({
       },
       embedding: {
         enabled: true,
-        validate (this, { parent }) {
-        const parentData = parent.getData()
-          return parentData.type === 'iteration' || parentData.type === 'loop'
+        validate (this) {
+          return false
         }
       },
       translating: {
@@ -929,13 +931,13 @@ export const useWorkflowGraph = ({
 
       const params = {
         ...config,
-        variables: config.variables.map(v => {
-            const { defaultValue, ...cleanV } = v
-            return {
-              ...cleanV,
-              default: defaultValue ?? ''
-            }
-          }),
+        variables: chatVariables.map(v => {
+          const { defaultValue, ...cleanV } = v
+          return {
+            ...cleanV,
+            default: defaultValue ?? ''
+          }
+        }),
         nodes: nodes.map((node: Node) => {
           const data = node.getData();
           const position = node.getPosition();
@@ -943,7 +945,15 @@ export const useWorkflowGraph = ({
 
           if (data.config) {
             Object.keys(data.config).forEach(key => {
-              if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_variables') {
+              if (key === 'memory' && data.config[key] && 'defaultValue' in data.config[key]) {
+                const { messages, ...rest } = data.config[key].defaultValue
+                let memoryMessage = { role: 'USER', content: data.config[key].defaultValue.messages }
+                itemConfig = {
+                  ...itemConfig,
+                  messages: rest.enable ? [...itemConfig.messages, memoryMessage] : itemConfig.messages,
+                  memory: { ...rest },
+                }
+              } else if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_variables') {
                 let group_variables = data.config.group.defaultValue ? {} : data.config[key].defaultValue
                 if (data.config.group.defaultValue) {
                   data.config[key].defaultValue.map((vo: any) => {
@@ -962,10 +972,10 @@ export const useWorkflowGraph = ({
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
                 itemConfig[key] = data.config[key].defaultValue
               } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
-                const { knowledge_bases } = data.config[key].defaultValue
+                const { knowledge_bases } = data.config[key].defaultValue || {}
                 itemConfig = {
                   ...itemConfig,
-                  ...data.config[key].defaultValue,
+                  ...(data.config[key].defaultValue || {}),
                   knowledge_bases: knowledge_bases?.map((vo: any) => {
                     const kb_config = vo.config || { similarity_threshold: vo.similarity_threshold, strategy: vo.strategy, top_k: vo.top_k, weight: vo.weight }
                     return { kb_id: vo.kb_id || vo.id, ...kb_config, }
@@ -1089,5 +1099,7 @@ export const useWorkflowGraph = ({
     copyEvent,
     parseEvent,
     handleSave,
+    chatVariables,
+    setChatVariables
   };
 };

@@ -1,11 +1,32 @@
+import json
+from pathlib import Path
 from datetime import datetime, timedelta
+
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
+from typing import Dict, Any
 
 from app.repositories.home_page_repository import HomePageRepository
 from app.schemas.home_page_schema import HomeStatistics, WorkspaceInfo
 
 class HomePageService:
+
+    DEFAULT_RETURN_DATA: Dict[str, Any] = {
+        "message": "",
+        "introduction": {
+            "codeName": "",
+            "releaseDate": "",
+            "upgradePosition": "",
+            "coreUpgrades": []
+        },
+        "introduction_en": {
+            "codeName": "",
+            "releaseDate": "",
+            "upgradePosition": "",
+            "coreUpgrades": []
+        }
+    }
     
     @staticmethod
     def get_home_statistics(db: Session, tenant_id: UUID) -> HomeStatistics:
@@ -69,3 +90,44 @@ class HomePageService:
             workspace_list.append(workspace_info)
         
         return workspace_list
+
+    @staticmethod
+    def load_version_introduction(version: str) -> Dict[str, Any]:
+        """
+        从 JSON 文件加载对应版本的介绍
+        :param version: 系统版本号（如 "0.2.0"）
+        :return: 对应版本的详细介绍
+        """
+        # 2. 定义 JSON 文件路径（简化路径处理，保留绝对路径调试特性）
+        json_abs_path = Path(__file__).parent.parent / "version_info.json"
+        json_abs_path = json_abs_path.resolve()
+
+        # 3. 初始化返回结果（深拷贝默认模板，避免修改原常量）
+        from copy import deepcopy
+        result = deepcopy(HomePageService.DEFAULT_RETURN_DATA)
+
+        try:
+            # 4. 简化文件存在性判断（合并逻辑，减少分支）
+            if not json_abs_path.exists():
+                result["message"] = f"版本介绍文件不存在：{json_abs_path}"
+                return result
+
+            # 5. 读取并解析 JSON 文件（简化文件操作流程）
+            with open(json_abs_path, "r", encoding="utf-8") as f:
+                changelogs = json.load(f)
+
+            # 6. 简化版本匹配逻辑，直接返回结果或更新提示信息
+            if version in changelogs:
+                return changelogs[version]
+            result["message"] = f"暂未查询到 {version} 版本的详细介绍"
+            return result
+
+        except FileNotFoundError as e:
+            result["message"] = f"系统内部错误：{str(e)}"
+            return result
+        except json.JSONDecodeError:
+            result["message"] = "版本介绍文件格式错误，无法解析 JSON"
+            return result
+        except Exception as e:
+            result["message"] = f"加载版本介绍失败：{str(e)}"
+            return result

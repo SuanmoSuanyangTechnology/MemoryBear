@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
 import { Form, Input, Button, Select, InputNumber, Slider, Space, Divider, App, Switch } from 'antd'
 
-import type { NodeConfig, NodeProperties, StartVariableItem, VariableEditModalRef } from '../../types'
+import type { NodeConfig, NodeProperties, StartVariableItem, VariableEditModalRef, ChatVariable } from '../../types'
 import Empty from '@/components/Empty';
 import emptyIcon from '@/assets/images/workflow/empty.png'
 import CustomSelect from "@/components/CustomSelect";
@@ -22,6 +22,8 @@ import ConditionList from './ConditionList'
 import CycleVarsList from './CycleVarsList'
 import AssignmentList from './AssignmentList'
 import ToolConfig from './ToolConfig'
+import MemoryConfig from './MemoryConfig'
+// import { calculateVariableList } from './utils/variableListCalculator'
 
 interface PropertiesProps {
   selectedNode?: Node | null; 
@@ -32,11 +34,12 @@ interface PropertiesProps {
   copyEvent: () => void;
   parseEvent: () => void;
   config?: any;
+  chatVariables: ChatVariable[];
 }
 const Properties: FC<PropertiesProps> = ({
   selectedNode,
   graphRef,
-  config: workflowConfig,
+  chatVariables
 }) => {
   const { t } = useTranslation()
   const { modal } = App.useApp()
@@ -45,6 +48,7 @@ const Properties: FC<PropertiesProps> = ({
   const values = Form.useWatch([], form);
   const variableModalRef = useRef<VariableEditModalRef>(null)
   const [editIndex, setEditIndex] = useState<number | null>(null)
+  const [graphUpdateTrigger, setGraphUpdateTrigger] = useState(0)
   const prevMappingNamesRef = useRef<string[]>([])
   const prevTemplateVarsRef = useRef<string[]>([])
   const syncTimeoutRef = useRef<number | null>(null)
@@ -240,6 +244,7 @@ const Properties: FC<PropertiesProps> = ({
   }, [values, selectedNode, form])
 
   const handleAddVariable = () => {
+    setEditIndex(null)
     variableModalRef.current?.handleOpen()
   }
   const handleEditVariable = (index: number, vo: StartVariableItem) => {
@@ -248,6 +253,7 @@ const Properties: FC<PropertiesProps> = ({
   }
   const handleRefreshVariable = (value: StartVariableItem) => {
     if (!selectedNode) return
+
     if (editIndex !== null) {
       const defaultValue = selectedNode.data.config.variables.defaultValue ?? []
       defaultValue[editIndex] = value
@@ -258,7 +264,7 @@ const Properties: FC<PropertiesProps> = ({
     }
     selectedNode?.setData({ ...selectedNode.data})
 
-    setConfigs({ ...selectedNode.data.config})
+    setConfigs({ ...selectedNode.data.config })
   }
   const handleDeleteVariable = (index: number, vo: StartVariableItem) => {
     if (!selectedNode) return
@@ -338,111 +344,32 @@ const Properties: FC<PropertiesProps> = ({
     const parentLoopNode = getParentLoopNode(selectedNode.id);
     
     console.log('childNodeIds', selectedNode, childNodeIds)
-    const allRelevantNodeIds = [...allPreviousNodeIds, ...childNodeIds];
+    let allRelevantNodeIds = [...allPreviousNodeIds, ...childNodeIds];
     
-    // Add parent loop/iteration node variables if current node is a child
+    // Add variables from nodes preceding the parent loop/iteration node if current node is a child
     if (parentLoopNode) {
-      const parentData = parentLoopNode.getData();
-      const parentNodeId = parentLoopNode.getData().id;
-      
-      if (parentData.type === 'loop') {
-        const cycleVars = parentData.cycle_vars || [];
-        cycleVars.forEach((cycleVar: any) => {
-          const key = `${parentNodeId}_cycle_${cycleVar.name}`;
-          if (!addedKeys.has(key)) {
-            addedKeys.add(key);
-            variableList.push({
-              key,
-              label: cycleVar.name,
-              type: 'variable',
-              dataType: cycleVar.type || 'String',
-              value: `${parentNodeId}.${cycleVar.name}`,
-              nodeData: parentData,
-            });
-          }
-        });
-      } else if (parentData.type === 'iteration') {
-        // Add item and index variables for iteration parent
-        const itemKey = `${parentNodeId}_item`;
-        const indexKey = `${parentNodeId}_index`;
-        
-        if (!addedKeys.has(itemKey)) {
-          addedKeys.add(itemKey);
-          variableList.push({
-            key: itemKey,
-            label: 'item',
-            type: 'variable',
-            dataType: 'Object',
-            value: `${parentNodeId}.item`,
-            nodeData: parentData,
-          });
-        }
-        
-        if (!addedKeys.has(indexKey)) {
-          addedKeys.add(indexKey);
-          variableList.push({
-            key: indexKey,
-            label: 'index',
-            type: 'variable',
-            dataType: 'Number',
-            value: `${parentNodeId}.index`,
-            nodeData: parentData,
-          });
-        }
-      }
-      
-      // Check if parent loop/iteration is connected to http-request via ERROR connection
-      if (parentData.type === 'loop' || parentData.type === 'iteration') {
-        const parentPreviousNodeIds = getAllPreviousNodes(parentLoopNode.id);
-        parentPreviousNodeIds.forEach(prevNodeId => {
-          const prevNode = nodes.find(n => n.id === prevNodeId);
-          if (!prevNode) return;
-          
-          const prevNodeData = prevNode.getData();
-          if (prevNodeData.type === 'http-request') {
-            // Check if connected via ERROR connection point
-            const errorEdges = edges.filter(edge => {
-              return edge.getTargetCellId() === parentLoopNode.id && 
-              edge.getSourceCellId() === prevNodeId &&
-              edge.getSourcePortId() === 'ERROR'
-            });
-            
-            if (errorEdges.length > 0) {
-              const errorMessageKey = `${prevNodeData.id}_error_message`;
-              const errorTypeKey = `${prevNodeData.id}_error_type`;
-              
-              if (!addedKeys.has(errorMessageKey)) {
-                addedKeys.add(errorMessageKey);
-                variableList.push({
-                  key: errorMessageKey,
-                  label: 'error_message',
-                  type: 'variable',
-                  dataType: 'string',
-                  value: `${prevNodeData.id}.error_message`,
-                  nodeData: prevNodeData,
-                });
-              }
-              
-              if (!addedKeys.has(errorTypeKey)) {
-                addedKeys.add(errorTypeKey);
-                variableList.push({
-                  key: errorTypeKey,
-                  label: 'error_type',
-                  type: 'variable',
-                  dataType: 'string',
-                  value: `${prevNodeData.id}.error_type`,
-                  nodeData: prevNodeData,
-                });
-              }
-            }
-          }
-        });
-      }
-      
-      // Add variables from nodes preceding the parent loop/iteration node
       const parentPreviousNodeIds = getAllPreviousNodes(parentLoopNode.id);
       allRelevantNodeIds.push(...parentPreviousNodeIds);
     }
+
+    // Add conversation variables from global config
+    const conversationVariables = chatVariables || [];
+
+    conversationVariables.forEach((variable: any) => {
+      const key = `CONVERSATION_${variable.name}`;
+      if (!addedKeys.has(key)) {
+        addedKeys.add(key);
+        variableList.push({
+          key,
+          label: variable.name,
+          type: 'variable',
+          dataType: variable.type,
+          value: `conv.${variable.name}`,
+          nodeData: { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' },
+          group: 'CONVERSATION'
+        });
+      }
+    });
     
     allRelevantNodeIds.forEach(nodeId => {
       const node = nodes.find(n => n.id === nodeId);
@@ -496,7 +423,7 @@ const Properties: FC<PropertiesProps> = ({
               key: llmKey,
               label: 'output',
               type: 'variable',
-              dataType: 'String',
+              dataType: 'string',
               value: `${dataNodeId}.output`,
               nodeData: nodeData,
             });
@@ -565,6 +492,17 @@ const Properties: FC<PropertiesProps> = ({
             const groupVariables = nodeData.config.group_variables.defaultValue || [];
             groupVariables?.forEach((groupVar: any) => {
               if (!groupVar || !groupVar.key) return;
+              
+              // Determine dataType from first variable in the group
+              let groupDataType = 'string';
+              if (groupVar.value && Array.isArray(groupVar.value) && groupVar.value.length > 0) {
+                const firstVariableValue = groupVar.value[0];
+                const firstVariable = variableList.find(v => `{{${v.value}}}` === firstVariableValue);
+                if (firstVariable) {
+                  groupDataType = firstVariable.dataType;
+                }
+              }
+              
               const groupVarKey = `${dataNodeId}_${groupVar.key}`;
               if (!addedKeys.has(groupVarKey)) {
                 addedKeys.add(groupVarKey);
@@ -572,14 +510,26 @@ const Properties: FC<PropertiesProps> = ({
                   key: groupVarKey,
                   label: groupVar.key,
                   type: 'variable',
-                  dataType: 'string',
+                  dataType: groupDataType,
                   value: `${dataNodeId}.${groupVar.key}`,
                   nodeData: nodeData,
                 });
               }
             });
           } else {
-            // If group=false, add output variable
+            // If group=false, add output variable with type from first group_variable
+            const groupVariables = nodeData.config.group_variables.defaultValue || [];
+            const firstVariable = groupVariables[0];
+            let outputDataType: string = 'any';
+            if (firstVariable) {
+              const filterVo = [...variableList].find(v => {
+                return `{{${v.value}}}` === firstVariable
+              })
+              if (filterVo) {
+                outputDataType = filterVo?.dataType
+              }
+            }
+            
             const varAggregatorKey = `${dataNodeId}_output`;
             if (!addedKeys.has(varAggregatorKey)) {
               addedKeys.add(varAggregatorKey);
@@ -587,7 +537,7 @@ const Properties: FC<PropertiesProps> = ({
                 key: varAggregatorKey,
                 label: 'output',
                 type: 'variable',
-                dataType: 'string',
+                dataType: outputDataType,
                 value: `${dataNodeId}.output`,
                 nodeData: nodeData,
               });
@@ -619,42 +569,6 @@ const Properties: FC<PropertiesProps> = ({
               nodeData: nodeData,
             });
           }
-          
-          // Check if connected via ERROR connection point
-          const errorEdges = edges.filter(edge => 
-            edge.getTargetCellId() === selectedNode.id && 
-            edge.getSourceCellId() === nodeId &&
-            edge.getSourcePortId() === 'ERROR'
-          );
-          
-          if (errorEdges.length > 0) {
-            const errorMessageKey = `${dataNodeId}_error_message`;
-            const errorTypeKey = `${dataNodeId}_error_type`;
-            
-            if (!addedKeys.has(errorMessageKey)) {
-              addedKeys.add(errorMessageKey);
-              variableList.push({
-                key: errorMessageKey,
-                label: 'error_message',
-                type: 'variable',
-                dataType: 'string',
-                value: `${dataNodeId}.error_message`,
-                nodeData: nodeData,
-              });
-            }
-            
-            if (!addedKeys.has(errorTypeKey)) {
-              addedKeys.add(errorTypeKey);
-              variableList.push({
-                key: errorTypeKey,
-                label: 'error_type',
-                type: 'variable',
-                dataType: 'string',
-                value: `${dataNodeId}.error_type`,
-                nodeData: nodeData,
-              });
-            }
-          }
           break
         case 'jinja-render':
           const jinjaOutputKey = `${dataNodeId}_output`;
@@ -684,21 +598,20 @@ const Properties: FC<PropertiesProps> = ({
               nodeData: nodeData,
             });
           }
-          if (!addedKeys.has(outputKey)) {
-            addedKeys.add(outputKey);
-            variableList.push({
-              key: outputKey,
-              label: 'output',
-              type: 'variable',
-              dataType: 'string',
-              value: `${dataNodeId}.output`,
-              nodeData: nodeData,
-            });
-          }
+          // if (!addedKeys.has(outputKey)) {
+          //   addedKeys.add(outputKey);
+          //   variableList.push({
+          //     key: outputKey,
+          //     label: 'output',
+          //     type: 'variable',
+          //     dataType: 'string',
+          //     value: `${dataNodeId}.output`,
+          //     nodeData: nodeData,
+          //   });
+          // }
           break
         case 'iteration':
           const iterationOutputKey = `${dataNodeId}_output`;
-          const iterationItemKey = `${dataNodeId}_item`;
           if (!addedKeys.has(iterationOutputKey)) {
             addedKeys.add(iterationOutputKey);
             // Get the data type from the output configuration, default to string
@@ -715,19 +628,8 @@ const Properties: FC<PropertiesProps> = ({
               key: iterationOutputKey,
               label: 'output',
               type: 'variable',
-              dataType: outputDataType,
+              dataType: `array[${outputDataType}]`,
               value: `${dataNodeId}.output`,
-              nodeData: nodeData,
-            });
-          }
-          if (!addedKeys.has(iterationItemKey)) {
-            addedKeys.add(iterationItemKey);
-            variableList.push({
-              key: iterationItemKey,
-              label: 'item',
-              type: 'variable',
-              dataType: 'string',
-              value: `${dataNodeId}.item`,
               nodeData: nodeData,
             });
           }
@@ -760,8 +662,34 @@ const Properties: FC<PropertiesProps> = ({
               key: toolDataKey,
               label: 'data',
               type: 'variable',
-              dataType: 'object',
+              dataType: 'string',
               value: `${dataNodeId}.data`,
+              nodeData: nodeData,
+            });
+          }
+          break
+        case 'memory-read':
+          const memoryReadAnswerKey = `${dataNodeId}_answer`;
+          const memoryReadIntermediateOutputs = `${dataNodeId}_intermediate_outputs`;
+          if (!addedKeys.has(memoryReadAnswerKey)) {
+            addedKeys.add(memoryReadAnswerKey);
+            variableList.push({
+              key: memoryReadAnswerKey,
+              label: 'answer',
+              type: 'variable',
+              dataType: 'string',
+              value: `${dataNodeId}.answer`,
+              nodeData: nodeData,
+            });
+          }
+          if (!addedKeys.has(memoryReadIntermediateOutputs)) {
+            addedKeys.add(memoryReadIntermediateOutputs);
+            variableList.push({
+              key: memoryReadIntermediateOutputs,
+              label: 'intermediate_outputs',
+              type: 'variable',
+              dataType: 'array[object]',
+              value: `${dataNodeId}.intermediate_outputs`,
               nodeData: nodeData,
             });
           }
@@ -769,38 +697,346 @@ const Properties: FC<PropertiesProps> = ({
       }
     });
 
-    // Add conversation variables from global config
-    const conversationVariables = workflowConfig?.variables || [];
-    
-    conversationVariables.forEach((variable: any) => {
-      const key = `CONVERSATION_${variable.name}`;
-      if (!addedKeys.has(key)) {
-        addedKeys.add(key);
-        variableList.push({
-          key,
-          label: variable.name,
-          type: 'variable',
-          dataType: variable.type,
-          value: `conv.${variable.name}`,
-          nodeData: { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' },
-          group: 'CONVERSATION'
+
+    // Add parent loop/iteration node variables if current node is a child
+    if (parentLoopNode) {
+      const parentData = parentLoopNode.getData();
+      const parentNodeId = parentLoopNode.getData().id;
+
+      if (parentData.type === 'loop') {
+        const cycleVars = parentData.cycle_vars || [];
+        cycleVars.forEach((cycleVar: any) => {
+          const key = `${parentNodeId}_cycle_${cycleVar.name}`;
+          if (!addedKeys.has(key)) {
+            addedKeys.add(key);
+            variableList.push({
+              key,
+              label: cycleVar.name,
+              type: 'variable',
+              dataType: cycleVar.type || 'String',
+              value: `${parentNodeId}.${cycleVar.name}`,
+              nodeData: parentData,
+            });
+          }
         });
+      } else if (parentData.type === 'iteration') {
+        // Add item and index variables for iteration parent only if input has value
+        if (parentData.config.input.defaultValue) {
+          const itemKey = `${parentNodeId}_item`;
+          const indexKey = `${parentNodeId}_index`;
+
+          // Determine item dataType from input variable
+          let itemDataType = 'object';
+          const inputVariable = variableList.find(v => `{{${v.value}}}` === parentData.config.input.defaultValue);
+          console.log('itemDataType defaultValue', parentData.config.input.defaultValue, variableList, inputVariable)
+          if (inputVariable && inputVariable.dataType.startsWith('array[')) {
+            itemDataType = inputVariable.dataType.replace(/^array\[(.+)\]$/, '$1');
+            console.log('itemDataType', itemDataType)
+          }
+
+
+          if (!addedKeys.has(itemKey)) {
+            addedKeys.add(itemKey);
+            variableList.push({
+              key: itemKey,
+              label: 'item',
+              type: 'variable',
+              dataType: itemDataType,
+              value: `${parentNodeId}.item`,
+              nodeData: parentData,
+            });
+          }
+
+          if (!addedKeys.has(indexKey)) {
+            addedKeys.add(indexKey);
+            variableList.push({
+              key: indexKey,
+              label: 'index',
+              type: 'variable',
+              dataType: 'number',
+              value: `${parentNodeId}.index`,
+              nodeData: parentData,
+            });
+          }
+        }
       }
-    });
+    }
 
     return variableList;
-  }, [selectedNode, graphRef, workflowConfig?.variables]);
+  }, [selectedNode, graphRef, graphUpdateTrigger, chatVariables]);
+
+  // Trigger variableList update when graph edges or nodes change
+  useEffect(() => {
+    if (!graphRef?.current) return;
+    
+    const graph = graphRef.current;
+    const handleGraphChange = () => {
+      console.log('handleGraphChange')
+      // Force variableList recalculation by updating trigger
+      setGraphUpdateTrigger(prev => prev + 1);
+    };
+    
+    // Listen to graph changes
+    graph.on('edge:added', handleGraphChange);
+    graph.on('edge:removed', handleGraphChange);
+    graph.on('edge:changed', handleGraphChange);
+    graph.on('node:added', handleGraphChange);
+    graph.on('node:removed', handleGraphChange);
+    graph.on('node:change:data', handleGraphChange);
+    
+    return () => {
+      graph.off('edge:added', handleGraphChange);
+      graph.off('edge:removed', handleGraphChange);
+      graph.off('edge:changed', handleGraphChange);
+      graph.off('node:added', handleGraphChange);
+      graph.off('node:removed', handleGraphChange);
+      graph.off('node:change:data', handleGraphChange);
+    };
+  }, [graphRef]);
 
   // Filter out boolean type variables for loop and llm nodes
-  const getFilteredVariableList = (nodeType?: string) => {
-    if (nodeType === 'loop' || nodeType === 'llm') {
-      return variableList.filter(variable => variable.dataType !== 'boolean');
+  const getFilteredVariableList = (nodeType?: string, key?: string) => {
+    // Check if current node is a child of iteration node
+    const parentIterationNode = selectedNode ? (() => {
+      const nodes = graphRef.current?.getNodes() || [];
+      const nodeData = selectedNode.getData();
+      const cycle = nodeData?.cycle;
+      
+      if (cycle) {
+        const parentNode = nodes.find(n => n.getData().id === cycle);
+        if (parentNode) {
+          const parentData = parentNode.getData();
+          if (parentData?.type === 'iteration') {
+            return parentNode;
+          }
+        }
+      }
+      return null;
+    })() : null;
+
+    // Helper function to add parent iteration variables
+    const addParentIterationVars = (filteredList: any[]) => {
+      if (parentIterationNode) {
+        const parentData = parentIterationNode.getData();
+        const parentNodeId = parentData.id;
+        
+        if (parentData.config?.input?.defaultValue) {
+          const itemKey = `${parentNodeId}_item`;
+          const indexKey = `${parentNodeId}_index`;
+          
+          const existingItemVar = filteredList.find(v => v.key === itemKey);
+          const existingIndexVar = filteredList.find(v => v.key === indexKey);
+          
+          if (!existingItemVar) {
+            // Determine item dataType from input variable
+            let itemDataType = 'object';
+            const inputVariable = variableList.find(v => `{{${v.value}}}` === parentData.config.input.defaultValue);
+            if (inputVariable && inputVariable.dataType.startsWith('array[')) {
+              itemDataType = inputVariable.dataType.replace(/^array\[(.+)\]$/, '$1');
+            }
+            
+            filteredList.push({
+              key: itemKey,
+              label: 'item',
+              type: 'variable',
+              dataType: itemDataType,
+              value: `${parentNodeId}.item`,
+              nodeData: parentData,
+            });
+          }
+          
+          if (!existingIndexVar) {
+            filteredList.push({
+              key: indexKey,
+              label: 'index',
+              type: 'variable',
+              dataType: 'number',
+              value: `${parentNodeId}.index`,
+              nodeData: parentData,
+            });
+          }
+        }
+      }
+      return filteredList;
+    };
+
+    if (nodeType === 'llm') {
+      // For LLM nodes that are children of iteration or loop nodes, include parent variables
+      const parentLoopNode = selectedNode ? (() => {
+        const nodes = graphRef.current?.getNodes() || [];
+        const nodeData = selectedNode.getData();
+        const cycle = nodeData?.cycle;
+        
+        if (cycle) {
+          const parentNode = nodes.find(n => n.getData().id === cycle);
+          if (parentNode) {
+            const parentData = parentNode.getData();
+            if (parentData?.type === 'loop' || parentData?.type === 'iteration') {
+              return parentNode;
+            }
+          }
+        }
+        return null;
+      })() : null;
+      
+      let filteredList = variableList.filter(variable => variable.dataType !== 'boolean');
+      
+      // If this LLM node is a child of iteration/loop, ensure parent variables are included
+      if (parentLoopNode) {
+        const parentData = parentLoopNode.getData();
+        const parentNodeId = parentData.id;
+        
+        // Ensure parent loop/iteration variables are included
+        if (parentData.type === 'loop') {
+          const cycleVars = parentData.cycle_vars || [];
+          cycleVars.forEach((cycleVar: any) => {
+            const key = `${parentNodeId}_cycle_${cycleVar.name}`;
+            const existingVar = filteredList.find(v => v.key === key);
+            if (!existingVar && cycleVar.name && cycleVar.type !== 'boolean') {
+              filteredList.push({
+                key,
+                label: cycleVar.name,
+                type: 'variable',
+                dataType: cycleVar.type || 'String',
+                value: `${parentNodeId}.${cycleVar.name}`,
+                nodeData: parentData,
+              });
+            }
+          });
+        } else if (parentData.type === 'iteration') {
+          // Add item and index variables for iteration parent
+          if (parentData.config?.input?.defaultValue) {
+            const itemKey = `${parentNodeId}_item`;
+            const indexKey = `${parentNodeId}_index`;
+            
+            const existingItemVar = filteredList.find(v => v.key === itemKey);
+            const existingIndexVar = filteredList.find(v => v.key === indexKey);
+            
+            if (!existingItemVar) {
+              // Determine item dataType from input variable
+              let itemDataType = 'object';
+              const inputVariable = variableList.find(v => `{{${v.value}}}` === parentData.config.input.defaultValue);
+              if (inputVariable && inputVariable.dataType.startsWith('array[')) {
+                itemDataType = inputVariable.dataType.replace(/^array\[(.+)\]$/, '$1');
+              }
+              
+              filteredList.push({
+                key: itemKey,
+                label: 'item',
+                type: 'variable',
+                dataType: itemDataType,
+                value: `${parentNodeId}.item`,
+                nodeData: parentData,
+              });
+            }
+            
+            if (!existingIndexVar) {
+              filteredList.push({
+                key: indexKey,
+                label: 'index',
+                type: 'variable',
+                dataType: 'Number',
+                value: `${parentNodeId}.index`,
+                nodeData: parentData,
+              });
+            }
+          }
+        }
+      }
+      
+      return filteredList;
     }
-    return variableList;
+    if (nodeType === 'knowledge-retrieval' || nodeType === 'parameter-extractor' && key !== 'prompt' || nodeType === 'memory-read' || nodeType === 'memory-write' || nodeType === 'question-classifier') {
+      let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string');
+      return filteredList;
+    }
+    if (nodeType === 'parameter-extractor' && key === 'prompt') {
+      let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string' || variable.dataType === 'number');
+      return filteredList;
+    }
+    if (nodeType === 'iteration' && key === 'output') {
+      return variableList.filter(variable => variable.value.includes('sys.'));
+    }
+    if (nodeType === 'iteration') {
+      return variableList.filter(variable => variable.dataType.includes('array'));
+    }
+    if (nodeType === 'loop' && key === 'condition') {
+      let filteredList = addParentIterationVars(variableList).filter(variable => variable.nodeData.type !== 'loop');
+      
+      // Add child node output variables for loop nodes
+      if (selectedNode) {
+        const graph = graphRef.current;
+        if (graph) {
+          const nodes = graph.getNodes();
+          const childNodes = nodes.filter(node => {
+            const nodeData = node.getData();
+            return nodeData?.cycle === selectedNode.id;
+          });
+          
+          // Add output variables from child nodes
+          childNodes.forEach(childNode => {
+            const childData = childNode.getData();
+            const childNodeId = childData.id;
+            
+            // Add child node output variables based on their type
+            switch(childData.type) {
+              case 'llm':
+              case 'jinja-render':
+              case 'tool':
+                const outputKey = `${childNodeId}_output`;
+                const existingOutput = filteredList.find(v => v.key === outputKey);
+                if (!existingOutput) {
+                  filteredList.push({
+                    key: outputKey,
+                    label: 'output',
+                    type: 'variable',
+                    dataType: 'string',
+                    value: `${childNodeId}.output`,
+                    nodeData: childData,
+                  });
+                }
+                break;
+              case 'http-request':
+                const bodyKey = `${childNodeId}_body`;
+                const statusKey = `${childNodeId}_status_code`;
+                if (!filteredList.find(v => v.key === bodyKey)) {
+                  filteredList.push({
+                    key: bodyKey,
+                    label: 'body',
+                    type: 'variable',
+                    dataType: 'string',
+                    value: `${childNodeId}.body`,
+                    nodeData: childData,
+                  });
+                }
+                if (!filteredList.find(v => v.key === statusKey)) {
+                  filteredList.push({
+                    key: statusKey,
+                    label: 'status_code',
+                    type: 'variable',
+                    dataType: 'number',
+                    value: `${childNodeId}.status_code`,
+                    nodeData: childData,
+                  });
+                }
+                break;
+            }
+          });
+        }
+      }
+      
+      return filteredList;
+    }
+    
+    // For all other node types, add parent iteration variables if applicable
+    let baseList = variableList;
+    return addParentIterationVars(baseList);
   };
 
+  // const defaultVariableList = calculateVariableList(selectedNode as Node, graphRef, workflowConfig )
+
   console.log('values', values)
-  console.log('variableList', variableList, selectedNode?.data)
+  console.log('variableList', variableList)
 
   return (
     <div className="rb:w-75 rb:fixed rb:right-0 rb:top-16 rb:bottom-0 rb:p-3">
@@ -901,11 +1137,10 @@ const Properties: FC<PropertiesProps> = ({
                       });
                     }
                   }
-                  
                   return (
                     <Form.Item key={key} name={key}>
                       <MessageEditor
-                        key={key} 
+                        key={key}
                         options={contextVariableList.filter(variable => variable.nodeData?.type !== 'knowledge-retrieval')} 
                         parentName={key}
                       />
@@ -915,7 +1150,12 @@ const Properties: FC<PropertiesProps> = ({
                 if (selectedNode?.data?.type === 'end' && key === 'output') {
                   return (
                     <Form.Item key={key} name={key}>
-                      <MessageEditor key={key} isArray={false} parentName={key} options={variableList} />
+                      <MessageEditor
+                        key={key}
+                        isArray={false}
+                        parentName={key}
+                        options={variableList.filter(variable => variable.nodeData?.type !== 'knowledge-retrieval')} 
+                      />
                     </Form.Item>
                   )
                 }
@@ -943,7 +1183,7 @@ const Properties: FC<PropertiesProps> = ({
                         isArray={!!config.isArray} 
                         parentName={key}
                         enableJinja2={config.enableJinja2 as boolean}
-                        options={getFilteredVariableList(selectedNode?.data?.type)}
+                        options={getFilteredVariableList(selectedNode?.data?.type, key)}
                       />
                     </Form.Item>
                   )
@@ -964,7 +1204,7 @@ const Properties: FC<PropertiesProps> = ({
                     <Form.Item key={key} name={key}>
                       <GroupVariableList
                         name={key}
-                        options={getFilteredVariableList(selectedNode?.data?.type)}
+                        options={getFilteredVariableList(selectedNode?.data?.type, key)}
                         isCanAdd={!!(values as any)?.group}
                       />
                     </Form.Item>
@@ -976,7 +1216,7 @@ const Properties: FC<PropertiesProps> = ({
                     <Form.Item key={key} name={key}>
                       <CaseList
                         name={key}
-                        options={getFilteredVariableList(selectedNode?.data?.type)}
+                        options={getFilteredVariableList(selectedNode?.data?.type, key)}
                         selectedNode={selectedNode}
                         graphRef={graphRef}
                       />
@@ -989,7 +1229,7 @@ const Properties: FC<PropertiesProps> = ({
                     <Form.Item key={key} name={key}
                       label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                     >
-                      <MappingList name={key} options={getFilteredVariableList(selectedNode?.data?.type)} />
+                      <MappingList name={key} options={getFilteredVariableList(selectedNode?.data?.type, key)} />
                     </Form.Item>
                   
                   )
@@ -999,7 +1239,7 @@ const Properties: FC<PropertiesProps> = ({
                     <Form.Item key={key} name={key}>
                       <CycleVarsList
                         parentName={key}
-                        options={getFilteredVariableList(selectedNode?.data?.type)}
+                        options={getFilteredVariableList(selectedNode?.data?.type, key)}
                       />
                     </Form.Item>
                   )
@@ -1013,12 +1253,26 @@ const Properties: FC<PropertiesProps> = ({
                           if (config.filterLoopIterationVars) {
                             const loopIterationVars: Suggestion[] = [];
                             
-                            return [...getFilteredVariableList(selectedNode?.data?.type), ...loopIterationVars];
+                            return [...getFilteredVariableList(selectedNode?.data?.type, key), ...loopIterationVars];
                           }
-                          return getFilteredVariableList(selectedNode?.data?.type);
+                          return getFilteredVariableList(selectedNode?.data?.type, key);
                         })()
                       }
                     />
+                    </Form.Item>
+                  )
+                }
+                if (config.type === 'memoryConfig') {
+                  return (
+                    <Form.Item
+                      key={key}
+                      name={key}
+                      noStyle
+                    >
+                      <MemoryConfig
+                        parentName={key}
+                        options={getFilteredVariableList('llm')}
+                      />
                     </Form.Item>
                   )
                 }
@@ -1060,7 +1314,7 @@ const Properties: FC<PropertiesProps> = ({
                       ? <VariableSelect
                           placeholder={t('common.pleaseSelect')}
                           options={(() => {
-                            const baseVariableList = getFilteredVariableList(selectedNode?.data?.type);
+                            const baseVariableList = getFilteredVariableList(selectedNode?.data?.type, key);
                             // Apply filtering if specified in config
                             if (config.filterNodeTypes || config.filterVariableNames) {
                               return baseVariableList.filter(variable => {
@@ -1068,7 +1322,7 @@ const Properties: FC<PropertiesProps> = ({
                                   (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
                                 const variableNameMatch = !config.filterVariableNames || 
                                   (Array.isArray(config.filterVariableNames) && config.filterVariableNames.includes(variable.label));
-                                return nodeTypeMatch && variableNameMatch;
+                                return nodeTypeMatch || variableNameMatch;
                               });
                             }
                             // Filter child nodes for iteration output
@@ -1085,7 +1339,7 @@ const Properties: FC<PropertiesProps> = ({
                               });
                               
                               return baseVariableList.filter(variable => 
-                                childNodes.some(node => node.id === variable.nodeData?.id)
+                                childNodes.some(node => node.id === variable.nodeData?.id) || selectedNode?.data?.type === 'iteration' && key === 'output' && variable.value.includes('sys.')
                               );
                             }
                             return baseVariableList;
@@ -1095,7 +1349,12 @@ const Properties: FC<PropertiesProps> = ({
                       : config.type === 'switch'
                       ? <Switch onChange={key === 'group' ? () => { form.setFieldValue('group_variables', []) } : undefined} />
                       : config.type === 'categoryList'
-                      ? <CategoryList parentName={key} selectedNode={selectedNode} graphRef={graphRef} />
+                      ? <CategoryList 
+                        parentName={key} 
+                        selectedNode={selectedNode}
+                        graphRef={graphRef}
+                        options={getFilteredVariableList(selectedNode?.data?.type, key)}
+                      />
                       : config.type === 'conditionList'
                       ? <ConditionList
                         parentName={key}
@@ -1109,18 +1368,9 @@ const Properties: FC<PropertiesProps> = ({
                             value: `${selectedNode.getData().id}.${cycleVar.name}`,
                             nodeData: selectedNode.getData(),
                           }));
-                          return [...variableList.filter(variable => {
-                            // Keep conversation variables
-                            if (variable.group === 'CONVERSATION') return true;
-                            // Keep sys variables from start nodes
-                            if (variable.nodeData?.type === 'start' && variable.value?.startsWith('sys.')) return true;
-                            // Keep variables from non-start nodes
-                            if (variable.nodeData?.type !== 'start' && variable.nodeData?.type !== 'http-request' && variable.dataType !== 'boolean') return true;
-                            // Filter out custom variables from start nodes
-                            return false;
-                          }), ...cycleVarSuggestions];
-                        })()
-                      }
+
+                          return [...getFilteredVariableList(selectedNode?.data?.type, key), ...cycleVarSuggestions];
+                        })()}
                         selectedNode={selectedNode}
                         graphRef={graphRef}
                         addBtnText={t('workflow.config.addCase')}

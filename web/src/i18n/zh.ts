@@ -17,6 +17,11 @@ export const zh = {
       spaceTitle:'记忆熊智能空间管理平台',
       spaceSubTitle: '使智能模型的实施变得更加容易——一个集模型管理、知识构建、工作流程编排以及空间操作于一体的综合性平台',
     },
+    version:{
+      releaseDate: '发布日',
+      version: '版本',
+      name: '代号'
+    },
     quickActions:{
       title: '快速操作',
       spaceManagement: '空间管理',
@@ -66,6 +71,7 @@ export const zh = {
       stepTwoDescription: '你可以在这里创建和管理不同的空间，把模型和数据组织到具体的使用场景中。空间创建完成后，可以去 User Management 邀请成员、分配权限，一起协作使用。👉 点击左侧 User Management 继续。',
       stepThree: '这里是用户管理页',
       stepThreeDescription: '你可以在这里创建用户、分配角色，并管理团队成员的访问权限。完成用户设置后，基础配置就准备好了，可以开始实际使用平台的各项功能了 🎉',
+      finishButtonText: '开始使用',
     },
     menu: {
       home: '首页',
@@ -82,7 +88,7 @@ export const zh = {
       modelManagement: '模型管理',
       memoryStore: '记忆存储',
       apiParameters: 'API参数',
-      userMemory: '用户记忆',
+      userMemory: '记忆库',
       memberManagement: '成员管理',
       memorySummary: '记忆摘要',
       memoryConversation: '记忆验证',
@@ -97,7 +103,7 @@ export const zh = {
       knowledgeShare: '详情',
       knowledgeCreateDataset: '新建数据集',
       knowledgeDocumentDetails: '详情',
-      userMemoryDetail: '用户记忆详情',
+      userMemoryDetail: '记忆库详情',
       toolManagement: '工具管理',
       emotionEngine: '情感引擎',
       statementDetail: '情绪记忆',
@@ -105,6 +111,7 @@ export const zh = {
       pricing: '收费管理',
       orderPayment: '订单支付',
       orderHistory: '订单记录',
+      spaceConfig: '空间配置'
     },
     knowledgeBase: {
       home: '首页',
@@ -502,7 +509,7 @@ export const zh = {
       VersionInformation: '版本信息',
       publishedOn: '发布于',
       publisher: '发布者',
-      DetailsOfVersion: 'v{{version}}版本详情',
+      DetailsOfVersion: '{{version}}版本详情',
       exportDSLFile: '导出DSL文件',
       willRollToThisVersion: '将回滚到此版本',
       share: '分享',
@@ -776,14 +783,15 @@ export const zh = {
       createNewMemorySummary: '创建新记忆条目',
 
       createNewApplication: '创建新应用',
-      createNewApplicationDesc: '创建新空间应用',
+      createNewApplicationDesc: '零代码拖拽3分钟创应用',
 
-      createNewKnowledge: '创建新知识',
-      createNewKnowledgeDesc: '创建新记忆条目',
+      createNewKnowledge: '创建知识库',
+      createNewKnowledgeDesc: '秒变可搜索的专属知识库',
 
       memoryConversation: '记忆对话',
-      memoryConversationDesc: '记忆对话',
-
+      memoryConversationDesc: '让AI越用越懂你',
+      helpCenter: '帮助中心',
+      helpCenterDesc: '一站式解决疑问快速上手',
       memorySummary: '查看记忆摘要',
       memorySummaryDesc: '查看记忆摘要报告',
 
@@ -956,6 +964,8 @@ export const zh = {
       reset: '重置',
       refresh: '刷新',
       return: '返回',
+      statusEnabled: '可用',
+      statusDisabled: '不可用'
     },
     product: {
       applicationManagement: '应用管理',
@@ -1293,8 +1303,8 @@ export const zh = {
       IMPLICIT_MEMORY: '隐性记忆',
       EMOTIONAL_MEMORY: '情绪记忆',
       EPISODIC_MEMORY: '情景记忆',
-      FORGETTING_MANAGEMENT: '遗忘',
-
+      FORGET_MEMORY: '遗忘记忆',
+      
       endUserProfile: '核心档案',
       editEndUserProfile: '编辑',
       other_name: '姓名',
@@ -1308,7 +1318,7 @@ export const zh = {
       updated_at: '最后更新时间',
       fullScreen: '全屏',
 
-      memoryWindow: "{{name}}的记忆之窗",
+      memoryWindow: "{{name}} 的记忆之窗",
       memory_insight: '总体概述',
       key_findings: '关键发现',
       behavior_pattern: '行为模式',
@@ -1333,10 +1343,11 @@ export const zh = {
       unix: '个',
       completeMemory: '完整记忆',
       relationshipEvolution: '关系演化',
-      timelineMemories: '共同记忆时间线',
+      timelineMemories: '长期记忆',
       emotionLine: '情绪随时间变化',
       interaction: '互动频率 & 关系阶段',
       timelines_memory: '全部',
+      Chunk: '工作记忆',
       MemorySummary: '长期沉淀',
       Statement: '情绪记忆',
       ExtractedEntity: '情景记忆',
@@ -1344,6 +1355,12 @@ export const zh = {
       negative: '负向情绪',
       neutral: '中性情绪',
       interactionCountData: '互动次数',
+      capacity: '容量',
+      type: '类型',
+      person: '个人',
+      memoryNum: '条记忆',
+      memory_config_name: '记忆引擎',
+      searchPlaceholder: '搜索记忆库名称',
     },
     space: {
       createSpace: '创建空间',
@@ -1359,7 +1376,8 @@ export const zh = {
       neo4jDesc: '基于知识图谱，适合关系推理和路径查询',
       llmModel: 'LLM 模型',
       embeddingModel: 'Embedding 模型',
-      rerankModel: 'Rerank 模型'
+      rerankModel: 'Rerank 模型',
+      configAlert: '空间模型配置为空间的模型模型，保障空间运行时能正确的调用到相应的模型来处理业务数据。',
     },
     memoryExtractionEngine: {
       title: '记忆引擎模块配置中心',
@@ -1508,6 +1526,7 @@ export const zh = {
       deduplication_desc: '去重消歧完成，最终{{count}}个唯一实体'
     },
     memoryConversation: {
+      chatEmpty:'有什么我可以帮您的吗？',
       searchPlaceholder: '输入用户ID...',
       userID: '用户ID',
       testMemoryConversation: '测试记忆对话',
@@ -1532,6 +1551,8 @@ export const zh = {
       quickReply: '快速回复',
       web_search: '联网搜索',
       memory: '记忆',
+      memoryConversationAnalysisEmpty: '目前没有可用的对话分析内容',
+      memoryConversationAnalysisEmptySubTitle: '输入您的用户ID后，点击"测试记忆"查看对话记忆',
     },
     login: {
       title: '红熊记忆科学',
@@ -1706,19 +1727,17 @@ export const zh = {
 
       JsonTool_desc: '数据格式转换',
       JsonTool_features: 'JSON格式化、压缩、验证和转换功能',
-      jsonFormat: 'JSON格式化',
-      jsonGzip: 'JSON压缩',
-      jsonCheck: 'JSON验证',
-      jsonConversion: '格式转换',
+      jsonParse: 'JSON解析',
+      jsonInsert: 'JSON插入',
+      jsonReplace: 'JSON验证',
+      jsonDelete: 'JSON删除',
       jsonEg: '示例JSON',
       enterJson: '输入JSON',
       jsonPlaceholder: '输入JSON数据，例如：{"name": "测试", "value": 123}',
       clear: '清空',
-      parse: '粘贴',
-      format: '格式化',
-      minify: '压缩',
-      validate: '验证',
-      convert: '转义',
+      paste: '粘贴',
+      parse: '解析',
+      json_path: 'JSON 路径参数',
       outputResult: '输出结果',
       validJosn: 'JSON格式正确，验证通过！',
       
@@ -1804,6 +1823,8 @@ export const zh = {
       tagDesc: '多个标签用逗号分隔',
       availableTools: '可用工具',
       name: '名称',
+      enterNamePlaceholder: '请输入名称',
+      toolEmpty: '未检测到工具',
       desc: '描述',
       method: '方法',
       path: '路径',
@@ -1870,6 +1891,9 @@ export const zh = {
           temperature: '温度',
           max_tokens: '最大令牌数',
           context: '上下文',
+          memory: '记忆',
+          enable_window: '记忆窗口',
+          inner: '内置',
         },
         start: {
           variables: '输入字段',
@@ -2038,7 +2062,11 @@ export const zh = {
       variableConfig: '变量配置',
       variableRequired: '必填',
       addMessage: '添加消息',
-      answerDesc: '回复'
+      answerDesc: '回复',
+      addNode: '添加节点',
+      arrange: '整理',
+      redo: '重做',
+      undo: '撤销',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',

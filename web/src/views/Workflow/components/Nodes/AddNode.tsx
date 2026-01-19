@@ -13,11 +13,12 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
   const handleNodeSelect = (selectedNodeType: any) => {
     const parentBBox = node.getBBox();
     const cycleId = data.cycle;
+    const horizontalSpacing = 20;
 
     const id = `${selectedNodeType.type.replace(/-/g, '_') }_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const newNode = graph.addNode({
       ...(graphNodeLibrary[selectedNodeType.type] || graphNodeLibrary.default),
-      x: parentBBox.x,
+      x: parentBBox.x + horizontalSpacing,
       y: parentBBox.y,
       id,
       data: {
@@ -46,7 +47,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       graph.addEdge({
         source: { cell: edge.getSourceCellId(), port: edge.getSourcePortId() },
         target: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'left')?.id || 'left' },
-        attrs: edge.getAttrs()
+        attrs: edge.getAttrs(),
       });
     });
 
@@ -57,7 +58,6 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         source: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'right')?.id || 'right' },
         target: { cell: edge.getTargetCellId(), port: targetPortId },
         attrs: edge.getAttrs(),
-        zIndex: 3
       });
     });
 
@@ -107,7 +107,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     <div style={{ maxHeight: '300px', overflowY: 'auto', minWidth: '240px' }}>
       {nodeLibrary.map((category, categoryIndex) => {
         const filteredNodes = category.nodes.filter(nodeType => 
-          nodeType.type !== 'start' && nodeType.type !== 'end' && nodeType.type !== 'loop' && nodeType.type !== 'cycle-start'
+          nodeType.type !== 'start' && nodeType.type !== 'end' && nodeType.type !== 'iteration' && nodeType.type !== 'loop' && nodeType.type !== 'cycle-start'
         );
         
         if (filteredNodes.length === 0) return null;

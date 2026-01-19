@@ -11,10 +11,14 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
   const { t } = useTranslation()
 
   useEffect(() => {
-    initNodes()
-    // 检查是否需要添加add-node
-    checkAndAddAddNode()
-  }, [])
+    // 使用setTimeout确保在所有节点都添加完成后再创建连线
+    const timer = setTimeout(() => {
+      initNodes()
+      checkAndAddAddNode()
+    }, 50)
+    
+    return () => clearTimeout(timer)
+  }, [graph])
 
   const checkAndAddAddNode = () => {
     if (!graph) return;
@@ -29,11 +33,11 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       
       const addNode = graph.addNode({
         ...graphNodeLibrary.addStart,
-        x: cycleStartBBox.x + 64,
+        x: cycleStartBBox.x + 84,
         y: cycleStartBBox.y,
         data: {
           type: 'add-node',
-          label: '添加节点',
+          label: t('workflow.addNode'),
           icon: '+',
           parentId: node.id,
           cycle: data.id,
@@ -47,7 +51,8 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       const targetPorts = addNode.getPorts();
       const sourcePort = sourcePorts.find((port: any) => port.group === 'right')?.id || 'right';
       const targetPort = targetPorts.find((port: any) => port.group === 'left')?.id || 'left';
-      
+
+      // 然后创建连线
       graph.addEdge({
         source: { cell: cycleStartNode.id, port: sourcePort },
         target: { cell: addNode.id, port: targetPort },
@@ -61,7 +66,6 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
             },
           },
         },
-        zIndex: 3
       });
     }
   }
@@ -93,11 +97,11 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     });
     const addNode = graph.addNode({
       ...graphNodeLibrary.addStart,
-      x: centerX + 64,
+      x: centerX + 84,
       y: centerY,
       data: {
         type: 'add-node',
-        label: '添加节点',
+        label: t('workflow.addNode'),
         icon: '+',
         parentId: node.id,
         cycle: data.id,
@@ -124,13 +128,11 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
           strokeWidth: 1,
           targetMarker: {
             name: 'block',
-            size: 8,
+            size: 2,
           },
         },
       },
-      zIndex: 3
     }
-
     graph.addEdge(edgeConfig)
   }
 

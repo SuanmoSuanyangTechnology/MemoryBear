@@ -135,6 +135,14 @@ export const nodeLibrary: NodeLibrary[] = [
                 readonly: true
               },
             ]
+          },
+          memory: {
+            type: 'memoryConfig',
+            defaultValue: {
+              enable: false,
+              enable_window: false,
+              window_size: 20
+            }
           }
         }
       },
@@ -270,7 +278,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           input: {
             type: 'variableList',
-            filterNodeTypes: ['knowledge-retrieval'],
+            filterNodeTypes: ['knowledge-retrieval', 'iteration', 'loop'],
             filterVariableNames: ['message']
           },
           parallel: {
@@ -334,8 +342,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      {
-        type: "assigner", icon: assignerIcon,
+      { type: "assigner", icon: assignerIcon,
         config: {
           assignments: {
             type: 'assignmentList',
@@ -503,16 +510,44 @@ interface NodeConfig {
   ports?: PortsConfig;
 }
 
-const portAttrs = {
-  circle: {
-    r: 4, magnet: true, stroke: '#155EEF', strokeWidth: 2, fill: '#155EEF', position: { top: 22 }
+// 统一的端口 markup 配置
+export const portMarkup = [
+  {
+    tagName: 'circle',
+    selector: 'body',
   },
+  {
+    tagName: 'text',
+    selector: 'label',
+  },
+];
+
+// 统一的端口属性配置
+export const portAttrs = {
+  body: {
+    r: 6, 
+    magnet: true, 
+    stroke: '#155EEF', 
+    strokeWidth: 2, 
+    fill: '#155EEF',
+  },
+  label: {
+    text: '+',
+    fontSize: 12,
+    fontWeight: 'bold',
+    fill: '#FFFFFF',
+    textAnchor: 'middle',
+    textVerticalAnchor: 'middle',
+    pointerEvents: 'none',
+  }
 }
+
+// 统一的端口组配置
 const defaultPortGroups = {
-  // top: { position: 'top', attrs: portAttrs },
-  right: { position: 'right', attrs: portAttrs },
-  // bottom: { position: 'bottom', attrs: portAttrs },
-  left: { position: 'left', attrs: portAttrs },
+  // top: { position: 'top', markup: portMarkup, attrs: portAttrs },
+  right: { position: 'right', markup: portMarkup, attrs: portAttrs },
+  // bottom: { position: 'bottom', markup: portMarkup, attrs: portAttrs },
+  left: { position: 'left', markup: portMarkup, attrs: portAttrs },
 }
 const defaultPortItems = [
   // { group: 'top' },
@@ -570,7 +605,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 64,
     shape: 'normal-node',
     ports: {
-      groups: {right: { position: 'right', attrs: portAttrs }},
+      groups: {right: { position: 'right', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'right' }],
     },
   },
@@ -579,7 +614,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 64,
     shape: 'normal-node',
     ports: {
-      groups: {left: { position: 'left', attrs: portAttrs }},
+      groups: {left: { position: 'left', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'left' }],
     },
   },
@@ -588,7 +623,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 44,
     shape: 'cycle-start',
     ports: {
-      groups: {right: { position: 'right', attrs: portAttrs }},
+      groups: {right: { position: 'right', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'right' }],
     },
   },
@@ -597,7 +632,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 44,
     shape: 'add-node',
     ports: {
-      groups: {left: { position: 'left', attrs: portAttrs }},
+      groups: {left: { position: 'left', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'left' }],
     },
   },
@@ -615,7 +650,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 44,
     shape: 'cycle-start',
     ports: {
-      groups: {right: { position: 'right', attrs: portAttrs }},
+      groups: {right: { position: 'right', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'right' }],
     },
   },
@@ -624,8 +659,114 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 44,
     shape: 'add-node',
     ports: {
-      groups: {left: { position: 'left', attrs: portAttrs }},
+      groups: {left: { position: 'left', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'left' }],
     },
   }
+}
+
+
+export interface OutputVariable {
+  default?: Array<{
+    name: string;
+    type: string;
+  }>;
+  define?: string[];
+  sys?: Array<{
+    name: string;
+    type: string;
+  }>;
+  error?: Array<{
+    name: string;
+    type: string;
+  }>;
+}
+export const outputVariable: { [key: string]: OutputVariable } = {
+  start: {
+    sys: [
+      { name: "message", type: "string" },
+      { name: "conversation_id", type: "string" },
+      { name: "execution_id", type: "string", },
+      { name: "workspace_id", type: "string" },
+      { name: "user_id", type: "string" },
+    ],
+    define: ['variables']
+  },
+  end: {
+  },
+  llm: {
+    default: [
+      { name: "output", type: "string" },
+    ]
+  },
+  'knowledge-retrieval': {
+    default: [
+      { name: "output", type: "array[object]" },
+    ]
+  },
+  'parameter-extractor': {
+    default: [
+      { name: "__is_success", type: "number" },
+      { name: "__reason", type: "string" },
+    ],
+    define: ['params']
+  },
+  'memory-read': {
+    default: [
+      { name: "answer", type: "string" },
+      { name: "intermediate_outputs", type: "array[object]" },
+    ],
+  },
+  'memory-write': {
+
+  },
+  'if-else': {
+
+  },
+  'question-classifier': {
+    default: [
+      { name: "class_name", type: "string" },
+      // { name: "output", type: "string" },
+    ],
+  },
+  'iteration': {
+    default: [
+      // { name: "item", type: "string" }, // 仅内部使用
+      { name: "output", type: "array[string]" },
+    ],
+  },
+  'loop': {
+    define: ['cycle_vars']
+  },
+  'cycle-start': {
+
+  },
+  'break': {
+
+  },
+  'var-aggregator': {
+    // default: [
+    //   { name: "output", type: "string" },
+    // ],
+    define: ['group_variables']
+  },
+  'assigner': {
+
+  },
+  'http-request': {
+    default: [
+      { name: "body", type: "string" },
+      { name: "status_code", type: "number" },
+    ],
+  },
+  'tool': {
+    default: [
+      { name: "data", type: "string" },
+    ],
+  },
+  'jinja-render': {
+    default: [
+      { name: "output", type: "string" },
+    ],
+  },
 }

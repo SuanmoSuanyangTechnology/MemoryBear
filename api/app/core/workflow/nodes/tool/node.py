@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import uuid
@@ -18,10 +19,11 @@ class ToolNode(BaseNode):
     
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = ToolNodeConfig(**self.config)
+        self.typed_config: ToolNodeConfig | None = None
     
     async def execute(self, state: WorkflowState) -> dict[str, Any]:
         """执行工具"""
+        self.typed_config = ToolNodeConfig(**self.config)
         # 获取租户ID和用户ID
         tenant_id = self.get_variable("sys.tenant_id", state)
         user_id = self.get_variable("sys.user_id", state)
@@ -70,15 +72,14 @@ class ToolNode(BaseNode):
         if result.success:
             logger.info(f"节点 {self.node_id} 工具执行成功")
             return {
-                "success": True,
-                "data": result.data,
+                "data": result.data if isinstance(result.data, str) else json.dumps(result.data, ensure_ascii=False),
+                "error_code": "",
                 "execution_time": result.execution_time
             }
         else:
             logger.error(f"节点 {self.node_id} 工具执行失败: {result.error}")
             return {
-                "success": False,
-                "data": result.error,
+                "data": result.error if isinstance(result.error, str) else  json.dumps(result.error, ensure_ascii=False),
                 "error_code": result.error_code,
                 "execution_time": result.execution_time
             }

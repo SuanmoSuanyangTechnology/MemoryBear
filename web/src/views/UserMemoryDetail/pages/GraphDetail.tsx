@@ -1,16 +1,17 @@
-import {  useState, forwardRef, useImperativeHandle, useMemo } from 'react'
+import {  useState, forwardRef, useImperativeHandle, useMemo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import { Row, Col, Tabs, Space, Skeleton } from 'antd'
 
 import { getRelationshipEvolution, getTimelineMemories } from '@/api/memory'
 import type { Node, GraphDetailRef } from '../types'
-import RbDrawer from '@/components/RbDrawer'
 import RbCard from '@/components/RbCard/Card'
-import EmotionLine from './EmotionLine'
+import EmotionLine from '../components/EmotionLine'
 import { formatDateTime } from '@/utils/format'
 import Tag from '@/components/Tag'
-import InteractionBar from './InteractionBar'
+import InteractionBar from '../components/InteractionBar'
 import Empty from '@/components/Empty'
+import PageHeader from '../components/PageHeader'
 
 export interface Emotion {
   emotion_intensity: number;
@@ -35,7 +36,7 @@ interface Timeline {
 
 const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false);
+  const [searchParams] = useSearchParams()
   const [vo, setVo] = useState<Node | null>(null)
   const [loading, setLoading] = useState(false)
   const [emotionData, setEmotionData] = useState<Emotion[]>([])
@@ -43,14 +44,23 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
   const [activeTab, setActiveTab] = useState('timelines_memory')
   const [timelineLoading, setTimelineLoading] = useState(false)
   const [timelineMemories, setTimelineMemories] = useState<Timeline>({ timelines_memory: [], MemorySummary: [], Statement: [], ExtractedEntity: []})
+  useEffect(() => {
+    const nodeId = searchParams.get('nodeId')
+    const nodeLabel = searchParams.get('nodeLabel')
+    const nodeName = searchParams.get('nodeName')
+    
+    if (nodeId && nodeLabel) {
+      const nodeFromUrl = {
+        id: nodeId,
+        label: nodeLabel,
+        name: nodeName || nodeLabel
+      }
+      handleOpen(nodeFromUrl as Node)
+    }
+  }, [searchParams])
 
-  const handleCancel = () => {
-    setVo(null)
-    setOpen(false)
-  }
   const handleOpen = (vo: Node) => {
     setActiveTab('timelines_memory')
-    setOpen(true)
     setVo(vo)
     getRelationshipEvolutionData(vo)
     getTimelineMemoriesData(vo)
@@ -85,56 +95,57 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
   }, [activeTab, timelineMemories])
 
   return (
-    <RbDrawer
-      title={vo?.name}
-      open={open}
-      onClose={handleCancel}
-      width={1000}
-    >
-      <div className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:mb-3">{t('userMemory.relationshipEvolution')}</div>
-      <RbCard>
-        <Row gutter={16}>
-          <Col span={12}>
-            <EmotionLine chartData={emotionData} loading={loading} />
-          </Col>
-          <Col span={12}>
-            <InteractionBar chartData={interactionData} loading={loading} />
-          </Col>
-        </Row>
-      </RbCard>
+    <>
+      <PageHeader
+        name={vo?.name}
+        source="node"
+      />
+      <div className="rb:h-full rb:max-w-266 rb:mx-auto">
+        <div className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:mb-3">{t('userMemory.relationshipEvolution')}</div>
+        <RbCard>
+          <Row gutter={16}>
+            <Col span={12}>
+              <EmotionLine chartData={emotionData} loading={loading} />
+            </Col>
+            <Col span={12}>
+              <InteractionBar chartData={interactionData} loading={loading} />
+            </Col>
+          </Row>
+        </RbCard>
 
-      <div className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:mb-3 rb:mt-6">{t('userMemory.timelineMemories')}</div>
-      <RbCard>
-        <Tabs
-          activeKey={activeTab}
-          items={['timelines_memory', 'ExtractedEntity', 'Statement', 'MemorySummary'].map(key => ({
-            label: t(`userMemory.${key}`),
-            key
-          }))}
-          onChange={(key: string) => setActiveTab(key)}
-        />
-        {timelineLoading
-          ? <Skeleton active />
-          : !activeContent || activeContent.length === 0
-          ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
-          : <Space size={16} direction="vertical" className="rb:w-full">
-            {activeContent.map((vo, index) => (
-              <RbCard
-                key={index}
-                headerType="borderL"
-                headerClassName="rb:before:bg-[#155EEF]!"
-                title={vo.text}
-              >
-                <div className="rb:text-[#A8A9AA] rb:text-[12px] rb:leading-4">{formatDateTime(vo.created_at)}</div>
-                <Tag className="rb:mt-2">{vo.type}</Tag>
-              </RbCard>
-            ))}
-          </Space>
-        }
+        <div className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:mb-3 rb:mt-6">{t('userMemory.timelineMemories')}</div>
+        <RbCard>
+          <Tabs
+            activeKey={activeTab}
+            items={['timelines_memory', 'Statement', 'MemorySummary'].map(key => ({
+              label: t(`userMemory.${key}`),
+              key
+            }))}
+            onChange={(key: string) => setActiveTab(key)}
+          />
+          {timelineLoading
+            ? <Skeleton active />
+            : !activeContent || activeContent.length === 0
+            ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
+            : <Space size={16} direction="vertical" className="rb:w-full">
+              {activeContent.map((vo, index) => (
+                <RbCard
+                  key={index}
+                  headerType="borderL"
+                  headerClassName="rb:before:bg-[#155EEF]!"
+                  title={vo.text}
+                >
+                  <div className="rb:text-[#A8A9AA] rb:text-[12px] rb:leading-4">{formatDateTime(vo.created_at)}</div>
+                  <Tag className="rb:mt-2">{vo.type}</Tag>
+                </RbCard>
+              ))}
+            </Space>
+          }
 
-        
-      </RbCard>
-    </RbDrawer>
+          
+        </RbCard>
+      </div>
+    </>
   )
 })
 export default GraphDetail

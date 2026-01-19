@@ -466,7 +466,7 @@ async def chat(
             conversation_id=conversation.id,  # 使用已创建的会话 ID
             user_id=str(new_end_user.id),  # 转换为字符串
             variables=payload.variables,
-            config= payload.agent_config,
+            config=agent_config,
             web_search=payload.web_search,
             memory=payload.memory,
             storage_type=storage_type,
@@ -565,11 +565,12 @@ async def chat(
         config = workflow_config_4_app_release(release)
         if payload.stream:
             async def event_generator():
+
                 async for event in app_chat_service.workflow_chat_stream(
 
                     message=payload.message,
                     conversation_id=conversation.id,  # 使用已创建的会话 ID
-                    user_id=new_end_user.id,  # 转换为字符串
+                    user_id=end_user_id,  # 转换为字符串
                     variables=payload.variables,
                     config=config,
                     web_search=payload.web_search,
@@ -583,7 +584,7 @@ async def chat(
                     event_data = event.get("data", {})
 
                     # 转换为标准 SSE 格式（字符串）
-                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
                     yield sse_message
 
             return StreamingResponse(
@@ -601,7 +602,7 @@ async def chat(
 
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
-            user_id=new_end_user.id,  # 转换为字符串
+            user_id=end_user_id,  # 转换为字符串
             variables=payload.variables,
             config=config,
             web_search=payload.web_search,

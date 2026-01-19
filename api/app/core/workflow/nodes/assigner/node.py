@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class AssignerNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = AssignerNodeConfig(**self.config)
+        self.typed_config: AssignerNodeConfig | None = None
 
     async def execute(self, state: WorkflowState) -> Any:
         """
@@ -28,6 +28,7 @@ class AssignerNode(BaseNode):
             None or the result of the assignment operation.
         """
         # Initialize a variable pool for accessing conversation, node, and system variables
+        self.typed_config = AssignerNodeConfig(**self.config)
         logger.info(f"节点 {self.node_id} 开始执行")
         pool = VariablePool(state)
         for assignment in self.typed_config.assignments:

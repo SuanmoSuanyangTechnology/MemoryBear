@@ -36,11 +36,77 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     if (!sourceNode || !graph) return;
 
     const sourceNodeData = sourceNode.getData();
+    const sourceNodeType = sourceNodeData?.type;
     
-    // 计算新节点位置（在源节点右侧）
+    // 如果是cycle-start节点，需要处理add-node节点
+    let addNodePosition = null;
+    if (sourceNodeType === 'cycle-start' && sourceNodeData.cycle) {
+      const cycleId = sourceNodeData.cycle;
+      const addNodes = graph.getNodes().filter((n: any) => 
+        n.getData()?.type === 'add-node' && n.getData()?.cycle === cycleId
+      );
+      
+      if (addNodes.length > 0) {
+        const addNode = addNodes[0];
+        addNodePosition = addNode.getBBox();
+        addNode.remove();
+      }
+    }
+    
+    // 计算新节点位置，避免重叠
     const sourceBBox = sourceNode.getBBox();
-    const newX = sourceBBox.x + sourceBBox.width + 50;
-    const newY = sourceBBox.y;
+    const nodeWidth = graphNodeLibrary[selectedNodeType.type]?.width || 120;
+    const nodeHeight = graphNodeLibrary[selectedNodeType.type]?.height || 88;
+    const horizontalSpacing = sourceNodeType === 'cycle-start' ? 40 : 80;
+    const verticalSpacing = 10;
+    
+    // 获取源连接桩的group信息
+    const sourcePortInfo = sourceNode.getPorts().find((p: any) => p.id === sourcePort);
+    const sourcePortGroup = sourcePortInfo?.group || sourcePort;
+    console.log('sourcePortGroup', sourcePortGroup, sourcePortInfo)
+    
+    // 如果有add-node位置，使用该位置，否则计算新位置
+    let newX, newY;
+    if (addNodePosition) {
+      newX = addNodePosition.x;
+      newY = addNodePosition.y;
+    } else {
+      // 根据连接桩位置决定节点放置方向
+      if (sourcePortGroup === 'left') {
+        // 左侧连接桩，在左侧添加节点
+        newX = sourceBBox.x - nodeWidth*2 - horizontalSpacing;
+        newY = sourceBBox.y;
+      } else {
+        // 右侧连接桩，在右侧添加节点
+        newX = sourceBBox.x + sourceBBox.width + horizontalSpacing;
+        newY = sourceBBox.y;
+      }
+      
+      // 检查位置是否与现有节点重叠（只考虑与当前节点相连的节点）
+      const checkOverlap = (x: number, y: number) => {
+        // 获取与源节点相连的节点
+        const connectedNodes = new Set();
+        graph.getConnectedEdges(sourceNode).forEach((edge: any) => {
+          const sourceId = edge.getSourceCellId();
+          const targetId = edge.getTargetCellId();
+          if (sourceId !== sourceNode.id) connectedNodes.add(sourceId);
+          if (targetId !== sourceNode.id) connectedNodes.add(targetId);
+        });
+        
+        return graph.getNodes().some((node: any) => {
+          if (node.id === sourceNode.id) return false;
+          if (!connectedNodes.has(node.id)) return false; // 只考虑相连的节点
+          const bbox = node.getBBox();
+          return !(x + nodeWidth < bbox.x || x > bbox.x + bbox.width || 
+                  y + nodeHeight < bbox.y || y > bbox.y + bbox.height);
+        });
+      };
+      
+      // 如果位置被占用，向下寻找空位
+      while (checkOverlap(newX, newY)) {
+        newY += nodeHeight + verticalSpacing;
+      }
+    }
     
     // 创建新节点
     const id = `${selectedNodeType.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -70,7 +136,15 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     // 创建连线
     setTimeout(() => {
       const targetPorts = newNode.getPorts();
-      const targetPort = targetPorts.find((port: any) => port.group === 'left')?.id || 'left';
+      let targetPort;
+      
+      if (sourcePortGroup === 'left') {
+        // 从左侧连接桩连出，连接到新节点的右侧
+        targetPort = targetPorts.find((port: any) => port.group === 'right')?.id || 'right';
+      } else {
+        // 从右侧连接桩连出，连接到新节点的左侧
+        targetPort = targetPorts.find((port: any) => port.group === 'left')?.id || 'left';
+      }
       
       graph.addEdge({
         source: { cell: sourceNode.id, port: sourcePort },
@@ -85,6 +159,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
             },
           },
         },
+        // zIndex: sourceNodeData.cycle && sourceNodeType == 'cycle-start' ? 1 : sourceNodeData.cycle ? 2 : 0
       });
       
       // 循环节点内子节点通过连接桩添加时，调整循环节点大小
@@ -107,8 +182,9 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
               }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
               
               const padding = 20;
+              const bottomPadding = 50;
               const newWidth = Math.max(240, bounds.maxX - bounds.minX + padding * 2);
-              const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding * 2);
+              const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding + bottomPadding);
 
               parentNode.prop('size', { width: newWidth, height: newHeight });
             }
@@ -151,16 +227,16 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
         
         let filteredNodes;
         if (isChildOfLoop) {
-          // Use same filtering as AddNode for child nodes of loop
+          // Use same filtering as AddNode for child nodes of loop, but allow break
           filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'loop', 'cycle-start', 'iteration'].includes(nodeType.type));
         } else if (isChildOfIteration) {
-          // Filter out loop and iteration nodes for children of iteration nodes
-          filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'loop', 'break', 'cycle-start', 'iteration'].includes(nodeType.type));
+          // Filter out loop and iteration nodes for children of iteration nodes, but allow break
+          filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'loop', 'cycle-start', 'iteration'].includes(nodeType.type));
         } else {
           // Original filtering for non-loop child nodes
-          filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'break', 'cycle-start'].includes(nodeType.type));
+          filteredNodes = category.nodes.filter(nodeType => !['start', 'break', 'cycle-start'].includes(nodeType.type));
           filteredNodes = category.nodes.filter(nodeType =>
-            nodeType.type !== 'start' && nodeType.type !== 'end' && nodeType.type !== 'cycle-start' && nodeType.type !== 'break'
+            nodeType.type !== 'start' && nodeType.type !== 'cycle-start' && nodeType.type !== 'break'
           );
         }
         

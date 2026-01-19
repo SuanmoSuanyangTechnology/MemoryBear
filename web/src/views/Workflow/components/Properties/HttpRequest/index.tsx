@@ -90,7 +90,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         </Col>
         <Col span={16}>
           <Form.Item name="url">
-            <Editor options={options} variant="outlined" />
+            <Editor options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')} variant="outlined" />
           </Form.Item>
         </Col>
       </Row>
@@ -144,7 +144,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           <Form.Item name={['body', 'data']} noStyle>
             <EditableTable
               parentName={['body', 'data']}
-              options={options}
+              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
               filterBooleanType={true}
             />
           </Form.Item>
@@ -154,7 +154,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             <MessageEditor
               key="json"
               parentName={['body', 'data']}
-              options={options}
+              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
               isArray={false}
               title="JSON"
             />

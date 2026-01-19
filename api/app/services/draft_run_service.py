@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.celery_app import celery_app
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -22,6 +23,7 @@ from app.core.rag.nlp.search import knowledge_retrieval
 from app.models import AgentConfig, ModelApiKey, ModelConfig
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
+from app.services import task_service
 from app.services.langchain_tool_server import Search
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
@@ -55,7 +57,7 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
         长期记忆工具
     """
     # search_switch = memory_config.get("search_switch", "2")
-    config_id= memory_config.get("memory_content",'17')
+    config_id= memory_config.get("memory_content",None)
     logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
     @tool(args_schema=LongTermMemoryInput)
     def long_term_memory(question: str) -> str:
@@ -94,13 +96,21 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                         group_id=end_user_id,
                         message=question,
                         history=[],
-                        search_switch="1",
+                        search_switch="2",
                         config_id=config_id,
                         db=db,
                         storage_type=storage_type,
                         user_rag_memory_id=user_rag_memory_id
                     )
                 )
+                task = celery_app.send_task(
+                    "app.core.memory.agent.read_message",
+                    args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
+                )
+                result = task_service.get_task_memory_read_result(task.id)
+                status = result.get("status")
+                logger.info(f"读取任务状态：{status}")
+
             finally:
                 db.close()
             logger.info(f'用户ID：Agent:{end_user_id}')
@@ -235,7 +245,8 @@ class DraftRunService:
         storage_type: Optional[str] = None,
         user_rag_memory_id: Optional[str] = None,
         web_search: bool = True,
-        memory: bool = True
+        memory: bool = True,
+        sub_agent: bool = False
     ) -> Dict[str, Any]:
         """执行试运行（使用 LangChain Agent）
 
@@ -425,7 +436,7 @@ class DraftRunService:
             elapsed_time = time.time() - start_time
 
             # 8. 保存会话消息
-            if agent_config.memory and agent_config.memory.get("enabled"):
+            if not sub_agent and agent_config.memory and agent_config.memory.get("enabled"):
                 await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,

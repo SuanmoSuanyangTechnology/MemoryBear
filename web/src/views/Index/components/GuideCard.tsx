@@ -1,3 +1,11 @@
+/*
+ * @Description: 
+ * @Version: 0.0.1
+ * @Author: yujiangping
+ * @Date: 2026-01-13 11:44:06
+ * @LastEditors: yujiangping
+ * @LastEditTime: 2026-01-15 20:59:57
+ */
 import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';

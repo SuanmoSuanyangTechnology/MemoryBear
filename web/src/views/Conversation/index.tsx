@@ -11,6 +11,7 @@ import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import { randomString } from '@/utils/common'
 import BgImg from '@/assets/images/conversation/bg.png'
+import ChatEmpty from '@/assets/images/empty/chatEmpty.png'
 import Chat from '@/components/Chat'
 import type { ChatItem } from '@/components/Chat/types'
 import ButtonCheckbox from '@/components/ButtonCheckbox'
@@ -181,10 +182,15 @@ const Conversation: FC = () => {
             currentConversationId = newId
             break
           case 'message':
-            const { content } = item.data as { content: string  }
-            updateAssistantMessage(content)
+            const { content, chunk, conversation_id: curId } = item.data as { content: string; chunk: string; conversation_id: string;  }
+            updateAssistantMessage(content ?? chunk)
+
+            if (curId) {
+              currentConversationId = curId;
+            }
             break
           case 'end':
+          case 'workflow_end':
             setLoading(false)
             if (currentConversationId && currentConversationId !== conversation_id) {
               setConversationId(currentConversationId)
@@ -254,9 +260,10 @@ const Conversation: FC = () => {
       </div>
 
       <div className="rb:relative rb:h-screen rb:px-4 rb:flex-[1_1_auto]">
+        <div className='rb:w-[760px]  rb:h-screen rb:mx-auto rb:pt-10'>
         <Chat
-          empty={<Empty url={AnalysisEmptyIcon} className="rb:h-full" subTitle={t('memoryConversation.emptyDesc')} />}
-          contentClassName="rb:h-[calc(100%-152px)]"
+          empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
+          contentClassName="rb:h-[calc(100%-152px)] "
           data={chatList}
           streamLoading={streamLoading}
           loading={loading}
@@ -285,6 +292,7 @@ const Conversation: FC = () => {
             </Flex>
           </Form>
         </Chat>
+        </div>
       </div>
     </Flex>
   )

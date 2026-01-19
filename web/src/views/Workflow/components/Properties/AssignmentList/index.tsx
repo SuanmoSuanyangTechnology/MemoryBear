@@ -60,7 +60,7 @@ const AssignmentList: FC<AssignmentListProps> = ({
                     >
                       <VariableSelect
                         placeholder={t('common.pleaseSelect')}
-                        options={options}
+                        options={options.filter(vo => vo.nodeData.type === 'loop' || vo.value.includes('conv.') || (vo.nodeData.type === 'iteration' && (vo.label === 'item' || vo.label === 'index')))}
                         popupMatchSelectWidth={false}
                         onChange={() => {
                           form.setFieldValue([parentName, name, 'operation'], undefined);

@@ -292,7 +292,7 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
                       if (params.dataType === 'node') {
                         const node = params.data as KnowledgeNode
                         return `
-                          <div>
+                          <div class="rb:max-w-[560px]">
                             <div><strong>${node.entity_name}</strong></div>
                             <div>类型: ${node.entity_type}</div>
                             <div>重要度: ${(node.pagerank * 100).toFixed(2)}%</div>
@@ -301,10 +301,10 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
                       } else if (params.dataType === 'edge') {
                         const edge = params.data as KnowledgeEdge
                         return `
-                          <div>
+                          <div class="rb:max-w-[560px]">
                             <div><strong>关系</strong></div>
                             <div>权重: ${edge.weight}</div>
-                            <div>${edge.description}</div>
+                            <div class="rb:break-words rb:whitespace-pre-wrap">${edge.description}</div>
                           </div>
                         `
                       }

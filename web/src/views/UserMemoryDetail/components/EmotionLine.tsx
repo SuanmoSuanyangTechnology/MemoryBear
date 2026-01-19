@@ -3,8 +3,7 @@ import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react';
 import Empty from '@/components/Empty'
 import Loading from '@/components/Empty/Loading'
-import type { Emotion } from './GraphDetail'
-import { format } from 'echarts';
+import type { Emotion } from '../pages/GraphDetail'
 
 interface EmotionLineProps {
   chartData: Emotion[];

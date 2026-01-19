@@ -8,7 +8,7 @@ import PortClickHandler from './components/PortClickHandler';
 import { useWorkflowGraph } from './hooks/useWorkflowGraph';
 import type { WorkflowRef } from '@/views/ApplicationConfig/types'
 import Chat from './components/Chat/Chat';
-import type { ChatRef, AddChatVariableRef, ChatVariable } from './types'
+import type { ChatRef, AddChatVariableRef } from './types'
 import arrowIcon from '@/assets/images/workflow/arrow.png'
 import AddChatVariable from './components/AddChatVariable';
 
@@ -21,7 +21,6 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
   // 使用自定义Hook初始化工作流图
   const {
     config,
-    setConfig,
     graphRef,
     selectedNode,
     setSelectedNode,
@@ -38,6 +37,8 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
     copyEvent,
     parseEvent,
     handleSave,
+    chatVariables,
+    setChatVariables
   } = useWorkflowGraph({ containerRef, miniMapRef });
 
   const onDragOver = (event: React.DragEvent) => {
@@ -51,15 +52,6 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
   }
   const addVariable = () => {
     addChatVariableRef.current?.handleOpen()
-  }
-  const handleUpdateChatVariable = (variables: ChatVariable[]) => {
-    setConfig(prev => {
-      if (!prev) return null
-      return {
-        ...prev,
-        variables
-      }
-    })
   }
 
   useImperativeHandle(ref, () => ({
@@ -115,6 +107,7 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
         copyEvent={copyEvent}
         parseEvent={parseEvent}
         config={config}
+        chatVariables={chatVariables}
       />
       <Chat
         ref={chatRef}
@@ -125,8 +118,8 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
 
       <AddChatVariable
         ref={addChatVariableRef}
-        variables={config?.variables}
-        onChange={handleUpdateChatVariable}
+        variables={chatVariables}
+        onChange={setChatVariables}
       />
     </div>
   );

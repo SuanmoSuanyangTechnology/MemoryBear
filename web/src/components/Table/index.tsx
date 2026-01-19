@@ -16,6 +16,7 @@ interface TableComponentProps extends Omit<TableProps, 'pagination'> {
   rowSelection?: TableProps['rowSelection'];
   initialData?: Record<string, unknown>[];
   emptySize?: number;
+  emptyText?: string;
   isScroll?: boolean;
   scrollX?: number | string | true; // 支持自定义横向滚动宽度
   scrollY?: number | string; // 支持自定义纵向滚动高度
@@ -46,6 +47,7 @@ const TableComponent = forwardRef<TableRef, TableComponentProps>(({
   rowSelection,
   initialData,
   emptySize = 160,
+  emptyText,
   isScroll = false,
   scrollX,
   scrollY,
@@ -169,7 +171,7 @@ const TableComponent = forwardRef<TableRef, TableComponentProps>(({
       rowSelection={rowSelection}
       rowClassName={styles.row}
       className={styles.table}
-      locale={{ emptyText: <Empty size={emptySize} /> }}
+      locale={{ emptyText: <Empty size={emptySize} subTitle={emptyText} /> }}
       scroll={getScrollConfig()}
       tableLayout="auto"
     />

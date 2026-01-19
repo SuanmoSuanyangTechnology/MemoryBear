@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class IfElseNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = IfElseNodeConfig(**self.config)
+        self.typed_config: IfElseNodeConfig | None= None
 
     @staticmethod
     def _evaluate(operator, instance: CompareOperatorInstance) -> Any:
@@ -109,6 +109,7 @@ class IfElseNode(BaseNode):
         Returns:
             str: The matched branch identifier, e.g., 'CASE1', 'CASE2', ..., used for node transitions.
         """
+        self.typed_config = IfElseNodeConfig(**self.config)
         expressions = self.evaluate_conditional_edge_expressions(state)
         # TODO: 变量类型及文本类型解析
         for i in range(len(expressions)):

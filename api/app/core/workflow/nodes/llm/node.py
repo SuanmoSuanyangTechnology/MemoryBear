@@ -68,7 +68,7 @@ class LLMNode(BaseNode):
 
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = LLMNodeConfig(**self.config)
+        self.typed_config: LLMNodeConfig | None = None
 
     def _render_context(self, message, state):
         context = f"<context>{self._render_template(self.typed_config.context, state)}</context>"
@@ -85,28 +85,31 @@ class LLMNode(BaseNode):
         """
 
         # 1. 处理消息格式（优先使用 messages）
-        messages_config = self.config.get("messages")
+        messages_config = self.typed_config.messages
 
         if messages_config:
             # 使用 LangChain 消息格式
             messages = []
             for msg_config in messages_config:
-                role = msg_config.get("role", "user").lower()
-                content_template = msg_config.get("content", "")
+                role = msg_config.role.lower()
+                content_template = msg_config.content
                 content_template = self._render_context(content_template, state)
                 content = self._render_template(content_template, state)
 
                 # 根据角色创建对应的消息对象
                 if role == "system":
-                    messages.append(SystemMessage(content=content))
+                    messages.append({"role": "system", "content": content})
                 elif role in ["user", "human"]:
-                    messages.append(HumanMessage(content=content))
+                    messages.append({"role": "user", "content": content})
                 elif role in ["ai", "assistant"]:
-                    messages.append(AIMessage(content=content))
+                    messages.append({"role": "assistant", "content": content})
                 else:
                     logger.warning(f"未知的消息角色: {role}，默认使用 user")
-                    messages.append(HumanMessage(content=content))
+                    messages.append({"role": "user", "content": content})
 
+            if self.typed_config.memory.enable:
+                # if self.typed_config.memory.enable_window:
+                messages = messages[:-1] + state["messages"][-self.typed_config.memory.window_size:] + messages[-1:]
             prompt_or_messages = messages
         else:
             # 使用简单的 prompt 格式（向后兼容）
@@ -164,6 +167,7 @@ class LLMNode(BaseNode):
         Returns:
             LLM 响应消息
         """
+        self.typed_config = LLMNodeConfig(**self.config)
         llm, prompt_or_messages = self._prepare_llm(state, True)
 
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（非流式）")
@@ -188,7 +192,7 @@ class LLMNode(BaseNode):
         return {
             "prompt": prompt_or_messages if isinstance(prompt_or_messages, str) else None,
             "messages": [
-                {"role": msg.__class__.__name__.replace("Message", "").lower(), "content": msg.content}
+                {"role": msg.get("role"), "content": msg.get("content", "")}
                 for msg in prompt_or_messages
             ] if isinstance(prompt_or_messages, list) else None,
             "config": {
@@ -225,6 +229,7 @@ class LLMNode(BaseNode):
         Yields:
             文本片段（chunk）或完成标记
         """
+        self.typed_config = LLMNodeConfig(**self.config)
         from langgraph.config import get_stream_writer
 
         llm, prompt_or_messages = self._prepare_llm(state, True)

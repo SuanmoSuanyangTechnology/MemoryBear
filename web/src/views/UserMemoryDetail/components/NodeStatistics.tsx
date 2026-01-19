@@ -32,7 +32,7 @@ const typeList = [
       { key: 'EXPLICIT_MEMORY' }
     ]
   },
-  { key: 'FORGETTING_MANAGEMENT', bg: 5 },
+  { key: 'FORGET_MEMORY', bg: 5 },
 ]
 
 const NodeStatistics: FC = () => {
