@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState } from 'react'
+import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 
@@ -18,7 +18,7 @@ interface Suggestions {
     actionable_steps: string[];
   }>;
 }
-const Suggestions: FC = () => {
+const Suggestions = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [suggestions, setSuggestions] = useState<Suggestions | null>(null)
@@ -37,6 +37,9 @@ const Suggestions: FC = () => {
       })
   }
 
+  useImperativeHandle(ref, () => ({
+    handleRefresh: getSuggestionData
+  }));
   return (
     <RbCard
       title={t('statementDetail.suggestions')}
@@ -64,6 +67,6 @@ const Suggestions: FC = () => {
       }
     </RbCard>
   )
-}
+})
 
 export default Suggestions
