@@ -418,48 +418,32 @@ class ImplicitMemoryService:
         end_user_id: str,
         db: Session
     ) -> Optional[dict]:
-        """从缓存获取完整用户画像
+        """从 Redis 缓存获取完整用户画像
         
         Args:
             end_user_id: 终端用户ID
-            db: 数据库会话
+            db: 数据库会话（保留参数以保持接口兼容性）
             
         Returns:
             Dict: 缓存的画像数据，如果不存在或已过期返回 None
         """
         try:
-            from app.repositories.implicit_memory_cache_repository import (
-                ImplicitMemoryCacheRepository,
-            )
+            from app.cache.memory.implicit_memory import ImplicitMemoryCache
             
-            logger.info(f"尝试从缓存获取用户画像: user={end_user_id}")
+            logger.info(f"尝试从 Redis 缓存获取用户画像: user={end_user_id}")
             
-            cache_repo = ImplicitMemoryCacheRepository(db)
-            cache = cache_repo.get_by_end_user_id(end_user_id)
+            # 从 Redis 获取缓存
+            cached_data = await ImplicitMemoryCache.get_user_profile(end_user_id)
             
-            if cache is None:
-                logger.info(f"用户 {end_user_id} 的画像缓存不存在")
+            if cached_data is None:
+                logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
                 return None
             
-            # 检查是否过期
-            if cache_repo.is_expired(cache):
-                logger.info(f"用户 {end_user_id} 的画像缓存已过期")
-                return None
-            
-            logger.info(f"成功从缓存获取用户画像: user={end_user_id}")
-            
-            return {
-                "end_user_id": cache.end_user_id,
-                "preferences": cache.preferences,
-                "portrait": cache.portrait,
-                "interest_areas": cache.interest_areas,
-                "habits": cache.habits,
-                "generated_at": cache.generated_at.isoformat(),
-                "cached": True
-            }
+            logger.info(f"成功从 Redis 缓存获取用户画像: user={end_user_id}")
+            return cached_data
             
         except Exception as e:
-            logger.error(f"从缓存获取用户画像失败: {str(e)}", exc_info=True)
+            logger.error(f"从 Redis 缓存获取用户画像失败: {str(e)}", exc_info=True)
             return None
     
     async def save_profile_cache(
@@ -469,32 +453,33 @@ class ImplicitMemoryService:
         db: Session,
         expires_hours: int = 168  # 默认7天
     ) -> None:
-        """保存用户画像到缓存
+        """保存用户画像到 Redis 缓存
         
         Args:
             end_user_id: 终端用户ID
             profile_data: 画像数据
-            db: 数据库会话
+            db: 数据库会话（保留参数以保持接口兼容性）
             expires_hours: 过期时间（小时），默认168小时（7天）
         """
         try:
-            from app.repositories.implicit_memory_cache_repository import (
-                ImplicitMemoryCacheRepository,
+            from app.cache.memory.implicit_memory import ImplicitMemoryCache
+            
+            logger.info(f"保存用户画像到 Redis 缓存: user={end_user_id}, expires={expires_hours}小时")
+            
+            # 计算过期时间（秒）
+            expire_seconds = expires_hours * 3600
+            
+            # 保存到 Redis
+            success = await ImplicitMemoryCache.set_user_profile(
+                user_id=end_user_id,
+                profile_data=profile_data,
+                expire=expire_seconds
             )
             
-            logger.info(f"保存用户画像到缓存: user={end_user_id}")
-            
-            cache_repo = ImplicitMemoryCacheRepository(db)
-            cache_repo.create_or_update(
-                end_user_id=end_user_id,
-                preferences=profile_data["preferences"],
-                portrait=profile_data["portrait"],
-                interest_areas=profile_data["interest_areas"],
-                habits=profile_data["habits"],
-                expires_hours=expires_hours
-            )
-            
-            logger.info(f"用户画像缓存保存成功: user={end_user_id}")
+            if success:
+                logger.info(f"用户画像缓存保存成功: user={end_user_id}")
+            else:
+                logger.warning(f"用户画像缓存保存失败: user={end_user_id}")
             
         except Exception as e:
             logger.error(f"保存用户画像缓存失败: {str(e)}", exc_info=True)
