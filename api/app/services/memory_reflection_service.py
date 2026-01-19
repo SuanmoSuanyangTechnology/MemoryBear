@@ -120,10 +120,12 @@ class WorkspaceAppService:
     def _get_data_config(self, memory_content: str) -> Dict[str, Any]:
         """Retrieve data_comfig information based on memory_comtent"""
         try:
-            data_config_query, data_config_params = DataConfigRepository.build_select_reflection(memory_content)
-            data_config_result = self.db.execute(text(data_config_query), data_config_params).fetchone()
-            if data_config_result is None:
-                return None
+            data_config_result = DataConfigRepository.query_reflection_config_by_id(self.db, int(memory_content))
+
+            # data_config_query, data_config_params = DataConfigRepository.build_select_reflection(memory_content)
+            # data_config_result = self.db.execute(text(data_config_query), data_config_params).fetchone()
+            # if data_config_result is None:
+            #     return None
             
             if data_config_result:
                 return {

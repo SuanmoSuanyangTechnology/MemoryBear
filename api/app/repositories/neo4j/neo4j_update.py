@@ -11,22 +11,28 @@ async def update_neo4j_data(neo4j_dict_data, update_databases):
         update_databases: update
     """
     try:
-        # 构建WHERE条件
+        # 构建WHERE条件 - 只使用elementId
         where_conditions = []
         params = {}
 
-        for key, value in neo4j_dict_data.items():
-            if value is not None:
-                param_name = f"param_{key}"
-                where_conditions.append(f"e.{key} = ${param_name}")
-                params[param_name] = value
+        # 优先使用id作为elementId进行查询
+        if 'id' in neo4j_dict_data and neo4j_dict_data['id'] is not None:
+            where_conditions.append(f"elementId(e) = $param_id")
+            params['param_id'] = neo4j_dict_data['id']
+        else:
+            # 如果没有id，使用其他字段作为条件
+            for key, value in neo4j_dict_data.items():
+                if value is not None:
+                    param_name = f"param_{key}"
+                    where_conditions.append(f"e.{key} = ${param_name}")
+                    params[param_name] = value
 
         where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
 
-        # 构建SET条件
+        # 构建SET条件 - 排除id字段
         set_conditions = []
         for key, value in update_databases.items():
-            if value is not None:
+            if value is not None and key != 'id':  # 不更新id字段
                 param_name = f"update_{key}"
                 set_conditions.append(f"e.{key} = ${param_name}")
                 params[param_name] = value
@@ -76,22 +82,28 @@ async def update_neo4j_data_edge(neo4j_dict_data, update_databases):
         update_databases: update
     """
     try:
-        # 构建WHERE条件
+        # 构建WHERE条件 - 只使用elementId
         where_conditions = []
         params = {}
 
-        for key, value in neo4j_dict_data.items():
-            if value is not None:
-                param_name = f"param_{key}"
-                where_conditions.append(f"r.{key} = ${param_name}")
-                params[param_name] = value
+        # 优先使用id作为elementId进行查询
+        if 'id' in neo4j_dict_data and neo4j_dict_data['id'] is not None:
+            where_conditions.append(f"elementId(r) = $param_id")
+            params['param_id'] = neo4j_dict_data['id']
+        else:
+            # 如果没有id，使用其他字段作为条件
+            for key, value in neo4j_dict_data.items():
+                if value is not None:
+                    param_name = f"param_{key}"
+                    where_conditions.append(f"r.{key} = ${param_name}")
+                    params[param_name] = value
 
         where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
 
-        # 构建SET条件
+        # 构建SET条件 - 排除id字段
         set_conditions = []
         for key, value in update_databases.items():
-            if value is not None:
+            if value is not None and key != 'id':  # 不更新id字段
                 param_name = f"update_{key}"
                 set_conditions.append(f"r.{key} = ${param_name}")
                 params[param_name] = value
@@ -242,7 +254,16 @@ async def neo4j_data(solved_data):
                 if key=='expired_at':
                     updat_expired_at[key] = values[1]
 
-            elif key == 'statement_id':
+            elif key == 'id':
+                ori_edge[key] = values
+                updata_edge[key] = values
+
+                ori_entity[key] = values
+                updata_entity[key] = values
+
+                ori_expired_at[key] = values
+            elif key == 'rel_id':
+                key='id'
                 ori_edge[key] = values
                 updata_edge[key] = values
 

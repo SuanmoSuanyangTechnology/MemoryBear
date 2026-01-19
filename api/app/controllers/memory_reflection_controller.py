@@ -1,10 +1,11 @@
 import asyncio
 import time
+import uuid
 
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.reflection_engine.self_reflexion import (
     ReflectionConfig,
-    ReflectionEngine,
+    ReflectionEngine, ReflectionRange, ReflectionBaseline,
 )
 from app.core.response_utils import success
 from app.db import get_db
@@ -39,9 +40,6 @@ async def save_reflection_config(
     db: Session = Depends(get_db),
 ) -> dict:
     """Save reflection configuration to data_comfig table"""
-    
-
-    
     try:
         config_id = request.config_id
         if not config_id:
@@ -52,51 +50,30 @@ async def save_reflection_config(
 
         api_logger.info(f"用户 {current_user.username} 保存反思配置，config_id: {config_id}")
 
-        update_params = {
-            "enable_self_reflexion": request.reflection_enabled,
-            "iteration_period": request.reflection_period_in_hours,
-            "reflexion_range": request.reflexion_range,
-            "baseline": request.baseline,
-            "reflection_model_id": request.reflection_model_id,
-            "memory_verify": request.memory_verify,
-            "quality_assessment": request.quality_assessment,
-        }
+        data_config = DataConfigRepository.update_reflection_config(
+            db,
+            config_id=config_id,
+            enable_self_reflexion=request.reflection_enabled,
+            iteration_period=request.reflection_period_in_hours,
+            reflexion_range=request.reflexion_range,
+            baseline=request.baseline,
+            reflection_model_id=request.reflection_model_id,
+            memory_verify=request.memory_verify,
+            quality_assessment=request.quality_assessment
+        )
 
-
-
-        query, params = DataConfigRepository.build_update_reflection(config_id, **update_params)
-
-        result = db.execute(text(query), params)
-        if result.rowcount == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"未找到config_id为 {config_id} 的配置"
-            )
-        
         db.commit()
-        
-        # 查询更新后的配置
-        select_query, select_params = DataConfigRepository.build_select_reflection(config_id)
-        result = db.execute(text(select_query), select_params).fetchone()
-        
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"更新后未找到config_id为 {config_id} 的配置"
-            )
-        
-        api_logger.info(f"成功保存反思配置到数据库，config_id: {config_id}")
+        db.refresh(data_config)
 
         reflection_result={
-                "config_id": result.config_id,
-                "enable_self_reflexion": result.enable_self_reflexion,
-                "iteration_period": result.iteration_period,
-                "reflexion_range": result.reflexion_range,
-                "baseline": result.baseline,
-                "reflection_model_id": result.reflection_model_id,
-                "memory_verify": result.memory_verify,
-                "quality_assessment": result.quality_assessment,
-                "user_id": result.user_id}
+                "config_id": data_config.config_id,
+                "enable_self_reflexion": data_config.enable_self_reflexion,
+                "iteration_period": data_config.iteration_period,
+                "reflexion_range": data_config.reflexion_range,
+                "baseline": data_config.baseline,
+                "reflection_model_id": data_config.reflection_model_id,
+                "memory_verify": data_config.memory_verify,
+                "quality_assessment": data_config.quality_assessment}
 
         return success(data=reflection_result, msg="反思配置成功")
         
@@ -116,9 +93,8 @@ async def save_reflection_config(
         )
 
 
-@router.post("/reflection")
+@router.get("/reflection")
 async def start_workspace_reflection(
-    config_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -178,17 +154,7 @@ async def start_reflection_configs(
     """通过config_id查询data_config表中的反思配置信息"""
     try:
         api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
-        
-        # 使用DataConfigRepository查询反思配置
-        select_query, select_params = DataConfigRepository.build_select_reflection(config_id)
-        result = db.execute(text(select_query), select_params).fetchone()
-        
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"未找到config_id为 {config_id} 的配置"
-            )
-        
+        result = DataConfigRepository.query_reflection_config_by_id(db, config_id)
         # 构建返回数据
         reflection_config = {
             "config_id": result.config_id,
@@ -198,8 +164,7 @@ async def start_reflection_configs(
             "baseline": result.baseline,
             "reflection_model_id": result.reflection_model_id,
             "memory_verify": result.memory_verify,
-            "quality_assessment": result.quality_assessment,
-            "user_id": result.user_id
+            "quality_assessment": result.quality_assessment
         }
         api_logger.info(f"成功查询反思配置，config_id: {config_id}")
         return success(data=reflection_config, msg="反思配置查询成功")
@@ -227,9 +192,7 @@ async def reflection_run(
     api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
 
     # 使用DataConfigRepository查询反思配置
-    select_query, select_params = DataConfigRepository.build_select_reflection(config_id)
-    result = db.execute(text(select_query), select_params).fetchone()
-
+    result = DataConfigRepository.query_reflection_config_by_id(db, config_id)
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -242,7 +205,7 @@ async def reflection_run(
     model_id = result.reflection_model_id
     if model_id:
         try:
-            ModelConfigService.get_model_by_id(db=db, model_id=model_id)
+            ModelConfigService.get_model_by_id(db=db, model_id=uuid.UUID(model_id))
             api_logger.info(f"模型ID验证成功: {model_id}")
         except Exception as e:
             api_logger.warning(f"模型ID '{model_id}' 不存在，将使用默认模型: {str(e)}")
@@ -252,8 +215,8 @@ async def reflection_run(
     config = ReflectionConfig(
         enabled=result.enable_self_reflexion,
         iteration_period=result.iteration_period,
-        reflexion_range=result.reflexion_range,
-        baseline=result.baseline,
+        reflexion_range=ReflectionRange(result.reflexion_range),
+        baseline=ReflectionBaseline(result.baseline),
         output_example='',
         memory_verify=result.memory_verify,
         quality_assessment=result.quality_assessment,
