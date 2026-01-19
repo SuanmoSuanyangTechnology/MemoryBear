@@ -758,8 +758,7 @@ class AppService:
         )
 
         # 构建查询条件
-        filters = []
-        filters.append(App.is_active == True)
+        filters = [App.is_active == True]
         if type:
             filters.append(App.type == type)
         if visibility:
@@ -948,8 +947,12 @@ class AppService:
         # 只读操作，允许访问共享应用
         self._validate_app_accessible(app, workspace_id)
 
-        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active == True).order_by(
-            AgentConfig.updated_at.desc())
+        stmt = select(AgentConfig).where(
+            AgentConfig.app_id == app_id,
+            AgentConfig.is_active.is_(True)
+        ).order_by(
+            AgentConfig.updated_at.desc()
+        )
         config = self.db.scalars(stmt).first()
 
         if config:
@@ -1265,7 +1268,7 @@ class AppService:
                 raise BusinessException("应用缺少有效配置，无法发布", BizCode.CONFIG_MISSING)
 
             config = {
-                "id": workflow_cfg.id,
+                "id": str(workflow_cfg.id),
                 "nodes": workflow_cfg.nodes,
                 "edges": workflow_cfg.edges,
                 "variables": workflow_cfg.variables,
@@ -2063,8 +2066,12 @@ def publish(db: Session, *, app_id: uuid.UUID, publisher_id: uuid.UUID, workspac
                            workspace_id=workspace_id, release_notes=release_notes)
 
 
-def get_current_release(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UUID | None = None) -> Optional[
-    AppRelease]:
+def get_current_release(
+        db: Session,
+        *,
+        app_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None
+) -> Optional[AppRelease]:
     """获取当前发布版本（向后兼容接口）"""
     service = AppService(db)
     return service.get_current_release(app_id=app_id, workspace_id=workspace_id)
