@@ -85,6 +85,7 @@ class LLMNode(BaseNode):
         """
 
         # 1. 处理消息格式（优先使用 messages）
+        self.typed_config = LLMNodeConfig(**self.config)
         messages_config = self.typed_config.messages
 
         if messages_config:
@@ -167,7 +168,7 @@ class LLMNode(BaseNode):
         Returns:
             LLM 响应消息
         """
-        self.typed_config = LLMNodeConfig(**self.config)
+        # self.typed_config = LLMNodeConfig(**self.config)
         llm, prompt_or_messages = self._prepare_llm(state, True)
 
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（非流式）")
