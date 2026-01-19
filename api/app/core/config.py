@@ -39,8 +39,6 @@ class Settings:
     REDIS_DB: int = int(os.getenv("REDIS_DB", "1"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
     
-    # Development Redis Database (独立开发数据库)
-    DEV_REDIS_DB: int = int(os.getenv("DEV_REDIS_DB", "14"))
 
     # ElasticSearch configuration
     ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "https://127.0.0.1")
