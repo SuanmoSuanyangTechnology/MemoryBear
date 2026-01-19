@@ -2,12 +2,13 @@ import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, InputNumber, Checkbox } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { StartVariableItem, VariableConfigModalRef } from '../../types'
+import type { VariableConfigModalRef } from '../../types'
+import type { Variable } from '../Properties/VariableList/types'
 import RbModal from '@/components/RbModal'
 
 interface VariableEditModalProps {
-  refresh: (values: StartVariableItem[]) => void;
-  variables: StartVariableItem[]
+  refresh: (values: Variable[]) => void;
+  variables: Variable[]
 }
 
 const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModalProps>(({
@@ -15,9 +16,9 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
-  const [form] = Form.useForm<{variables: StartVariableItem[]}>();
+  const [form] = Form.useForm<{variables: Variable[]}>();
   const [loading, setLoading] = useState(false)
-  const [initialValues, setInitialValues] = useState<StartVariableItem[]>([])
+  const [initialValues, setInitialValues] = useState<Variable[]>([])
 
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
@@ -26,7 +27,7 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
     setLoading(false)
   };
 
-  const handleOpen = (values: StartVariableItem[]) => {
+  const handleOpen = (values: Variable[]) => {
     setVisible(true);
     form.setFieldsValue({variables: values})
     setInitialValues([...values])

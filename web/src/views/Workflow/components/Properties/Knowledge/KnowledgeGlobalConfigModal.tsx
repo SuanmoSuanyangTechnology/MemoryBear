@@ -70,6 +70,7 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
       <Form
         form={form}
         layout="vertical"
+        size="middle"
       >
         <div className="rb:text-[#5B6167] rb:mb-6">{t('application.globalConfigDesc')}</div>
 

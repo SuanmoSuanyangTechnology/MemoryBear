@@ -1,6 +1,6 @@
-import { type FC, useEffect, useRef } from 'react';
+import { type FC, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Layout, Tabs, Dropdown, Button } from 'antd';
+import { Layout, Tabs, Dropdown, Button, Flex } from 'antd';
 import type { MenuProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 import styles from '../index.module.css'
@@ -141,10 +141,12 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
             {/* <Button type="primary">{t('workflow.export')}</Button> */}
             <img src={logoutIcon} className="rb:w-4 rb:h-4 rb:cursor-pointer" onClick={goToApplication} />
           </div>
-        : <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
-          <img src={logoutIcon} className="rb:mr-2 rb:w-4 rb:h-4" />
-          {t('application.returnToApplicationList')}
-        </div>
+          : <Flex justify="flex-end">
+            <div className="rb:h-8 rb:flex rb:items-center rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
+              <img src={logoutIcon} className="rb:mr-2 rb:w-4 rb:h-4" />
+              {t('application.returnToApplicationList')}
+            </div>
+          </Flex>
         }
       </Header>
       <ApplicationModal

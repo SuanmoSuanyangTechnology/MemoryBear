@@ -1,6 +1,6 @@
 import { type FC, useRef, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Space, Button, List } from 'antd'
+import { Space, Button } from 'antd'
 import knowledgeEmpty from '@/assets/images/application/knowledgeEmpty.svg'
 import type {
   KnowledgeConfigForm,
@@ -113,49 +113,65 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
   }
   return (
     <div>
-      <div className="rb:flex rb:justify-between rb:items-center">
-        <div>{t('application.knowledgeBaseAssociation')}</div>
+      <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
+        <div className="rb:text-[12px] rb:font-medium rb:leading-4.5">
+          {t('application.knowledgeBaseAssociation')}
+        </div>
 
-        <Space>
-          <Button style={{ padding: '0 8px', height: '24px' }} onClick={handleKnowledgeConfig}>{t('workflow.config.knowledge-retrieval.recallConfig')}</Button>
-          <Button style={{ padding: '0 8px', height: '24px' }} onClick={handleAddKnowledge}>+</Button>
-        </Space>
+        <Button
+          onClick={handleKnowledgeConfig}
+          className="rb:py-0! rb:px-1! rb:text-[12px]! rb:group rb:gap-0.5!"
+          size="small"
+        >
+          <div
+            className="rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/recall.svg')] rb:group-hover:bg-[url('@/assets/images/workflow/recall_hover.svg')]"
+          ></div>
+          {t('workflow.config.knowledge-retrieval.recallConfig')}
+        </Button>
       </div>
 
-      {knowledgeList.length === 0
-        ? <Empty url={knowledgeEmpty} size={88} subTitle={t('application.knowledgeEmpty')} />
-        : 
-          <List
-            grid={{ gutter: 12, column: 1 }}
-            dataSource={knowledgeList}
-            renderItem={(item) => {
-              if (!item.id) return null
-              return (
-                <List.Item>
-                  <div key={item.id} className="rb:flex rb:items-center rb:justify-between rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
-                    <div className="rb:font-medium rb:leading-4">
-                      {item.name}
-                      <Tag color={item.status === 1 ? 'success' : item.status === 0 ? 'default' : 'error'} className="rb:ml-2">
-                        {item.status === 1 ? t('common.enable') : item.status === 0 ? t('common.disabled') : t('common.deleted')}
-                      </Tag>
-                      <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5">{t('application.contains', {include_count: item.doc_num})}</div>
-                    </div>
-                    <Space size={12}>
-                      <div 
-                        className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]" 
-                        onClick={() => handleEditKnowledge(item)}
-                      ></div>
-                      <div 
-                        className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
-                        onClick={() => handleDeleteKnowledge(item.id)}
-                      ></div>
-                    </Space>
-                  </div>
-                </List.Item>
-              )
-            }}
-          />
-      }
+      <Space size={10} direction="vertical" className="rb:w-full!">
+        <Button
+          type="dashed"
+          block
+          size="middle"
+          className="rb:text-[12px]!"
+          onClick={handleAddKnowledge}
+        >
+          + {t('workflow.config.knowledge-retrieval.addKnowledge')}
+        </Button>
+
+        {knowledgeList.length === 0
+          ? <Empty url={knowledgeEmpty} size={88} subTitle={t('application.knowledgeEmpty')} />
+          : knowledgeList.map(item => {
+            if (!item.id) return null
+            return (
+              <div key={item.id} className="rb:text-[12px] rb:flex rb:items-center rb:justify-between rb:py-2 rb:px-2.5 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
+                <div className="">
+                  <span className="rb:font-medium rb:leading-4">{item.name}</span>
+                  <Tag 
+                    color={item.status === 1 ? 'success' : item.status === 0 ? 'default' : 'error'} 
+                    className="rb:ml-1 rb:py-0! rb:px-1! rb:text-[12px] rb:leading-3.5!"
+                  >
+                    {item.status === 1 ? t('common.enable') : item.status === 0 ? t('common.disabled') : t('common.deleted')}
+                  </Tag>
+                  <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5">{t('application.contains', { include_count: item.doc_num })}</div>
+                </div>
+                <Space size={12}>
+                  <div
+                    className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]"
+                    onClick={() => handleEditKnowledge(item)}
+                  ></div>
+                  <div
+                    className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]"
+                    onClick={() => handleDeleteKnowledge(item.id)}
+                  ></div>
+                </Space>
+              </div>
+            )
+          })
+        }
+      </Space>
       {/* 全局设置 */}
       <KnowledgeGlobalConfigModal
         data={editConfig}

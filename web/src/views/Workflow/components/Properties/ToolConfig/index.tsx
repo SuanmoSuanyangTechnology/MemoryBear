@@ -171,6 +171,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
         label={t('workflow.config.tool.tool_id')}
       >
         <Cascader 
+          placeholder={t('common.pleaseSelect')}
           options={optionList} 
           loadData={loadData}
           onChange={handleChange}
@@ -187,28 +188,30 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
               label={parameter.name}
               extra={parameter.type === 'boolean' ? undefined : parameter.description}
               rules={[
-                { required: parameter.required, message: t('workflow.config.tool.required') }
+                { required: parameter.required, message: t('common.pleaseEnter') }
               ]}
               layout={parameter.type === 'boolean' ? 'horizontal' : 'vertical'}
               className={parameter.type === 'boolean' ? 'rb:mb-0!' : ''}
             >
               {parameter.type === 'string' && parameter.enum && parameter.enum.length > 0
-                ? <Select options={parameter.enum.map(vo => ({ value: vo, label: vo }))} placeholder={t('common.pleaseSelect')} />
+                ? <Select size="small" options={parameter.enum.map(vo => ({ value: vo, label: vo }))} placeholder={t('common.pleaseSelect')} />
                 : parameter.type === 'boolean'
-                ? <Switch />
+                ? <Switch size="small" />
                 : parameter.type === 'integer' || parameter.type === 'number'
                 ? <InputNumber
                     min={parameter.minimum}
                     max={parameter.maximum}
                     step={parameter.type === 'integer' ? 1 : 0.01}
                     placeholder={t('common.pleaseEnter')}
-                    className="rb:w-full!"
+                      className="rb:w-full!"
+                      size="small"
                     onChange={(value) => form.setFieldValue(['tool_parameters', parameter.name], value)}
                   />
                 : <Editor
                     height={32}
                     variant="outlined"
                     options={options} 
+                    size="small"
                     placeholder={t('common.pleaseEnter')}
                   />
               }
