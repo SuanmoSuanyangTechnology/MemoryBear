@@ -8,6 +8,7 @@ import logging
 import uuid
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from app.core.workflow.graph_builder import GraphBuilder
@@ -53,11 +54,11 @@ class WorkflowExecutor:
         self.edges = workflow_config.get("edges", [])
         self.execution_config = workflow_config.get("execution_config", {})
 
-        self.checkpoint_config = {
-            "configurable": {
+        self.checkpoint_config = RunnableConfig(
+            configurable={
                 "thread_id": uuid.uuid4(),
             }
-        }
+        )
 
     def _prepare_initial_state(self, input_data: dict[str, Any]) -> WorkflowState:
         """准备初始状态（注入系统变量和会话变量）
@@ -214,13 +215,13 @@ class WorkflowExecutor:
         return {
             "status": "completed",
             "output": final_output,
+            "variables": result.get("variables", {}),
             "node_outputs": node_outputs,
             "messages": result.get("messages", []),
             "conversation_id": conversation_id,
             "elapsed_time": elapsed_time,
             "token_usage": token_usage,
             "error": result.get("error"),
-            "variables": result.get("variables", {}),
         }
 
     def build_graph(self, stream=False) -> CompiledStateGraph:
@@ -326,11 +327,10 @@ class WorkflowExecutor:
         }
 
         # 1. 构建图
-        graph = self.build_graph(True)
+        graph = self.build_graph(stream=True)
 
         # 2. 初始化状态（自动注入系统变量）
         initial_state = self._prepare_initial_state(input_data)
-
         # 3. Execute workflow
         try:
             chunk_count = 0
@@ -346,14 +346,16 @@ class WorkflowExecutor:
                     mode, data = event
                 else:
                     # Unexpected format, log and skip
-                    logger.warning(f"[STREAM] Unexpected event format: {type(event)}, value: {event}")
+                    logger.warning(f"[STREAM] Unexpected event format: {type(event)}, value: {event}"
+                                   f"- execution_id: {self.execution_id}")
                     continue
 
                 if mode == "custom":
                     # Handle custom streaming events (chunks from nodes via stream writer)
                     chunk_count += 1
                     event_type = data.get("type", "node_chunk")  # "message" or "node_chunk"
-                    logger.info(f"[CUSTOM] ✅ 收到 {event_type} #{chunk_count} from {data.get('node_id')}")
+                    logger.info(f"[CUSTOM] ✅ 收到 {event_type} #{chunk_count} from {data.get('node_id')}"
+                                f"- execution_id: {self.execution_id}")
                     yield {
                         "event": event_type,  # "message" or "node_chunk"
                         "data": {
@@ -380,7 +382,8 @@ class WorkflowExecutor:
                         variables_sys = variables.get("sys", {})
                         conversation_id = input_data.get("conversation_id")
                         execution_id = variables_sys.get("execution_id")
-                        logger.info(f"[DEBUG] Node starts execution: {node_name}")
+                        logger.info(f"[NODE-START] Node starts execution: {node_name} "
+                                    f"- execution_id: {self.execution_id}")
 
                         yield {
                             "event": "node_start",
@@ -399,7 +402,8 @@ class WorkflowExecutor:
                         variables_sys = variables.get("sys", {})
                         conversation_id = input_data.get("conversation_id")
                         execution_id = variables_sys.get("execution_id")
-                        logger.info(f"[DEBUG] Node execution completed: {node_name}")
+                        logger.info(f"[NODE-END] Node execution completed: {node_name} "
+                                    f"- execution_id: {self.execution_id}")
 
                         yield {
                             "event": "node_end",
@@ -407,13 +411,15 @@ class WorkflowExecutor:
                                 "node_id": node_name,
                                 "conversation_id": conversation_id,
                                 "execution_id": execution_id,
-                                "timestamp": data.get("timestamp")
+                                "timestamp": data.get("timestamp"),
+                                "state": result.get("node_outputs", {}).get(node_name),
                             }
                         }
 
                 elif mode == "updates":
                     # Handle state updates - store final state
-                    logger.debug(f"[UPDATES] 收到 state 更新 from {list(data.keys())}")
+                    logger.debug(f"[UPDATES] 收到 state 更新 from {list(data.keys())} "
+                                 f"- execution_id: {self.execution_id}")
 
             # 计算耗时
             end_time = datetime.datetime.now()
@@ -421,7 +427,7 @@ class WorkflowExecutor:
             result = graph.get_state(self.checkpoint_config).values
             logger.info(
                 f"Workflow execution completed (streaming), "
-                f"total chunks: {chunk_count}, elapsed: {elapsed_time:.2f}s"
+                f"total chunks: {chunk_count}, elapsed: {elapsed_time:.2f}s, execution_id: {self.execution_id}"
             )
 
             # 发送 workflow_end 事件
@@ -449,7 +455,8 @@ class WorkflowExecutor:
                 }
             }
 
-    def _extract_final_output(self, node_outputs: dict[str, Any]) -> str | None:
+    @staticmethod
+    def _extract_final_output(node_outputs: dict[str, Any]) -> str | None:
         """从节点输出中提取最终输出
 
         优先级：
@@ -473,7 +480,8 @@ class WorkflowExecutor:
 
         return None
 
-    def _aggregate_token_usage(self, node_outputs: dict[str, Any]) -> dict[str, int] | None:
+    @staticmethod
+    def _aggregate_token_usage(node_outputs: dict[str, Any]) -> dict[str, int] | None:
         """聚合所有节点的 token 使用情况
 
         Args:
