@@ -1,13 +1,14 @@
 import { type FC, useMemo } from 'react';
+import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Input, Form, Space, Button, Row, Col, Select, type FormListOperation } from 'antd';
-import { MinusCircleOutlined } from '@ant-design/icons';
 import Editor from '../Editor'
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 
 interface MessageEditor {
   options: Suggestion[];
-  title?: string
+  title?: string;
+  titleVariant?: 'outlined' | 'borderless';
   isArray?: boolean;
   parentName?: string | string[];
   label?: string;
@@ -15,6 +16,7 @@ interface MessageEditor {
   value?: string;
   enableJinja2?: boolean;
   onChange?: (value?: string) => void;
+  size?: 'small' | 'default'
 }
 const roleOptions = [
   // { label: 'SYSTEM', value: 'SYSTEM' },
@@ -23,11 +25,13 @@ const roleOptions = [
 ]
 const MessageEditor: FC<MessageEditor> = ({
   title,
+  titleVariant = 'outlined',
   isArray = true,
   parentName = 'messages',
   placeholder,
   options,
   enableJinja2 = false,
+  size = 'default'
 }) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance();
@@ -74,14 +78,16 @@ const MessageEditor: FC<MessageEditor> = ({
 
   if (!isArray) {
     return (
-      <Space size={12} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5 rb:bg-white" data-editor-type={parentName === 'template' ? 'template' : undefined}>
+      <Space size={8} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5" data-editor-type={parentName === 'template' ? 'template' : undefined}>
         <Row>
           <Col span={12}>
-            {title ?? t('workflow.answerDesc')}
+            <div className={clsx("rb:text-[12px] rb:font-medium rb:py-1 rb:leading-2", {
+              'rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-sm rb:px-2': titleVariant === 'outlined'
+            })}>{title ?? t('workflow.answerDesc')}</div>
           </Col>
         </Row>
         <Form.Item name={parentName} noStyle>
-          <Editor enableJinja2={enableJinja2} placeholder={placeholder} options={processedOptions} />
+          <Editor size={size} enableJinja2={enableJinja2} placeholder={placeholder} options={processedOptions} />
         </Form.Item>
       </Space>
     );
@@ -90,7 +96,7 @@ const MessageEditor: FC<MessageEditor> = ({
   return (
     <Form.List name={parentName}>
       {(fields, { add, remove }) => (
-        <Space size={12} direction="vertical" className="rb:w-full">
+        <Space size={8} direction="vertical" className="rb:w-full">
           {fields.map(({ key, name, ...restField }) => {
             const fieldValue = Array.isArray(parentName) 
               ? parentName.reduce((obj, key) => obj?.[key], values)
@@ -99,16 +105,17 @@ const MessageEditor: FC<MessageEditor> = ({
             const currentRole = (fieldValue?.[name]?.role || 'USER').toUpperCase();
             
             return (
-              <Space key={key} size={12} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5 rb:bg-white">
+              <Space key={key} size={12} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:p-2">
                 <Row>
                   <Col span={12}>
                     <Form.Item {...restField} name={[name, 'role']} noStyle>
                       {currentRole === 'SYSTEM' ? (
-                        <Input disabled />
+                        <Input disabled className="rb:font-medium!" />
                       ) : (
                         <Select
                           options={roleOptions}
                           disabled={currentRole === 'SYSTEM'}
+                          className="rb:font-medium!"
                         />
                       )}
                     </Form.Item>
@@ -116,20 +123,23 @@ const MessageEditor: FC<MessageEditor> = ({
                   {currentRole !== 'SYSTEM' && (
                     <Col span={12}>
                       <div className="rb:h-full rb:flex rb:justify-end rb:items-center">
-                        <MinusCircleOutlined onClick={() => remove(name)} />
+                        <div
+                          className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/delete_cycle.svg')]"
+                          onClick={() => remove(name)}
+                        ></div>
                       </div>
                     </Col>
                   )}
                 </Row>
                 <Form.Item {...restField} name={[name, 'content']} noStyle>
-                  <Editor enableJinja2={enableJinja2} placeholder={placeholder} options={processedOptions} />
+                  <Editor size={size} enableJinja2={enableJinja2} placeholder={placeholder} options={processedOptions} />
                 </Form.Item>
               </Space>
             );
           })}
           <Form.Item noStyle>
-            <Button type="dashed" onClick={() => handleAdd(add)} block>
-              +{t('workflow.addMessage')}
+            <Button type="dashed" size="middle" className="rb:text-[12px]!" onClick={() => handleAdd(add)} block>
+              + {t('workflow.addMessage')}
             </Button>
           </Form.Item>
         </Space>

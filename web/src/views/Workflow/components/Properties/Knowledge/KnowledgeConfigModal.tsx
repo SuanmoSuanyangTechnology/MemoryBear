@@ -83,6 +83,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
       <Form
         form={form}
         layout="vertical"
+        size="middle"
       >
         {data && (
           <div className="rb:mb-6 rb:flex rb:items-center rb:justify-between rb:border rb:rounded-lg rb:p-[17px_16px] rb:cursor-pointer rb:bg-[#F0F3F8] rb:border-[#DFE4ED] rb:text-[#212332]">

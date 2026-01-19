@@ -9,6 +9,7 @@
 import { type FC } from 'react'
 import { Modal, type ModalProps } from 'antd'
 import { useTranslation } from 'react-i18next'
+import './index.css'
 const RbModal: FC<ModalProps> = ({
   onOk,
   onCancel,
