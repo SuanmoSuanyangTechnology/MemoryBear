@@ -837,12 +837,14 @@ neo4j_query_part = """
             WITH DISTINCT m
             OPTIONAL MATCH (m)-[rel]-(other:ExtractedEntity)
             RETURN 
+             elementId(m) as id,
             m.name as entity1_name,
             m.description as description,
             m.statement_id as statement_id,
             m.created_at as created_at,
             m.expired_at as expired_at,
             CASE WHEN rel IS NULL THEN "NO_RELATIONSHIP" ELSE type(rel) END as relationship_type,
+              elementId(rel) as rel_id,
             rel.predicate as predicate,
             rel.statement as relationship,
             rel.statement_id as relationship_statement_id,
@@ -855,12 +857,14 @@ neo4j_query_all = """
                 WITH DISTINCT m
                 OPTIONAL MATCH (m)-[rel]-(other:ExtractedEntity)
                 RETURN 
+                 elementId(m) as id,
                 m.name as entity1_name,
                 m.description as description,
                 m.statement_id as statement_id,
                 m.created_at as created_at,
                 m.expired_at as expired_at,
                 CASE WHEN rel IS NULL THEN "NO_RELATIONSHIP" ELSE type(rel) END as relationship_type,
+                  elementId(rel) as rel_id,
                 rel.predicate as predicate,
                 rel.statement as relationship,
                 rel.statement_id as relationship_statement_id,

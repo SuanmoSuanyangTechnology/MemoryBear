@@ -35,10 +35,10 @@ class BaseDataSchema(BaseModel):
     expired_at: Optional[str] = Field(None, description="The expiration timestamp in ISO 8601 format.")
     description: Optional[str] = Field(None, description="The description of the data entry.")
 
-    # 新增字段以匹配实际输入数据
-    entity1_name: str = Field(..., description="The first entity name.")
+    # 新增字段以匹配实际输入数据 - 改为可选以支持resolved_memory场景
+    entity1_name: Optional[str] = Field(None, description="The first entity name.")
     entity2_name: Optional[str] = Field(None, description="The second entity name.")
-    statement_id: str = Field(..., description="The statement identifier.")
+    statement_id: Optional[str] = Field(None, description="The statement identifier.")
     # 新增字段 - 设为可选以保持向后兼容性
     predicate: Optional[str] = Field(None, description="The predicate describing the relationship between entities.")
     relationship_statement_id: Optional[str] = Field(None, description="The relationship statement identifier.")
@@ -108,13 +108,13 @@ class ChangeRecordSchema(BaseModel):
     """Schema for individual change records
     
     字段值格式说明：
-    - id 和 statement_id: 字符串或 None
+    - id: 字符串，表示修改字段对应的记录ID
     - 其他字段: 可以是字符串、None，数组 [修改前的值, 修改后的值]，或嵌套字典结构
     - entity2等嵌套对象的字段也遵循 [old_value, new_value] 格式
     """
     field: List[Dict[str, Any]] = Field(
         ..., 
-        description="List of field changes. First item: {id: value or None}, second: {statement_id: value}, followed by changed fields as {field_name: [old_value, new_value]} or {field_name: new_value} or nested structures like {entity2: {field_name: [old, new]}}"
+        description="List of field changes. First item: {id: value}, followed by changed fields as {field_name: [old_value, new_value]} or {field_name: new_value} or nested structures like {entity2: {field_name: [old, new]}}"
     )
 
 class ResolvedSchema(BaseModel):
