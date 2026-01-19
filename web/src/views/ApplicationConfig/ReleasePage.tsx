@@ -47,11 +47,11 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
   }
   return (
     <div className="rb:flex rb:h-[calc(100vh-64px)]">
-      <div className="rb:h-full rb:overflow-y-auto rb:w-[432px] rb:flex-[0_0_auto] rb:border-r-[1px] rb:border-[#DFE4ED] rb:p-[16px]">
+      <div className="rb:h-full rb:overflow-y-auto rb:w-108 rb:flex-[0_0_auto] rb:border-r rb:border-[#DFE4ED] rb:p-4">
         <Space size={16} direction="vertical" style={{ width: '100%' }}>
-          <div className="rb:leading-[22px] rb:px-[4px]">
+          <div className="rb:leading-5.5 rb:px-1">
             {t('application.versionList')}
-            <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-[4px] rb:leading-[16px]">{t('application.versionListDesc')}</div>
+            <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-1 rb:leading-4">{t('application.versionListDesc')}</div>
           </div>
           {releaseList.length === 0
             ? <Empty />
@@ -64,8 +64,8 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                 <RbCard 
                   key={version.version} 
                   title={<>
-                    {version.version_name || `v${version.version}`}
-                    {tagKey && <Tag color={tagColors[tagKey]} className="rb:ml-[8px]">
+                    {version.version_name && version.version_name[0].toLocaleLowerCase() === 'v' ? version.version_name : version.version_name ? `v${version.version_name}` : `v${version.version}`}
+                    {tagKey && <Tag color={tagColors[tagKey]} className="rb:ml-2">
                       {tagKey}
                     </Tag>}
                   </>}
@@ -76,13 +76,13 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                   headerType="borderless"
                   onClick={() => setSelectedVersion(version)}
                 >
-                  <div className="rb:leading-[20px] rb:line-clamp-2 rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
+                  <div className="rb:leading-5 rb:line-clamp-2 rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
                     <Markdown content={version.release_notes} />
                   </div>
-                  <div className="rb:mt-[16px] rb:text-[12px] rb:text-[#5B6167] rb:leading-[16px]">
+                  <div className="rb:mt-4 rb:text-[12px] rb:text-[#5B6167] rb:leading-4">
                     {t('application.publishedOn')} {formatDateTime(version.published_at, 'YYYY-MM-DD HH:mm:ss')}
                   </div>
-                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-[4px] rb:leading-[16px]">
+                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-1 rb:leading-4">
                     {t('application.publisher')}: {version.publisher_name}
                   </div>
                 </RbCard>
@@ -91,13 +91,13 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
           }
         </Space>
       </div>
-      <div className="rb:h-full rb:overflow-y-auto rb:flex-[1_1_auto] rb:p-[16px]">
+      <div className="rb:h-full rb:overflow-y-auto rb:flex-[1_1_auto] rb:p-4">
         <Form layout="vertical">
-          <div className={clsx("rb:leading-[22px] rb:px-[4px] rb:flex rb:items-center rb:text-[16px] rb:font-medium rb:mb-[21px]", {
+          <div className={clsx("rb:leading-5.5 rb:px-1 rb:flex rb:items-center rb:text-[16px] rb:font-medium rb:mb-5.25", {
             'rb:justify-between': selectedVersion,
             'rb:justify-end': !selectedVersion
           })}>
-            {selectedVersion && t('application.DetailsOfVersion', { version: selectedVersion.version_name || `v${selectedVersion.version}` || '-' })}
+            {selectedVersion && t('application.DetailsOfVersion', { version: selectedVersion.version_name && selectedVersion.version_name[0].toLocaleLowerCase() === 'v' ? selectedVersion.version_name : selectedVersion.version_name ? `v${selectedVersion.version_name}` : `v${selectedVersion.version}` || '-' })}
 
             <Space size={10}>
               {selectedVersion && <>
@@ -111,14 +111,14 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
           {selectedVersion && 
             <Space size={16} direction="vertical" style={{ width: '100%' }}>
               <RbCard title={t('application.VersionInformation')} headerType="borderless">
-                <div className="rb:grid rb:grid-cols-3 rb:gap-[16px]">
-                  <Form.Item label={t('application.releaseTime')} className="rb:mb-[0]!">
+                <div className="rb:grid rb:grid-cols-3 rb:gap-4">
+                  <Form.Item label={t('application.releaseTime')} className="rb:mb-0!">
                     <Input value={formatDateTime(selectedVersion.published_at, 'YYYY-MM-DD HH:mm:ss')} disabled />
                   </Form.Item>
-                  <Form.Item label={t('application.lastUpdateTime')} className="rb:mb-[0]!">
+                  <Form.Item label={t('application.lastUpdateTime')} className="rb:mb-0!">
                     <Input value={formatDateTime(selectedVersion.updated_at, 'YYYY-MM-DD HH:mm:ss')} disabled />
                   </Form.Item>
-                  <Form.Item label={t('application.editor')} className="rb:mb-[0]!">
+                  <Form.Item label={t('application.editor')} className="rb:mb-0!">
                     <Input value={selectedVersion.publisher_name} disabled />
                   </Form.Item>
                 </div>
@@ -131,9 +131,9 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                   <RbCard
                     headerType="borderBL"
                     title={<div className="rb:text-[14px]">{formatDateTime(selectedVersion.published_at, 'YYYY-MM-DD HH:mm:ss')}</div>}
-                    extra={<span className="rb:text-[12px] rb:text-[#5B6167] rb:leading-[16px]">{selectedVersion.publisher_name}</span>}
+                    extra={<span className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4">{selectedVersion.publisher_name}</span>}
                   >
-                    <div className="rb:leading-[20px] rb:font-medium rb:font-regular rb:text-[12px] rb:text-[#5B6167] rb:leading-[16px]">
+                    <div className="rb:font-medium rb:font-regular rb:text-[12px] rb:text-[#5B6167] rb:leading-4">
                       <Markdown content={selectedVersion.release_notes} />
                     </div>
                   </RbCard>

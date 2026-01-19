@@ -705,3 +705,85 @@ class EmotionAnalyticsService:
             health_summary=summary,
             suggestions=suggestions
         )
+    
+    async def get_cached_suggestions(
+        self,
+        end_user_id: str,
+        db: Session,
+    ) -> Optional[Dict[str, Any]]:
+        """从缓存获取个性化情绪建议
+        
+        Args:
+            end_user_id: 宿主ID（用户组ID）
+            db: 数据库会话
+            
+        Returns:
+            Dict: 缓存的建议数据，如果不存在或已过期返回 None
+        """
+        try:
+            from app.repositories.emotion_suggestions_cache_repository import (
+                EmotionSuggestionsCacheRepository,
+            )
+            
+            logger.info(f"尝试从缓存获取情绪建议: user={end_user_id}")
+            
+            cache_repo = EmotionSuggestionsCacheRepository(db)
+            cache = cache_repo.get_by_end_user_id(end_user_id)
+            
+            if cache is None:
+                logger.info(f"用户 {end_user_id} 的建议缓存不存在")
+                return None
+            
+            # 检查是否过期
+            if cache_repo.is_expired(cache):
+                logger.info(f"用户 {end_user_id} 的建议缓存已过期")
+                return None
+            
+            logger.info(f"成功从缓存获取建议: user={end_user_id}")
+            
+            return {
+                "health_summary": cache.health_summary,
+                "suggestions": cache.suggestions,
+                "generated_at": cache.generated_at.isoformat(),
+                "cached": True
+            }
+            
+        except Exception as e:
+            logger.error(f"从缓存获取建议失败: {str(e)}", exc_info=True)
+            return None
+    
+    async def save_suggestions_cache(
+        self,
+        end_user_id: str,
+        suggestions_data: Dict[str, Any],
+        db: Session,
+        expires_hours: int = 24
+    ) -> None:
+        """保存建议到缓存
+        
+        Args:
+            end_user_id: 宿主ID（用户组ID）
+            suggestions_data: 建议数据
+            db: 数据库会话
+            expires_hours: 过期时间（小时）
+        """
+        try:
+            from app.repositories.emotion_suggestions_cache_repository import (
+                EmotionSuggestionsCacheRepository,
+            )
+            
+            logger.info(f"保存建议到缓存: user={end_user_id}")
+            
+            cache_repo = EmotionSuggestionsCacheRepository(db)
+            cache_repo.create_or_update(
+                end_user_id=end_user_id,
+                health_summary=suggestions_data["health_summary"],
+                suggestions=suggestions_data["suggestions"],
+                expires_hours=expires_hours
+            )
+            
+            logger.info(f"建议缓存保存成功: user={end_user_id}")
+            
+        except Exception as e:
+            logger.error(f"保存建议缓存失败: {str(e)}", exc_info=True)
+            # 不抛出异常，缓存失败不应影响主流程

@@ -33,5 +33,12 @@ def get_workspace_list(
 def get_system_version():
     """获取系统版本号+说明"""
     current_version = settings.SYSTEM_VERSION
-    version_introduction = HomePageService.load_version_introduction(current_version)
-    return success(data={"version": current_version, "introduction": version_introduction}, msg="系统版本获取成功")
+    version_info = HomePageService.load_version_introduction(current_version)
+    return success(
+        data={
+            "version": current_version,
+            "introduction": version_info.get("introduction"),
+            "introduction_en": version_info.get("introduction_en")
+        },
+        msg="系统版本获取成功"
+    )
