@@ -456,6 +456,8 @@ class MemoryAgentService:
                         config=config
                 ):
                     for node_name, node_data in update_event.items():
+                        # if 'save_neo4j' == node_name:
+                        #     massages = node_data
                         print(f"处理节点: {node_name}")
 
                         # 处理不同Summary节点的返回结构
