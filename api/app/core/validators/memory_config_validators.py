@@ -36,7 +36,6 @@ from app.services.model_service import ModelConfigService
 
 logger = get_config_logger()
 COnfigType=ModelValidationStatus
-
 def _parse_model_id(model_id: Union[str, UUID, None], model_type: str,
                     config_id: Optional[int] = None, workspace_id: Optional[UUID] = None) -> Optional[UUID]:
     """Parse model ID from string or UUID."""
