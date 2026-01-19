@@ -269,12 +269,16 @@ class LLMNode(BaseNode):
         chunk_count = 0
 
         # 调用 LLM（流式，支持字符串或消息列表）
-        async for chunk in llm.astream(prompt_or_messages):
+        last_meta_data = {}
+        async for chunk in llm.astream(prompt_or_messages, stream_usage=True):
             # 提取内容
             if hasattr(chunk, 'content'):
                 content = chunk.content
             else:
                 content = str(chunk)
+            if hasattr(chunk, 'response_metadata'):
+                if chunk.response_metadata:
+                    last_meta_data = chunk.response_metadata
 
             # 只有当内容不为空时才处理
             if content:
@@ -288,13 +292,10 @@ class LLMNode(BaseNode):
         logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}, 总 chunks: {chunk_count}")
 
         # 构建完整的 AIMessage（包含元数据）
-        if isinstance(last_chunk, AIMessage):
-            final_message = AIMessage(
-                content=full_response,
-                response_metadata=last_chunk.response_metadata if hasattr(last_chunk, 'response_metadata') else {}
-            )
-        else:
-            final_message = AIMessage(content=full_response)
+        final_message = AIMessage(
+            content=full_response,
+            response_metadata=last_meta_data
+        )
 
         # yield 完成标记
         yield {"__final__": True, "result": final_message}
