@@ -161,9 +161,9 @@ async def get_preference_tags(
         if cached_profile is None:
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
             return fail(
-                BizCode.RESOURCE_NOT_FOUND,
+                BizCode.NOT_FOUND,
                 "画像缓存不存在或已过期，请调用 /generate_profile 接口生成新画像",
-                None
+                ""
             )
         
         # Extract preferences from cache
@@ -232,9 +232,9 @@ async def get_dimension_portrait(
         if cached_profile is None:
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
             return fail(
-                BizCode.RESOURCE_NOT_FOUND,
+                BizCode.NOT_FOUND,
                 "画像缓存不存在或已过期，请调用 /generate_profile 接口生成新画像",
-                None
+                ""
             )
         
         # Extract portrait from cache
@@ -280,9 +280,9 @@ async def get_interest_area_distribution(
         if cached_profile is None:
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
             return fail(
-                BizCode.RESOURCE_NOT_FOUND,
+                BizCode.NOT_FOUND,
                 "画像缓存不存在或已过期，请调用 /generate_profile 接口生成新画像",
-                None
+                ""
             )
         
         # Extract interest areas from cache
@@ -332,9 +332,9 @@ async def get_behavior_habits(
         if cached_profile is None:
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
             return fail(
-                BizCode.RESOURCE_NOT_FOUND,
+                BizCode.NOT_FOUND,
                 "画像缓存不存在或已过期，请调用 /generate_profile 接口生成新画像",
-                None
+                ""
             )
         
         # Extract habits from cache

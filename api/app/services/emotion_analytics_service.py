@@ -711,45 +711,32 @@ class EmotionAnalyticsService:
         end_user_id: str,
         db: Session,
     ) -> Optional[Dict[str, Any]]:
-        """从缓存获取个性化情绪建议
+        """从 Redis 缓存获取个性化情绪建议
         
         Args:
             end_user_id: 宿主ID（用户组ID）
-            db: 数据库会话
+            db: 数据库会话（保留参数以保持接口兼容性）
             
         Returns:
             Dict: 缓存的建议数据，如果不存在或已过期返回 None
         """
         try:
-            from app.repositories.emotion_suggestions_cache_repository import (
-                EmotionSuggestionsCacheRepository,
-            )
+            from app.cache.memory.emotion_memory import EmotionMemoryCache
             
-            logger.info(f"尝试从缓存获取情绪建议: user={end_user_id}")
+            logger.info(f"尝试从 Redis 缓存获取情绪建议: user={end_user_id}")
             
-            cache_repo = EmotionSuggestionsCacheRepository(db)
-            cache = cache_repo.get_by_end_user_id(end_user_id)
+            # 从 Redis 获取缓存
+            cached_data = await EmotionMemoryCache.get_emotion_suggestions(end_user_id)
             
-            if cache is None:
-                logger.info(f"用户 {end_user_id} 的建议缓存不存在")
+            if cached_data is None:
+                logger.info(f"用户 {end_user_id} 的建议缓存不存在或已过期")
                 return None
             
-            # 检查是否过期
-            if cache_repo.is_expired(cache):
-                logger.info(f"用户 {end_user_id} 的建议缓存已过期")
-                return None
-            
-            logger.info(f"成功从缓存获取建议: user={end_user_id}")
-            
-            return {
-                "health_summary": cache.health_summary,
-                "suggestions": cache.suggestions,
-                "generated_at": cache.generated_at.isoformat(),
-                "cached": True
-            }
+            logger.info(f"成功从 Redis 缓存获取建议: user={end_user_id}")
+            return cached_data
             
         except Exception as e:
-            logger.error(f"从缓存获取建议失败: {str(e)}", exc_info=True)
+            logger.error(f"从 Redis 缓存获取建议失败: {str(e)}", exc_info=True)
             return None
     
     async def save_suggestions_cache(
@@ -759,30 +746,33 @@ class EmotionAnalyticsService:
         db: Session,
         expires_hours: int = 24
     ) -> None:
-        """保存建议到缓存
+        """保存建议到 Redis 缓存
         
         Args:
             end_user_id: 宿主ID（用户组ID）
             suggestions_data: 建议数据
-            db: 数据库会话
-            expires_hours: 过期时间（小时）
+            db: 数据库会话（保留参数以保持接口兼容性）
+            expires_hours: 过期时间（小时），默认24小时
         """
         try:
-            from app.repositories.emotion_suggestions_cache_repository import (
-                EmotionSuggestionsCacheRepository,
+            from app.cache.memory.emotion_memory import EmotionMemoryCache
+            
+            logger.info(f"保存建议到 Redis 缓存: user={end_user_id}, expires={expires_hours}小时")
+            
+            # 计算过期时间（秒）
+            expire_seconds = expires_hours * 3600
+            
+            # 保存到 Redis
+            success = await EmotionMemoryCache.set_emotion_suggestions(
+                user_id=end_user_id,
+                suggestions_data=suggestions_data,
+                expire=expire_seconds
             )
             
-            logger.info(f"保存建议到缓存: user={end_user_id}")
-            
-            cache_repo = EmotionSuggestionsCacheRepository(db)
-            cache_repo.create_or_update(
-                end_user_id=end_user_id,
-                health_summary=suggestions_data["health_summary"],
-                suggestions=suggestions_data["suggestions"],
-                expires_hours=expires_hours
-            )
-            
-            logger.info(f"建议缓存保存成功: user={end_user_id}")
+            if success:
+                logger.info(f"建议缓存保存成功: user={end_user_id}")
+            else:
+                logger.warning(f"建议缓存保存失败: user={end_user_id}")
             
         except Exception as e:
             logger.error(f"保存建议缓存失败: {str(e)}", exc_info=True)

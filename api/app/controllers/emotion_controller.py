@@ -231,9 +231,9 @@ async def get_emotion_suggestions(
                 extra={"group_id": request.group_id}
             )
             return fail(
-                BizCode.RESOURCE_NOT_FOUND,
+                BizCode.NOT_FOUND,
                 "建议缓存不存在或已过期，请调用 /generate_suggestions 接口生成新建议",
-                None
+                ""
             )
 
         api_logger.info(
