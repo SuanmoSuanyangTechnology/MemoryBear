@@ -9,7 +9,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-from app.dev_redis import dev_redis
+from app.aioRedis import aio_redis
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class EmotionMemoryCache:
             suggestions_data["cached"] = True
             
             value = json.dumps(suggestions_data, ensure_ascii=False)
-            await dev_redis.set(key, value, ex=expire)
+            await aio_redis.set(key, value, ex=expire)
             logger.info(f"设置情绪建议缓存成功: {key}, 过期时间: {expire}秒")
             return True
         except Exception as e:
@@ -82,7 +82,7 @@ class EmotionMemoryCache:
         """
         try:
             key = cls._get_key("suggestions", user_id)
-            value = await dev_redis.get(key)
+            value = await aio_redis.get(key)
             
             if value:
                 data = json.loads(value)
@@ -107,7 +107,7 @@ class EmotionMemoryCache:
         """
         try:
             key = cls._get_key("suggestions", user_id)
-            result = await dev_redis.delete(key)
+            result = await aio_redis.delete(key)
             logger.info(f"删除情绪建议缓存: {key}, 结果: {result}")
             return result > 0
         except Exception as e:
@@ -126,7 +126,7 @@ class EmotionMemoryCache:
         """
         try:
             key = cls._get_key("suggestions", user_id)
-            ttl = await dev_redis.ttl(key)
+            ttl = await aio_redis.ttl(key)
             logger.debug(f"情绪建议缓存TTL: {key} = {ttl}秒")
             return ttl
         except Exception as e:
