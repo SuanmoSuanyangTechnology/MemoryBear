@@ -4,7 +4,7 @@
 import datetime
 import logging
 import uuid
-from typing import Any, Annotated, AsyncGenerator
+from typing import Any, Annotated, AsyncGenerator, Optional
 
 from deprecated import deprecated
 from fastapi import Depends
@@ -14,15 +14,14 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
-from app.models.conversation_model import Message
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
-from app.repositories.conversation_repository import MessageRepository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
     WorkflowNodeExecutionRepository
 )
 from app.schemas import DraftRunRequest
+from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
 
 logger = logging.getLogger(__name__)
@@ -36,7 +35,7 @@ class WorkflowService:
         self.config_repo = WorkflowConfigRepository(db)
         self.execution_repo = WorkflowExecutionRepository(db)
         self.node_execution_repo = WorkflowNodeExecutionRepository(db)
-        self.message_repo = MessageRepository(db)
+        self.conversation_service = ConversationService(db)
 
     # ==================== 配置管理 ====================
 
@@ -266,6 +265,7 @@ class WorkflowService:
             workflow_config_id: uuid.UUID,
             app_id: uuid.UUID,
             trigger_type: str,
+            release_id: uuid.UUID | None = None,
             triggered_by: uuid.UUID | None = None,
             conversation_id: uuid.UUID | None = None,
             input_data: dict[str, Any] | None = None
@@ -273,6 +273,7 @@ class WorkflowService:
         """创建工作流执行记录
 
         Args:
+            release_id: 应用发布 ID
             workflow_config_id: 工作流配置 ID
             app_id: 应用 ID
             trigger_type: 触发类型
@@ -289,6 +290,7 @@ class WorkflowService:
         execution = WorkflowExecution(
             workflow_config_id=workflow_config_id,
             app_id=app_id,
+            release_id=release_id,
             conversation_id=conversation_id,
             execution_id=execution_id,
             trigger_type=trigger_type,
@@ -337,6 +339,7 @@ class WorkflowService:
             self,
             execution_id: str,
             status: str,
+            token_usage: int | None = None,
             output_data: dict[str, Any] | None = None,
             error_message: str | None = None,
             error_node_id: str | None = None
@@ -346,6 +349,7 @@ class WorkflowService:
         Args:
             execution_id: 执行 ID
             status: 状态
+            token_usage: token消耗
             output_data: 输出数据
             error_message: 错误信息
             error_node_id: 出错节点 ID
@@ -364,6 +368,8 @@ class WorkflowService:
             )
 
         execution.status = status
+        if token_usage is not None:
+            execution.token_usage = token_usage
         if output_data is not None:
             execution.output_data = convert_uuids_to_str(output_data)
         if error_message is not None:
@@ -414,12 +420,14 @@ class WorkflowService:
             payload: DraftRunRequest,
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
+            release_id: uuid.UUID | None = None,
     ):
         """运行工作流
 
         Args:
-            workspace_id:
-            config:
+            release_id: 发布 ID
+            workspace_id:工作空间 ID
+            config: 配置
             payload:
             app_id: 应用 ID
 
@@ -463,7 +471,8 @@ class WorkflowService:
             trigger_type="manual",
             triggered_by=None,
             conversation_id=conversation_id_uuid,
-            input_data=input_data
+            input_data=input_data,
+            release_id=release_id,
         )
 
         # 3. 构建工作流配置字典
@@ -507,20 +516,20 @@ class WorkflowService:
 
             # 更新执行结果
             if result.get("status") == "completed":
+                token_usage = result.get("token_usage", {}) or {}
                 self.update_execution_status(
                     execution.execution_id,
                     "completed",
-                    output_data=result
+                    output_data=result,
+                    token_usage=token_usage.get("total_tokens", None)
                 )
                 final_messages = result.get("messages", [])[init_message_length:]
                 for message in final_messages:
-                    message_obj = Message(
+                    self.conversation_service.add_message(
                         conversation_id=conversation_id_uuid,
                         role=message["role"],
-                        content=message["content"],
+                        content=message["content"]
                     )
-                    self.message_repo.add_message(message_obj)
-                self.db.commit()
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
             else:
@@ -562,10 +571,12 @@ class WorkflowService:
             payload: DraftRunRequest,
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
+            release_id: Optional[uuid.UUID] = None,
     ):
         """运行工作流（流式）
 
         Args:
+            release_id: 发布id
             workspace_id:
             app_id: 应用 ID
             payload: 请求对象（包含 message, variables, conversation_id 等）
@@ -611,7 +622,8 @@ class WorkflowService:
             trigger_type="manual",
             triggered_by=None,
             conversation_id=conversation_id_uuid,
-            input_data=input_data
+            input_data=input_data,
+            release_id=release_id,
         )
 
         # 3. 构建工作流配置字典
@@ -653,21 +665,21 @@ class WorkflowService:
                 if event.get("event") == "workflow_end":
 
                     status = event.get("data", {}).get("status")
+                    token_usage = event.get("data", {}).get("token_usage", {}) or {}
                     if status == "completed":
                         self.update_execution_status(
                             execution.execution_id,
                             "completed",
-                            output_data=event.get("data")
+                            output_data=event.get("data"),
+                            token_usage=token_usage.get("total_tokens", None)
                         )
                         final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
                         for message in final_messages:
-                            message_obj = Message(
+                            self.conversation_service.add_message(
                                 conversation_id=conversation_id_uuid,
                                 role=message["role"],
-                                content=message["content"],
+                                content=message["content"]
                             )
-                            self.message_repo.add_message(message_obj)
-                        self.db.commit()
                         logger.info(f"Workflow Run Success, "
                                     f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
                     elif status == "failed":
@@ -784,10 +796,12 @@ class WorkflowService:
 
                 # 更新执行结果
                 if result.get("status") == "completed":
+                    token_usage = result.get("data").get("token_usage", {}) or {}
                     self.update_execution_status(
                         execution.execution_id,
                         "completed",
-                        output_data=result.get("node_outputs", {})
+                        output_data=result.get("node_outputs", {}),
+                        token_usage=token_usage.get("total_tokens", None)
                     )
                 else:
                     self.update_execution_status(
@@ -882,13 +896,14 @@ class WorkflowService:
             ):
                 # 直接转发事件（executor 已经返回正确格式）
                 if event.get("event") == "workflow_end":
-
+                    token_usage = event.get("data").get("token_usage", {}) or {}
                     status = event.get("data", {}).get("status")
                     if status == "completed":
                         self.update_execution_status(
                             execution_id,
                             "completed",
-                            output_data=event.get("data")
+                            output_data=event.get("data"),
+                            token_usage=token_usage.get("total_tokens", None)
                         )
                     elif status == "failed":
                         self.update_execution_status(
