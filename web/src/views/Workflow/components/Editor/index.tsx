@@ -1,4 +1,4 @@
-import { type FC, useState, useEffect } from 'react';
+import { type FC, useState, useEffect, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
@@ -25,7 +25,11 @@ interface LexicalEditorProps {
   options: Suggestion[];
   variant?: 'outlined' | 'borderless';
   height?: number;
+  fontSize?: number;
+  lineHeight?: number;
   enableJinja2?: boolean;
+  size?: 'default' | 'small';
+  type?: 'input' | 'textarea'
 }
 
 const theme = {
@@ -51,8 +55,9 @@ const Editor: FC<LexicalEditorProps> =({
   onChange,
   options,
   variant = 'borderless',
-  height = 60,
   enableJinja2 = false,
+  size = 'default',
+  type = 'textarea'
 }) => {
 
   const [_count, setCount] = useState(0);
@@ -94,12 +99,9 @@ const Editor: FC<LexicalEditorProps> =({
             display: flex;
           }
           .line-numbers {
-            background-color: #f8f9fa;
-            border-right: 1px solid #e1e4e8;
-            color: #656d76;
             font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
             font-size: 12px;
-            line-height: 20px;
+            line-height: 16px;
             padding: 4px 8px;
             text-align: right;
             user-select: none;
@@ -142,6 +144,21 @@ const Editor: FC<LexicalEditorProps> =({
       console.error(error);
     },
   };
+  const minheight = useMemo(() => {
+    if (type === 'input') {
+      return `${size === 'small' ? 26 : 30}px`
+    }
+    return `${size === 'small' ? 60 : 120}px`
+  }, [type, size])
+  const fontSize = useMemo(() => {
+    return `${size === 'small' ? 12 : 14}px`
+  }, [size])
+  const lineHeight = useMemo(() => {
+    return `${size === 'small' ? 16 : 20}px`
+  }, [size])
+  const placeHolderMinheight = useMemo(() => {
+    return `${size === 'small' ? 16 : 30}px`
+  }, [type, size])
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
@@ -152,7 +169,7 @@ const Editor: FC<LexicalEditorProps> =({
               <div className="editor-with-line-numbers" style={{
                 border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
                 borderRadius: '6px',
-                minHeight: `${height}px`,
+                minHeight: minheight,
               }}>
                 <div className="line-numbers">
                   <div>1</div>
@@ -160,12 +177,12 @@ const Editor: FC<LexicalEditorProps> =({
                 <ContentEditable
                   className="editor-content-with-numbers"
                   style={{
-                    minHeight: `${height}px`,
-                    padding: '4px 11px',
+                    minHeight: minheight,
+                    padding: '4px 0',
                     outline: 'none',
                     resize: 'none',
-                    fontSize: '14px',
-                    lineHeight: '20px',
+                    fontSize: fontSize,
+                    lineHeight: lineHeight,
                     border: 'none',
                   }}
                 />
@@ -173,14 +190,14 @@ const Editor: FC<LexicalEditorProps> =({
             ) : (
               <ContentEditable
                 style={{
-                  minHeight: `${height}px`,
+                  minHeight: minheight,
                   padding: variant === 'borderless' ? '0' : '4px 11px',
                   border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
                   borderRadius: '6px',
                   outline: 'none',
                   resize: 'none',
-                  fontSize: '14px',
-                  lineHeight: '20px',
+                  fontSize: fontSize,
+                  lineHeight: lineHeight,
                 }}
               />
             )
@@ -188,12 +205,13 @@ const Editor: FC<LexicalEditorProps> =({
           placeholder={
             <div
               style={{
+                minHeight: placeHolderMinheight,
                 position: 'absolute',
                 top: variant === 'borderless' ? '0' : '6px',
                 left: enableJinja2 ? '59px' : (variant === 'borderless' ? '0' : '11px'),
-                color: '#5B6167',
-                fontSize: '14px',
-                lineHeight: '20px',
+                color: '#A8A9AA',
+                fontSize: fontSize,
+                lineHeight: placeHolderMinheight,
                 pointerEvents: 'none',
               }}
             >

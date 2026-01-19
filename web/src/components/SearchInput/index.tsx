@@ -1,5 +1,5 @@
 import { useState, type FC, useCallback, useRef } from 'react';
-import { Input } from 'antd';
+import { Input, type InputProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 import searchIcon from '@/assets/images/search.svg'
 
@@ -11,6 +11,7 @@ interface SearchInputProps {
   defaultValue?: string;
   style?: Record<string, string | number>;
   className?: string;
+  size?: InputProps['size']
 }
 
 const SearchInput: FC<SearchInputProps> = ({
@@ -79,7 +80,7 @@ const SearchInput: FC<SearchInputProps> = ({
   return (
     <Input
       allowClear
-      prefix={<img src={searchIcon} alt="search" className="rb:w-[16px] rb:h-[16px] rb:mr-[4px]" />}
+      prefix={<img src={searchIcon} alt="search" className="rb:w-4 rb:h-4 rb:mr-1" />}
       placeholder={placeholder || t('user.searchPlaceholder')}
       value={value}
       onChange={handleChange}

@@ -1,8 +1,11 @@
 
 import { Graph } from '@antv/x6';
 import type { KnowledgeConfig } from './components/Properties/Knowledge/types'
+import type { Variable } from './components/Properties/VariableList/types'
 export interface NodeConfig {
   type: 'input' | 'textarea' | 'select' | 'inputNumber' | 'slider' | 'customSelect' | 'define' | 'knowledge' | 'variableList' | string;
+  placeholder?: string;
+  titleVariant?: 'outlined' | 'borderless';
   options?: { label: string; value: string }[];
 
   max?: number;
@@ -14,7 +17,7 @@ export interface NodeConfig {
   valueKey?: string;
   labelKey?: string;
 
-  defaultValue?: any | StartVariableItem[];
+  defaultValue?: any;
 
   sys?: Array<{
     name: string;
@@ -37,6 +40,7 @@ export interface NodeProperties {
   id?: string;
   config?: Record<string, NodeConfig>;
   hidden?: boolean;
+  cycle?: string;
 }
 
 export interface NodeLibrary {
@@ -87,27 +91,12 @@ export interface WorkflowConfig {
   updated_at: number;
 }
 
-export interface VariableEditModalRef {
-  handleOpen: (values?: StartVariableItem) => void;
-}
-export interface StartVariableItem {
-  name: string;
-  type: string;
-  required: boolean;
-  description: string;
-  max_length?: number;
-  default?: string;
-  readonly?: boolean;
-  defaultValue?: any;
-  value?: any;
-}
-
 export interface ChatRef {
   handleOpen: () => void;
 }
 export type GraphRef = React.MutableRefObject<Graph | undefined>
 export interface VariableConfigModalRef {
-  handleOpen: (values: StartVariableItem[]) => void;
+  handleOpen: (values: Variable[]) => void;
 }
 
 export interface ChatVariable {

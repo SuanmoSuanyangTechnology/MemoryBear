@@ -74,6 +74,7 @@ const ParamEditModal = forwardRef<ParamEditModalRef, ParamEditModalProps>(({
       <Form
         form={form}
         layout="vertical"
+        size="middle"
         scrollToFirstError={{ behavior: 'instant', block: 'end', focus: true }}
       >
         <FormItem
