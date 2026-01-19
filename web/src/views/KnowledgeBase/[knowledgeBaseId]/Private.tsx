@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useCallback, type FC } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Switch, Button, Dropdown, Space, Modal, message, Radio } from 'antd';
+import { Switch, Button, Dropdown, Space, Modal, message, Radio, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import SearchInput from '@/components/SearchInput'
 import Table, { type TableRef } from '@/components/Table'
@@ -562,6 +562,37 @@ const Private: FC = () => {
             ></span>
             <span>{value === 1 ? t('knowledgeBase.completed') : value === 0 ? t('knowledgeBase.pending') : t('knowledgeBase.processing')}</span>
           </span>
+        );
+      }
+    },{
+      title: t('knowledgeBase.processMsg'),
+      dataIndex: 'progress_msg',
+      key: 'progress_msg',
+      width: 320,
+      render: (value: string) => {
+        if (!value) return '-';
+        
+        // 解析日志格式，将 \n 转换为换行
+        const formattedText = value.replace(/\\n/g, '\n');
+        
+        return (
+          <Tooltip title={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{formattedText}</pre>} placement="topLeft">
+            <div 
+              style={{
+                maxWidth: '320px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                lineHeight: '1.5',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word'
+              }}
+            >
+              {formattedText}
+            </div>
+          </Tooltip>
         );
       }
     },

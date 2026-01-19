@@ -151,7 +151,7 @@ const MemoryConversation: FC = () => {
           >
             <Chat
               empty={
-                <Empty url={ConversationEmptyIcon} className="rb:h-full" size={[140, 100]} title={t('memoryConversation.conversationContentEmpty')} />
+                <Empty url={ConversationEmptyIcon} className="rb:h-full" size={[140, 100]} title={t('memoryConversation.conversationContentEmpty')} isNeedSubTitle={false} />
               }
               contentClassName='rb:h-[calc(100vh-362px)]'
               data={chatData}

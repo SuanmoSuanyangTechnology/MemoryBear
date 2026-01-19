@@ -38,7 +38,7 @@ const Detail: FC = () => {
     })
   }
   const items = useMemo(() => {
-    return ['PERCEPTUAL_MEMORY', 'WORKING_MEMORY', 'EMOTIONAL_MEMORY', 'SHORT_TERM_MEMORY', 'IMPLICIT_MEMORY', 'EPISODIC_MEMORY', 'EXPLICIT_MEMORY', 'FORGETTING_MANAGEMENT']
+    return ['PERCEPTUAL_MEMORY', 'WORKING_MEMORY', 'EMOTIONAL_MEMORY', 'SHORT_TERM_MEMORY', 'IMPLICIT_MEMORY', 'EPISODIC_MEMORY', 'EXPLICIT_MEMORY', 'FORGET_MEMORY']
       .map(key => ({ key, label: t(`userMemory.${key}`) }))
   }, [t])
   const onClick = ({ key }: { key: string }) => {
@@ -67,7 +67,7 @@ const Detail: FC = () => {
             </div>
           </Dropdown>
         }
-        extra={type === 'FORGETTING_MANAGEMENT' &&
+        extra={type === 'FORGET_MEMORY' &&
           <Button type="primary" ghost className="rb:group rb:h-6! rb:px-2!" onClick={handleRefresh}>
             <img src={refreshIcon} className="rb:w-4 rb:h-4" />
             {t('common.refresh')}
@@ -75,7 +75,7 @@ const Detail: FC = () => {
       />
       <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:py-3 rb:px-4">
         {type === 'EMOTIONAL_MEMORY' && <StatementDetail />}
-        {type === 'FORGETTING_MANAGEMENT' && <ForgetDetail ref={forgetDetailRef} />}
+        {type === 'FORGET_MEMORY' && <ForgetDetail ref={forgetDetailRef} />}
         {type === 'IMPLICIT_MEMORY' && <ImplicitDetail />}
         {type === 'SHORT_TERM_MEMORY' && <ShortTermDetail />}
         {type === 'PERCEPTUAL_MEMORY' && <PerceptualDetail />}

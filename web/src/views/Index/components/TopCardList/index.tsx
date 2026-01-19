@@ -77,7 +77,8 @@ const TopCardList: FC<{data?: DataResponse}> = ({ data }) => {
 
             <div className={styles.content}>
               {item.key === 'spaces' && String(data?.active_workspaces)}
-              {item.key !== 'spaces' && String(data?.[`total_${item.key}` as keyof DataResponse] || item.value || 0)}
+              {item.key === 'running_apps' &&  String(data?.[`${item.key}` as keyof DataResponse] || item.value || 0)}
+              {item.key !== 'spaces' && item.key !== 'running_apps' && String(data?.[`total_${item.key}` as keyof DataResponse] || item.value || 0)}
             </div>
             <div className='rb:flex rb:flex-col rb:items-start'>
                 {item.key === 'models' ? (
