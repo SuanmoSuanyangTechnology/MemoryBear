@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 33</title>
+    <g id="工作流" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="工作流--流程控制-条件分支" transform="translate(-1752, -352)" stroke="#5B6167">
+            <g id="编组-37" transform="translate(1480, 63)">
+                <g id="编组-35" transform="translate(8, 195)">
+                    <g id="编组-33" transform="translate(264, 94)">
+                        <g id="编组-32" transform="translate(3, 3.5)">
+                            <line x1="-1.63757896e-14" y1="2" x2="10" y2="2" id="路径-29"></line>
+                            <polyline id="路径-30" stroke-linejoin="round" points="3 1.99990611 3 0 7 0 7 2"></polyline>
+                            <path d="M1.5,2.01228712 L1.5,8 C1.5,8.55228475 1.94771525,9 2.5,9 L7.5,9 C8.05228475,9 8.5,8.55228475 8.5,8 L8.5,2 L8.5,2" id="路径-31" stroke-linejoin="round"></path>
+                            <line x1="4" y1="4.00683364" x2="4" y2="7.00683364" id="路径-32"></line>
+                            <line x1="6" y1="4.00683364" x2="6" y2="7.00683364" id="路径-32"></line>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

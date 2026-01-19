@@ -93,6 +93,7 @@ const AuthConfigModal = forwardRef<AuthConfigModalRef, AuthConfigModalProps>(({
         initialValues={{
           auth: 'none'
         }}
+        size="middle"
       >
         <FormItem
           name="auth"
@@ -102,6 +103,7 @@ const AuthConfigModal = forwardRef<AuthConfigModalRef, AuthConfigModalProps>(({
           ]}
         >
           <Select
+            size="middle"
             options={[
               { value: 'none', label: t('workflow.config.http-request.none') },
               { value: 'api_key', label: t('workflow.config.http-request.apiKey') },
@@ -117,6 +119,7 @@ const AuthConfigModal = forwardRef<AuthConfigModalRef, AuthConfigModalProps>(({
             ]}
           >
             <Select
+              size="middle"
               options={[
                 { value: 'basic', label: t('workflow.config.http-request.basic') },
                 { value: 'bearer', label: t('workflow.config.http-request.bearer') },
@@ -132,7 +135,7 @@ const AuthConfigModal = forwardRef<AuthConfigModalRef, AuthConfigModalProps>(({
                 { required: true, message: t('common.pleaseEnter') }
               ]}
             >
-              <Input placeholder={t('common.pleaseEnter')} />
+              <Input size="middle" placeholder={t('common.pleaseEnter')} />
             </FormItem>
           }
           <FormItem 
@@ -142,7 +145,7 @@ const AuthConfigModal = forwardRef<AuthConfigModalRef, AuthConfigModalProps>(({
               { required: true, message: t('common.pleaseEnter') }
             ]}
           >
-            <Input placeholder={t('common.pleaseEnter')} />
+            <Input size="middle" placeholder={t('common.pleaseEnter')} />
           </FormItem>
         </>}
       </Form>

@@ -21,6 +21,8 @@ export const lightTheme: ThemeConfig = {
     colorBorderSecondary: '#DFE4ED',
     // colorBgContainer: '#FBFDFF',
     colorError: '#FF5D34',
+    sizeSM: 12,
+    fontSizeSM: 12, 
   },
   components: {
     Layout: {
@@ -86,6 +88,7 @@ export const lightTheme: ThemeConfig = {
       rowSelectedBg: '#E9F1FF',
       rowSelectedHoverBg: '#F0F3F8',
       cellPaddingBlock: 8,
+      cellFontSizeSM: 12,
 
       // cellPaddingInline: 24,
       selectionColumnWidth: 48,
@@ -95,6 +98,13 @@ export const lightTheme: ThemeConfig = {
       lastItemColor: '#212332',
       linkColor: '#5B6167',
       linkHoverColor: '#212332',
+    },
+    Input: {
+      inputFontSizeSM: 12,
+      controlHeightSM: 26
+    },
+    Select: {
+      lineHeightSM: 26
     }
   }
 };
