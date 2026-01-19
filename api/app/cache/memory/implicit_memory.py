@@ -52,7 +52,7 @@ class ImplicitMemoryCache:
             expire: 过期时间（秒），默认24小时（86400秒）
             
         Returns:
-            是否删除成功
+            是否设置成功
         """
         try:
             key = cls._get_key("profile", user_id)
