@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState } from 'react'
+import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Space, Progress } from 'antd';
@@ -20,7 +20,7 @@ interface HabitsItem {
   specific_examples: string[];
 }
 
-const Habits: FC = () => {
+const Habits = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
@@ -43,6 +43,9 @@ const Habits: FC = () => {
       setLoading(false)
     })
   }
+  useImperativeHandle(ref, () => ({
+    handleRefresh: getData
+  }));
 
   return (
     <>
@@ -80,5 +83,5 @@ const Habits: FC = () => {
       </RbCard>
     </>
   )
-}
+})
 export default Habits
