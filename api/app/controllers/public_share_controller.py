@@ -567,6 +567,7 @@ async def chat(
             with get_db_read() as db:
                 source_config = WorkflowConfigRepository(db).get_by_app_id(release.app_id)
                 config.id = source_config.id
+        config.id = uuid.UUID(config.id)
         if payload.stream:
             async def event_generator():
                 async for event in app_chat_service.workflow_chat_stream(

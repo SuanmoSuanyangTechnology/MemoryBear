@@ -21,6 +21,7 @@ class IterationRuntime:
     optional parallel execution, flattening of output, and loop control via
     the workflow state.
     """
+
     def __init__(
             self,
             graph: CompiledStateGraph,
@@ -87,6 +88,7 @@ class IterationRuntime:
             self.result.append(output)
         if not result["looping"]:
             self.looping = False
+        return result
 
     def _create_iteration_tasks(self, array_obj, idx):
         """
@@ -124,7 +126,7 @@ class IterationRuntime:
         array_obj = VariablePool(self.state).get(input_expression)
         if not isinstance(array_obj, list):
             raise RuntimeError("Cannot iterate over a non-list variable")
-
+        child_state = []
         idx = 0
         if self.typed_config.parallel:
             # Execute iterations in parallel batches
@@ -132,15 +134,14 @@ class IterationRuntime:
                 tasks = self._create_iteration_tasks(array_obj, idx)
                 logger.info(f"Iteration node {self.node_id}: running, concurrency {len(tasks)}")
                 idx += self.typed_config.parallel_count
-                await asyncio.gather(*tasks)
-            logger.info(f"Iteration node {self.node_id}: execution completed")
-            return self.result
+                child_state.extend(await asyncio.gather(*tasks))
         else:
             # Execute iterations sequentially
             while idx < len(array_obj) and self.looping:
                 logger.info(f"Iteration node {self.node_id}: running")
                 item = array_obj[idx]
                 result = await self.graph.ainvoke(self._init_iteration_state(item, idx))
+                child_state.append(result)
                 output = VariablePool(result).get(self.output_value)
                 if isinstance(output, list) and self.typed_config.flatten:
                     self.result.extend(output)
@@ -150,5 +151,8 @@ class IterationRuntime:
                     self.looping = False
                 idx += 1
 
-            logger.info(f"Iteration node {self.node_id}: execution completed")
-            return self.result
+        logger.info(f"Iteration node {self.node_id}: execution completed")
+        return {
+            "output": self.result,
+            "__child_state": child_state
+        }
