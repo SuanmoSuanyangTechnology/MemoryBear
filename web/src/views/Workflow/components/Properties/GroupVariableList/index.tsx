@@ -17,7 +17,7 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
   name,
   options = [],
   isCanAdd = false,
-  size = "middle"
+  size = "small"
 }) => {
   const { t } = useTranslation();
   const form = Form.useFormInstance();
@@ -37,16 +37,10 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
     }
     
     return (
-      <div className="rb:mb-4">
-        <Row gutter={12} className="rb:mb-2!">
-          <Col span={12}>
-            <Form.Item
-              noStyle
-            >
-              {t('workflow.config.var-aggregator.variable')}
-            </Form.Item>
-          </Col>
-        </Row>
+      <div>
+        <div className="rb:font-medium rb:text-[12px] rb:mb-1">
+          {t('workflow.config.var-aggregator.variable')}
+        </div>
 
         <Form.Item
           name={name}
