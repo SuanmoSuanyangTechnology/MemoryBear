@@ -1000,3 +1000,113 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
 
     logger.info(f"Successfully retrieved connected config: memory_config_id={memory_config_id}")
     return result
+
+
+def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) -> Dict[str, Dict[str, Any]]:
+    """
+    批量获取多个终端用户关联的记忆配置（优化版本，减少数据库查询次数）
+
+    通过以下流程获取配置：
+    1. 批量查询所有 end_user_id 对应的 app_id
+    2. 批量获取这些应用的最新发布版本
+    3. 从发布版本的 config 字段中提取 memory_config_id
+
+    Args:
+        end_user_ids: 终端用户ID列表
+        db: 数据库会话
+
+    Returns:
+        字典，key 为 end_user_id，value 为包含 memory_config_id 和 memory_config_name 的字典
+        格式: {
+            "user_id_1": {"memory_config_id": "xxx", "memory_config_name": "xxx"},
+            "user_id_2": {"memory_config_id": None, "memory_config_name": None},
+            ...
+        }
+    """
+    from app.models.app_release_model import AppRelease
+    from app.models.end_user_model import EndUser
+    from app.models.memory_config_model import MemoryConfig
+    from sqlalchemy import select
+
+    logger.info(f"Batch getting connected configs for {len(end_user_ids)} end_users")
+
+    result = {}
+
+    # 如果列表为空，直接返回空字典
+    if not end_user_ids:
+        return result
+
+    # 1. 批量查询所有 end_user 及其 app_id
+    end_users = db.query(EndUser).filter(EndUser.id.in_(end_user_ids)).all()
+    
+    # 创建 end_user_id -> app_id 的映射
+    user_to_app = {str(eu.id): eu.app_id for eu in end_users}
+    
+    # 记录未找到的用户
+    found_user_ids = set(user_to_app.keys())
+    missing_user_ids = set(end_user_ids) - found_user_ids
+    if missing_user_ids:
+        logger.warning(f"End users not found: {missing_user_ids}")
+        for user_id in missing_user_ids:
+            result[user_id] = {"memory_config_id": None, "memory_config_name": None}
+
+    # 2. 批量获取所有相关应用的最新发布版本
+    app_ids = list(user_to_app.values())
+    if not app_ids:
+        return result
+
+    # 查询所有活跃的发布版本
+    stmt = (
+        select(AppRelease)
+        .where(AppRelease.app_id.in_(app_ids), AppRelease.is_active.is_(True))
+        .order_by(AppRelease.app_id, AppRelease.version.desc())
+    )
+    releases = db.scalars(stmt).all()
+
+    # 创建 app_id -> latest_release 的映射（每个 app 只保留最新版本）
+    app_to_release = {}
+    for release in releases:
+        if release.app_id not in app_to_release:
+            app_to_release[release.app_id] = release
+
+    # 3. 收集所有 memory_config_id 并批量查询配置名称
+    memory_config_ids = []
+    for end_user_id, app_id in user_to_app.items():
+        release = app_to_release.get(app_id)
+        if release:
+            config = release.config or {}
+            memory_obj = config.get('memory', {})
+            memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
+            if memory_config_id:
+                memory_config_ids.append(memory_config_id)
+
+    # 批量查询 memory_config_name
+    config_id_to_name = {}
+    if memory_config_ids:
+        memory_configs = db.query(MemoryConfig).filter(MemoryConfig.id.in_(memory_config_ids)).all()
+        config_id_to_name = {str(mc.id): mc.config_name for mc in memory_configs}
+
+    # 4. 构建最终结果
+    for end_user_id, app_id in user_to_app.items():
+        release = app_to_release.get(app_id)
+        
+        if not release:
+            logger.warning(f"No active release found for app: {app_id} (end_user: {end_user_id})")
+            result[end_user_id] = {"memory_config_id": None, "memory_config_name": None}
+            continue
+
+        # 从 config 中提取 memory_config_id
+        config = release.config or {}
+        memory_obj = config.get('memory', {})
+        memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
+        
+        # 获取配置名称
+        memory_config_name = config_id_to_name.get(memory_config_id) if memory_config_id else None
+
+        result[end_user_id] = {
+            "memory_config_id": memory_config_id,
+            "memory_config_name": memory_config_name
+        }
+
+    logger.info(f"Successfully retrieved {len(result)} connected configs")
+    return result
