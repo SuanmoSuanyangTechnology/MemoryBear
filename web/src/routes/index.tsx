@@ -34,6 +34,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   AuthSpaceLayout: lazy(() => import('@/components/Layout/AuthSpaceLayout')),
   BasicLayout: lazy(() => import('@/components/Layout/BasicLayout')),
   LoginLayout: lazy(() => import('@/components/Layout/LoginLayout')),
+  NoAuthLayout: lazy(() => import('@/components/Layout/NoAuthLayout')),
   // 视图组件
   Index: lazy(() => import('@/views/Index')),
   Home: lazy(() => import('@/views/Home')),

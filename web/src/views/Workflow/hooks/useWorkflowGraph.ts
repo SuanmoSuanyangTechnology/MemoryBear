@@ -54,7 +54,7 @@ export const useWorkflowGraph = ({
   const historyRef = useRef<{ undoStack: string[], redoStack: string[] }>({ undoStack: [], redoStack: [] });
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [isHandMode, setIsHandMode] = useState(false);
+  const [isHandMode, setIsHandMode] = useState(true);
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
 
@@ -275,6 +275,11 @@ export const useWorkflowGraph = ({
       }, 100)
     }
     if (edges.length) {
+      // 计算loop和iteration类型节点的数量
+      const loopIterationCount = nodes.filter(node => 
+        node.type === 'loop' || node.type === 'iteration'
+      ).length;
+      
       // 去重处理：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
       const uniqueEdges = edges.filter((edge, index, arr) => {
         return arr.findIndex(e => {
@@ -349,7 +354,7 @@ export const useWorkflowGraph = ({
                 },
               },
             },
-            zIndex: targetCell.getData()?.cycle ? 3 : 0
+            // zIndex: loopIterationCount
           }
 
           return edgeConfig
@@ -417,7 +422,7 @@ export const useWorkflowGraph = ({
     graphRef.current.use(
       new MiniMap({
         container: miniMapRef.current,
-        width: 100,
+        width: 170,
         height: 80,
         padding: 5,
       }),
@@ -689,10 +694,9 @@ export const useWorkflowGraph = ({
           thickness: 1, // 网点大小
         }
       },
-      panning: false,
+      panning: isHandMode,
       mousewheel: {
         enabled: true,
-        modifiers: ['ctrl', 'meta'],
       },
       connecting: {
         // router: 'orth',
@@ -725,7 +729,6 @@ export const useWorkflowGraph = ({
                 },
               },
             },
-            zIndex: 0,
           });
         },
         validateConnection({ sourceCell, targetCell, targetMagnet }) {
@@ -762,9 +765,8 @@ export const useWorkflowGraph = ({
       },
       embedding: {
         enabled: true,
-        validate (this, { parent }) {
-        const parentData = parent.getData()
-          return parentData.type === 'iteration' || parentData.type === 'loop'
+        validate (this) {
+          return false
         }
       },
       translating: {
@@ -970,10 +972,10 @@ export const useWorkflowGraph = ({
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
                 itemConfig[key] = data.config[key].defaultValue
               } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
-                const { knowledge_bases } = data.config[key].defaultValue
+                const { knowledge_bases } = data.config[key].defaultValue || {}
                 itemConfig = {
                   ...itemConfig,
-                  ...data.config[key].defaultValue,
+                  ...(data.config[key].defaultValue || {}),
                   knowledge_bases: knowledge_bases?.map((vo: any) => {
                     const kb_config = vo.config || { similarity_threshold: vo.similarity_threshold, strategy: vo.strategy, top_k: vo.top_k, weight: vo.weight }
                     return { kb_id: vo.kb_id || vo.id, ...kb_config, }

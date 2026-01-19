@@ -16,7 +16,7 @@ import { maskApiKeys } from '@/utils/apiKeyReplacer'
 
 const Api: FC<{ application: Application | null }> = ({ application }) => {
   const { t } = useTranslation();
-  const activeMethods = ['GET'];
+  const activeMethods = ['POST'];
   const { message, modal } = App.useApp()
   const copyContent = window.location.origin + '/v1/chat'
   const apiKeyModalRef = useRef<ApiKeyModalRef>(null);

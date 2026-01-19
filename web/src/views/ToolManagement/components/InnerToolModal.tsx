@@ -60,25 +60,23 @@ const InnerToolModal = forwardRef<InnerToolModalRef, InnerToolModalProps>(({
             ...values.config,
           }
         } as any)
-          .then(() => {
-            handleClose()
-            message.success(t('common.saveSuccess'))
-            refreshTable()
+          .then((res: any) => {
+            message.success(t('common.saveSuccess'));
+            testConnection(res.tool_id || editVo?.id)
+              .finally(() => {
+                setLoading(false);
+                handleClose();
+                refreshTable()
+              })
+          })
+          .catch(() => {
+            setLoading(false);
           })
       })
       .catch((err) => {
         console.log('err', err)
       });
   }
-  const handleTestConnection = () => {
-    testConnection(editVo.id)
-      .then(() => {
-        message.success(t('tool.testConnectionSuccess'));
-      })
-      .finally(() => {
-        refreshTable()
-      })
-  };
 
   // 暴露给父组件的方法
   useImperativeHandle(ref, () => ({
@@ -91,12 +89,9 @@ const InnerToolModal = forwardRef<InnerToolModalRef, InnerToolModalProps>(({
       title={`${editVo.name} ${t('tool.config')}`}
       open={visible}
       onCancel={handleClose}
+      okText={t('tool.saveAndTest')}
+      onOk={handleSave}
       confirmLoading={loading}
-      footer={[
-        <Button onClick={handleClose}>{t('common.cancel')}</Button>,
-        <Button onClick={handleTestConnection}>{t('tool.textLink')}</Button>,
-        <Button type="primary" loading={loading} onClick={handleSave}>{t('common.save')}</Button>,
-      ]}
     >
       {editVo?.config_data?.tool_class && config && <>
         <RbAlert className="rb:mb-3">

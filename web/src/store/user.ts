@@ -45,7 +45,7 @@ export const useUser = create<UserState>((set, get) => ({
         const response = res as User;
         set({ user: response })
         if (flag) {
-          window.location.href = response.role && response.current_workspace_id ? '/#/' : '/#/space'
+          window.location.href = response.role && response.current_workspace_id ? '/#/' : '/#/index'
         }
         localStorage.setItem('user', JSON.stringify(response))
       })
