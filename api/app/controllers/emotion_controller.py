@@ -254,7 +254,7 @@ async def get_emotion_suggestions(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取个性化建议失败(无缓存内容): {str(e)}"
+            detail=f"获取个性化建议失败: {str(e)}"
         )
 
 
