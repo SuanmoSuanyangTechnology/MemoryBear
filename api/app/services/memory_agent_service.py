@@ -56,7 +56,6 @@ class MemoryAgentService:
 
         if str(messages) == 'success':
             logger.info(f"Write operation successful for group {group_id} with config_id {config_id}")
-            # 记录成功的操作
             if audit_logger:
                 audit_logger.log_operation(operation="WRITE", config_id=config_id, group_id=group_id, success=True,
                                            duration=duration, details={"message_length": len(message)})
@@ -64,7 +63,6 @@ class MemoryAgentService:
         else:
             logger.warning(f"Write operation failed for group {group_id}")
 
-            # 记录失败的操作
             if audit_logger:
                 audit_logger.log_operation(
                     operation="WRITE",
