@@ -173,14 +173,63 @@ class LangChainAgent:
             retrieved_content.append({query: aimessages})
         return messagss_list,retrieved_content
 
-
-    async def write(self,storage_type,end_user_id,message,user_rag_memory_id,actual_end_user_id,content,actual_config_id):
+    async def write(self, storage_type, end_user_id, user_message, ai_message, user_rag_memory_id, actual_end_user_id, actual_config_id):
+        """
+        写入记忆（支持结构化消息）
+        
+        Args:
+            storage_type: 存储类型 (neo4j/rag)
+            end_user_id: 终端用户ID
+            user_message: 用户消息内容
+            ai_message: AI 回复内容
+            user_rag_memory_id: RAG 记忆ID
+            actual_end_user_id: 实际用户ID
+            actual_config_id: 配置ID
+            
+        逻辑说明：
+        - RAG 模式：组合 user_message 和 ai_message 为字符串格式，保持原有逻辑不变
+        - Neo4j 模式：使用结构化消息列表
+          1. 如果 user_message 和 ai_message 都不为空：创建配对消息 [user, assistant]
+          2. 如果只有 user_message：创建单条用户消息 [user]（用于历史记忆场景）
+          3. 每条消息会被转换为独立的 Chunk，保留 speaker 字段
+        """
         if storage_type == "rag":
-            await write_rag(end_user_id, message, user_rag_memory_id)
+            # RAG 模式：组合消息为字符串格式（保持原有逻辑）
+            combined_message = f"user: {user_message}\nassistant: {ai_message}"
+            await write_rag(end_user_id, combined_message, user_rag_memory_id)
             logger.info(f'RAG_Agent:{end_user_id};{user_rag_memory_id}')
         else:
-            write_id = write_message_task.delay(actual_end_user_id, content, actual_config_id, storage_type,
-                                                user_rag_memory_id)
+            # Neo4j 模式：使用结构化消息列表
+            structured_messages = []
+            
+            # 始终添加用户消息（如果不为空）
+            if user_message:
+                structured_messages.append({"role": "user", "content": user_message})
+            
+            # 只有当 AI 回复不为空时才添加 assistant 消息
+            if ai_message:
+                structured_messages.append({"role": "assistant", "content": ai_message})
+            
+            # 如果没有消息，直接返回
+            if not structured_messages:
+                logger.warning(f"No messages to write for user {actual_end_user_id}")
+                return
+            
+            # 调用 Celery 任务，传递结构化消息列表
+            # 数据流：
+            # 1. structured_messages 传递给 write_message_task
+            # 2. write_message_task 调用 memory_agent_service.write_memory
+            # 3. write_memory 调用 write_tools.write，传递 messages 参数
+            # 4. write_tools.write 调用 get_chunked_dialogs，传递 messages 参数
+            # 5. get_chunked_dialogs 为每条消息创建独立的 Chunk，设置 speaker 字段
+            # 6. 每个 Chunk 保存到 Neo4j，包含 speaker 字段
+            write_id = write_message_task.delay(
+                actual_end_user_id,  # group_id: 用户ID
+                structured_messages,  # message: 结构化消息列表 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+                actual_config_id,    # config_id: 配置ID
+                storage_type,        # storage_type: "neo4j"
+                user_rag_memory_id   # user_rag_memory_id: RAG记忆ID（Neo4j模式下不使用）
+            )
             write_status = get_task_memory_write_result(str(write_id))
             logger.info(f'Agent:{actual_end_user_id};{write_status}')
 
@@ -227,7 +276,7 @@ class LangChainAgent:
         actual_end_user_id = end_user_id if end_user_id is not None else "unknown"
         logger.info(f'写入类型{storage_type,str(end_user_id), message, str(user_rag_memory_id)}')
         print(f'写入类型{storage_type,str(end_user_id), message, str(user_rag_memory_id)}')
-
+# TODO 乐力齐，
         history_term_memory_result = await self.term_memory_redis_read(end_user_id)
         history_term_memory = history_term_memory_result[0]
         db_for_memory = next(get_db())
@@ -248,8 +297,9 @@ class LangChainAgent:
                 finally:
                     db_for_memory.close()
 
-                await self.write(storage_type,end_user_id,history_term_memory,user_rag_memory_id,actual_end_user_id,history_term_memory,actual_config_id)
-            await self.write(storage_type,end_user_id,message,user_rag_memory_id,actual_end_user_id,message,actual_config_id)
+                # 长期记忆写入（
+                await self.write(storage_type, actual_end_user_id, history_term_memory, "", user_rag_memory_id, actual_end_user_id, actual_config_id)
+            # 注意：不在这里写入用户消息，等 AI 回复后一起写入
         try:
             # 准备消息列表
             messages = self._prepare_messages(message, history, context)
@@ -277,8 +327,9 @@ class LangChainAgent:
 
             elapsed_time = time.time() - start_time
             if memory_flag:
-                await self.write(storage_type,end_user_id,content,user_rag_memory_id,actual_end_user_id,content,actual_config_id)
-                await self.term_memory_save(message_chat,end_user_id,content)
+                # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
+                await self.write(storage_type, actual_end_user_id, message_chat, content, user_rag_memory_id, actual_end_user_id, actual_config_id)
+                await self.term_memory_save(message_chat, end_user_id, content)
             response = {
                 "content": content,
                 "model": self.model_name,
@@ -359,14 +410,14 @@ class LangChainAgent:
                     repo.upsert(end_user_id, retrieved_content)
                     logger.info(
                         f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
-                    await self.write(storage_type, end_user_id, history_term_memory, user_rag_memory_id, end_user_id,
-                                     history_term_memory, actual_config_id)
+                    # 长期记忆写入
+                    await self.write(storage_type, end_user_id, history_term_memory, "", user_rag_memory_id, end_user_id, actual_config_id)
                 except Exception as e:
                     logger.error(f"Failed to write to long term memory: {e}")
                 finally:
                     db_for_memory.close()
 
-            await self.write(storage_type, end_user_id, message, user_rag_memory_id, end_user_id, message, actual_config_id)
+            # 注意：不在这里写入用户消息，等 AI 回复后一起写入
         try:
             # 准备消息列表
             messages = self._prepare_messages(message, history, context)
@@ -418,7 +469,8 @@ class LangChainAgent:
                 
                 logger.debug(f"Agent 流式完成，共 {chunk_count} 个事件")
                 if memory_flag:
-                    await self.write(storage_type, end_user_id,full_content, user_rag_memory_id, end_user_id,full_content, actual_config_id)
+                    # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
+                    await self.write(storage_type, end_user_id, message_chat, full_content, user_rag_memory_id, end_user_id, actual_config_id)
                     await self.term_memory_save(message_chat, end_user_id, full_content)
                 
             except Exception as e:

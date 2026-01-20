@@ -472,13 +472,19 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True)
-def write_message_task(self, group_id: str, message: str, config_id: str,storage_type:str,user_rag_memory_id:str) -> Dict[str, Any]:
+def write_message_task(self, group_id: str, message, config_id: str, storage_type: str, user_rag_memory_id: str) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
+    
+    支持两种消息格式：
+    1. 字符串格式（向后兼容）：message="user: xxx\nassistant: yyy"
+    2. 结构化消息列表（推荐）：message=[{"role": "user", "content": "xxx"}, {"role": "assistant", "content": "yyy"}]
     
     Args:
         group_id: Group ID for the memory agent (also used as end_user_id)
-        message: Message to write
+        message: Message to write (str or list[dict])
         config_id: Optional configuration ID
+        storage_type: Storage type (neo4j/rag)
+        user_rag_memory_id: RAG memory ID
         
     Returns:
         Dict containing the result and metadata
@@ -532,11 +538,15 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
         result = loop.run_until_complete(_run())
         elapsed_time = time.time() - start_time
         
+        # 记录消息类型用于调试
+        message_type = "structured" if isinstance(message, list) else "string"
+        
         return {
             "status": "SUCCESS",
             "result": result,
             "group_id": group_id,
             "config_id": config_id,
+            "message_type": message_type,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }

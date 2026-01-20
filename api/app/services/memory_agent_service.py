@@ -20,6 +20,7 @@ from app.core.memory.agent.langgraph_graph.write_graph import make_write_graph
 from app.core.memory.agent.logger_file.log_streamer import LogStreamer
 from app.core.memory.agent.utils.mcp_tools import get_mcp_server_config
 from app.core.memory.agent.utils.type_classifier import status_typle
+from app.core.memory.agent.utils.write_tools import write  # 新增：直接导入 write 函数
 from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
@@ -27,6 +28,7 @@ from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.memory_short_repository import ShortTermMemoryRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import ConfigurationError
+from app.schemas.memory_agent_schema import Write_UserInput
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
@@ -53,22 +55,27 @@ class MemoryAgentService:
     
 
 
-    def writer_messages_deal(self,messages,start_time,group_id,config_id,message):
+    def writer_messages_deal(self, messages, start_time, group_id, config_id, message: list[dict]):
         messages = str(messages).replace("'", '"').replace('\\n', '').replace('\n', '').replace('\\', '')
         countext = re.findall(r'"status": "(.*?)",', messages)[0]
         duration = time.time() - start_time
 
         if countext == 'success':
             logger.info(f"Write operation successful for group {group_id} with config_id {config_id}")
-            # 记录成功的操作
             if audit_logger:
-                audit_logger.log_operation(operation="WRITE", config_id=config_id, group_id=group_id, success=True,
-                                           duration=duration, details={"message_length": len(message)})
+                message_length = sum(len(msg.get('content', '')) for msg in message)
+                audit_logger.log_operation(
+                    operation="WRITE", 
+                    config_id=config_id, 
+                    group_id=group_id, 
+                    success=True,
+                    duration=duration, 
+                    details={"message_length": message_length, "message_count": len(message)}
+                )
             return countext
         else:
             logger.warning(f"Write operation failed for group {group_id}")
 
-            # 记录失败的操作
             if audit_logger:
                 audit_logger.log_operation(
                     operation="WRITE",
@@ -249,13 +256,13 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
     
-    async def write_memory(self, group_id: str, message: str, config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
+    async def write_memory(self, group_id: str, message: list[dict], config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
         """
         Process write operation with config_id
         
         Args:
             group_id: Group identifier (also used as end_user_id)
-            message: Message to write
+            message: Structured message list [{"role": "user", "content": "..."}, ...]
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -276,7 +283,7 @@ class MemoryAgentService:
                     raise ValueError(f"No memory configuration found for end_user {group_id}. Please ensure the user has a connected memory configuration.")
             except Exception as e:
                 if "No memory configuration found" in str(e):
-                    raise  # Re-raise our specific error
+                    raise
                 logger.error(f"Failed to get connected config for end_user {group_id}: {e}")
                 raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
         
@@ -301,53 +308,52 @@ class MemoryAgentService:
                 audit_logger.log_operation(operation="WRITE", config_id=config_id, group_id=group_id, success=False, duration=duration, error=error_msg)
             
             raise ValueError(error_msg)
-        mcp_config = get_mcp_server_config()
-        client = MultiServerMCPClient(mcp_config)
 
         if storage_type == "rag":
-            result = await write_rag(group_id, message, user_rag_memory_id)
+            message_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in message])
+            result = await write_rag(group_id, message_str, user_rag_memory_id)
             return result
         else:
-            async with client.session("data_flow") as session:
-                logger.debug("Connected to MCP Server: data_flow")
-                tools = await load_mcp_tools(session)
-                workflow_errors = []  # Track errors from workflow
-
-                # Pass memory_config to the graph workflow
-                async with make_write_graph(group_id, tools, group_id, group_id, memory_config=memory_config) as graph:
-                    logger.debug("Write graph created successfully")
-
-                    config = {"configurable": {"thread_id": group_id}}
-
-                    async for event in graph.astream(
-                            {"messages": message, "memory_config": memory_config, "errors": []},
-                            stream_mode="values",
-                            config=config
-                    ):
-                        messages = event.get('messages')
-                        # Capture any errors from the state
-                        if event.get('errors'):
-                            workflow_errors.extend(event.get('errors', []))
-            
-            # Check for workflow errors
-            if workflow_errors:
-                error_details = "; ".join([f"{e['tool']}: {e['error']}" for e in workflow_errors])
-                logger.error(f"Write workflow failed with errors: {error_details}")
+            try:
+                await write(
+                    user_id=group_id,
+                    apply_id=str(config_id),
+                    group_id=group_id,
+                    memory_config=memory_config,
+                    messages=message,
+                )
                 
+                duration = time.time() - start_time
                 if audit_logger:
-                    duration = time.time() - start_time
+                    message_length = sum(len(msg.get('content', '')) for msg in message)
+                    audit_logger.log_operation(
+                        operation="WRITE",
+                        config_id=config_id,
+                        group_id=group_id,
+                        success=True,
+                        duration=duration,
+                        details={"message_length": message_length, "message_count": len(message)}
+                    )
+                
+                logger.info(f"Write operation successful for group {group_id} with config_id {config_id}")
+                return "success"
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Write operation failed: {error_msg}")
+                
+                duration = time.time() - start_time
+                if audit_logger:
                     audit_logger.log_operation(
                         operation="WRITE",
                         config_id=config_id,
                         group_id=group_id,
                         success=False,
                         duration=duration,
-                        error=error_details
+                        error=error_msg
                     )
                 
-                raise ValueError(f"Write workflow failed: {error_details}")
-            
-            return self.writer_messages_deal(messages, start_time, group_id, config_id, message)
+                raise ValueError(f"Write failed: {error_msg}")
     
     async def read_memory(
         self,
@@ -639,6 +645,52 @@ class MemoryAgentService:
             "answer": final_answer,
             "intermediate_outputs": intermediate_outputs
         }
+
+    def get_messages_list(self, user_input: Write_UserInput) -> list[dict]:
+        """
+        Get standardized message list from user input.
+        
+        Args:
+            user_input: Write_UserInput object
+        
+        Returns:
+            list[dict]: Message list, each message contains role and content
+            
+        Raises:
+            ValueError: If messages is empty or format is incorrect
+        """
+        from app.core.logging_config import get_api_logger
+        logger = get_api_logger()
+        
+        if len(user_input.messages) == 0:
+            logger.error("Validation failed: Message list cannot be empty")
+            raise ValueError("Message list cannot be empty")
+        
+        for idx, msg in enumerate(user_input.messages):
+            if not isinstance(msg, dict):
+                logger.error(f"Validation failed: Message {idx} is not a dict: {type(msg)}")
+                raise ValueError(f"Message format error: Message must be a dictionary. Error message index: {idx}, type: {type(msg)}")
+            
+            if 'role' not in msg:
+                logger.error(f"Validation failed: Message {idx} missing 'role' field: {msg}")
+                raise ValueError(f"Message format error: Message must contain 'role' field. Error message index: {idx}")
+            
+            if 'content' not in msg:
+                logger.error(f"Validation failed: Message {idx} missing 'content' field: {msg}")
+                raise ValueError(f"Message format error: Message must contain 'content' field. Error message index: {idx}")
+            
+            if msg['role'] not in ['user', 'assistant']:
+                logger.error(f"Validation failed: Message {idx} invalid role: {msg['role']}")
+                raise ValueError(f"Role must be 'user' or 'assistant', got: {msg['role']}. Message index: {idx}")
+            
+            if not msg['content'] or not msg['content'].strip():
+                logger.error(f"Validation failed: Message {idx} content is empty")
+                raise ValueError(f"Message content cannot be empty. Message index: {idx}, role: {msg['role']}")
+        
+        logger.info(f"Validation successful: Structured message list, count: {len(user_input.messages)}")
+        return user_input.messages
+
+
 
     def _create_intermediate_key(self, output: Dict) -> str:
         """

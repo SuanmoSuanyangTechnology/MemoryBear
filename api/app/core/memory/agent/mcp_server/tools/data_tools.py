@@ -104,45 +104,63 @@ async def Data_type_differentiation(
 @mcp.tool()
 async def Data_write(
     ctx: Context,
-    content: str,
     user_id: str,
     apply_id: str,
     group_id: str,
     memory_config: MemoryConfig,
+    messages: list,
 ) -> dict:
     """
-    Write data to the database/file system.
+    Write structured messages to the memory system.
     
     Args:
         ctx: FastMCP context for dependency injection
-        content: Data content to write
         user_id: User identifier
         apply_id: Application identifier
         group_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
+        messages: Structured message list [{"role": "user", "content": "..."}, ...]
         
     Returns:
         dict: Contains 'status', 'saved_to', and 'data' fields
+        
+    Raises:
+        ValueError: If messages is empty or invalid format
     """
     try:
-        # Ensure output directory exists
+        if not messages or not isinstance(messages, list) or len(messages) == 0:
+            raise ValueError("messages parameter must be a non-empty list")
+        
+        for idx, msg in enumerate(messages):
+            if not isinstance(msg, dict):
+                raise ValueError(f"Message {idx} must be a dictionary")
+            if 'role' not in msg or 'content' not in msg:
+                raise ValueError(f"Message {idx} must contain 'role' and 'content' fields")
+            if msg['role'] not in ['user', 'assistant']:
+                raise ValueError(f"Message {idx} role must be 'user' or 'assistant', got: {msg['role']}")
+        
         os.makedirs("data_output", exist_ok=True)
         file_path = os.path.join("data_output", "user_data.csv")
 
-        # Write data - clients are constructed inside write() from memory_config
+        logger.info(f"Writing {len(messages)} structured messages to memory system")
+        
         await write(
-            content=content,
+            messages=messages,
             user_id=user_id,
             apply_id=apply_id,
             group_id=group_id,
             memory_config=memory_config,
         )
+        
+        formatted_content = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+        
         logger.info(f"Write completed successfully! Config: {memory_config.config_name}")
 
         return {
             "status": "success",
             "saved_to": file_path,
-            "data": content,
+            "data": formatted_content,
+            "message_count": len(messages),
             "config_id": memory_config.config_id,
             "config_name": memory_config.config_name,
         }

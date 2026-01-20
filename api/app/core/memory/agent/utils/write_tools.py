@@ -31,25 +31,22 @@ logger = get_agent_logger(__name__)
 
 
 async def write(
-    content: str,
     user_id: str,
     apply_id: str,
     group_id: str,
     memory_config: MemoryConfig,
+    messages: list,
     ref_id: str = "wyl20251027",
 ) -> None:
     """
     Execute the complete knowledge extraction pipeline.
     
-    Only MemoryConfig is needed - LLM and embedding clients are constructed
-    internally from the config.
-
     Args:
-        content: Dialogue content to process
         user_id: User identifier
         apply_id: Application identifier
         group_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
+        messages: Structured message list [{"role": "user", "content": "..."}, ...]
         ref_id: Reference ID, defaults to "wyl20251027"
     """
     # Extract config values
@@ -91,7 +88,7 @@ async def write(
         group_id=group_id,
         user_id=user_id,
         apply_id=apply_id,
-        content=content,
+        messages=messages,
         ref_id=ref_id,
         config_id=config_id,
     )

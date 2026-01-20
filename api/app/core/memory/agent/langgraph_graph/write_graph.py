@@ -45,17 +45,47 @@ async def make_write_graph(user_id, tools, apply_id, group_id, memory_config: Me
 
     async def call_model(state):
         messages = state["messages"]
-        last_message = messages[-1]
-        content = last_message[1] if isinstance(last_message, tuple) else last_message.content
-
-        # Call Data_write directly with memory_config
+        
+        if not isinstance(messages, list) or len(messages) == 0:
+            raise ValueError(f"Invalid messages format: expected non-empty list, got {type(messages)}")
+        
+        from langchain_core.messages import BaseMessage, HumanMessage, AIMessage as LangChainAIMessage
+        
+        if isinstance(messages[0], BaseMessage):
+            # LangChain messages: convert to structured dict
+            logger.info(f"Converting LangChain messages to structured format: {len(messages)} messages")
+            
+            structured_messages = []
+            for msg in messages:
+                if isinstance(msg, HumanMessage):
+                    role = "user"
+                elif isinstance(msg, LangChainAIMessage):
+                    role = "assistant"
+                else:
+                    logger.warning(f"Skipping unsupported message type: {type(msg)}")
+                    continue
+                
+                structured_messages.append({
+                    "role": role,
+                    "content": msg.content
+                })
+            
+        elif isinstance(messages[0], dict) and 'role' in messages[0] and 'content' in messages[0]:
+            # Already structured: use directly
+            logger.info(f"Processing structured messages: {len(messages)} messages")
+            structured_messages = messages
+            
+        else:
+            raise ValueError(f"Unsupported message format: {type(messages[0])}. Expected LangChain BaseMessage or dict with 'role' and 'content' keys.")
+        
         write_params = {
-            "content": content,
+            "messages": structured_messages,
             "apply_id": apply_id,
             "group_id": group_id,
             "user_id": user_id,
             "memory_config": memory_config,
         }
+        
         logger.debug(f"Passing memory_config to Data_write: {memory_config.config_id}")
 
         write_result = await data_write_tool.ainvoke(write_params)
