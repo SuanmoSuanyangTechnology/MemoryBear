@@ -6,6 +6,7 @@ import { Form, Button, Select, Space, Divider, InputNumber, Radio, type SelectPr
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
 import Editor from '../../Editor'
+import { edgeAttrs } from '../../../constant'
 
 interface CaseListProps {
   value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; operator: string; right: string; input_type?: string; }[] }>;
@@ -120,16 +121,7 @@ const CaseList: FC<CaseListProps> = ({
             graphRef.current?.addEdge({
               source: { cell: sourceCellId, port: sourcePortId },
               target: { cell: selectedNode.id, port: targetPortId },
-              attrs: {
-                line: {
-                  stroke: '#155EEF',
-                  strokeWidth: 1,
-                  targetMarker: {
-                    name: 'block',
-                    size: 8,
-                  },
-                },
-              },
+              ...edgeAttrs,
             });
           }
           graphRef.current?.removeCell(edge);
@@ -174,16 +166,7 @@ const CaseList: FC<CaseListProps> = ({
             graphRef.current?.addEdge({
               source: { cell: selectedNode.id, port: newPortId },
               target: { cell: targetCellId, port: targetPortId },
-              attrs: {
-                line: {
-                  stroke: '#155EEF',
-                  strokeWidth: 1,
-                  targetMarker: {
-                    name: 'block',
-                    size: 8,
-                  },
-                },
-              },
+              ...edgeAttrs
             });
           }
         }
