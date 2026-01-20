@@ -1,3 +1,4 @@
+import os
 import json
 import time
 from app.core.logging_config import get_agent_logger
@@ -13,7 +14,7 @@ from app.core.memory.agent.utils.session_tools import SessionService
 from app.core.memory.agent.utils.template_tools import TemplateService
 from app.core.memory.agent.services.optimized_llm_service import LLMServiceMixin
 
-template_root = PROJECT_ROOT_ + '/agent/utils/prompt'
+template_root = os.path.join(PROJECT_ROOT_, 'agent', 'utils', 'prompt')
 db_session = next(get_db())
 logger = get_agent_logger(__name__)
 
@@ -35,11 +36,16 @@ async def Split_The_Problem(state: ReadState) -> ReadState:
     memory_config = state.get('memory_config', None)
 
     history = await SessionService(store).get_history(group_id, group_id, group_id)
+    
+    # 生成 JSON schema 以指导 LLM 输出正确格式
+    json_schema = ProblemExtensionResponse.model_json_schema()
+    
     system_prompt = await problem_service.template_service.render_template(
         template_name='problem_breakdown_prompt.jinja2',
         operation_name='split_the_problem',
         history=history,
-        sentence=content
+        sentence=content,
+        json_schema=json_schema
     )
     
     try:
@@ -147,11 +153,16 @@ async def Problem_Extension(state: ReadState) -> ReadState:
         data = []
 
     history = await SessionService(store).get_history(group_id, group_id, group_id)
+    
+    # 生成 JSON schema 以指导 LLM 输出正确格式
+    json_schema = ProblemExtensionResponse.model_json_schema()
+    
     system_prompt = await problem_service.template_service.render_template(
         template_name='Problem_Extension_prompt.jinja2',
         operation_name='problem_extension',
         history=history,
-        questions=databasets
+        questions=databasets,
+        json_schema=json_schema
     )
 
     try:
