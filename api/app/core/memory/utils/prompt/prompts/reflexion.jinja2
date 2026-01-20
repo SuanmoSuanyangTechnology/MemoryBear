@@ -63,7 +63,7 @@
 **脱敏字段**: name、entity1_name、entity2_name、description、relationship
 
 ## 4. 处理流程
-
+###如果存在冲突数据执行以下步骤，不存在返回【】在data中
 ### 步骤1: 类型匹配验证
 **匹配规则**:
 - baseline="TIME": 只处理时间相关冲突(涉及时间表达式、日期、时间点)
@@ -78,7 +78,7 @@
 
 ### 步骤2: 冲突数据分组
 **分组策略**:
-- 时间冲突组: 涉及用户时间的记录
+- 时间冲突组: 涉及用户时间的记录比如（生日在2月17...）
 - 活动时间冲突组: 同一活动不同时间的记录  
 - 事实冲突组: 同一实体不同属性的记录
 - 其他冲突组: 其他类型冲突记录
@@ -97,11 +97,12 @@
 ### 处理规则
 
 ** baseline是TIME
-    -保留正确记录不变修改错误记录的expired_at为当前时间(2025-12-16T12:00:00),以及name需要修改成正确的
-** baseline不是TIME
+    - 只处理时间相关的内容，比如时间表达式、日期、时间点
+    -保留正确记录不变修改错误记录的expired_at为当前时间，比如(2025-12-16T12:00:00)
+** baseline是FACT或者HYBRID
+    - 处理不是时间相关的内容
     - 修改字段内容（ name、entity1_name、entity2_name、description、relationship）字段内容是否正确，如果不正确，需要对这些字段的内容重新生成，则不需要修改expired_at字段,
     如果涉及到修改entity1_name/entity2_name字段的时候，同时也需要修改description字段，输出修改前和修改后的放入change里面的field
-
 **核心原则**:
 - 只输出需要修改的记录
 - 优先保留策略: 时间冲突保留最可信created_at时间，事实冲突选择最新且可信度最高记录
@@ -110,21 +111,25 @@
 - 脱敏变更记录: 隐私脱敏变更也必须在change字段中记录{% endif %}
 - 不可修改数据: 数据被判定为正确时不可修改，无数据可输出时为空
 - 输出的结果reflexion字段中的reason字段和solution不允许含有（expired_at设为2024-01-01T00:00:00Z、memory_verify=true、memory_verify=false)等原数据字段以及涉及需要修改的字段以及内容，
-    ，如果是FACT，只记录事实冲突相关的数据；如果是TIME，只记录时间冲突相关的数据；如果是HYBRID，则记录所有冲突相关的数据
+    ，如果是FACT，只记录事实冲突相关的数据；如果是TIME，只记录时间冲突相关的数据；如果是HYBRID，则记录所有冲突相关的数据,如果存在隐私审核，隐私审核是true，也需要放到reflexion的reason字段和solution
 
 **变更记录格式**:
 ```json
 "change": [
   {
     "field": [
-      {"id":修改字段对应的ID}
-      {"statement_id":需要修改的对象对应的statement_id}
-      {"字段名1": ["修改前的值1","修改后的值1"]},
-      {"字段名2": ["修改前的值2","修改后的值2"]}
+      {"id": "修改字段对应的ID"},
+      {"字段名1": ["修改前的值1", "修改后的值1"]},
+      {"字段名2": ["修改前的值2", "修改后的值2"]}
     ]
   }
 ]
 ```
+
+**resolved_memory格式说明**:
+- 对于TIME类型冲突: 只需expired_at字段即可
+- 对于FACT/HYBRID类型冲突: 需要包含完整的记录对象（包括name、entity1_name、entity2_name、description、relationship等所有相关字段）
+- resolved_memory中只包含需要修改的记录，不需要修改的记录不要包含在内
 
 **类型不匹配处理**:
 - 冲突类型与baseline不匹配时，resolved设为null
@@ -157,7 +162,8 @@
         "conflict": true
       },
       "reflexion": {
-        "reason": "该冲突类型的原因分析，如果是FACT就是存在事实冲突，分析该冲突原因，如果是TIME就是存在时间冲突，分析该冲突原因，如果是HYBRID，可以输出存在时间与事实的混合冲突再添加上原因分析，
+        "reason": "该冲突类型的原因分析，如果是FACT就是存在事实冲突，分析该冲突原因，如果是TIME就是存在时间冲突，分析该冲突原因，如果是HYBRID，可以输出存在时间与事实的混合冲突再添加上原因分析，如果
+        隐私审核打开的时候如果存在冲突，分析该冲突的原因
         不可以随意分配冲突类型以及原因，不允许输出字段比如（statement、description、entity1_name、entity2_name、name、memory_verify、expired_at、conflict）等类似这种",
         "solution": "该冲突类型的解决方案（不允许输出字段比如（statement、description、entity1_name、entity2_name、name、memory_verify、expired_at、conflict）等类似这种）"
       },
