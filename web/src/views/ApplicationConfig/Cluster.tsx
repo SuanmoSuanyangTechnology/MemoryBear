@@ -58,16 +58,14 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
       }))
     }
 
-    console.log('params', params)
-
     return new Promise((resolve, reject) => {
       form.validateFields().then(() => {
         saveMultiAgentConfig(id as string, params)
-          .then(() => {
+          .then((res) => {
             if (flag) {
               message.success(t('common.saveSuccess'))
             }
-            resolve(true)
+            resolve(res)
           })
           .catch(error => {
             reject(error)

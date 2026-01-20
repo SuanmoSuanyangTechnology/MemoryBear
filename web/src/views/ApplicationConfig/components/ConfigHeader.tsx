@@ -11,7 +11,7 @@ import exportIcon from '@/assets/images/export_hover.svg'
 import deleteIcon from '@/assets/images/delete_hover.svg'
 import type { Application, ApplicationModalRef } from '@/views/ApplicationManagement/types';
 import ApplicationModal from '@/views/ApplicationManagement/components/ApplicationModal'
-import type { CopyModalRef, WorkflowRef } from '../types'
+import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef } from '../types'
 import { deleteApplication } from '@/api/application'
 import CopyModal from './CopyModal'
 
@@ -30,10 +30,11 @@ interface ConfigHeaderProps {
   handleChangeTab: (key: string) => void;
   refresh: () => void;
   workflowRef: React.RefObject<WorkflowRef>
+  appRef?: React.RefObject<AgentRef | ClusterRef | WorkflowRef>
 }
 const ConfigHeader: FC<ConfigHeaderProps> = ({ 
   application, activeTab, handleChangeTab, refresh,
-  workflowRef
+  workflowRef,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -48,7 +49,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     }))
   }
   const formatMenuItems = () => {
-    const items =  ['edit', 'copy', 'delete'].map(key => ({
+    const items =  ['edit', 'copy', 'export', 'delete'].map(key => ({
       key,
       icon: <img src={menuIcons[key]} className="rb:w-4 rb:h-4 rb:mr-2" />,
       label: t(`common.${key}`),
@@ -59,7 +60,6 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     }
   }
   const handleClick: MenuProps['onClick'] = ({ key }) => {
-    console.log('key', key)
     switch (key) {
       case 'edit':
         applicationModalRef.current?.handleOpen(application as Application)
