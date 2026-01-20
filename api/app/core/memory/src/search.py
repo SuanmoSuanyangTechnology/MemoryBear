@@ -131,179 +131,60 @@ def normalize_scores(results: List[Dict[str, Any]], score_field: str = "score") 
     return results
 
 
-# ============================================================================
-# 以下函数已被 rerank_with_activation 替代，暂时保留以供参考
-# ============================================================================
 
-# def rerank_hybrid_results(
-#     keyword_results: Dict[str, List[Dict[str, Any]]],
-#     embedding_results: Dict[str, List[Dict[str, Any]]],
-#     alpha: float = 0.6,
-#     limit: int = 10
-# ) -> Dict[str, List[Dict[str, Any]]]:
-#     """
-#     Rerank hybrid search results by combining BM25 and embedding scores.
-#     
-#     已废弃：此函数功能已被 rerank_with_activation 完全替代
-#
-#     Args:
-#         keyword_results: Results from keyword/BM25 search
-#         embedding_results: Results from embedding search
-#         alpha: Weight for BM25 scores (1-alpha for embedding scores)
-#         limit: Maximum number of results to return per category
-#
-#     Returns:
-#         Reranked results with combined scores
-#     """
-#     reranked = {}
-#
-#     for category in ["statements", "chunks", "entities","summaries"]:
-#         keyword_items = keyword_results.get(category, [])
-#         embedding_items = embedding_results.get(category, [])
-#
-#         # Normalize scores within each search type
-#         keyword_items = normalize_scores(keyword_items, "score")
-#         embedding_items = normalize_scores(embedding_items, "score")
-#
-#         # Create a combined pool of unique items
-#         combined_items = {}
-#
-#         # Add keyword results with BM25 scores
-#         for item in keyword_items:
-#             item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
-#             if item_id:
-#                 combined_items[item_id] = item.copy()
-#                 combined_items[item_id]["bm25_score"] = item.get("normalized_score", 0)
-#                 combined_items[item_id]["embedding_score"] = 0  # Default
-#
-#         # Add or update with embedding results
-#         for item in embedding_items:
-#             item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
-#             if item_id:
-#                 if item_id in combined_items:
-#                     # Update existing item with embedding score
-#                     combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
-#                 else:
-#                     # New item from embedding search only
-#                     combined_items[item_id] = item.copy()
-#                     combined_items[item_id]["bm25_score"] = 0  # Default
-#                     combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
-#
-#         # Calculate combined scores and rank
-#         for item_id, item in combined_items.items():
-#             bm25_score = item.get("bm25_score", 0)
-#             embedding_score = item.get("embedding_score", 0)
-#
-#             # Combined score: weighted average of normalized scores
-#             combined_score = alpha * bm25_score + (1 - alpha) * embedding_score
-#             item["combined_score"] = combined_score
-#
-#             # Keep original score for reference
-#             if "score" not in item and bm25_score > 0:
-#                 item["score"] = bm25_score
-#             elif "score" not in item and embedding_score > 0:
-#                 item["score"] = embedding_score
-#
-#         # Sort by combined score and limit results
-#         sorted_items = sorted(
-#             combined_items.values(),
-#             key=lambda x: x.get("combined_score", 0),
-#             reverse=True
-#         )[:limit]
-#
-#         reranked[category] = sorted_items
-#
-#     return reranked
-
-# def rerank_with_forgetting_curve(
-#     keyword_results: Dict[str, List[Dict[str, Any]]],
-#     embedding_results: Dict[str, List[Dict[str, Any]]],
-#     alpha: float = 0.6,
-#     limit: int = 10,
-#     forgetting_config: ForgettingEngineConfig | None = None,
-#     now: datetime | None = None,
-# ) -> Dict[str, List[Dict[str, Any]]]:
-#     """
-#     Rerank hybrid results with a forgetting curve applied to combined scores.
-#     
-#     已废弃：此函数功能已被 rerank_with_activation 完全替代
-#     rerank_with_activation 提供了更完整的遗忘曲线支持（结合激活度）
-#
-#     The forgetting curve reduces scores for older memories or weaker connections.
-#
-#     Args:
-#         keyword_results: Results from keyword/BM25 search
-#         embedding_results: Results from embedding search
-#         alpha: Weight for BM25 scores (1-alpha for embedding scores)
-#         limit: Maximum number of results to return per category
-#         forgetting_config: Configuration for the forgetting engine
-#         now: Optional current time override for testing
-#
-#     Returns:
-#         Reranked results with combined and final scores (after forgetting)
-#     """
-#     engine = ForgettingEngine(forgetting_config or ForgettingEngineConfig())
-#     now_dt = now or datetime.now()
-#
-#     reranked: Dict[str, List[Dict[str, Any]]] = {}
-#
-#     for category in ["statements", "chunks", "entities","summaries"]:
-#         keyword_items = keyword_results.get(category, [])
-#         embedding_items = embedding_results.get(category, [])
-#
-#         # Normalize scores within each search type
-#         keyword_items = normalize_scores(keyword_items, "score")
-#         embedding_items = normalize_scores(embedding_items, "score")
-#
-#         combined_items: Dict[str, Dict[str, Any]] = {}
-#
-#         # Combine two result sets by ID
-#         for src_items, is_embedding in (
-#             (keyword_items, False), (embedding_items, True)
-#         ):
-#             for item in src_items:
-#                 item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
-#                 if not item_id:
-#                     continue
-#                 existing = combined_items.get(item_id)
-#                 if not existing:
-#                     combined_items[item_id] = item.copy()
-#                     combined_items[item_id]["bm25_score"] = 0
-#                     combined_items[item_id]["embedding_score"] = 0
-#                 # Update normalized score from the right source
-#                 if is_embedding:
-#                     combined_items[item_id]["embedding_score"] = item.get("normalized_score", 0)
-#                 else:
-#                     combined_items[item_id]["bm25_score"] = item.get("normalized_score", 0)
-#
-#         # Calculate scores and apply forgetting weights
-#         for item_id, item in combined_items.items():
-#             bm25_score = float(item.get("bm25_score", 0) or 0)
-#             embedding_score = float(item.get("embedding_score", 0) or 0)
-#             combined_score = alpha * bm25_score + (1 - alpha) * embedding_score
-#
-#             # Estimate time elapsed in days
-#             dt = _parse_datetime(item.get("created_at"))
-#             if dt is None:
-#                 time_elapsed_days = 0.0
-#             else:
-#                 time_elapsed_days = max(0.0, (now_dt - dt).total_seconds() / 86400.0)
-#
-#             # Memory strength (currently set to default value)
-#             memory_strength = 1.0
-#             forgetting_weight = engine.calculate_weight(
-#                 time_elapsed=time_elapsed_days, memory_strength=memory_strength
-#             )
-#             final_score = combined_score * forgetting_weight
-#             item["combined_score"] = final_score
-#
-#         sorted_items = sorted(
-#             combined_items.values(), key=lambda x: x.get("combined_score", 0), reverse=True
-#         )[:limit]
-#
-#         reranked[category] = sorted_items
-#
-#     return reranked
+def _deduplicate_results(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Remove duplicate items from search results based on content.
+    
+    Deduplication strategy:
+    1. First try to deduplicate by ID (id, uuid, or chunk_id)
+    2. Then deduplicate by content hash (text, content, statement, or name fields)
+    
+    Args:
+        items: List of search result items
+        
+    Returns:
+        Deduplicated list of items, preserving the order of first occurrence
+    """
+    seen_ids = set()
+    seen_content = set()
+    deduplicated = []
+    
+    for item in items:
+        # Try multiple ID fields to identify unique items
+        item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
+        
+        # Extract content from various possible fields
+        content = (
+            item.get("text") or 
+            item.get("content") or 
+            item.get("statement") or 
+            item.get("name") or 
+            ""
+        )
+        
+        # Normalize content for comparison (strip whitespace and lowercase)
+        normalized_content = str(content).strip().lower() if content else ""
+        
+        # Check if we've seen this ID or content before
+        is_duplicate = False
+        
+        if item_id and item_id in seen_ids:
+            is_duplicate = True
+        elif normalized_content and normalized_content in seen_content:
+            # Only check content duplication if content is not empty
+            is_duplicate = True
+        
+        if not is_duplicate:
+            # Mark as seen
+            if item_id:
+                seen_ids.add(item_id)
+            if normalized_content:  # Only track non-empty content
+                seen_content.add(normalized_content)
+            
+            deduplicated.append(item)
+    
+    return deduplicated
 
 
 def rerank_with_activation(
@@ -364,7 +245,7 @@ def rerank_with_activation(
         keyword_items = normalize_scores(keyword_items, "score")
         embedding_items = normalize_scores(embedding_items, "score")
         
-        # 步骤 2: 按 ID 合并结果
+        # 步骤 2: 按 ID 合并结果（去重）
         combined_items: Dict[str, Dict[str, Any]] = {}
         
         # 添加关键词结果
@@ -506,6 +387,9 @@ def rerank_with_activation(
             else:
                 # 无激活值：使用内容相关性分数
                 item["final_score"] = item.get("base_score", 0)
+        
+        # 最终去重确保没有重复项
+        sorted_items = _deduplicate_results(sorted_items)
         
         reranked[category] = sorted_items
     
@@ -1144,96 +1028,3 @@ async def search_chunk_by_chunk_id(
     )
     return {"chunks": chunks}
 
-
-# def main():
-#     """Main entry point for the hybrid graph search CLI.
-
-#     Parses command line arguments and executes search with specified parameters.
-#     Supports keyword, embedding, and hybrid search modes.
-#     """
-#     parser = argparse.ArgumentParser(description="Hybrid graph search with keyword and embedding options")
-#     parser.add_argument(
-#         "--query", "-q", required=True, help="Free-text query to search"
-#     )
-#     parser.add_argument(
-#         "--search-type",
-#         "-t",
-#         choices=["keyword", "embedding", "hybrid"],
-#         default="hybrid",
-#         help="Search type: keyword (text matching), embedding (semantic), or hybrid (both) (default: hybrid)"
-#     )
-#     parser.add_argument(
-#         "--config-id",
-#         "-c",
-#         type=int,
-#         required=True,
-#         help="Database configuration ID (required)",
-#     )
-#     parser.add_argument(
-#         "--group-id",
-#         "-g",
-#         default=None,
-#         help="Optional group_id to filter results (default: None)",
-#     )
-#     parser.add_argument(
-#         "--limit",
-#         "-k",
-#         type=int,
-#         default=5,
-#         help="Max number of results per type (default: 5)",
-#     )
-#     parser.add_argument(
-#         "--include",
-#         "-i",
-#         nargs="+",
-#         default=["statements", "chunks", "entities", "summaries"],
-#         choices=["statements", "chunks", "entities", "summaries"],
-#         help="Which targets to search for embedding search (default: statements chunks entities summaries)"
-#     )
-#     parser.add_argument(
-#         "--output",
-#         "-o",
-#         default="search_results.json",
-#         help="Path to save the search results JSON (default: search_results.json)",
-#     )
-#     parser.add_argument(
-#         "--rerank-alpha",
-#         "-a",
-#         type=float,
-#         default=0.6,
-#         help="Weight for BM25 scores in reranking (0.0-1.0, higher values favor keyword search) (default: 0.6)",
-#     )
-#     parser.add_argument(
-#         "--forgetting-rerank",
-#         action="store_true",
-#         help="Apply forgetting curve during reranking for hybrid search.",
-#     )
-#     parser.add_argument(
-#         "--llm-rerank",
-#         action="store_true",
-#         help="Apply LLM-based reranking for hybrid search.",
-#     )
-#     args = parser.parse_args()
-
-#     # Load memory config from database
-#     from app.services.memory_config_service import MemoryConfigService
-#     memory_config = MemoryConfigService.load_memory_config(args.config_id)
-
-#     asyncio.run(
-#         run_hybrid_search(
-#             query_text=args.query,
-#             search_type=args.search_type,
-#             group_id=args.group_id,
-#             limit=args.limit,
-#             include=args.include,
-#             output_path=args.output,
-#             memory_config=memory_config,
-#             rerank_alpha=args.rerank_alpha,
-#             use_forgetting_rerank=args.forgetting_rerank,
-#             use_llm_rerank=args.llm_rerank,
-#         )
-#     )
-
-
-# if __name__ == "__main__":
-#     main()

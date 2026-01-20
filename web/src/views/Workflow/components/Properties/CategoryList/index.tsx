@@ -5,6 +5,7 @@ import { Graph, Node } from '@antv/x6';
 
 import Editor from '../../Editor';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
+import { edgeAttrs } from '../../../constant'
 
 interface CategoryListProps {
   parentName: string;
@@ -70,16 +71,7 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
             graphRef.current?.addEdge({
               source: { cell: sourceCellId, port: sourcePortId },
               target: { cell: selectedNode.id, port: targetPortId },
-              attrs: {
-                line: {
-                  stroke: '#155EEF',
-                  strokeWidth: 1,
-                  targetMarker: {
-                    name: 'block',
-                    size: 8,
-                  },
-                },
-              },
+              ...edgeAttrs
             });
           }
           return;
@@ -110,16 +102,7 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
             graphRef.current?.addEdge({
               source: { cell: selectedNode.id, port: newPortId },
               target: { cell: targetCellId, port: targetPortId },
-              attrs: {
-                line: {
-                  stroke: '#155EEF',
-                  strokeWidth: 1,
-                  targetMarker: {
-                    name: 'block',
-                    size: 8,
-                  },
-                },
-              },
+              ...edgeAttrs
             });
           }
         }
