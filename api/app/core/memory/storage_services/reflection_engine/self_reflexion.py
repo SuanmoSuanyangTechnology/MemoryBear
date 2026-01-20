@@ -18,13 +18,11 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from app.core.memory.llm_tools.openai_client import OpenAIClient
-from app.core.memory.utils.config import definitions as config_defs
 from app.core.memory.utils.config.get_data import (
     extract_and_process_changes,
     get_data,
     get_data_statement,
 )
-
 from app.core.models.base import RedBearModelConfig
 from app.repositories.neo4j.cypher_queries import (
     neo4j_query_all,

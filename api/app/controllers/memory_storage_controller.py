@@ -1,10 +1,8 @@
 import os
-import uuid
 from typing import Optional
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
-from app.core.memory.utils.self_reflexion_utils import self_reflexion
 from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -457,19 +455,4 @@ async def get_recent_activity_stats_api(
     except Exception as e:
         api_logger.error(f"Recent activity stats failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "最近活动统计失败", str(e))
-
-
-
-
-@router.get("/self_reflexion")
-async def self_reflexion_endpoint(host_id: uuid.UUID) -> str:
-    """
-    自我反思接口，自动对检索出的信息进行自我反思并返回自我反思结果。
-
-    Args:
-        None
-    Returns:
-        自我反思结果。
-    """
-    return await self_reflexion(host_id)
 
