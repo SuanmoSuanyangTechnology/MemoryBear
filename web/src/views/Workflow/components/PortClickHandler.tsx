@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Popover } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { nodeLibrary, graphNodeLibrary } from '../constant';
+import { nodeLibrary, graphNodeLibrary, edgeAttrs } from '../constant';
 
 interface PortClickHandlerProps {
   graph: any;
@@ -149,16 +149,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       graph.addEdge({
         source: { cell: sourceNode.id, port: sourcePort },
         target: { cell: newNode.id, port: targetPort },
-        attrs: {
-          line: {
-            stroke: '#155EEF',
-            strokeWidth: 1,
-            targetMarker: {
-              name: 'block',
-              size: 8,
-            },
-          },
-        },
+        ...edgeAttrs
         // zIndex: sourceNodeData.cycle && sourceNodeType == 'cycle-start' ? 1 : sourceNodeData.cycle ? 2 : 0
       });
       

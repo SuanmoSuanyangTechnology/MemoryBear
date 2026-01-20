@@ -1,6 +1,6 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next';
-import { Form, Select, Input, Button } from 'antd'
+import { Form, Select, Input, Button, InputNumber } from 'antd'
 import VariableSelect from '../VariableSelect'
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
@@ -93,6 +93,7 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
             </Button>
           </div>
           {fields.map(({ key, name }, index) => {
+            const currentType = value?.[index]?.type;
             const currentInputType = value?.[index]?.input_type;
             
             return (
@@ -131,7 +132,8 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
                   </div>
                   
                   <Form.Item name={[name, 'value']} noStyle>
-                    {currentInputType === 'variable' ? (
+                    {currentInputType === 'variable'
+                      ? (
                       <VariableSelect
                         placeholder={t('common.pleaseSelect')}
                         options={availableOptions.filter(option => {
@@ -143,7 +145,15 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
                         variant="borderless"
                         size="small"
                       />
-                    ) : (
+                    )
+                    : currentType === 'number'
+                    ? <InputNumber
+                      placeholder={t('common.pleaseEnter')}
+                      variant="borderless"
+                      className="rb:w-full! rb:my-1!"
+                      onChange={(value) => form.setFieldValue([name, 'value'], value)}
+                    />
+                    : (
                       <Input.TextArea
                         placeholder={t('common.pleaseEnter')}
                         rows={3}
