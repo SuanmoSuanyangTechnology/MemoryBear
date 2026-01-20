@@ -13,26 +13,25 @@ import type {
   Config,
   ModelConfig,
   AgentRef,
-  KnowledgeBase,
-  KnowledgeConfig,
-  Variable,
   MemoryConfig,
   AiPromptModalRef,
   Source,
-  ToolOption
+  ChatVariableConfigModalRef
 } from './types'
+import type { Variable } from './components/VariableList/types'
+import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Model } from '@/views/ModelManagement/types'
 import { getModelList } from '@/api/models';
 import { saveAgentConfig } from '@/api/application'
-import Knowledge from './components/Knowledge'
-import VariableList from './components/VariableList'
+import Knowledge from './components/Knowledge/Knowledge'
+import VariableList from './components/VariableList/VariableList'
 import { getApplicationConfig } from '@/api/application'
-import { getKnowledgeBaseList } from '@/api/knowledgeBase'
 import { memoryConfigListUrl } from '@/api/memory'
 import CustomSelect from '@/components/CustomSelect'
 import aiPrompt from '@/assets/images/application/aiPrompt.png'
 import AiPromptModal from './components/AiPromptModal'
-import ToolList from './components/ToolList'
+import ToolList from './components/ToolList/ToolList'
+import ChatVariableConfigModal from './components/ChatVariableConfigModal';
 
 const DescWrapper: FC<{desc: string, className?: string}> = ({desc, className}) => {
   return (
@@ -66,7 +65,7 @@ const SwitchWrapper: FC<{ title: string, desc?: string, name: string | string[];
     </div>
   )
 }
-const SelectWrapper: FC<{ title: string, desc: string, name: string, url: string }> = ({ title, desc, name, url }) => {
+const SelectWrapper: FC<{ title: string, desc: string, name: string | string[], url: string }> = ({ title, desc, name, url }) => {
   const { t } = useTranslation();
   return (
     <>
@@ -77,6 +76,7 @@ const SelectWrapper: FC<{ title: string, desc: string, name: string, url: string
         className="rb:mb-0!"
       >
         <CustomSelect
+          placeholder={t('common.pleaseSelect')}
           url={url}
           hasAll={false}
           valueKey='config_id'
@@ -99,54 +99,22 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   const [modelList, setModelList] = useState<Model[]>([])
   const [defaultModel, setDefaultModel] = useState<Model | null>(null)
   const [chatList, setChatList] = useState<ChatData[]>([])
-  const [formData, setFormData] = useState<{
-    default_model_config_id?: string,
-    model_parameters?: Config['model_parameters'],
-    tools: ToolOption[],
-  } | null>(null)
-  const values = Form.useWatch<{
-    memoryEnabled: boolean;
-    memory_content?: string | number;
-  } & Config>([], form)
-
-  const [knowledgeConfig, setKnowledgeConfig] = useState<KnowledgeConfig>({ knowledge_bases: [] })  
-  const [variableList, setVariableList] = useState<Variable[]>([])  
+  const values = Form.useWatch<Config>([], form) 
   const [isSave, setIsSave] = useState(false)
   const initialized = useRef(false)
-  const [toolList, setToolList] = useState<ToolOption[]>([])
   
   // 初始化完成标记
   useEffect(() => {
-    if (data && values && formData) {
+    if (data) {
       initialized.current = true
     }
-  }, [data, values, formData])
+  }, [data])
 
-  useEffect(() => {
-    if (!initialized.current) return
-    if (isSave) return
-    setIsSave(true)
-  }, [knowledgeConfig])
-  useEffect(() => {
-    if (!initialized.current) return
-    if (isSave) return
-    setIsSave(true)
-  }, [variableList])
-  useEffect(() => {
-    if (!initialized.current) return
-    if (isSave) return
-    setIsSave(true)
-  }, [formData])
   useEffect(() => {
     if (!initialized.current) return
     if (isSave) return
     setIsSave(true)
   }, [values])
-  useEffect(() => {
-    if (!initialized.current) return
-    if (isSave) return
-    setIsSave(true)
-  }, [toolList])
 
   useEffect(() => {
     getModels()
@@ -157,67 +125,18 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     setLoading(true)
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
-      setData({
-        ...response,
-        tools: Array.isArray(response.tools) ? response.tools : []
-      })
-      const { memory, tools } = response
+      let allTools = Array.isArray(response.tools) ? response.tools : []
       form.setFieldsValue({
         ...response,
-        memoryEnabled: memory?.enabled || false,
-        memory_content: memory?.memory_content ? Number(memory?.memory_content) : undefined,
-        tools: Array.isArray(tools) ? tools : []
+        tools: allTools
       })
-      setFormData({
-        default_model_config_id: response.default_model_config_id,
-        model_parameters: response.model_parameters || {},
-        tools: Array.isArray(tools) ? tools : []
+      setData({
+        ...response,
+        tools: allTools
       })
-      if (response?.knowledge_retrieval?.knowledge_bases?.length) {
-        getDefaultKnowledgeList(response)
-      }
-      if (response?.tools?.length) {
-        setToolList(response?.tools)
-      }
     }).finally(() => {
       setLoading(false)
     })
-  }
-  const getDefaultKnowledgeList = (data: Config) => {
-    if (!data || !data.knowledge_retrieval || !data.knowledge_retrieval?.knowledge_bases?.length) {
-      return
-    }
-    const initialList = [...(data?.knowledge_retrieval?.knowledge_bases || [])]
-    getKnowledgeBaseList(undefined, {
-      kb_ids: initialList.map(vo => vo.kb_id).join(','),
-      page: 1,
-      pagesize: 100,
-    })
-      .then(res => {
-        const list = res.items || []
-        const knowledge_bases: KnowledgeBase[] = list.map(item => {
-          const filterItem = initialList.find(vo => vo.kb_id === item.id)
-          return {
-            ...item,
-            ...filterItem
-          }
-        })
-        setKnowledgeConfig(prev => ({
-          ...prev,
-          knowledge_bases: [...knowledge_bases]
-        }))
-        setData((prev) => {
-          prev = prev as Config
-          const knowledge_retrieval: KnowledgeConfig = {
-            ...(prev?.knowledge_retrieval || {}),
-            knowledge_bases: [...knowledge_bases]
-          }
-          return {
-            ...(prev || {}),
-            knowledge_retrieval
-          }
-        })
-      })
   }
 
   const refresh = (vo: ModelConfig, type: Source) => {
@@ -227,15 +146,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         default_model_config_id,
         model_parameters: {...rest}
       })
-      setFormData((prevState) => {
-        const prev = prevState as Config
-        return {
-          ...(prev || {}),
-          default_model_config_id,
-          model_parameters: {...rest}
-        };
-      })
-      if (default_model_config_id === formData?.default_model_config_id) {
+      if (default_model_config_id === values?.default_model_config_id) {
         setChatList([{
           label: vo.label || '',
           model_config_id: default_model_config_id || '',
@@ -279,24 +190,20 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   // 保存Agent配置
   const handleSave = (flag = true) => {
     if (!isSave || !data) return Promise.resolve()
-    const { memoryEnabled, memory_content, ...rest } = values
-    const { knowledge_bases = [], ...knowledgeRest } = knowledgeConfig || {}
-
-    
+    const { memory, knowledge_retrieval, tools, ...rest } = values
+    const { knowledge_bases = [], ...knowledgeRest } = knowledge_retrieval || {}
+    const { memory_content } = memory || {}
     // 从原数据中获取memory的其他必要属性
     const originalMemory = data.memory || ({} as MemoryConfig)
     
     const params: Config = {
       ...data,
       ...rest,
-      ...(formData || {}),
       memory: {
         ...originalMemory,
-        enabled: memoryEnabled,
+        ...memory,
         memory_content: memory_content ? String(memory_content) : '',
-        max_history: originalMemory.max_history || '',
       },
-      variables: variableList || [],
       knowledge_retrieval: knowledge_bases.length > 0 ? {
         ...data.knowledge_retrieval,
         ...knowledgeRest,
@@ -305,14 +212,12 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
           ...(item.config || {})
         }))
       } as KnowledgeConfig : null,
-      tools: toolList.map(vo => ({
+      tools: tools.map(vo => ({
         tool_id: vo.tool_id,
         operation: vo.operation,
         enabled: vo.enabled
       }))
     }
-
-    console.log('params', rest, params)
     
     return new Promise((resolve, reject) => {
       saveAgentConfig(data.app_id, params)
@@ -338,8 +243,8 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     modelConfigModalRef.current?.handleOpen('chat')
   }
   useEffect(() => {
-    if (formData?.default_model_config_id && modelList.length > 0) {
-      const filterValue = modelList.find(item => item.id === formData.default_model_config_id)
+    if (values?.default_model_config_id && modelList.length > 0) {
+      const filterValue = modelList.find(item => item.id === values.default_model_config_id)
       setDefaultModel(filterValue as Model | null)
       setChatList([{
         label: filterValue?.name || '',
@@ -348,7 +253,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         list: []
       }])
     }
-  }, [modelList, formData?.default_model_config_id])
+  }, [modelList, values?.default_model_config_id])
 
   useImperativeHandle(ref, () => ({
     handleSave
@@ -360,8 +265,31 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   }
   const updatePrompt = (value: string) => {
     form.setFieldValue('system_prompt', value)
+    const variables = value.match(/\{\{([^}]+)\}\}/g)?.map(match => match.slice(2, -2)) || []
+    const uniqueVariables = [...new Set(variables)]
+    const newVariableList: Variable[] = uniqueVariables.map((name, index) => ({
+      index,
+      type: 'text',
+      name,
+      display_name: name,
+      required: false
+    }))
+    updateVariableList(newVariableList)
   }
 
+  const updateVariableList = (list: Variable[]) => {
+    form.setFieldValue('variables', [...list])
+    setChatVariables([...list])
+  }
+  const chatVariableConfigModalRef = useRef<ChatVariableConfigModalRef>(null)
+  const [chatVariables, setChatVariables] = useState<Variable[]>([])
+  const handleOpenVariableConfig = () => {
+    chatVariableConfigModalRef.current?.handleOpen(chatVariables)
+  }
+  const handleSaveChatVariable = (values: Variable[]) => {
+    setChatVariables(values)
+  }
+  console.log('values', values)
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
@@ -379,8 +307,9 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
             </Space>
           </div>
           <Form form={form}>
+            <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
+            <Form.Item name="model_parameters" hidden noStyle></Form.Item>
             <Space size={16} direction="vertical" style={{ width: '100%' }}>
-              {/* 提示词 */}
               <Card title={t('application.promptConfiguration')}>
                 <div className="rb:flex rb:items-center rb:justify-between rb:mb-2.75">
                   <div className="rb:font-medium rb:leading-5">
@@ -406,36 +335,31 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                 </Form.Item>
               </Card>
 
-              {/* 知识库 */}
-              <Knowledge
-                data={data?.knowledge_retrieval || { knowledge_bases: [] }} 
-                onUpdate={setKnowledgeConfig}
-              />
+              <Form.Item name="knowledge_retrieval" noStyle>
+                <Knowledge />
+              </Form.Item>
 
               {/* 记忆配置 */}
               <Card title={t('application.memoryConfiguration')}>
                 <Space size={24} direction='vertical' style={{ width: '100%' }}>
-                  <SwitchWrapper title="dialogueHistoricalMemory" desc="dialogueHistoricalMemoryDesc" name="memoryEnabled" />
+                  <SwitchWrapper title="dialogueHistoricalMemory" desc="dialogueHistoricalMemoryDesc" name={['memory', 'enabled']} />
                   <SelectWrapper 
                     title="selectMemoryContent" 
                     desc="selectMemoryContentDesc" 
-                    name="memory_content"
+                    name={['memory', 'memory_content']}
                     url={memoryConfigListUrl}
                   />
                 </Space>
               </Card>
 
-              {/* 变量配置 */}
-              <VariableList
-                data={data?.variables}
-                onUpdate={setVariableList}
-              />
+              <Form.Item name="variables">
+                <VariableList />
+              </Form.Item>
               
               {/* 工具配置 */}
-              <ToolList
-                data={data?.tools || []}
-                onUpdate={setToolList}
-              />
+              <Form.Item name="tools">
+                <ToolList />
+              </Form.Item>
             </Space>
           </Form>
         </Col>
@@ -444,6 +368,9 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
             {t('application.debuggingAndPreview')}
 
             <Space size={10}>
+              <Button type="primary" ghost onClick={handleOpenVariableConfig}>
+                {t('application.variableConfig')}
+              </Button>
               <Button type="primary" ghost onClick={handleAddModel}>
                 + {t('application.addModel')}
               </Button>
@@ -463,7 +390,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
 
       <ModelConfigModal
         modelList={modelList}
-        data={formData as Config}
+        data={values}
         ref={modelConfigModalRef}
         refresh={refresh}
       />
@@ -471,6 +398,10 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         ref={aiPromptModalRef}
         defaultModel={defaultModel}
         refresh={updatePrompt}
+      />
+      <ChatVariableConfigModal
+        ref={chatVariableConfigModalRef}
+        refresh={handleSaveChatVariable}
       />
     </>
   );

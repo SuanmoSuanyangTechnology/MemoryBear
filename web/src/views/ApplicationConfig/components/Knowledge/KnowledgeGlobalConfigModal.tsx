@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Form, InputNumber, Switch } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { RerankerConfig, KnowledgeGlobalConfigModalRef } from '../types'
+import type { RerankerConfig, KnowledgeGlobalConfigModalRef } from './types'
 import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect'
 import { getModelListUrl } from '@/api/models'
@@ -71,18 +71,18 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
         form={form}
         layout="vertical"
       >
-        <div className="rb:text-[#5B6167] rb:mb-[24px]">{t('application.globalConfigDesc')}</div>
+        <div className="rb:text-[#5B6167] rb:mb-6">{t('application.globalConfigDesc')}</div>
 
         {/* 结果重排 */}
-        <div className="rb:flex rb:items-center rb:justify-between rb:my-[24px]">
-          <div className="rb:text-[14px] rb:font-medium rb:leading-[20px]">
+        <div className="rb:flex rb:items-center rb:justify-between rb:my-6">
+          <div className="rb:text-[14px] rb:font-medium rb:leading-5">
             {t('application.rerankModel')}
-            <div className="rb:mt-[4px] rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-[16px]">{t('application.rerankModelDesc')}</div>
+            <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t('application.rerankModelDesc')}</div>
           </div>
           <FormItem
             name="rerank_model"
             valuePropName="checked"
-            className="rb:mb-[0px]!"
+            className="rb:mb-0!"
           >
             <Switch />
           </FormItem>
@@ -110,7 +110,12 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
             rules={[{ required: true, message: t('common.pleaseEnter') }]}
             extra={t('application.reranker_top_k_desc')}
           >
-            <InputNumber style={{ width: '100%' }} min={1} max={20} />
+            <InputNumber
+              style={{ width: '100%' }}
+              min={1}
+              max={20}
+              onChange={(value) => form.setFieldValue('reranker_top_k', value)}
+            />
           </FormItem>
         </>}
       </Form>

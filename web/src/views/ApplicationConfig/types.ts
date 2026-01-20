@@ -1,4 +1,6 @@
-import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types'
+import type { KnowledgeConfig } from './components/Knowledge/types'
+import type { Variable } from './components/VariableList/types'
+import type { ToolOption } from './components/ToolList/types'
 import type { ChatItem } from '@/components/Chat/types'
 import type { GraphRef } from '@/views/Workflow/types';
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
@@ -14,55 +16,6 @@ export interface ModelConfig {
   n: number;
   stop?: string;
 }
-
-/*************** 知识库相关 ******************/
-export interface RerankerConfig {
-  rerank_model?: boolean | undefined;
-  reranker_id?: string | undefined;
-  reranker_top_k?: number | undefined;
-}
-export interface KnowledgeConfigForm {
-  kb_id?: string;
-  similarity_threshold?: number;
-  vector_similarity_weight?: number;
-  top_k?: number;
-  retrieve_type?: 'participle' | 'semantic' | 'hybrid';
-}
-export interface KnowledgeBase extends KnowledgeBaseListItem, KnowledgeConfigForm {
-  config?: KnowledgeConfigForm
-}
-export interface KnowledgeConfig extends RerankerConfig {
-  knowledge_bases: KnowledgeBase[];
-}
-
-export interface KnowledgeConfigModalRef {
-  handleOpen: (data: KnowledgeBase) => void;
-}
-export interface KnowledgeGlobalConfigModalRef {
-  handleOpen: () => void;
-}
-/*********** end 知识库相关 ******************/
-
-/*************** 变量相关 ******************/
-export interface Variable {
-  index?: number;
-  name: string;
-  display_name: string;
-  type: string;
-  required: boolean;
-  max_length?: number;
-  description?: string;
-
-  key: string;
-  default_value?: string;
-  options?: string[];
-  api_extension?: string;
-  hidden?: boolean;
-}
-export interface VariableEditModalRef {
-  handleOpen: (values?: Variable) => void;
-}
-/*********** end 变量相关 ******************/
 export interface MemoryConfig {
   enabled: boolean;
   memory_content?: string;
@@ -131,17 +84,6 @@ export interface ModelConfigModalData {
 export interface AiPromptModalRef {
   handleOpen: () => void;
 }
-export interface KnowledgeModalRef {
-  handleOpen: (config?: KnowledgeConfig[]) => void;
-}
-export interface ApiExtensionModalData {
-  name: string;
-  apiEndpoint: string;
-  apiKey: string;
-}
-export interface ApiExtensionModalRef {
-  handleOpen: () => void;
-}
 export interface ChatData {
   label?: string;
   model_config_id?: string;
@@ -206,30 +148,6 @@ export interface AiPromptForm {
   message?: string;
   current_prompt?: string;
 }
-export interface ToolModalRef {
-  handleOpen: () => void;
-}
-
-export interface ToolOption {
-  value?: string | number | null;
-  label?: React.ReactNode;
-  description?: string;
-  children?: ToolOption[];
-  isLeaf?: boolean;
-  method_id?: string;
-  operation?: string;
-  parameters?: Parameter[];
-  tool_id?: string;
-  enabled?: boolean;
-}
-export interface Parameter {
-  name: string;
-  type: string;
-  description: string;
-  required: boolean;
-  default: any;
-  enum: null | string[];
-  minimum: number;
-  maximum: number;
-  pattern: null | string;
+export interface ChatVariableConfigModalRef {
+  handleOpen: (values: Variable[]) => void;
 }

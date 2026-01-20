@@ -3,18 +3,21 @@ import RbCard from '@/components/RbCard/Card'
 
 interface CardProps {
   title?: string | ReactNode;
+  subTitle?: string | ReactNode;
   children: ReactNode;
   extra?: ReactNode;
 }
 
 const Card: FC<CardProps> = ({
   title,
+  subTitle,
   children,
   extra,
 }) => {
   return (
     <RbCard
       title={title}
+      subTitle={subTitle}
       extra={extra}
       headerType="borderL"
       headerClassName="rb:before:bg-[#155EEF]! rb:before:h-[19px]"
