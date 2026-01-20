@@ -16,6 +16,7 @@ import InitialValuePlugin from './plugin/InitialValuePlugin';
 import CommandPlugin from './plugin/CommandPlugin';
 import Jinja2HighlightPlugin from './plugin/Jinja2HighlightPlugin';
 import LineNumberPlugin from './plugin/LineNumberPlugin';
+import BlurPlugin from './plugin/BlurPlugin';
 import { VariableNode } from './nodes/VariableNode'
 
 interface LexicalEditorProps {
@@ -113,8 +114,10 @@ const Editor: FC<LexicalEditorProps> =({
             display: flex;
             align-items: flex-start;
           }
-          .editor-content-with-numbers {
+          .editor-content-wrapper {
             flex: 1;
+          }
+          .editor-content-with-numbers {
             white-space: pre-wrap;
           }
           .editor-content-with-numbers p {
@@ -174,18 +177,20 @@ const Editor: FC<LexicalEditorProps> =({
                 <div className="line-numbers">
                   <div>1</div>
                 </div>
-                <ContentEditable
-                  className="editor-content-with-numbers"
-                  style={{
-                    minHeight: minheight,
-                    padding: '4px 0',
-                    outline: 'none',
-                    resize: 'none',
-                    fontSize: fontSize,
-                    lineHeight: lineHeight,
-                    border: 'none',
-                  }}
-                />
+                <div className="editor-content-wrapper">
+                  <ContentEditable
+                    className="editor-content-with-numbers"
+                    style={{
+                      minHeight: minheight,
+                      padding: '4px 0',
+                      outline: 'none',
+                      resize: 'none',
+                      fontSize: fontSize,
+                      lineHeight: lineHeight,
+                      border: 'none',
+                    }}
+                  />
+                </div>
               </div>
             ) : (
               <ContentEditable
@@ -207,8 +212,8 @@ const Editor: FC<LexicalEditorProps> =({
               style={{
                 minHeight: placeHolderMinheight,
                 position: 'absolute',
-                top: variant === 'borderless' ? '0' : '6px',
-                left: enableJinja2 ? '59px' : (variant === 'borderless' ? '0' : '11px'),
+                top: enableJinja2 ? '4px' : variant === 'borderless' ? '0' : '6px',
+                left: enableJinja2 ? '16px' : (variant === 'borderless' ? '0' : '11px'),
                 color: '#A8A9AA',
                 fontSize: fontSize,
                 lineHeight: placeHolderMinheight,
@@ -227,6 +232,7 @@ const Editor: FC<LexicalEditorProps> =({
         <AutocompletePlugin options={options} enableJinja2={enableJinja2} />
         <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
         <InitialValuePlugin value={value} options={options} enableJinja2={enableJinja2} />
+        {enableJinja2 && <BlurPlugin />}
       </div>
     </LexicalComposer>
   );

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getSelection, $isRangeSelection } from 'lexical';
+import { $getSelection, $isRangeSelection, $isTextNode } from 'lexical';
 
 import { INSERT_VARIABLE_COMMAND } from '../commands';
 import type { NodeProperties } from '../../../types'
@@ -96,7 +96,9 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
           const textAfter = nodeText.substring(anchorOffset);
           const newText = textBefore + `{{${suggestion.value}}}` + textAfter;
           
-          anchorNode.setTextContent(newText);
+          if ($isTextNode(anchorNode)) {
+            anchorNode.setTextContent(newText);
+          }
           
           // 设置光标位置到插入文本之后
           const newOffset = textBefore.length + `{{${suggestion.value}}}`.length;
@@ -129,6 +131,8 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
   }
   return (
     <div
+      data-autocomplete-popup="true"
+      onMouseDown={(e) => e.preventDefault()}
       style={{
         position: 'fixed',
         top: popupPosition.top,

@@ -36,7 +36,7 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
   return (
     <span
       onClick={handleClick}
-      className={clsx('rb:border rb:rounded-md rb:bg-white rb:text-[12px] rb:inline-flex rb:items-center rb:py-0.5 rb:px-1.5 rb:mx-0.5 rb:cursor-pointer', {
+      className={clsx('rb:border rb:rounded-md rb:bg-white rb:text-[10px] rb:inline-flex rb:items-center rb:py-0 rb:px-1.5 rb:mx-0.5 rb:cursor-pointer', {
         'rb:border-[#155EEF]': isSelected,
         'rb:border-[#DFE4ED]': !isSelected
       })}
