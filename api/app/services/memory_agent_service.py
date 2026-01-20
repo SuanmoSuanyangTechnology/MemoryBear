@@ -26,6 +26,7 @@ from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import ConfigurationError
+from app.services.memory_base_service import Translation_English
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
@@ -692,7 +693,9 @@ class MemoryAgentService:
     async def get_hot_memory_tags_by_user(
         self,
         end_user_id: Optional[str] = None,
-        limit: int = 20
+        limit: int = 20,
+        model_id: Optional[str] = None,
+        language_type: Optional[str] = "zh"
     ) -> List[Dict[str, Any]]:
         """
         获取指定用户的热门记忆标签
@@ -710,7 +713,14 @@ class MemoryAgentService:
         try:
             # by_user=False 表示按 group_id 查询（在Neo4j中，group_id就是用户维度）
             tags = await get_hot_memory_tags(end_user_id, limit=limit, by_user=False)
-            payload = [{"name": t, "frequency": f} for t, f in tags]
+            payload=[]
+            for tag, freq in tags:
+                print(tag, freq)
+                if language_type!="zh":
+                    tag=await Translation_English(model_id, tag)
+                    payload.append({"name": tag, "frequency": freq})
+                else:
+                    payload.append({"name": tag, "frequency": freq})
             return payload
         except Exception as e:
             logger.error(f"热门记忆标签查询失败: {e}")
