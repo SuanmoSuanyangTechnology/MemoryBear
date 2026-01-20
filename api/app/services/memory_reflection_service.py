@@ -239,8 +239,6 @@ class MemoryReflectionService:
                     "reflection_results": reflection_results
                 }
 
-
-
         except Exception as e:
             config_id = config_data.get("config_id", "unknown")
             api_logger.error(f"启动反思失败，config_id: {config_id}, end_user_id: {end_user_id}, 错误: {str(e)}")
