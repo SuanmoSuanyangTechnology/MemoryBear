@@ -162,22 +162,35 @@ class OptimizedLLMService:
                     return fallback_value
                 elif isinstance(fallback_value, dict):
                     return response_model(**fallback_value)
+                elif isinstance(fallback_value, list):
+                    # 对于 RootModel[List[...]] 类型，直接传入列表
+                    if hasattr(response_model, 'model_fields') and 'root' in response_model.model_fields:
+                        return response_model(root=fallback_value)
+                    # 或者尝试直接传入（Pydantic v2 的 RootModel 支持）
+                    return response_model(fallback_value)
             
             # 尝试创建空的响应模型
-            if hasattr(response_model, 'root'):
-                # RootModel类型
+            # 检查是否是 RootModel 类型（通过检查 __pydantic_root_model__ 属性）
+            if hasattr(response_model, '__pydantic_root_model__') and response_model.__pydantic_root_model__:
+                # RootModel类型 - 传入空列表
+                logger.debug(f"创建 RootModel 类型的空响应: {response_model.__name__}")
                 return response_model([])
             else:
-                # 普通BaseModel类型
+                # 普通BaseModel类型 - 尝试无参数构造
+                logger.debug(f"创建普通 BaseModel 类型的空响应: {response_model.__name__}")
                 return response_model()
                 
         except Exception as e:
-            logger.error(f"创建降级响应失败: {e}")
+            logger.error(f"创建降级响应失败: {e}", exc_info=True)
             # 最后的降级策略
-            if hasattr(response_model, 'root'):
-                return response_model([])
-            else:
-                return response_model()
+            try:
+                if hasattr(response_model, '__pydantic_root_model__') and response_model.__pydantic_root_model__:
+                    return response_model([])
+                else:
+                    return response_model()
+            except Exception as final_error:
+                logger.error(f"最终降级策略也失败: {final_error}")
+                raise
     
     def clear_cache(self):
         """清理客户端缓存"""

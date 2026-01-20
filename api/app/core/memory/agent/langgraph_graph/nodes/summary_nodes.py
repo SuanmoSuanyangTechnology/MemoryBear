@@ -1,5 +1,6 @@
 
 
+import os
 import time
 
 from app.core.logging_config import get_agent_logger, log_time
@@ -19,7 +20,7 @@ from app.core.memory.agent.utils.session_tools import SessionService
 from app.core.memory.agent.utils.template_tools import TemplateService
 from app.core.memory.agent.services.optimized_llm_service import LLMServiceMixin
 
-template_root = PROJECT_ROOT_ + '/agent/utils/prompt'
+template_root = os.path.join(PROJECT_ROOT_, 'agent', 'utils', 'prompt')
 logger = get_agent_logger(__name__)
 db_session = next(get_db())
 
