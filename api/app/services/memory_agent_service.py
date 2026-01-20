@@ -20,12 +20,14 @@ from app.core.memory.agent.langgraph_graph.write_graph import make_write_graph
 from app.core.memory.agent.logger_file.log_streamer import LogStreamer
 from app.core.memory.agent.utils.messages_tools import merge_multiple_search_results, reorder_output_results
 from app.core.memory.agent.utils.type_classifier import status_typle
+from app.core.memory.agent.utils.write_tools import write  # 新增：直接导入 write 函数
 from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import ConfigurationError
+from app.schemas.memory_agent_schema import Write_UserInput
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
@@ -53,7 +55,6 @@ class MemoryAgentService:
 
         if str(messages) == 'success':
             logger.info(f"Write operation successful for group {group_id} with config_id {config_id}")
-            # 记录成功的操作
             if audit_logger:
                 audit_logger.log_operation(operation="WRITE", config_id=config_id, group_id=group_id, success=True,
                                            duration=duration, details={"message_length": len(message)})
@@ -61,7 +62,6 @@ class MemoryAgentService:
         else:
             logger.warning(f"Write operation failed for group {group_id}")
 
-            # 记录失败的操作
             if audit_logger:
                 audit_logger.log_operation(
                     operation="WRITE",
@@ -265,7 +265,7 @@ class MemoryAgentService:
 
         Args:
             group_id: Group identifier (also used as end_user_id)
-            message: Message to write
+            message: Structured message list [{"role": "user", "content": "..."}, ...]
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -286,7 +286,7 @@ class MemoryAgentService:
                     raise ValueError(f"No memory configuration found for end_user {group_id}. Please ensure the user has a connected memory configuration.")
             except Exception as e:
                 if "No memory configuration found" in str(e):
-                    raise  # Re-raise our specific error
+                    raise
                 logger.error(f"Failed to get connected config for end_user {group_id}: {e}")
                 raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
 
