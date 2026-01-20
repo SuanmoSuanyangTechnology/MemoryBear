@@ -60,10 +60,11 @@ const ApplicationConfig: React.FC = () => {
         handleChangeTab={handleChangeTab}
         application={application as Application}
         refresh={getApplicationInfo}
+        appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : application?.type === 'workflow' ? workflowRef : undefined}
         workflowRef={workflowRef}
       />
       {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} />}
-      {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} application={application as Application} />}
+      {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} />}
       {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} />}
       {activeTab === 'api' && <Api application={application} />}
       {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
