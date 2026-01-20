@@ -1,29 +1,30 @@
-from typing import Any, Dict, List, Optional
 import asyncio
 import logging
+from typing import Any, Dict, List, Optional
+
+from app.repositories.neo4j.cypher_queries import (
+    CHUNK_EMBEDDING_SEARCH,
+    ENTITY_EMBEDDING_SEARCH,
+    MEMORY_SUMMARY_EMBEDDING_SEARCH,
+    SEARCH_CHUNK_BY_CHUNK_ID,
+    SEARCH_CHUNKS_BY_CONTENT,
+    SEARCH_DIALOGUE_BY_DIALOG_ID,
+    SEARCH_ENTITIES_BY_NAME,
+    SEARCH_MEMORY_SUMMARIES_BY_KEYWORD,
+    SEARCH_STATEMENTS_BY_CREATED_AT,
+    SEARCH_STATEMENTS_BY_KEYWORD,
+    SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL,
+    SEARCH_STATEMENTS_BY_TEMPORAL,
+    SEARCH_STATEMENTS_BY_VALID_AT,
+    SEARCH_STATEMENTS_G_CREATED_AT,
+    SEARCH_STATEMENTS_G_VALID_AT,
+    SEARCH_STATEMENTS_L_CREATED_AT,
+    SEARCH_STATEMENTS_L_VALID_AT,
+    STATEMENT_EMBEDDING_SEARCH,
+)
 
 # 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.neo4j.cypher_queries import (
-    SEARCH_STATEMENTS_BY_KEYWORD,
-    SEARCH_ENTITIES_BY_NAME,
-    SEARCH_CHUNKS_BY_CONTENT,
-    STATEMENT_EMBEDDING_SEARCH,
-    CHUNK_EMBEDDING_SEARCH,
-    ENTITY_EMBEDDING_SEARCH,
-    SEARCH_MEMORY_SUMMARIES_BY_KEYWORD,
-    MEMORY_SUMMARY_EMBEDDING_SEARCH,
-    SEARCH_STATEMENTS_BY_TEMPORAL,
-    SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL,
-    SEARCH_DIALOGUE_BY_DIALOG_ID,
-    SEARCH_CHUNK_BY_CHUNK_ID,
-    SEARCH_STATEMENTS_BY_CREATED_AT,
-    SEARCH_STATEMENTS_BY_VALID_AT,
-    SEARCH_STATEMENTS_G_CREATED_AT,
-    SEARCH_STATEMENTS_L_CREATED_AT,
-    SEARCH_STATEMENTS_G_VALID_AT,
-    SEARCH_STATEMENTS_L_VALID_AT,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +56,12 @@ async def _update_activation_values_batch(
         return []
     
     # 延迟导入以避免循环依赖
-    from app.core.memory.storage_services.forgetting_engine.access_history_manager import AccessHistoryManager
-    from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
+    from app.core.memory.storage_services.forgetting_engine.access_history_manager import (
+        AccessHistoryManager,
+    )
+    from app.core.memory.storage_services.forgetting_engine.actr_calculator import (
+        ACTRCalculator,
+    )
     
     # 创建计算器和管理器实例
     actr_calculator = ACTRCalculator()
@@ -292,6 +297,13 @@ async def search_graph(
         else:
             results[key] = result
     
+    # Deduplicate results before updating activation values
+    # This prevents duplicates from propagating through the pipeline
+    from app.core.memory.src.search import _deduplicate_results
+    for key in results:
+        if isinstance(results[key], list):
+            results[key] = _deduplicate_results(results[key])
+    
     # 更新知识节点的激活值（Statement, ExtractedEntity, MemorySummary）
     results = await _update_search_results_activation(
         connector=connector,
@@ -396,6 +408,13 @@ async def search_graph_by_embedding(
             results[key] = []
         else:
             results[key] = result
+
+    # Deduplicate results before updating activation values
+    # This prevents duplicates from propagating through the pipeline
+    from app.core.memory.src.search import _deduplicate_results
+    for key in results:
+        if isinstance(results[key], list):
+            results[key] = _deduplicate_results(results[key])
 
     # 更新知识节点的激活值（Statement, ExtractedEntity, MemorySummary）
     update_start = time.time()

@@ -221,12 +221,12 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     
     return new Promise((resolve, reject) => {
       saveAgentConfig(data.app_id, params)
-      .then(() => {
+      .then((res) => {
         if (flag) {
           message.success(t('common.saveSuccess'))
         }
         setIsSave(false)
-        resolve(true)
+        resolve(res)
       }).catch(error => {
         reject(error)
       })
