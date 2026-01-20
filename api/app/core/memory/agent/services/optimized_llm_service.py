@@ -162,7 +162,7 @@ class OptimizedLLMService:
                     return fallback_value
                 elif isinstance(fallback_value, dict):
                     return response_model(**fallback_value)
-            
+
             # 尝试创建空的响应模型
             if hasattr(response_model, 'root'):
                 # RootModel类型
@@ -170,7 +170,7 @@ class OptimizedLLMService:
             else:
                 # 普通BaseModel类型
                 return response_model()
-                
+
         except Exception as e:
             logger.error(f"创建降级响应失败: {e}")
             # 最后的降级策略
