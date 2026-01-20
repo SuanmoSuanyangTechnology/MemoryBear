@@ -4,6 +4,7 @@ import os
 import asyncio
 import json
 import numpy as np
+import logging
 
 # Fix tokenizer parallelism warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -23,28 +24,29 @@ from app.core.memory.models.message_models import DialogData, Chunk
 try:
     from app.core.memory.llm_tools.openai_client import OpenAIClient
 except Exception:
-    # 在测试或无可用依赖（如 langfuse）环境下，允许惰性导入
     OpenAIClient = Any
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 
 class LLMChunker:
-    """基于LLM的智能分块策略"""
+    """LLM-based intelligent chunking strategy"""
     def __init__(self, llm_client: OpenAIClient, chunk_size: int = 1000):
         self.llm_client = llm_client
         self.chunk_size = chunk_size
 
     async def __call__(self, text: str) -> List[Any]:
-        # 使用LLM分析文本结构并进行智能分块
         prompt = f"""
-            请将以下文本分割成语义连贯的段落。每个段落应该围绕一个主题，长度大约在{self.chunk_size}字符左右。
-            请以JSON格式返回结果，包含chunks数组，每个chunk有text字段。
+            Split the following text into semantically coherent paragraphs. Each paragraph should focus on one topic, approximately {self.chunk_size} characters long.
+            Return results in JSON format with a chunks array, each chunk having a text field.
 
-            文本内容：
+            Text content:
             {text[:5000]}
             """
 
         messages = [
-            {"role": "system", "content": "你是一个专业的文本分析助手，擅长将长文本分割成语义连贯的段落。"},
+            {"role": "system", "content": "You are a professional text analysis assistant, skilled at splitting long texts into semantically coherent paragraphs."},
             {"role": "user", "content": prompt}
         ]
 
@@ -171,8 +173,6 @@ class ChunkerClient:
                 base_chunk_size=self.chunk_size,
             )
         elif chunker_config.chunker_strategy == "SentenceChunker":
-            # 某些 chonkie 版本的 SentenceChunker 不支持 tokenizer_or_token_counter 参数
-            # 为了兼容不同版本，这里仅传递广泛支持的参数
             self.chunker = SentenceChunker(
                 chunk_size=self.chunk_size,
                 chunk_overlap=self.chunk_overlap,
@@ -186,100 +186,93 @@ class ChunkerClient:
 
     async def generate_chunks(self, dialogue: DialogData):
         """
-        生成分块，支持异步操作
+        Generate chunks following 1 Message = 1 Chunk strategy.
+        
+        Each message creates one chunk, directly inheriting role information.
+        If a message is too long, it will be split into multiple sub-chunks,
+        each maintaining the same speaker.
+        
+        Raises:
+            ValueError: If dialogue has no messages or chunking fails
         """
-        try:
-            # 预处理文本：确保对话标记格式统一
-            content = dialogue.content
-            content = content.replace('AI：', 'AI:').replace('用户：', '用户:')  # 统一冒号
-            content = re.sub(r'(\n\s*)+\n', '\n\n', content)  # 合并多个空行
-
-            if hasattr(self.chunker, '__call__') and not asyncio.iscoroutinefunction(self.chunker.__call__):
-                # 同步分块器
-                chunks = self.chunker(content)
+        # Validate dialogue has messages
+        if not dialogue.context or not dialogue.context.msgs:
+            raise ValueError(
+                f"Dialogue {dialogue.ref_id} has no messages. "
+                f"Cannot generate chunks from empty dialogue."
+            )
+        
+        dialogue.chunks = []
+        
+        # 按消息分块：每个消息创建一个或多个 chunk，直接继承角色
+        for msg_idx, msg in enumerate(dialogue.context.msgs):
+            # Validate message has required attributes
+            if not hasattr(msg, 'role') or not hasattr(msg, 'msg'):
+                raise ValueError(
+                    f"Message {msg_idx} in dialogue {dialogue.ref_id} "
+                    f"missing 'role' or 'msg' attribute"
+                )
+            
+            msg_content = msg.msg.strip()
+            
+            # Skip empty messages
+            if not msg_content:
+                continue
+            
+            # 如果消息太长，可以进一步分块
+            if len(msg_content) > self.chunk_size:
+                # 对单个消息的内容进行分块
+                try:
+                    sub_chunks = self.chunker(msg_content)
+                except Exception as e:
+                    raise ValueError(
+                        f"Failed to chunk long message {msg_idx} in dialogue {dialogue.ref_id}: {e}"
+                    )
+                
+                for idx, sub_chunk in enumerate(sub_chunks):
+                    sub_chunk_text = sub_chunk.text if hasattr(sub_chunk, 'text') else str(sub_chunk)
+                    sub_chunk_text = sub_chunk_text.strip()
+                    
+                    if len(sub_chunk_text) < (self.min_characters_per_chunk or 50):
+                        continue
+                    
+                    chunk = Chunk(
+                        content=f"{msg.role}: {sub_chunk_text}",
+                        speaker=msg.role,  # 直接继承角色
+                        metadata={
+                            "message_index": msg_idx,
+                            "message_role": msg.role,
+                            "sub_chunk_index": idx,
+                            "total_sub_chunks": len(sub_chunks),
+                            "chunker_strategy": self.chunker_config.chunker_strategy,
+                        },
+                    )
+                    dialogue.chunks.append(chunk)
             else:
-                # 异步分块器（如LLMChunker）
-                chunks = await self.chunker(content)
-
-            # 过滤空块和过小的块
-            valid_chunks = []
-            for c in chunks:
-                chunk_text = getattr(c, 'text', str(c)) if not isinstance(c, str) else c
-                if isinstance(chunk_text, str) and len(chunk_text.strip()) >= (self.min_characters_per_chunk or 50):
-                    valid_chunks.append(c)
-
-            dialogue.chunks = [
-                Chunk(
-                    content=c.text if hasattr(c, 'text') else str(c),
+                # 消息不长，直接作为一个 chunk
+                chunk = Chunk(
+                    content=f"{msg.role}: {msg_content}",
+                    speaker=msg.role,  # 直接继承角色
                     metadata={
-                        "start_index": getattr(c, "start_index", None),
-                        "end_index": getattr(c, "end_index", None),
+                        "message_index": msg_idx,
+                        "message_role": msg.role,
                         "chunker_strategy": self.chunker_config.chunker_strategy,
                     },
                 )
-                for c in valid_chunks
-            ]
-            return dialogue
-
-        except Exception as e:
-            print(f"分块失败: {e}")
-
-            # 改进的后备方案：尝试按对话回合分割
-            try:
-                # 简单的按对话分割
-                dialogue_pattern = r'(AI:|用户:)(.*?)(?=AI:|用户:|$)'
-                matches = re.findall(dialogue_pattern, dialogue.content, re.DOTALL)
-
-                class SimpleChunk:
-                    def __init__(self, text, start_index, end_index):
-                        self.text = text
-                        self.start_index = start_index
-                        self.end_index = end_index
-
-                chunks = []
-                current_chunk = ""
-                current_start = 0
-
-                for match in matches:
-                    speaker, ct = match[0], match[1].strip()
-                    turn_text = f"{speaker} {ct}"
-
-                    if len(current_chunk) + len(turn_text) > (self.chunk_size or 500):
-                        if current_chunk:
-                            chunks.append(SimpleChunk(current_chunk, current_start, current_start + len(current_chunk)))
-                        current_chunk = turn_text
-                        current_start = dialogue.content.find(turn_text, current_start)
-                    else:
-                        current_chunk += ("\n" + turn_text) if current_chunk else turn_text
-
-                if current_chunk:
-                    chunks.append(SimpleChunk(current_chunk, current_start, current_start + len(current_chunk)))
-
-                dialogue.chunks = [
-                    Chunk(
-                        content=c.text,
-                        metadata={
-                            "start_index": c.start_index,
-                            "end_index": c.end_index,
-                            "chunker_strategy": "DialogueTurnFallback",
-                        },
-                    )
-                    for c in chunks
-                ]
-
-            except Exception:
-                # 最后的手段：单一大块
-                dialogue.chunks = [Chunk(
-                    content=dialogue.content,
-                    metadata={"chunker_strategy": "SingleChunkFallback"},
-                )]
-
-            return dialogue
+                dialogue.chunks.append(chunk)
+        
+        # Validate we generated at least one chunk
+        if not dialogue.chunks:
+            raise ValueError(
+                f"No valid chunks generated for dialogue {dialogue.ref_id}. "
+                f"All messages were either empty or too short. "
+                f"Messages count: {len(dialogue.context.msgs)}"
+            )
+        
+        return dialogue
 
     def evaluate_chunking(self, dialogue: DialogData) -> dict:
-        """
-        评估分块质量
-        """
+        """Evaluate chunking quality."""
         if not getattr(dialogue, 'chunks', None):
             return {}
 
@@ -304,11 +297,8 @@ class ChunkerClient:
         return metrics
 
     def save_chunking_results(self, dialogue: DialogData, output_path: str):
-        """
-        保存分块结果到文件，文件名包含策略名称
-        """
+        """Save chunking results to file with strategy name in filename."""
         strategy_name = self.chunker_config.chunker_strategy
-        # 在文件名中添加策略名称
         base_name, ext = os.path.splitext(output_path)
         strategy_output_path = f"{base_name}_{strategy_name}{ext}"
 

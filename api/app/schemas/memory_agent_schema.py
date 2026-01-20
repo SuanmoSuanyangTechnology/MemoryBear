@@ -12,7 +12,7 @@ class UserInput(BaseModel):
 
 
 class Write_UserInput(BaseModel):
-    message: str
+    messages: list[dict]
     group_id: str
     config_id: Optional[str] = None
 
