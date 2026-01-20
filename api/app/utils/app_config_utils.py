@@ -120,12 +120,9 @@ def multi_agent_config_4_app_release(release: AppRelease) -> MultiAgentConfig:
 
 def workflow_config_4_app_release(release: AppRelease) -> WorkflowConfig:
     config_dict = release.config
-    with get_db_read() as db:
-        source_config = WorkflowConfigRepository(db).get_by_app_id(release.app_id)
-        source_config_id = source_config.id
 
     config = WorkflowConfig(
-        id=source_config_id,
+        id=config_dict.get("id"),
         app_id=release.app_id,
         nodes=config_dict.get("nodes", []),
         edges=config_dict.get("edges", []),

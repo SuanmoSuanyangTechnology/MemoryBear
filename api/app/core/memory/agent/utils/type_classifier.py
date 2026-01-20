@@ -1,10 +1,9 @@
 """
 Type classification utility for distinguishing read/write operations.
 """
-from app.core.config import settings
 from app.core.logging_config import get_agent_logger, log_prompt_rendering
 from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
-from app.core.memory.agent.utils.messages_tool import read_template_file
+from app.core.memory.agent.utils.messages_tools import read_template_file
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from jinja2 import Template

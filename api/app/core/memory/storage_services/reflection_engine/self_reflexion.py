@@ -18,21 +18,13 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from app.core.memory.llm_tools.openai_client import OpenAIClient
-from app.core.memory.utils.config import definitions as config_defs
 from app.core.memory.utils.config.get_data import (
     extract_and_process_changes,
     get_data,
     get_data_statement,
 )
-from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.utils.prompt.template_render import (
-    render_evaluate_prompt,
-    render_reflexion_prompt,
-)
 from app.core.models.base import RedBearModelConfig
-from app.core.response_utils import success
 from app.repositories.neo4j.cypher_queries import (
-    UPDATE_STATEMENT_INVALID_AT,
     neo4j_query_all,
     neo4j_query_part,
     neo4j_statement_all,
@@ -160,12 +152,11 @@ class ReflectionEngine:
             self.neo4j_connector = Neo4jConnector()
 
         if self.llm_client is None:
-            from app.core.memory.utils.config import definitions as config_defs
             from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
             from app.db import get_db_context
             with get_db_context() as db:
                 factory = MemoryClientFactory(db)
-                self.llm_client = factory.get_llm_client(config_defs.SELECTED_LLM_ID)
+                self.llm_client = factory.get_llm_client(self.config.model_id)
         elif isinstance(self.llm_client, str):
             # 如果 llm_client 是字符串（model_id），则用它初始化客户端
             from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -263,25 +254,23 @@ class ReflectionEngine:
 
             # 2. 检测冲突（基于事实的反思）
             conflict_data = await self._detect_conflicts(reflexion_data, statement_databasets)
-            print(100 * '-')
-            print(conflict_data)
-            print(100 * '-')
-            # # 检查是否真的有冲突
-            conflicts_found=''
+            conflict_list=[]
+            for i  in conflict_data:
+                conflict_list.append(i['data'])
 
-            conflicts_found=''
+
+
+            conflicts_found=0
             # 3. 解决冲突
-            solved_data = await self._resolve_conflicts(conflict_data, statement_databasets)
+            solved_data = await self._resolve_conflicts(conflict_list, statement_databasets)
+
             if not solved_data:
                 return ReflectionResult(
                     success=False,
-                    message="反思失败，未解决冲突",
+                    message=f"没有{self.config.baseline}相关的冲突数据",
                     conflicts_found=conflicts_found,
                     execution_time=asyncio.get_event_loop().time() - start_time
                 )
-            print(100 * '*')
-            print(solved_data)
-            print(100 * '*')
 
             conflicts_resolved = len(solved_data)
             logging.info(f"解决了 {conflicts_resolved} 个冲突")
@@ -386,7 +375,7 @@ class ReflectionEngine:
             memory_verifies.append(item['memory_verify'])
         result_data['memory_verifies'] = memory_verifies
         result_data['quality_assessments'] = quality_assessments
-        conflicts_found=''
+        conflicts_found = 0  # 初始化为整数0而不是空字符串
         REMOVE_KEYS = {"created_at", "expired_at","relationship","predicate","statement_id","id","statement_id","relationship_statement_id"}
         # Clearn conflict_data，And memory_verify和quality_assessment
         cleaned_conflict_data = []
@@ -414,7 +403,7 @@ class ReflectionEngine:
             cleaned_conflict_data_.append(cleaned_item)
         print(cleaned_conflict_data_)
         # 3. 解决冲突
-        solved_data = await self._resolve_conflicts(cleaned_conflict_data, source_data)
+        solved_data = await self._resolve_conflicts(cleaned_conflict_data_, source_data)
         if not solved_data:
             return ReflectionResult(
                 success=False,
@@ -738,5 +727,4 @@ class ReflectionEngine:
         else:
 
             raise ValueError(f"未知的反思基线: {self.config.baseline}")
-
 

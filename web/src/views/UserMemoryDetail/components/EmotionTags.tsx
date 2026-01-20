@@ -121,7 +121,7 @@ const EmotionTags: FC = () => {
             })}
           </div>
         </div>
-        : <Empty size={88} className="rb:h-full" />
+        : <Empty size={88} className="rb:h-full rb:mb-4" />
       }
     </RbCard>
   )

@@ -18,174 +18,180 @@ import type { TestParams } from '@/views/MemoryConversation'
 import type { EndUser } from '@/views/UserMemoryDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 
-// 记忆对话
+// Memory conversation
 export const readService = (query: TestParams) => {
   return request.post('/memory/read_service', query)
 }
-/****************** 记忆看板 相关接口 *******************************/
-// 记忆看板-记忆总量
+/****************** Memory Dashboard APIs *******************************/
+// Memory Dashboard - Total memory count
 export const getTotalMemoryCount = () => {
   return request.get(`/dashboard/total_memory_count`)
 }
-// 记忆看板-知识库类型分布
+// Memory Dashboard - Knowledge base type distribution
 export const getKbTypes = () => {
   return request.get(`/memory/stats/types`)
 }
-// 记忆看板-热门记忆标签
+// Memory Dashboard - Hot memory tags
 export const getHotMemoryTags = () => {
   return request.get(`/memory-storage/analytics/hot_memory_tags`)
 }
-// 记忆看板-最近活动统计
+// Memory Dashboard - Recent activity statistics
 export const getRecentActivityStats = () => {
   return request.get(`/memory-storage/analytics/recent_activity_stats`)
 }
-// 记忆看板-记忆增长趋势
+// Memory Dashboard - Memory growth trend
 export const getMemoryIncrement = (limit: number) => {
   return request.get(`/dashboard/memory_increment`, { limit })
 }
-// 记忆看板-API调用趋势
+// Memory Dashboard - API call trend
 export const getApiTrend = () => {
   return request.get(`/dashboard/api_increment`)
 }
-// 记忆看板-总数据
+// Memory Dashboard - Total data
 export const getDashboardData = () => {
   return request.get(`/dashboard/dashboard_data`)
 }
-/*************** end 记忆看板 相关接口 ******************************/
+/*************** end Memory Dashboard APIs ******************************/
 
 
-/****************** 用户记忆 相关接口 *******************************/
+/****************** User Memory APIs *******************************/
 export const userMemoryListUrl = '/dashboard/end_users'
 export const getUserMemoryList = () => {
   return request.get(userMemoryListUrl)
 }
-// 用户记忆-用户记忆总量
+// User Memory - Total end users
 export const getTotalEndUsers = () => {
   return request.get(`/dashboard/total_end_users`)
 }
-// 用户记忆-用户详情
+// User Memory - User profile
 export const getUserProfile = (end_user_id: string) => {
   return request.get(`/memory/analytics/user_profile`, { end_user_id })
 }
 
-// 用户记忆-记忆洞察
+// User Memory - Memory insight
 export const getMemoryInsightReport = (end_user_id: string) => {
   return request.get(`/memory-storage/analytics/memory_insight/report`, { end_user_id })
 }
-// 用户记忆-用户摘要
+// User Memory - User summary
 export const getUserSummary = (end_user_id: string) => {
   return request.get(`/memory-storage/analytics/user_summary`, { end_user_id })
 }
-// 记忆分类
+// Memory classification
 export const getNodeStatistics = (end_user_id: string) => {
   return request.get(`/memory-storage/analytics/node_statistics`, { end_user_id })
 }
-// 基本信息
+// Basic information
 export const getEndUserProfile = (end_user_id: string) => {
   return request.get(`/memory-storage/read_end_user/profile`, { end_user_id })
 }
 export const updatedEndUserProfile = (values: EndUser) => {
   return request.post(`/memory-storage/updated_end_user/profile`, values)
 }
-// 用户记忆-关系网络
+// User Memory - Relationship network
 export const getMemorySearchEdges = (end_user_id: string) => {
   return request.get(`/memory-storage/analytics/graph_data`, { end_user_id })
 }
-// 用户记忆-用户兴趣分布
+// User Memory - User interest distribution
 export const getHotMemoryTagsByUser = (end_user_id: string) => {
   return request.get(`/memory/analytics/hot_memory_tags/by_user`, { end_user_id })
 }
-// 用户记忆-记忆总量
+// User Memory - Total memory count
 export const getTotalMemoryCountByUser = (end_user_id: string) => {
   return request.get(`/memory-storage/search`, { end_user_id })
 }
-// RAG 用户记忆-记忆总量
+// RAG User Memory - Total memory count
 export const getTotalRagMemoryCountByUser = (end_user_id: string) => {
   return request.get(`/dashboard/current_user_rag_total_num`, { end_user_id })
 }
-// RAG 用户记忆-用户摘要
+// RAG User Memory - User summary
 export const getChunkSummaryTag = (end_user_id: string) => {
   return request.get(`/dashboard/chunk_summary_tag`, { end_user_id })
 }
-// RAG 用户记忆-记忆洞察
+// RAG User Memory - Memory insight
 export const getChunkInsight = (end_user_id: string) => {
   return request.get(`/dashboard/chunk_insight`, { end_user_id })
 }
-// RAG 用户记忆-存储内容
+// RAG User Memory - Storage content
 export const getRagContent = (end_user_id: string) => {
   return request.get(`/dashboard/rag_content`, { end_user_id, limit: 20 })
 }
-// 情感分布分析
+// Emotion distribution analysis
 export const getWordCloud = (group_id: string) => {
   return request.post(`/memory/emotion-memory/wordcloud`, { group_id, limit: 20 })
 }
-// 高频情绪关键词
+// High-frequency emotion keywords
 export const getEmotionTags = (group_id: string) => {
   return request.post(`/memory/emotion-memory/tags`, { group_id, limit: 20 })
 }
-// 情绪健康指数
+// Emotion health index
 export const getEmotionHealth = (group_id: string) => {
   return request.post(`/memory/emotion-memory/health`, { group_id, limit: 20 })
 }
-// 个性化建议
+// Personalized suggestions
 export const getEmotionSuggestions = (group_id: string) => {
   return request.post(`/memory/emotion-memory/suggestions`, { group_id, limit: 20 })
+}
+export const generateSuggestions = (end_user_id: string) => {
+  return request.post(`/memory/emotion-memory/generate_suggestions`, { end_user_id })
 }
 export const analyticsRefresh = (end_user_id: string) => {
   return request.post('/memory-storage/analytics/generate_cache', { end_user_id })
 }
-// 遗忘
+// Forgetting stats
 export const getForgetStats = (group_id: string) => {
   return request.get(`/memory/forget-memory/stats`, { group_id })
 }
-// 隐性记忆-偏好
+// Implicit Memory - Preferences
 export const getImplicitPreferences = (end_user_id: string) => {
   return request.get(`/memory/implicit-memory/preferences/${end_user_id}`)
 }
-// 隐性记忆-核心特质
+// Implicit Memory - Core traits
 export const getImplicitPortrait = (end_user_id: string) => {
   return request.get(`/memory/implicit-memory/portrait/${end_user_id}`)
 }
-// 隐性记忆-兴趣领域分布
+// Implicit Memory - Interest areas distribution
 export const getImplicitInterestAreas = (end_user_id: string) => {
   return request.get(`/memory/implicit-memory/interest-areas/${end_user_id}`)
 }
-// 隐性记忆-用户习惯分析
+// Implicit Memory - User habits analysis
 export const getImplicitHabits = (end_user_id: string) => {
   return request.get(`/memory/implicit-memory/habits/${end_user_id}`)
 }
-// 短期记忆
+export const generateProfile = (end_user_id: string) => {
+  return request.post(`/memory/implicit-memory/generate_profile`, { end_user_id })
+}
+// Short-term memory
 export const getShortTerm = (end_user_id: string) => {
   return request.get(`/memory/short/short_term`, { end_user_id })
 }
-// 感知记忆-视觉记忆
+// Perceptual Memory - Visual memory
 export const getPerceptualLastVisual = (end_user: string) => {
   return request.get(`/memory/perceptual/${end_user}/last_visual`)
 }
-// 感知记忆-音频记忆
+// Perceptual Memory - Audio memory
 export const getPerceptualLastListen = (end_user: string) => {
   return request.get(`/memory/perceptual/${end_user}/last_listen`)
 }
-// 感知记忆-文本记忆
+// Perceptual Memory - Text memory
 export const getPerceptualLastText = (end_user: string) => {
   return request.get(`/memory/perceptual/${end_user}/last_text`)
 }
-// 感知记忆-感知记忆时间线
+// Perceptual Memory - Perceptual memory timeline
 export const getPerceptualTimeline = (end_user: string) => {
   return request.get(`/memory/perceptual/${end_user}/timeline`)
 }
-// 情景记忆-总览
+// Episodic Memory - Overview
 export const getEpisodicOverview = (data: { end_user_id: string; time_range: string; episodic_type: string; } ) => {
   return request.post(`/memory/episodic-memory/overview`, data)
 }
 export const getEpisodicDetail = (data: { end_user_id: string; summary_id: string; } ) => {
   return request.post(`/memory/episodic-memory/details`, data)
 }
-// 关系演化
+// Relationship evolution
 export const getRelationshipEvolution = (data: { id: string; label: string; } ) => {
   return request.get(`/memory-storage/memory_space/relationship_evolution`, data)
 }
-// 共同记忆时间线
+// Shared memory timeline
 export const getTimelineMemories = (data: { id: string; label: string; }) => {
   return request.get(`/memory-storage/memory_space/timeline_memories`, data)
 }
@@ -207,72 +213,72 @@ export const getConversationDetail = (end_user: string, conversation_id: string)
 export const forgetTrigger = (data: { max_merge_batch_size: number; min_days_since_access: number; end_user_id: string;}) => {
   return request.post(`/memory/forget-memory/trigger`, data)
 }
-/*************** end 用户记忆 相关接口 ******************************/
+/*************** end User Memory APIs ******************************/
 
-/****************** 记忆管理 相关接口 *******************************/
-// 记忆管理-获取所有配置
+/****************** Memory Management APIs *******************************/
+// Memory Management - Get all configurations
 export const memoryConfigListUrl = '/memory-storage/read_all_config'
 export const getMemoryConfigList = () => {
   return request.get(memoryConfigListUrl)
 }
-// 记忆管理-创建配置
+// Memory Management - Create configuration
 export const createMemoryConfig = (values: MemoryFormData) => {
   return request.post('/memory-storage/create_config', values)
 }
-// 记忆管理-更新配置
+// Memory Management - Update configuration
 export const updateMemoryConfig = (values: MemoryFormData) => {
   return request.post('/memory-storage/update_config', values)
 }
-// 记忆管理-删除配置
+// Memory Management - Delete configuration
 export const deleteMemoryConfig = (config_id: number) => {
   return request.delete(`/memory-storage/delete_config?config_id=${config_id}`)
 }
-// 遗忘引擎-获取配置
+// Forgetting Engine - Get configuration
 export const getMemoryForgetConfig = (config_id: number | string) => {
   return request.get('/memory/forget-memory/read_config', { config_id })
 }
-// 遗忘引擎-更新配置
+// Forgetting Engine - Update configuration
 export const updateMemoryForgetConfig = (values: ForgetConfigForm) => {
   return request.post('/memory/forget-memory/update_config', values)
 }
-// 记忆萃取引擎-获取配置
+// Memory Extraction Engine - Get configuration
 export const getMemoryExtractionConfig = (config_id: number | string) => {
   return request.get('/memory-storage/read_config_extracted', { config_id: config_id })
 }
-// 记忆萃取引擎-更新配置
+// Memory Extraction Engine - Update configuration
 export const updateMemoryExtractionConfig = (values: ExtractionConfigForm) => {
   return request.post('/memory-storage/update_config_extracted', values)
 }
-// 记忆萃取引擎-试运行
+// Memory Extraction Engine - Pilot run
 export const pilotRunMemoryExtractionConfig = (values: { config_id: number | string; dialogue_text: string; }, onMessage?: (data: SSEMessage[]) => void) => {
   return handleSSE('/memory-storage/pilot_run', values, onMessage)
 }
-// 情绪引擎-获取配置
+// Emotion Engine - Get configuration
 export const getMemoryEmotionConfig = (config_id: number | string) => {
   return request.get('/memory/emotion/read_config', { config_id: config_id })
 }
-// 情绪引擎-更新配置
+// Emotion Engine - Update configuration
 export const updateMemoryEmotionConfig = (values: EmotionConfig) => {
   return request.post('/memory/emotion/updated_config', values)
 }
-// 反思引擎-获取配置
+// Reflection Engine - Get configuration
 export const getMemoryReflectionConfig = (config_id: number | string) => {
   return request.get('/memory/reflection/configs', { config_id: config_id })
 }
-// 反思引擎-更新配置
+// Reflection Engine - Update configuration
 export const updateMemoryReflectionConfig = (values: SelfReflectionEngineConfig) => {
   return request.post('/memory/reflection/save', values)
 }
-// 反思引擎-试运行
+// Reflection Engine - Pilot run
 export const pilotRunMemoryReflectionConfig = (values: { config_id: number | string; language_type: string; }) => {
   return request.get('/memory/reflection/run', values)
 }
 
-/*************** end 记忆管理 相关接口 ******************************/
+/*************** end Memory Management APIs ******************************/
 
 
-/****************** API参数 相关接口 *******************************/
+/****************** API Parameters APIs *******************************/
 export const getMemoryApi = () => {
   return request.get('/memory/docs/api')
 }
-/*************** end API参数 相关接口 ******************************/
+/*************** end API Parameters APIs ******************************/
