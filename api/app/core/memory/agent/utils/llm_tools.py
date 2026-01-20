@@ -1,40 +1,12 @@
-import asyncio
-import json
-import logging
 import os
 from collections import defaultdict
 from typing import Annotated, TypedDict
 
-from app.core.memory.agent.utils.messages_tool import read_template_file
-from app.core.memory.utils.config.config_utils import (
-    get_picture_config,
-    get_voice_config,
-)
-
-# Removed global variable imports - use dependency injection instead
-from dotenv import load_dotenv
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
-from openai import OpenAI
 
 PROJECT_ROOT_ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-logger = logging.getLogger(__name__)
 
-load_dotenv()
-
-
-async def picture_model_requests(image_url):
-    '''
-
-    Args:
-        image_url:
-    Returns:
-
-    '''
-    file_path = PROJECT_ROOT_ + '/agent/utils/prompt/Template_for_image_recognition_prompt.jinja2 '
-    system_prompt = await read_template_file(file_path)
-    result = await Picture_recognize(image_url,system_prompt)
-    return (result)
 class WriteState(TypedDict):
     '''
     Langgrapg Writing TypedDict
@@ -44,39 +16,69 @@ class WriteState(TypedDict):
     apply_id:str
     group_id:str
     errors: list[dict]  # Track errors: [{"tool": "tool_name", "error": "message"}]
+    memory_config: object
+    write_result: dict
+    data:str
 
 class ReadState(TypedDict):
-    '''
-       Langgrapg READING TypedDict
-       name:
-       id:user id
-       loop_count:Traverse times
-       search_switch：type
-       config_id: configuration id for filtering results
-       errors: list of errors that occurred during workflow execution
-       '''
-    messages: Annotated[list[AnyMessage], add_messages] #消息追加的模式增加消息
-    name: str
-    id: str
-    loop_count:int
+    """
+    LangGraph 工作流状态定义
+
+    Attributes:
+        messages: 消息列表，支持自动追加
+        loop_count: 遍历次数
+        search_switch: 搜索类型开关
+        group_id: 组标识
+        config_id: 配置ID，用于过滤结果
+        data: 从content_input_node传递的内容数据
+        spit_data: 从Split_The_Problem传递的分解结果
+        tool_calls: 工具调用请求列表
+        tool_results: 工具执行结果列表
+        memory_config: 内存配置对象
+    """
+    messages: Annotated[list[AnyMessage], add_messages]  # 消息追加模式
+    loop_count: int
     search_switch: str
-    user_id: str
-    apply_id: str
     group_id: str
     config_id: str
-    errors: list[dict]  # Track errors: [{"tool": "tool_name", "error": "message"}]
-
-
+    data: str  # 新增字段用于传递内容
+    spit_data: dict  # 新增字段用于传递问题分解结果
+    problem_extension:dict
+    storage_type: str
+    user_rag_memory_id: str
+    llm_id: str
+    embedding_id: str
+    memory_config: object  # 新增字段用于传递内存配置对象
+    retrieve:dict
+    RetrieveSummary: dict
+    InputSummary: dict
+    verify: dict
+    SummaryFails: dict
+    summary: dict
 class COUNTState:
-    '''
-    The number of times the workflow dialogue retrieval content has no correct message recall traversal
-    '''
+    """
+    工作流对话检索内容计数器
+
+    用于记录工作流对话检索内容没有正确消息召回遍历的次数。
+    """
+
     def __init__(self, limit: int = 5):
+        """
+        初始化计数器
+
+        Args:
+            limit: 最大计数限制，默认为5
+        """
         self.total: int = 0  # 当前累加值
         self.limit: int = limit  # 最大上限
 
-    def add(self, value: int = 1):
-        """累加数字，如果达到上限就保持最大值"""
+    def add(self, value: int = 1) -> None:
+        """
+        累加数字，如果达到上限就保持最大值
+
+        Args:
+            value: 要累加的值，默认为1
+        """
         self.total += value
         print(f"[COUNTState] 当前值: {self.total}")
         if self.total >= self.limit:
@@ -84,20 +86,18 @@ class COUNTState:
             self.total = self.limit  # 达到上限不再增加
 
     def get_total(self) -> int:
-        """获取当前累加值"""
+        """
+        获取当前累加值
+
+        Returns:
+            当前累加值
+        """
         return self.total
 
-    def reset(self):
+    def reset(self) -> None:
         """手动重置累加值"""
         self.total = 0
         print("[COUNTState] 已重置为 0")
-
-
-def merge_to_key_value_pairs(data, query_key, result_key):
-    grouped = defaultdict(list)
-    for item in data:
-        grouped[item[query_key]].append(item[result_key])
-    return [{key: values} for key, values in grouped.items()]
 
 def deduplicate_entries(entries):
     seen = set()
@@ -109,70 +109,37 @@ def deduplicate_entries(entries):
             deduped.append(entry)
     return deduped
 
+def merge_to_key_value_pairs(data, query_key, result_key):
+    grouped = defaultdict(list)
+    for item in data:
+        grouped[item[query_key]].append(item[result_key])
+    return [{key: values} for key, values in grouped.items()]
 
 
-async def Picture_recognize(image_path, PROMPT_TICKET_EXTRACTION, picture_model_name: str) -> str:
+def convert_extended_question_to_question(data):
     """
-    Updated to eliminate global variables in favor of explicit parameters.
-    
+    递归地将数据中的 extended_question 字段转换为 question 字段
+
     Args:
-        image_path: Path to image file
-        PROMPT_TICKET_EXTRACTION: Extraction prompt
-        picture_model_name: Picture model name (required, no longer from global variables)
+        data: 要转换的数据（可能是字典、列表或其他类型）
+
+    Returns:
+        转换后的数据
     """
-    try:
-        model_config = get_picture_config(picture_model_name)
-    except Exception as e:
-            err = f"LLM配置不可用：{str(e)}。请检查 config.json 和 runtime.json。"
-            logger.error(err)
-            return err
-    api_key = os.getenv(model_config["api_key"])  # 从环境变量读取对应后端的 API key
-    backend_model_name = model_config["llm_name"].split("/")[-1]
-    api_base=model_config['api_base']
-
-    logger.info(f"model_name: {backend_model_name}")
-    logger.info(f"api_key set: {'yes' if api_key else 'no'}")
-    logger.info(f"base_url: {model_config['api_base']}")
-
-    client = OpenAI(
-        api_key=api_key, base_url=api_base,
-    )
-    completion = client.chat.completions.create(
-        model=backend_model_name,
-        messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url":image_path,
-                        },
-                        {"type": "text",
-                         "text": PROMPT_TICKET_EXTRACTION}
-                    ]
-                }
-            ])
-    picture_text = completion.choices[0].message.content
-    picture_text = picture_text.replace('```json', '').replace('```', '')
-    picture_text = json.loads(picture_text)
-    return (picture_text['statement'])
-
-async def Voice_recognize(voice_model_name: str):
-    """
-    Updated to eliminate global variables in favor of explicit parameters.
-    
-    Args:
-        voice_model_name: Voice model name (required, no longer from global variables)
-    """
-    try:
-        model_config = get_voice_config(voice_model_name)
-    except Exception as e:
-            err = f"LLM配置不可用：{str(e)}。请检查 config.json 和 runtime.json。"
-            logger.error(err)
-            return err
-    api_key = os.getenv(model_config["api_key"])  # 从环境变量读取对应后端的 API key
-    backend_model_name = model_config["llm_name"].split("/")[-1]
-    api_base = model_config['api_base']
-    return api_key,backend_model_name,api_base
-
-
+    if isinstance(data, dict):
+        # 创建新字典来存储转换后的数据
+        converted = {}
+        for key, value in data.items():
+            if key == 'extended_question':
+                # 将 extended_question 转换为 question
+                converted['question'] = convert_extended_question_to_question(value)
+            else:
+                # 递归处理其他字段
+                converted[key] = convert_extended_question_to_question(value)
+        return converted
+    elif isinstance(data, list):
+        # 递归处理列表中的每个元素
+        return [convert_extended_question_to_question(item) for item in data]
+    else:
+        # 其他类型直接返回
+        return data

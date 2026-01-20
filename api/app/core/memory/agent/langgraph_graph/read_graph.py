@@ -1,469 +1,177 @@
-import json
-import os
-import re
-import time
-import warnings
+#!/usr/bin/env python3
 from contextlib import asynccontextmanager
-from typing import Literal
 
-from app.core.logging_config import get_agent_logger
-from app.core.memory.agent.langgraph_graph.nodes import (
-    ToolExecutionNode,
-    create_input_message,
-)
-from app.core.memory.agent.mcp_server.services.parameter_builder import ParameterBuilder
-from app.core.memory.agent.utils.llm_tools import COUNTState, ReadState
-from app.core.memory.agent.utils.multimodal import MultimodalProcessor
-from app.schemas.memory_config_schema import MemoryConfig
-from dotenv import load_dotenv
-from langchain_core.messages import AIMessage
-from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.constants import END, START
+from langchain_core.messages import HumanMessage
+from langgraph.constants import START, END
 from langgraph.graph import StateGraph
-from langgraph.prebuilt import ToolNode
-
-logger = get_agent_logger(__name__)
-
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-load_dotenv()
-redishost=os.getenv("REDISHOST")
-redisport=os.getenv('REDISPORT')
-redisdb=os.getenv('REDISDB')
-redispassword=os.getenv('REDISPASSWORD')
-counter = COUNTState(limit=3)
-
-# Update loop count in workflow
-async def update_loop_count(state):
-    """Update loop counter"""
-    current_count = state.get("loop_count", 0)
-    return {"loop_count": current_count + 1}
 
 
-def Verify_continue(state: ReadState) -> Literal["Summary", "Summary_fails", "content_input"]:
-    messages = state["messages"]
+from app.db import get_db
+from app.services.memory_config_service import MemoryConfigService
 
-    # Add boundary check
-    if not messages:
-        return END
-    counter.add(1)  # Increment by 1
+from app.core.memory.agent.utils.llm_tools import ReadState
+from app.core.memory.agent.langgraph_graph.nodes.data_nodes import content_input_node
+from app.core.memory.agent.langgraph_graph.nodes.problem_nodes import (
+    Split_The_Problem,
+    Problem_Extension,
+)
+from app.core.memory.agent.langgraph_graph.nodes.retrieve_nodes import (
+    retrieve,
+)
+from app.core.memory.agent.langgraph_graph.nodes.summary_nodes import (
+    Input_Summary,
+    Retrieve_Summary,
+    Summary_fails,
+    Summary,
+)
+from app.core.memory.agent.langgraph_graph.nodes.verification_nodes import Verify
+from app.core.memory.agent.langgraph_graph.routing.routers import (
+    Split_continue,
+    Retrieve_continue,
+    Verify_continue,
+)
 
-    loop_count = counter.get_total()
-    logger.debug(f"[should_continue] Current loop count: {loop_count}")
-
-    last_message = messages[-1]
-    last_message_str = str(last_message).replace('\\', '')
-    status_tools = re.findall(r'"split_result": "(.*?)"', last_message_str)
-    logger.debug(f"Status tools: {status_tools}")
-
-    if "success" in status_tools:
-        counter.reset()
-        return "Summary"
-    elif "failed" in status_tools:
-        if loop_count < 2:  # Maximum loop count is 3
-            return "content_input"
-        else:
-            counter.reset()
-            return "Summary_fails"
-    else:
-        # Add default return value to avoid returning None
-        counter.reset()
-        return "Summary"  # Default based on business requirements
-
-
-def Retrieve_continue(state) -> Literal["Verify", "Retrieve_Summary"]:
-    """
-    Determine routing based on search_switch value.
-
-    Args:
-        state: State dictionary containing search_switch
-
-    Returns:
-        Next node to execute
-    """
-    # Direct dictionary access instead of regex parsing
-    search_switch = state.get("search_switch")
-
-    # Handle case where search_switch might be in messages
-    if search_switch is None and "messages" in state:
-        messages = state.get("messages", [])
-        if messages:
-            last_message = messages[-1]
-            # Try to extract from tool_calls args
-            if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-                for tool_call in last_message.tool_calls:
-                    if isinstance(tool_call, dict) and "args" in tool_call:
-                        search_switch = tool_call["args"].get("search_switch")
-                        break
-
-    # Convert to string for comparison if needed
-    if search_switch is not None:
-        search_switch = str(search_switch)
-        if search_switch == '0':
-            return 'Verify'
-        elif search_switch == '1':
-            return 'Retrieve_Summary'
-
-    # Add default return value to avoid returning None
-    return 'Retrieve_Summary'  # Default based on business logic
-
-
-def Split_continue(state) -> Literal["Split_The_Problem", "Input_Summary"]:
-    """
-    Determine routing based on search_switch value.
-
-    Args:
-        state: State dictionary containing search_switch
-
-    Returns:
-        Next node to execute
-    """
-    logger.debug(f"Split_continue state: {state}")
-
-    # Direct dictionary access instead of regex parsing
-    search_switch = state.get("search_switch")
-
-    # Handle case where search_switch might be in messages
-    if search_switch is None and "messages" in state:
-        messages = state.get("messages", [])
-        if messages:
-            last_message = messages[-1]
-            # Try to extract from tool_calls args
-            if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-                for tool_call in last_message.tool_calls:
-                    if isinstance(tool_call, dict) and "args" in tool_call:
-                        search_switch = tool_call["args"].get("search_switch")
-                        break
-
-    # Convert to string for comparison if needed
-    if search_switch is not None:
-        search_switch = str(search_switch)
-        if search_switch == '2':
-            return 'Input_Summary'
-    return 'Split_The_Problem'  # Default case
-
-
-class ProblemExtensionNode:
-    def __init__(self, tool, id, namespace, search_switch, apply_id, group_id, storage_type="", user_rag_memory_id=""):
-        self.tool_node = ToolNode([tool])
-        self.id = id
-        self.tool_name = tool.name if hasattr(tool, 'name') else str(tool)
-        self.namespace = namespace
-        self.search_switch = search_switch
-        self.apply_id = apply_id
-        self.group_id = group_id
-        self.storage_type = storage_type
-        self.user_rag_memory_id = user_rag_memory_id
-
-    async def __call__(self, state):
-        messages = state["messages"]
-        last_message = messages[-1] if messages else ""
-        logger.debug(f"ProblemExtensionNode {self.id} - Current time: {time.time()} - Message: {last_message}")
-        if self.tool_name == 'Input_Summary':
-            tool_call = re.findall("'id': '(.*?)'", str(last_message))[0]
-        else:
-            tool_call = str(re.findall(r"tool_call_id=.*?'(.*?)'", str(last_message))[0]).replace('\\', '').split('_id')[1]
-        
-        # Try to extract actual content payload from previous tool result
-        raw_msg = last_message.content if hasattr(last_message, 'content') else str(last_message)
-        extracted_payload = None
-        # Capture ToolMessage content field (supports single/double quotes), avoid greedy matching
-        m = re.search(r"content=(?:\"|\')(.*?)(?:\"|\'),\s*name=", raw_msg, flags=re.S)
-        if m:
-            extracted_payload = m.group(1)
-        else:
-            # Fallback: use raw string directly
-            extracted_payload = raw_msg
-
-        # Try to parse content as JSON first
-        try:
-            content = json.loads(extracted_payload)
-        except Exception:
-            # Try to extract JSON fragment from text and parse
-            parsed = None
-            candidates = re.findall(r"[\[{].*[\]}]", extracted_payload, flags=re.S)
-            for cand in candidates:
-                try:
-                    parsed = json.loads(cand)
-                    break
-                except Exception:
-                    continue
-            # If still fails, use raw string as content
-            content = parsed if parsed is not None else extracted_payload
-
-        # Build correct parameters based on tool name
-        tool_args = {}
-
-        if self.tool_name == "Verify":
-            # Verify tool requires context and usermessages parameters
-            if isinstance(content, dict):
-                tool_args["context"] = content
-            else:
-                tool_args["context"] = {"content": content}
-            tool_args["usermessages"] = str(tool_call)
-            tool_args["apply_id"] = str(self.apply_id)
-            tool_args["group_id"] = str(self.group_id)
-        elif self.tool_name == "Retrieve":
-            # Retrieve tool requires context and usermessages parameters
-            if isinstance(content, dict):
-                tool_args["context"] = content
-            else:
-                tool_args["context"] = {"content": content}
-            tool_args["usermessages"] = str(tool_call)
-            tool_args["search_switch"] = str(self.search_switch)
-            tool_args["apply_id"] = str(self.apply_id)
-            tool_args["group_id"] = str(self.group_id)
-        elif self.tool_name == "Summary":
-            # Summary tool requires string type context parameter
-            if isinstance(content, dict):
-                # Convert dict to JSON string
-                tool_args["context"] = json.dumps(content, ensure_ascii=False)
-            else:
-                tool_args["context"] = str(content)
-            tool_args["usermessages"] = str(tool_call)
-            tool_args["apply_id"] = str(self.apply_id)
-            tool_args["group_id"] = str(self.group_id)
-        elif self.tool_name == "Summary_fails":
-            # Summary_fails tool requires string type context parameter
-            if isinstance(content, dict):
-                # Convert dict to JSON string
-                tool_args["context"] = json.dumps(content, ensure_ascii=False)
-            else:
-                tool_args["context"] = str(content)
-            tool_args["usermessages"] = str(tool_call)
-            tool_args["apply_id"] = str(self.apply_id)
-            tool_args["group_id"] = str(self.group_id)
-        elif self.tool_name == 'Input_Summary':
-            tool_args["context"] = str(last_message)
-            tool_args["usermessages"] = str(tool_call)
-            tool_args["search_switch"] = str(self.search_switch)
-            tool_args["apply_id"] = str(self.apply_id)
-            tool_args["group_id"] = str(self.group_id)
-            tool_args["storage_type"] = getattr(self, 'storage_type', "")
-            tool_args["user_rag_memory_id"] = getattr(self, 'user_rag_memory_id', "")
-        elif self.tool_name == 'Retrieve_Summary':
-            # Retrieve_Summary expects dict directly, not JSON string
-            # content might be a JSON string, try to parse it
-            if isinstance(content, str):
-                try:
-                    parsed_content = json.loads(content)
-                    # Check if it has a "context" key
-                    if isinstance(parsed_content, dict) and "context" in parsed_content:
-                        tool_args["context"] = parsed_content["context"]
-                    else:
-                        tool_args["context"] = parsed_content
-                except json.JSONDecodeError:
-                    # If parsing fails, wrap the string
-                    tool_args["context"] = {"content": content}
-            elif isinstance(content, dict):
-                # Check if content has a "context" key that needs unwrapping
-                if "context" in content:
-                    tool_args["context"] = content["context"]
-                else:
-                    tool_args["context"] = content
-            else:
-                tool_args["context"] = {"content": str(content)}
-
-            tool_args["usermessages"] = str(tool_call)
-            tool_args["apply_id"] = str(self.apply_id)
-            tool_args["group_id"] = str(self.group_id)
-        else:
-            # Other tools use context parameter
-            if isinstance(content, dict):
-                tool_args["context"] = content
-            else:
-                tool_args["context"] = {"content": content}
-            tool_args["usermessages"] = str(tool_call)
-            tool_args["apply_id"] = str(self.apply_id)
-            tool_args["group_id"] = str(self.group_id)
-
-
-        tool_input = {
-            "messages": [
-                AIMessage(
-                    content="",
-                    tool_calls=[{
-                        "name": self.tool_name,
-                        "args": tool_args,
-                        "id": self.id + f"{tool_call}",
-                    }]
-                )
-            ]
-        }
-        result = await self.tool_node.ainvoke(tool_input)
-        result_text = str(result)
-
-        return {"messages": [AIMessage(content=result_text)]}
 
 
 @asynccontextmanager
-async def make_read_graph(namespace, tools, search_switch, apply_id, group_id, memory_config: MemoryConfig, storage_type=None, user_rag_memory_id=None):
-    """
-    Create a read graph workflow for memory operations.
-    
-    Args:
-        namespace: Namespace identifier
-        tools: MCP tools loaded from session
-        search_switch: Search mode switch ("0", "1", or "2")
-        apply_id: Application identifier
-        group_id: Group identifier
-        memory_config: MemoryConfig object containing all configuration
-        storage_type: Storage type (optional)
-        user_rag_memory_id: User RAG memory ID (optional)
-    """
-    memory = InMemorySaver()
-    tool = [i.name for i in tools]
-    logger.info(f"Initializing read graph with tools: {tool}")
-    logger.info(f"Using memory_config: {memory_config.config_name} (id={memory_config.config_id})")
-    
-    # Extract tool functions
-    Split_The_Problem_ = next((t for t in tools if t.name == "Split_The_Problem"), None)
-    Problem_Extension_ = next((t for t in tools if t.name == "Problem_Extension"), None)
-    Retrieve_ = next((t for t in tools if t.name == "Retrieve"), None)
-    Verify_ = next((t for t in tools if t.name == "Verify"), None)
-    Summary_ = next((t for t in tools if t.name == "Summary"), None)
-    Summary_fails_ = next((t for t in tools if t.name == "Summary_fails"), None)
-    Retrieve_Summary_ = next((t for t in tools if t.name == "Retrieve_Summary"), None)
-    Input_Summary_ = next((t for t in tools if t.name == "Input_Summary"), None)
-    
-    # Instantiate services
-    parameter_builder = ParameterBuilder()
-    multimodal_processor = MultimodalProcessor()
-    
-    # Create nodes using new modular components
-    Split_The_Problem_node = ToolNode([Split_The_Problem_])
-    
-    Problem_Extension_node = ToolExecutionNode(
-        tool=Problem_Extension_,
-        node_id="Problem_Extension_id",
-        namespace=namespace,
-        search_switch=search_switch,
-        apply_id=apply_id,
-        group_id=group_id,
-        parameter_builder=parameter_builder,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-        memory_config=memory_config,
+async def make_read_graph():
+    """创建并返回 LangGraph 工作流"""
+    try:
+        # Build workflow graph
+        workflow = StateGraph(ReadState)
+        workflow.add_node("content_input", content_input_node)
+        workflow.add_node("Split_The_Problem", Split_The_Problem)
+        workflow.add_node("Problem_Extension", Problem_Extension)
+        workflow.add_node("Input_Summary", Input_Summary)
+        # workflow.add_node("Retrieve", retrieve_nodes)
+        workflow.add_node("Retrieve", retrieve)
+        workflow.add_node("Verify", Verify)
+        workflow.add_node("Retrieve_Summary", Retrieve_Summary)
+        workflow.add_node("Summary", Summary)
+        workflow.add_node("Summary_fails", Summary_fails)
+        
+        # 添加边
+        workflow.add_edge(START, "content_input")
+        workflow.add_conditional_edges("content_input", Split_continue)
+        workflow.add_edge("Input_Summary", END)
+        workflow.add_edge("Split_The_Problem", "Problem_Extension")
+        workflow.add_edge("Problem_Extension", "Retrieve")
+        workflow.add_conditional_edges("Retrieve", Retrieve_continue)
+        workflow.add_edge("Retrieve_Summary", END)
+        workflow.add_conditional_edges("Verify", Verify_continue)
+        workflow.add_edge("Summary_fails", END)
+        workflow.add_edge("Summary", END)
+
+
+        '''-----'''
+        # workflow.add_edge("Retrieve", END)
+        
+        # 编译工作流
+        graph = workflow.compile()
+        yield graph
+        
+    except Exception as e:
+        print(f"创建工作流失败: {e}")
+        raise
+    finally:
+        print("工作流创建完成")
+
+async def main():
+    """主函数 - 运行工作流"""
+    message = "昨天有什么好看的电影"
+    group_id = '88a459f5_text09'  # 组ID
+    storage_type = 'neo4j'  # 存储类型
+    search_switch = '1'  # 搜索开关
+    user_rag_memory_id = 'wwwwwwww'  # 用户RAG记忆ID
+
+    # 获取数据库会话
+    db_session = next(get_db())
+    config_service = MemoryConfigService(db_session)
+    memory_config = config_service.load_memory_config(
+        config_id=17,  # 改为整数
+        service_name="MemoryAgentService"
     )
+    import time
+    start=time.time()
+    try:
+        async with make_read_graph() as graph:
+            config = {"configurable": {"thread_id": group_id}}
+            # 初始状态 - 包含所有必要字段
+            initial_state = {"messages": [HumanMessage(content=message)] ,"search_switch":search_switch,"group_id":group_id
+                             ,"storage_type":storage_type,"user_rag_memory_id":user_rag_memory_id,"memory_config":memory_config}
+            # 获取节点更新信息
+            _intermediate_outputs = []
+            summary = ''
+            
+            async for update_event in graph.astream(
+                    initial_state,
+                    stream_mode="updates",
+                    config=config
+            ):
+                for node_name, node_data in update_event.items():
+                    print(f"处理节点: {node_name}")
+                    
+                    # 处理不同Summary节点的返回结构
+                    if 'Summary' in node_name:
+                        if 'InputSummary' in node_data and 'summary_result' in node_data['InputSummary']:
+                            summary = node_data['InputSummary']['summary_result']
+                        elif 'RetrieveSummary' in node_data and 'summary_result' in node_data['RetrieveSummary']:
+                            summary = node_data['RetrieveSummary']['summary_result']
+                        elif 'summary' in node_data and 'summary_result' in node_data['summary']:
+                            summary = node_data['summary']['summary_result']
+                        elif 'SummaryFails' in node_data and 'summary_result' in node_data['SummaryFails']:
+                            summary = node_data['SummaryFails']['summary_result']
 
-    Retrieve_node = ToolExecutionNode(
-        tool=Retrieve_,
-        node_id="Retrieve_id",
-        namespace=namespace,
-        search_switch=search_switch,
-        apply_id=apply_id,
-        group_id=group_id,
-        parameter_builder=parameter_builder,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-        memory_config=memory_config,
-    )
+                    spit_data = node_data.get('spit_data', {}).get('_intermediate', None)
+                    if spit_data and spit_data != [] and spit_data != {}:
+                        _intermediate_outputs.append(spit_data)
+                    
+                    # Problem_Extension 节点
+                    problem_extension = node_data.get('problem_extension', {}).get('_intermediate', None)
+                    if problem_extension and problem_extension != [] and problem_extension != {}:
+                        _intermediate_outputs.append(problem_extension)
+                    
+                    # Retrieve 节点
+                    retrieve_node = node_data.get('retrieve', {}).get('_intermediate_outputs', None)
+                    if retrieve_node and retrieve_node != [] and retrieve_node != {}:
+                        _intermediate_outputs.extend(retrieve_node)
+                    
+                    # Verify 节点
+                    verify_n = node_data.get('verify', {}).get('_intermediate', None)
+                    if verify_n and verify_n != [] and verify_n != {}:
+                        _intermediate_outputs.append(verify_n)
 
-    Verify_node = ToolExecutionNode(
-        tool=Verify_,
-        node_id="Verify_id",
-        namespace=namespace,
-        search_switch=search_switch,
-        apply_id=apply_id,
-        group_id=group_id,
-        parameter_builder=parameter_builder,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-        memory_config=memory_config,
-    )
-    
-    Summary_node = ToolExecutionNode(
-        tool=Summary_,
-        node_id="Summary_id",
-        namespace=namespace,
-        search_switch=search_switch,
-        apply_id=apply_id,
-        group_id=group_id,
-        parameter_builder=parameter_builder,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-        memory_config=memory_config,
-    )
+                    
+                    # Summary 节点
+                    summary_n = node_data.get('summary', {}).get('_intermediate', None)
+                    if summary_n and summary_n != [] and summary_n != {}:
+                        _intermediate_outputs.append(summary_n)
 
-    Summary_fails_node = ToolExecutionNode(
-        tool=Summary_fails_,
-        node_id="Summary_fails_id",
-        namespace=namespace,
-        search_switch=search_switch,
-        apply_id=apply_id,
-        group_id=group_id,
-        parameter_builder=parameter_builder,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-        memory_config=memory_config,
-    )
+            # # 过滤掉空值
+            # _intermediate_outputs = [item for item in _intermediate_outputs if item and item != [] and item != {}]
+            #
+            # # 优化搜索结果
+            # print("=== 开始优化搜索结果 ===")
+            # optimized_outputs = merge_multiple_search_results(_intermediate_outputs)
+            # result=reorder_output_results(optimized_outputs)
+            # # 保存优化后的结果到文件
+            # with open('_intermediate_outputs_optimized.json', 'w', encoding='utf-8') as f:
+            #     import json
+            #     f.write(json.dumps(result, indent=4, ensure_ascii=False))
+            #
+            print(f"=== 最终摘要 ===")
+            print(summary)
+                
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
 
-    Retrieve_Summary_node = ToolExecutionNode(
-        tool=Retrieve_Summary_,
-        node_id="Retrieve_Summary_id",
-        namespace=namespace,
-        search_switch=search_switch,
-        apply_id=apply_id,
-        group_id=group_id,
-        parameter_builder=parameter_builder,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-        memory_config=memory_config,
-    )
+    end=time.time()
+    print(100*'y')
+    print(f"总耗时: {end-start}s")
+    print(100*'y')
 
-    Input_Summary_node = ToolExecutionNode(
-        tool=Input_Summary_,
-        node_id="Input_Summary_id",
-        namespace=namespace,
-        search_switch=search_switch,
-        apply_id=apply_id,
-        group_id=group_id,
-        parameter_builder=parameter_builder,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-        memory_config=memory_config,
-    )
 
-    async def content_input_node(state):
-        state_search_switch = state.get("search_switch", search_switch)
-
-        tool_name = "Input_Summary" if state_search_switch == '2' else "Split_The_Problem"
-        session_prefix = "input_summary_call_id" if state_search_switch == '2' else "split_call_id"
-
-        return await create_input_message(
-            state=state,
-            tool_name=tool_name,
-            session_id=f"{session_prefix}_{namespace}",
-            search_switch=search_switch,
-            apply_id=apply_id,
-            group_id=group_id,
-            multimodal_processor=multimodal_processor,
-            memory_config=memory_config,
-        )
-
-    
-    # Build workflow graph
-    workflow = StateGraph(ReadState)
-    workflow.add_node("content_input", content_input_node)
-    workflow.add_node("Split_The_Problem", Split_The_Problem_node)
-    workflow.add_node("Problem_Extension", Problem_Extension_node)
-    workflow.add_node("Retrieve", Retrieve_node)
-    workflow.add_node("Verify", Verify_node)
-    workflow.add_node("Summary", Summary_node)
-    workflow.add_node("Summary_fails", Summary_fails_node)
-    workflow.add_node("Retrieve_Summary", Retrieve_Summary_node)
-    workflow.add_node("Input_Summary", Input_Summary_node)
-
-    # Add edges using imported routers
-    workflow.add_edge(START, "content_input")
-    workflow.add_conditional_edges("content_input", Split_continue)
-    workflow.add_edge("Input_Summary", END)
-    workflow.add_edge("Split_The_Problem", "Problem_Extension")
-    workflow.add_edge("Problem_Extension", "Retrieve")
-    workflow.add_conditional_edges("Retrieve", Retrieve_continue)
-    workflow.add_edge("Retrieve_Summary", END)
-    workflow.add_conditional_edges("Verify", Verify_continue)
-    workflow.add_edge("Summary_fails", END)
-    workflow.add_edge("Summary", END)
-
-    graph = workflow.compile(checkpointer=memory)
-    yield graph
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

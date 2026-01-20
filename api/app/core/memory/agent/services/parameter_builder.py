@@ -4,22 +4,19 @@ Parameter Builder for constructing tool call arguments.
 This service provides tool-specific parameter transformation logic
 to build correct arguments for each tool type.
 """
-
 from typing import Any, Dict, Optional
-
 from app.core.logging_config import get_agent_logger
-from app.schemas.memory_config_schema import MemoryConfig
 
 logger = get_agent_logger(__name__)
 
 
 class ParameterBuilder:
     """Service for building tool call arguments based on tool type."""
-
+    
     def __init__(self):
         """Initialize the parameter builder."""
         logger.info("ParameterBuilder initialized")
-
+    
     def build_tool_args(
         self,
         tool_name: str,
@@ -28,9 +25,8 @@ class ParameterBuilder:
         search_switch: str,
         apply_id: str,
         group_id: str,
-        memory_config: MemoryConfig,
         storage_type: Optional[str] = None,
-        user_rag_memory_id: Optional[str] = None,
+        user_rag_memory_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Build tool arguments based on tool type.
@@ -49,7 +45,6 @@ class ParameterBuilder:
             search_switch: Search routing parameter
             apply_id: Application identifier
             group_id: Group identifier
-            memory_config: MemoryConfig object containing all configuration
             storage_type: Storage type for the workspace (optional)
             user_rag_memory_id: User RAG memory ID for knowledge base retrieval (optional)
             
@@ -60,19 +55,18 @@ class ParameterBuilder:
         base_args = {
             "usermessages": tool_call_id,
             "apply_id": apply_id,
-            "group_id": group_id,
-            "memory_config": memory_config,
+            "group_id": group_id
         }
-
+        
         # Always add storage_type and user_rag_memory_id (with defaults if None)
         base_args["storage_type"] = storage_type if storage_type is not None else ""
         base_args["user_rag_memory_id"] = user_rag_memory_id if user_rag_memory_id is not None else ""
         
         # Tool-specific argument construction
-        if tool_name in ["Verify", "Summary", "Summary_fails", "Retrieve_Summary", "Problem_Extension"]:
-            # These tools expect dict context
+        if tool_name in ["Verify","Summary", "Summary_fails",'Retrieve_Summary']:
+            # Verify expects dict context
             return {
-                "context": content if isinstance(content, dict) else {"content": content},
+                "context": content if isinstance(content, dict) else {},
                 **base_args
             }
 

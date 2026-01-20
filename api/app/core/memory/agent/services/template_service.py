@@ -3,12 +3,22 @@ Template Service for loading and rendering Jinja2 templates.
 
 This service provides centralized template management with caching and error handling.
 """
+
 import os
 from functools import lru_cache
-from typing import Optional
-from jinja2 import Environment, FileSystemLoader, Template, TemplateNotFound
 
-from app.core.logging_config import get_agent_logger, log_prompt_rendering
+from jinja2 import (
+    Environment,
+    FileSystemLoader,
+    Template,
+    TemplateNotFound,
+)
+
+from app.core.logging_config import (
+    get_agent_logger,
+    log_prompt_rendering,
+)
+
 
 
 logger = get_agent_logger(__name__)
