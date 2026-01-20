@@ -2061,6 +2061,7 @@ export const zh = {
         value: '值',
         addCase: '添加条件',
         addVariable: '添加变量',
+        output: '输出变量'
       },
 
       clear: '清空',
