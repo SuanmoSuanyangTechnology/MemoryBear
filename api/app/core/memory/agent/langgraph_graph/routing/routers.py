@@ -45,9 +45,6 @@ def Retrieve_continue(state) -> Literal["Verify", "Retrieve_Summary"]:
     return 'Retrieve_Summary'  # Default based on business logic
 def Verify_continue(state: ReadState) -> Literal["Summary", "Summary_fails", "content_input"]:
     status=state.get('verify', '')['status']
-    print(100*'-')
-    print(status)
-    print(100*'-')
     # loop_count = counter.get_total()
     if "success" in status:
         # counter.reset()
