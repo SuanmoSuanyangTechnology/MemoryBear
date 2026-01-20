@@ -30,9 +30,6 @@ async def write_node(state: WriteState) -> WriteState:
             group_id=group_id,
             memory_config=memory_config,
         )
-        print('-----------')
-        print(result)
-        print('-----------')
         logger.info(f"Write completed successfully! Config: {memory_config.config_name}")
 
         write_result= {

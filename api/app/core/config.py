@@ -147,8 +147,7 @@ class Settings:
     # Celery configuration (internal)
     CELERY_BROKER: int = int(os.getenv("CELERY_BROKER", "1"))
     CELERY_BACKEND: int = int(os.getenv("CELERY_BACKEND", "2"))
-    BROKER_URL: str = os.getenv("BROKER_URL", f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{CELERY_BROKER}")
-    RESULT_BACKEND: str = os.getenv("RESULT_BACKEND", f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{CELERY_BACKEND}")
+
     REFLECTION_INTERVAL_SECONDS: float = float(os.getenv("REFLECTION_INTERVAL_SECONDS", "300"))
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))
     MEMORY_INCREMENT_INTERVAL_HOURS: float = float(os.getenv("MEMORY_INCREMENT_INTERVAL_HOURS", "24"))
