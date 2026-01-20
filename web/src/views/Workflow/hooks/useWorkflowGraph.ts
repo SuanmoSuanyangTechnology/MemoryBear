@@ -275,11 +275,6 @@ export const useWorkflowGraph = ({
       }, 100)
     }
     if (edges.length) {
-      // 计算loop和iteration类型节点的数量
-      const loopIterationCount = nodes.filter(node => 
-        node.type === 'loop' || node.type === 'iteration'
-      ).length;
-      
       // 去重处理：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
       const uniqueEdges = edges.filter((edge, index, arr) => {
         return arr.findIndex(e => {
@@ -666,6 +661,77 @@ export const useWorkflowGraph = ({
       graphRef.current.resize(containerRef.current.offsetWidth, containerRef.current.offsetHeight);
     }
   };
+  
+  const nodeChangePosition = ({ node, options }: { node: Node; options: { skipParentHandler?: boolean } }) => {
+    const embedPadding = 50; // Define the embed padding constant
+    if (options.skipParentHandler) {
+      return
+    }
+
+    const children = node.getChildren()
+    if (children && children.length) {
+      node.prop('originPosition', node.getPosition())
+    }
+
+    const parent = node.getParent()
+    if (parent && parent.isNode()) {
+      let originSize = parent.prop('originSize')
+      if (originSize == null) {
+        originSize = parent.getSize()
+        parent.prop('originSize', originSize)
+      }
+
+      let originPosition = parent.prop('originPosition')
+      if (originPosition == null) {
+        originPosition = parent.getPosition()
+        parent.prop('originPosition', originPosition)
+      }
+
+      let x = originPosition.x
+      let y = originPosition.y
+      let cornerX = originPosition.x + originSize.width
+      let cornerY = originPosition.y + originSize.height
+      let hasChange = false
+
+      const children = parent.getChildren()
+      if (children) {
+        children.forEach((child) => {
+          const bbox = child.getBBox().inflate(embedPadding)
+          const corner = bbox.getCorner()
+
+          if (bbox.x < x) {
+            x = bbox.x
+            hasChange = true
+          }
+
+          if (bbox.y < y) {
+            y = bbox.y
+            hasChange = true
+          }
+
+          if (corner.x > cornerX) {
+            cornerX = corner.x
+            hasChange = true
+          }
+
+          if (corner.y > cornerY) {
+            cornerY = corner.y
+            hasChange = true
+          }
+        })
+      }
+
+      if (hasChange) {
+        parent.prop(
+          {
+            position: { x, y },
+            size: { width: cornerX - x, height: cornerY - y },
+          },
+          { skipParentHandler: true },
+        )
+      }
+    }
+  }
 
   // 初始化
   const init = () => {
@@ -734,6 +800,9 @@ export const useWorkflowGraph = ({
         validateConnection({ sourceCell, targetCell, targetMagnet }) {
           if (!targetMagnet) return false;
           
+          // 节点不能与自己连线
+          if (sourceCell?.id === targetCell?.id) return false;
+          
           const sourceType = sourceCell?.getData()?.type;
           const targetType = targetCell?.getData()?.type;
           
@@ -764,10 +833,7 @@ export const useWorkflowGraph = ({
         },
       },
       embedding: {
-        enabled: true,
-        validate (this) {
-          return false
-        }
+        enabled: false,
       },
       translating: {
         restrict(view) {
@@ -781,6 +847,17 @@ export const useWorkflowGraph = ({
           }
 
           return null
+        },
+      },
+      highlighting: {
+        embedding: {
+          name: 'stroke',
+          args: {
+            padding: -1,
+            attrs: {
+              stroke: '#73d13d',
+            },
+          },
         },
       },
     });
@@ -824,7 +901,8 @@ export const useWorkflowGraph = ({
     // 监听缩放事件
     graphRef.current.on('scale', scaleEvent);
     // 监听节点移动事件
-    graphRef.current.on('node:moved', nodeMoved);
+    // graphRef.current.on('node:moved', nodeMoved);
+    graphRef.current.on('node:change:position', nodeChangePosition);
 
     // 监听画布变化事件
     const events = [

@@ -24,6 +24,8 @@ const Detail: FC = () => {
   const navigate = useNavigate()
   const [name, setName] = useState<string>('')
   const forgetDetailRef = useRef<{ handleRefresh: () => void }>(null)
+  const statementDetailRef = useRef<{ handleRefresh: () => void }>(null)
+  const implicitDetailRef = useRef<{ handleRefresh: () => void }>(null)
 
   useEffect(() => {
     if (!id) return
@@ -45,7 +47,17 @@ const Detail: FC = () => {
     navigate(`/user-memory/detail/${id}/${key}`, { replace: true })
   }
   const handleRefresh = () => {
-    forgetDetailRef.current?.handleRefresh()
+    switch(type) {
+      case 'FORGET_MEMORY':
+        forgetDetailRef.current?.handleRefresh()
+        break;
+      case 'EMOTIONAL_MEMORY':
+        statementDetailRef.current?.handleRefresh()
+        break
+      case 'IMPLICIT_MEMORY':
+        implicitDetailRef.current?.handleRefresh()
+        break
+    }
   }
 
   if (type === 'GRAPH') {
@@ -67,16 +79,16 @@ const Detail: FC = () => {
             </div>
           </Dropdown>
         }
-        extra={type === 'FORGET_MEMORY' &&
+        extra={['FORGET_MEMORY', 'EMOTIONAL_MEMORY', 'IMPLICIT_MEMORY'].includes(type as string) &&
           <Button type="primary" ghost className="rb:group rb:h-6! rb:px-2!" onClick={handleRefresh}>
             <img src={refreshIcon} className="rb:w-4 rb:h-4" />
             {t('common.refresh')}
           </Button>}
       />
       <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:py-3 rb:px-4">
-        {type === 'EMOTIONAL_MEMORY' && <StatementDetail />}
+        {type === 'EMOTIONAL_MEMORY' && <StatementDetail ref={statementDetailRef} />}
         {type === 'FORGET_MEMORY' && <ForgetDetail ref={forgetDetailRef} />}
-        {type === 'IMPLICIT_MEMORY' && <ImplicitDetail />}
+        {type === 'IMPLICIT_MEMORY' && <ImplicitDetail ref={implicitDetailRef} />}
         {type === 'SHORT_TERM_MEMORY' && <ShortTermDetail />}
         {type === 'PERCEPTUAL_MEMORY' && <PerceptualDetail />}
         {type === 'EPISODIC_MEMORY' && <EpisodicDetail />}

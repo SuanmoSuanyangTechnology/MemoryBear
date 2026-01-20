@@ -34,5 +34,4 @@ class EmotionSuggestionsRequest(BaseModel):
 
 class EmotionGenerateSuggestionsRequest(BaseModel):
     """生成个性化情绪建议请求"""
-    group_id: str = Field(..., description="组ID")
-    config_id: Optional[int] = Field(None, description="配置ID（用于指定LLM模型）")
+    end_user_id: str = Field(..., description="终端用户ID")
