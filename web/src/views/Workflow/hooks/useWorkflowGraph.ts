@@ -586,6 +586,77 @@ export const useWorkflowGraph = ({
       graphRef.current.resize(containerRef.current.offsetWidth, containerRef.current.offsetHeight);
     }
   };
+  
+  const nodeChangePosition = ({ node, options }: { node: Node; options: { skipParentHandler?: boolean } }) => {
+    const embedPadding = 50; // Define the embed padding constant
+    if (options.skipParentHandler) {
+      return
+    }
+
+    const children = node.getChildren()
+    if (children && children.length) {
+      node.prop('originPosition', node.getPosition())
+    }
+
+    const parent = node.getParent()
+    if (parent && parent.isNode()) {
+      let originSize = parent.prop('originSize')
+      if (originSize == null) {
+        originSize = parent.getSize()
+        parent.prop('originSize', originSize)
+      }
+
+      let originPosition = parent.prop('originPosition')
+      if (originPosition == null) {
+        originPosition = parent.getPosition()
+        parent.prop('originPosition', originPosition)
+      }
+
+      let x = originPosition.x
+      let y = originPosition.y
+      let cornerX = originPosition.x + originSize.width
+      let cornerY = originPosition.y + originSize.height
+      let hasChange = false
+
+      const children = parent.getChildren()
+      if (children) {
+        children.forEach((child) => {
+          const bbox = child.getBBox().inflate(embedPadding)
+          const corner = bbox.getCorner()
+
+          if (bbox.x < x) {
+            x = bbox.x
+            hasChange = true
+          }
+
+          if (bbox.y < y) {
+            y = bbox.y
+            hasChange = true
+          }
+
+          if (corner.x > cornerX) {
+            cornerX = corner.x
+            hasChange = true
+          }
+
+          if (corner.y > cornerY) {
+            cornerY = corner.y
+            hasChange = true
+          }
+        })
+      }
+
+      if (hasChange) {
+        parent.prop(
+          {
+            position: { x, y },
+            size: { width: cornerX - x, height: cornerY - y },
+          },
+          { skipParentHandler: true },
+        )
+      }
+    }
+  }
 
   // 初始化
   const init = () => {
@@ -674,10 +745,7 @@ export const useWorkflowGraph = ({
         },
       },
       embedding: {
-        enabled: true,
-        validate (this) {
-          return false
-        }
+        enabled: false,
       },
       translating: {
         restrict(view) {
@@ -691,6 +759,17 @@ export const useWorkflowGraph = ({
           }
 
           return null
+        },
+      },
+      highlighting: {
+        embedding: {
+          name: 'stroke',
+          args: {
+            padding: -1,
+            attrs: {
+              stroke: '#73d13d',
+            },
+          },
         },
       },
     });

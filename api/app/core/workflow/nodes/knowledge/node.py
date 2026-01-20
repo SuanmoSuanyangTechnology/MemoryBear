@@ -10,9 +10,8 @@ from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
 from app.db import get_db_read
 from app.models import knowledge_model, knowledgeshare_model, ModelType
-from app.repositories import knowledge_repository
+from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.schemas.chunk_schema import RetrieveType
-from app.services import knowledge_service, knowledgeshare_service
 from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -96,7 +95,7 @@ class KnowledgeRetrievalNode(BaseNode):
 
         filters = self._build_kb_filter(kb_ids, knowledge_model.PermissionType.Share)
 
-        share_ids = knowledge_service.knowledge_repository.get_chunked_knowledgeids(
+        share_ids = knowledge_repository.get_chunked_knowledgeids(
             db=db,
             filters=filters
         )
@@ -105,7 +104,7 @@ class KnowledgeRetrievalNode(BaseNode):
             filters = [
                 knowledgeshare_model.KnowledgeShare.target_kb_id.in_(kb_ids)
             ]
-            items = knowledgeshare_service.knowledgeshare_repository.get_source_kb_ids_by_target_kb_id(
+            items = knowledgeshare_repository.get_source_kb_ids_by_target_kb_id(
                 db=db,
                 filters=filters
             )

@@ -1,48 +1,15 @@
 import asyncio
-import os
-import sys
-from typing import List, Tuple
-
-from neo4j import GraphDatabase
-from pydantic import BaseModel, Field
-
-# ------------------- 自包含路径解析 -------------------
-# 这个代码块确保脚本可以从任何地方运行，并且仍然可以在项目结构中找到它需要的模块。
-try:
-    # 假设脚本在 /path/to/project/src/analytics/
-    # 上升3个级别以到达项目根目录。
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    src_path = os.path.join(project_root, 'src')
-
-    # 将 'src' 和 'project_root' 都添加到路径中。
-    # 'src' 目录对于像 'from utils.config_utils import ...' 这样的导入是必需的。
-    # 'project_root' 目录对于像 'from variate_config import ...' 这样的导入是必需的。
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-except NameError:
-    # 为 __file__ 未定义的环境（例如某些交互式解释器）提供回退方案
-    project_root = os.path.abspath(os.path.join(os.getcwd()))
-    src_path = os.path.join(project_root, 'src')
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-# ---------------------------------------------------------------------
-
-# 现在路径已经配置好，我们可以使用绝对导入
 import json
+import os
+from typing import List, Tuple
 
 from app.core.config import settings
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.memory_config_service import MemoryConfigService
+from pydantic import BaseModel, Field
 
-#TODO: Fix this
-# Default values (previously from definitions.py)
-DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
-DEFAULT_GROUP_ID = os.getenv("SELECTED_GROUP_ID", "group_123")
 
 # 定义用于LLM结构化输出的Pydantic模型
 class FilteredTags(BaseModel):
@@ -52,34 +19,45 @@ class FilteredTags(BaseModel):
 async def filter_tags_with_llm(tags: List[str], group_id: str) -> List[str]:
     """
     使用LLM筛选标签列表，仅保留具有代表性的核心名词。
+    
+    Args:
+        tags: 原始标签列表
+        group_id: 用户组ID，用于获取配置
+        
+    Returns:
+        筛选后的标签列表
+        
+    Raises:
+        ValueError: 如果无法获取有效的LLM配置
     """
     try:
         # Get config_id using get_end_user_connected_config
         with get_db_context() as db:
-            try:
-                from app.services.memory_agent_service import (
-                    get_end_user_connected_config,
+            from app.services.memory_agent_service import (
+                get_end_user_connected_config,
+            )
+            
+            connected_config = get_end_user_connected_config(group_id, db)
+            config_id = connected_config.get("memory_config_id")
+            
+            if not config_id:
+                raise ValueError(
+                    f"No memory_config_id found for group_id: {group_id}. "
+                    "Please ensure the user has a valid memory configuration."
                 )
-                connected_config = get_end_user_connected_config(group_id, db)
-                config_id = connected_config.get("memory_config_id")
-                
-                if config_id:
-                    # Use the config_id to get the proper LLM client
-                    config_service = MemoryConfigService(db)
-                    memory_config = config_service.load_memory_config(config_id)
-                    factory = MemoryClientFactory(db)
-                    llm_client = factory.get_llm_client(memory_config.llm_model_id)
-                else:
-                    # TODO: Remove DEFAULT_LLM_ID fallback once all users have proper config
-                    # Fallback to default LLM if no config found
-                    factory = MemoryClientFactory(db)
-                    llm_client = factory.get_llm_client(DEFAULT_LLM_ID)
-            except Exception as e:
-                print(f"Failed to get user connected config, using default LLM: {e}")
-                # TODO: Remove DEFAULT_LLM_ID fallback once all users have proper config
-                # Fallback to default LLM
-                factory = MemoryClientFactory(db)
-                llm_client = factory.get_llm_client(DEFAULT_LLM_ID)
+            
+            # Use the config_id to get the proper LLM client
+            config_service = MemoryConfigService(db)
+            memory_config = config_service.load_memory_config(config_id)
+            
+            if not memory_config.llm_model_id:
+                raise ValueError(
+                    f"No llm_model_id found in memory config {config_id}. "
+                    "Please configure a valid LLM model."
+                )
+            
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client(memory_config.llm_model_id)
 
         # 3. 构建Prompt
         tag_list_str = ", ".join(tags)
@@ -107,33 +85,26 @@ async def filter_tags_with_llm(tags: List[str], group_id: str) -> List[str]:
         # 在LLM失败时返回原始标签，确保流程继续
         return tags
 
-def get_db_connection():
+async def get_raw_tags_from_db(
+    connector: Neo4jConnector,
+    group_id: str,
+    limit: int,
+    by_user: bool = False
+) -> List[Tuple[str, int]]:
     """
-    使用项目的标准配置方法建立与Neo4j数据库的连接。
-    """
-    # 从全局配置获取 Neo4j 连接信息
-    uri = settings.NEO4J_URI
-    user = settings.NEO4J_USERNAME
-
-    # 密码必须为了安全从环境变量加载
-    password = os.getenv("NEO4J_PASSWORD")
-
-    if not uri or not user:
-        raise ValueError("在 config.json 中未找到 Neo4j 的 'uri' 或 'username'。")
-    if not password:
-        raise ValueError("NEO4J_PASSWORD 环境变量未设置。")
-
-    # 为此脚本使用同步驱动
-    return GraphDatabase.driver(uri, auth=(user, password))
-
-def get_raw_tags_from_db(group_id: str, limit: int, by_user: bool = False) -> List[Tuple[str, int]]:
-    """
+    TODO: not accurate tag extraction
     从数据库查询原始的、未经过滤的实体标签及其频率。
+    
+    使用项目的Neo4jConnector进行查询，遵循仓储模式。
 
     Args:
+        connector: Neo4j连接器实例
         group_id: 如果by_user=False，则为group_id；如果by_user=True，则为user_id
         limit: 返回的标签数量限制
         by_user: 是否按user_id查询（默认False，按group_id查询）
+        
+    Returns:
+        List[Tuple[str, int]]: 标签名称和频率的元组列表
     """
     names_to_exclude = ['AI', 'Caroline', 'Melanie', 'Jon', 'Gina', '用户', 'AI助手', 'John', 'Maria']
 
@@ -154,83 +125,55 @@ def get_raw_tags_from_db(group_id: str, limit: int, by_user: bool = False) -> Li
             "LIMIT $limit"
         )
 
-    driver = None
-    try:
-        driver = get_db_connection()
-        with driver.session() as session:
-            result = session.run(query, id=group_id, limit=limit, names_to_exclude=names_to_exclude)
-            return [(record["name"], record["frequency"]) for record in result]
-    finally:
-        if driver:
-            driver.close()
+    # 使用项目的Neo4jConnector执行查询
+    results = await connector.execute_query(
+        query,
+        id=group_id,
+        limit=limit,
+        names_to_exclude=names_to_exclude
+    )
+    
+    return [(record["name"], record["frequency"]) for record in results]
 
-async def get_hot_memory_tags(group_id: str | None = None, limit: int = 40, by_user: bool = False) -> List[Tuple[str, int]]:
+async def get_hot_memory_tags(group_id: str, limit: int = 40, by_user: bool = False) -> List[Tuple[str, int]]:
     """
     获取原始标签，然后使用LLM进行筛选，返回最终的热门标签列表。
     查询更多的标签(limit=40)给LLM提供更丰富的上下文进行筛选。
 
     Args:
-        group_id: 如果by_user=False，则为group_id；如果by_user=True，则为user_id
+        group_id: 必需参数。如果by_user=False，则为group_id；如果by_user=True，则为user_id
         limit: 返回的标签数量限制
         by_user: 是否按user_id查询（默认False，按group_id查询）
+        
+    Raises:
+        ValueError: 如果group_id未提供或为空
     """
-    # 默认从环境变量读取
-    group_id = group_id or DEFAULT_GROUP_ID
-    # 1. 从数据库获取原始排名靠前的标签
-    raw_tags_with_freq = get_raw_tags_from_db(group_id, limit, by_user=by_user)
-    if not raw_tags_with_freq:
-        return []
-
-    raw_tag_names = [tag for tag, freq in raw_tags_with_freq]
-
-    # 2. 初始化LLM客户端并使用LLM筛选出有意义的标签
-    meaningful_tag_names = await filter_tags_with_llm(raw_tag_names, group_id)
-
-    # 3. 根据LLM的筛选结果，构建最终的标签列表（保留原始频率和顺序）
-    final_tags = []
-    for tag, freq in raw_tags_with_freq:
-        if tag in meaningful_tag_names:
-            final_tags.append((tag, freq))
-
-    return final_tags
-
-if __name__ == "__main__":
-    print("开始获取热门记忆标签...")
+    # 验证group_id必须提供且不为空
+    if not group_id or not group_id.strip():
+        raise ValueError(
+            "group_id is required. Please provide a valid group_id or user_id."
+        )
+    
+    # 使用项目的Neo4jConnector
+    connector = Neo4jConnector()
     try:
-        # 直接使用环境变量中的 group_id
-        group_id_to_query = DEFAULT_GROUP_ID
-        # 使用 asyncio.run 来执行异步主函数
-        top_tags = asyncio.run(get_hot_memory_tags(group_id=group_id_to_query))
+        # 1. 从数据库获取原始排名靠前的标签
+        raw_tags_with_freq = await get_raw_tags_from_db(connector, group_id, limit, by_user=by_user)
+        if not raw_tags_with_freq:
+            return []
 
-        if top_tags:
-            print(f"热门记忆标签 (Group ID: {group_id_to_query}, 经LLM筛选):")
-            for tag, frequency in top_tags:
-                print(f"- {tag} (数量: {frequency})")
+        raw_tag_names = [tag for tag, freq in raw_tags_with_freq]
 
-            # --- 将结果写入统一的 Signboard.json 到 logs/memory-output ---
-            from app.core.config import settings
-            settings.ensure_memory_output_dir()
-            signboard_path = settings.get_memory_output_path("Signboard.json")
-            payload = {
-                "group_id": group_id_to_query,
-                "hot_tags": [{"name": t, "frequency": f} for t, f in top_tags]
-            }
-            try:
-                existing = {}
-                if os.path.exists(signboard_path):
-                    with open(signboard_path, "r", encoding="utf-8") as rf:
-                        existing = json.load(rf)
-                existing["hot_memory_tags"] = payload
-                with open(signboard_path, "w", encoding="utf-8") as wf:
-                    json.dump(existing, wf, ensure_ascii=False, indent=2)
-                print(f"已写入 {signboard_path} -> hot_memory_tags")
-            except Exception as e:
-                print(f"写入 Signboard.json 失败: {e}")
-        else:
-            print(f"在 Group ID '{group_id_to_query}' 中没有找到符合条件的实体标签。")
-    except Exception as e:
-        print(f"执行过程中发生严重错误: {e}")
-        print("请检查：")
-        print("1. Neo4j数据库服务是否正在运行。")
-        print("2. 'config.json'中的配置是否正确。")
-        print("3. 相关的环境变量 (如 NEO4J_PASSWORD, DASHSCOPE_API_KEY) 是否已正确设置。")
+        # 2. 初始化LLM客户端并使用LLM筛选出有意义的标签
+        meaningful_tag_names = await filter_tags_with_llm(raw_tag_names, group_id)
+
+        # 3. 根据LLM的筛选结果，构建最终的标签列表（保留原始频率和顺序）
+        final_tags = []
+        for tag, freq in raw_tags_with_freq:
+            if tag in meaningful_tag_names:
+                final_tags.append((tag, freq))
+
+        return final_tags
+    finally:
+        # 确保关闭连接
+        await connector.close()

@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState } from 'react'
+import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Progress } from 'antd';
@@ -23,7 +23,7 @@ interface InterestAreasItem {
   art: Item;
 }
 
-const InterestAreas: FC = () => {
+const InterestAreas = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
@@ -47,6 +47,9 @@ const InterestAreas: FC = () => {
     })
   }
 
+  useImperativeHandle(ref, () => ({
+    handleRefresh: getData
+  }));
   return (
     <RbCard
       title={t('implicitDetail.interestAreas')}
@@ -70,5 +73,5 @@ const InterestAreas: FC = () => {
         }
     </RbCard>
   )
-}
+})
 export default InterestAreas

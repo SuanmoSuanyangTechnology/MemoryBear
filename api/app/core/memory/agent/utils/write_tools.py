@@ -7,14 +7,12 @@ pipeline. Only MemoryConfig is needed - clients are constructed internally.
 import time
 from datetime import datetime
 
+from dotenv import load_dotenv
+
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
-from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import (
-    ExtractionOrchestrator,
-)
-from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
-    memory_summary_generation,
-)
+from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import ExtractionOrchestrator
+from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import memory_summary_generation
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.logging_utils import log_time
 from app.db import get_db_context
@@ -23,7 +21,7 @@ from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
 from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import MemoryConfig
-from dotenv import load_dotenv
+
 
 load_dotenv()
 

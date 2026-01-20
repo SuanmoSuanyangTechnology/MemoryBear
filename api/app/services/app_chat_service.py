@@ -527,6 +527,7 @@ class AppChatService:
             conversation_id: uuid.UUID,
             config: WorkflowConfig,
             app_id: uuid.UUID,
+            release_id: uuid.UUID,
             workspace_id: uuid.UUID,
             user_id: Optional[str] = None,
             variables: Optional[Dict[str, Any]] = None,
@@ -549,6 +550,7 @@ class AppChatService:
             payload=payload,
             config=config,
             workspace_id=workspace_id,
+            release_id=release_id,
         )
 
     async def workflow_chat_stream(
@@ -557,6 +559,7 @@ class AppChatService:
             conversation_id: uuid.UUID,
             config: WorkflowConfig,
             app_id: uuid.UUID,
+            release_id: uuid.UUID,
             workspace_id: uuid.UUID,
             user_id: str = None,
             variables: Optional[Dict[str, Any]] = None,
@@ -565,7 +568,7 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
 
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict, None]:
         """聊天（流式）"""
         workflow_service = WorkflowService(self.db)
         payload = DraftRunRequest(
@@ -580,6 +583,7 @@ class AppChatService:
                 payload=payload,
                 config=config,
                 workspace_id=workspace_id,
+                release_id=release_id
         ):
             yield event
 

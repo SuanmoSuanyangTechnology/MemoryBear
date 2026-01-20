@@ -120,10 +120,12 @@ class WorkspaceAppService:
     def _get_data_config(self, memory_content: str) -> Dict[str, Any]:
         """Retrieve data_comfig information based on memory_comtent"""
         try:
-            data_config_query, data_config_params = DataConfigRepository.build_select_reflection(memory_content)
-            data_config_result = self.db.execute(text(data_config_query), data_config_params).fetchone()
-            if data_config_result is None:
-                return None
+            data_config_result = DataConfigRepository.query_reflection_config_by_id(self.db, int(memory_content))
+
+            # data_config_query, data_config_params = DataConfigRepository.build_select_reflection(memory_content)
+            # data_config_result = self.db.execute(text(data_config_query), data_config_params).fetchone()
+            # if data_config_result is None:
+            #     return None
             
             if data_config_result:
                 return {
@@ -206,6 +208,47 @@ class MemoryReflectionService:
     def __init__(self,db: Session = Depends(get_db)):
         self.db=db
 
+    async def start_text_reflection(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
+        try:
+            config_id = config_data.get("config_id")
+            api_logger.info(f"从配置数据启动反思，config_id: {config_id}, end_user_id: {end_user_id}")
+
+            if not config_data.get("enable_self_reflexion", False):
+                return {
+                    "status": "跳过",
+                    "message": "反思引擎未启用",
+                    "config_id": config_id,
+                    "end_user_id": end_user_id,
+                    "config_data": config_data
+                }
+
+            config_data_id = config_data['config_id']
+            reflection_config = WorkspaceAppService(self.db)._get_data_config(config_data_id)
+            if reflection_config is not None and reflection_config['enable_self_reflexion']:
+                reflection_config = self._create_reflection_config_from_data(reflection_config)
+                # 3. 执行反思引擎
+                reflection_results = await self._execute_reflection_engine(
+                    reflection_config, end_user_id
+                )
+                return {
+                    "status": "完成",
+                    "message": "反思引擎执行完成",
+                    "config_id": config_id,
+                    "end_user_id": end_user_id,
+                    "config_data": config_data,
+                    "reflection_results": reflection_results
+                }
+
+        except Exception as e:
+            config_id = config_data.get("config_id", "unknown")
+            api_logger.error(f"启动反思失败，config_id: {config_id}, end_user_id: {end_user_id}, 错误: {str(e)}")
+            return {
+                "status": "错误",
+                "message": f"启动反思失败: {str(e)}",
+                "config_id": config_id,
+                "end_user_id": end_user_id,
+                "config_data": config_data
+            }
     
     async def start_reflection_from_data(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
         """
@@ -237,16 +280,41 @@ class MemoryReflectionService:
             reflection_config=WorkspaceAppService(self.db)._get_data_config(config_data_id)
             if reflection_config is not None and reflection_config['enable_self_reflexion']:
                 reflection_config=  self._create_reflection_config_from_data(reflection_config)
-                iteration_period=reflection_config.iteration_period
+                iteration_period = int(reflection_config.iteration_period)
                 workspace_service = WorkspaceAppService(self.db)
                 current_reflection_time = workspace_service.get_end_user_reflection_time(end_user_id)
 
-                reflection_time = datetime.fromisoformat(str(current_reflection_time))
-
-                current_time = datetime.now()
-                time_diff = current_time - reflection_time
-                hours_diff = int(time_diff.total_seconds() / 3600)
-                if iteration_period==hours_diff or current_reflection_time is None:
+                # 检查是否需要执行反思
+                should_execute = False
+                hours_diff = 0
+                
+                if current_reflection_time is None:
+                    # 首次执行反思
+                    should_execute = True
+                    api_logger.info(f"首次执行反思，end_user_id: {end_user_id}")
+                else:
+                    # 计算时间差
+                    try:
+                        if isinstance(current_reflection_time, str):
+                            reflection_time = datetime.fromisoformat(current_reflection_time)
+                        else:
+                            reflection_time = current_reflection_time
+                        
+                        current_time = datetime.now()
+                        time_diff = current_time - reflection_time
+                        hours_diff = int(time_diff.total_seconds() / 3600)
+                        
+                        # 检查是否达到反思周期
+                        if hours_diff >= iteration_period:
+                            should_execute = True
+                            api_logger.info(f"与上次的反思时间间隔为: {hours_diff} 小时，达到周期 {iteration_period} 小时")
+                        else:
+                            api_logger.info(f"与上次的反思时间间隔为: {hours_diff} 小时，未达到周期 {iteration_period} 小时")
+                    except (ValueError, TypeError) as e:
+                        api_logger.warning(f"解析反思时间失败: {e}，将执行反思")
+                        should_execute = True
+                
+                if should_execute:
                     api_logger.info(f"与上次的反思时间间隔为: {hours_diff} 小时")
                     # 3. 执行反思引擎
                     reflection_results = await self._execute_reflection_engine(
@@ -269,13 +337,15 @@ class MemoryReflectionService:
                     }
                 else:
                     return {
-                        "status": "等待中..",
-                        "message": "反思引擎未开始执行执",
+                        "status": "等待中",
+                        "message": f"反思引擎未开始执行，距离下次执行还需 {iteration_period - hours_diff} 小时",
                         "config_id": config_id,
                         "end_user_id": end_user_id,
                         "config_data": config_data,
-                        "reflection_results": ''
+                        "hours_since_last_reflection": hours_diff,
+                        "next_reflection_in_hours": iteration_period - hours_diff
                     }
+
             
         except Exception as e:
             config_id = config_data.get("config_id", "unknown")

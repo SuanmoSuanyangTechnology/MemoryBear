@@ -333,21 +333,6 @@
       ]
     },
     {
-      "id": 19,
-      "parent": 0,
-      "code": "member",
-      "label": "成员管理",
-      "i18nKey": "menu.memberManagement",
-      "path": "/member",
-      "enable": true,
-      "display": true,
-      "level": 1,
-      "sort": 0,
-      "icon": null,
-      "iconActive": null,
-      "subs": null
-    },
-    {
       "id": 10,
       "parent": 0,
       "code": "memoryConversation",
@@ -369,6 +354,21 @@
       "label": "API KEY管理",
       "i18nKey": "menu.apiKeyManagement",
       "path": "/api-key",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "icon": null,
+      "iconActive": null,
+      "subs": null
+    },
+    {
+      "id": 19,
+      "parent": 0,
+      "code": "member",
+      "label": "成员管理",
+      "i18nKey": "menu.memberManagement",
+      "path": "/member",
       "enable": true,
       "display": true,
       "level": 1,

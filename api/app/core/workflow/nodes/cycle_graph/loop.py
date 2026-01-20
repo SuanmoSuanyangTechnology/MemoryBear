@@ -67,7 +67,9 @@ class LoopRuntime:
                 variables=pool.get_all_conversation_vars(),
                 node_outputs=pool.get_all_node_outputs(),
                 system_vars=pool.get_all_system_vars(),
-            ) if variable.input_type == ValueInputType.VARIABLE else TypeTransformer.transform(variable.value, variable.type)
+            )
+            if variable.input_type == ValueInputType.VARIABLE
+            else TypeTransformer.transform(variable.value, variable.type)
             for variable in self.typed_config.cycle_vars
         }
         self.state["node_outputs"][self.node_id] = {
@@ -76,7 +78,9 @@ class LoopRuntime:
                 variables=pool.get_all_conversation_vars(),
                 node_outputs=pool.get_all_node_outputs(),
                 system_vars=pool.get_all_system_vars(),
-            ) if variable.input_type == ValueInputType.VARIABLE else TypeTransformer.transform(variable.value, variable.type)
+            )
+            if variable.input_type == ValueInputType.VARIABLE
+            else TypeTransformer.transform(variable.value, variable.type)
             for variable in self.typed_config.cycle_vars
         }
         loopstate = WorkflowState(
@@ -171,10 +175,11 @@ class LoopRuntime:
         """
         loopstate = self._init_loop_state()
         loop_time = self.typed_config.max_loop
+        child_state = []
         while self.evaluate_conditional(loopstate) and loopstate["looping"] and loop_time > 0:
             logger.info(f"loop node {self.node_id}: running")
-            await self.graph.ainvoke(loopstate)
+            child_state.append(await self.graph.ainvoke(loopstate))
             loop_time -= 1
 
         logger.info(f"loop node {self.node_id}: execution completed")
-        return loopstate["runtime_vars"][self.node_id]
+        return loopstate["runtime_vars"][self.node_id] | {"__child_state": child_state}
