@@ -275,11 +275,6 @@ export const useWorkflowGraph = ({
       }, 100)
     }
     if (edges.length) {
-      // 计算loop和iteration类型节点的数量
-      const loopIterationCount = nodes.filter(node => 
-        node.type === 'loop' || node.type === 'iteration'
-      ).length;
-      
       // 去重处理：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
       const uniqueEdges = edges.filter((edge, index, arr) => {
         return arr.findIndex(e => {
@@ -804,6 +799,9 @@ export const useWorkflowGraph = ({
         },
         validateConnection({ sourceCell, targetCell, targetMagnet }) {
           if (!targetMagnet) return false;
+          
+          // 节点不能与自己连线
+          if (sourceCell?.id === targetCell?.id) return false;
           
           const sourceType = sourceCell?.getData()?.type;
           const targetType = targetCell?.getData()?.type;

@@ -33,7 +33,8 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
 
   useEffect(() => {
     if (value !== prevValueRef.current && !isUserInputRef.current) {
-      editor.update(() => {
+      queueMicrotask(() => {
+        editor.update(() => {
         const root = $getRoot();
         root.clear();
 
@@ -98,7 +99,8 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
           });
           root.append(paragraph);
         }
-      }, { discrete: true });
+        }, { discrete: true });
+      });
     }
     
     prevValueRef.current = value;

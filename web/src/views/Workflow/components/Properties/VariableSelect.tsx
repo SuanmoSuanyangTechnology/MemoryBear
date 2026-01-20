@@ -34,9 +34,9 @@ const VariableSelect: FC<VariableSelectProps> = ({
     if (filterOption) {
       return (
         <span
-          className={clsx("rb:w-full rb:wrap-break-word rb:line-clamp-1 rb:border rb:border-[#DFE4ED] rb:rounded-md rb:bg-white rb:text-[12px] rb:inline-flex rb:items-center rb:px-1.5 rb:cursor-pointer", {
+          className={clsx("rb:max-w-full rb:wrap-break-word rb:line-clamp-1 rb:border rb:border-[#DFE4ED] rb:rounded-md rb:bg-white rb:text-[12px] rb:inline-flex rb:items-center rb:px-1.5 rb:cursor-pointer", {
             'rb:leading-5.5!': size !== 'small',
-            'rb:leading-4!': size === 'small'
+            'rb:leading-4! rb:text-[10px]!': size === 'small'
           })}
           contentEditable={false}
         >
