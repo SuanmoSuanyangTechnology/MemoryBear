@@ -45,18 +45,17 @@ def Retrieve_continue(state) -> Literal["Verify", "Retrieve_Summary"]:
     return 'Retrieve_Summary'  # Default based on business logic
 def Verify_continue(state: ReadState) -> Literal["Summary", "Summary_fails", "content_input"]:
     status=state.get('verify', '')['status']
-    loop_count = counter.get_total()
-    print(status)
+    # loop_count = counter.get_total()
     if "success" in status:
-        counter.reset()
+        # counter.reset()
         return "Summary"
     elif "failed" in status:
-        if loop_count < 2:  # Maximum loop count is 3
-            return "content_input"
-        else:
-            counter.reset()
-            return "Summary_fails"
-    # else:
-    #     # Add default return value to avoid returning None
-    #     counter.reset()
-    #     return "Summary"  # Default based on business requirements
+        # if loop_count < 2:  # Maximum loop count is 3
+        #     return "content_input"
+        # else:
+            # counter.reset()
+        return "Summary_fails"
+    else:
+        # Add default return value to avoid returning None
+        # counter.reset()
+        return "Summary"  # Default based on business requirements

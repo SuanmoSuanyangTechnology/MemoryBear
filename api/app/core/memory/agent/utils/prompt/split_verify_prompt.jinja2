@@ -42,19 +42,33 @@
 如果状态是TRUE保留这条数据，否则需不需要这条数据
 ### 第五步 输出格式
 按照json的形式输出
-{"data":"Query":原来Query的字段，"history":原来的history字段，
-"expansion_issue":以为列表的形式存储验证之后的数据比如[
-{"query_small": query_small,
-                "answer_small": answer_small,,
-                "status": 回答的结果是否符合query_small，填写状态,
-                "query_answer": answer_small},
+{"query":"原来Query的字段",
+"history":"原来的history字段",
+"expansion_issue":以列表的形式存储验证之后的数据比如[
 {
-                "query_small": "张曼婷生日是什么时候？",
-                "answer_small": "张曼婷喜欢绘画。",
-                "status": "True",
-                "query_answer": "张曼 婷喜欢绘画。"
-            },{}......]
-,
- "split_result":如果expansion_issue是空的列表返回failed，不是空列表返回success,
-  "reason": 为以上分析完之后的结果给一个说明
-            }
+    "query_small": "子问题",
+    "answer_small": "子问题的回答",
+    "status": "True或False，表示回答是否符合query_small",
+    "query_answer": "问题的答案（与answer_small相同）"
+},
+{
+    "query_small": "张曼婷生日是什么时候？",
+    "answer_small": "张曼婷喜欢绘画。",
+    "status": "False",
+    "query_answer": "张曼婷喜欢绘画。"
+}
+],
+"split_result":"如果expansion_issue是空的列表返回failed，不是空列表返回success",
+"reason": "为以上分析完之后的结果给一个说明"
+}
+
+**输出格式要求**
+**CRITICAL JSON FORMATTING REQUIREMENTS:**
+1. Use only standard ASCII double quotes (") for JSON structure - never use Chinese quotation marks ("") or other Unicode quotes
+2. If the extracted statement text contains quotation marks, escape them properly using backslashes (\")
+3. Ensure all JSON strings are properly closed and comma-separated
+4. Do not include line breaks within JSON string values
+5. The output language should always be the same as the input language
+
+**JSON Schema:**
+{{ json_schema }}
