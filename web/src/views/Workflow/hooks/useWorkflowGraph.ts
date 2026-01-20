@@ -729,6 +729,9 @@ export const useWorkflowGraph = ({
         validateConnection({ sourceCell, targetCell, targetMagnet }) {
           if (!targetMagnet) return false;
           
+          // 节点不能与自己连线
+          if (sourceCell?.id === targetCell?.id) return false;
+          
           const sourceType = sourceCell?.getData()?.type;
           const targetType = targetCell?.getData()?.type;
           
