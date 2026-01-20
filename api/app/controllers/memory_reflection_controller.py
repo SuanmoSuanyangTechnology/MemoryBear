@@ -119,11 +119,20 @@ async def start_workspace_reflection(
             end_users = data['end_users']
             
             for base, config, user in zip(releases, data_configs, end_users):
-                if int(base['config']) == int(config['config_id']) and base['app_id'] == user['app_id']:
+                # 安全地转换为整数，处理空字符串和None的情况
+                print(base['config'])
+                try:
+                    base_config = int(base['config']) if base['config'] else 0
+                    config_id = int(config['config_id']) if config['config_id'] else 0
+                except (ValueError, TypeError):
+                    api_logger.warning(f"无效的配置ID: base['config']={base.get('config')}, config['config_id']={config.get('config_id')}")
+                    continue
+                
+                if base_config == config_id and base['app_id'] == user['app_id']:
                     # 调用反思服务
                     api_logger.info(f"为用户 {user['id']} 启动反思，config_id: {config['config_id']}")
                     
-                    reflection_result = await reflection_service.start_reflection_from_data(
+                    reflection_result = await reflection_service.start_text_reflection(
                         config_data=config,
                         end_user_id=user['id']
                     )
