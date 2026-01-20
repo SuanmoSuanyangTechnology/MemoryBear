@@ -658,8 +658,8 @@ export const zh = {
       priority: '结构化整合',
       addTool: '添加工具',
       tool: '工具',
+      variableConfig: '配置变量'
     },
-    // 角色管理相关翻译
     role: {
       roleManagement: '角色管理',
       roleId: '角色ID',
@@ -2061,6 +2061,7 @@ export const zh = {
         value: '值',
         addCase: '添加条件',
         addVariable: '添加变量',
+        output: '输出变量'
       },
 
       clear: '清空',

@@ -1967,6 +1967,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         value: 'Value',
         addCase: 'Add Condition',
         addVariable: 'Add Variables',
+        output: 'Output Variable'
       },
 
       clear: 'Clear',
