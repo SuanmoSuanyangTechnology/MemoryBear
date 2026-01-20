@@ -26,8 +26,6 @@ services:
     container_name: worker
     env_file:
       - .env
-    environment:
-      # - MCP_SERVER_URL=
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
