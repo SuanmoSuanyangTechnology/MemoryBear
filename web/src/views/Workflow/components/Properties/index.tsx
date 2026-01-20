@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState, useRef, useMemo } from "react";
+import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
@@ -17,7 +17,6 @@ import ParamsList from './ParamsList';
 import GroupVariableList from './GroupVariableList'
 import CaseList from './CaseList'
 import HttpRequest from './HttpRequest';
-import MappingList from './MappingList'
 import CategoryList from './CategoryList'
 import ConditionList from './ConditionList'
 import CycleVarsList from './CycleVarsList'
@@ -29,6 +28,7 @@ import { useVariableList, getCurrentNodeVariables } from './hooks/useVariableLis
 import styles from './properties.module.css'
 import Editor from "../Editor";
 import RbSlider from './RbSlider'
+import JinjaRender from './JinjaRender'
 
 interface PropertiesProps {
   selectedNode?: Node | null; 
@@ -50,135 +50,15 @@ const Properties: FC<PropertiesProps> = ({
   const [form] = Form.useForm<NodeConfig>();
   const [configs, setConfigs] = useState<Record<string,NodeConfig>>({} as Record<string,NodeConfig>)
   const values = Form.useWatch([], form);
-  const prevMappingNamesRef = useRef<string[]>([])
-  const prevTemplateVarsRef = useRef<string[]>([])
-  const syncTimeoutRef = useRef<number | null>(null)
-  const isSyncingRef = useRef(false)
-  const lastSyncSourceRef = useRef<'mapping' | 'template' | null>(null)
   const variableList = useVariableList(selectedNode, graphRef, chatVariables)
 
   useEffect(() => {
     if (selectedNode?.getData()?.id) {
-      form.resetFields()
-      prevMappingNamesRef.current = []
-      prevTemplateVarsRef.current = []
-      lastSyncSourceRef.current = null
       setOutputCollapsed(true)
+    } else {
+      form.resetFields()
     }
   }, [selectedNode?.getData()?.id])
-
-  // Sync template when mapping names change
-  useEffect(() => {
-    if (isSyncingRef.current || lastSyncSourceRef.current === 'mapping' || selectedNode?.data?.type !== 'jinja-render' || !values?.mapping || !values?.template) return
-    
-    const currentMappingNames = Array.isArray(values.mapping) ? values.mapping.filter(item => item && item.name).map((item: any) => item.name) : []
-    const prevNames = prevMappingNamesRef.current
-    
-    if (prevNames.length === 0) {
-      prevMappingNamesRef.current = currentMappingNames
-      return
-    }
-    
-    if (JSON.stringify(prevNames) === JSON.stringify(currentMappingNames)) return
-    
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
-    const activeElement = document.activeElement as HTMLElement
-    
-    syncTimeoutRef.current = setTimeout(() => {
-      let updatedTemplate = String(form.getFieldValue('template') || '')
-      
-      prevNames.forEach((oldName, index) => {
-        const newName = currentMappingNames[index]
-        if (newName && oldName !== newName) {
-          updatedTemplate = updatedTemplate.replace(new RegExp(`{{\\s*${oldName}\\s*}}`, 'g'), `{{${newName}}}`)
-        }
-      })
-      
-      if (updatedTemplate !== form.getFieldValue('template')) {
-        isSyncingRef.current = true
-        lastSyncSourceRef.current = 'mapping'
-        const newTemplateVars = (updatedTemplate.match(/{{\s*([\w.]+)\s*}}/g) || []).map(m => m.replace(/{{\s*|\s*}}/g, ''))
-        prevTemplateVarsRef.current = newTemplateVars
-        prevMappingNamesRef.current = currentMappingNames
-        form.setFieldValue('template', updatedTemplate)
-        
-        requestAnimationFrame(() => {
-          activeElement?.focus?.()
-          setTimeout(() => { 
-            isSyncingRef.current = false
-            lastSyncSourceRef.current = null
-          }, 50)
-        })
-      } else {
-        prevMappingNamesRef.current = currentMappingNames
-      }
-    }, 0)
-  }, [values?.mapping, selectedNode?.data?.type, form])
-
-  // Sync mapping when template variables change
-  useEffect(() => {
-    if (isSyncingRef.current || lastSyncSourceRef.current === 'template' || selectedNode?.data?.type !== 'jinja-render' || !values?.template || !values?.mapping) return
-    
-    const templateVars = (String(values.template).match(/{{\s*([\w.]+)\s*}}/g) || []).map(m => m.replace(/{{\s*|\s*}}/g, ''))
-    if (JSON.stringify(prevTemplateVarsRef.current) === JSON.stringify(templateVars)) return
-    
-    const isTemplateEditor = document.activeElement?.closest('[data-editor-type="template"]')
-    if (!isTemplateEditor) {
-      prevTemplateVarsRef.current = templateVars
-      return
-    }
-    
-    const updatedMapping = Array.isArray(values.mapping) ? [...values.mapping.filter(item => item)] : []
-    const existingNames = updatedMapping.filter(item => item && item.name).map(item => item.name)
-    let updatedTemplate = String(values.template)
-    
-    if (prevTemplateVarsRef.current.length > 0) {
-      prevTemplateVarsRef.current.forEach((oldVar, index) => {
-        const newVar = templateVars[index]
-        if (newVar && oldVar !== newVar && updatedMapping[index]) {
-          updatedMapping[index] = { ...updatedMapping[index], name: newVar }
-        }
-      })
-    }
-    
-    templateVars.forEach(varName => {
-      const existingMapping = updatedMapping.find(item => item.value === `{{${varName}}}`)
-      const regex = new RegExp(`{{\\s*${varName.replace(/\./g, '\\.')}\\s*}}`, 'g')
-      
-      if (existingMapping) {
-        updatedTemplate = updatedTemplate.replace(regex, `{{${existingMapping.name}}}`)
-      } else if (!existingNames.includes(varName)) {
-        const mappingName = varName.includes('.') ? varName.split('.').pop() || varName : varName
-        updatedMapping.push({ name: mappingName, value: `{{${varName}}}` })
-        updatedTemplate = updatedTemplate.replace(regex, `{{${mappingName}}}`)
-      }
-    })
-    
-    const seenNames = new Set<string>()
-    const finalMapping = updatedMapping.filter(item => {
-      const isUsed = templateVars.some(v => item.name === v || item.value === `{{${v}}}`)
-      if (!isUsed || seenNames.has(item.name)) return false
-      seenNames.add(item.name)
-      return true
-    })
-    
-    isSyncingRef.current = true
-    lastSyncSourceRef.current = 'template'
-    prevMappingNamesRef.current = finalMapping.filter(item => item && item.name).map((item: any) => item.name)
-    prevTemplateVarsRef.current = templateVars
-    
-    if (JSON.stringify(finalMapping) !== JSON.stringify(values.mapping)) {
-      form.setFieldValue('mapping', finalMapping)
-    }
-    if (updatedTemplate !== String(values.template)) {
-      form.setFieldValue('template', updatedTemplate)
-    }
-    
-    setTimeout(() => { 
-      isSyncingRef.current = false
-      lastSyncSourceRef.current = null
-    }, 50)
-  }, [values?.template, selectedNode?.data?.type, form])
 
   useEffect(() => {
     if (selectedNode && form) {
@@ -197,6 +77,8 @@ const Properties: FC<PropertiesProps> = ({
         ...initialValue,
       })
       setConfigs(config || {})
+    } else {
+      form.resetFields()
     }
   }, [selectedNode, form])
 
@@ -529,6 +411,12 @@ const Properties: FC<PropertiesProps> = ({
               />
             : selectedNode?.data?.type === 'tool'
             ? <ToolConfig options={variableList} />
+            : selectedNode?.data.type === 'jinja-render'
+            ? <JinjaRender
+              selectedNode={selectedNode}
+              options={getFilteredVariableList(selectedNode?.data?.type, 'mapping')}
+              templateOptions={getFilteredVariableList(selectedNode?.data?.type, 'template')}
+            />
             : configs && Object.keys(configs).length > 0 && Object.keys(configs).map((key) => {
               const config = configs[key] || {}
 
@@ -644,15 +532,6 @@ const Properties: FC<PropertiesProps> = ({
                       graphRef={graphRef}
                     />
                   </Form.Item>
-                )
-              }
-
-              if (config.type === 'mappingList') {
-                return (
-                  <Form.Item key={key} name={key} noStyle>
-                    <MappingList name={key} options={getFilteredVariableList(selectedNode?.data?.type, key)} />
-                  </Form.Item>
-                
                 )
               }
               if (config.type === 'cycleVarsList') {
