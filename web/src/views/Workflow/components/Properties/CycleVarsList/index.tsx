@@ -1,6 +1,6 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next';
-import { Form, Select, Input, Button, InputNumber } from 'antd'
+import { Form, Select, Input, Button, InputNumber, Radio } from 'antd'
 import VariableSelect from '../VariableSelect'
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
@@ -153,6 +153,11 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
                       className="rb:w-full! rb:my-1!"
                       onChange={(value) => form.setFieldValue([name, 'value'], value)}
                     />
+                    : currentType === 'boolean'
+                    ? <Radio.Group block>
+                      <Radio.Button value={true}>True</Radio.Button>
+                      <Radio.Button value={false}>False</Radio.Button>
+                    </Radio.Group>
                     : (
                       <Input.TextArea
                         placeholder={t('common.pleaseEnter')}
