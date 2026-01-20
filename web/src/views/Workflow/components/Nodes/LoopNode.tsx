@@ -2,9 +2,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx';
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
-import { graphNodeLibrary } from '../../constant';
-
-import { edge_color } from '../../hooks/useWorkflowGraph'
+import { graphNodeLibrary, edgeAttrs } from '../../constant';
 
 const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
   const data = node.getData() || {};
@@ -56,16 +54,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       graph.addEdge({
         source: { cell: cycleStartNode.id, port: sourcePort },
         target: { cell: addNode.id, port: targetPort },
-        attrs: {
-          line: {
-            stroke: edge_color,
-            strokeWidth: 1,
-            targetMarker: {
-              name: 'block',
-              size: 8,
-            },
-          },
-        },
+        ...edgeAttrs,
       });
     }
   }
@@ -122,16 +111,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         cell: addNode.id,
         port: targetPorts.find((port: any) => port.group === 'left')?.id || 'left'
       },
-      attrs: {
-        line: {
-          stroke: edge_color,
-          strokeWidth: 1,
-          targetMarker: {
-            name: 'block',
-            size: 2,
-          },
-        },
-      },
+      ...edgeAttrs
     }
     graph.addEdge(edgeConfig)
   }
