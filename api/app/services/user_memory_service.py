@@ -18,7 +18,7 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
 from app.services.implicit_memory_service import ImplicitMemoryService
-from app.services.memory_base_service import MemoryBaseService
+from app.services.memory_base_service import MemoryBaseService, MemoryTransService, Translation_English
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_perceptual_service import MemoryPerceptualService
 from app.services.memory_short_service import ShortService
@@ -360,7 +360,9 @@ class UserMemoryService:
     async def get_cached_memory_insight(
         self, 
         db: Session, 
-        end_user_id: str
+        end_user_id: str,
+        model_id: str,
+        language_type: str
     ) -> Dict[str, Any]:
         """
         从数据库获取缓存的记忆洞察（四个维度）
@@ -419,11 +421,18 @@ class UserMemoryService:
                     key_findings_array = []
                 
                 logger.info(f"成功获取 end_user_id {end_user_id} 的缓存记忆洞察（四维度）")
+                memory_insight=end_user.memory_insight
+                behavior_pattern=end_user.behavior_pattern
+                growth_trajectory=end_user.growth_trajectory
+                if language_type!='zh':
+                    memory_insight=await Translation_English(model_id,memory_insight)
+                    behavior_pattern=await Translation_English(model_id,behavior_pattern)
+                    growth_trajectory=await Translation_English(model_id,growth_trajectory)
                 return {
-                    "memory_insight": end_user.memory_insight,  # 总体概述存储在 memory_insight
-                    "behavior_pattern": end_user.behavior_pattern,
+                    "memory_insight":memory_insight,  # 总体概述存储在 memory_insight
+                    "behavior_pattern":behavior_pattern,
                     "key_findings": key_findings_array,  # 返回数组
-                    "growth_trajectory": end_user.growth_trajectory,
+                    "growth_trajectory": growth_trajectory,
                     "updated_at": self._datetime_to_timestamp(end_user.memory_insight_updated_at),
                     "is_cached": True
                 }
@@ -457,7 +466,9 @@ class UserMemoryService:
     async def get_cached_user_summary(
         self, 
         db: Session, 
-        end_user_id: str
+        end_user_id: str,
+        model_id:str,
+        language_type:str="zh"
     ) -> Dict[str, Any]:
         """
         从数据库获取缓存的用户摘要（四个部分）
@@ -481,7 +492,6 @@ class UserMemoryService:
             user_uuid = uuid.UUID(end_user_id)
             repo = EndUserRepository(db)
             end_user = repo.get_by_id(user_uuid)
-            
             if not end_user:
                 logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
                 return {
@@ -495,20 +505,29 @@ class UserMemoryService:
                 }
             
             # 检查是否有缓存数据（至少有一个字段不为空）
+            user_summary=end_user.user_summary
+            personality_traits=end_user.personality_traits
+            core_values=end_user.core_values
+            one_sentence_summary=end_user.one_sentence_summary
+            if language_type!='zh':
+                user_summary=await Translation_English(model_id, user_summary)
+                personality_traits = await Translation_English(model_id, personality_traits)
+                core_values = await Translation_English(model_id, core_values)
+                one_sentence_summary = await Translation_English(model_id, one_sentence_summary)
             has_cache = any([
-                end_user.user_summary,
-                end_user.personality_traits,
-                end_user.core_values,
-                end_user.one_sentence_summary
+                user_summary,
+                personality_traits,
+                core_values,
+                one_sentence_summary
             ])
             
             if has_cache:
                 logger.info(f"成功获取 end_user_id {end_user_id} 的缓存用户摘要")
                 return {
-                    "user_summary": end_user.user_summary,
-                    "personality": end_user.personality_traits,
-                    "core_values": end_user.core_values,
-                    "one_sentence": end_user.one_sentence_summary,
+                    "user_summary": user_summary,
+                    "personality": personality_traits,
+                    "core_values":core_values,
+                    "one_sentence": one_sentence_summary,
                     "updated_at": self._datetime_to_timestamp(end_user.user_summary_updated_at),
                     "is_cached": True
                 }
@@ -1367,7 +1386,6 @@ async def analytics_memory_types(
     
     return memory_types
 
-
 async def analytics_graph_data(
     db: Session,
     end_user_id: str,
@@ -1557,7 +1575,7 @@ async def analytics_graph_data(
             f"成功获取图数据: end_user_id={end_user_id}, "
             f"nodes={len(nodes)}, edges={len(edges)}"
         )
-        
+
         return {
             "nodes": nodes,
             "edges": edges,
@@ -1606,11 +1624,7 @@ async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_
     
     # 获取该节点类型的白名单字段
     allowed_fields = field_whitelist.get(label, [])
-    
-    # 如果没有定义白名单，返回空字典（或者可以返回所有字段）
-    # if not allowed_fields:
-    #     # 对于未定义的节点类型，只返回基本字段
-    #     allowed_fields = ["name", "created_at", "caption"]
+
     count_neo4j=f"""MATCH (n)-[r]-(m) WHERE elementId(n) ="{node_id}" RETURN count(r) AS rel_count;"""
     node_results = await (_neo4j_connector.execute_query(count_neo4j))
     # 提取白名单中的字段
@@ -1618,13 +1632,12 @@ async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_
     for field in allowed_fields:
         if field in properties:
             value = properties[field]
-            if str(field) == 'entity_type':
+            if  str(field) == 'entity_type':
                 value=type_mapping.get(value,'')
             if str(field)=="emotion_type":
                 value=EmotionType.EMOTION_MAPPING.get(value)
-            if str(field)=="emotion_subject":
+            if  str(field)=="emotion_subject":
                 value=EmotionSubject.SUBJECT_MAPPING.get(value)
-            # 清理 Neo4j 特殊类型
             filtered_props[field] = _clean_neo4j_value(value)
     filtered_props['associative_memory']=[i['rel_count'] for i in node_results][0]
     return filtered_props

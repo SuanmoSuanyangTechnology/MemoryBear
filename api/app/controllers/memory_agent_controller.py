@@ -9,7 +9,7 @@ from app.db import get_db
 from app.dependencies import cur_workspace_access_guard, get_current_user
 from app.models import ModelApiKey
 from app.models.user_model import User
-from app.repositories import knowledge_repository
+from app.repositories import knowledge_repository, WorkspaceRepository
 from app.schemas.memory_agent_schema import UserInput, Write_UserInput
 from app.schemas.response_schema import ApiResponse
 from app.services import task_service, workspace_service
@@ -616,8 +616,10 @@ async def get_knowledge_type_stats_api(
 @router.get("/analytics/hot_memory_tags/by_user", response_model=ApiResponse)
 async def get_hot_memory_tags_by_user_api(
     end_user_id: Optional[str] = Query(None, description="用户ID（可选）"),
+    language_type: Optional[str] ="zh",
     limit: int = Query(20, description="返回标签数量限制"),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session=Depends(get_db),
 ):
     """
     获取指定用户的热门记忆标签
@@ -628,10 +630,22 @@ async def get_hot_memory_tags_by_user_api(
         ...
     ]
     """
+
+    workspace_id=current_user.current_workspace_id
+    workspace_repo = WorkspaceRepository(db)
+    workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
+
+    if workspace_models:
+        model_id = workspace_models.get("llm", None)
+    else:
+        model_id = None
+
     api_logger.info(f"Hot memory tags by user requested: end_user_id={end_user_id}")
     try:
         result = await memory_agent_service.get_hot_memory_tags_by_user(
             end_user_id=end_user_id,
+            language_type=language_type,
+            model_id=model_id,
             limit=limit
         )
         return success(data=result, msg="获取热门记忆标签成功")
