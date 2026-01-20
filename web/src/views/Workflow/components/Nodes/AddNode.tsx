@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Popover } from 'antd';
 import clsx from 'clsx';
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
-import { nodeLibrary, graphNodeLibrary } from '../../constant';
+import { nodeLibrary, graphNodeLibrary, edgeAttrs } from '../../constant';
 import { useTranslation } from 'react-i18next';
 
 const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
@@ -47,7 +47,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       graph.addEdge({
         source: { cell: edge.getSourceCellId(), port: edge.getSourcePortId() },
         target: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'left')?.id || 'left' },
-        attrs: edge.getAttrs(),
+        ...edgeAttrs
       });
     });
 
@@ -57,7 +57,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       graph.addEdge({
         source: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'right')?.id || 'right' },
         target: { cell: edge.getTargetCellId(), port: targetPortId },
-        attrs: edge.getAttrs(),
+        ...edgeAttrs
       });
     });
 

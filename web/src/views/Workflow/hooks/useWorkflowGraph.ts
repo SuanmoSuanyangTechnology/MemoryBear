@@ -5,7 +5,7 @@ import { App } from 'antd'
 import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import type { PortMetadata } from '@antv/x6/lib/model/port';
@@ -23,12 +23,8 @@ export interface UseWorkflowGraphReturn {
   setSelectedNode: React.Dispatch<React.SetStateAction<Node | null>>;
   zoomLevel: number;
   setZoomLevel: React.Dispatch<React.SetStateAction<number>>;
-  canUndo: boolean;
-  canRedo: boolean;
   isHandMode: boolean;
   setIsHandMode: React.Dispatch<React.SetStateAction<boolean>>;
-  onUndo: () => void;
-  onRedo: () => void;
   onDrop: (event: React.DragEvent) => void;
   blankClick: () => void;
   deleteEvent: () => boolean | void;
@@ -39,8 +35,6 @@ export interface UseWorkflowGraphReturn {
   setChatVariables: React.Dispatch<React.SetStateAction<ChatVariable[]>>;
 }
 
-export const edge_color = '#155EEF';
-const edge_selected_color = '#4DA8FF'
 export const useWorkflowGraph = ({
   containerRef,
   miniMapRef,
@@ -51,9 +45,6 @@ export const useWorkflowGraph = ({
   const graphRef = useRef<Graph>();
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
-  const historyRef = useRef<{ undoStack: string[], redoStack: string[] }>({ undoStack: [], redoStack: [] });
-  const [canUndo, setCanUndo] = useState(false);
-  const [canRedo, setCanRedo] = useState(false);
   const [isHandMode, setIsHandMode] = useState(true);
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
@@ -338,17 +329,7 @@ export const useWorkflowGraph = ({
               port: targetPorts.find((port: any) => port.group === 'left')?.id || 'left'
             },
             connector: { name: 'smooth' },
-            attrs: {
-              line: {
-                stroke: edge_color,
-                strokeWidth: 1,
-                targetMarker: {
-                  name: 'diamond',
-                  width: 4,
-                  height: 4,
-                },
-              },
-            },
+            ...edgeAttrs
             // zIndex: loopIterationCount
           }
 
@@ -368,48 +349,6 @@ export const useWorkflowGraph = ({
       }, 200)
     }
   }
-
-  const saveState = () => {
-    if (!graphRef.current) return;
-    const state = JSON.stringify(graphRef.current.toJSON());
-    historyRef.current.undoStack.push(state);
-    historyRef.current.redoStack = [];
-    if (historyRef.current.undoStack.length > 50) {
-      historyRef.current.undoStack.shift();
-    }
-    updateHistoryState();
-  };
-
-  const updateHistoryState = () => {
-    setCanUndo(historyRef.current.undoStack.length > 1);
-    setCanRedo(historyRef.current.redoStack.length > 0);
-  };
-
-  // 撤销
-  const onUndo = () => {
-    if (!graphRef.current || historyRef.current.undoStack.length === 0) return;
-    const { undoStack = [], redoStack = [] } = historyRef.current
-
-    const currentState = JSON.stringify(graphRef.current.toJSON());
-    const prevState = undoStack[undoStack.length - 2];
-
-    historyRef.current.redoStack = [...redoStack, currentState]
-    historyRef.current.undoStack = undoStack.slice(0, undoStack.length - 1)
-    graphRef.current.fromJSON(JSON.parse(prevState));
-    updateHistoryState();
-  };
-  // 重做
-  const onRedo = () => {
-    if (!graphRef.current || historyRef.current.redoStack.length === 0) return;
-    const { undoStack = [], redoStack = [] } = historyRef.current
-
-    const nextState = redoStack[redoStack.length - 1];
-
-    historyRef.current.undoStack = [...undoStack, nextState]
-    historyRef.current.redoStack = redoStack.slice(0, redoStack.length - 1)
-    graphRef.current.fromJSON(JSON.parse(nextState));
-    updateHistoryState();
-  };
   // 使用插件
   const setupPlugins = () => {
     if (!graphRef.current || !miniMapRef.current) return;
@@ -563,20 +502,6 @@ export const useWorkflowGraph = ({
     }
     return false;
   };
-  // 撤销快捷键事件
-  const undoEvent = () => {
-    if (canUndo) {
-      onUndo();
-    }
-    return false;
-  };
-  // 重做快捷键事件
-  const redoEvent = () => {
-    if (canRedo) {
-      onRedo();
-    }
-    return false;
-  };
   // 删除选中的节点和连线事件
   const deleteEvent = () => {
     if (!graphRef.current) return;
@@ -677,8 +602,6 @@ export const useWorkflowGraph = ({
       background: {
         color: '#F0F3F8',
       },
-      // width: container.clientWidth || 800,
-      // height: container.clientHeight || 600,
       autoResize: true,
       grid: {
         visible: true,
@@ -694,37 +617,26 @@ export const useWorkflowGraph = ({
         enabled: true,
       },
       connecting: {
-        // router: 'orth',
-        // router: 'manhattan',
         connector: {
           name: 'smooth',
           args: {
             radius: 8,
           },
         },
-        anchor: 'center',
+        anchor: 'midSide',
         connectionPoint: 'anchor',
         allowBlank: false,
+        allowLoop: false,
         allowNode: false,
         allowEdge: false,
+        allowPort: true,
+        allowMulti: true,
         highlight: true,
         snap: {
           radius: 20,
         },
         createEdge() {
-          return graphRef.current?.createEdge({
-            attrs: {
-              line: {
-                stroke: edge_color,
-                strokeWidth: 1,
-                targetMarker: {
-                  name: 'diamond',
-                  width: 4,
-                  height: 4,
-                },
-              },
-            },
-          });
+          return graphRef.current?.createEdge(edgeAttrs);
         },
         validateConnection({ sourceCell, targetCell, targetMagnet }) {
           if (!targetMagnet) return false;
@@ -823,25 +735,6 @@ export const useWorkflowGraph = ({
     graphRef.current.on('scale', scaleEvent);
     // 监听节点移动事件
     graphRef.current.on('node:moved', nodeMoved);
-
-    // 监听画布变化事件
-    const events = [
-      'node:added', 
-      'node:removed', 
-      'edge:added', 
-      'edge:removed',
-    ];
-    events.forEach(event => {
-      graphRef.current!.on(event, () => {
-        console.log('event', event);
-        setTimeout(() => saveState(), 50);
-      });
-    });
-
-    // 监听撤销键盘事件
-    graphRef.current.bindKey(['ctrl+z', 'cmd+z'], undoEvent);
-    // 监听重做键盘事件
-    graphRef.current.bindKey(['ctrl+shift+z', 'cmd+shift+z', 'ctrl+y', 'cmd+y'], redoEvent);
     // 监听复制键盘事件
     graphRef.current.bindKey(['ctrl+c', 'cmd+c'], copyEvent);
     // 监听粘贴键盘事件
@@ -849,11 +742,6 @@ export const useWorkflowGraph = ({
     // 删除选中的节点和连线
     graphRef.current.bindKey(['ctrl+d', 'cmd+d', 'delete', 'backspace'], deleteEvent);
 
-    // 保存初始状态
-    setTimeout(() => saveState(), 100);
-    // init window hook
-    (window as Window & { __x6_instances__?: Graph[] }).__x6_instances__ = [];
-    (window as Window & { __x6_instances__?: Graph[] }).__x6_instances__?.push(graphRef.current);
   };
 
   useEffect(() => {
@@ -1066,11 +954,11 @@ export const useWorkflowGraph = ({
         }),
       }
       saveWorkflowConfig(config.app_id, params as WorkflowConfig)
-      .then(() => {
+      .then((res) => {
         if (flag) {
           message.success(t('common.saveSuccess'))
         }
-        resolve(true)
+        resolve(res)
       }).catch(error => {
         reject(error)
       })
@@ -1085,12 +973,8 @@ export const useWorkflowGraph = ({
     setSelectedNode,
     zoomLevel,
     setZoomLevel,
-    canUndo,
-    canRedo,
     isHandMode,
     setIsHandMode,
-    onUndo,
-    onRedo,
     onDrop,
     blankClick,
     deleteEvent,

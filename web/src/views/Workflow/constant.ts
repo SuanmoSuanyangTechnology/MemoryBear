@@ -517,6 +517,8 @@ interface NodeConfig {
   ports?: PortsConfig;
 }
 
+export const edge_color = '#155EEF';
+export const edge_selected_color = '#4DA8FF'
 // 统一的端口 markup 配置
 export const portMarkup = [
   {
@@ -534,9 +536,9 @@ export const portAttrs = {
   body: {
     r: 6, 
     magnet: true, 
-    stroke: '#155EEF', 
+    stroke: edge_color, 
     strokeWidth: 2, 
-    fill: '#155EEF',
+    fill: edge_color,
   },
   label: {
     text: '+',
@@ -775,5 +777,19 @@ export const outputVariable: { [key: string]: OutputVariable } = {
     default: [
       { name: "output", type: "string" },
     ],
+  },
+}
+
+export const edgeAttrs = {
+  attrs: {
+    line: {
+      stroke: edge_color,
+      strokeWidth: 1,
+      targetMarker: {
+        name: 'block',
+        width: 4,
+        height: 4,
+      },
+    },
   },
 }
