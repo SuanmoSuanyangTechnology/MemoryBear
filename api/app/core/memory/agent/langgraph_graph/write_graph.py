@@ -1,30 +1,32 @@
+
 import asyncio
-import json
 import sys
 import warnings
 from contextlib import asynccontextmanager
 
-from app.core.logging_config import get_agent_logger
-from app.core.memory.agent.utils.llm_tools import WriteState
-from app.schemas.memory_config_schema import MemoryConfig
-from langchain_core.messages import AIMessage
+
+from langchain_core.messages import HumanMessage
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
-from langgraph.prebuilt import ToolNode
+
+
+from app.db import get_db
+from app.core.logging_config import get_agent_logger
+from app.core.memory.agent.utils.llm_tools import WriteState
+from app.core.memory.agent.langgraph_graph.nodes.write_nodes import write_node
+from app.core.memory.agent.langgraph_graph.nodes.data_nodes import content_input_write
+from app.services.memory_config_service import MemoryConfigService
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
-
 logger = get_agent_logger(__name__)
 
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-
 @asynccontextmanager
-async def make_write_graph(user_id, tools, apply_id, group_id, memory_config: MemoryConfig):
+async def make_write_graph():
     """
     Create a write graph workflow for memory operations.
-    
+
     Args:
         user_id: User identifier
         tools: MCP tools loaded from session
@@ -32,43 +34,8 @@ async def make_write_graph(user_id, tools, apply_id, group_id, memory_config: Me
         group_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
     """
-    logger.info("Loading MCP tools: %s", [t.name for t in tools])
-    logger.info(f"Using memory_config: {memory_config.config_name} (id={memory_config.config_id})")
-
-    data_write_tool = next((t for t in tools if t.name == "Data_write"), None)
-
-    if not data_write_tool:
-        logger.error("Data_write tool not found", exc_info=True)
-        raise ValueError("Data_write tool not found")
-
-    write_node = ToolNode([data_write_tool])
-
-    async def call_model(state):
-        messages = state["messages"]
-        last_message = messages[-1]
-        content = last_message[1] if isinstance(last_message, tuple) else last_message.content
-
-        # Call Data_write directly with memory_config
-        write_params = {
-            "content": content,
-            "apply_id": apply_id,
-            "group_id": group_id,
-            "user_id": user_id,
-            "memory_config": memory_config,
-        }
-        logger.debug(f"Passing memory_config to Data_write: {memory_config.config_id}")
-
-        write_result = await data_write_tool.ainvoke(write_params)
-
-        if isinstance(write_result, dict):
-            result_content = write_result.get("data", str(write_result))
-        else:
-            result_content = str(write_result)
-        logger.info("Write content: %s", result_content)
-        return {"messages": [AIMessage(content=result_content)]}
-
     workflow = StateGraph(WriteState)
-    workflow.add_node("content_input", call_model)
+    workflow.add_node("content_input", content_input_write)
     workflow.add_node("save_neo4j", write_node)
     workflow.add_edge(START, "content_input")
     workflow.add_edge("content_input", "save_neo4j")
@@ -76,5 +43,45 @@ async def make_write_graph(user_id, tools, apply_id, group_id, memory_config: Me
 
     graph = workflow.compile()
 
-
     yield graph
+
+
+async def main():
+    """主函数 - 运行工作流"""
+    message = "今天周一"
+    group_id = 'new_2025test1103'  # 组ID
+
+
+    # 获取数据库会话
+    db_session = next(get_db())
+    config_service = MemoryConfigService(db_session)
+    memory_config = config_service.load_memory_config(
+        config_id=17,  # 改为整数
+        service_name="MemoryAgentService"
+    )
+    try:
+        async with make_write_graph() as graph:
+            config = {"configurable": {"thread_id": group_id}}
+            # 初始状态 - 包含所有必要字段
+            initial_state = {"messages": [HumanMessage(content=message)],  "group_id": group_id, "memory_config": memory_config}
+
+            # 获取节点更新信息
+            async for update_event in graph.astream(
+                    initial_state,
+                    stream_mode="updates",
+                    config=config
+            ):
+                for node_name, node_data in update_event.items():
+                    if 'save_neo4j'==node_name:
+                        massages=node_data
+            massages=massages.get('write_result')['status']
+            print(massages)  # | 更新数据: {node_data}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
