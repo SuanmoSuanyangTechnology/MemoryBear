@@ -26,22 +26,33 @@ class VerificationNodeService(LLMServiceMixin):
 # 创建全局服务实例
 verification_service = VerificationNodeService()
 
-async def Verify_prompt(state: ReadState,messages_deal):
+async def Verify_prompt(state: ReadState, messages_deal: VerificationResult):
+    """处理验证结果并生成输出格式"""
     storage_type = state.get('storage_type', '')
     user_rag_memory_id = state.get('user_rag_memory_id', '')
     data = state.get('data', '')
+    
+    # 将 VerificationItem 对象转换为字典列表
+    verified_data = []
+    if messages_deal.expansion_issue:
+        for item in messages_deal.expansion_issue:
+            if hasattr(item, 'model_dump'):
+                verified_data.append(item.model_dump())
+            elif isinstance(item, dict):
+                verified_data.append(item)
+    
     Verify_result = {
         "status": messages_deal.split_result,
-        "verified_data": messages_deal.expansion_issue,
+        "verified_data": verified_data,
         "storage_type": storage_type,
         "user_rag_memory_id": user_rag_memory_id,
         "_intermediate": {
             "type": "verification",
             "title": "Data Verification",
             "result": messages_deal.split_result,
-            "reason": messages_deal.reason,
-            "query": data,
-            "verified_count": len(messages_deal.expansion_issue),
+            "reason": messages_deal.reason or "验证完成",
+            "query": messages_deal.query,
+            "verified_count": len(verified_data),
             "storage_type": storage_type,
             "user_rag_memory_id": user_rag_memory_id
         }
@@ -71,11 +82,16 @@ async def Verify(state: ReadState):
         }
 
         logger.info("Verify: 开始渲染模板")
+        
+        # 生成 JSON schema 以指导 LLM 输出正确格式
+        json_schema = VerificationResult.model_json_schema()
+        
         system_prompt = await verification_service.template_service.render_template(
             template_name='split_verify_prompt.jinja2',
             operation_name='split_verify_prompt',
             history=history,
-            sentence=messages
+            sentence=messages,
+            json_schema=json_schema
         )
         logger.info(f"Verify: 模板渲染完成，prompt length={len(system_prompt)}")
         
@@ -92,10 +108,11 @@ async def Verify(state: ReadState):
                     system_prompt=system_prompt,
                     response_model=VerificationResult,
                     fallback_value={
-                        "query": content,  # 添加必填的 query 字段
-                        "split_result": "fail",
+                        "query": content,
+                        "history": history if isinstance(history, list) else [],
                         "expansion_issue": [],
-                        "reason": "验证失败"
+                        "split_result": "failed",
+                        "reason": "验证失败或超时"
                     }
                 ),
                 timeout=150.0  # 150秒超时
@@ -105,8 +122,9 @@ async def Verify(state: ReadState):
             logger.error("Verify: LLM 调用超时（150秒），使用 fallback 值")
             structured = VerificationResult(
                 query=content,
-                split_result="fail",
+                history=history if isinstance(history, list) else [],
                 expansion_issue=[],
+                split_result="failed",
                 reason="LLM调用超时"
             )
         
