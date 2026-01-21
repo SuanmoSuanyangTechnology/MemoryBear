@@ -77,14 +77,11 @@ services:
     command: >
       celery -A app.celery_worker.celery_app flower
       --port=5555
-      --broker_api=redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/${CELERY_BROKER}
       --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin123}
       --persistent=True
       --db=/files/flower.db
       --max_tasks=10000
       --purge_offline_workers=60
-      --auto_refresh=True
-      --natural_time=True
     restart: unless-stopped
     networks:
       - celery
