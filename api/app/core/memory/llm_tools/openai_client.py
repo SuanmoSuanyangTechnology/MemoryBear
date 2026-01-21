@@ -92,8 +92,6 @@ class OpenAIClient(LLMClient):
                 config["callbacks"] = [self.langfuse_handler]
 
             response = await chain.ainvoke({"messages": messages}, config=config)
-
-            logger.debug(f"LLM 响应成功: {len(str(response))} 字符")
             return response
 
         except Exception as e:
@@ -149,13 +147,10 @@ class OpenAIClient(LLMClient):
                         config=config
                     )
 
-                    logger.debug(f"使用 PydanticOutputParser 解析成功")
                     return parsed
 
                 except Exception as e:
-                    logger.warning(
-                        f"PydanticOutputParser 解析失败，尝试其他方法: {e}"
-                    )
+                    logger.debug(f"PydanticOutputParser 解析失败，尝试备用方法: {e}")
 
             # 方法 2: 使用 LangChain 的 with_structured_output
             template = """{question}"""
@@ -173,13 +168,17 @@ class OpenAIClient(LLMClient):
 
                     # 验证并返回结果
                     try:
-                        return response_model.model_validate(parsed)
+                        result = response_model.model_validate(parsed)
+                        return result
                     except Exception:
                         # 如果已经是 Pydantic 实例，直接返回
                         if hasattr(parsed, "model_dump"):
                             return parsed
                         # 尝试从 JSON 解析
-                        return response_model.model_validate_json(json.dumps(parsed))
+                        result = response_model.model_validate_json(json.dumps(parsed))
+                        return result
+                else:
+                    logger.warning("with_structured_output 方法不可用")
 
             except Exception as e:
                 logger.error(f"结构化输出失败: {e}")

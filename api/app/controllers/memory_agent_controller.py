@@ -160,9 +160,12 @@ async def write_server(
     
     api_logger.info(f"Write service requested for group {user_input.group_id}, storage_type: {storage_type}, user_rag_memory_id: {user_rag_memory_id}")
     try:
+        # 获取标准化的消息列表
+        messages_list = memory_agent_service.get_messages_list(user_input)
+        
         result = await memory_agent_service.write_memory(
             user_input.group_id, 
-            user_input.message, 
+            messages_list,  # 传递结构化消息列表
             config_id,
             db,
             storage_type, 
@@ -219,9 +222,12 @@ async def write_server_async(
         if knowledge: user_rag_memory_id = str(knowledge.id)
     api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     try:
+        # 获取标准化的消息列表
+        messages_list = memory_agent_service.get_messages_list(user_input)
+        
         task = celery_app.send_task(
             "app.core.memory.agent.write_message",
-            args=[user_input.group_id, user_input.message, config_id, storage_type, user_rag_memory_id]
+            args=[user_input.group_id, messages_list, config_id, storage_type, user_rag_memory_id]
         )
         api_logger.info(f"Write task queued: {task.id}")
         
@@ -564,8 +570,23 @@ async def status_type(
     """
     api_logger.info(f"Status type check requested for group {user_input.group_id}")
     try:
+        # 获取标准化的消息列表
+        messages_list = memory_agent_service.get_messages_list(user_input)
+        
+        # 将消息列表转换为字符串用于分类
+        # 只取最后一条用户消息进行分类
+        last_user_message = ""
+        for msg in reversed(messages_list):
+            if msg.get('role') == 'user':
+                last_user_message = msg.get('content', '')
+                break
+        
+        if not last_user_message:
+            # 如果没有用户消息，使用所有消息的内容
+            last_user_message = " ".join([msg.get('content', '') for msg in messages_list])
+        
         result = await memory_agent_service.classify_message_type(
-            user_input.message,
+            last_user_message,
             user_input.config_id,
             db
         )
