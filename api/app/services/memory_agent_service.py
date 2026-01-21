@@ -715,7 +715,6 @@ class MemoryAgentService:
             tags = await get_hot_memory_tags(end_user_id, limit=limit, by_user=False)
             payload=[]
             for tag, freq in tags:
-                print(tag, freq)
                 if language_type!="zh":
                     tag=await Translation_English(model_id, tag)
                     payload.append({"name": tag, "frequency": freq})
