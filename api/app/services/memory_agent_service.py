@@ -26,6 +26,7 @@ from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.memory_config_schema import ConfigurationError
 from app.services.memory_base_service import Translation_English
 from app.services.memory_config_service import MemoryConfigService

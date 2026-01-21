@@ -555,7 +555,6 @@ def write_message_task(self, group_id: str, message, config_id: str, storage_typ
             "result": result,
             "group_id": group_id,
             "config_id": config_id,
-            "message_type": message_type,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
