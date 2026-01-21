@@ -55,6 +55,7 @@ class MemoryAgentService:
 
         if str(messages) == 'success':
             logger.info(f"Write operation successful for group {group_id} with config_id {config_id}")
+            # 记录成功的操作
             if audit_logger:
                 audit_logger.log_operation(operation="WRITE", config_id=config_id, group_id=group_id, success=True,
                                            duration=duration, details={"message_length": len(message)})
@@ -62,6 +63,7 @@ class MemoryAgentService:
         else:
             logger.warning(f"Write operation failed for group {group_id}")
 
+            # 记录失败的操作
             if audit_logger:
                 audit_logger.log_operation(
                     operation="WRITE",
@@ -259,13 +261,13 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
-    async def write_memory(self, group_id: str, message: str, config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
+    async def write_memory(self, group_id: str, messages: list[dict], config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
         """
         Process write operation with config_id
 
         Args:
             group_id: Group identifier (also used as end_user_id)
-            message: Structured message list [{"role": "user", "content": "..."}, ...]
+            messages: Structured message list [{"role": "user", "content": "..."}, ...]
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -314,14 +316,28 @@ class MemoryAgentService:
 
         try:
             if storage_type == "rag":
-                result = await write_rag(group_id, message, user_rag_memory_id)
+                # For RAG storage, convert messages to single string
+                message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+                result = await write_rag(group_id, message_text, user_rag_memory_id)
                 return result
             else:
                 async with make_write_graph() as graph:
                     config = {"configurable": {"thread_id": group_id}}
+                    # Convert structured messages to LangChain messages
+                    langchain_messages = []
+                    for msg in messages:
+                        if msg['role'] == 'user':
+                            langchain_messages.append(HumanMessage(content=msg['content']))
+                        elif msg['role'] == 'assistant':
+                            from langchain_core.messages import AIMessage
+                            langchain_messages.append(AIMessage(content=msg['content']))
+                    
                     # 初始状态 - 包含所有必要字段
-                    initial_state = {"messages": [HumanMessage(content=message)], "group_id": group_id,
-                                     "memory_config": memory_config}
+                    initial_state = {
+                        "messages": langchain_messages,
+                        "group_id": group_id,
+                        "memory_config": memory_config
+                    }
 
                     # 获取节点更新信息
                     async for update_event in graph.astream(
@@ -334,7 +350,9 @@ class MemoryAgentService:
                                 massages = node_data
                     massagesstatus = massages.get('write_result')['status']
                     contents = massages.get('write_result')
-                    return self.writer_messages_deal(massagesstatus, start_time, group_id, config_id, message, contents)
+                    # Convert messages back to string for logging
+                    message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+                    return self.writer_messages_deal(massagesstatus, start_time, group_id, config_id, message_text, contents)
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Write operation failed: {str(e)}"
@@ -530,7 +548,49 @@ class MemoryAgentService:
                 )
             raise ValueError(error_msg)
 
-
+    def get_messages_list(self, user_input: Write_UserInput) -> list[dict]:
+        """
+        Get standardized message list from user input.
+        
+        Args:
+            user_input: Write_UserInput object
+        
+        Returns:
+            list[dict]: Message list, each message contains role and content
+            
+        Raises:
+            ValueError: If messages is empty or format is incorrect
+        """
+        from app.core.logging_config import get_api_logger
+        logger = get_api_logger()
+        
+        if len(user_input.messages) == 0:
+            logger.error("Validation failed: Message list cannot be empty")
+            raise ValueError("Message list cannot be empty")
+        
+        for idx, msg in enumerate(user_input.messages):
+            if not isinstance(msg, dict):
+                logger.error(f"Validation failed: Message {idx} is not a dict: {type(msg)}")
+                raise ValueError(f"Message format error: Message must be a dictionary. Error message index: {idx}, type: {type(msg)}")
+            
+            if 'role' not in msg:
+                logger.error(f"Validation failed: Message {idx} missing 'role' field: {msg}")
+                raise ValueError(f"Message format error: Message must contain 'role' field. Error message index: {idx}")
+            
+            if 'content' not in msg:
+                logger.error(f"Validation failed: Message {idx} missing 'content' field: {msg}")
+                raise ValueError(f"Message format error: Message must contain 'content' field. Error message index: {idx}")
+            
+            if msg['role'] not in ['user', 'assistant']:
+                logger.error(f"Validation failed: Message {idx} invalid role: {msg['role']}")
+                raise ValueError(f"Role must be 'user' or 'assistant', got: {msg['role']}. Message index: {idx}")
+            
+            if not msg['content'] or not msg['content'].strip():
+                logger.error(f"Validation failed: Message {idx} content is empty")
+                raise ValueError(f"Message content cannot be empty. Message index: {idx}, role: {msg['role']}")
+        
+        logger.info(f"Validation successful: Structured message list, count: {len(user_input.messages)}")
+        return user_input.messages
 
     async def classify_message_type(self, message: str, config_id: int, db: Session) -> Dict:
         """
