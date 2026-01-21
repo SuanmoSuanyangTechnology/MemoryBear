@@ -357,6 +357,101 @@ class UserMemoryService:
                     data[key] = UserMemoryService._datetime_to_timestamp(original_value)
         return data
     
+    def update_end_user_profile(
+        self,
+        db: Session,
+        end_user_id: str,
+        profile_update: Any
+    ) -> Dict[str, Any]:
+        """
+        更新终端用户的基本信息
+        
+        Args:
+            db: 数据库会话
+            end_user_id: 终端用户ID (UUID)
+            profile_update: 包含更新字段的 Pydantic 模型
+            
+        Returns:
+            {
+                "success": bool,
+                "data": dict,  # 更新后的用户档案数据
+                "error": Optional[str]
+            }
+        """
+        try:
+            # 转换为UUID并查询用户
+            user_uuid = uuid.UUID(end_user_id)
+            repo = EndUserRepository(db)
+            end_user = repo.get_by_id(user_uuid)
+            
+            if not end_user:
+                logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "终端用户不存在"
+                }
+            
+            # 获取更新数据（排除 end_user_id 字段）
+            update_data = profile_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
+            
+            # 特殊处理 hire_date：如果提供了时间戳，转换为 DateTime
+            if 'hire_date' in update_data:
+                hire_date_timestamp = update_data['hire_date']
+                if hire_date_timestamp is not None:
+                    from app.core.api_key_utils import timestamp_to_datetime
+                    update_data['hire_date'] = timestamp_to_datetime(hire_date_timestamp)
+                # 如果是 None，保持 None（允许清空）
+            
+            # 更新字段
+            for field, value in update_data.items():
+                setattr(end_user, field, value)
+            
+            # 更新时间戳
+            end_user.updated_at = datetime.now()
+            end_user.updatetime_profile = datetime.now()
+            
+            # 提交更改
+            db.commit()
+            db.refresh(end_user)
+            
+            # 构建响应数据
+            from app.schemas.end_user_schema import EndUserProfileResponse
+            profile_data = EndUserProfileResponse(
+                id=end_user.id,
+                other_name=end_user.other_name,
+                position=end_user.position,
+                department=end_user.department,
+                contact=end_user.contact,
+                phone=end_user.phone,
+                hire_date=end_user.hire_date,
+                updatetime_profile=end_user.updatetime_profile
+            )
+            
+            logger.info(f"成功更新用户信息: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
+            
+            return {
+                "success": True,
+                "data": self.convert_profile_to_dict_with_timestamp(profile_data),
+                "error": None
+            }
+            
+        except ValueError:
+            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
+            return {
+                "success": False,
+                "data": None,
+                "error": "无效的用户ID格式"
+            }
+        except Exception as e:
+            db.rollback()
+            logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={str(e)}")
+            return {
+                "success": False,
+                "data": None,
+                "error": str(e)
+            }
+    
     async def get_cached_memory_insight(
         self, 
         db: Session, 

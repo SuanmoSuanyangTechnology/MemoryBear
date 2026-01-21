@@ -28,7 +28,6 @@ from app.services.memory_storage_service import (
     search_dialogue,
     search_edges,
     search_entity,
-    search_entity_graph,
     search_statement,
 )
 from fastapi import APIRouter, Depends
@@ -412,21 +411,7 @@ async def search_entity_edges(
         api_logger.error(f"Search edges failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "边查询失败", str(e))
 
-@router.get("/search/entity_graph", response_model=ApiResponse)
-async def search_for_entity_graph(
-    end_user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    ) -> dict:
-    """
-    搜索所有实体之间的关系网络
-    """
-    api_logger.info(f"Search entity graph requested for end_user_id: {end_user_id}")
-    try:
-        result = await search_entity_graph(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Search entity graph failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "实体图查询失败", str(e))
+
 
 
 @router.get("/analytics/hot_memory_tags", response_model=ApiResponse)
