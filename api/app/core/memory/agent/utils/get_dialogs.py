@@ -43,13 +43,13 @@ async def get_chunked_dialogs(
             raise ValueError(f"Message {idx} format error: must contain 'role' and 'content' fields")
         
         role = msg['role']
-        content_text = msg['content']
+        content = msg['content']
         
         if role not in ['user', 'assistant']:
             raise ValueError(f"Message {idx} role must be 'user' or 'assistant', got: {role}")
         
-        if content_text.strip():
-            conversation_messages.append(ConversationMessage(role=role, msg=content_text.strip()))
+        if content.strip():
+            conversation_messages.append(ConversationMessage(role=role, msg=content.strip()))
     
     if not conversation_messages:
         raise ValueError("Message list cannot be empty after filtering")
