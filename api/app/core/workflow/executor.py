@@ -54,6 +54,8 @@ class WorkflowExecutor:
         self.edges = workflow_config.get("edges", [])
         self.execution_config = workflow_config.get("execution_config", {})
 
+        self.start_node_id = None
+
         self.checkpoint_config = RunnableConfig(
             configurable={
                 "thread_id": uuid.uuid4(),
@@ -131,76 +133,11 @@ class WorkflowExecutor:
                 for node in self.workflow_config.get("nodes")
                 if node.get("type") in [NodeType.LOOP, NodeType.ITERATION]
             ],  # loop, iteration node id
-            "looping": False  # loop runing flag, only use in loop node,not use in main loop
+            "looping": False,  # loop runing flag, only use in loop node,not use in main loop
+            "activate": {
+                self.start_node_id: True
+            }
         }
-
-    def _analyze_end_node_prefixes(self) -> tuple[dict[str, str], set[str]]:
-        """分析 End 节点的前缀配置
-        
-        检查每个 End 节点的模板，找到直接上游节点的引用，
-        提取该引用之前的前缀部分。
-        
-        Returns:
-            元组：({上游节点ID: End节点前缀}, {与End相邻且被引用的节点ID集合})
-        """
-        import re
-
-        prefixes = {}
-        adjacent_and_referenced = set()  # 记录与 End 节点相邻且被引用的节点
-
-        # 找到所有 End 节点
-        end_nodes = [node for node in self.nodes if node.get("type") == "end"]
-        logger.info(f"[前缀分析] 找到 {len(end_nodes)} 个 End 节点")
-
-        for end_node in end_nodes:
-            end_node_id = end_node.get("id")
-            output_template = end_node.get("config", {}).get("output")
-
-            logger.info(f"[前缀分析] End 节点 {end_node_id} 模板: {output_template}")
-
-            if not output_template:
-                continue
-
-            # 找到所有直接连接到 End 节点的上游节点
-            direct_upstream_nodes = []
-            for edge in self.edges:
-                if edge.get("target") == end_node_id:
-                    source_node_id = edge.get("source")
-                    direct_upstream_nodes.append(source_node_id)
-
-            logger.info(f"[前缀分析] End 节点的直接上游节点: {direct_upstream_nodes}")
-
-            # 查找模板中引用了哪些节点
-            # 匹配 {{node_id.xxx}} 或 {{ node_id.xxx }} 格式（支持空格）
-            pattern = r'\{\{\s*([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+\s*\}\}'
-            matches = list(re.finditer(pattern, output_template))
-
-            logger.info(f"[前缀分析] 模板中找到 {len(matches)} 个节点引用")
-
-            # 找到第一个直接上游节点的引用
-            for match in matches:
-                referenced_node_id = match.group(1)
-                logger.info(f"[前缀分析] 检查引用: {referenced_node_id}")
-
-                if referenced_node_id in direct_upstream_nodes:
-                    # 这是直接上游节点的引用，提取前缀
-                    prefix = output_template[:match.start()]
-
-                    logger.info(f"[前缀分析] ✅ 找到直接上游节点 {referenced_node_id} 的引用，前缀: '{prefix}'")
-
-                    # 标记这个节点为"相邻且被引用"
-                    adjacent_and_referenced.add(referenced_node_id)
-
-                    if prefix:
-                        prefixes[referenced_node_id] = prefix
-                        logger.info(f"✅ [前缀分析] 为节点 {referenced_node_id} 配置前缀: '{prefix[:50]}...'")
-
-                    # 只处理第一个直接上游节点的引用
-                    break
-
-        logger.info(f"[前缀分析] 最终配置: {prefixes}")
-        logger.info(f"[前缀分析] 与 End 相邻且被引用的节点: {adjacent_and_referenced}")
-        return prefixes, adjacent_and_referenced
 
     def _build_final_output(self, result, elapsed_time):
         node_outputs = result.get("node_outputs", {})
@@ -231,10 +168,12 @@ class WorkflowExecutor:
             编译后的状态图
         """
         logger.info(f"开始构建工作流图: execution_id={self.execution_id}")
-        graph = GraphBuilder(
+        builder = GraphBuilder(
             self.workflow_config,
             stream=stream,
-        ).build()
+        )
+        self.start_node_id = builder.start_node_id
+        graph = builder.build()
         logger.info(f"工作流图构建完成: execution_id={self.execution_id}")
 
         return graph
@@ -375,13 +314,15 @@ class WorkflowExecutor:
                     payload = data.get("payload", {})
                     node_name = payload.get("name")
 
+                    if node_name and node_name.startswith("nop"):
+                        continue
+
                     if event_type == "task":
                         # Node starts execution
                         inputv = payload.get("input", {})
-                        variables = inputv.get("variables", {})
-                        variables_sys = variables.get("sys", {})
+                        if not inputv.get("activate", {}).get(node_name):
+                            continue
                         conversation_id = input_data.get("conversation_id")
-                        execution_id = variables_sys.get("execution_id")
                         logger.info(f"[NODE-START] Node starts execution: {node_name} "
                                     f"- execution_id: {self.execution_id}")
 
@@ -390,18 +331,17 @@ class WorkflowExecutor:
                             "data": {
                                 "node_id": node_name,
                                 "conversation_id": conversation_id,
-                                "execution_id": execution_id,
-                                "timestamp": data.get("timestamp")
+                                "execution_id": self.execution_id,
+                                "timestamp": data.get("timestamp"),
                             }
                         }
                     elif event_type == "task_result":
                         # Node execution completed
                         result = payload.get("result", {})
-                        inputv = result.get("input", {})
-                        variables = inputv.get("variables", {})
-                        variables_sys = variables.get("sys", {})
+                        if not result.get("activate", {}).get(node_name):
+                            continue
+
                         conversation_id = input_data.get("conversation_id")
-                        execution_id = variables_sys.get("execution_id")
                         logger.info(f"[NODE-END] Node execution completed: {node_name} "
                                     f"- execution_id: {self.execution_id}")
 
@@ -410,7 +350,7 @@ class WorkflowExecutor:
                             "data": {
                                 "node_id": node_name,
                                 "conversation_id": conversation_id,
-                                "execution_id": execution_id,
+                                "execution_id": self.execution_id,
                                 "timestamp": data.get("timestamp"),
                                 "state": result.get("node_outputs", {}).get(node_name),
                             }
