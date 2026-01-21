@@ -10,11 +10,6 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from langchain.tools import tool
-from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.celery_app import celery_app
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -28,6 +23,10 @@ from app.services.langchain_tool_server import Search
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.tool_service import ToolService
+from langchain.tools import tool
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 logger = get_business_logger()
 class KnowledgeRetrievalInput(BaseModel):
@@ -107,9 +106,9 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                     "app.core.memory.agent.read_message",
                     args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
                 )
-                result = task_service.get_task_memory_read_result(task.id)
-                status = result.get("status")
-                logger.info(f"读取任务状态：{status}")
+                # result = task_service.get_task_memory_read_result(task.id)
+                # status = result.get("status")
+                # logger.info(f"读取任务状态：{status}")
 
             finally:
                 db.close()

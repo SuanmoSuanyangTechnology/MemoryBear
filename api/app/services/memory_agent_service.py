@@ -10,15 +10,17 @@ import re
 import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
-import redis
-from langchain_core.messages import HumanMessage
 
+import redis
 from app.core.config import settings
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.agent.langgraph_graph.read_graph import make_read_graph
 from app.core.memory.agent.langgraph_graph.write_graph import make_write_graph
 from app.core.memory.agent.logger_file.log_streamer import LogStreamer
-from app.core.memory.agent.utils.messages_tools import merge_multiple_search_results, reorder_output_results
+from app.core.memory.agent.utils.messages_tools import (
+    merge_multiple_search_results,
+    reorder_output_results,
+)
 from app.core.memory.agent.utils.type_classifier import status_typle
 from app.core.memory.agent.utils.write_tools import write  # 新增：直接导入 write 函数
 from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
@@ -33,6 +35,7 @@ from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
 )
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -404,6 +407,7 @@ class MemoryAgentService:
 
         import time
         start_time = time.time()
+        logger.info(f"[PERF] read_memory started for group_id={group_id}, search_switch={search_switch}")
 
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
@@ -427,13 +431,15 @@ class MemoryAgentService:
             audit_logger = None
 
 
+        config_load_start = time.time()
         try:
             config_service = MemoryConfigService(db)
             memory_config = config_service.load_memory_config(
                 config_id=config_id,
                 service_name="MemoryAgentService"
             )
-            logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
+            config_load_time = time.time() - config_load_start
+            logger.info(f"[PERF] Configuration loaded in {config_load_time:.4f}s: {memory_config.config_name}")
         except ConfigurationError as e:
             error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
             logger.error(error_msg)
@@ -457,6 +463,7 @@ class MemoryAgentService:
         logger.debug(f"Group ID:{group_id}, Message:{message}, History:{history}, Config ID:{config_id}")
 
         # Step 3: Initialize MCP client and execute read workflow
+        graph_exec_start = time.time()
         try:
             async with make_read_graph() as graph:
                 config = {"configurable": {"thread_id": group_id}}
@@ -512,6 +519,9 @@ class MemoryAgentService:
                         summary_n = node_data.get('summary', {}).get('_intermediate', None)
                         if summary_n and summary_n != [] and summary_n != {}:
                             _intermediate_outputs.append(summary_n)
+
+                graph_exec_time = time.time() - graph_exec_start
+                logger.info(f"[PERF] Graph execution completed in {graph_exec_time:.4f}s")
 
                 _intermediate_outputs = [item for item in _intermediate_outputs if item and item != [] and item != {}]
 
@@ -570,6 +580,8 @@ class MemoryAgentService:
                     logger.error(f"保存短期记忆失败: {str(save_error)}", exc_info=True)
 
                 # Log successful operation
+                total_time = time.time() - start_time
+                logger.info(f"[PERF] read_memory completed successfully in {total_time:.4f}s (config: {config_load_time:.4f}s, graph: {graph_exec_time:.4f}s)")
                 if audit_logger:
                     duration = time.time() - start_time
                     audit_logger.log_operation(
@@ -587,7 +599,8 @@ class MemoryAgentService:
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Read operation failed: {str(e)}"
-            logger.error(error_msg)
+            total_time = time.time() - start_time
+            logger.error(f"[PERF] read_memory failed after {total_time:.4f}s: {error_msg}")
             if audit_logger:
                 duration = time.time() - start_time
                 audit_logger.log_operation(
