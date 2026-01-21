@@ -26,6 +26,9 @@ class NodeType(StrEnum):
     MEMORY_WRITE = "memory-write"
 
 
+BRANCH_NODES = [NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER]
+
+
 class ComparisonOperator(StrEnum):
     EMPTY = "empty"
     NOT_EMPTY = "not_empty"
