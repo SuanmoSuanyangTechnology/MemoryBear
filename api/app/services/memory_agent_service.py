@@ -518,6 +518,57 @@ class MemoryAgentService:
                 optimized_outputs = merge_multiple_search_results(_intermediate_outputs)
                 result = reorder_output_results(optimized_outputs)
 
+                # 保存短期记忆到数据库
+                # 只有 search_switch 不为 "2"（快速检索）时才保存
+                try:
+                    from app.repositories.memory_short_repository import ShortTermMemoryRepository
+                    
+                    retrieved_content = []
+                    repo = ShortTermMemoryRepository(db)
+                    
+                    if str(search_switch) != "2":
+                        for intermediate in _intermediate_outputs:
+                            logger.debug(f"处理中间结果: {intermediate}")
+                            intermediate_type = intermediate.get('type', '')
+                            
+                            if intermediate_type == "search_result":
+                                query = intermediate.get('query', '')
+                                raw_results = intermediate.get('raw_results', {})
+                                reranked_results = raw_results.get('reranked_results', [])
+                                
+                                try:
+                                    statements = [statement['statement'] for statement in reranked_results.get('statements', [])]
+                                except Exception:
+                                    statements = []
+                                
+                                # 去重
+                                statements = list(set(statements))
+                                
+                                if query and statements:
+                                    retrieved_content.append({query: statements})
+                    
+                    # 如果 retrieved_content 为空，设置为空字符串
+                    if retrieved_content == []:
+                        retrieved_content = ''
+                    
+                    # 只有当回答不是"信息不足"且不是快速检索时才保存
+                    if '信息不足，无法回答。' != str(summary) and str(search_switch).strip() != "2":
+                        # 使用 upsert 方法
+                        repo.upsert(
+                            end_user_id=group_id,
+                            messages=message,
+                            aimessages=summary,
+                            retrieved_content=retrieved_content,
+                            search_switch=str(search_switch)
+                        )
+                        logger.info(f"成功保存短期记忆: group_id={group_id}, search_switch={search_switch}")
+                    else:
+                        logger.debug(f"跳过保存短期记忆: summary={summary[:50] if summary else 'None'}, search_switch={search_switch}")
+                        
+                except Exception as save_error:
+                    # 保存失败不应该影响主流程，只记录错误
+                    logger.error(f"保存短期记忆失败: {str(save_error)}", exc_info=True)
+
                 # Log successful operation
                 if audit_logger:
                     duration = time.time() - start_time
