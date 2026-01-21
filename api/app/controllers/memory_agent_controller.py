@@ -164,7 +164,7 @@ async def write_server(
     try:
         result = await memory_agent_service.write_memory(
             user_input.end_user_id,
-            user_input.message, 
+            user_input.messages,
             config_id,
             db,
             storage_type, 
@@ -290,7 +290,7 @@ async def read_server(
         )
         if str(user_input.search_switch) == "2":
             retrieve_info = result['answer']
-            history = await SessionService(store).get_history(user_input.group_id, user_input.group_id, user_input.group_id)
+            history = await SessionService(store).get_history(user_input.end_user_id, user_input.end_user_id, user_input.end_user_id)
             query = user_input.message
 
             # 调用 memory_agent_service 的方法生成最终答案
@@ -596,7 +596,7 @@ async def status_type(
             last_user_message = " ".join([msg.get('content', '') for msg in messages_list])
 
         result = await memory_agent_service.classify_message_type(
-            user_input.message,
+            user_input.messages,
             user_input.config_id,
             db
         )

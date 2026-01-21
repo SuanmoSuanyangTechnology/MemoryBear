@@ -21,9 +21,9 @@ async def write_node(state: WriteState) -> WriteState:
     memory_config=state.get('memory_config', '')
     try:
         result=await write(
-            content=content,
             end_user_id=end_user_id,
             memory_config=memory_config,
+            messages=content,  # 修复：使用正确的参数名 messages
         )
         logger.info(f"Write completed successfully! Config: {memory_config.config_name}")
 

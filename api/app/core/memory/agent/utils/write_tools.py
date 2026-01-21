@@ -77,10 +77,25 @@ async def write(
 
     # Step 1: Load and chunk data
     step_start = time.time()
+    
+    # Convert messages list to content string
+    # messages format: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
+    if isinstance(messages, list) and len(messages) > 0:
+        # Extract content from the last user message or concatenate all messages
+        if isinstance(messages[-1], dict) and 'content' in messages[-1]:
+            content = messages[-1]['content']
+        else:
+            # Fallback: concatenate all message contents
+            content = " ".join([msg.get('content', '') for msg in messages if isinstance(msg, dict)])
+    elif isinstance(messages, str):
+        content = messages
+    else:
+        content = str(messages)
+    
     chunked_dialogs = await get_chunked_dialogs(
         chunker_strategy=chunker_strategy,
         end_user_id=end_user_id,
-        messages=messages,
+        content=content,  # 修复：使用 content 参数而不是 messages
         ref_id=ref_id,
         config_id=config_id,
     )
