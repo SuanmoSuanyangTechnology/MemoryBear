@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 
 def merget_activate_state(x, y):
-    logger.info(f"merge: {x}, {y}")
     return {
         k: x.get(k, False) or y.get(k, False)
         for k in set(x) | set(y)

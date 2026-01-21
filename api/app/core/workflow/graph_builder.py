@@ -318,10 +318,8 @@ class GraphBuilder:
                         ):
                             logger.debug(f"Conditional routing {src}: selected branch {label}")
                             new_state["activate"][branch["node"]["name"]] = True
-                            logger.info(state)
                             continue
                         new_state["activate"][branch["node"]["name"]] = False
-                        logger.info(f"False{state}")
                     for label, branch in unique_branch.items():
                         branch_activate.append(
                             Send(

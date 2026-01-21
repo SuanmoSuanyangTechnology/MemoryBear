@@ -333,7 +333,6 @@ class WorkflowExecutor:
                                 "conversation_id": conversation_id,
                                 "execution_id": self.execution_id,
                                 "timestamp": data.get("timestamp"),
-                                "activate": inputv.get("activate"),
                             }
                         }
                     elif event_type == "task_result":
@@ -354,7 +353,6 @@ class WorkflowExecutor:
                                 "execution_id": self.execution_id,
                                 "timestamp": data.get("timestamp"),
                                 "state": result.get("node_outputs", {}).get(node_name),
-                                "activate": payload,
                             }
                         }
 
