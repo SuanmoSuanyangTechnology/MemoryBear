@@ -683,7 +683,67 @@ class MemoryAgentService:
         logger.debug(f"Message type: {status}")
         return status
 
-    # ==================== 新增的三个接口方法 ====================
+    async def generate_summary_from_retrieve(
+        self,
+        retrieve_info: str,
+        history: List[Dict],
+        query: str,
+        config_id: str,
+        db: Session
+    ) -> str:
+        """
+        基于检索信息、历史对话和查询生成最终答案
+        
+        使用 Retrieve_Summary_prompt.jinja2 模板调用大模型生成答案
+        
+        Args:
+            retrieve_info: 检索到的信息
+            history: 历史对话记录
+            query: 用户查询
+            config_id: 配置ID
+            db: 数据库会话
+            
+        Returns:
+            生成的答案文本
+        """
+        logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
+        
+        try:
+            # 加载配置
+            config_service = MemoryConfigService(db)
+            memory_config = config_service.load_memory_config(
+                config_id=config_id,
+                service_name="MemoryAgentService"
+            )
+            
+            # 导入必要的模块
+            from app.core.memory.agent.langgraph_graph.nodes.summary_nodes import summary_llm
+            from app.core.memory.agent.models.summary_models import RetrieveSummaryResponse
+            
+            # 构建状态对象
+            state = {
+                "data": query,
+                "memory_config": memory_config
+            }
+            
+            # 直接调用 summary_llm 函数
+            answer = await summary_llm(
+                state=state,
+                history=history,
+                retrieve_info=retrieve_info,
+                template_name='Retrieve_Summary_prompt.jinja2',
+                operation_name='retrieve_summary',
+                response_model=RetrieveSummaryResponse,
+                search_mode="1"
+            )
+            
+            logger.info(f"Successfully generated summary: {answer[:100] if answer else 'None'}...")
+            return answer if answer else "信息不足，无法回答。"
+            
+        except Exception as e:
+            logger.error(f"生成摘要失败: {str(e)}", exc_info=True)
+            return "信息不足，无法回答。"
+
 
     async def get_knowledge_type_stats(
         self,
