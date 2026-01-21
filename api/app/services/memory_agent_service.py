@@ -10,27 +10,32 @@ import re
 import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
-import redis
-from langchain_core.messages import HumanMessage
 
+import redis
 from app.core.config import settings
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.agent.langgraph_graph.read_graph import make_read_graph
 from app.core.memory.agent.langgraph_graph.write_graph import make_write_graph
 from app.core.memory.agent.logger_file.log_streamer import LogStreamer
-from app.core.memory.agent.utils.messages_tools import merge_multiple_search_results, reorder_output_results
+from app.core.memory.agent.utils.messages_tools import (
+    merge_multiple_search_results,
+    reorder_output_results,
+)
 from app.core.memory.agent.utils.type_classifier import status_typle
+from app.core.memory.agent.utils.write_tools import write  # 新增：直接导入 write 函数
 from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.memory_config_schema import ConfigurationError
 from app.services.memory_base_service import Translation_English
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
 )
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -260,13 +265,13 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
-    async def write_memory(self, group_id: str, message: str, config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
+    async def write_memory(self, group_id: str, messages: list[dict], config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
         """
         Process write operation with config_id
 
         Args:
             group_id: Group identifier (also used as end_user_id)
-            message: Message to write
+            messages: Structured message list [{"role": "user", "content": "..."}, ...]
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -287,7 +292,7 @@ class MemoryAgentService:
                     raise ValueError(f"No memory configuration found for end_user {group_id}. Please ensure the user has a connected memory configuration.")
             except Exception as e:
                 if "No memory configuration found" in str(e):
-                    raise  # Re-raise our specific error
+                    raise
                 logger.error(f"Failed to get connected config for end_user {group_id}: {e}")
                 raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
 
@@ -315,14 +320,28 @@ class MemoryAgentService:
 
         try:
             if storage_type == "rag":
-                result = await write_rag(group_id, message, user_rag_memory_id)
+                # For RAG storage, convert messages to single string
+                message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+                result = await write_rag(group_id, message_text, user_rag_memory_id)
                 return result
             else:
                 async with make_write_graph() as graph:
                     config = {"configurable": {"thread_id": group_id}}
+                    # Convert structured messages to LangChain messages
+                    langchain_messages = []
+                    for msg in messages:
+                        if msg['role'] == 'user':
+                            langchain_messages.append(HumanMessage(content=msg['content']))
+                        elif msg['role'] == 'assistant':
+                            from langchain_core.messages import AIMessage
+                            langchain_messages.append(AIMessage(content=msg['content']))
+                    
                     # 初始状态 - 包含所有必要字段
-                    initial_state = {"messages": [HumanMessage(content=message)], "group_id": group_id,
-                                     "memory_config": memory_config}
+                    initial_state = {
+                        "messages": langchain_messages,
+                        "group_id": group_id,
+                        "memory_config": memory_config
+                    }
 
                     # 获取节点更新信息
                     async for update_event in graph.astream(
@@ -335,7 +354,9 @@ class MemoryAgentService:
                                 massages = node_data
                     massagesstatus = massages.get('write_result')['status']
                     contents = massages.get('write_result')
-                    return self.writer_messages_deal(massagesstatus, start_time, group_id, config_id, message, contents)
+                    # Convert messages back to string for logging
+                    message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+                    return self.writer_messages_deal(massagesstatus, start_time, group_id, config_id, message_text, contents)
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Write operation failed: {str(e)}"
@@ -386,6 +407,7 @@ class MemoryAgentService:
 
         import time
         start_time = time.time()
+        logger.info(f"[PERF] read_memory started for group_id={group_id}, search_switch={search_switch}")
 
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
@@ -409,13 +431,15 @@ class MemoryAgentService:
             audit_logger = None
 
 
+        config_load_start = time.time()
         try:
             config_service = MemoryConfigService(db)
             memory_config = config_service.load_memory_config(
                 config_id=config_id,
                 service_name="MemoryAgentService"
             )
-            logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
+            config_load_time = time.time() - config_load_start
+            logger.info(f"[PERF] Configuration loaded in {config_load_time:.4f}s: {memory_config.config_name}")
         except ConfigurationError as e:
             error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
             logger.error(error_msg)
@@ -439,6 +463,7 @@ class MemoryAgentService:
         logger.debug(f"Group ID:{group_id}, Message:{message}, History:{history}, Config ID:{config_id}")
 
         # Step 3: Initialize MCP client and execute read workflow
+        graph_exec_start = time.time()
         try:
             async with make_read_graph() as graph:
                 config = {"configurable": {"thread_id": group_id}}
@@ -495,12 +520,68 @@ class MemoryAgentService:
                         if summary_n and summary_n != [] and summary_n != {}:
                             _intermediate_outputs.append(summary_n)
 
+                graph_exec_time = time.time() - graph_exec_start
+                logger.info(f"[PERF] Graph execution completed in {graph_exec_time:.4f}s")
+
                 _intermediate_outputs = [item for item in _intermediate_outputs if item and item != [] and item != {}]
 
                 optimized_outputs = merge_multiple_search_results(_intermediate_outputs)
                 result = reorder_output_results(optimized_outputs)
 
+                # 保存短期记忆到数据库
+                # 只有 search_switch 不为 "2"（快速检索）时才保存
+                try:
+                    from app.repositories.memory_short_repository import ShortTermMemoryRepository
+                    
+                    retrieved_content = []
+                    repo = ShortTermMemoryRepository(db)
+                    
+                    if str(search_switch) != "2":
+                        for intermediate in _intermediate_outputs:
+                            logger.debug(f"处理中间结果: {intermediate}")
+                            intermediate_type = intermediate.get('type', '')
+                            
+                            if intermediate_type == "search_result":
+                                query = intermediate.get('query', '')
+                                raw_results = intermediate.get('raw_results', {})
+                                reranked_results = raw_results.get('reranked_results', [])
+                                
+                                try:
+                                    statements = [statement['statement'] for statement in reranked_results.get('statements', [])]
+                                except Exception:
+                                    statements = []
+                                
+                                # 去重
+                                statements = list(set(statements))
+                                
+                                if query and statements:
+                                    retrieved_content.append({query: statements})
+                    
+                    # 如果 retrieved_content 为空，设置为空字符串
+                    if retrieved_content == []:
+                        retrieved_content = ''
+                    
+                    # 只有当回答不是"信息不足"且不是快速检索时才保存
+                    if '信息不足，无法回答。' != str(summary) and str(search_switch).strip() != "2":
+                        # 使用 upsert 方法
+                        repo.upsert(
+                            end_user_id=group_id,
+                            messages=message,
+                            aimessages=summary,
+                            retrieved_content=retrieved_content,
+                            search_switch=str(search_switch)
+                        )
+                        logger.info(f"成功保存短期记忆: group_id={group_id}, search_switch={search_switch}")
+                    else:
+                        logger.debug(f"跳过保存短期记忆: summary={summary[:50] if summary else 'None'}, search_switch={search_switch}")
+                        
+                except Exception as save_error:
+                    # 保存失败不应该影响主流程，只记录错误
+                    logger.error(f"保存短期记忆失败: {str(save_error)}", exc_info=True)
+
                 # Log successful operation
+                total_time = time.time() - start_time
+                logger.info(f"[PERF] read_memory completed successfully in {total_time:.4f}s (config: {config_load_time:.4f}s, graph: {graph_exec_time:.4f}s)")
                 if audit_logger:
                     duration = time.time() - start_time
                     audit_logger.log_operation(
@@ -518,7 +599,8 @@ class MemoryAgentService:
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Read operation failed: {str(e)}"
-            logger.error(error_msg)
+            total_time = time.time() - start_time
+            logger.error(f"[PERF] read_memory failed after {total_time:.4f}s: {error_msg}")
             if audit_logger:
                 duration = time.time() - start_time
                 audit_logger.log_operation(
@@ -531,7 +613,49 @@ class MemoryAgentService:
                 )
             raise ValueError(error_msg)
 
-
+    def get_messages_list(self, user_input: Write_UserInput) -> list[dict]:
+        """
+        Get standardized message list from user input.
+        
+        Args:
+            user_input: Write_UserInput object
+        
+        Returns:
+            list[dict]: Message list, each message contains role and content
+            
+        Raises:
+            ValueError: If messages is empty or format is incorrect
+        """
+        from app.core.logging_config import get_api_logger
+        logger = get_api_logger()
+        
+        if len(user_input.messages) == 0:
+            logger.error("Validation failed: Message list cannot be empty")
+            raise ValueError("Message list cannot be empty")
+        
+        for idx, msg in enumerate(user_input.messages):
+            if not isinstance(msg, dict):
+                logger.error(f"Validation failed: Message {idx} is not a dict: {type(msg)}")
+                raise ValueError(f"Message format error: Message must be a dictionary. Error message index: {idx}, type: {type(msg)}")
+            
+            if 'role' not in msg:
+                logger.error(f"Validation failed: Message {idx} missing 'role' field: {msg}")
+                raise ValueError(f"Message format error: Message must contain 'role' field. Error message index: {idx}")
+            
+            if 'content' not in msg:
+                logger.error(f"Validation failed: Message {idx} missing 'content' field: {msg}")
+                raise ValueError(f"Message format error: Message must contain 'content' field. Error message index: {idx}")
+            
+            if msg['role'] not in ['user', 'assistant']:
+                logger.error(f"Validation failed: Message {idx} invalid role: {msg['role']}")
+                raise ValueError(f"Role must be 'user' or 'assistant', got: {msg['role']}. Message index: {idx}")
+            
+            if not msg['content'] or not msg['content'].strip():
+                logger.error(f"Validation failed: Message {idx} content is empty")
+                raise ValueError(f"Message content cannot be empty. Message index: {idx}, role: {msg['role']}")
+        
+        logger.info(f"Validation successful: Structured message list, count: {len(user_input.messages)}")
+        return user_input.messages
 
     async def classify_message_type(self, message: str, config_id: int, db: Session) -> Dict:
         """
@@ -559,7 +683,67 @@ class MemoryAgentService:
         logger.debug(f"Message type: {status}")
         return status
 
-    # ==================== 新增的三个接口方法 ====================
+    async def generate_summary_from_retrieve(
+        self,
+        retrieve_info: str,
+        history: List[Dict],
+        query: str,
+        config_id: str,
+        db: Session
+    ) -> str:
+        """
+        基于检索信息、历史对话和查询生成最终答案
+        
+        使用 Retrieve_Summary_prompt.jinja2 模板调用大模型生成答案
+        
+        Args:
+            retrieve_info: 检索到的信息
+            history: 历史对话记录
+            query: 用户查询
+            config_id: 配置ID
+            db: 数据库会话
+            
+        Returns:
+            生成的答案文本
+        """
+        logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
+        
+        try:
+            # 加载配置
+            config_service = MemoryConfigService(db)
+            memory_config = config_service.load_memory_config(
+                config_id=config_id,
+                service_name="MemoryAgentService"
+            )
+            
+            # 导入必要的模块
+            from app.core.memory.agent.langgraph_graph.nodes.summary_nodes import summary_llm
+            from app.core.memory.agent.models.summary_models import RetrieveSummaryResponse
+            
+            # 构建状态对象
+            state = {
+                "data": query,
+                "memory_config": memory_config
+            }
+            
+            # 直接调用 summary_llm 函数
+            answer = await summary_llm(
+                state=state,
+                history=history,
+                retrieve_info=retrieve_info,
+                template_name='Retrieve_Summary_prompt.jinja2',
+                operation_name='retrieve_summary',
+                response_model=RetrieveSummaryResponse,
+                search_mode="1"
+            )
+            
+            logger.info(f"Successfully generated summary: {answer[:100] if answer else 'None'}...")
+            return answer if answer else "信息不足，无法回答。"
+            
+        except Exception as e:
+            logger.error(f"生成摘要失败: {str(e)}", exc_info=True)
+            return "信息不足，无法回答。"
+
 
     async def get_knowledge_type_stats(
         self,
@@ -1033,7 +1217,7 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     """
     from app.models.app_release_model import AppRelease
     from app.models.end_user_model import EndUser
-    from app.models.memory_config_model import MemoryConfig
+    from app.models.data_config_model import DataConfig
     from sqlalchemy import select
 
     logger.info(f"Batch getting connected configs for {len(end_user_ids)} end_users")
@@ -1091,8 +1275,8 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     # 批量查询 memory_config_name
     config_id_to_name = {}
     if memory_config_ids:
-        memory_configs = db.query(MemoryConfig).filter(MemoryConfig.id.in_(memory_config_ids)).all()
-        config_id_to_name = {str(mc.id): mc.config_name for mc in memory_configs}
+        memory_configs = db.query(DataConfig).filter(DataConfig.config_id.in_(memory_config_ids)).all()
+        config_id_to_name = {str(mc.config_id): mc.config_name for mc in memory_configs}
 
     # 4. 构建最终结果
     for end_user_id, app_id in user_to_app.items():
@@ -1109,7 +1293,7 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
         memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
         
         # 获取配置名称
-        memory_config_name = config_id_to_name.get(memory_config_id) if memory_config_id else None
+        memory_config_name = config_id_to_name.get(str(memory_config_id)) if memory_config_id else None
 
         result[end_user_id] = {
             "memory_config_id": memory_config_id,
