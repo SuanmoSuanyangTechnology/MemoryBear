@@ -89,14 +89,15 @@ def validate_model_exists_and_active(
     start_time = time.time()
     
     try:
-        # First check if model exists at all (without tenant filtering)
-        model_without_tenant = ModelConfigRepository.get_by_id(db, model_id, tenant_id=None)
-        
-        # Then check with tenant filtering
+        # OPTIMIZED: Single query with tenant filter
+        # We'll check tenant mismatch in the error handling
         model = ModelConfigRepository.get_by_id(db, model_id, tenant_id)
         elapsed_ms = (time.time() - start_time) * 1000
         
         if not model:
+            # Model not found with tenant filter - check if it exists without filter
+            model_without_tenant = ModelConfigRepository.get_by_id(db, model_id, tenant_id=None)
+            
             if model_without_tenant:
                 # Model exists but belongs to different tenant
                 logger.warning(
@@ -208,8 +209,11 @@ def validate_embedding_model(
     db: Session,
     tenant_id: Optional[UUID] = None,
     workspace_id: Optional[UUID] = None
-) -> UUID:
-    """Validate that embedding model is available and return its UUID.
+) -> tuple[UUID, str]:
+    """Validate that embedding model is available and return its UUID and name.
+    
+    Returns:
+        Tuple of (embedding_uuid, embedding_name)
     
     Raises:
         InvalidConfigError: If embedding_id is not provided or invalid
@@ -225,14 +229,19 @@ def validate_embedding_model(
             workspace_id=workspace_id
         )
     
-    embedding_uuid, _ = validate_and_resolve_model_id(
+    embedding_uuid, embedding_name = validate_and_resolve_model_id(
         embedding_id, "embedding", db, tenant_id, required=True,
         config_id=config_id, workspace_id=workspace_id
     )
-    print(100*'-')
-    print(embedding_uuid)
-    print(_)
-    print(100*'-')
+    
+    logger.debug(
+        "Embedding model validated",
+        extra={
+            "embedding_uuid": str(embedding_uuid),
+            "embedding_name": embedding_name,
+            "config_id": config_id
+        }
+    )
     
     if embedding_uuid is None:
         raise InvalidConfigError(
@@ -243,7 +252,7 @@ def validate_embedding_model(
             workspace_id=workspace_id
         )
     
-    return embedding_uuid
+    return embedding_uuid, embedding_name
 
 
 def validate_llm_model(

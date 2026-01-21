@@ -425,24 +425,7 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
             db.close()
 
     try:
-        # 使用 nest_asyncio 来避免事件循环冲突
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-        
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(_run())
+        result = asyncio.run(_run())
         elapsed_time = time.time() - start_time
         
         return {
@@ -455,7 +438,6 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
         }
     except BaseException as e:
         elapsed_time = time.time() - start_time
-        # Handle ExceptionGroup from TaskGroup
         if hasattr(e, 'exceptions'):
             error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
             detailed_error = "; ".join(error_messages)
@@ -528,24 +510,7 @@ def write_message_task(self, group_id: str, message, config_id: str, storage_typ
             db.close()
 
     try:
-        # 使用 nest_asyncio 来避免事件循环冲突
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-        
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(_run())
+        result = asyncio.run(_run())
         elapsed_time = time.time() - start_time
         
         logger.info(f"[CELERY WRITE] Task completed successfully - elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
@@ -560,7 +525,6 @@ def write_message_task(self, group_id: str, message, config_id: str, storage_typ
         }
     except BaseException as e:
         elapsed_time = time.time() - start_time
-        # Handle ExceptionGroup from TaskGroup
         if hasattr(e, 'exceptions'):
             error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
             detailed_error = "; ".join(error_messages)
@@ -600,53 +564,53 @@ def reflection_timer_task() -> None:
     """
     reflection_engine()
 
-
-@celery_app.task(name="app.core.memory.agent.health.check_read_service")
-def check_read_service_task() -> Dict[str, str]:
-    """Call read_service and write latest status to Redis.
+# unused task
+# @celery_app.task(name="app.core.memory.agent.health.check_read_service")
+# def check_read_service_task() -> Dict[str, str]:
+#     """Call read_service and write latest status to Redis.
     
-    Returns status data dict that gets written to Redis.
-    """
-    client = redis.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        db=settings.REDIS_DB,
-        password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None
-    )
-    try:
-        api_url = f"http://{settings.SERVER_IP}:8000/api/memory/read_service"
-        payload = {
-            "user_id": "健康检查",
-            "apply_id": "健康检查",
-            "group_id": "健康检查",
-            "message": "你好",
-            "history": [],
-            "search_switch": "2",
-        }
-        resp = requests.post(api_url, json=payload, timeout=15)
-        ok = resp.status_code == 200
-        status = "Success" if ok else "Fail"
-        msg = "接口请求成功" if ok else f"接口请求失败: {resp.status_code}"
-        error = "" if ok else resp.text
-        code = 0 if ok else 500
-    except Exception as e:
-        status = "Fail"
-        msg = "接口请求失败"
-        error = str(e)
-        code = 500
+#     Returns status data dict that gets written to Redis.
+#     """
+#     client = redis.Redis(
+#         host=settings.REDIS_HOST,
+#         port=settings.REDIS_PORT,
+#         db=settings.REDIS_DB,
+#         password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None
+#     )
+#     try:
+#         api_url = f"http://{settings.SERVER_IP}:8000/api/memory/read_service"
+#         payload = {
+#             "user_id": "健康检查",
+#             "apply_id": "健康检查",
+#             "group_id": "健康检查",
+#             "message": "你好",
+#             "history": [],
+#             "search_switch": "2",
+#         }
+#         resp = requests.post(api_url, json=payload, timeout=15)
+#         ok = resp.status_code == 200
+#         status = "Success" if ok else "Fail"
+#         msg = "接口请求成功" if ok else f"接口请求失败: {resp.status_code}"
+#         error = "" if ok else resp.text
+#         code = 0 if ok else 500
+#     except Exception as e:
+#         status = "Fail"
+#         msg = "接口请求失败"
+#         error = str(e)
+#         code = 500
 
-    data = {
-        "status": status,
-        "msg": msg,
-        "error": error,
-        "code": str(code),
-        "time": str(int(time.time())),
-    }
+#     data = {
+#         "status": status,
+#         "msg": msg,
+#         "error": error,
+#         "code": str(code),
+#         "time": str(int(time.time())),
+#     }
 
-    client.hset("memsci:health:read_service", mapping=data)
-    client.expire("memsci:health:read_service", int(settings.HEALTH_CHECK_SECONDS))
+#     client.hset("memsci:health:read_service", mapping=data)
+#     client.expire("memsci:health:read_service", int(settings.HEALTH_CHECK_SECONDS))
 
-    return data
+#     return data
 
 
 @celery_app.task(name="app.controllers.memory_storage_controller.search_all")
@@ -911,24 +875,7 @@ def regenerate_memory_cache(self) -> Dict[str, Any]:
                 }
     
     try:
-        # 使用 nest_asyncio 来避免事件循环冲突
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-        
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(_run())
+        result = asyncio.run(_run())
         elapsed_time = time.time() - start_time
         result["elapsed_time"] = elapsed_time
         result["task_id"] = self.request.id
@@ -1055,24 +1002,7 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
                 }
 
     try:
-        # 使用 nest_asyncio 来避免事件循环冲突
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        result = loop.run_until_complete(_run())
+        result = asyncio.run(_run())
         elapsed_time = time.time() - start_time
         result["elapsed_time"] = elapsed_time
         result["task_id"] = self.request.id
@@ -1148,11 +1078,4 @@ def run_forgetting_cycle_task(self, config_id: Optional[int] = None) -> Dict[str
                     "duration_seconds": duration
                 }
     
-    # 运行异步函数
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        result = loop.run_until_complete(_run())
-        return result
-    finally:
-        loop.close()
+    return asyncio.run(_run())

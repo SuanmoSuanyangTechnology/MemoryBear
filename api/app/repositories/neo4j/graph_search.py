@@ -305,11 +305,18 @@ async def search_graph(
             results[key] = _deduplicate_results(results[key])
     
     # 更新知识节点的激活值（Statement, ExtractedEntity, MemorySummary）
-    results = await _update_search_results_activation(
-        connector=connector,
-        results=results,
-        group_id=group_id
+    # Skip activation updates if only searching summaries (optimization)
+    needs_activation_update = any(
+        key in include and key in results and results[key]
+        for key in ['statements', 'entities', 'chunks']
     )
+    
+    if needs_activation_update:
+        results = await _update_search_results_activation(
+            connector=connector,
+            results=results,
+            group_id=group_id
+        )
     
     return results
 
@@ -339,7 +346,7 @@ async def search_graph_by_embedding(
     embed_start = time.time()
     embeddings = await embedder_client.response([query_text])
     embed_time = time.time() - embed_start
-    print(f"[PERF] Embedding generation took: {embed_time:.4f}s")
+    logger.info(f"[PERF] Embedding generation took: {embed_time:.4f}s")
     
     if not embeddings or not embeddings[0]:
         return {"statements": [], "chunks": [], "entities": [], "summaries": []}
@@ -393,7 +400,7 @@ async def search_graph_by_embedding(
     query_start = time.time()
     task_results = await asyncio.gather(*tasks, return_exceptions=True)
     query_time = time.time() - query_start
-    print(f"[PERF] Neo4j queries (parallel) took: {query_time:.4f}s")
+    logger.info(f"[PERF] Neo4j queries (parallel) took: {query_time:.4f}s")
     
     # Build results dictionary
     results: Dict[str, List[Dict[str, Any]]] = {
@@ -417,14 +424,23 @@ async def search_graph_by_embedding(
             results[key] = _deduplicate_results(results[key])
 
     # 更新知识节点的激活值（Statement, ExtractedEntity, MemorySummary）
-    update_start = time.time()
-    results = await _update_search_results_activation(
-        connector=connector,
-        results=results,
-        group_id=group_id
+    # Skip activation updates if only searching summaries (optimization)
+    needs_activation_update = any(
+        key in include and key in results and results[key]
+        for key in ['statements', 'entities', 'chunks']
     )
-    update_time = time.time() - update_start
-    print(f"[PERF] Activation value updates took: {update_time:.4f}s")
+    
+    if needs_activation_update:
+        update_start = time.time()
+        results = await _update_search_results_activation(
+            connector=connector,
+            results=results,
+            group_id=group_id
+        )
+        update_time = time.time() - update_start
+        logger.info(f"[PERF] Activation value updates took: {update_time:.4f}s")
+    else:
+        logger.info(f"[PERF] Skipping activation updates (only summaries)")
 
     return results
 async def get_dedup_candidates_for_entities(  # 适配新版查询：使用全文索引按名称检索候选实体
@@ -535,7 +551,7 @@ async def search_graph_by_keyword_temporal(
     - Returns up to 'limit' statements
     """
     if not query_text:
-        print(f"query_text不能为空")
+        logger.warning(f"query_text cannot be empty")
         return {"statements": []}
     statements = await connector.execute_query(
         SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL,
@@ -549,7 +565,7 @@ async def search_graph_by_keyword_temporal(
         invalid_date=invalid_date,
         limit=limit,
     )
-    print(f"查询结果为：\n{statements}")
+    logger.debug(f"Temporal keyword search results: {len(statements)} statements found")
 
     # 更新 Statement 节点的激活值
     results = {"statements": statements}
@@ -594,9 +610,9 @@ async def search_graph_by_temporal(
         limit=limit,
     )
 
-    print(f"查询语句为：\n{SEARCH_STATEMENTS_BY_TEMPORAL}")
-    print(f"查询参数为：\n{{group_id: {group_id}, apply_id: {apply_id}, user_id: {user_id}, start_date: {start_date}, end_date: {end_date}, valid_date: {valid_date}, invalid_date: {invalid_date}, limit: {limit}}}")
-    print(f"查询结果为：\n{statements}")
+    logger.debug(f"Temporal search query: {SEARCH_STATEMENTS_BY_TEMPORAL}")
+    logger.debug(f"Query params: group_id={group_id}, apply_id={apply_id}, user_id={user_id}, start_date={start_date}, end_date={end_date}, valid_date={valid_date}, invalid_date={invalid_date}, limit={limit}")
+    logger.debug(f"Temporal search results: {len(statements)} statements found")
     
     # 更新 Statement 节点的激活值
     results = {"statements": statements}
@@ -623,7 +639,7 @@ async def search_graph_by_dialog_id(
     - Returns up to 'limit' dialogues
     """
     if not dialog_id:
-        print(f"dialog_id不能为空")
+        logger.warning(f"dialog_id cannot be empty")
         return {"dialogues": []}
 
     dialogues = await connector.execute_query(
@@ -642,7 +658,7 @@ async def search_graph_by_chunk_id(
     limit: int = 1,
 ) -> Dict[str, List[Dict[str, Any]]]:
     if not chunk_id:
-        print(f"chunk_id不能为空")
+        logger.warning(f"chunk_id cannot be empty")
         return {"chunks": []}
     chunks = await connector.execute_query(
         SEARCH_CHUNK_BY_CHUNK_ID,
@@ -679,9 +695,9 @@ async def search_graph_by_created_at(
         limit=limit,
     )
 
-    print(f"查询语句为：\n{SEARCH_STATEMENTS_BY_CREATED_AT}")
-    print(f"查询参数为：\n{{group_id: {group_id}, apply_id: {apply_id}, user_id: {user_id}, created_at: {created_at}, limit: {limit}}}")
-    print(f"查询结果为：\n{statements}")
+    logger.debug(f"Search by created_at query: {SEARCH_STATEMENTS_BY_CREATED_AT}")
+    logger.debug(f"Query params: group_id={group_id}, apply_id={apply_id}, user_id={user_id}, created_at={created_at}, limit={limit}")
+    logger.debug(f"Search results: {len(statements)} statements found")
     
     # 更新 Statement 节点的激活值
     results = {"statements": statements}
@@ -719,9 +735,9 @@ async def search_graph_by_valid_at(
         limit=limit,
     )
 
-    print(f"查询语句为：\n{SEARCH_STATEMENTS_BY_VALID_AT}")
-    print(f"查询参数为：\n{{group_id: {group_id}, apply_id: {apply_id}, user_id: {user_id}, valid_at: {valid_at}, limit: {limit}}}")
-    print(f"查询结果为：\n{statements}")
+    logger.debug(f"Search by valid_at query: {SEARCH_STATEMENTS_BY_VALID_AT}")
+    logger.debug(f"Query params: group_id={group_id}, apply_id={apply_id}, user_id={user_id}, valid_at={valid_at}, limit={limit}")
+    logger.debug(f"Search results: {len(statements)} statements found")
     
     # 更新 Statement 节点的激活值
     results = {"statements": statements}
@@ -759,9 +775,9 @@ async def search_graph_g_created_at(
         limit=limit,
     )
 
-    print(f"查询语句为：\n{SEARCH_STATEMENTS_G_CREATED_AT}")
-    print(f"查询参数为：\n{{group_id: {group_id}, apply_id: {apply_id}, user_id: {user_id}, created_at: {created_at}, limit: {limit}}}")
-    print(f"查询结果为：\n{statements}")
+    logger.debug(f"Search greater than created_at query: {SEARCH_STATEMENTS_G_CREATED_AT}")
+    logger.debug(f"Query params: group_id={group_id}, apply_id={apply_id}, user_id={user_id}, created_at={created_at}, limit={limit}")
+    logger.debug(f"Search results: {len(statements)} statements found")
     
     # 更新 Statement 节点的激活值
     results = {"statements": statements}
@@ -799,9 +815,9 @@ async def search_graph_g_valid_at(
         limit=limit,
     )
 
-    print(f"查询语句为：\n{SEARCH_STATEMENTS_G_VALID_AT}")
-    print(f"查询参数为：\n{{group_id: {group_id}, apply_id: {apply_id}, user_id: {user_id}, valid_at: {valid_at}, limit: {limit}}}")
-    print(f"查询结果为：\n{statements}")
+    logger.debug(f"Search greater than valid_at query: {SEARCH_STATEMENTS_G_VALID_AT}")
+    logger.debug(f"Query params: group_id={group_id}, apply_id={apply_id}, user_id={user_id}, valid_at={valid_at}, limit={limit}")
+    logger.debug(f"Search results: {len(statements)} statements found")
     
     # 更新 Statement 节点的激活值
     results = {"statements": statements}
@@ -839,9 +855,9 @@ async def search_graph_l_created_at(
         limit=limit,
     )
 
-    print(f"查询语句为：\n{SEARCH_STATEMENTS_L_CREATED_AT}")
-    print(f"查询参数为：\n{{group_id: {group_id}, apply_id: {apply_id}, user_id: {user_id}, created_at: {created_at}, limit: {limit}}}")
-    print(f"查询结果为：\n{statements}")
+    logger.debug(f"Search less than created_at query: {SEARCH_STATEMENTS_L_CREATED_AT}")
+    logger.debug(f"Query params: group_id={group_id}, apply_id={apply_id}, user_id={user_id}, created_at={created_at}, limit={limit}")
+    logger.debug(f"Search results: {len(statements)} statements found")
     
     # 更新 Statement 节点的激活值
     results = {"statements": statements}
@@ -879,9 +895,9 @@ async def search_graph_l_valid_at(
         limit=limit,
     )
 
-    print(f"查询语句为：\n{SEARCH_STATEMENTS_L_VALID_AT}")
-    print(f"查询参数为：\n{{group_id: {group_id}, apply_id: {apply_id}, user_id: {user_id}, valid_at: {valid_at}, limit: {limit}}}")
-    print(f"查询结果为：\n{statements}")
+    logger.debug(f"Search less than valid_at query: {SEARCH_STATEMENTS_L_VALID_AT}")
+    logger.debug(f"Query params: group_id={group_id}, apply_id={apply_id}, user_id={user_id}, valid_at={valid_at}, limit={limit}")
+    logger.debug(f"Search results: {len(statements)} statements found")
     
     # 更新 Statement 节点的激活值
     results = {"statements": statements}
