@@ -14,7 +14,6 @@ from app.db import get_db
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.llm_tools import WriteState
 from app.core.memory.agent.langgraph_graph.nodes.write_nodes import write_node
-from app.core.memory.agent.langgraph_graph.nodes.data_nodes import content_input_write
 from app.services.memory_config_service import MemoryConfigService
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -27,18 +26,12 @@ async def make_write_graph():
     """
     Create a write graph workflow for memory operations.
 
-    Args:
-        user_id: User identifier
-        tools: MCP tools loaded from session
-        apply_id: Application identifier
-        group_id: Group identifier
-        memory_config: MemoryConfig object containing all configuration
+    The workflow directly processes messages from the initial state
+    and saves them to Neo4j storage.
     """
     workflow = StateGraph(WriteState)
-    workflow.add_node("content_input", content_input_write)
     workflow.add_node("save_neo4j", write_node)
-    workflow.add_edge(START, "content_input")
-    workflow.add_edge("content_input", "save_neo4j")
+    workflow.add_edge(START, "save_neo4j")
     workflow.add_edge("save_neo4j", END)
 
     graph = workflow.compile()
