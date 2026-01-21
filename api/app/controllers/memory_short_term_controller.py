@@ -20,6 +20,7 @@ router = APIRouter(
 @router.get("/short_term")
 async def short_term_configs(
         end_user_id: str,
+        language_type:Optional[str] = "zh",
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ):

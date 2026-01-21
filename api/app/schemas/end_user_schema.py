@@ -44,6 +44,7 @@ class EndUserProfileResponse(BaseModel):
     updatetime_profile: Optional[datetime.datetime] = Field(description="核心档案信息最后更新时间", default=None)
 
 
+
 class EndUserProfileUpdate(BaseModel):
     """终端用户基本信息更新请求模型"""
     end_user_id: str = Field(description="终端用户ID")
