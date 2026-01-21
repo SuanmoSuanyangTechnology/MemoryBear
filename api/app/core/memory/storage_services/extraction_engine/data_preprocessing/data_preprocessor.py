@@ -555,8 +555,8 @@ class DataPreprocessor:
                 dialog_id = item.get('dialog_id', item.get('ref_id', item.get('id', f'dialog_{i}')))
 
 
-                # 获取group_id，如果不存在则生成默认值
-                group_id = item.get('group_id', f'group_default_{i}')
+                # 获取end_user_id，如果不存在则生成默认值
+                end_user_id = item.get('end_user_id', f'group_default_{i}')
                 user_id = item.get('user_id', f'user_default_{i}')
                 apply_id = item.get('apply_id', f'apply_default_{i}')
 
@@ -574,7 +574,7 @@ class DataPreprocessor:
                 dialog_data = DialogData(
                     context=context,
                     ref_id=dialog_id,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     user_id=user_id,
                     apply_id=apply_id,
                     metadata=metadata
@@ -644,7 +644,7 @@ class DataPreprocessor:
                 
                 context = ConversationContext(msgs=messages)
                 dialog_id = item.get('dialog_id', item.get('ref_id', item.get('id', f'dialog_{i}')))
-                group_id = item.get('group_id', f'group_default_{i}')
+                end_user_id = item.get('end_user_id', f'group_default_{i}')
                 user_id = item.get('user_id', f'user_default_{i}')
                 apply_id = item.get('apply_id', f'apply_default_{i}')
                 
@@ -657,7 +657,7 @@ class DataPreprocessor:
                 dialog_data = DialogData(
                     context=context,
                     ref_id=dialog_id,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     user_id=user_id,
                     apply_id=apply_id,
                     metadata=metadata

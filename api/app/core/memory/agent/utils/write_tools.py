@@ -29,9 +29,7 @@ logger = get_agent_logger(__name__)
 
 
 async def write(
-    user_id: str,
-    apply_id: str,
-    group_id: str,
+    end_user_id: str,
     memory_config: MemoryConfig,
     messages: list,
     ref_id: str = "wyl20251027",
@@ -40,9 +38,7 @@ async def write(
     Execute the complete knowledge extraction pipeline.
     
     Args:
-        user_id: User identifier
-        apply_id: Application identifier
-        group_id: Group identifier
+        end_user_id: End user identifier
         memory_config: MemoryConfig object containing all configuration
         messages: Structured message list [{"role": "user", "content": "..."}, ...]
         ref_id: Reference ID, defaults to "wyl20251027"
@@ -58,7 +54,7 @@ async def write(
     logger.info(f"LLM model: {memory_config.llm_model_name}")
     logger.info(f"Embedding model: {memory_config.embedding_model_name}")
     logger.info(f"Chunker strategy: {chunker_strategy}")
-    logger.info(f"Group ID: {group_id}")
+    logger.info(f"End User ID: {end_user_id}")
 
     # Construct clients from memory_config using factory pattern with db session
     with get_db_context() as db:
@@ -83,9 +79,7 @@ async def write(
     step_start = time.time()
     chunked_dialogs = await get_chunked_dialogs(
         chunker_strategy=chunker_strategy,
-        group_id=group_id,
-        user_id=user_id,
-        apply_id=apply_id,
+        end_user_id=end_user_id,
         messages=messages,
         ref_id=ref_id,
         config_id=config_id,

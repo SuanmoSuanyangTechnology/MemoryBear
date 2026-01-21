@@ -75,7 +75,7 @@ class EmotionAnalyticsService:
             
             # 调用仓储层查询
             tags = await self.emotion_repo.get_emotion_tags(
-                group_id=end_user_id,
+                end_user_id=end_user_id,
                 emotion_type=emotion_type,
                 start_date=start_date,
                 end_date=end_date,
@@ -157,7 +157,7 @@ class EmotionAnalyticsService:
             
             # 调用仓储层查询
             keywords = await self.emotion_repo.get_emotion_wordcloud(
-                group_id=end_user_id,
+                end_user_id=end_user_id,
                 emotion_type=emotion_type,
                 limit=limit
             )
@@ -339,7 +339,7 @@ class EmotionAnalyticsService:
             
             # 获取时间范围内的情绪数据
             emotions = await self.emotion_repo.get_emotions_in_range(
-                group_id=end_user_id,
+                end_user_id=end_user_id,
                 time_range=time_range
             )
             
@@ -519,7 +519,7 @@ class EmotionAnalyticsService:
             
             # 3. 获取情绪数据用于模式分析
             emotions = await self.emotion_repo.get_emotions_in_range(
-                group_id=end_user_id,
+                end_user_id=end_user_id,
                 time_range="30d"
             )
             
@@ -598,13 +598,13 @@ class EmotionAnalyticsService:
             # 查询用户的实体和标签
             query = """
             MATCH (e:Entity)
-            WHERE e.group_id = $group_id
+            WHERE e.end_user_id = $end_user_id
             RETURN e.name as name, e.type as type
             ORDER BY e.created_at DESC
             LIMIT 20
             """
             
-            entities = await connector.execute_query(query, group_id=end_user_id)
+            entities = await connector.execute_query(query, end_user_id=end_user_id)
             
             # 提取兴趣标签
             interests = [e["name"] for e in entities if e.get("type") in ["INTEREST", "HOBBY"]][:5]

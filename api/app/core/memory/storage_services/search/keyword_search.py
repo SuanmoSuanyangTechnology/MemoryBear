@@ -44,7 +44,7 @@ class KeywordSearchStrategy(SearchStrategy):
     async def search(
         self,
         query_text: str,
-        group_id: Optional[str] = None,
+        end_user_id: Optional[str] = None,
         limit: int = 50,
         include: Optional[List[str]] = None,
         **kwargs
@@ -53,7 +53,7 @@ class KeywordSearchStrategy(SearchStrategy):
 
         Args:
             query_text: 查询文本
-            group_id: 可选的组ID过滤
+            end_user_id: 可选的组ID过滤
             limit: 每个类别的最大结果数
             include: 要包含的搜索类别列表
             **kwargs: 其他搜索参数
@@ -61,7 +61,7 @@ class KeywordSearchStrategy(SearchStrategy):
         Returns:
             SearchResult: 搜索结果对象
         """
-        logger.info(f"执行关键词搜索: query='{query_text}', group_id={group_id}, limit={limit}")
+        logger.info(f"执行关键词搜索: query='{query_text}', end_user_id={end_user_id}, limit={limit}")
 
         # 获取有效的搜索类别
         include_list = self._get_include_list(include)
@@ -75,7 +75,7 @@ class KeywordSearchStrategy(SearchStrategy):
             results_dict = await search_graph(
                 connector=self.connector,
                 q=query_text,
-                group_id=group_id,
+                end_user_id=end_user_id,
                 limit=limit,
                 include=include_list
             )
@@ -84,7 +84,7 @@ class KeywordSearchStrategy(SearchStrategy):
             metadata = self._create_metadata(
                 query_text=query_text,
                 search_type="keyword",
-                group_id=group_id,
+                end_user_id=end_user_id,
                 limit=limit,
                 include=include_list
             )
@@ -115,7 +115,7 @@ class KeywordSearchStrategy(SearchStrategy):
                 metadata=self._create_metadata(
                     query_text=query_text,
                     search_type="keyword",
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     limit=limit,
                     error=str(e)
                 )

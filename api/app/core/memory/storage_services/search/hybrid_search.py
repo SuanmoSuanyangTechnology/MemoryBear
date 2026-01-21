@@ -77,7 +77,7 @@
 #     async def search(
 #         self,
 #         query_text: str,
-#         group_id: Optional[str] = None,
+#         end_user_id: Optional[str] = None,
 #         limit: int = 50,
 #         include: Optional[List[str]] = None,
 #         **kwargs
@@ -86,7 +86,7 @@
 
 #         Args:
 #             query_text: 查询文本
-#             group_id: 可选的组ID过滤
+#             end_user_id: 可选的组ID过滤
 #             limit: 每个类别的最大结果数
 #             include: 要包含的搜索类别列表
 #             **kwargs: 其他搜索参数（如alpha, use_forgetting_curve）
@@ -94,7 +94,7 @@
 #         Returns:
 #             SearchResult: 搜索结果对象
 #         """
-#         logger.info(f"执行混合搜索: query='{query_text}', group_id={group_id}, limit={limit}")
+#         logger.info(f"执行混合搜索: query='{query_text}', end_user_id={end_user_id}, limit={limit}")
 
 #         # 从kwargs中获取参数
 #         alpha = kwargs.get("alpha", self.alpha)
@@ -107,14 +107,14 @@
 #             # 并行执行关键词搜索和语义搜索
 #             keyword_result = await self.keyword_strategy.search(
 #                 query_text=query_text,
-#                 group_id=group_id,
+#                 end_user_id=end_user_id,
 #                 limit=limit,
 #                 include=include_list
 #             )
 
 #             semantic_result = await self.semantic_strategy.search(
 #                 query_text=query_text,
-#                 group_id=group_id,
+#                 end_user_id=end_user_id,
 #                 limit=limit,
 #                 include=include_list
 #             )
@@ -139,7 +139,7 @@
 #             metadata = self._create_metadata(
 #                 query_text=query_text,
 #                 search_type="hybrid",
-#                 group_id=group_id,
+#                 end_user_id=end_user_id,
 #                 limit=limit,
 #                 include=include_list,
 #                 alpha=alpha,
@@ -165,7 +165,7 @@
 #                 metadata=self._create_metadata(
 #                     query_text=query_text,
 #                     search_type="hybrid",
-#                     group_id=group_id,
+#                     end_user_id=end_user_id,
 #                     limit=limit,
 #                     error=str(e)
 #                 )

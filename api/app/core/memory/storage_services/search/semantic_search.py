@@ -85,7 +85,7 @@ class SemanticSearchStrategy(SearchStrategy):
     async def search(
         self,
         query_text: str,
-        group_id: Optional[str] = None,
+        end_user_id: Optional[str] = None,
         limit: int = 50,
         include: Optional[List[str]] = None,
         **kwargs
@@ -94,7 +94,7 @@ class SemanticSearchStrategy(SearchStrategy):
 
         Args:
             query_text: 查询文本
-            group_id: 可选的组ID过滤
+            end_user_id: 可选的组ID过滤
             limit: 每个类别的最大结果数
             include: 要包含的搜索类别列表
             **kwargs: 其他搜索参数
@@ -102,7 +102,7 @@ class SemanticSearchStrategy(SearchStrategy):
         Returns:
             SearchResult: 搜索结果对象
         """
-        logger.info(f"执行语义搜索: query='{query_text}', group_id={group_id}, limit={limit}")
+        logger.info(f"执行语义搜索: query='{query_text}', end_user_id={end_user_id}, limit={limit}")
 
         # 获取有效的搜索类别
         include_list = self._get_include_list(include)
@@ -119,7 +119,7 @@ class SemanticSearchStrategy(SearchStrategy):
                 connector=self.connector,
                 embedder_client=self.embedder_client,
                 query_text=query_text,
-                group_id=group_id,
+                end_user_id=end_user_id,
                 limit=limit,
                 include=include_list
             )
@@ -128,7 +128,7 @@ class SemanticSearchStrategy(SearchStrategy):
             metadata = self._create_metadata(
                 query_text=query_text,
                 search_type="semantic",
-                group_id=group_id,
+                end_user_id=end_user_id,
                 limit=limit,
                 include=include_list
             )
@@ -159,7 +159,7 @@ class SemanticSearchStrategy(SearchStrategy):
                 metadata=self._create_metadata(
                     query_text=query_text,
                     search_type="semantic",
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     limit=limit,
                     error=str(e)
                 )

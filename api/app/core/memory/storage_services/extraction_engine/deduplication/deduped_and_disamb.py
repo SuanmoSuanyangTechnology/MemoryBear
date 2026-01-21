@@ -199,7 +199,7 @@ def accurate_match(
     entity_nodes: List[ExtractedEntityNode]
 ) -> Tuple[List[ExtractedEntityNode], Dict[str, str], Dict[str, Dict]]:
     """
-    精确匹配：按 (group_id, name, entity_type) 合并实体并建立重定向与合并记录。
+    精确匹配：按 (end_user_id, name, entity_type) 合并实体并建立重定向与合并记录。
     返回: (deduped_entities, id_redirect, exact_merge_map)
     """
     exact_merge_map: Dict[str, Dict] = {}
@@ -210,8 +210,8 @@ def accurate_match(
     for ent in entity_nodes:
         name_norm = (getattr(ent, "name", "") or "").strip()
         type_norm = (getattr(ent, "entity_type", "") or "").strip()
-        key = f"{getattr(ent, 'group_id', None)}|{name_norm}|{type_norm}"
-        # 为避免跨业务组误并，明确以 group_id 为范围边界
+        key = f"{getattr(ent, 'end_user_id', None)}|{name_norm}|{type_norm}"
+        # 为避免跨业务组误并，明确以 end_user_id 为范围边界
         if key not in canonical_map:
             canonical_map[key] = ent
             id_redirect[ent.id] = ent.id
@@ -223,11 +223,11 @@ def accurate_match(
         id_redirect[ent.id] = canonical.id
         # 记录精确匹配的合并项（使用规范化键，避免外层变量误用）
         try:
-            k = f"{canonical.group_id}|{(canonical.name or '').strip()}|{(canonical.entity_type or '').strip()}"
+            k = f"{canonical.end_user_id}|{(canonical.name or '').strip()}|{(canonical.entity_type or '').strip()}"
             if k not in exact_merge_map:
                 exact_merge_map[k] = {
                     "canonical_id": canonical.id,
-                    "group_id": canonical.group_id,
+                    "end_user_id": canonical.end_user_id,
                     "name": canonical.name,
                     "entity_type": canonical.entity_type,
                     "merged_ids": set(),
@@ -596,7 +596,7 @@ def fuzzy_match(
             b = deduped_entities[j]
             
             # 跳过不同业务组的实体
-            if getattr(a, "group_id", None) != getattr(b, "group_id", None):
+            if getattr(a, "end_user_id", None) != getattr(b, "end_user_id", None):
                 j += 1
                 continue
             
@@ -671,7 +671,7 @@ def fuzzy_match(
                     merge_reason = "[别名匹配]" if alias_match_merge else "[模糊]"
                     merge_reason = "[别名匹配]" if alias_match_merge else "[模糊]"
                     fuzzy_merge_records.append(
-                        f"{merge_reason} 规范实体 {a.id} ({a.group_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.group_id}|{b.name}|{b.entity_type}) | "
+                        f"{merge_reason} 规范实体 {a.id} ({a.end_user_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.end_user_id}|{b.name}|{b.entity_type}) | "
                         f"s_name={s_name:.3f}, s_type={s_type:.3f}, overall={overall:.3f}, exact_alias={has_exact_match}"
                     )
                 except Exception:
@@ -779,7 +779,7 @@ async def LLM_decision(  # 决策中包含去重和消歧的功能
             # 记录 LLM 融合日志
             try:
                 llm_records.append(
-                    f"[LLM融合] 规范实体 {a.id} ({a.group_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.group_id}|{b.name}|{b.entity_type})"
+                    f"[LLM融合] 规范实体 {a.id} ({a.end_user_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.end_user_id}|{b.name}|{b.entity_type})"
                 )
                 # 详细的“同类名称相似”记录改由 LLM 去重模块统一生成以携带 conf/reason
             except Exception:
@@ -847,7 +847,7 @@ async def LLM_disamb_decision(
                         id_redirect[k] = a.id
                 try:
                     disamb_records.append(
-                        f"[DISAMB合并应用] 规范实体 {a.id} ({a.group_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.group_id}|{b.name}|{b.entity_type})"
+                        f"[DISAMB合并应用] 规范实体 {a.id} ({a.end_user_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.end_user_id}|{b.name}|{b.entity_type})"
                     )
                 except Exception:
                     pass

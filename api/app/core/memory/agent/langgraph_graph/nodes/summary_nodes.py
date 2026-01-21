@@ -34,8 +34,8 @@ class SummaryNodeService(LLMServiceMixin):
 summary_service = SummaryNodeService()
 
 async def summary_history(state: ReadState) -> ReadState:
-    group_id = state.get("group_id", '')
-    history = await SessionService(store).get_history(group_id, group_id, group_id)
+    end_user_id = state.get("end_user_id", '')
+    history = await SessionService(store).get_history(end_user_id, end_user_id, end_user_id)
     return history
 
 async def summary_llm(state: ReadState, history, retrieve_info, template_name, operation_name, response_model,search_mode) -> str:
@@ -122,12 +122,12 @@ async def summary_llm(state: ReadState, history, retrieve_info, template_name, o
 
 async def summary_redis_save(state: ReadState,aimessages) -> ReadState:
     data = state.get("data", '')
-    group_id = state.get("group_id", '')
+    end_user_id = state.get("end_user_id", '')
     await SessionService(store).save_session(
-        user_id=group_id,
+        user_id=end_user_id,
         query=data,
-        apply_id=group_id,
-        group_id=group_id,
+        apply_id=end_user_id,
+        end_user_id=end_user_id,
         ai_response=aimessages
     )
     await SessionService(store).cleanup_duplicates()
@@ -175,11 +175,11 @@ async def Input_Summary(state: ReadState) -> ReadState:
     memory_config = state.get('memory_config', None)
     user_rag_memory_id=state.get("user_rag_memory_id",'')
     data=state.get("data", '')
-    group_id=state.get("group_id", '')
+    end_user_id=state.get("end_user_id", '')
     logger.info(f"Input_Summary: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     history = await summary_history( state)
     search_params = {
-        "group_id": group_id,
+        "end_user_id": end_user_id,
         "question": data,
         "return_raw_results": True,
         "include": ["summaries"]  # Only search summary nodes for faster performance

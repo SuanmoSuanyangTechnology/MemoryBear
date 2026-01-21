@@ -125,7 +125,7 @@ async def write_server(
     Write service endpoint - processes write operations synchronously
     
     Args:
-        user_input: Write request containing message and group_id
+        user_input: Write request containing message and end_user_id
     
     Returns:
         Response with write operation status
@@ -160,14 +160,11 @@ async def write_server(
             api_logger.warning("workspace_id 为空，无法使用 rag 存储，将使用 neo4j 存储")
             storage_type = 'neo4j'
     
-    api_logger.info(f"Write service requested for group {user_input.group_id}, storage_type: {storage_type}, user_rag_memory_id: {user_rag_memory_id}")
+    api_logger.info(f"Write service requested for group {user_input.end_user_id}, storage_type: {storage_type}, user_rag_memory_id: {user_rag_memory_id}")
     try:
-        # 获取标准化的消息列表
-        messages_list = memory_agent_service.get_messages_list(user_input)
-        
         result = await memory_agent_service.write_memory(
-            user_input.group_id, 
-            messages_list,  # 传递结构化消息列表
+            user_input.end_user_id,
+            user_input.message, 
             config_id,
             db,
             storage_type, 
@@ -196,7 +193,7 @@ async def write_server_async(
     Async write service endpoint - enqueues write processing to Celery
     
     Args:
-        user_input: Write request containing message and group_id
+        user_input: Write request containing message and end_user_id
     
     Returns:
         Task ID for tracking async operation
@@ -224,12 +221,9 @@ async def write_server_async(
         if knowledge: user_rag_memory_id = str(knowledge.id)
     api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     try:
-        # 获取标准化的消息列表
-        messages_list = memory_agent_service.get_messages_list(user_input)
-        
         task = celery_app.send_task(
             "app.core.memory.agent.write_message",
-            args=[user_input.group_id, messages_list, config_id, storage_type, user_rag_memory_id]
+            args=[user_input.end_user_id, user_input.message, config_id, storage_type, user_rag_memory_id]
         )
         api_logger.info(f"Write task queued: {task.id}")
         
@@ -255,7 +249,7 @@ async def read_server(
     - "2": Direct answer based on context
     
     Args:
-        user_input: Read request with message, history, search_switch, and group_id
+        user_input: Read request with message, history, search_switch, and end_user_id
     
     Returns:
         Response with query answer
@@ -279,12 +273,13 @@ async def read_server(
             name="USER_RAG_MERORY",
             workspace_id=workspace_id
         )
-        if knowledge: user_rag_memory_id = str(knowledge.id)
+        if knowledge:
+            user_rag_memory_id = str(knowledge.id)
     
-    api_logger.info(f"Read service: group={user_input.group_id}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}")
+    api_logger.info(f"Read service: group={user_input.end_user_id}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}")
     try:
         result = await memory_agent_service.read_memory(
-            user_input.group_id,
+            user_input.end_user_id,
             user_input.message,
             user_input.history,
             user_input.search_switch,
@@ -297,7 +292,7 @@ async def read_server(
             retrieve_info = result['answer']
             history = await SessionService(store).get_history(user_input.group_id, user_input.group_id, user_input.group_id)
             query = user_input.message
-            
+
             # 调用 memory_agent_service 的方法生成最终答案
             result['answer'] = await memory_agent_service.generate_summary_from_retrieve(
                 retrieve_info=retrieve_info,
@@ -403,7 +398,7 @@ async def read_server_async(
     try:
         task = celery_app.send_task(
             "app.core.memory.agent.read_message",
-            args=[user_input.group_id, user_input.message, user_input.history, user_input.search_switch,
+            args=[user_input.end_user_id, user_input.message, user_input.history, user_input.search_switch,
                   config_id, storage_type, user_rag_memory_id]
         )
         api_logger.info(f"Read task queued: {task.id}")
@@ -447,7 +442,7 @@ async def get_read_task_result(
                 return success(
                     data={
                         "result": task_result.get("result"),
-                        "group_id": task_result.get("group_id"),
+                        "end_user_id": task_result.get("end_user_id"),
                         "elapsed_time": task_result.get("elapsed_time"),
                         "task_id": task_id
                     },
@@ -524,7 +519,7 @@ async def get_write_task_result(
                 return success(
                     data={
                         "result": task_result.get("result"),
-                        "group_id": task_result.get("group_id"),
+                        "end_user_id": task_result.get("end_user_id"),
                         "elapsed_time": task_result.get("elapsed_time"),
                         "task_id": task_id
                     },
@@ -578,16 +573,16 @@ async def status_type(
     Determine the type of user message (read or write)
     
     Args:
-        user_input: Request containing user message and group_id
+        user_input: Request containing user message and end_user_id
     
     Returns:
         Type classification result
     """
-    api_logger.info(f"Status type check requested for group {user_input.group_id}")
+    api_logger.info(f"Status type check requested for group {user_input.end_user_id}")
     try:
         # 获取标准化的消息列表
         messages_list = memory_agent_service.get_messages_list(user_input)
-        
+
         # 将消息列表转换为字符串用于分类
         # 只取最后一条用户消息进行分类
         last_user_message = ""
@@ -595,13 +590,13 @@ async def status_type(
             if msg.get('role') == 'user':
                 last_user_message = msg.get('content', '')
                 break
-        
+
         if not last_user_message:
             # 如果没有用户消息，使用所有消息的内容
             last_user_message = " ".join([msg.get('content', '') for msg in messages_list])
-        
+
         result = await memory_agent_service.classify_message_type(
-            last_user_message,
+            user_input.message,
             user_input.config_id,
             db
         )
@@ -624,7 +619,7 @@ async def get_knowledge_type_stats_api(
     会对缺失类型补 0，返回字典形式。
     可选按状态过滤。
     - 知识库类型根据当前用户的 current_workspace_id 过滤
-    - memory 是 Neo4j 中 Chunk 的数量，根据 end_user_id (group_id) 过滤
+    - memory 是 Neo4j 中 Chunk 的数量，根据 end_user_id (end_user_id) 过滤
     - 如果用户没有当前工作空间或未提供 end_user_id，对应的统计返回 0
     """
     api_logger.info(f"Knowledge type stats requested for workspace_id: {current_user.current_workspace_id}, end_user_id: {end_user_id}")
@@ -697,7 +692,7 @@ async def get_user_profile_api(
     current_user: User = Depends(get_current_user)
 ):
     """
-    获取工作空间下Popular Memory Tags，包含：
+    获取用户详情，包含：
     - name: 用户名字（直接使用 end_user_id）
     - tags: 3个用户特征标签（从语句和实体中LLM总结）
     - hot_tags: 4个热门记忆标签

@@ -47,7 +47,7 @@ from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.utils.definitions import (
     PROJECT_ROOT,
     SELECTED_EMBEDDING_ID,
-    SELECTED_GROUP_ID,
+    SELECTED_end_user_id,
     SELECTED_LLM_ID,
 )
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -59,7 +59,7 @@ from app.services.memory_config_service import MemoryConfigService
 
 async def run_locomo_benchmark(
     sample_size: int = 20,
-    group_id: Optional[str] = None,
+    end_user_id: Optional[str] = None,
     search_type: str = "hybrid",
     search_limit: int = 12,
     context_char_budget: int = 8000,
@@ -85,7 +85,7 @@ async def run_locomo_benchmark(
     
     Args:
         sample_size: Number of QA pairs to evaluate (from first conversation)
-        group_id: Database group ID for retrieval (uses default if None)
+        end_user_id: Database group ID for retrieval (uses default if None)
         search_type: "keyword", "embedding", or "hybrid"
         search_limit: Max documents to retrieve per query
         context_char_budget: Max characters for context
@@ -96,8 +96,8 @@ async def run_locomo_benchmark(
     Returns:
         Dictionary with evaluation results including metrics, timing, and samples
     """
-    # Use default group_id if not provided
-    group_id = group_id or SELECTED_GROUP_ID
+    # Use default end_user_id if not provided
+    end_user_id = end_user_id or SELECTED_end_user_id
     
     # Determine data path
     data_path = os.path.join(PROJECT_ROOT, "data", "locomo10.json")
@@ -110,7 +110,7 @@ async def run_locomo_benchmark(
     print(f"{'='*60}")
     print("📊 Configuration:")
     print(f"   Sample size: {sample_size}")
-    print(f"   Group ID: {group_id}")
+    print(f"   Group ID: {end_user_id}")
     print(f"   Search type: {search_type}")
     print(f"   Search limit: {search_limit}")
     print(f"   Context budget: {context_char_budget} chars")
@@ -134,7 +134,7 @@ async def run_locomo_benchmark(
     # Step 2: Extract conversations and ingest if needed
     if skip_ingest:
         print("⏭️  Skipping data ingestion (using existing data in Neo4j)")
-        print(f"   Group ID: {group_id}\n")
+        print(f"   Group ID: {end_user_id}\n")
     else:
         print("💾 Checking database ingestion...")
         try:
@@ -142,10 +142,10 @@ async def run_locomo_benchmark(
             print(f"📝 Extracted {len(conversations)} conversations")
             
             # Always ingest for now (ingestion check not implemented)
-            print(f"🔄 Ingesting conversations into group '{group_id}'...")
+            print(f"🔄 Ingesting conversations into group '{end_user_id}'...")
             success = await ingest_conversations_if_needed(
                 conversations=conversations,
-                group_id=group_id,
+                end_user_id=end_user_id,
                 reset=reset_group
             )
             
@@ -224,7 +224,7 @@ async def run_locomo_benchmark(
             try:
                 retrieved_info = await retrieve_relevant_information(
                     question=question,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     search_type=search_type,
                     search_limit=search_limit,
                     connector=connector,
@@ -409,7 +409,7 @@ async def run_locomo_benchmark(
         "sample_size": len(qa_items),
         "timestamp": datetime.now().isoformat(),
         "params": {
-            "group_id": group_id,
+            "end_user_id": end_user_id,
             "search_type": search_type,
             "search_limit": search_limit,
             "context_char_budget": context_char_budget,
@@ -467,7 +467,7 @@ def main():
         help="Number of QA pairs to evaluate"
     )
     parser.add_argument(
-        "--group_id",
+        "--end_user_id",
         type=str,
         default=None,
         help="Database group ID for retrieval (uses default if not specified)"
@@ -516,7 +516,7 @@ def main():
     # Run benchmark
     result = asyncio.run(run_locomo_benchmark(
         sample_size=args.sample_size,
-        group_id=args.group_id,
+        end_user_id=args.end_user_id,
         search_type=args.search_type,
         search_limit=args.search_limit,
         context_char_budget=args.context_char_budget,

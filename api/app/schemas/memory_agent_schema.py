@@ -7,11 +7,11 @@ class UserInput(BaseModel):
     message: str
     history: list[dict]
     search_switch: str
-    group_id: str
+    end_user_id: str
     config_id: Optional[str] = None
 
 
 class Write_UserInput(BaseModel):
     messages: list[dict]
-    group_id: str
+    end_user_id: str
     config_id: Optional[str] = None
