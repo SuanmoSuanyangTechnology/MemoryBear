@@ -9,6 +9,8 @@ from app.db import get_db
 from app.dependencies import cur_workspace_access_guard, get_current_user
 from app.models import ModelApiKey
 from app.models.user_model import User
+from app.core.memory.agent.utils.session_tools import SessionService
+from app.core.memory.agent.utils.redis_tool import store
 from app.repositories import knowledge_repository, WorkspaceRepository
 from app.schemas.memory_agent_schema import UserInput, Write_UserInput
 from app.schemas.response_schema import ApiResponse
@@ -160,9 +162,12 @@ async def write_server(
     
     api_logger.info(f"Write service requested for group {user_input.group_id}, storage_type: {storage_type}, user_rag_memory_id: {user_rag_memory_id}")
     try:
+        # 获取标准化的消息列表
+        messages_list = memory_agent_service.get_messages_list(user_input)
+        
         result = await memory_agent_service.write_memory(
             user_input.group_id, 
-            user_input.message, 
+            messages_list,  # 传递结构化消息列表
             config_id,
             db,
             storage_type, 
@@ -219,9 +224,12 @@ async def write_server_async(
         if knowledge: user_rag_memory_id = str(knowledge.id)
     api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     try:
+        # 获取标准化的消息列表
+        messages_list = memory_agent_service.get_messages_list(user_input)
+        
         task = celery_app.send_task(
             "app.core.memory.agent.write_message",
-            args=[user_input.group_id, user_input.message, config_id, storage_type, user_rag_memory_id]
+            args=[user_input.group_id, messages_list, config_id, storage_type, user_rag_memory_id]
         )
         api_logger.info(f"Write task queued: {task.id}")
         
@@ -285,6 +293,19 @@ async def read_server(
             storage_type,
             user_rag_memory_id
         )
+        if str(user_input.search_switch) == "2":
+            retrieve_info = result['answer']
+            history = await SessionService(store).get_history(user_input.group_id, user_input.group_id, user_input.group_id)
+            query = user_input.message
+            
+            # 调用 memory_agent_service 的方法生成最终答案
+            result['answer'] = await memory_agent_service.generate_summary_from_retrieve(
+                retrieve_info=retrieve_info,
+                history=history,
+                query=query,
+                config_id=config_id,
+                db=db
+            )
         return success(data=result, msg="回复对话消息成功")
     except BaseException as e:
         # Handle ExceptionGroup from TaskGroup (Python 3.11+) or BaseExceptionGroup
@@ -564,8 +585,23 @@ async def status_type(
     """
     api_logger.info(f"Status type check requested for group {user_input.group_id}")
     try:
+        # 获取标准化的消息列表
+        messages_list = memory_agent_service.get_messages_list(user_input)
+        
+        # 将消息列表转换为字符串用于分类
+        # 只取最后一条用户消息进行分类
+        last_user_message = ""
+        for msg in reversed(messages_list):
+            if msg.get('role') == 'user':
+                last_user_message = msg.get('content', '')
+                break
+        
+        if not last_user_message:
+            # 如果没有用户消息，使用所有消息的内容
+            last_user_message = " ".join([msg.get('content', '') for msg in messages_list])
+        
         result = await memory_agent_service.classify_message_type(
-            user_input.message,
+            last_user_message,
             user_input.config_id,
             db
         )
@@ -661,7 +697,7 @@ async def get_user_profile_api(
     current_user: User = Depends(get_current_user)
 ):
     """
-    获取用户详情，包含：
+    获取工作空间下Popular Memory Tags，包含：
     - name: 用户名字（直接使用 end_user_id）
     - tags: 3个用户特征标签（从语句和实体中LLM总结）
     - hot_tags: 4个热门记忆标签
