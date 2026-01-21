@@ -125,7 +125,11 @@ class MemoryConfigService:
         try:
             validated_config_id = _validate_config_id(config_id)
             
+            # Step 1: Get config and workspace
+            db_query_start = time.time()
             result = DataConfigRepository.get_config_with_workspace(self.db, validated_config_id)
+            db_query_time = time.time() - db_query_start
+            logger.info(f"[PERF] Config+Workspace query: {db_query_time:.4f}s")
             if not result:
                 elapsed_ms = (time.time() - start_time) * 1000
                 config_logger.error(
@@ -144,16 +148,20 @@ class MemoryConfigService:
             
             memory_config, workspace = result
             
-            # Validate embedding model
-            embedding_uuid = validate_embedding_model(
+            # Step 2: Validate embedding model (returns both UUID and name)
+            embed_start = time.time()
+            embedding_uuid, embedding_name = validate_embedding_model(
                 validated_config_id,
                 memory_config.embedding_id,
                 self.db,
                 workspace.tenant_id,
                 workspace.id,
             )
+            embed_time = time.time() - embed_start
+            logger.info(f"[PERF] Embedding validation: {embed_time:.4f}s")
             
-            # Resolve LLM model
+            # Step 3: Resolve LLM model
+            llm_start = time.time()
             llm_uuid, llm_name = validate_and_resolve_model_id(
                 memory_config.llm_id,
                 "llm",
@@ -163,8 +171,11 @@ class MemoryConfigService:
                 config_id=validated_config_id,
                 workspace_id=workspace.id,
             )
+            llm_time = time.time() - llm_start
+            logger.info(f"[PERF] LLM validation: {llm_time:.4f}s")
             
-            # Resolve optional rerank model
+            # Step 4: Resolve optional rerank model
+            rerank_start = time.time()
             rerank_uuid = None
             rerank_name = None
             if memory_config.rerank_id:
@@ -177,16 +188,12 @@ class MemoryConfigService:
                     config_id=validated_config_id,
                     workspace_id=workspace.id,
                 )
+            rerank_time = time.time() - rerank_start
+            if memory_config.rerank_id:
+                logger.info(f"[PERF] Rerank validation: {rerank_time:.4f}s")
             
-            # Get embedding model name
-            embedding_name, _ = validate_model_exists_and_active(
-                embedding_uuid,
-                "embedding",
-                self.db,
-                workspace.tenant_id,
-                config_id=validated_config_id,
-                workspace_id=workspace.id,
-            )
+            # Note: embedding_name is now returned from validate_embedding_model above
+            # No need for redundant query!
             
             # Create immutable MemoryConfig object
             config = MemoryConfig(
