@@ -51,6 +51,7 @@ class EpisodicMemoryOverviewRequest(BaseModel):
     """情景记忆总览查询请求"""
     
     end_user_id: str = Field(..., description="终端用户ID")
+    language_type: Optional[str] = Field("zh", description="语言类型（zh/en）")
     time_range: str = Field(
         default="all",
         description="时间范围筛选，可选值：all, today, this_week, this_month"
@@ -70,3 +71,4 @@ class EpisodicMemoryDetailsRequest(BaseModel):
     
     end_user_id: str = Field(..., description="终端用户ID")
     summary_id: str = Field(..., description="情景记忆摘要ID")
+    language_type: Optional[str] = Field("zh", description="语言类型（zh/en）")
