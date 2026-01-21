@@ -592,49 +592,6 @@ class MemoryAgentService:
         
         logger.info(f"Validation successful: Structured message list, count: {len(user_input.messages)}")
         return user_input.messages
-    def get_messages_list(self, user_input: Write_UserInput) -> list[dict]:
-        """
-        Get standardized message list from user input.
-        
-        Args:
-            user_input: Write_UserInput object
-        
-        Returns:
-            list[dict]: Message list, each message contains role and content
-            
-        Raises:
-            ValueError: If messages is empty or format is incorrect
-        """
-        from app.core.logging_config import get_api_logger
-        logger = get_api_logger()
-        
-        if len(user_input.messages) == 0:
-            logger.error("Validation failed: Message list cannot be empty")
-            raise ValueError("Message list cannot be empty")
-        
-        for idx, msg in enumerate(user_input.messages):
-            if not isinstance(msg, dict):
-                logger.error(f"Validation failed: Message {idx} is not a dict: {type(msg)}")
-                raise ValueError(f"Message format error: Message must be a dictionary. Error message index: {idx}, type: {type(msg)}")
-            
-            if 'role' not in msg:
-                logger.error(f"Validation failed: Message {idx} missing 'role' field: {msg}")
-                raise ValueError(f"Message format error: Message must contain 'role' field. Error message index: {idx}")
-            
-            if 'content' not in msg:
-                logger.error(f"Validation failed: Message {idx} missing 'content' field: {msg}")
-                raise ValueError(f"Message format error: Message must contain 'content' field. Error message index: {idx}")
-            
-            if msg['role'] not in ['user', 'assistant']:
-                logger.error(f"Validation failed: Message {idx} invalid role: {msg['role']}")
-                raise ValueError(f"Role must be 'user' or 'assistant', got: {msg['role']}. Message index: {idx}")
-            
-            if not msg['content'] or not msg['content'].strip():
-                logger.error(f"Validation failed: Message {idx} content is empty")
-                raise ValueError(f"Message content cannot be empty. Message index: {idx}, role: {msg['role']}")
-        
-        logger.info(f"Validation successful: Structured message list, count: {len(user_input.messages)}")
-        return user_input.messages
 
     async def classify_message_type(self, message: str, config_id: int, db: Session) -> Dict:
         """
