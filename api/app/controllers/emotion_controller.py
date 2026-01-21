@@ -232,7 +232,7 @@ async def get_emotion_suggestions(
             )
             return fail(
                 BizCode.NOT_FOUND,
-                "建议缓存不存在或已过期，请调用 /generate_suggestions 接口生成新建议",
+                "建议缓存不存在或已过期，请右上角刷新生成新建议",
                 ""
             )
 
