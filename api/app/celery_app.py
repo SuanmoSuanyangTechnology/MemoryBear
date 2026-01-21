@@ -16,7 +16,7 @@ celery_app = Celery(
 )
 
 # Default queue for unrouted tasks
-celery_app.conf.task_default_queue = 'io_tasks'
+celery_app.conf.task_default_queue = 'memory_tasks'
 
 # macOS 兼容性配置
 if platform.system() == 'Darwin':
@@ -58,20 +58,20 @@ celery_app.conf.update(
     
     # task routing
     task_routes={
-        # IO-bound tasks → io_tasks queue (gevent worker)
-        'app.core.memory.agent.read_message_priority': {'queue': 'io_tasks'},
-        'app.core.memory.agent.read_message': {'queue': 'io_tasks'},
-        'app.core.memory.agent.write_message': {'queue': 'io_tasks'},
+        # Memory tasks → memory_tasks queue (threads worker)
+        'app.core.memory.agent.read_message_priority': {'queue': 'memory_tasks'},
+        'app.core.memory.agent.read_message': {'queue': 'memory_tasks'},
+        'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
         
-        # CPU-bound tasks → cpu_tasks queue (prefork worker)
-        'app.core.rag.tasks.parse_document': {'queue': 'cpu_tasks'},
-        'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'cpu_tasks'},
+        # Document tasks → document_tasks queue (prefork worker)
+        'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
+        'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'document_tasks'},
         
-        # Beat/periodic tasks → cpu_tasks queue (prefork worker)
-        'app.tasks.workspace_reflection_task': {'queue': 'cpu_tasks'},
-        'app.tasks.regenerate_memory_cache': {'queue': 'cpu_tasks'},
-        'app.tasks.run_forgetting_cycle_task': {'queue': 'cpu_tasks'},
-        'app.controllers.memory_storage_controller.search_all': {'queue': 'cpu_tasks'},
+        # Beat/periodic tasks → document_tasks queue (prefork worker)
+        'app.tasks.workspace_reflection_task': {'queue': 'document_tasks'},
+        'app.tasks.regenerate_memory_cache': {'queue': 'document_tasks'},
+        'app.tasks.run_forgetting_cycle_task': {'queue': 'document_tasks'},
+        'app.controllers.memory_storage_controller.search_all': {'queue': 'document_tasks'},
     },
 )
 

@@ -16,33 +16,33 @@ services:
       - default
       - celery
     depends_on:
-      - worker-io
-      - worker-cpu
+      - worker-memory
+      - worker-document
 
-  # IO worker - Memory read/write tasks (gevent, high concurrency)
-  worker-io:
+  # Memory worker - Memory read/write tasks (threads pool for asyncio)
+  worker-memory:
     image: redbear-mem-open:latest
-    container_name: worker-io
+    container_name: worker-memory
     env_file:
       - .env
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
-    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=gevent --concurrency=500 --queues=io_tasks -n io_worker@%h
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks -n memory_worker@%h
     restart: unless-stopped
     networks:
       - celery
 
-  # CPU worker - Document parsing tasks (prefork, low concurrency)
-  worker-cpu:
+  # Document worker - Document parsing tasks (prefork for CPU-bound)
+  worker-document:
     image: redbear-mem-open:latest
-    container_name: worker-cpu
+    container_name: worker-document
     env_file:
       - .env
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
-    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=cpu_tasks --max-tasks-per-child=100 -n cpu_worker@%h
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks --max-tasks-per-child=100 -n document_worker@%h
     restart: unless-stopped
     networks:
       - celery
@@ -61,38 +61,7 @@ services:
     networks:
       - celery
     depends_on:
-      - worker-io
-
-  # Flower - Celery monitoring tool
-  flower:
-    image: redbear-mem-open:latest
-    container_name: flower
-    ports:
-      - "5555:5555"
-    env_file:
-      - .env
-    volumes:
-      - ./files:/files
-      - /etc/localtime:/etc/localtime:ro
-    command: >
-      celery -A app.celery_worker.celery_app flower
-      --port=5555
-      --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin123}
-      --persistent=True
-      --db=/files/flower.db
-      --max_tasks=10000
-      --purge_offline_workers=60
-    restart: unless-stopped
-    networks:
-      - celery
-    depends_on:
-      - worker-io
-      - worker-cpu
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
+      - worker-memory
 
 networks:
   celery:

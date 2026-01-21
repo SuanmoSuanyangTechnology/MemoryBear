@@ -6,7 +6,6 @@ async-timeout==5.0.1
 bcrypt==5.0.0
 billiard==4.2.2
 celery==5.5.3
-gevent==24.11.1
 flower==2.0.1
 cffi==2.0.0
 click==8.3.0

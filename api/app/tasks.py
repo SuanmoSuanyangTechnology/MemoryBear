@@ -425,24 +425,7 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
             db.close()
 
     try:
-        # 使用 nest_asyncio 来避免事件循环冲突
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-        
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(_run())
+        result = asyncio.run(_run())
         elapsed_time = time.time() - start_time
         
         return {
@@ -455,7 +438,6 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
         }
     except BaseException as e:
         elapsed_time = time.time() - start_time
-        # Handle ExceptionGroup from TaskGroup
         if hasattr(e, 'exceptions'):
             error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
             detailed_error = "; ".join(error_messages)
@@ -522,24 +504,7 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
             db.close()
 
     try:
-        # 使用 nest_asyncio 来避免事件循环冲突
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-        
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(_run())
+        result = asyncio.run(_run())
         elapsed_time = time.time() - start_time
         
         logger.info(f"[CELERY WRITE] Task completed successfully - elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
@@ -554,7 +519,6 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
         }
     except BaseException as e:
         elapsed_time = time.time() - start_time
-        # Handle ExceptionGroup from TaskGroup
         if hasattr(e, 'exceptions'):
             error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
             detailed_error = "; ".join(error_messages)
@@ -905,24 +869,7 @@ def regenerate_memory_cache(self) -> Dict[str, Any]:
                 }
     
     try:
-        # 使用 nest_asyncio 来避免事件循环冲突
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-        
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(_run())
+        result = asyncio.run(_run())
         elapsed_time = time.time() - start_time
         result["elapsed_time"] = elapsed_time
         result["task_id"] = self.request.id
@@ -1049,24 +996,7 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
                 }
 
     try:
-        # 使用 nest_asyncio 来避免事件循环冲突
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        result = loop.run_until_complete(_run())
+        result = asyncio.run(_run())
         elapsed_time = time.time() - start_time
         result["elapsed_time"] = elapsed_time
         result["task_id"] = self.request.id
@@ -1142,11 +1072,4 @@ def run_forgetting_cycle_task(self, config_id: Optional[int] = None) -> Dict[str
                     "duration_seconds": duration
                 }
     
-    # 运行异步函数
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        result = loop.run_until_complete(_run())
-        return result
-    finally:
-        loop.close()
+    return asyncio.run(_run())

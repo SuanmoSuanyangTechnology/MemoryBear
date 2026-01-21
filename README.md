@@ -334,7 +334,12 @@ step6: Log In to the Frontend Interface.
 ## License
 This project is licensed under the Apache License 2.0. For details, see the LICENSE file.
 
-## Acknowledgements & Community
-- Feedback & Issues: Please submit an Issue in the repository for bug reports or discussions.
-- Contributions Welcome: When submitting a Pull Request, please create a feature branch and follow conventional commit message guidelines.
-- Contact: If you are interested in contributing or collaborating, feel free to reach out at tianyou_hubm@redbearai.com
+## Community & Support
+
+Join our community to ask questions, share your work, and connect with fellow developers.
+
+- **GitHub Issues**: Report bugs, request features, or track known issues via [GitHub Issues](https://github.com/redbear-ai/memorybear/issues).
+- **GitHub Pull Requests**: Contribute code improvements or fixes through [Pull Requests](https://github.com/redbear-ai/memorybear/pulls).
+- **GitHub Discussions**: Ask questions, share ideas, and engage with the community in [GitHub Discussions](https://github.com/redbear-ai/memorybear/discussions).
+- **WeChat**: Scan the QR code below to join our WeChat community group.
+- **Contact**: If you are interested in contributing or collaborating, feel free to reach out at tianyou_hubm@redbearai.com
