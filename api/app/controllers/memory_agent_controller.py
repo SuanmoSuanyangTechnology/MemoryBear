@@ -9,6 +9,8 @@ from app.db import get_db
 from app.dependencies import cur_workspace_access_guard, get_current_user
 from app.models import ModelApiKey
 from app.models.user_model import User
+from app.core.memory.agent.utils.session_tools import SessionService
+from app.core.memory.agent.utils.redis_tool import store
 from app.repositories import knowledge_repository, WorkspaceRepository
 from app.schemas.memory_agent_schema import UserInput, Write_UserInput
 from app.schemas.response_schema import ApiResponse
@@ -291,6 +293,19 @@ async def read_server(
             storage_type,
             user_rag_memory_id
         )
+        if str(user_input.search_switch) == "2":
+            retrieve_info = result['answer']
+            history = await SessionService(store).get_history(user_input.group_id, user_input.group_id, user_input.group_id)
+            query = user_input.message
+            
+            # 调用 memory_agent_service 的方法生成最终答案
+            result['answer'] = await memory_agent_service.generate_summary_from_retrieve(
+                retrieve_info=retrieve_info,
+                history=history,
+                query=query,
+                config_id=config_id,
+                db=db
+            )
         return success(data=result, msg="回复对话消息成功")
     except BaseException as e:
         # Handle ExceptionGroup from TaskGroup (Python 3.11+) or BaseExceptionGroup
