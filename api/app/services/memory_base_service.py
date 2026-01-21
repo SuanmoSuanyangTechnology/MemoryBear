@@ -3,17 +3,268 @@ Memory Base Service
 
 提供记忆服务的基础功能和共享辅助方法。
 """
-
+import asyncio
+import re
 from datetime import datetime
 from typing import Optional
-
+from pydantic import BaseModel
 from app.core.logging_config import get_logger
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.emotion_analytics_service import EmotionAnalyticsService
-
+from app.core.memory.llm_tools.openai_client import OpenAIClient
+from app.core.models.base import RedBearModelConfig
+from app.services.memory_config_service import MemoryConfigService
+from app.db import get_db_context
 logger = get_logger(__name__)
+class TranslationResponse(BaseModel):
+    """翻译响应模型"""
+    data: str
+
+class MemoryTransService:
+    """记忆翻译服务，提供中英文翻译功能"""
+    
+    def __init__(self, llm_client=None, model_id: Optional[str] = None):
+        """
+        初始化翻译服务
+        
+        Args:
+            llm_client: LLM客户端实例或模型ID字符串（可选）
+            model_id: 模型ID，用于初始化LLM客户端（可选）
+        
+        Note:
+            - 如果llm_client是字符串，会被当作model_id使用
+            - 如果同时提供llm_client和model_id，优先使用llm_client
+        """
+        # 处理llm_client参数：如果是字符串，当作model_id
+        if isinstance(llm_client, str):
+            self.model_id = llm_client
+            self.llm_client = None
+        else:
+            self.llm_client = llm_client
+            self.model_id = model_id
+        
+        self._initialized = False
+    
+    def _ensure_llm_client(self):
+        """确保LLM客户端已初始化"""
+        if self._initialized:
+            return
+        
+        if self.llm_client is None:
+            if self.model_id:
+                with get_db_context() as db:
+                    config_service = MemoryConfigService(db)
+                    model_config = config_service.get_model_config(self.model_id)
+                
+                extra_params = {
+                    "temperature": 0.2,
+                    "max_tokens": 400,
+                    "top_p": 0.8,
+                    "stream": False,
+                }
+                
+                self.llm_client = OpenAIClient(
+                    RedBearModelConfig(
+                        model_name=model_config.get("model_name"),
+                        provider=model_config.get("provider"),
+                        api_key=model_config.get("api_key"),
+                        base_url=model_config.get("base_url"),
+                        timeout=model_config.get("timeout", 30),
+                        max_retries=model_config.get("max_retries", 3),
+                        extra_params=extra_params
+                    ),
+                    type_=model_config.get("type")
+                )
+            else:
+                raise ValueError("必须提供 llm_client 或 model_id 之一")
+        
+        self._initialized = True
+    
+    async def translate_to_english(self, text: str) -> str:
+        """
+        将中文翻译为英文
+        
+        Args:
+            text: 要翻译的中文文本
+            
+        Returns:
+            翻译后的英文文本
+        """
+        self._ensure_llm_client()
+
+        translation_messages = [
+            {
+                "role": "user",
+                "content": f"{text}\n\n中文翻译为英文，输出格式为{{\"data\":\"翻译后的内容\"}}"
+            }
+        ]
+
+        try:
+            response = await self.llm_client.response_structured(
+                messages=translation_messages,
+                response_model=TranslationResponse
+            )
+            return response.data
+        except Exception as e:
+            logger.error(f"翻译失败: {str(e)}")
+            return text  # 翻译失败时返回原文
+
+    async def is_english(self, text: str) -> bool:
+        """
+        检查文本是否为英文
+        
+        Args:
+            text: 要检查的文本（必须是字符串）
+            
+        Returns:
+            True 如果文本主要是英文，False 否则
+            
+        Note:
+            - 只接受字符串类型
+            - 检查是否主要由英文字母和常见标点组成
+            - 允许数字、空格和常见标点符号
+        """
+        if not isinstance(text, str):
+            raise TypeError(f"is_english 只接受字符串类型，收到: {type(text).__name__}")
+        
+        if not text.strip():
+            return True  # 空字符串视为英文
+        
+        # 更宽松的英文检查：允许字母、数字、空格和常见标点
+        # 如果文本中英文字符占比超过 80%，认为是英文
+        english_chars = sum(1 for c in text if c.isascii() and (c.isalnum() or c.isspace() or c in '.,!?;:\'"()-'))
+        total_chars = len(text)
+        
+        if total_chars == 0:
+            return True
+        
+        return (english_chars / total_chars) >= 0.8
+    async def Translate(self, text: str, target_language: str = "en") -> str:
+        """
+        通用翻译方法（保持向后兼容）
+        
+        Args:
+            text: 要翻译的文本
+            target_language: 目标语言，"en"表示英文，"zh"表示中文
+            
+        Returns:
+            翻译后的文本
+        """
+        if target_language == "en":
+            return await self.translate_to_english(text)
+        else:
+            logger.warning(f"不支持的目标语言: {target_language}，返回原文")
+            return text
+    
 
 
+ # 测试翻译服务
+async def Translation_English(modid, text, fields=None):
+    """
+    将数据翻译为英文（支持字段级翻译）
+
+    Args:
+        modid: 模型ID
+        text: 要翻译的数据（可以是字符串、字典或列表）
+        fields: 需要翻译的字段列表（可选）
+                如果为None，默认翻译: ['content', 'summary', 'statement', 'description',
+                                      'name', 'aliases', 'caption', 'emotion_keywords']
+
+    Returns:
+        翻译后的数据，保持原有结构
+        
+    Note:
+        - 对于字符串：直接翻译
+        - 对于列表：递归处理每个元素，保持列表长度和索引不变
+        - 对于字典：只翻译指定字段（fields参数）
+        - 对于其他类型：原样返回
+    """
+    trans_service = MemoryTransService(modid)
+    
+    # 处理字符串类型
+    if isinstance(text, str):
+        # 空字符串直接返回
+        if not text.strip():
+            return text
+        
+        try:
+            is_eng = await trans_service.is_english(text)
+            if not is_eng:
+                english_result = await trans_service.Translate(text)
+                return english_result
+            return text
+        except Exception as e:
+            logger.warning(f"翻译字符串失败: {e}")
+            return text
+    
+    # 处理列表类型
+    elif isinstance(text, list):
+        english_result = []
+        for item in text:
+            # 递归处理列表中的每个元素
+            if isinstance(item, str):
+                # 字符串元素：检查是否需要翻译
+                if not item.strip():
+                    english_result.append(item)
+                    continue
+                
+                try:
+                    is_eng = await trans_service.is_english(item)
+                    if not is_eng:
+                        translated = await trans_service.Translate(item)
+                        english_result.append(translated)
+                    else:
+                        # 保留英文项，不改变列表长度
+                        english_result.append(item)
+                except Exception as e:
+                    logger.warning(f"翻译列表项失败: {e}")
+                    english_result.append(item)
+            
+            elif isinstance(item, dict):
+                # 字典元素：递归调用自己处理字典
+                translated_dict = await Translation_English(modid, item, fields)
+                english_result.append(translated_dict)
+            
+            elif isinstance(item, list):
+                # 嵌套列表：递归处理
+                translated_list = await Translation_English(modid, item, fields)
+                english_result.append(translated_list)
+            
+            else:
+                # 其他类型（数字、布尔值等）：原样保留
+                english_result.append(item)
+        
+        return english_result
+    
+    # 处理字典类型
+    elif isinstance(text, dict):
+        # 确定要翻译的字段
+        if fields is None:
+            # 默认翻译字段
+            fields = [
+                'content', 'summary', 'statement', 'description',
+                'name', 'aliases', 'caption', 'emotion_keywords',
+                'text', 'title', 'label', 'type'  # 添加常用字段
+            ]
+        
+        # 创建副本，避免修改原始数据
+        result = text.copy()
+        
+        for field in fields:
+            if field in result and result[field] is not None:
+                # 递归翻译字段值（可能是字符串、列表或嵌套字典）
+                try:
+                    result[field] = await Translation_English(modid, result[field], fields)
+                except Exception as e:
+                    logger.warning(f"翻译字段 {field} 失败: {e}")
+                    # 翻译失败时保留原值
+                    continue
+        
+        return result
+    
+    # 其他类型（数字、布尔值、None等）：原样返回
+    else:
+        return text
 class MemoryBaseService:
     """记忆服务基类，提供共享的辅助方法"""
     
