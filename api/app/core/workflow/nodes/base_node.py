@@ -7,16 +7,25 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from langchain_core.messages import AIMessage
 from langgraph.config import get_stream_writer
 from typing_extensions import TypedDict, Annotated
 
 from app.core.config import settings
+from app.core.workflow.nodes.enums import BRANCH_NODES
 from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
+
+
+def merget_activate_state(x, y):
+    logger.info(f"merge: {x}, {y}")
+    return {
+        k: x.get(k, False) or y.get(k, False)
+        for k in set(x) | set(y)
+    }
 
 
 class WorkflowState(TypedDict):
@@ -60,6 +69,9 @@ class WorkflowState(TypedDict):
     # Format: {node_id: {"chunks": [...], "full_content": "..."}}
     streaming_buffer: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
 
+    # node activate status
+    activate: Annotated[dict[str, bool], merget_activate_state]
+
 
 class BaseNode(ABC):
     """节点基类
@@ -84,6 +96,47 @@ class BaseNode(ABC):
         self.config = node_config.get("config") or {}
         self.error_handling = node_config.get("error_handling") or {}
 
+        self.variable_updater = False
+
+    def check_activate(self, state: WorkflowState):
+        """Check if the current node is activated in the workflow state.
+
+        Args:
+            state (WorkflowState): The current workflow state containing the 'activate' dict.
+
+        Returns:
+            bool: True if the node is activated, False otherwise.
+        """
+        return state["activate"][self.node_id]
+
+    def trans_activate(self, state: WorkflowState):
+        """Transform the activation state for downstream nodes.
+
+        This method collects all downstream nodes (excluding branch nodes)
+        connected to the current node and returns a dict indicating whether
+        each of these nodes should be activated based on the current node's state.
+        The current node itself is also included in the returned activation dict.
+
+        Args:
+            state (WorkflowState): The current workflow state.
+
+        Returns:
+            dict: A dict with a single key 'activate', mapping node IDs to
+                  their activation status (True/False).
+        """
+        edges = self.workflow_config.get("edges")
+        under_stream_nodes = [
+            edge.get("target")
+            for edge in edges
+            if edge.get("source") == self.node_id and self.node_type not in BRANCH_NODES
+        ]
+        return {
+            "activate": {
+                            node_id: self.check_activate(state)
+                            for node_id in under_stream_nodes
+                        } | {self.node_id: self.check_activate(state)}
+        }
+
     @abstractmethod
     async def execute(self, state: WorkflowState) -> Any:
         """执行节点业务逻辑（非流式）
@@ -99,13 +152,13 @@ class BaseNode(ABC):
         
         Examples:
             >>> # LLM 节点
-            >>> return "这是 AI 的回复"
+            >>> "这是 AI 的回复"
             
             >>> # Transform 节点
-            >>> return {"processed_data": [...]}
+            >>> {"processed_data": [...]}
             
             >>> # Start/End 节点
-            >>> return {"message": "开始", "conversation_id": "xxx"}
+            >>> {"message": "开始", "conversation_id": "xxx"}
         """
         pass
 
@@ -126,14 +179,14 @@ class BaseNode(ABC):
             业务数据（chunk）或完成标记
         
         Examples:
-            >>> # 流式 LLM 节点
-            >>> full_response = ""
-            >>> async for chunk in llm.astream(prompt):
-            ...     full_response += chunk
-            ...     yield chunk  # yield 文本片段
-            >>> 
-            >>> # 最后 yield 完成标记
-            >>> yield {"__final__": True, "result": AIMessage(content=full_response)}
+            # 流式 LLM 节点
+            full_response = ""
+            async for chunk in llm.astream(prompt):
+                full_response += chunk
+                yield chunk  # yield 文本片段
+
+            # 最后 yield 完成标记
+            yield {"__final__": True, "result": AIMessage(content=full_response)}
         """
         result = await self.execute(state)
         # 默认实现：直接 yield 完成标记
@@ -146,7 +199,7 @@ class BaseNode(ABC):
             是否支持流式输出
         """
         # 检查子类是否重写了 execute_stream 方法
-        return self.execute_stream.__func__ != BaseNode.execute_stream.__func__
+        return self.__class__.execute_stream is not BaseNode.execute_stream
 
     def get_timeout(self) -> int:
         """获取超时时间（秒）
@@ -172,6 +225,9 @@ class BaseNode(ABC):
         Returns:
             标准化的状态更新字典
         """
+        if not self.check_activate(state):
+            return self.trans_activate(state)
+
         import time
 
         start_time = time.time()
@@ -204,12 +260,11 @@ class BaseNode(ABC):
             return {
                 **wrapped_output,
                 "messages": state["messages"],
-                "variables": state["variables"],
                 "runtime_vars": {
                     self.node_id: runtime_var
                 },
                 "looping": state["looping"]
-            }
+            } | self.trans_activate(state)
 
         except TimeoutError:
             elapsed_time = time.time() - start_time
@@ -220,7 +275,7 @@ class BaseNode(ABC):
             logger.error(f"节点 {self.node_id} 执行失败: {e}", exc_info=True)
             return self._wrap_error(str(e), elapsed_time, state)
 
-    async def run_stream(self, state: WorkflowState):
+    async def run_stream(self, state: WorkflowState) -> AsyncGenerator[dict[str, Any], Any]:
         """Execute node with error handling and output wrapping (streaming)
         
         This method is called by the Executor and is responsible for:
@@ -241,6 +296,11 @@ class BaseNode(ABC):
         Yields:
             State updates with streaming buffer and final result
         """
+        if not self.check_activate(state):
+            yield self.trans_activate(state)
+            logger.info(f"跳过节点{self.node_id}")
+            return
+
         import time
 
         start_time = time.time()
@@ -358,7 +418,6 @@ class BaseNode(ABC):
             state_update = {
                 **final_output,
                 "messages": state["messages"],
-                "variables": state["variables"],
                 "runtime_vars": {
                     self.node_id: runtime_var
                 },
@@ -377,7 +436,7 @@ class BaseNode(ABC):
 
             # Finally yield state update
             # LangGraph will merge this into state
-            yield state_update
+            yield state_update | self.trans_activate(state)
 
         except TimeoutError:
             elapsed_time = time.time() - start_time
@@ -427,12 +486,13 @@ class BaseNode(ABC):
             "token_usage": token_usage,
             "error": None
         }
-
-        return {
-            "node_outputs": {
-                self.node_id: node_output
-            }
+        final_output = {
+            "node_outputs": {self.node_id: node_output},
         }
+        if self.variable_updater:
+            final_output = final_output | {"variables": state["variables"]}
+
+        return final_output
 
     def _wrap_error(
             self,

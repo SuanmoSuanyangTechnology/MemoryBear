@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
-from app.core.response_utils import success
+from app.core.response_utils import success, fail
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.models import User
@@ -660,6 +660,11 @@ async def draft_run(
         return success(
             data=result,
             msg="工作流任务执行成功"
+        )
+    else:
+        return fail(
+            msg="未知应用类型",
+            code=422
         )
 
 
