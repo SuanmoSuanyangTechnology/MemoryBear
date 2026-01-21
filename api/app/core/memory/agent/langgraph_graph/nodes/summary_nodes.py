@@ -3,12 +3,11 @@
 import time
 
 from app.core.logging_config import get_agent_logger, log_time
-from app.db import get_db
-
 from app.core.memory.agent.models.summary_models import (
     RetrieveSummaryResponse,
     SummaryResponse,
 )
+from app.core.memory.agent.services.optimized_llm_service import LLMServiceMixin
 from app.core.memory.agent.services.search_service import SearchService
 from app.core.memory.agent.utils.llm_tools import (
     PROJECT_ROOT_,
@@ -17,7 +16,7 @@ from app.core.memory.agent.utils.llm_tools import (
 from app.core.memory.agent.utils.redis_tool import store
 from app.core.memory.agent.utils.session_tools import SessionService
 from app.core.memory.agent.utils.template_tools import TemplateService
-from app.core.memory.agent.services.optimized_llm_service import LLMServiceMixin
+from app.db import get_db
 
 template_root = PROJECT_ROOT_ + '/agent/utils/prompt'
 logger = get_agent_logger(__name__)
@@ -181,7 +180,8 @@ async def Input_Summary(state: ReadState) -> ReadState:
     search_params = {
         "group_id": group_id,
         "question": data,
-        "return_raw_results": True
+        "return_raw_results": True,
+        "include": ["summaries"]  # Only search summary nodes for faster performance
     }
 
     try:

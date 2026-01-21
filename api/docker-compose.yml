@@ -7,10 +7,6 @@ services:
       - "8002:8000"
     env_file:
       - .env
-    environment:
-      - SERVER_IP=0.0.0.0
-      # 如果代码里必须要 MCP_SERVER_URL，可以先注释或指向占位
-      # - MCP_SERVER_URL=
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
@@ -19,20 +15,87 @@ services:
     networks:
       - default
       - celery
+    depends_on:
+      - worker-io
+      - worker-cpu
 
-  # Celery worker
-  worker:
+  # IO worker - Memory read/write tasks (gevent, high concurrency)
+  worker-io:
     image: redbear-mem-open:latest
-    container_name: worker
+    container_name: worker-io
     env_file:
       - .env
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
-    command: celery -A app.celery_worker.celery_app worker --loglevel=info
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=gevent --concurrency=500 --queues=io_tasks -n io_worker@%h
     restart: unless-stopped
     networks:
       - celery
+
+  # CPU worker - Document parsing tasks (prefork, low concurrency)
+  worker-cpu:
+    image: redbear-mem-open:latest
+    container_name: worker-cpu
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=cpu_tasks --max-tasks-per-child=100 -n cpu_worker@%h
+    restart: unless-stopped
+    networks:
+      - celery
+
+  # Celery Beat - scheduler
+  beat:
+    image: redbear-mem-open:latest
+    container_name: celery-beat
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: celery -A app.celery_worker.celery_app beat --loglevel=info
+    restart: unless-stopped
+    networks:
+      - celery
+    depends_on:
+      - worker-io
+
+  # Flower - Celery monitoring tool
+  flower:
+    image: redbear-mem-open:latest
+    container_name: flower
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: >
+      celery -A app.celery_worker.celery_app flower
+      --port=5555
+      --broker_api=redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/${CELERY_BROKER}
+      --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin123}
+      --persistent=True
+      --db=/files/flower.db
+      --max_tasks=10000
+      --purge_offline_workers=60
+      --auto_refresh=True
+      --natural_time=True
+    restart: unless-stopped
+    networks:
+      - celery
+    depends_on:
+      - worker-io
+      - worker-cpu
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
 
 networks:
   celery:
