@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = "==3.12.*"
 resolution-markers = [
     "sys_platform == 'darwin'",
@@ -636,6 +636,18 @@ name = "demjson3"
 version = "3.0.6"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/f7/d2/6a81a9b5311d50542e11218b470dafd8adbaf1b3e51fc1fddd8a57eed691/demjson3-3.0.6.tar.gz", hash = "sha256:37c83b0c6eb08d25defc88df0a2a4875d58a7809a9650bd6eee7afd8053cdbac", size = 131477, upload-time = "2022-10-22T19:09:05.379Z" }
+
+[[package]]
+name = "deprecated"
+version = "1.3.1"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "wrapt" },
+]
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/49/85/12f0a49a7c4ffb70572b6c2ef13c90c88fd190debda93b23f026b25f9634/deprecated-1.3.1.tar.gz", hash = "sha256:b1b50e0ff0c1fddaa5708a2c6b0a6588bb09b892825ab2b214ac9ea9d92a5223", size = 2932523, upload-time = "2025-10-30T08:19:02.757Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/84/d0/205d54408c08b13550c733c4b85429e7ead111c7f0014309637425520a9a/deprecated-1.3.1-py2.py3-none-any.whl", hash = "sha256:597bfef186b6f60181535a29fbe44865ce137a5079f295b479886c82729d5f3f", size = 11298, upload-time = "2025-10-30T08:19:00.758Z" },
+]
 
 [[package]]
 name = "diskcache"
@@ -2927,6 +2939,28 @@ wheels = [
 ]
 
 [[package]]
+name = "python-calamine"
+version = "0.6.1"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/9b/32/99a794a1ca7b654cecdb76d4d61f21658b6f76574321341eb47df4365807/python_calamine-0.6.1.tar.gz", hash = "sha256:5974989919aa0bb55a136c1822d6f8b967d13c0fd0f245e3293abb4e63ab0f4b", size = 138354, upload-time = "2025-11-26T10:48:35.331Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/17/ad/f7cd7281dbd15c63c106963bdc2474354eeac58afb5484da23cfb89f650e/python_calamine-0.6.1-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:b06e10ce5a83ed32d7322b79b929eccde02fa69cdca74a0af69f373f4a0ba38e", size = 877325, upload-time = "2025-11-26T10:46:25.994Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/76/4f/d29f20e48adc1e7bab38f74498935dd3047c3ffc31fdf8424a68d821965b/python_calamine-0.6.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:57fc3dd9a4b293ad1300c35b10f4f6bdffb80861b6b4fe7e5bb05ef12dc6bc43", size = 854967, upload-time = "2025-11-26T10:46:27.38Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/94/04/c8eac3245010eaa0a39b27c4c53d401eae8719a0a8044106d7cb7761d57d/python_calamine-0.6.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:5a6b44d98d29769595af6d17443607156da55b8ee7338011abd20f51a3c540d1", size = 928722, upload-time = "2025-11-26T10:46:28.807Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/3b/0d/a08871caf15673a7af94a42ae7af183ef9f6790851c027e97d425a7285ba/python_calamine-0.6.1-cp312-cp312-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:599928d30ef294c688c2a2db0c24e05a81a7dff08fec7865f6724694ab68950a", size = 912566, upload-time = "2025-11-26T10:46:30.26Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/6b/7b/5547c90b5d9b0ca10dd81398673968a08040ad0b6a757e2ca05d8deef6eb/python_calamine-0.6.1-cp312-cp312-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:28a4799efc9d163130edb8b4f7b35a0e51f46b40e3ce57c024fa2c52d10bbe4b", size = 1073608, upload-time = "2025-11-26T10:46:31.784Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c3/f3/4b8007cab8084d5d5c1b3da1f4490035033692d12b66a5fcc2903fb76554/python_calamine-0.6.1-cp312-cp312-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:a57a1876748746c9e41237fd1dd49c2f231628c5f97ca1ef1b100db97af7a0e2", size = 964662, upload-time = "2025-11-26T10:46:33.193Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/8a/d2/71ea99fd1b06864791267c9ff43480fa569d0f7700506bbb84d9a17cb749/python_calamine-0.6.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c73c9b06cac54d0b4350d6935bab6fead954b997062854aeaba3c7a966db5ac0", size = 933579, upload-time = "2025-11-26T10:46:34.62Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/53/68/5556f44fdd1ed3e48c043e407e4ca7cd311787934b1ded9870d2dd1e5f4e/python_calamine-0.6.1-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:c9e3db8502f59234bcd72cb3042c628fb2a99e59e721dbd11e8ee6106cee3513", size = 975141, upload-time = "2025-11-26T10:46:36.026Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c8/fa/595c254014c863b8f9ed68cef6dcdb58c3ea3bb0166fe6f120808441b427/python_calamine-0.6.1-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:978006312127727bb0f481992aa1e2f0d2109efe5d4a3fe248471efb1591d06d", size = 1110935, upload-time = "2025-11-26T10:46:37.531Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/5e/ae/9377b92cf380f7d5843348de148646c630665a32c2efcc7a88f3e8056eaf/python_calamine-0.6.1-cp312-cp312-musllinux_1_1_armv7l.whl", hash = "sha256:8a39d1e58610674f4fcc3648aff885897998228f6bb6d09e09dccd73c4b59e64", size = 1179688, upload-time = "2025-11-26T10:46:39.14Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/47/23/d439d9dc61aa6bb5dcae4ee95de8cded53d2099d9d309531159e7050be26/python_calamine-0.6.1-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:7d5874a1d83361a32099bfe6dce806498a4d9cf070dde0b48fd3e691789c1322", size = 1108864, upload-time = "2025-11-26T10:46:41.53Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/d0/c0/b54f124f03fff0c5439e899f6e3fb89636def08ac04f5c24184d2bfdc17f/python_calamine-0.6.1-cp312-cp312-win32.whl", hash = "sha256:9dca5bc0490b377fc619b4e93bff91a3ba296fefa2aab3eb7a652c7c7606ad61", size = 695346, upload-time = "2025-11-26T10:46:44.203Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c4/d2/2df6e2ae9c63a7ffb6ceb3f8f36e2711e772bb96ddb0785e37107996d562/python_calamine-0.6.1-cp312-cp312-win_amd64.whl", hash = "sha256:1675ff630d439144ad5805a28bf4f65afd100b38f2a8703ceebe7c7e47039bc5", size = 747324, upload-time = "2025-11-26T10:46:45.478Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/f7/3f/1e55ccab357f653dfe5f7991ff7f7a38b1892e88610a8873db1549e7c0c5/python_calamine-0.6.1-cp312-cp312-win_arm64.whl", hash = "sha256:4f7a68b31474a39a0f22e1f1464857222877e740255db196e141ff9db0d3229c", size = 716731, upload-time = "2025-11-26T10:46:47.351Z" },
+]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -3083,6 +3117,7 @@ dependencies = [
     { name = "dashscope" },
     { name = "datrie" },
     { name = "demjson3" },
+    { name = "deprecated" },
     { name = "ecdsa" },
     { name = "editdistance" },
     { name = "elastic-transport" },
@@ -3144,6 +3179,7 @@ dependencies = [
     { name = "pypdf2" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "python-calamine" },
     { name = "python-dateutil" },
     { name = "python-docx" },
     { name = "python-dotenv" },
@@ -3182,6 +3218,7 @@ dependencies = [
     { name = "word2number" },
     { name = "xgboost" },
     { name = "xinference-client" },
+    { name = "xlrd" },
     { name = "xpinyin" },
     { name = "xxhash" },
 ]
@@ -3214,6 +3251,7 @@ requires-dist = [
     { name = "dashscope", specifier = ">=1.25.0" },
     { name = "datrie", specifier = "==0.8.3" },
     { name = "demjson3", specifier = "==3.0.6" },
+    { name = "deprecated", specifier = ">=1.3.1" },
     { name = "ecdsa", specifier = "==0.19.1" },
     { name = "editdistance", specifier = "==0.8.1" },
     { name = "elastic-transport", specifier = "==8.17.0" },
@@ -3277,6 +3315,7 @@ requires-dist = [
     { name = "pypdf2", specifier = "==3.0.1" },
     { name = "pytest", specifier = ">=9.0.1" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "python-calamine", specifier = ">=0.4.0" },
     { name = "python-dateutil", specifier = "==2.9.0.post0" },
     { name = "python-docx", specifier = "==1.2.0" },
     { name = "python-dotenv", specifier = "==1.1.1" },
@@ -3316,6 +3355,7 @@ requires-dist = [
     { name = "word2number", specifier = "==1.1" },
     { name = "xgboost", specifier = "==3.0.0" },
     { name = "xinference-client", specifier = "==1.11.0" },
+    { name = "xlrd", specifier = "==2.0.2" },
     { name = "xpinyin", specifier = "==0.7.7" },
     { name = "xxhash", specifier = "==3.6.0" },
 ]
@@ -4172,6 +4212,15 @@ dependencies = [
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/01/e5/5ed26708062db451d827b4a3e6585e2091b75ffae1bf47a105827bf2e405/xinference-client-1.11.0.tar.gz", hash = "sha256:2fec1eb61bad9c3eb93db3dfadb47aaea106e83724494cf7f82897c38b9dc9e9", size = 57345, upload-time = "2025-10-19T15:05:08.644Z" }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/d4/b9/04ca69d2d012f2f73f59d7ef64bc6bab38133a9e6ba595a08d9e95a75e80/xinference_client-1.11.0-py3-none-any.whl", hash = "sha256:b5d64341b8f2f1e4f82988899788ab50ab05027e653c1321772d386282498403", size = 39127, upload-time = "2025-10-19T15:05:07.333Z" },
+]
+
+[[package]]
+name = "xlrd"
+version = "2.0.2"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/07/5a/377161c2d3538d1990d7af382c79f3b2372e880b65de21b01b1a2b78691e/xlrd-2.0.2.tar.gz", hash = "sha256:08b5e25de58f21ce71dc7db3b3b8106c1fa776f3024c54e45b45b374e89234c9", size = 100167, upload-time = "2025-06-14T08:46:39.039Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/1a/62/c8d562e7766786ba6587d09c5a8ba9f718ed3fa8af7f4553e8f91c36f302/xlrd-2.0.2-py2.py3-none-any.whl", hash = "sha256:ea762c3d29f4cca48d82df517b6d89fbce4db3107f9d78713e48cd321d5c9aa9", size = 96555, upload-time = "2025-06-14T08:46:37.766Z" },
 ]
 
 [[package]]
