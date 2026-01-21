@@ -20,11 +20,13 @@ from app.core.memory.agent.langgraph_graph.write_graph import make_write_graph
 from app.core.memory.agent.logger_file.log_streamer import LogStreamer
 from app.core.memory.agent.utils.messages_tools import merge_multiple_search_results, reorder_output_results
 from app.core.memory.agent.utils.type_classifier import status_typle
+from app.core.memory.agent.utils.write_tools import write  # 新增：直接导入 write 函数
 from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.memory_config_schema import ConfigurationError
 from app.services.memory_base_service import Translation_English
 from app.services.memory_config_service import MemoryConfigService
@@ -260,13 +262,13 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
-    async def write_memory(self, group_id: str, message: str, config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
+    async def write_memory(self, group_id: str, messages: list[dict], config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
         """
         Process write operation with config_id
 
         Args:
             group_id: Group identifier (also used as end_user_id)
-            message: Message to write
+            messages: Structured message list [{"role": "user", "content": "..."}, ...]
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -287,7 +289,7 @@ class MemoryAgentService:
                     raise ValueError(f"No memory configuration found for end_user {group_id}. Please ensure the user has a connected memory configuration.")
             except Exception as e:
                 if "No memory configuration found" in str(e):
-                    raise  # Re-raise our specific error
+                    raise
                 logger.error(f"Failed to get connected config for end_user {group_id}: {e}")
                 raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
 
@@ -315,14 +317,28 @@ class MemoryAgentService:
 
         try:
             if storage_type == "rag":
-                result = await write_rag(group_id, message, user_rag_memory_id)
+                # For RAG storage, convert messages to single string
+                message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+                result = await write_rag(group_id, message_text, user_rag_memory_id)
                 return result
             else:
                 async with make_write_graph() as graph:
                     config = {"configurable": {"thread_id": group_id}}
+                    # Convert structured messages to LangChain messages
+                    langchain_messages = []
+                    for msg in messages:
+                        if msg['role'] == 'user':
+                            langchain_messages.append(HumanMessage(content=msg['content']))
+                        elif msg['role'] == 'assistant':
+                            from langchain_core.messages import AIMessage
+                            langchain_messages.append(AIMessage(content=msg['content']))
+                    
                     # 初始状态 - 包含所有必要字段
-                    initial_state = {"messages": [HumanMessage(content=message)], "group_id": group_id,
-                                     "memory_config": memory_config}
+                    initial_state = {
+                        "messages": langchain_messages,
+                        "group_id": group_id,
+                        "memory_config": memory_config
+                    }
 
                     # 获取节点更新信息
                     async for update_event in graph.astream(
@@ -335,7 +351,9 @@ class MemoryAgentService:
                                 massages = node_data
                     massagesstatus = massages.get('write_result')['status']
                     contents = massages.get('write_result')
-                    return self.writer_messages_deal(massagesstatus, start_time, group_id, config_id, message, contents)
+                    # Convert messages back to string for logging
+                    message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+                    return self.writer_messages_deal(massagesstatus, start_time, group_id, config_id, message_text, contents)
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Write operation failed: {str(e)}"
@@ -500,6 +518,57 @@ class MemoryAgentService:
                 optimized_outputs = merge_multiple_search_results(_intermediate_outputs)
                 result = reorder_output_results(optimized_outputs)
 
+                # 保存短期记忆到数据库
+                # 只有 search_switch 不为 "2"（快速检索）时才保存
+                try:
+                    from app.repositories.memory_short_repository import ShortTermMemoryRepository
+                    
+                    retrieved_content = []
+                    repo = ShortTermMemoryRepository(db)
+                    
+                    if str(search_switch) != "2":
+                        for intermediate in _intermediate_outputs:
+                            logger.debug(f"处理中间结果: {intermediate}")
+                            intermediate_type = intermediate.get('type', '')
+                            
+                            if intermediate_type == "search_result":
+                                query = intermediate.get('query', '')
+                                raw_results = intermediate.get('raw_results', {})
+                                reranked_results = raw_results.get('reranked_results', [])
+                                
+                                try:
+                                    statements = [statement['statement'] for statement in reranked_results.get('statements', [])]
+                                except Exception:
+                                    statements = []
+                                
+                                # 去重
+                                statements = list(set(statements))
+                                
+                                if query and statements:
+                                    retrieved_content.append({query: statements})
+                    
+                    # 如果 retrieved_content 为空，设置为空字符串
+                    if retrieved_content == []:
+                        retrieved_content = ''
+                    
+                    # 只有当回答不是"信息不足"且不是快速检索时才保存
+                    if '信息不足，无法回答。' != str(summary) and str(search_switch).strip() != "2":
+                        # 使用 upsert 方法
+                        repo.upsert(
+                            end_user_id=group_id,
+                            messages=message,
+                            aimessages=summary,
+                            retrieved_content=retrieved_content,
+                            search_switch=str(search_switch)
+                        )
+                        logger.info(f"成功保存短期记忆: group_id={group_id}, search_switch={search_switch}")
+                    else:
+                        logger.debug(f"跳过保存短期记忆: summary={summary[:50] if summary else 'None'}, search_switch={search_switch}")
+                        
+                except Exception as save_error:
+                    # 保存失败不应该影响主流程，只记录错误
+                    logger.error(f"保存短期记忆失败: {str(save_error)}", exc_info=True)
+
                 # Log successful operation
                 if audit_logger:
                     duration = time.time() - start_time
@@ -531,7 +600,49 @@ class MemoryAgentService:
                 )
             raise ValueError(error_msg)
 
-
+    def get_messages_list(self, user_input: Write_UserInput) -> list[dict]:
+        """
+        Get standardized message list from user input.
+        
+        Args:
+            user_input: Write_UserInput object
+        
+        Returns:
+            list[dict]: Message list, each message contains role and content
+            
+        Raises:
+            ValueError: If messages is empty or format is incorrect
+        """
+        from app.core.logging_config import get_api_logger
+        logger = get_api_logger()
+        
+        if len(user_input.messages) == 0:
+            logger.error("Validation failed: Message list cannot be empty")
+            raise ValueError("Message list cannot be empty")
+        
+        for idx, msg in enumerate(user_input.messages):
+            if not isinstance(msg, dict):
+                logger.error(f"Validation failed: Message {idx} is not a dict: {type(msg)}")
+                raise ValueError(f"Message format error: Message must be a dictionary. Error message index: {idx}, type: {type(msg)}")
+            
+            if 'role' not in msg:
+                logger.error(f"Validation failed: Message {idx} missing 'role' field: {msg}")
+                raise ValueError(f"Message format error: Message must contain 'role' field. Error message index: {idx}")
+            
+            if 'content' not in msg:
+                logger.error(f"Validation failed: Message {idx} missing 'content' field: {msg}")
+                raise ValueError(f"Message format error: Message must contain 'content' field. Error message index: {idx}")
+            
+            if msg['role'] not in ['user', 'assistant']:
+                logger.error(f"Validation failed: Message {idx} invalid role: {msg['role']}")
+                raise ValueError(f"Role must be 'user' or 'assistant', got: {msg['role']}. Message index: {idx}")
+            
+            if not msg['content'] or not msg['content'].strip():
+                logger.error(f"Validation failed: Message {idx} content is empty")
+                raise ValueError(f"Message content cannot be empty. Message index: {idx}, role: {msg['role']}")
+        
+        logger.info(f"Validation successful: Structured message list, count: {len(user_input.messages)}")
+        return user_input.messages
 
     async def classify_message_type(self, message: str, config_id: int, db: Session) -> Dict:
         """
