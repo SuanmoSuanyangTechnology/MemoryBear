@@ -351,12 +351,11 @@ async def update_end_user_profile(
 
     该接口可以更新用户的姓名、职位、部门、联系方式、电话和入职日期等信息。
     所有字段都是可选的，只更新提供的字段。
-
     """
     workspace_id = current_user.current_workspace_id
     end_user_id = profile_update.end_user_id
 
-    # 检查用户是否已选择工作空间
+    # 验证工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新用户信息但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
@@ -366,57 +365,24 @@ async def update_end_user_profile(
         f"workspace={workspace_id}"
     )
 
-    try:
-        # 查询终端用户
-        end_user = db.query(EndUser).filter(EndUser.id == end_user_id).first()
+    # 调用 Service 层处理业务逻辑
+    result = user_memory_service.update_end_user_profile(db, end_user_id, profile_update)
 
-        if not end_user:
-            api_logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
-            return fail(BizCode.INVALID_PARAMETER, "终端用户不存在", f"end_user_id={end_user_id}")
-
-        # 更新字段（只更新提供的字段，排除 end_user_id）
-        # 允许 None 值来重置字段（如 hire_date）
-        update_data = profile_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
-
-        # 特殊处理 hire_date：如果提供了时间戳，转换为 DateTime
-        if 'hire_date' in update_data:
-            hire_date_timestamp = update_data['hire_date']
-            if hire_date_timestamp is not None:
-                update_data['hire_date'] = timestamp_to_datetime(hire_date_timestamp)
-            # 如果是 None，保持 None（允许清空）
-
-        for field, value in update_data.items():
-            setattr(end_user, field, value)
-
-        # 更新 updated_at 时间戳
-        end_user.updated_at = datetime.datetime.now()
-
-        # 更新 updatetime_profile 为当前时间
-        end_user.updatetime_profile = datetime.datetime.now()
-
-        # 提交更改
-        db.commit()
-        db.refresh(end_user)
-
-        # 构建响应数据
-        profile_data = EndUserProfileResponse(
-            id=end_user.id,
-            other_name=end_user.other_name,
-            position=end_user.position,
-            department=end_user.department,
-            contact=end_user.contact,
-            phone=end_user.phone,
-            hire_date=end_user.hire_date,
-            updatetime_profile=end_user.updatetime_profile
-        )
-
-        api_logger.info(f"成功更新用户信息: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
-        return success(data=UserMemoryService.convert_profile_to_dict_with_timestamp(profile_data), msg="更新成功")
-
-    except Exception as e:
-        db.rollback()
-        api_logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", str(e))
+    if result["success"]:
+        api_logger.info(f"成功更新用户信息: end_user_id={end_user_id}")
+        return success(data=result["data"], msg="更新成功")
+    else:
+        error_msg = result["error"]
+        api_logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={error_msg}")
+        
+        # 根据错误类型映射到合适的业务错误码
+        if error_msg == "终端用户不存在":
+            return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", error_msg)
+        elif error_msg == "无效的用户ID格式":
+            return fail(BizCode.INVALID_USER_ID, "无效的用户ID格式", error_msg)
+        else:
+            # 只有未预期的错误才使用 INTERNAL_ERROR
+            return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", error_msg)
 
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)
 async def memory_space_timeline_of_shared_memories(id: str, label: str,language_type: str="zh",
