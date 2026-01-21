@@ -31,7 +31,7 @@ async def make_write_graph():
         user_id: User identifier
         tools: MCP tools loaded from session
         apply_id: Application identifier
-        group_id: Group identifier
+        end_user_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
     """
     workflow = StateGraph(WriteState)
@@ -49,7 +49,7 @@ async def make_write_graph():
 async def main():
     """主函数 - 运行工作流"""
     message = "今天周一"
-    group_id = 'new_2025test1103'  # 组ID
+    end_user_id = 'new_2025test1103'  # 组ID
 
 
     # 获取数据库会话
@@ -61,9 +61,9 @@ async def main():
     )
     try:
         async with make_write_graph() as graph:
-            config = {"configurable": {"thread_id": group_id}}
+            config = {"configurable": {"thread_id": end_user_id}}
             # 初始状态 - 包含所有必要字段
-            initial_state = {"messages": [HumanMessage(content=message)],  "group_id": group_id, "memory_config": memory_config}
+            initial_state = {"messages": [HumanMessage(content=message)],  "end_user_id": end_user_id, "memory_config": memory_config}
 
             # 获取节点更新信息
             async for update_event in graph.astream(

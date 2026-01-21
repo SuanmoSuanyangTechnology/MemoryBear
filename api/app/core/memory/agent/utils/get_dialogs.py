@@ -9,9 +9,7 @@ from app.core.memory.models.message_models import DialogData, ConversationContex
 
 async def get_chunked_dialogs(
         chunker_strategy: str = "RecursiveChunker",
-        group_id: str = "group_1",
-        user_id: str = "user1",
-        apply_id: str = "applyid",
+        end_user_id: str = "group_1",
         content: str = "这是用户的输入",
         ref_id: str = "wyl_20251027",
         config_id: str = None
@@ -20,9 +18,7 @@ async def get_chunked_dialogs(
 
     Args:
         chunker_strategy: The chunking strategy to use (default: RecursiveChunker)
-        group_id: Group identifier
-        user_id: User identifier
-        apply_id: Application identifier
+        end_user_id: End user identifier
         content: Dialog content
         ref_id: Reference identifier
         config_id: Configuration ID for processing
@@ -37,13 +33,11 @@ async def get_chunked_dialogs(
 
     # Create DialogData
     conversation_context = ConversationContext(msgs=messages)
-    # Create DialogData with group_id based on the entry's id for uniqueness
+    # Create DialogData with end_user_id
     dialog_data = DialogData(
         context=conversation_context,
         ref_id=ref_id,
-        group_id=group_id,
-        user_id=user_id,
-        apply_id=apply_id,
+        end_user_id=end_user_id,
         config_id=config_id
     )
     # Create DialogueChunker and process the dialogue

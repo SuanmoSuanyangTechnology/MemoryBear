@@ -104,38 +104,6 @@ class DataConfigRepository:
       r.statement AS statement
     """
 
-    # Entity graph within group (source node, edge, target node)
-    SEARCH_FOR_ENTITY_GRAPH = """
-    MATCH (n:ExtractedEntity)-[r]->(m:ExtractedEntity)
-    WHERE n.group_id = $group_id
-    RETURN
-      {
-        entity_idx: n.entity_idx,
-        connect_strength: n.connect_strength,
-        description: n.description,
-        entity_type: n.entity_type,
-        name: n.name,
-        fact_summary: COALESCE(n.fact_summary, ''),
-        id: n.id
-      } AS sourceNode,
-      {
-        rel_id: elementId(r),
-        source_id: startNode(r).id,
-        target_id: endNode(r).id,
-        predicate: r.predicate,
-        statement_id: r.statement_id,
-        statement: r.statement
-      } AS edge,
-      {
-        entity_idx: m.entity_idx,
-        connect_strength: m.connect_strength,
-        description: m.description,
-        entity_type: m.entity_type,
-        name: m.name,
-        fact_summary: COALESCE(m.fact_summary, ''),
-        id: m.id
-      } AS targetNode
-    """
     @staticmethod
     def update_reflection_config(
             db: Session,

@@ -29,25 +29,18 @@ logger = get_agent_logger(__name__)
 
 
 async def write(
-    content: str,
-    user_id: str,
-    apply_id: str,
-    group_id: str,
+    end_user_id: str,
     memory_config: MemoryConfig,
+    messages: list,
     ref_id: str = "wyl20251027",
 ) -> None:
     """
     Execute the complete knowledge extraction pipeline.
     
-    Only MemoryConfig is needed - LLM and embedding clients are constructed
-    internally from the config.
-
     Args:
-        content: Dialogue content to process
-        user_id: User identifier
-        apply_id: Application identifier
-        group_id: Group identifier
+        end_user_id: End user identifier
         memory_config: MemoryConfig object containing all configuration
+        messages: Structured message list [{"role": "user", "content": "..."}, ...]
         ref_id: Reference ID, defaults to "wyl20251027"
     """
     # Extract config values
@@ -61,7 +54,7 @@ async def write(
     logger.info(f"LLM model: {memory_config.llm_model_name}")
     logger.info(f"Embedding model: {memory_config.embedding_model_name}")
     logger.info(f"Chunker strategy: {chunker_strategy}")
-    logger.info(f"Group ID: {group_id}")
+    logger.info(f"End User ID: {end_user_id}")
 
     # Construct clients from memory_config using factory pattern with db session
     with get_db_context() as db:
@@ -84,12 +77,25 @@ async def write(
 
     # Step 1: Load and chunk data
     step_start = time.time()
+    
+    # Convert messages list to content string
+    # messages format: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
+    if isinstance(messages, list) and len(messages) > 0:
+        # Extract content from the last user message or concatenate all messages
+        if isinstance(messages[-1], dict) and 'content' in messages[-1]:
+            content = messages[-1]['content']
+        else:
+            # Fallback: concatenate all message contents
+            content = " ".join([msg.get('content', '') for msg in messages if isinstance(msg, dict)])
+    elif isinstance(messages, str):
+        content = messages
+    else:
+        content = str(messages)
+    
     chunked_dialogs = await get_chunked_dialogs(
         chunker_strategy=chunker_strategy,
-        group_id=group_id,
-        user_id=user_id,
-        apply_id=apply_id,
-        content=content,
+        end_user_id=end_user_id,
+        content=content,  # 修复：使用 content 参数而不是 messages
         ref_id=ref_id,
         config_id=config_id,
     )

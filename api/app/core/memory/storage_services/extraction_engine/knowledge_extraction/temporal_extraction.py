@@ -132,7 +132,7 @@ class TemporalExtractor:
             prompt_logger.info("")
             prompt_logger.info("=== TEMPORAL EXTRACTION RESULTS ===")
             prompt_logger.info(
-                f"[Temporal] Dialog ref_id={getattr(dialog_data, 'ref_id', None)}, group_id={getattr(dialog_data, 'group_id', None)}"
+                f"[Temporal] Dialog ref_id={getattr(dialog_data, 'ref_id', None)}, end_user_id={getattr(dialog_data, 'end_user_id', None)}"
             )
         except Exception:
             pass

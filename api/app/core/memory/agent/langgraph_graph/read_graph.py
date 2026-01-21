@@ -59,7 +59,6 @@ async def make_read_graph():
         workflow.add_conditional_edges("Retrieve", Retrieve_continue)
         workflow.add_edge("Retrieve_Summary", END)
         workflow.add_conditional_edges("Verify", Verify_continue)
-
         workflow.add_edge("Summary_fails", END)
         workflow.add_edge("Summary", END)
 
@@ -80,7 +79,7 @@ async def make_read_graph():
 async def main():
     """主函数 - 运行工作流"""
     message = "昨天有什么好看的电影"
-    group_id = '88a459f5_text09'  # 组ID
+    end_user_id = '88a459f5_text09'  # 组ID
     storage_type = 'neo4j'  # 存储类型
     search_switch = '1'  # 搜索开关
     user_rag_memory_id = 'wwwwwwww'  # 用户RAG记忆ID
@@ -96,9 +95,9 @@ async def main():
     start=time.time()
     try:
         async with make_read_graph() as graph:
-            config = {"configurable": {"thread_id": group_id}}
+            config = {"configurable": {"thread_id": end_user_id}}
             # 初始状态 - 包含所有必要字段
-            initial_state = {"messages": [HumanMessage(content=message)] ,"search_switch":search_switch,"group_id":group_id
+            initial_state = {"messages": [HumanMessage(content=message)] ,"search_switch":search_switch,"end_user_id":end_user_id
                              ,"storage_type":storage_type,"user_rag_memory_id":user_rag_memory_id,"memory_config":memory_config}
             # 获取节点更新信息
             _intermediate_outputs = []

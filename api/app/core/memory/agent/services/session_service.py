@@ -59,7 +59,7 @@ class SessionService:
         self,
         user_id: str,
         apply_id: str,
-        group_id: str
+        end_user_id: str
     ) -> List[dict]:
         """
         Retrieve conversation history from Redis.
@@ -67,20 +67,20 @@ class SessionService:
         Args:
             user_id: User identifier
             apply_id: Application identifier
-            group_id: Group identifier
+            end_user_id: Group identifier
             
         Returns:
             List of conversation history items with Query and Answer keys
             Returns empty list if no history found or on error
         """
         try:
-            history = self.store.find_user_apply_group(user_id, apply_id, group_id)
+            history = self.store.find_user_apply_group(user_id, apply_id, end_user_id)
             
             # Validate history structure
             if not isinstance(history, list):
                 logger.warning(
                     f"Invalid history format for user {user_id}, "
-                    f"apply {apply_id}, group {group_id}: expected list, got {type(history)}"
+                    f"apply {apply_id}, group {end_user_id}: expected list, got {type(history)}"
                 )
                 return []
             
@@ -89,7 +89,7 @@ class SessionService:
         except Exception as e:
             logger.error(
                 f"Failed to retrieve history for user {user_id}, "
-                f"apply {apply_id}, group {group_id}: {e}",
+                f"apply {apply_id}, group {end_user_id}: {e}",
                 exc_info=True
             )
             # Return empty list on error to allow execution to continue
@@ -100,7 +100,7 @@ class SessionService:
         user_id: str,
         query: str,
         apply_id: str,
-        group_id: str,
+        end_user_id: str,
         ai_response: str
     ) -> Optional[str]:
         """
@@ -110,7 +110,7 @@ class SessionService:
             user_id: User identifier
             query: User query/message
             apply_id: Application identifier
-            group_id: Group identifier
+            end_user_id: Group identifier
             ai_response: AI response/answer
             
         Returns:
@@ -131,7 +131,7 @@ class SessionService:
                 userid=user_id,
                 messages=query,
                 apply_id=apply_id,
-                group_id=group_id,
+                end_user_id=end_user_id,
                 aimessages=ai_response
             )
             
@@ -152,7 +152,7 @@ class SessionService:
         Duplicates are identified by matching:
         - sessionid
         - user_id (id field)
-        - group_id
+        - end_user_id
         - messages
         - aimessages
         

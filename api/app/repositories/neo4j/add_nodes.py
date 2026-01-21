@@ -6,10 +6,10 @@ from app.core.memory.models.graph_models import DialogueNode, StatementNode, Chu
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 
-async def delete_all_nodes(group_id: str, connector: Neo4jConnector):
+async def delete_all_nodes(end_user_id: str, connector: Neo4jConnector):
     """Delete all nodes in the database."""
-    result = await connector.execute_query(f"MATCH (n {{group_id: '{group_id}'}}) DETACH DELETE n")
-    print(f"All group_id: {group_id} node and edge deleted successfully")
+    result = await connector.execute_query(f"MATCH (n {{end_user_id: '{end_user_id}'}}) DETACH DELETE n")
+    print(f"All end_user_id: {end_user_id} node and edge deleted successfully")
     return result
 
 async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConnector) -> Optional[List[str]]:
@@ -32,9 +32,7 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
         for dialogue in dialogues:
             flattened_dialogues.append({
                 "id": dialogue.id,
-                "group_id": dialogue.group_id,
-                "user_id": dialogue.user_id,
-                "apply_id": dialogue.apply_id,
+                "end_user_id": dialogue.end_user_id,
                 "run_id": dialogue.run_id,
                 "ref_id": dialogue.ref_id,
                 "name": dialogue.name,
@@ -79,9 +77,7 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
             flattened_statement = {
                 "id": statement.id,
                 "name": statement.name,
-                "group_id": statement.group_id,
-                "user_id": statement.user_id,
-                "apply_id": statement.apply_id,
+                "end_user_id": statement.end_user_id,
                 "run_id": statement.run_id,
                 "chunk_id": statement.chunk_id,
                 # "created_at": statement.created_at.isoformat(),
@@ -101,6 +97,8 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
                 #     "entities": [entity.model_dump() for entity in statement.triplet_extraction_info.entities] if statement.triplet_extraction_info else []
                 # }) if statement.triplet_extraction_info else json.dumps({"triplets": [], "entities": []}),
                 "statement_embedding": statement.statement_embedding if statement.statement_embedding else None,
+                # 添加 speaker 字段（用于基于角色的情绪提取）
+                "speaker": statement.speaker if hasattr(statement, 'speaker') else None,
                 # 添加情绪字段处理
                 "emotion_type": statement.emotion_type,
                 "emotion_intensity": statement.emotion_intensity,
@@ -152,9 +150,7 @@ async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) ->
             flattened_chunk = {
                 "id": chunk.id,
                 "name": chunk.name,
-                "group_id": chunk.group_id,
-                "user_id": chunk.user_id,
-                "apply_id": chunk.apply_id,
+                "end_user_id": chunk.end_user_id,
                 "run_id": chunk.run_id,
                 "created_at": chunk.created_at.isoformat() if chunk.created_at else None,
                 "expired_at": chunk.expired_at.isoformat() if chunk.expired_at else None,
@@ -163,7 +159,9 @@ async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) ->
                 "chunk_embedding": chunk.chunk_embedding if chunk.chunk_embedding else None,
                 "sequence_number": chunk.sequence_number,
                 "start_index": metadata.get("start_index"),
-                "end_index": metadata.get("end_index")
+                "end_index": metadata.get("end_index"),
+                # 添加 speaker 字段（用于基于角色的情绪提取）
+                "speaker": chunk.speaker if hasattr(chunk, 'speaker') else None
             }
             flattened_chunks.append(flattened_chunk)
 
@@ -202,9 +200,7 @@ async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector
             flattened.append({
                 "id": s.id,
                 "name": s.name,
-                "group_id": s.group_id,
-                "user_id": s.user_id,
-                "apply_id": s.apply_id,
+                "end_user_id": s.end_user_id,
                 "run_id": s.run_id,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
                 "expired_at": s.expired_at.isoformat() if s.expired_at else None,

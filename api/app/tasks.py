@@ -382,12 +382,12 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
 
 
 @celery_app.task(name="app.core.memory.agent.read_message", bind=True)
-def read_message_task(self, group_id: str, message: str, history: List[Dict[str, Any]], search_switch: str, config_id: str,storage_type:str,user_rag_memory_id:str) -> Dict[str, Any]:
+def read_message_task(self, end_user_id: str, message: str, history: List[Dict[str, Any]], search_switch: str, config_id: str,storage_type:str,user_rag_memory_id:str) -> Dict[str, Any]:
 
     """Celery task to process a read message via MemoryAgentService.
 
     Args:
-        group_id: Group ID for the memory agent (also used as end_user_id)
+        end_user_id: Group ID for the memory agent (also used as end_user_id)
         message: User message to process
         history: Conversation history
         search_switch: Search switch parameter
@@ -408,7 +408,7 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
             from app.services.memory_agent_service import get_end_user_connected_config
             db = next(get_db())
             try:
-                connected_config = get_end_user_connected_config(group_id, db)
+                connected_config = get_end_user_connected_config(end_user_id, db)
                 actual_config_id = connected_config.get("memory_config_id")
             finally:
                 db.close()
@@ -420,7 +420,7 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
         db = next(get_db())
         try:
             service = MemoryAgentService()
-            return await service.read_memory(group_id, message, history, search_switch, actual_config_id, db, storage_type, user_rag_memory_id)
+            return await service.read_memory(end_user_id, message, history, search_switch, actual_config_id, db, storage_type, user_rag_memory_id)
         finally:
             db.close()
 
@@ -448,7 +448,7 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
         return {
             "status": "SUCCESS",
             "result": result,
-            "group_id": group_id,
+            "end_user_id": end_user_id,
             "config_id": config_id,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
@@ -464,7 +464,7 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
         return {
             "status": "FAILURE",
             "error": detailed_error,
-            "group_id": group_id,
+            "end_user_id": end_user_id,
             "config_id": config_id,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
@@ -472,11 +472,11 @@ def read_message_task(self, group_id: str, message: str, history: List[Dict[str,
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True)
-def write_message_task(self, group_id: str, message: str, config_id: str,storage_type:str,user_rag_memory_id:str) -> Dict[str, Any]:
+def write_message_task(self, end_user_id: str, message: str, config_id: str,storage_type:str,user_rag_memory_id:str) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     
     Args:
-        group_id: Group ID for the memory agent (also used as end_user_id)
+        end_user_id: Group ID for the memory agent (also used as end_user_id)
         message: Message to write
         config_id: Optional configuration ID
         
@@ -489,7 +489,7 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
     from app.core.logging_config import get_logger
     logger = get_logger(__name__)
     
-    logger.info(f"[CELERY WRITE] Starting write task - group_id={group_id}, config_id={config_id}, storage_type={storage_type}")
+    logger.info(f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
     start_time = time.time()
     
     # Resolve config_id if None
@@ -499,7 +499,7 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
             from app.services.memory_agent_service import get_end_user_connected_config
             db = next(get_db())
             try:
-                connected_config = get_end_user_connected_config(group_id, db)
+                connected_config = get_end_user_connected_config(end_user_id, db)
                 actual_config_id = connected_config.get("memory_config_id")
             finally:
                 db.close()
@@ -512,7 +512,7 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
         try:
             logger.info(f"[CELERY WRITE] Executing MemoryAgentService.write_memory")
             service = MemoryAgentService()
-            result = await service.write_memory(group_id, message, actual_config_id, db, storage_type, user_rag_memory_id)
+            result = await service.write_memory(end_user_id, message, actual_config_id, db, storage_type, user_rag_memory_id)
             logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
             return result
         except Exception as e:
@@ -547,7 +547,7 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
         return {
             "status": "SUCCESS",
             "result": result,
-            "group_id": group_id,
+            "end_user_id": end_user_id,
             "config_id": config_id,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
@@ -566,7 +566,7 @@ def write_message_task(self, group_id: str, message: str, config_id: str,storage
         return {
             "status": "FAILURE",
             "error": detailed_error,
-            "group_id": group_id,
+            "end_user_id": end_user_id,
             "config_id": config_id,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
@@ -612,7 +612,7 @@ def check_read_service_task() -> Dict[str, str]:
         payload = {
             "user_id": "健康检查",
             "apply_id": "健康检查",
-            "group_id": "健康检查",
+            "end_user_id": "健康检查",
             "message": "你好",
             "history": [],
             "search_switch": "2",
@@ -1112,7 +1112,7 @@ def run_forgetting_cycle_task(self, config_id: Optional[int] = None) -> Dict[str
                 # 运行遗忘周期
                 report = await forget_service.trigger_forgetting(
                     db=db,
-                    group_id=None,  # 处理所有组
+                    end_user_id=None,  # 处理所有组
                     config_id=config_id
                 )
                 

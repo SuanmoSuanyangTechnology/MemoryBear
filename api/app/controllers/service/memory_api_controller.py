@@ -39,7 +39,7 @@ async def write_memory_api_service(
     
     Stores memory content for the specified end user using the Memory API Service.
     """
-    logger.info(f"Memory write request - end_user_id: {payload.end_user_id}")
+    logger.info(f"Memory write request - end_user_id: {payload.end_user_id}, tenant_id: {api_key_auth.tenant_id}")
     
     memory_api_service = MemoryAPIService(db)
     
@@ -50,6 +50,7 @@ async def write_memory_api_service(
         config_id=payload.config_id,
         storage_type=payload.storage_type,
         user_rag_memory_id=payload.user_rag_memory_id,
+        tenant_id=api_key_auth.tenant_id,
     )
     
     logger.info(f"Memory write successful for end_user: {payload.end_user_id}")
