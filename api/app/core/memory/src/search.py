@@ -6,6 +6,7 @@ import os
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from uuid import UUID
 
 if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
@@ -396,13 +397,13 @@ def rerank_with_activation(
     return reranked
 
 
-def log_search_query(query_text: str, search_type: str, group_id: str | None, limit: int, include: List[str], log_file: str = None):
+def log_search_query(query_text: str, search_type: str, end_user_id: str | None, limit: int, include: List[str], log_file: str = None):
     """Log search query information using the logger.
     
     Args:
         query_text: The search query text
         search_type: Type of search (keyword, embedding, hybrid)
-        group_id: Group identifier for filtering
+        end_user_id: Group identifier for filtering
         limit: Maximum number of results
         include: List of result types to include
         log_file: Deprecated parameter, kept for backward compatibility
@@ -413,7 +414,7 @@ def log_search_query(query_text: str, search_type: str, group_id: str | None, li
     # Log using the standard logger
     logger.info(
         f"Search query: query='{cleaned_query}', type={search_type}, "
-        f"group_id={group_id}, limit={limit}, include={include}"
+        f"end_user_id={end_user_id}, limit={limit}, include={include}"
     )
 
 
@@ -672,7 +673,7 @@ def apply_reranker_placeholder(
 async def run_hybrid_search(
     query_text: str,
     search_type: str,
-    group_id: str | None,
+    end_user_id: str | None,
     limit: int,
     include: List[str],
     output_path: str | None,
@@ -692,6 +693,9 @@ async def run_hybrid_search(
     # Start overall timing
     search_start_time = time.time()
     latency_metrics = {}
+    print(100*'-')
+    print(memory_config)
+    print(100 * '-')
     logger.info(f"using embedding_id:{memory_config.embedding_model_id}...")
 
     # Clean and normalize the incoming query before use/logging
@@ -715,7 +719,7 @@ async def run_hybrid_search(
         }
     
     # Log the search query
-    log_search_query(query_text, search_type, group_id, limit, include)
+    log_search_query(query_text, search_type, end_user_id, limit, include)
 
     connector = Neo4jConnector()
     results = {}
@@ -732,7 +736,7 @@ async def run_hybrid_search(
                 search_graph(
                     connector=connector,
                     q=query_text,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     limit=limit,
                     include=include
                 )
@@ -769,7 +773,7 @@ async def run_hybrid_search(
                     connector=connector,
                     embedder_client=embedder,
                     query_text=query_text,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     limit=limit,
                     include=include,
                 )
@@ -916,9 +920,7 @@ async def run_hybrid_search(
 
 
 async def search_by_temporal(
-    group_id: Optional[str] = "test",
-    apply_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    end_user_id: Optional[str] = "test",
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     valid_date: Optional[str] = None,
@@ -929,7 +931,7 @@ async def search_by_temporal(
     Temporal search across Statements.
 
     - Matches statements created between start_date and end_date
-    - Optionally filters by group_id
+    - Optionally filters by end_user_id
     - Returns up to 'limit' statements
     """
     connector = Neo4jConnector()
@@ -939,9 +941,7 @@ async def search_by_temporal(
         end_date = normalize_date_safe(end_date)
 
     params = TemporalSearchParams.model_validate({
-        "group_id": group_id,
-        "apply_id": apply_id,
-        "user_id": user_id,
+        "end_user_id": end_user_id,
         "start_date": start_date,
         "end_date": end_date,
         "valid_date": valid_date,
@@ -950,9 +950,7 @@ async def search_by_temporal(
     })
     statements = await search_graph_by_temporal(
         connector=connector,
-        group_id=params.group_id,
-        apply_id=params.apply_id,
-        user_id=params.user_id,
+        end_user_id=params.end_user_id,
         start_date=params.start_date,
         end_date=params.end_date,
         valid_date=params.valid_date,
@@ -964,9 +962,7 @@ async def search_by_temporal(
 
 async def search_by_keyword_temporal(
     query_text: str,
-    group_id: Optional[str] = "test",
-    apply_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    end_user_id: Optional[str] = "test",
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     valid_date: Optional[str] = None,
@@ -987,9 +983,7 @@ async def search_by_keyword_temporal(
         invalid_date = normalize_date_safe(invalid_date)
 
     params = TemporalSearchParams.model_validate({
-        "group_id": group_id,
-        "apply_id": apply_id,
-        "user_id": user_id,
+        "end_user_id": end_user_id,
         "start_date": start_date,
         "end_date": end_date,
         "valid_date": valid_date,
@@ -999,9 +993,7 @@ async def search_by_keyword_temporal(
     statements = await search_graph_by_keyword_temporal(
         connector=connector,
         query_text=query_text,
-        group_id=params.group_id,
-        apply_id=params.apply_id,
-        user_id=params.user_id,
+        end_user_id=params.end_user_id,
         start_date=params.start_date,
         end_date=params.end_date,
         valid_date=params.valid_date,
@@ -1013,7 +1005,7 @@ async def search_by_keyword_temporal(
 
 async def search_chunk_by_chunk_id(
     chunk_id: str,
-    group_id: Optional[str] = "test",
+    end_user_id: Optional[str] = "test",
     limit: int = 1,
 ):
     """
@@ -1023,8 +1015,68 @@ async def search_chunk_by_chunk_id(
     chunks = await search_graph_by_chunk_id(
         connector=connector,
         chunk_id=chunk_id,
-        group_id=group_id,
+        end_user_id=end_user_id,
         limit=limit
     )
     return {"chunks": chunks}
 
+if __name__ == '__main__':
+    # 测试混合检索功能
+    from app.schemas.memory_config_schema import MemoryConfig
+    from app.db import get_db
+    from app.services.memory_config_service import MemoryConfigService
+    
+    # 从数据库获取真实配置
+    db = next(get_db())
+    try:
+        config_service = MemoryConfigService(db)
+        
+        # 使用 config_id=17 获取配置
+        memory_config = config_service.load_memory_config(config_id=17)
+        
+        if not memory_config:
+            print("错误：找不到 config_id=17 的配置")
+            print("请先在数据库中创建配置，或修改 config_id")
+            exit(1)
+        
+        print(f"✓ 成功加载配置: {memory_config.config_name}")
+        print(f"  - Workspace: {memory_config.workspace_name}")
+        print(f"  - LLM Model: {memory_config.llm_model_name}")
+        print(f"  - Embedding Model: {memory_config.embedding_model_name}")
+        print(f"  - Storage Type: {memory_config.storage_type}")
+        print()
+        
+        # 修改这里的参数进行测试
+        test_end_user_id = "021886bc-fab9-4fd5-b607-497b262e0381"  # 修改为你的 end_user_id
+        test_query = "小明擅长什么？"  # 修改为你的查询
+        
+        print(f"开始测试检索...")
+        print(f"  - Query: {test_query}")
+        print(f"  - End User ID: {test_end_user_id}")
+        print(f"  - Search Type: hybrid")
+        print()
+        
+        results = asyncio.run(run_hybrid_search(
+            query_text=test_query,
+            search_type="hybrid",  # 可选: "keyword", "embedding", "hybrid"
+            end_user_id=test_end_user_id,
+            limit=10,
+            include=["statements", "entities", "chunks", "summaries"],
+            output_path=None,
+            memory_config=memory_config,
+            rerank_alpha=0.6,
+            use_forgetting_rerank=False,
+            use_llm_rerank=False
+        ))
+        
+        print("=" * 80)
+        print("检索结果:")
+        print("=" * 80)
+        print(results)
+        
+    except Exception as e:
+        print(f"错误: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        db.close()

@@ -9,47 +9,36 @@ async def write_node(state: WriteState) -> WriteState:
         Write data to the database/file system.
 
         Args:
-            state: WriteState containing messages, group_id, and memory_config
+            content: Data content to write
+            end_user_id: End user identifier
+            memory_config: MemoryConfig object containing all configuration
 
         Returns:
-            dict: Contains 'write_result' with status and data fields
+            dict: Contains 'status', 'saved_to', and 'data' fields
         """
-    messages = state.get('messages', [])
-    group_id = state.get('group_id', '')
-    memory_config = state.get('memory_config', '')
-    
-    # Convert LangChain messages to structured format expected by write()
-    structured_messages = []
-    for msg in messages:
-        if hasattr(msg, 'type') and hasattr(msg, 'content'):
-            # Map LangChain message types to role names
-            role = 'user' if msg.type == 'human' else 'assistant' if msg.type == 'ai' else msg.type
-            structured_messages.append({
-                "role": role,
-                "content": msg.content  # content is now guaranteed to be a string
-            })
-    
+    content=state.get('data','')
+    end_user_id=state.get('end_user_id','')
+    memory_config=state.get('memory_config', '')
     try:
-        result = await write(
-            messages=structured_messages,
-            user_id=group_id,
-            apply_id=group_id,
-            group_id=group_id,
+        result=await write(
+            content=content,
+            end_user_id=end_user_id,
             memory_config=memory_config,
         )
         logger.info(f"Write completed successfully! Config: {memory_config.config_name}")
 
-        write_result = {
+        write_result= {
             "status": "success",
-            "data": structured_messages,
+            "data": content,
             "config_id": memory_config.config_id,
             "config_name": memory_config.config_name,
         }
-        return {"write_result": write_result}
+        return {"write_result":write_result}
+
 
     except Exception as e:
         logger.error(f"Data_write failed: {e}", exc_info=True)
-        write_result = {
+        write_result= {
             "status": "error",
             "message": str(e),
         }

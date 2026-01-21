@@ -23,7 +23,7 @@ async def _load_(data: List[Any]) -> List[Dict]:
     target_keys = [
         "id",
         "statement",
-        "group_id",
+        "end_user_id",
         "chunk_id",
         "created_at",
         "expired_at",
@@ -75,7 +75,7 @@ async def get_data(result):
     """
     EXCLUDE_FIELDS = {
         "user_id",
-        "group_id",
+        "end_user_id",
         "entity_type",
         "connect_strength",
         "relationship_type",

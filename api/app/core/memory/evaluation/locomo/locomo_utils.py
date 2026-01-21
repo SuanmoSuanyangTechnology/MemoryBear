@@ -348,7 +348,7 @@ def select_and_format_information(
 
 async def retrieve_relevant_information(
     question: str,
-    group_id: str,
+    end_user_id: str,
     search_type: str,
     search_limit: int,
     connector: Any,
@@ -368,7 +368,7 @@ async def retrieve_relevant_information(
     
     Args:
         question: Question to search for
-        group_id: Database group ID (identifies which conversation memory to search)
+        end_user_id: Database group ID (identifies which conversation memory to search)
         search_type: "keyword", "embedding", or "hybrid"
         search_limit: Max memory pieces to retrieve
         connector: Neo4j connector instance
@@ -396,7 +396,7 @@ async def retrieve_relevant_information(
                 connector=connector,
                 embedder_client=embedder,
                 query_text=question,
-                group_id=group_id,
+                end_user_id=end_user_id,
                 limit=search_limit,
                 include=["chunks", "statements", "entities", "summaries"],
             )
@@ -455,7 +455,7 @@ async def retrieve_relevant_information(
             search_results = await search_graph(
                 connector=connector,
                 q=question,
-                group_id=group_id,
+                end_user_id=end_user_id,
                 limit=search_limit
             )
             
@@ -491,7 +491,7 @@ async def retrieve_relevant_information(
                 search_results = await run_hybrid_search(
                     query_text=question,
                     search_type=search_type,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     limit=search_limit,
                     include=["chunks", "statements", "entities", "summaries"],
                     output_path=None,
@@ -524,7 +524,7 @@ async def retrieve_relevant_information(
                     connector=connector,
                     embedder_client=embedder,
                     query_text=question,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     limit=search_limit,
                     include=["chunks", "statements", "entities", "summaries"],
                 )
@@ -584,7 +584,7 @@ async def retrieve_relevant_information(
 
 async def ingest_conversations_if_needed(
     conversations: List[str],
-    group_id: str,
+    end_user_id: str,
     reset: bool = False
 ) -> bool:
     """
@@ -603,7 +603,7 @@ async def ingest_conversations_if_needed(
     Args:
         conversations: List of raw conversation texts from LoCoMo dataset
                       Example: ["User: I went to Paris. AI: When was that?", ...]
-        group_id: Target group ID for database storage
+        end_user_id: Target group ID for database storage
         reset: Whether to clear existing data first (not implemented in wrapper)
         
     Returns:
@@ -617,7 +617,7 @@ async def ingest_conversations_if_needed(
     try:
         success = await ingest_contexts_via_full_pipeline(
             contexts=conversations,
-            group_id=group_id,
+            end_user_id=end_user_id,
             save_chunk_output=True
         )
         return success

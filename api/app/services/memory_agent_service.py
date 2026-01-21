@@ -27,6 +27,7 @@ from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
+from app.repositories.memory_short_repository import ShortTermMemoryRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.memory_config_schema import ConfigurationError
@@ -54,25 +55,25 @@ _neo4j_connector = Neo4jConnector()
 class MemoryAgentService:
     """Service for memory agent operations"""
 
-    def writer_messages_deal(self, messages, start_time, group_id, config_id, message, context):
+    def writer_messages_deal(self, messages, start_time, end_user_id, config_id, message, context):
         duration = time.time() - start_time
 
         if str(messages) == 'success':
-            logger.info(f"Write operation successful for group {group_id} with config_id {config_id}")
+            logger.info(f"Write operation successful for group {end_user_id} with config_id {config_id}")
             # 记录成功的操作
             if audit_logger:
-                audit_logger.log_operation(operation="WRITE", config_id=config_id, group_id=group_id, success=True,
+                audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id, success=True,
                                            duration=duration, details={"message_length": len(message)})
             return context
         else:
-            logger.warning(f"Write operation failed for group {group_id}")
+            logger.warning(f"Write operation failed for group {end_user_id}")
 
             # 记录失败的操作
             if audit_logger:
                 audit_logger.log_operation(
                     operation="WRITE",
                     config_id=config_id,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     success=False,
                     duration=duration,
                     error=f"写入失败: {messages[:100]}"
@@ -265,13 +266,13 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
-    async def write_memory(self, group_id: str, messages: list[dict], config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
+    async def write_memory(self, end_user_id: str, message: str, config_id: Optional[str], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
         """
         Process write operation with config_id
 
         Args:
-            group_id: Group identifier (also used as end_user_id)
-            messages: Structured message list [{"role": "user", "content": "..."}, ...]
+            end_user_id: Group identifier (also used as end_user_id)
+            message: Message to write
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -286,15 +287,15 @@ class MemoryAgentService:
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
             try:
-                connected_config = get_end_user_connected_config(group_id, db)
+                connected_config = get_end_user_connected_config(end_user_id, db)
                 config_id = connected_config.get("memory_config_id")
                 if config_id is None:
-                    raise ValueError(f"No memory configuration found for end_user {group_id}. Please ensure the user has a connected memory configuration.")
+                    raise ValueError(f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
             except Exception as e:
                 if "No memory configuration found" in str(e):
-                    raise
-                logger.error(f"Failed to get connected config for end_user {group_id}: {e}")
-                raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
+                    raise  # Re-raise our specific error
+                logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+                raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
 
         import time
         start_time = time.time()
@@ -314,7 +315,7 @@ class MemoryAgentService:
             # Log failed operation
             if audit_logger:
                 duration = time.time() - start_time
-                audit_logger.log_operation(operation="WRITE", config_id=config_id, group_id=group_id, success=False, duration=duration, error=error_msg)
+                audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id, success=False, duration=duration, error=error_msg)
 
             raise ValueError(error_msg)
 
@@ -322,11 +323,11 @@ class MemoryAgentService:
             if storage_type == "rag":
                 # For RAG storage, convert messages to single string
                 message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-                result = await write_rag(group_id, message_text, user_rag_memory_id)
+                result = await write_rag(end_user_id, message_text, user_rag_memory_id)
                 return result
             else:
                 async with make_write_graph() as graph:
-                    config = {"configurable": {"thread_id": group_id}}
+                    config = {"configurable": {"thread_id": end_user_id}}
                     # Convert structured messages to LangChain messages
                     langchain_messages = []
                     for msg in messages:
@@ -339,7 +340,7 @@ class MemoryAgentService:
                     # 初始状态 - 包含所有必要字段
                     initial_state = {
                         "messages": langchain_messages,
-                        "group_id": group_id,
+                        "end_user_id": end_user_id,
                         "memory_config": memory_config
                     }
 
@@ -356,14 +357,14 @@ class MemoryAgentService:
                     contents = massages.get('write_result')
                     # Convert messages back to string for logging
                     message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-                    return self.writer_messages_deal(massagesstatus, start_time, group_id, config_id, message_text, contents)
+                    return self.writer_messages_deal(massagesstatus, start_time, end_user_id, config_id, message_text, contents)
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Write operation failed: {str(e)}"
             logger.error(error_msg)
             if audit_logger:
                 duration = time.time() - start_time
-                audit_logger.log_operation(operation="WRITE", config_id=config_id, group_id=group_id, success=False, duration=duration, error=error_msg)
+                audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id, success=False, duration=duration, error=error_msg)
             raise ValueError(error_msg)
 
 
@@ -371,15 +372,14 @@ class MemoryAgentService:
 
     async def read_memory(
         self,
-        group_id: str,
+        end_user_id: str,
         message: str,
         history: List[Dict],
         search_switch: str,
         config_id: Optional[str],
         db: Session,
         storage_type: str,
-        user_rag_memory_id: str
-    ) -> Dict:
+        user_rag_memory_id: str) -> Dict:
         """
         Process read operation with config_id
 
@@ -389,7 +389,7 @@ class MemoryAgentService:
         - "2": Direct answer based on context
 
         Args:
-            group_id: Group identifier (also used as end_user_id)
+            end_user_id: Group identifier (also used as end_user_id)
             message: User message
             history: Conversation history
             search_switch: Search mode switch
@@ -407,22 +407,22 @@ class MemoryAgentService:
 
         import time
         start_time = time.time()
-        logger.info(f"[PERF] read_memory started for group_id={group_id}, search_switch={search_switch}")
+        ori_message= message
 
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
             try:
-                connected_config = get_end_user_connected_config(group_id, db)
+                connected_config = get_end_user_connected_config(end_user_id, db)
                 config_id = connected_config.get("memory_config_id")
                 if config_id is None:
-                    raise ValueError(f"No memory configuration found for end_user {group_id}. Please ensure the user has a connected memory configuration.")
+                    raise ValueError(f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
             except Exception as e:
                 if "No memory configuration found" in str(e):
                     raise  # Re-raise our specific error
-                logger.error(f"Failed to get connected config for end_user {group_id}: {e}")
-                raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
+                logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+                raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
 
-        logger.info(f"Read operation for group {group_id} with config_id {config_id}")
+        logger.info(f"Read operation for group {end_user_id} with config_id {config_id}")
 
         # 导入审计日志记录器
         try:
@@ -431,15 +431,13 @@ class MemoryAgentService:
             audit_logger = None
 
 
-        config_load_start = time.time()
         try:
             config_service = MemoryConfigService(db)
             memory_config = config_service.load_memory_config(
                 config_id=config_id,
                 service_name="MemoryAgentService"
             )
-            config_load_time = time.time() - config_load_start
-            logger.info(f"[PERF] Configuration loaded in {config_load_time:.4f}s: {memory_config.config_name}")
+            logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
         except ConfigurationError as e:
             error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
             logger.error(error_msg)
@@ -450,7 +448,7 @@ class MemoryAgentService:
                 audit_logger.log_operation(
                     operation="READ",
                     config_id=config_id,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     success=False,
                     duration=duration,
                     error=error_msg
@@ -460,16 +458,16 @@ class MemoryAgentService:
 
         # Step 2: Prepare history
         history.append({"role": "user", "content": message})
-        logger.debug(f"Group ID:{group_id}, Message:{message}, History:{history}, Config ID:{config_id}")
+        logger.debug(f"Group ID:{end_user_id}, Message:{message}, History:{history}, Config ID:{config_id}")
 
         # Step 3: Initialize MCP client and execute read workflow
         graph_exec_start = time.time()
         try:
             async with make_read_graph() as graph:
-                config = {"configurable": {"thread_id": group_id}}
+                config = {"configurable": {"thread_id": end_user_id}}
                 # 初始状态 - 包含所有必要字段
                 initial_state = {"messages": [HumanMessage(content=message)], "search_switch": search_switch,
-                                 "group_id": group_id
+                                 "end_user_id": end_user_id
                     , "storage_type": storage_type, "user_rag_memory_id": user_rag_memory_id,
                                  "memory_config": memory_config}
                 # 获取节点更新信息
@@ -565,13 +563,13 @@ class MemoryAgentService:
                     if '信息不足，无法回答。' != str(summary) and str(search_switch).strip() != "2":
                         # 使用 upsert 方法
                         repo.upsert(
-                            end_user_id=group_id,
+                            end_user_id=end_user_id,
                             messages=message,
                             aimessages=summary,
                             retrieved_content=retrieved_content,
                             search_switch=str(search_switch)
                         )
-                        logger.info(f"成功保存短期记忆: group_id={group_id}, search_switch={search_switch}")
+                        logger.info(f"成功保存短期记忆: end_user_id={end_user_id}, search_switch={search_switch}")
                     else:
                         logger.debug(f"跳过保存短期记忆: summary={summary[:50] if summary else 'None'}, search_switch={search_switch}")
                         
@@ -580,14 +578,12 @@ class MemoryAgentService:
                     logger.error(f"保存短期记忆失败: {str(save_error)}", exc_info=True)
 
                 # Log successful operation
-                total_time = time.time() - start_time
-                logger.info(f"[PERF] read_memory completed successfully in {total_time:.4f}s (config: {config_load_time:.4f}s, graph: {graph_exec_time:.4f}s)")
                 if audit_logger:
                     duration = time.time() - start_time
                     audit_logger.log_operation(
                         operation="READ",
                         config_id=config_id,
-                        group_id=group_id,
+                        end_user_id=end_user_id,
                         success=True,
                         duration=duration
                     )
@@ -599,14 +595,13 @@ class MemoryAgentService:
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Read operation failed: {str(e)}"
-            total_time = time.time() - start_time
-            logger.error(f"[PERF] read_memory failed after {total_time:.4f}s: {error_msg}")
+            logger.error(error_msg)
             if audit_logger:
                 duration = time.time() - start_time
                 audit_logger.log_operation(
                     operation="READ",
                     config_id=config_id,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     success=False,
                     duration=duration,
                     error=error_msg
@@ -755,7 +750,7 @@ class MemoryAgentService:
         """
         统计知识库类型分布，包含：
         1. PostgreSQL 中的知识库类型：General, Web, Third-party, Folder（根据 workspace_id 过滤）
-        2. Neo4j 中的 memory 类型（仅统计 Chunk 数量，根据 end_user_id/group_id 过滤）
+        2. Neo4j 中的 memory 类型（仅统计 Chunk 数量，根据 end_user_id/end_user_id 过滤）
         3. total: 所有类型的总和
 
         参数：
@@ -841,11 +836,11 @@ class MemoryAgentService:
                 for end_user in end_users:
                     end_user_id_str = str(end_user.id)
                     memory_query = """
-                    MATCH (n:Chunk) WHERE n.group_id = $group_id RETURN count(n) AS Count
+                    MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id RETURN count(n) AS Count
                     """
                     neo4j_result = await _neo4j_connector.execute_query(
                         memory_query,
-                        group_id=end_user_id_str,
+                        end_user_id=end_user_id_str,
                     )
                     chunk_count = neo4j_result[0]["Count"] if neo4j_result else 0
                     total_chunks += chunk_count
@@ -885,7 +880,7 @@ class MemoryAgentService:
         获取指定用户的热门记忆标签
 
         参数：
-        - end_user_id: 用户ID（可选），对应Neo4j中的group_id字段
+        - end_user_id: 用户ID（可选），对应Neo4j中的end_user_id字段
         - limit: 返回标签数量限制
 
         返回格式：
@@ -895,7 +890,7 @@ class MemoryAgentService:
         ]
         """
         try:
-            # by_user=False 表示按 group_id 查询（在Neo4j中，group_id就是用户维度）
+            # by_user=False 表示按 end_user_id 查询（在Neo4j中，end_user_id就是用户维度）
             tags = await get_hot_memory_tags(end_user_id, limit=limit, by_user=False)
             payload=[]
             for tag, freq in tags:
@@ -970,21 +965,21 @@ class MemoryAgentService:
             # 查询该用户的语句
             query = (
                 "MATCH (s:Statement) "
-                "WHERE ($group_id IS NULL OR s.group_id = $group_id) AND s.statement IS NOT NULL "
+                "WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id) AND s.statement IS NOT NULL "
                 "RETURN s.statement AS statement "
                 "ORDER BY s.created_at DESC LIMIT 100"
             )
-            rows = await connector.execute_query(query, group_id=end_user_id)
+            rows = await connector.execute_query(query, end_user_id=end_user_id)
             statements = [r.get("statement", "") for r in rows if r.get("statement")]
 
             # 查询该用户的热门实体
             entity_query = (
                 "MATCH (e:ExtractedEntity) "
-                "WHERE ($group_id IS NULL OR e.group_id = $group_id) AND e.entity_type <> '人物' AND e.name IS NOT NULL "
+                "WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id) AND e.entity_type <> '人物' AND e.name IS NOT NULL "
                 "RETURN e.name AS name, count(e) AS frequency "
                 "ORDER BY frequency DESC LIMIT 20"
             )
-            entity_rows = await connector.execute_query(entity_query, group_id=end_user_id)
+            entity_rows = await connector.execute_query(entity_query, end_user_id=end_user_id)
             entities = [f"{r['name']} ({r['frequency']})" for r in entity_rows]
 
             await connector.close()
@@ -1037,14 +1032,14 @@ class MemoryAgentService:
             names_to_exclude = ['AI', 'Caroline', 'Melanie', 'Jon', 'Gina', '用户', 'AI助手', 'John', 'Maria']
             hot_tag_query = (
                 "MATCH (e:ExtractedEntity) "
-                "WHERE ($group_id IS NULL OR e.group_id = $group_id) AND e.entity_type <> '人物' "
+                "WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id) AND e.entity_type <> '人物' "
                 "AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
                 "RETURN e.name AS name, count(e) AS frequency "
                 "ORDER BY frequency DESC LIMIT 4"
             )
             hot_tag_rows = await connector.execute_query(
                 hot_tag_query,
-                group_id=end_user_id,
+                end_user_id=end_user_id,
                 names_to_exclude=names_to_exclude
             )
             await connector.close()
@@ -1190,6 +1185,10 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
         "memory_config_id": memory_config_id
     }
 
+    print(188*'*')
+    print(result)
+    print(188 * '*')
+
     logger.info(f"Successfully retrieved connected config: memory_config_id={memory_config_id}")
     return result
 
@@ -1230,10 +1229,10 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
 
     # 1. 批量查询所有 end_user 及其 app_id
     end_users = db.query(EndUser).filter(EndUser.id.in_(end_user_ids)).all()
-    
+
     # 创建 end_user_id -> app_id 的映射
     user_to_app = {str(eu.id): eu.app_id for eu in end_users}
-    
+
     # 记录未找到的用户
     found_user_ids = set(user_to_app.keys())
     missing_user_ids = set(end_user_ids) - found_user_ids
@@ -1275,13 +1274,13 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     # 批量查询 memory_config_name
     config_id_to_name = {}
     if memory_config_ids:
-        memory_configs = db.query(DataConfig).filter(DataConfig.config_id.in_(memory_config_ids)).all()
-        config_id_to_name = {str(mc.config_id): mc.config_name for mc in memory_configs}
+        memory_configs = db.query(MemoryConfig).filter(MemoryConfig.id.in_(memory_config_ids)).all()
+        config_id_to_name = {str(mc.id): mc.config_name for mc in memory_configs}
 
     # 4. 构建最终结果
     for end_user_id, app_id in user_to_app.items():
         release = app_to_release.get(app_id)
-        
+
         if not release:
             logger.warning(f"No active release found for app: {app_id} (end_user: {end_user_id})")
             result[end_user_id] = {"memory_config_id": None, "memory_config_name": None}
@@ -1293,7 +1292,7 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
         memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
         
         # 获取配置名称
-        memory_config_name = config_id_to_name.get(str(memory_config_id)) if memory_config_id else None
+        memory_config_name = config_id_to_name.get(memory_config_id) if memory_config_id else None
 
         result[end_user_id] = {
             "memory_config_id": memory_config_id,

@@ -41,7 +41,7 @@ DIALOGUE_EMBEDDING_SEARCH = """
 WITH $embedding AS q
 MATCH (d:Dialogue)
 WHERE d.dialog_embedding IS NOT NULL
-  AND ($group_id IS NULL OR d.group_id = $group_id)
+  AND ($end_user_id IS NULL OR d.end_user_id = $end_user_id)
 WITH d, q, d.dialog_embedding AS v
 WITH d,
      reduce(dot = 0.0, i IN range(0, size(q)-1) | dot + toFloat(q[i]) * toFloat(v[i])) AS dot,
@@ -50,7 +50,7 @@ WITH d,
 WITH d, CASE WHEN qnorm = 0 OR vnorm = 0 THEN 0.0 ELSE dot / (qnorm * vnorm) END AS score
 WHERE score > $threshold
 RETURN d.id AS dialog_id,
-       d.group_id AS group_id,
+       d.end_user_id AS end_user_id,
        d.content AS content,
        d.created_at AS created_at,
        d.expired_at AS expired_at,

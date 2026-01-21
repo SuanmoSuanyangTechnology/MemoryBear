@@ -48,11 +48,11 @@ def extract_tool_message_content(response):
 class TimeRetrievalInput(BaseModel):
     """时间检索工具的输入模式"""
     context: str = Field(description="用户输入的查询内容")
-    group_id: str = Field(default="88a459f5_text09", description="组ID，用于过滤搜索结果")
+    end_user_id: str = Field(default="88a459f5_text09", description="组ID，用于过滤搜索结果")
 
-def create_time_retrieval_tool(group_id: str):
+def create_time_retrieval_tool(end_user_id: str):
     """
-    创建一个带有特定group_id的TimeRetrieval工具（同步版本），用于按时间范围搜索语句(Statements)
+    创建一个带有特定end_user_id的TimeRetrieval工具（同步版本），用于按时间范围搜索语句(Statements)
     """
     
     def clean_temporal_result_fields(data):
@@ -93,26 +93,26 @@ def create_time_retrieval_tool(group_id: str):
             return data
     
     @tool
-    def TimeRetrievalWithGroupId(context: str, start_date: str = None, end_date: str = None, group_id_param: str = None, clean_output: bool = True) -> str:
+    def TimeRetrievalWithGroupId(context: str, start_date: str = None, end_date: str = None, end_user_id_param: str = None, clean_output: bool = True) -> str:
         """
         优化的时间检索工具，只结合时间范围搜索（同步版本），自动过滤不需要的元数据字段
         显式接收参数：
         - context: 查询上下文内容
         - start_date: 开始时间（可选，格式：YYYY-MM-DD）
         - end_date: 结束时间（可选，格式：YYYY-MM-DD）
-        - group_id_param: 组ID（可选，用于覆盖默认组ID）
+        - end_user_id_param: 组ID（可选，用于覆盖默认组ID）
         - clean_output: 是否清理输出中的元数据字段
         -end_date 需要根据用户的描述获取结束的时间，输出格式用strftime("%Y-%m-%d")
         """
         async def _async_search():
             # 使用传入的参数或默认值
-            actual_group_id = group_id_param or group_id
+            actual_end_user_id = end_user_id_param or end_user_id
             actual_end_date = end_date or datetime.now().strftime("%Y-%m-%d")
             actual_start_date = start_date or (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
             
             # 基本时间搜索
             results = await search_by_temporal(
-                group_id=actual_group_id,
+                end_user_id=actual_end_user_id,
                 start_date=actual_start_date,
                 end_date=actual_end_date,
                 limit=10
@@ -147,7 +147,7 @@ def create_time_retrieval_tool(group_id: str):
             # 关键词时间搜索
             results = await search_by_keyword_temporal(
                 query_text=context,
-                group_id=group_id,
+                end_user_id=end_user_id,
                 start_date=actual_start_date,
                 end_date=actual_end_date,
                 limit=15
@@ -172,7 +172,7 @@ def create_hybrid_retrieval_tool_async(memory_config, **search_params):
     
     Args:
         memory_config: 内存配置对象
-        **search_params: 搜索参数，包含group_id, limit, include等
+        **search_params: 搜索参数，包含end_user_id, limit, include等
     """
     
     def clean_result_fields(data):
@@ -211,7 +211,7 @@ def create_hybrid_retrieval_tool_async(memory_config, **search_params):
         context: str, 
         search_type: str = "hybrid",
         limit: int = 10,
-        group_id: str = None,
+        end_user_id: str = None,
         rerank_alpha: float = 0.6,
         use_forgetting_rerank: bool = False,
         use_llm_rerank: bool = False,
@@ -224,7 +224,7 @@ def create_hybrid_retrieval_tool_async(memory_config, **search_params):
             context: 查询内容
             search_type: 搜索类型 ('keyword', 'embedding', 'hybrid')
             limit: 结果数量限制
-            group_id: 组ID，用于过滤搜索结果
+            end_user_id: 组ID，用于过滤搜索结果
             rerank_alpha: 重排序权重参数
             use_forgetting_rerank: 是否使用遗忘重排序
             use_llm_rerank: 是否使用LLM重排序
@@ -238,7 +238,7 @@ def create_hybrid_retrieval_tool_async(memory_config, **search_params):
             final_params = {
                 "query_text": context,
                 "search_type": search_type,
-                "group_id": group_id or search_params.get("group_id"),
+                "end_user_id": end_user_id or search_params.get("end_user_id"),
                 "limit": limit or search_params.get("limit", 10),
                 "include": search_params.get("include", ["summaries", "statements", "chunks", "entities"]),
                 "output_path": None,  # 不保存到文件
@@ -291,7 +291,7 @@ def create_hybrid_retrieval_tool_sync(memory_config, **search_params):
         context: str, 
         search_type: str = "hybrid",
         limit: int = 10,
-        group_id: str = None,
+        end_user_id: str = None,
         clean_output: bool = True
     ) -> str:
         """
@@ -301,7 +301,7 @@ def create_hybrid_retrieval_tool_sync(memory_config, **search_params):
             context: 查询内容
             search_type: 搜索类型 ('keyword', 'embedding', 'hybrid')
             limit: 结果数量限制
-            group_id: 组ID，用于过滤搜索结果
+            end_user_id: 组ID，用于过滤搜索结果
             clean_output: 是否清理输出中的元数据字段
         """
         async def _async_search():
@@ -311,7 +311,7 @@ def create_hybrid_retrieval_tool_sync(memory_config, **search_params):
                 "context": context,
                 "search_type": search_type,
                 "limit": limit,
-                "group_id": group_id,
+                "end_user_id": end_user_id,
                 "clean_output": clean_output
             })
         

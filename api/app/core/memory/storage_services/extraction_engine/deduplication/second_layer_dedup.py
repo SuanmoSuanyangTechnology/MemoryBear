@@ -61,7 +61,7 @@ def _row_to_entity(row: Dict[str, Any]) -> ExtractedEntityNode:
     return ExtractedEntityNode(
         id=row.get("id"),
         name=row.get("name") or "",
-        group_id=row.get("group_id") or "",
+        end_user_id=row.get("end_user_id") or "",
         user_id=row.get("user_id") or "",
         apply_id=row.get("apply_id") or "",
         created_at=_parse_dt(row.get("created_at")),
@@ -79,7 +79,7 @@ def _row_to_entity(row: Dict[str, Any]) -> ExtractedEntityNode:
 
 async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑，与 Neo4j 中同组实体联合去重
     connector: Neo4jConnector,
-    group_id: str, # 用于定位neo4j中同一组的实体，确保只在同组内去重
+    end_user_id: str, # 用于定位neo4j中同一组的实体，确保只在同组内去重
     entity_nodes: List[ExtractedEntityNode], # 输入的实体节点列表，包含待去重的实体
     statement_entity_edges: List[StatementEntityEdge], # 输入的语句实体边列表，用于处理实体之间的关系
     entity_entity_edges: List[EntityEntityEdge], # 输入的实体实体边列表，用于处理实体之间的关系
@@ -88,7 +88,7 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
 ) -> Tuple[List[ExtractedEntityNode], List[StatementEntityEdge], List[EntityEntityEdge]]:
     """
     第二层去重消歧：
-    - 以第一层结果为索引，检索相同 group_id 下的 DB 候选实体
+    - 以第一层结果为索引，检索相同 end_user_id 下的 DB 候选实体
     - 将 DB 候选与当前实体集合联合，按既有精确/模糊/LLM 决策进行融合
     - 返回融合后的实体与重定向后的边（边已指向规范 ID，优先 DB ID）
     """
@@ -102,7 +102,7 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
 
     ]
     candidates_map = await get_dedup_candidates_for_entities( # 从 Neo4j 中查询候选实体，并将结果赋值给candidates_map（等待异步操作完成）。
-        connector=connector, group_id=group_id,
+        connector=connector, end_user_id=end_user_id,
         entities=incoming_rows,  # 传入参数：第一层实体的核心信息（作为查询索引）
         use_contains_fallback=True # 传入参数：启用 “包含关系” 作为匹配失败的降级策略（若精确匹配无结果，用包含关系召回候选），与src\database\cypher_queries.py的307产生联动
     )

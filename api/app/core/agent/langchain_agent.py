@@ -145,41 +145,38 @@ class LangChainAgent:
         messages.append(HumanMessage(content=user_content))
 
         return messages
-# TODO 乐力齐 - 累积多组对话批量写入功能已禁用
-    # async def term_memory_save(self,messages,end_user_end,aimessages):
-    #     '''短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j'''
-    #     end_user_end=f"Term_{end_user_end}"
-    #     print(messages)
-    #     print(aimessages)
-    #     session_id = store.save_session(
-    #                     userid=end_user_end,
-    #                     messages=messages,
-    #                     apply_id=end_user_end,
-    #                     group_id=end_user_end,
-    #                     aimessages=aimessages
-    #                 )
-    #     store.delete_duplicate_sessions()
-    #     # logger.info(f'Redis_Agent:{end_user_end};{session_id}')
-    #     return session_id
-    
-# TODO 乐力齐 - 累积多组对话批量写入功能已禁用
-    # async def term_memory_redis_read(self,end_user_end):
-    #     end_user_end = f"Term_{end_user_end}"
-    #     history = store.find_user_apply_group(end_user_end, end_user_end, end_user_end)
-    #     # logger.info(f'Redis_Agent:{end_user_end};{history}')
-    #     messagss_list=[]
-    #     retrieved_content=[]
-    #     for messages in history:
-    #         query = messages.get("Query")
-    #         aimessages = messages.get("Answer")
-    #         messagss_list.append(f'用户:{query}。AI回复:{aimessages}')
-    #         retrieved_content.append({query: aimessages})
-    #     return messagss_list,retrieved_content
+    async def term_memory_save(self,messages,end_user_end,aimessages):
+        '''短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j'''
+        end_user_end=f"Term_{end_user_end}"
+        print(messages)
+        print(aimessages)
+        session_id = store.save_session(
+                        userid=end_user_end,
+                        messages=messages,
+                        apply_id=end_user_end,
+                        end_user_id=end_user_end,
+                        aimessages=aimessages
+                    )
+        store.delete_duplicate_sessions()
+        # logger.info(f'Redis_Agent:{end_user_end};{session_id}')
+        return session_id
+    async def term_memory_redis_read(self,end_user_end):
+        end_user_end = f"Term_{end_user_end}"
+        history = store.find_user_apply_group(end_user_end, end_user_end, end_user_end)
+        # logger.info(f'Redis_Agent:{end_user_end};{history}')
+        messagss_list=[]
+        retrieved_content=[]
+        for messages in history:
+            query = messages.get("Query")
+            aimessages = messages.get("Answer")
+            messagss_list.append(f'用户:{query}。AI回复:{aimessages}')
+            retrieved_content.append({query: aimessages})
+        return messagss_list,retrieved_content
 
     async def write(self, storage_type, end_user_id, user_message, ai_message, user_rag_memory_id, actual_end_user_id, actual_config_id):
         """
         写入记忆（支持结构化消息）
-        
+
         Args:
             storage_type: 存储类型 (neo4j/rag)
             end_user_id: 终端用户ID
@@ -188,7 +185,7 @@ class LangChainAgent:
             user_rag_memory_id: RAG 记忆ID
             actual_end_user_id: 实际用户ID
             actual_config_id: 配置ID
-            
+
         逻辑说明：
         - RAG 模式：组合 user_message 和 ai_message 为字符串格式，保持原有逻辑不变
         - Neo4j 模式：使用结构化消息列表
@@ -204,20 +201,20 @@ class LangChainAgent:
         else:
             # Neo4j 模式：使用结构化消息列表
             structured_messages = []
-            
+
             # 始终添加用户消息（如果不为空）
             if user_message:
                 structured_messages.append({"role": "user", "content": user_message})
-            
+
             # 只有当 AI 回复不为空时才添加 assistant 消息
             if ai_message:
                 structured_messages.append({"role": "assistant", "content": ai_message})
-            
+
             # 如果没有消息，直接返回
             if not structured_messages:
                 logger.warning(f"No messages to write for user {actual_end_user_id}")
                 return
-            
+
             # 调用 Celery 任务，传递结构化消息列表
             # 数据流：
             # 1. structured_messages 传递给 write_message_task

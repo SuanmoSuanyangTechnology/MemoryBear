@@ -25,7 +25,7 @@ class MemoryAPIService:
     
     This service provides a thin layer that:
     1. Validates end_user exists and belongs to the authorized workspace
-    2. Maps end_user_id to group_id for memory operations
+    2. Maps end_user_id to end_user_id for memory operations
     3. Delegates to MemoryAgentService for actual memory read/write operations
     """
     
@@ -68,7 +68,7 @@ class MemoryAPIService:
             )
         
         end_user = self.db.query(EndUser).filter(EndUser.id == end_user_uuid).first()
-        
+
         if not end_user:
             logger.warning(f"End user not found: {end_user_id}")
             raise ResourceNotFoundException(
@@ -115,7 +115,7 @@ class MemoryAPIService:
         
         Args:
             workspace_id: Workspace ID for resource validation
-            end_user_id: End user identifier (used as group_id)
+            end_user_id: End user identifier (used as end_user_id)
             message: Message content to store
             config_id: Optional memory configuration ID
             storage_type: Storage backend (neo4j or rag)
@@ -133,13 +133,12 @@ class MemoryAPIService:
         # Validate end_user exists and belongs to workspace
         self.validate_end_user(end_user_id, workspace_id)
         
-        # Use end_user_id as group_id for memory operations
-        group_id = end_user_id
+        # Use end_user_id as end_user_id for memory operations
         
         try:
             # Delegate to MemoryAgentService
             result = await MemoryAgentService().write_memory(
-                group_id=group_id,
+                end_user_id=end_user_id,
                 message=message,
                 config_id=config_id,
                 db=self.db,
@@ -186,7 +185,7 @@ class MemoryAPIService:
         
         Args:
             workspace_id: Workspace ID for resource validation
-            end_user_id: End user identifier (used as group_id)
+            end_user_id: End user identifier (used as end_user_id)
             message: Query message
             search_switch: Search mode (0=deep search with verification, 1=deep search, 2=fast search)
             config_id: Optional memory configuration ID
@@ -205,13 +204,13 @@ class MemoryAPIService:
         # Validate end_user exists and belongs to workspace
         self.validate_end_user(end_user_id, workspace_id)
         
-        # Use end_user_id as group_id for memory operations
-        group_id = end_user_id
+        # Use end_user_id as end_user_id for memory operations
+
         
         try:
             # Delegate to MemoryAgentService
             result = await MemoryAgentService().read_memory(
-                group_id=group_id,
+                end_user_id=end_user_id,
                 message=message,
                 history=[],
                 search_switch=search_switch,

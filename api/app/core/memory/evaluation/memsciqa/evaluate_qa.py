@@ -27,7 +27,7 @@ from app.core.memory.storage_services.search import run_hybrid_search
 from app.core.memory.utils.config.definitions import (
     PROJECT_ROOT,
     SELECTED_EMBEDDING_ID,
-    SELECTED_GROUP_ID,
+    SELECTED_end_user_id,
     SELECTED_LLM_ID,
 )
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -135,8 +135,8 @@ def _combine_dialogues_for_hybrid(results: Dict[str, Any]) -> List[Dict[str, Any
     return merged
 
 
-async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid", memory_config: "MemoryConfig" = None) -> Dict[str, Any]:
-    group_id = group_id or SELECTED_GROUP_ID
+async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid", memory_config: "MemoryConfig" = None) -> Dict[str, Any]:
+    end_user_id = end_user_id or SELECTED_end_user_id
     # Load data
     data_path = os.path.join(PROJECT_ROOT, "data", "msc_self_instruct.jsonl")
     if not os.path.exists(data_path):
@@ -147,7 +147,7 @@ async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, s
     # 改为：每条样本仅摄入一个上下文（完整对话转录），避免多上下文摄入
     # 说明：memsciqa 数据集的每个样本天然只有一个对话，保持按样本一上下文的策略
     contexts: List[str] = [build_context_from_dialog(item) for item in items]
-    await ingest_contexts_via_full_pipeline(contexts, group_id)
+    await ingest_contexts_via_full_pipeline(contexts, end_user_id)
 
     # LLM client (使用异步调用)
     with get_db_context() as db:
@@ -173,7 +173,7 @@ async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, s
                 results = await run_hybrid_search(
                     query_text=question,
                     search_type=search_type,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     limit=search_limit,
                     include=["dialogues", "statements", "entities"],
                     output_path=None,
@@ -298,7 +298,7 @@ def main():
     load_dotenv()
     parser = argparse.ArgumentParser(description="Evaluate DMR (memsciqa) with graph search and Qwen")
     parser.add_argument("--sample-size", type=int, default=1, help="评测样本数量")
-    parser.add_argument("--group-id", type=str, default=None, help="可选 group_id，默认取 runtime.json")
+    parser.add_argument("--group-id", type=str, default=None, help="可选 end_user_id，默认取 runtime.json")
     parser.add_argument("--search-limit", type=int, default=8, help="每类检索最大返回数")
     parser.add_argument("--context-char-budget", type=int, default=4000, help="上下文字符预算")
     parser.add_argument("--llm-temperature", type=float, default=0.0, help="LLM 温度")
@@ -309,7 +309,7 @@ def main():
     result = asyncio.run(
         run_memsciqa_eval(
             sample_size=args.sample_size,
-            group_id=args.group_id,
+            end_user_id=args.end_user_id,
             search_limit=args.search_limit,
             context_char_budget=args.context_char_budget,
             llm_temperature=args.llm_temperature,

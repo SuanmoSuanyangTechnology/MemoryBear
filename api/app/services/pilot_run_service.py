@@ -91,7 +91,7 @@ async def run_pilot_extraction(
         dialog = DialogData(
             context=context,
             ref_id="pilot_dialog_1",
-            group_id=str(memory_config.workspace_id),
+            end_user_id=str(memory_config.workspace_id),
             user_id=str(memory_config.tenant_id),
             apply_id=str(memory_config.config_id),
             metadata={"source": "pilot_run", "input_type": "frontend_text"},
