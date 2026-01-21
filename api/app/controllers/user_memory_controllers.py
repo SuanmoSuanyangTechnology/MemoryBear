@@ -292,7 +292,6 @@ async def get_graph_data_api(
 @router.get("/read_end_user/profile", response_model=ApiResponse)
 async def get_end_user_profile(
     end_user_id: str,
-    language_type: str = "zh",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -321,20 +320,12 @@ async def get_end_user_profile(
         if not end_user:
             api_logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
             return fail(BizCode.INVALID_PARAMETER, "终端用户不存在", f"end_user_id={end_user_id}")
-
-        other_name=end_user.other_name
-        position=end_user.position
-        department=end_user.department
-        if language_type!="zh":
-            other_name=await Translation_English(model_id,other_name)
-            position = await Translation_English(model_id, position)
-            department = await Translation_English(model_id, department)
         # 构建响应数据
         profile_data = EndUserProfileResponse(
             id=end_user.id,
-            other_name=other_name,
-            position=position,
-            department=department,
+            other_name=end_user.other_name,
+            position=end_user.position,
+            department=end_user.department,
             contact=end_user.contact,
             phone=end_user.phone,
             hire_date=end_user.hire_date,
