@@ -372,8 +372,17 @@ async def update_end_user_profile(
         api_logger.info(f"成功更新用户信息: end_user_id={end_user_id}")
         return success(data=result["data"], msg="更新成功")
     else:
-        api_logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={result['error']}")
-        return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", result["error"])
+        error_msg = result["error"]
+        api_logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={error_msg}")
+        
+        # 根据错误类型映射到合适的业务错误码
+        if error_msg == "终端用户不存在":
+            return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", error_msg)
+        elif error_msg == "无效的用户ID格式":
+            return fail(BizCode.INVALID_USER_ID, "无效的用户ID格式", error_msg)
+        else:
+            # 只有未预期的错误才使用 INTERNAL_ERROR
+            return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", error_msg)
 
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)
 async def memory_space_timeline_of_shared_memories(id: str, label: str,language_type: str="zh",
