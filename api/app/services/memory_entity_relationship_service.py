@@ -132,20 +132,7 @@ class MemoryEntityService:
         all_timeline_data = self._merge_same_text_items(all_timeline_data)
         
         # 如果需要翻译（非中文），对整个结果进行翻译
-        if language_type != 'zh':
-            # 定义需要翻译的字段
-            fields_to_translate = ['text', 'type']
-            
-            # 翻译各个列表
-            if memory_summary_list:
-                memory_summary_list = await self._translate_list(memory_summary_list, model_id, fields_to_translate)
-            if statement_list:
-                statement_list = await self._translate_list(statement_list, model_id, fields_to_translate)
-            if extracted_entity_list:
-                extracted_entity_list = await self._translate_list(extracted_entity_list, model_id, fields_to_translate)
-            if all_timeline_data:
-                all_timeline_data = await self._translate_list(all_timeline_data, model_id, fields_to_translate)
-        
+
         result = {
             "MemorySummary": memory_summary_list,
             "Statement": statement_list,

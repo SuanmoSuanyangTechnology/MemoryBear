@@ -419,7 +419,7 @@ async def update_end_user_profile(
         return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", str(e))
 
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)
-async def memory_space_timeline_of_shared_memories(id: str, label: str,language_type: str,
+async def memory_space_timeline_of_shared_memories(id: str, label: str,language_type: str="zh",
                                       current_user: User = Depends(get_current_user),
                                       db: Session = Depends(get_db),
                                       ):
