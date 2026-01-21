@@ -40,7 +40,7 @@ class EmotionRepository:
     
     async def get_emotion_tags(
         self,
-        group_id: str,
+        end_user_id: str,
         emotion_type: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
@@ -51,7 +51,7 @@ class EmotionRepository:
         查询指定用户的情绪类型分布，包括计数、百分比和平均强度。
         
         Args:
-            group_id: 用户组ID（宿主ID）
+            end_user_id: 用户组ID（宿主ID）
             emotion_type: 可选的情绪类型过滤（joy/sadness/anger/fear/surprise/neutral）
             start_date: 可选的开始日期（ISO格式字符串）
             end_date: 可选的结束日期（ISO格式字符串）
@@ -65,8 +65,8 @@ class EmotionRepository:
                 - avg_intensity: 平均强度
         """
         # 构建查询条件
-        where_clauses = ["s.group_id = $group_id", "s.emotion_type IS NOT NULL"]
-        params = {"group_id": group_id, "limit": limit}
+        where_clauses = ["s.end_user_id = $end_user_id", "s.emotion_type IS NOT NULL"]
+        params = {"end_user_id": end_user_id, "limit": limit}
         
         if emotion_type:
             where_clauses.append("s.emotion_type = $emotion_type")
@@ -119,7 +119,7 @@ class EmotionRepository:
     
     async def get_emotion_wordcloud(
         self,
-        group_id: str,
+        end_user_id: str,
         emotion_type: Optional[str] = None,
         limit: int = 50
     ) -> List[Dict[str, Any]]:
@@ -128,7 +128,7 @@ class EmotionRepository:
         查询情绪关键词及其频率，用于生成词云可视化。
         
         Args:
-            group_id: 用户组ID（宿主ID）
+            end_user_id: 用户组ID（宿主ID）
             emotion_type: 可选的情绪类型过滤
             limit: 返回关键词的最大数量
             
@@ -140,8 +140,8 @@ class EmotionRepository:
                 - avg_intensity: 平均强度
         """
         # 构建查询条件
-        where_clauses = ["s.group_id = $group_id", "s.emotion_keywords IS NOT NULL"]
-        params = {"group_id": group_id, "limit": limit}
+        where_clauses = ["s.end_user_id = $end_user_id", "s.emotion_keywords IS NOT NULL"]
+        params = {"end_user_id": end_user_id, "limit": limit}
         
         if emotion_type:
             where_clauses.append("s.emotion_type = $emotion_type")
@@ -186,7 +186,7 @@ class EmotionRepository:
     
     async def get_emotions_in_range(
         self,
-        group_id: str,
+        end_user_id: str,
         time_range: str = "30d"
     ) -> List[Dict[str, Any]]:
         """获取时间范围内的情绪数据
@@ -194,7 +194,7 @@ class EmotionRepository:
         查询指定时间范围内的所有情绪数据，用于健康指数计算。
         
         Args:
-            group_id: 用户组ID（宿主ID）
+            end_user_id: 用户组ID（宿主ID）
             time_range: 时间范围（7d/30d/90d）
             
         Returns:
@@ -214,7 +214,7 @@ class EmotionRepository:
         # 优化的 Cypher 查询：使用字符串比较避免时区问题
         query = """
         MATCH (s:Statement)
-        WHERE s.group_id = $group_id
+        WHERE s.end_user_id = $end_user_id
           AND s.emotion_type IS NOT NULL
           AND s.created_at >= $start_date
         RETURN s.id as statement_id,

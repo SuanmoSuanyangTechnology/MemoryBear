@@ -523,11 +523,11 @@ def generate_query_keywords_cn(question: str) -> List[str]:
 
 
 # 通过别名匹配进行实体关键词检索（多token合并）
-async def _search_entities_by_aliases(connector: Neo4jConnector, tokens: List[str], group_id: str | None, limit: int) -> List[Dict[str, Any]]:
+async def _search_entities_by_aliases(connector: Neo4jConnector, tokens: List[str], end_user_id: str | None, limit: int) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
     try:
         for tok in tokens:
-            rows = await connector.execute_query(SEARCH_ENTITIES_BY_NAME, q=tok, group_id=group_id, limit=limit)
+            rows = await connector.execute_query(SEARCH_ENTITIES_BY_NAME, q=tok, end_user_id=end_user_id, limit=limit)
             if rows:
                 results.extend(rows)
     except Exception:
@@ -547,15 +547,15 @@ async def _search_entities_by_aliases(connector: Neo4jConnector, tokens: List[st
 # 通过对话/陈述中的entity_ids反查实体名称
 _FETCH_ENTITIES_BY_IDS = """
 MATCH (e:ExtractedEntity)
-WHERE e.id IN $ids AND ($group_id IS NULL OR e.group_id = $group_id)
-RETURN e.id AS id, e.name AS name, e.group_id AS group_id, e.entity_type AS entity_type
+WHERE e.id IN $ids AND ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+RETURN e.id AS id, e.name AS name, e.end_user_id AS end_user_id, e.entity_type AS entity_type
 """
 
-async def _fetch_entities_by_ids(connector: Neo4jConnector, ids: List[str], group_id: str | None) -> List[Dict[str, Any]]:
+async def _fetch_entities_by_ids(connector: Neo4jConnector, ids: List[str], end_user_id: str | None) -> List[Dict[str, Any]]:
     if not ids:
         return []
     try:
-        rows = await connector.execute_query(_FETCH_ENTITIES_BY_IDS, ids=list({i for i in ids if i}), group_id=group_id)
+        rows = await connector.execute_query(_FETCH_ENTITIES_BY_IDS, ids=list({i for i in ids if i}), end_user_id=end_user_id)
         return rows or []
     except Exception:
         return []
@@ -565,18 +565,18 @@ async def _fetch_entities_by_ids(connector: Neo4jConnector, ids: List[str], grou
 _TIME_ENTITY_SEARCH = """
 MATCH (e:ExtractedEntity)
 WHERE e.entity_type CONTAINS "TIME" OR e.entity_type CONTAINS "DATE" OR e.name =~ $date_pattern
-AND ($group_id IS NULL OR e.group_id = $group_id)
-RETURN e.id AS id, e.name AS name, e.group_id AS group_id, e.entity_type AS entity_type
+AND ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+RETURN e.id AS id, e.name AS name, e.end_user_id AS end_user_id, e.entity_type AS entity_type
 LIMIT $limit
 """
 
-async def _search_time_entities(connector: Neo4jConnector, group_id: str | None, limit: int = 5) -> List[Dict[str, Any]]:
+async def _search_time_entities(connector: Neo4jConnector, end_user_id: str | None, limit: int = 5) -> List[Dict[str, Any]]:
     """专门搜索时间相关的实体"""
     try:
         date_pattern = r".*\d{4}.*|.*\d{1,2}月\d{1,2}日.*"
         rows = await connector.execute_query(_TIME_ENTITY_SEARCH,
                                            date_pattern=date_pattern,
-                                           group_id=group_id,
+                                           end_user_id=end_user_id,
                                            limit=limit)
         return rows or []
     except Exception:
@@ -623,7 +623,7 @@ def _resolve_relative_times_cn_en(text: str, anchor: datetime) -> str:
 
 async def run_longmemeval_test(
     sample_size: int = 3,
-    group_id: str = "longmemeval_zh_bak_3",
+    end_user_id: str = "longmemeval_zh_bak_3",
     search_limit: int = 8,
     context_char_budget: int = 4000,
     llm_temperature: float = 0.0,
@@ -677,13 +677,13 @@ async def run_longmemeval_test(
             contexts.extend(selected)
 
         print(f"📥 摄入 {len(contexts)} 个上下文到数据库")
-        if reset_group_before_ingest and group_id:
+        if reset_group_before_ingest and end_user_id:
             try:
                 _tmp_conn = Neo4jConnector()
-                await _tmp_conn.delete_group(group_id)
-                print(f"🧹 已清空组 {group_id} 的历史图数据")
+                await _tmp_conn.delete_group(end_user_id)
+                print(f"🧹 已清空组 {end_user_id} 的历史图数据")
             except Exception as _e:
-                print(f"⚠️ 清空组数据失败（忽略继续）: {group_id} - {_e}")
+                print(f"⚠️ 清空组数据失败（忽略继续）: {end_user_id} - {_e}")
             finally:
                 try:
                     await _tmp_conn.close()
@@ -695,7 +695,7 @@ async def run_longmemeval_test(
         else:
             await _ingest_fn(
                 contexts,
-                group_id,
+                end_user_id,
                 save_chunk_output=save_chunk_output,
                 save_chunk_output_path=save_chunk_output_path,
             )
@@ -750,7 +750,7 @@ async def run_longmemeval_test(
                         connector=connector,
                         embedder_client=embedder,
                         query_text=question,
-                        group_id=group_id,
+                        end_user_id=end_user_id,
                         limit=search_limit,
                         include=["chunks", "statements", "entities", "summaries"],
                     )
@@ -795,7 +795,7 @@ async def run_longmemeval_test(
                     search_results = await search_graph(
                         connector=connector,
                         q=question,
-                        group_id=group_id,
+                        end_user_id=end_user_id,
                         limit=search_limit,
                     )
                     chunks = search_results.get("chunks", [])
@@ -830,7 +830,7 @@ async def run_longmemeval_test(
                             connector=connector,
                             embedder_client=embedder,
                             query_text=question,
-                            group_id=group_id,
+                            end_user_id=end_user_id,
                             limit=search_limit,
                             include=["chunks", "statements", "entities", "summaries"],
                         )
@@ -848,7 +848,7 @@ async def run_longmemeval_test(
                         kw_res = await search_graph(
                             connector=connector,
                             q=question,
-                            group_id=group_id,
+                            end_user_id=end_user_id,
                             limit=search_limit,
                         )
                         if isinstance(kw_res, dict):
@@ -859,7 +859,7 @@ async def run_longmemeval_test(
                             # 时间推理问题的特殊处理
                             if is_temporal:
                                 # 专门搜索时间实体
-                                time_entities = await _search_time_entities(connector, group_id, search_limit//2)
+                                time_entities = await _search_time_entities(connector, end_user_id, search_limit//2)
                                 if time_entities:
                                     kw_entities.extend(time_entities)
                                 # 添加时间相关关键词检索
@@ -869,7 +869,7 @@ async def run_longmemeval_test(
                                         time_res = await search_graph(
                                             connector=connector,
                                             q=tk,
-                                            group_id=group_id,
+                                            end_user_id=end_user_id,
                                             limit=2,
                                         )
                                         if isinstance(time_res, dict):
@@ -880,7 +880,7 @@ async def run_longmemeval_test(
 
                             # 中文关键词拆分后做别名匹配
                             cn_tokens = _extract_cn_tokens(question)
-                            alias_entities = await _search_entities_by_aliases(connector, cn_tokens, group_id, search_limit)
+                            alias_entities = await _search_entities_by_aliases(connector, cn_tokens, end_user_id, search_limit)
                             if alias_entities:
                                 kw_entities.extend(alias_entities)
 
@@ -894,7 +894,7 @@ async def run_longmemeval_test(
                             except Exception:
                                 pass
                             if ids:
-                                id_entities = await _fetch_entities_by_ids(connector, ids, group_id)
+                                id_entities = await _fetch_entities_by_ids(connector, ids, end_user_id)
                                 if id_entities:
                                     kw_entities.extend(id_entities)
 
@@ -908,7 +908,7 @@ async def run_longmemeval_test(
                                     sub_res = await search_graph(
                                         connector=connector,
                                         q=str(kw),
-                                        group_id=group_id,
+                                        end_user_id=end_user_id,
                                         limit=max(3, search_limit // 2),
                                     )
                                     if isinstance(sub_res, dict):
@@ -927,7 +927,7 @@ async def run_longmemeval_test(
                                     opt_res = await search_graph(
                                         connector=connector,
                                         q=str(opt),
-                                        group_id=group_id,
+                                        end_user_id=end_user_id,
                                         limit=max(3, search_limit // 2),
                                     )
                                     if isinstance(opt_res, dict):

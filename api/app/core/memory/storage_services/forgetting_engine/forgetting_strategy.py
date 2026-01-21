@@ -90,7 +90,7 @@ class ForgettingStrategy:
     
     async def find_forgettable_nodes(
         self,
-        group_id: Optional[str] = None,
+        end_user_id: Optional[str] = None,
         min_days_since_access: int = 30
     ) -> List[Dict[str, Any]]:
         """
@@ -102,7 +102,7 @@ class ForgettingStrategy:
         3. Statement 和 Entity 之间存在关系边
         
         Args:
-            group_id: 组 ID（可选，用于过滤特定组的节点）
+            end_user_id: 组 ID（可选，用于过滤特定组的节点）
             min_days_since_access: 最小未访问天数（默认 30 天）
         
         Returns:
@@ -136,8 +136,8 @@ class ForgettingStrategy:
           AND (e.entity_type IS NULL OR e.entity_type <> 'Person')
         """
         
-        if group_id:
-            query += " AND s.group_id = $group_id AND e.group_id = $group_id"
+        if end_user_id:
+            query += " AND s.end_user_id = $end_user_id AND e.end_user_id = $end_user_id"
         
         query += """
         RETURN s.id as statement_id,
@@ -159,8 +159,8 @@ class ForgettingStrategy:
             'threshold': self.forgetting_threshold,
             'cutoff_time': cutoff_time_iso
         }
-        if group_id:
-            params['group_id'] = group_id
+        if end_user_id:
+            params['end_user_id'] = end_user_id
         
         results = await self.connector.execute_query(query, **params)
         
@@ -247,8 +247,8 @@ class ForgettingStrategy:
         entity_activation = entity_node['entity_activation']
         entity_importance = entity_node['entity_importance']
         
-        # 获取 group_id（从 statement 或 entity 节点）
-        group_id = statement_node.get('group_id') or entity_node.get('group_id')
+        # 获取 end_user_id（从 statement 或 entity 节点）
+        end_user_id = statement_node.get('end_user_id') or entity_node.get('end_user_id')
         
         # 生成摘要内容
         summary_text = await self._generate_summary(
@@ -325,7 +325,7 @@ class ForgettingStrategy:
                 last_access_time: $current_time,
                 access_count: 1,
                 version: 1,
-                group_id: $group_id,
+                end_user_id: $end_user_id,
                 created_at: datetime($current_time),
                 merged_at: datetime($current_time)
             })
@@ -423,7 +423,7 @@ class ForgettingStrategy:
             'inherited_activation': inherited_activation,
             'inherited_importance': inherited_importance,
             'current_time': current_time_iso,
-            'group_id': group_id
+            'end_user_id': end_user_id
         }
         
         try:

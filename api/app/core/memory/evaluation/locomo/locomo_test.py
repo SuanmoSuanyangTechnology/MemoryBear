@@ -555,7 +555,7 @@ async def run_enhanced_evaluation():
                 search_results = await run_hybrid_search(
                     query_text=q,
                     search_type="hybrid",
-                    group_id="locomo_sk",
+                    end_user_id="locomo_sk",
                     limit=20,
                     include=["statements", "chunks", "entities", "summaries"],
                     alpha=0.6,  # BM25权重

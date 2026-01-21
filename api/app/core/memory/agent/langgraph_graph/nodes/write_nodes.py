@@ -9,26 +9,21 @@ async def write_node(state: WriteState) -> WriteState:
         Write data to the database/file system.
 
         Args:
-            ctx: FastMCP context for dependency injection
             content: Data content to write
-            user_id: User identifier
-            apply_id: Application identifier
-            group_id: Group identifier
+            end_user_id: End user identifier
             memory_config: MemoryConfig object containing all configuration
 
         Returns:
             dict: Contains 'status', 'saved_to', and 'data' fields
         """
     content=state.get('data','')
-    group_id=state.get('group_id','')
+    end_user_id=state.get('end_user_id','')
     memory_config=state.get('memory_config', '')
     try:
         result=await write(
-            content=content,
-            user_id=group_id,
-            apply_id=group_id,
-            group_id=group_id,
+            end_user_id=end_user_id,
             memory_config=memory_config,
+            messages=content,  # 修复：使用正确的参数名 messages
         )
         logger.info(f"Write completed successfully! Config: {memory_config.config_name}")
 

@@ -75,7 +75,7 @@ class AccessHistoryManager:
         self,
         node_id: str,
         node_label: str,
-        group_id: Optional[str] = None,
+        end_user_id: Optional[str] = None,
         current_time: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
@@ -91,7 +91,7 @@ class AccessHistoryManager:
         Args:
             node_id: 节点ID
             node_label: 节点标签（Statement, ExtractedEntity, MemorySummary）
-            group_id: 组ID（可选，用于过滤）
+            end_user_id: 组ID（可选，用于过滤）
             current_time: 当前时间（可选，默认使用系统时间）
         
         Returns:
@@ -123,7 +123,7 @@ class AccessHistoryManager:
         for attempt in range(self.max_retries):
             try:
                 # 步骤1：读取当前节点状态
-                node_data = await self._fetch_node(node_id, node_label, group_id)
+                node_data = await self._fetch_node(node_id, node_label, end_user_id)
                 
                 if not node_data:
                     raise ValueError(
@@ -142,7 +142,7 @@ class AccessHistoryManager:
                     node_id=node_id,
                     node_label=node_label,
                     update_data=update_data,
-                    group_id=group_id
+                    end_user_id=end_user_id
                 )
                 
                 logger.info(
@@ -172,7 +172,7 @@ class AccessHistoryManager:
         self,
         node_ids: List[str],
         node_label: str,
-        group_id: Optional[str] = None,
+        end_user_id: Optional[str] = None,
         current_time: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -184,7 +184,7 @@ class AccessHistoryManager:
         Args:
             node_ids: 节点ID列表
             node_label: 节点标签（所有节点必须是同一类型）
-            group_id: 组ID（可选）
+            end_user_id: 组ID（可选）
             current_time: 当前时间（可选）
         
         Returns:
@@ -202,7 +202,7 @@ class AccessHistoryManager:
             task = self.record_access(
                 node_id=node_id,
                 node_label=node_label,
-                group_id=group_id,
+                end_user_id=end_user_id,
                 current_time=current_time
             )
             tasks.append(task)
@@ -235,7 +235,7 @@ class AccessHistoryManager:
         self,
         node_id: str,
         node_label: str,
-        group_id: Optional[str] = None
+        end_user_id: Optional[str] = None
     ) -> Tuple[ConsistencyCheckResult, Optional[str]]:
         """
         检查节点数据的一致性
@@ -249,14 +249,14 @@ class AccessHistoryManager:
         Args:
             node_id: 节点ID
             node_label: 节点标签
-            group_id: 组ID（可选）
+            end_user_id: 组ID（可选）
         
         Returns:
             Tuple[ConsistencyCheckResult, Optional[str]]: 
                 - 一致性检查结果枚举
                 - 错误描述（如果不一致）
         """
-        node_data = await self._fetch_node(node_id, node_label, group_id)
+        node_data = await self._fetch_node(node_id, node_label, end_user_id)
         
         if not node_data:
             return ConsistencyCheckResult.CONSISTENT, None
@@ -305,7 +305,7 @@ class AccessHistoryManager:
     async def check_batch_consistency(
         self,
         node_label: str,
-        group_id: Optional[str] = None,
+        end_user_id: Optional[str] = None,
         limit: int = 1000
     ) -> Dict[str, Any]:
         """
@@ -313,7 +313,7 @@ class AccessHistoryManager:
         
         Args:
             node_label: 节点标签
-            group_id: 组ID（可选）
+            end_user_id: 组ID（可选）
             limit: 检查的最大节点数
         
         Returns:
@@ -329,16 +329,16 @@ class AccessHistoryManager:
         MATCH (n:{node_label})
         WHERE n.access_history IS NOT NULL
         """
-        if group_id:
-            query += " AND n.group_id = $group_id"
+        if end_user_id:
+            query += " AND n.end_user_id = $end_user_id"
         query += """
         RETURN n.id as id
         LIMIT $limit
         """
         
         params = {"limit": limit}
-        if group_id:
-            params["group_id"] = group_id
+        if end_user_id:
+            params["end_user_id"] = end_user_id
         
         results = await self.connector.execute_query(query, **params)
         node_ids = [r['id'] for r in results]
@@ -351,7 +351,7 @@ class AccessHistoryManager:
             result, message = await self.check_consistency(
                 node_id=node_id,
                 node_label=node_label,
-                group_id=group_id
+                end_user_id=end_user_id
             )
             
             if result == ConsistencyCheckResult.CONSISTENT:
@@ -387,7 +387,7 @@ class AccessHistoryManager:
         self,
         node_id: str,
         node_label: str,
-        group_id: Optional[str] = None
+        end_user_id: Optional[str] = None
     ) -> bool:
         """
         自动修复节点的数据不一致问题
@@ -401,7 +401,7 @@ class AccessHistoryManager:
         Args:
             node_id: 节点ID
             node_label: 节点标签
-            group_id: 组ID（可选）
+            end_user_id: 组ID（可选）
         
         Returns:
             bool: 修复成功返回True，否则返回False
@@ -411,7 +411,7 @@ class AccessHistoryManager:
             result, message = await self.check_consistency(
                 node_id=node_id,
                 node_label=node_label,
-                group_id=group_id
+                end_user_id=end_user_id
             )
             
             if result == ConsistencyCheckResult.CONSISTENT:
@@ -419,7 +419,7 @@ class AccessHistoryManager:
                 return True
             
             # 获取节点数据
-            node_data = await self._fetch_node(node_id, node_label, group_id)
+            node_data = await self._fetch_node(node_id, node_label, end_user_id)
             if not node_data:
                 logger.error(f"节点不存在，无法修复: {node_label}[{node_id}]")
                 return False
@@ -457,8 +457,8 @@ class AccessHistoryManager:
             query = f"""
             MATCH (n:{node_label} {{id: $node_id}})
             """
-            if group_id:
-                query += " WHERE n.group_id = $group_id"
+            if end_user_id:
+                query += " WHERE n.end_user_id = $end_user_id"
             query += """
             SET n += $repair_data
             RETURN n
@@ -468,8 +468,8 @@ class AccessHistoryManager:
                 'node_id': node_id,
                 'repair_data': repair_data
             }
-            if group_id:
-                params['group_id'] = group_id
+            if end_user_id:
+                params['end_user_id'] = end_user_id
             
             await self.connector.execute_query(query, **params)
             
@@ -491,7 +491,7 @@ class AccessHistoryManager:
         self,
         node_id: str,
         node_label: str,
-        group_id: Optional[str] = None
+        end_user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         获取节点数据
@@ -499,7 +499,7 @@ class AccessHistoryManager:
         Args:
             node_id: 节点ID
             node_label: 节点标签
-            group_id: 组ID（可选）
+            end_user_id: 组ID（可选）
         
         Returns:
             Optional[Dict[str, Any]]: 节点数据，如果不存在返回None
@@ -507,8 +507,8 @@ class AccessHistoryManager:
         query = f"""
         MATCH (n:{node_label} {{id: $node_id}})
         """
-        if group_id:
-            query += " WHERE n.group_id = $group_id"
+        if end_user_id:
+            query += " WHERE n.end_user_id = $end_user_id"
         query += """
         RETURN n.id as id,
                n.importance_score as importance_score,
@@ -519,8 +519,8 @@ class AccessHistoryManager:
         """
         
         params = {'node_id': node_id}
-        if group_id:
-            params['group_id'] = group_id
+        if end_user_id:
+            params['end_user_id'] = end_user_id
         
         results = await self.connector.execute_query(query, **params)
         
@@ -585,7 +585,7 @@ class AccessHistoryManager:
         node_id: str,
         node_label: str,
         update_data: Dict[str, Any],
-        group_id: Optional[str] = None
+        end_user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         原子性更新节点（使用乐观锁）
@@ -597,7 +597,7 @@ class AccessHistoryManager:
             node_id: 节点ID
             node_label: 节点标签
             update_data: 更新数据
-            group_id: 组ID（可选）
+            end_user_id: 组ID（可选）
         
         Returns:
             Dict[str, Any]: 更新后的节点数据
@@ -606,13 +606,13 @@ class AccessHistoryManager:
             RuntimeError: 如果更新失败或发生版本冲突
         """
         # 定义事务函数
-        async def update_transaction(tx, node_id, node_label, update_data, group_id):
+        async def update_transaction(tx, node_id, node_label, update_data, end_user_id):
             # 步骤1：读取当前节点并获取版本号
             read_query = f"""
             MATCH (n:{node_label} {{id: $node_id}})
             """
-            if group_id:
-                read_query += " WHERE n.group_id = $group_id"
+            if end_user_id:
+                read_query += " WHERE n.end_user_id = $end_user_id"
             read_query += """
             RETURN n.id as id,
                    n.version as version,
@@ -624,8 +624,8 @@ class AccessHistoryManager:
             """
             
             read_params = {'node_id': node_id}
-            if group_id:
-                read_params['group_id'] = group_id
+            if end_user_id:
+                read_params['end_user_id'] = end_user_id
             
             read_result = await tx.run(read_query, **read_params)
             current_node = await read_result.single()
@@ -656,8 +656,8 @@ class AccessHistoryManager:
             
             # 构建 WHERE 子句
             where_conditions = []
-            if group_id:
-                where_conditions.append("n.group_id = $group_id")
+            if end_user_id:
+                where_conditions.append("n.end_user_id = $end_user_id")
             
             # 添加版本检查
             if current_version > 0:
@@ -695,8 +695,8 @@ class AccessHistoryManager:
                 'last_access_time': update_data['last_access_time'],
                 'access_count': update_data['access_count']
             }
-            if group_id:
-                update_params['group_id'] = group_id
+            if end_user_id:
+                update_params['end_user_id'] = end_user_id
             
             update_result = await tx.run(update_query, **update_params)
             updated_node = await update_result.single()
@@ -720,7 +720,7 @@ class AccessHistoryManager:
                 node_id=node_id,
                 node_label=node_label,
                 update_data=update_data,
-                group_id=group_id
+                end_user_id=end_user_id
             )
             return result
         except Exception as e:

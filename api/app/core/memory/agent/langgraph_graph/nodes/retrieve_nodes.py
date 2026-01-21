@@ -52,9 +52,9 @@ async def rag_config(state):
     return kb_config
 async def rag_knowledge(state,question):
     kb_config = await rag_config(state)
-    group_id = state.get('group_id', '')
+    end_user_id = state.get('end_user_id', '')
     user_rag_memory_id=state.get("user_rag_memory_id",'')
-    retrieve_chunks_result = knowledge_retrieval(question, kb_config, [str(group_id)])
+    retrieve_chunks_result = knowledge_retrieval(question, kb_config, [str(end_user_id)])
     try:
         retrieval_knowledge = [i.page_content for i in retrieve_chunks_result]
         clean_content = '\n\n'.join(retrieval_knowledge)
@@ -159,7 +159,7 @@ async def retrieve_nodes(state: ReadState) -> ReadState:
     problem_extension=state.get('problem_extension', '')['context']
     storage_type=state.get('storage_type', '')
     user_rag_memory_id=state.get('user_rag_memory_id', '')
-    group_id=state.get('group_id', '')
+    end_user_id=state.get('end_user_id', '')
     memory_config = state.get('memory_config', None)
     original=state.get('data', '')
     problem_list=[]
@@ -172,7 +172,7 @@ async def retrieve_nodes(state: ReadState) -> ReadState:
         try:
             # Prepare search parameters based on storage type
             search_params = {
-                "group_id": group_id,
+                "end_user_id": end_user_id,
                 "question": question,
                 "return_raw_results": True
             }
@@ -263,13 +263,13 @@ async def retrieve_nodes(state: ReadState) -> ReadState:
 
 
 async def retrieve(state: ReadState) -> ReadState:
-    # 从state中获取group_id
+    # 从state中获取end_user_id
     import time
     start=time.time()
     problem_extension = state.get('problem_extension', '')['context']
     storage_type = state.get('storage_type', '')
     user_rag_memory_id = state.get('user_rag_memory_id', '')
-    group_id = state.get('group_id', '')
+    end_user_id = state.get('end_user_id', '')
     memory_config = state.get('memory_config', None)
     original = state.get('data', '')
     problem_list = []
@@ -295,13 +295,13 @@ async def retrieve(state: ReadState) -> ReadState:
         temperature=0.2,
     )
 
-    time_retrieval_tool = create_time_retrieval_tool(group_id)
-    search_params = { "group_id": group_id, "return_raw_results": True }
+    time_retrieval_tool = create_time_retrieval_tool(end_user_id)
+    search_params = { "end_user_id": end_user_id, "return_raw_results": True }
     hybrid_retrieval=create_hybrid_retrieval_tool_sync(memory_config, **search_params)
     agent = create_agent(
         llm,
         tools=[time_retrieval_tool,hybrid_retrieval],
-        system_prompt=f"我是检索专家，可以根据适合的工具进行检索。当前使用的group_id是: {group_id}"
+        system_prompt=f"我是检索专家，可以根据适合的工具进行检索。当前使用的end_user_id是: {end_user_id}"
     )
 
     # 创建异步任务处理单个问题

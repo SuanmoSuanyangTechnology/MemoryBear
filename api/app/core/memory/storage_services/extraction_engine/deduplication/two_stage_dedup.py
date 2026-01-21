@@ -57,11 +57,11 @@ async def dedup_layers_and_merge_and_return(
     if pipeline_config is None:
         raise ValueError("pipeline_config is required for dedup_layers_and_merge_and_return")
 
-    # 先探测 group_id，决定报告写入策略
-    group_id: Optional[str] = None
+    # 先探测 end_user_id，决定报告写入策略
+    end_user_id: Optional[str] = None
     for dd in dialog_data_list:
-        group_id = getattr(dd, "group_id", None)
-        if group_id:
+        end_user_id = getattr(dd, "end_user_id", None)
+        if end_user_id:
             break
 
     # 第一层去重消歧
@@ -82,11 +82,11 @@ async def dedup_layers_and_merge_and_return(
 
     # 第二层去重消歧：与 Neo4j 中同组实体联合融合
     try:
-        if group_id:
+        if end_user_id:
             if connector:
                 fused_entity_nodes, fused_statement_entity_edges, fused_entity_entity_edges = await second_layer_dedup_and_merge_with_neo4j(
                     connector=connector,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     entity_nodes=dedup_entity_nodes,
                     statement_entity_edges=dedup_statement_entity_edges,
                     entity_entity_edges=dedup_entity_entity_edges,
@@ -96,7 +96,7 @@ async def dedup_layers_and_merge_and_return(
             else:
                 print("Skip second-layer dedup: missing connector")
         else:
-            print("Skip second-layer dedup: missing group_id")
+            print("Skip second-layer dedup: missing end_user_id")
     except Exception as e:
         print(f"Second-layer dedup failed: {e}")
 

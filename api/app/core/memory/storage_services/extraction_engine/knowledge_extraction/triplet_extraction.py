@@ -116,7 +116,7 @@ class TripletExtractor:
         logger.info(f"Processing {len(all_statements)} statements for triplet extraction...")
         try:
             prompt_logger.info(
-                f"[Triplet] Dialog ref_id={getattr(dialog_data, 'ref_id', None)}, group_id={getattr(dialog_data, 'group_id', None)}, statements_to_process={len(all_statements)}"
+                f"[Triplet] Dialog ref_id={getattr(dialog_data, 'ref_id', None)}, end_user_id={getattr(dialog_data, 'end_user_id', None)}, statements_to_process={len(all_statements)}"
             )
         except Exception:
             pass

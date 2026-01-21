@@ -72,7 +72,7 @@ class TemporalSearchParams(BaseModel):
     """Parameters for temporal search queries in the knowledge graph.
 
     Attributes:
-        group_id: Group ID to filter search results (default: 'test')
+        end_user_id: Group ID to filter search results (default: 'test')
         apply_id: Application ID to filter search results
         user_id: User ID to filter search results
         start_date: Start date for temporal filtering (format: 'YYYY-MM-DD')
@@ -81,7 +81,7 @@ class TemporalSearchParams(BaseModel):
         invalid_date: Date when memory should be invalid (format: 'YYYY-MM-DD')
         limit: Maximum number of results to return (default: 3)
     """
-    group_id: Optional[str] = Field("test", description="The group ID to filter the search.")
+    end_user_id: Optional[str] = Field("test", description="The group ID to filter the search.")
     apply_id: Optional[str] = Field(None, description="The apply ID to filter the search.")
     user_id: Optional[str] = Field(None, description="The user ID to filter the search.")
     start_date: Optional[str] = Field(None, description="The start date for the search.")

@@ -24,7 +24,7 @@ class ParameterBuilder:
         tool_call_id: str,
         search_switch: str,
         apply_id: str,
-        group_id: str,
+        end_user_id: str,
         storage_type: Optional[str] = None,
         user_rag_memory_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -44,7 +44,7 @@ class ParameterBuilder:
             tool_call_id: Extracted tool call identifier
             search_switch: Search routing parameter
             apply_id: Application identifier
-            group_id: Group identifier
+            end_user_id: Group identifier
             storage_type: Storage type for the workspace (optional)
             user_rag_memory_id: User RAG memory ID for knowledge base retrieval (optional)
             
@@ -55,7 +55,7 @@ class ParameterBuilder:
         base_args = {
             "usermessages": tool_call_id,
             "apply_id": apply_id,
-            "group_id": group_id
+            "end_user_id": end_user_id
         }
         
         # Always add storage_type and user_rag_memory_id (with defaults if None)

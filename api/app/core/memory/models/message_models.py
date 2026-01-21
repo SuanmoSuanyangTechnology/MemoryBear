@@ -25,10 +25,10 @@ class ConversationMessage(BaseModel):
     """Represents a single message in a conversation.
 
     Attributes:
-        role: Role of the speaker (e.g., '用户' for user, 'AI' for assistant)
+        role: Role of the speaker (e.g., 'user' for user, 'assistant' for AI assistant)
         msg: Text content of the message
     """
-    role: str = Field(..., description="The role of the speaker (e.g., '用户', 'AI').")
+    role: str = Field(..., description="The role of the speaker (e.g., 'user', 'assistant').")
     msg: str = Field(..., description="The text content of the message.")
 
 
@@ -55,8 +55,9 @@ class Statement(BaseModel):
     Attributes:
         id: Unique identifier for the statement
         chunk_id: ID of the parent chunk this statement belongs to
-        group_id: Optional group ID for multi-tenancy
+        end_user_id: Optional group ID for multi-tenancy
         statement: The actual statement text content
+        speaker: Optional speaker identifier ('用户' for user, 'AI' for AI responses)
         statement_embedding: Optional embedding vector for the statement
         stmt_type: Type of the statement (from ontology)
         temporal_info: Temporal information extracted from the statement
@@ -72,8 +73,9 @@ class Statement(BaseModel):
     """
     id: str = Field(default_factory=lambda: uuid4().hex, description="A unique identifier for the statement.")
     chunk_id: str = Field(..., description="ID of the parent chunk this statement belongs to.")
-    group_id: Optional[str] = Field(None, description="ID of the group this statement belongs to.")
+    end_user_id: Optional[str] = Field(None, description="ID of the group this statement belongs to.")
     statement: str = Field(..., description="The text content of the statement.")
+    speaker: Optional[str] = Field(None, description="Speaker identifier: 'user' for user messages, 'assistant' for AI responses")
     statement_embedding: Optional[List[float]] = Field(None, description="The embedding vector of the statement.")
     stmt_type: StatementType = Field(..., description="The type of the statement.")
     temporal_info: TemporalInfo = Field(..., description="The temporal information of the statement.")
@@ -118,36 +120,36 @@ class Chunk(BaseModel):
 
     Attributes:
         id: Unique identifier for the chunk
-        text: List of messages in the chunk
         content: The content of the chunk as a formatted string
+        speaker: The speaker/role for this chunk (user/assistant)
         statements: List of statements extracted from this chunk
         chunk_embedding: Optional embedding vector for the chunk
         metadata: Additional metadata as key-value pairs
     """
     id: str = Field(default_factory=lambda: uuid4().hex, description="A unique identifier for the chunk.")
-    text: List[ConversationMessage] = Field(default_factory=list, description="A list of messages in the chunk.")
     content: str = Field(..., description="The content of the chunk as a string.")
+    speaker: Optional[str] = Field(None, description="The speaker/role for this chunk (user/assistant).")
     statements: List[Statement] = Field(default_factory=list, description="A list of statements in the chunk.")
     chunk_embedding: Optional[List[float]] = Field(None, description="The embedding vector of the chunk.")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the chunk.")
 
     @classmethod
-    def from_messages(cls, messages: List[ConversationMessage], metadata: Optional[Dict[str, Any]] = None):
-        """Create a chunk from a list of messages.
+    def from_single_message(cls, message: ConversationMessage, metadata: Optional[Dict[str, Any]] = None):
+        """Create a chunk from a single message (1 Message = 1 Chunk).
 
         Args:
-            messages: List of conversation messages
+            message: Single conversation message
             metadata: Optional metadata dictionary
 
         Returns:
-            Chunk instance with formatted content
+            Chunk instance with speaker directly from message.role
         """
-        if metadata is None:
-            metadata = {}
-        # Generate content from messages
-        content = "\n".join([f"{msg.role}: {msg.msg}" for msg in messages])
-        return cls(text=messages, content=content, metadata=metadata)
-
+        return cls(
+            content=f"{message.role}: {message.msg}",
+            speaker=message.role,
+            metadata=metadata or {}
+        )
+    
 
 class DialogData(BaseModel):
     """Represents the complete data structure for a dialog record.
@@ -157,9 +159,7 @@ class DialogData(BaseModel):
         context: Full conversation context
         dialog_embedding: Optional embedding vector for the entire dialog
         ref_id: Reference ID linking to external dialog system
-        group_id: Group ID for multi-tenancy
-        user_id: User ID for user-specific data
-        apply_id: Application ID for application-specific data
+        end_user_id: End user ID for multi-tenancy
         created_at: Timestamp when the dialog was created
         expired_at: Timestamp when the dialog expires (default: far future)
         metadata: Additional metadata as key-value pairs
@@ -173,9 +173,7 @@ class DialogData(BaseModel):
     context: ConversationContext = Field(..., description="The full conversation context as a single string.")
     dialog_embedding: Optional[List[float]] = Field(None, description="The embedding vector of the dialog.")
     ref_id: str = Field(..., description="Refer to external dialog id. This is used to link to the original dialog.")
-    group_id: str = Field(default=..., description="Group ID of dialogue data")
-    user_id: str = Field(..., description="USER ID of dialogue data")
-    apply_id: str = Field(..., description="APPLY ID of dialogue data")
+    end_user_id: str = Field(default=..., description="End user ID of dialogue data")
     run_id: str = Field(default_factory=lambda: uuid4().hex, description="Unique identifier for this pipeline run.")
     created_at: datetime = Field(default_factory=datetime.now, description="The timestamp when the dialog was created.")
     expired_at: datetime = Field(default_factory=lambda: datetime(9999, 12, 31), description="The timestamp when the dialog expires.")
@@ -254,5 +252,5 @@ class DialogData(BaseModel):
         """
         for chunk in self.chunks:
             for statement in chunk.statements:
-                if statement.group_id is None:
-                    statement.group_id = self.group_id
+                if statement.end_user_id is None:
+                    statement.end_user_id = self.end_user_id
