@@ -1445,7 +1445,7 @@ class AppService:
             target_workspace_ids: List[uuid.UUID],
             user_id: uuid.UUID,
             workspace_id: Optional[uuid.UUID] = None
-    ) -> AppShare:
+    ) -> list[AppShare]:
         """分享应用到其他工作空间
 
         Args:
