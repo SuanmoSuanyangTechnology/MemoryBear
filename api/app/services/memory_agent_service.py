@@ -640,6 +640,7 @@ class MemoryAgentService:
                 )
             raise ValueError(error_msg)
 
+
     def get_messages_list(self, user_input: Write_UserInput) -> list[dict]:
         """
         Get standardized message list from user input.
