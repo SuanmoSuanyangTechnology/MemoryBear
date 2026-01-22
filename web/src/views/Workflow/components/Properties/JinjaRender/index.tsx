@@ -31,13 +31,11 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
   const form = Form.useFormInstance()
   const values = Form.useWatch([], form) || {}
 
-  console.log('JinjaRender values', values)
-
   const prevMappingNamesRef = useRef<string[]>([])
   const prevTemplateVarsRef = useRef<string[]>([])
-  const syncTimeoutRef = useRef<number | null>(null)
   const isSyncingRef = useRef(false)
   const lastSyncSourceRef = useRef<'mapping' | 'template' | null>(null)
+  const editorKeyRef = useRef(0)
 
   // Reset refs when node changes
   useEffect(() => {
@@ -68,46 +66,39 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
 
     if (JSON.stringify(prevNames) === JSON.stringify(currentMappingNames)) return
 
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
-    const activeElement = document.activeElement as HTMLElement
+    let updatedTemplate = String(form.getFieldValue('template') || '')
 
-    syncTimeoutRef.current = setTimeout(() => {
-      let updatedTemplate = String(form.getFieldValue('template') || '')
-
-      prevNames.forEach((oldName, index) => {
-        const newName = currentMappingNames[index]
-        if (newName && oldName !== newName) {
-          updatedTemplate = updatedTemplate.replace(
-            new RegExp(`{{\\s*${oldName}\\s*}}`, 'g'),
-            `{{${newName}}}`
-          )
-        }
-      })
-
-      if (updatedTemplate !== form.getFieldValue('template')) {
-        isSyncingRef.current = true
-        lastSyncSourceRef.current = 'mapping'
-        
-        prevTemplateVarsRef.current = extractTemplateVars(updatedTemplate)
-        prevMappingNamesRef.current = currentMappingNames
-        form.setFieldValue('template', updatedTemplate)
-
-        requestAnimationFrame(() => {
-          activeElement?.focus?.()
-          setTimeout(() => {
-            isSyncingRef.current = false
-            lastSyncSourceRef.current = null
-          }, 50)
-        })
-      } else {
-        prevMappingNamesRef.current = currentMappingNames
+    prevNames.forEach((oldName, index) => {
+      const newName = currentMappingNames[index]
+      if (newName && oldName !== newName) {
+        updatedTemplate = updatedTemplate.replace(
+          new RegExp(`{{\\s*${oldName}\\s*}}`, 'g'),
+          `{{${newName}}}`
+        )
       }
-    }, 0)
+    })
+
+
+    if (updatedTemplate !== form.getFieldValue('template')) {
+      isSyncingRef.current = true
+      lastSyncSourceRef.current = 'mapping'
+      
+      prevTemplateVarsRef.current = extractTemplateVars(updatedTemplate)
+      prevMappingNamesRef.current = currentMappingNames
+      form.setFieldValue('template', updatedTemplate)
+      editorKeyRef.current++
+
+      setTimeout(() => {
+        isSyncingRef.current = false
+        lastSyncSourceRef.current = null
+      }, 0)
+    } else {
+      prevMappingNamesRef.current = currentMappingNames
+    }
   }, [values?.mapping, selectedNode?.data?.type, form])
 
   // Sync mapping when template variables change
   useEffect(() => {
-    console.log('values?.template', values?.template)
     if (
       isSyncingRef.current ||
       lastSyncSourceRef.current === 'template' ||
@@ -155,11 +146,10 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
       }
     })
 
-    // Remove unused mappings and duplicates
+    // Remove duplicates only
     const seenNames = new Set<string>()
     const finalMapping = updatedMapping.filter(item => {
-      const isUsed = templateVars.some(v => item.name === v || item.value === `{{${v}}}`)
-      if (!isUsed || !item.name || seenNames.has(item.name)) return false
+      if (!item.name || seenNames.has(item.name)) return false
       seenNames.add(item.name)
       return true
     })
@@ -190,6 +180,7 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
 
       <Form.Item name="template">
         <MessageEditor
+          key={editorKeyRef.current}
           title={t('workflow.config.jinja-render.template')}
           isArray={false}
           parentName="template"

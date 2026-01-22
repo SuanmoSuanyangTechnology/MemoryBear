@@ -2064,6 +2064,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       stability: 'Stability',
       resilience: 'Resilience',
       suggestions: 'Personalized Suggestions',
+      suggestionLoading: 'Your personalized suggestions are being generated',
     },
     reflectionEngine: {
       reflectionEngineConfig: 'Reflection Engine Configuration',
