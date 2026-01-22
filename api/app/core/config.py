@@ -76,6 +76,22 @@ class Settings:
     # File Upload
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "52428800"))
     FILE_PATH: str = os.getenv("FILE_PATH", "/files")
+    FILE_URL_EXPIRES: int = int(os.getenv("FILE_URL_EXPIRES", "3600"))
+
+    # Storage Configuration
+    STORAGE_TYPE: str = os.getenv("STORAGE_TYPE", "local")
+
+    # Aliyun OSS Configuration
+    OSS_ENDPOINT: str = os.getenv("OSS_ENDPOINT", "")
+    OSS_ACCESS_KEY_ID: str = os.getenv("OSS_ACCESS_KEY_ID", "")
+    OSS_ACCESS_KEY_SECRET: str = os.getenv("OSS_ACCESS_KEY_SECRET", "")
+    OSS_BUCKET_NAME: str = os.getenv("OSS_BUCKET_NAME", "")
+
+    # AWS S3 Configuration
+    S3_REGION: str = os.getenv("S3_REGION", "")
+    S3_ACCESS_KEY_ID: str = os.getenv("S3_ACCESS_KEY_ID", "")
+    S3_SECRET_ACCESS_KEY: str = os.getenv("S3_SECRET_ACCESS_KEY", "")
+    S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "")
 
     # VOLC ASR settings
     VOLC_APP_KEY: str = os.getenv("VOLC_APP_KEY", "")

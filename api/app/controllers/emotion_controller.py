@@ -24,7 +24,7 @@ from app.schemas.emotion_schema import (
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.emotion_analytics_service import EmotionAnalyticsService
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status,Header
 from sqlalchemy.orm import Session
 
 # 获取API专用日志器
@@ -45,6 +45,7 @@ emotion_service = EmotionAnalyticsService()
 @router.post("/tags", response_model=ApiResponse)
 async def get_emotion_tags(
     request: EmotionTagsRequest,
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
 ):
 
@@ -96,6 +97,7 @@ async def get_emotion_tags(
 @router.post("/wordcloud", response_model=ApiResponse)
 async def get_emotion_wordcloud(
     request: EmotionWordcloudRequest,
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
 ):
 
@@ -142,6 +144,7 @@ async def get_emotion_wordcloud(
 @router.post("/health", response_model=ApiResponse)
 async def get_emotion_health(
     request: EmotionHealthRequest,
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
 ):
 
@@ -196,6 +199,7 @@ async def get_emotion_health(
 @router.post("/suggestions", response_model=ApiResponse)
 async def get_emotion_suggestions(
     request: EmotionSuggestionsRequest,
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -232,7 +236,7 @@ async def get_emotion_suggestions(
             )
             return fail(
                 BizCode.NOT_FOUND,
-                "建议缓存不存在或已过期，请调用 /generate_suggestions 接口生成新建议",
+                "建议缓存不存在或已过期，请右上角刷新生成新建议",
                 ""
             )
 
@@ -261,6 +265,7 @@ async def get_emotion_suggestions(
 @router.post("/generate_suggestions", response_model=ApiResponse)
 async def generate_emotion_suggestions(
     request: EmotionGenerateSuggestionsRequest,
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
