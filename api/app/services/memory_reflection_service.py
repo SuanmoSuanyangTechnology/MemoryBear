@@ -40,7 +40,7 @@ class WorkspaceAppService:
         """
         apps = self.db.query(App).filter(
             App.workspace_id == workspace_id,
-            App.is_active == True
+            App.is_active.is_(True)
         ).all()
         app_ids = [str(app.id) for app in apps]
         

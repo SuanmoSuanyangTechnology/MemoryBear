@@ -2,6 +2,7 @@ import os
 import re
 import glob
 import json
+from pathlib import Path
 from typing import Tuple
 
 try:
@@ -10,8 +11,7 @@ except Exception:
     # Fallback: derive project root from this file location
     # 当前文件在 api/app/core/memory/analytics/recent_activity_stats.py
     # 需要向上 5 级到达 api/ 目录
-    current_file = os.path.abspath(__file__)
-    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file)))))
+    PROJECT_ROOT = str(Path(__file__).resolve().parents[4])
 
 
 def _get_latest_prompt_log_path() -> str | None:
