@@ -2,6 +2,7 @@ import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Dropdown, Button } from 'antd'
+import { LoadingOutlined } from '@ant-design/icons';
 
 import PageHeader from '../components/PageHeader'
 import StatementDetail from './StatementDetail'
@@ -46,17 +47,29 @@ const Detail: FC = () => {
   const onClick = ({ key }: { key: string }) => {
     navigate(`/user-memory/detail/${id}/${key}`, { replace: true })
   }
+
+  const [loading, setLoading] = useState(false)
   const handleRefresh = () => {
+    setLoading(true)
+    let response: any = null
     switch(type) {
       case 'FORGET_MEMORY':
         forgetDetailRef.current?.handleRefresh()
         break;
       case 'EMOTIONAL_MEMORY':
-        statementDetailRef.current?.handleRefresh()
+        response = statementDetailRef.current?.handleRefresh()
         break
       case 'IMPLICIT_MEMORY':
-        implicitDetailRef.current?.handleRefresh()
+        response = implicitDetailRef.current?.handleRefresh()
         break
+    }
+
+    if (response instanceof Promise) {
+      response.finally(() => {
+        setLoading(false)
+      })
+    } else {
+      setLoading(false)
     }
   }
 
@@ -80,8 +93,8 @@ const Detail: FC = () => {
           </Dropdown>
         }
         extra={['FORGET_MEMORY', 'EMOTIONAL_MEMORY', 'IMPLICIT_MEMORY'].includes(type as string) &&
-          <Button type="primary" ghost className="rb:group rb:h-6! rb:px-2!" onClick={handleRefresh}>
-            <img src={refreshIcon} className="rb:w-4 rb:h-4" />
+          <Button type="primary" ghost size="small" className="rb:h-6! rb:px-2! rb:leading-5.5!" loading={loading} onClick={handleRefresh}>
+            {!loading && <img src={refreshIcon} className="rb:w-4 rb:h-4" /> }
             {t('common.refresh')}
           </Button>}
       />

@@ -716,7 +716,7 @@ export const zh = {
       total_models: '可用模型总数',
       total_spaces: '活跃空间数量',
       total_users: '用户总数',
-      total_running_apps: '应用运行次数',
+      total_running_apps: '正在运行的应用',
       desc_models: '包含 {{ account }} 个大语言模型和 {{ nums }} 个嵌入模型',
       desc_spaces: '多于上周',
       desc_users: '本周新增',
@@ -2158,6 +2158,7 @@ export const zh = {
       stability: '稳定性',
       resilience: '恢复力',
       suggestions: '个性化建议',
+      suggestionLoading: '您的个性化建议正在生成中',
     },
     reflectionEngine: {
       reflectionEngineConfig: '反思引擎配置',

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { TextNode, $createTextNode } from 'lexical';
+import { TextNode, $createTextNode, $getSelection, $isRangeSelection } from 'lexical';
 
 const Jinja2HighlightPlugin = () => {
   const [editor] = useLexicalComposerContext();
@@ -17,6 +17,16 @@ const Jinja2HighlightPlugin = () => {
       
       const parent = textNode.getParent();
       if (!parent) return;
+
+      // Preserve selection
+      const selection = $getSelection();
+      let selectionOffset = null;
+      if ($isRangeSelection(selection)) {
+        const anchor = selection.anchor;
+        if (anchor.getNode() === textNode) {
+          selectionOffset = anchor.offset;
+        }
+      }
 
       const tokens = tokenizeJinja2(text);
       
@@ -84,6 +94,19 @@ const Jinja2HighlightPlugin = () => {
           textNode.replace(newNodes[0]);
           for (let i = 1; i < newNodes.length; i++) {
             newNodes[i - 1].insertAfter(newNodes[i]);
+          }
+          
+          // Restore selection
+          if (selectionOffset !== null && $isRangeSelection(selection)) {
+            let currentOffset = 0;
+            for (const node of newNodes) {
+              const nodeLength = node.getTextContent().length;
+              if (currentOffset + nodeLength >= selectionOffset) {
+                node.select(selectionOffset - currentOffset, selectionOffset - currentOffset);
+                break;
+              }
+              currentOffset += nodeLength;
+            }
           }
         }
     });
