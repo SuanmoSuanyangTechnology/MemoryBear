@@ -531,7 +531,7 @@ def write_message_task(self, end_user_id: str, message: str, config_id: str, sto
         except Exception:
             # Log but continue - will fail later with proper error
             pass
-    
+
     async def _run() -> str:
         db = next(get_db())
         try:
@@ -619,53 +619,53 @@ def reflection_timer_task() -> None:
     """
     reflection_engine()
 
-
-@celery_app.task(name="app.core.memory.agent.health.check_read_service")
-def check_read_service_task() -> Dict[str, str]:
-    """Call read_service and write latest status to Redis.
+# unused task
+# @celery_app.task(name="app.core.memory.agent.health.check_read_service")
+# def check_read_service_task() -> Dict[str, str]:
+#     """Call read_service and write latest status to Redis.
     
-    Returns status data dict that gets written to Redis.
-    """
-    client = redis.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        db=settings.REDIS_DB,
-        password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None
-    )
-    try:
-        api_url = f"http://{settings.SERVER_IP}:8000/api/memory/read_service"
-        payload = {
-            "user_id": "健康检查",
-            "apply_id": "健康检查",
-            "end_user_id": "健康检查",
-            "message": "你好",
-            "history": [],
-            "search_switch": "2",
-        }
-        resp = requests.post(api_url, json=payload, timeout=15)
-        ok = resp.status_code == 200
-        status = "Success" if ok else "Fail"
-        msg = "接口请求成功" if ok else f"接口请求失败: {resp.status_code}"
-        error = "" if ok else resp.text
-        code = 0 if ok else 500
-    except Exception as e:
-        status = "Fail"
-        msg = "接口请求失败"
-        error = str(e)
-        code = 500
+#     Returns status data dict that gets written to Redis.
+#     """
+#     client = redis.Redis(
+#         host=settings.REDIS_HOST,
+#         port=settings.REDIS_PORT,
+#         db=settings.REDIS_DB,
+#         password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None
+#     )
+#     try:
+#         api_url = f"http://{settings.SERVER_IP}:8000/api/memory/read_service"
+#         payload = {
+#             "user_id": "健康检查",
+#             "apply_id": "健康检查",
+#             "group_id": "健康检查",
+#             "message": "你好",
+#             "history": [],
+#             "search_switch": "2",
+#         }
+#         resp = requests.post(api_url, json=payload, timeout=15)
+#         ok = resp.status_code == 200
+#         status = "Success" if ok else "Fail"
+#         msg = "接口请求成功" if ok else f"接口请求失败: {resp.status_code}"
+#         error = "" if ok else resp.text
+#         code = 0 if ok else 500
+#     except Exception as e:
+#         status = "Fail"
+#         msg = "接口请求失败"
+#         error = str(e)
+#         code = 500
 
-    data = {
-        "status": status,
-        "msg": msg,
-        "error": error,
-        "code": str(code),
-        "time": str(int(time.time())),
-    }
+#     data = {
+#         "status": status,
+#         "msg": msg,
+#         "error": error,
+#         "code": str(code),
+#         "time": str(int(time.time())),
+#     }
 
-    client.hset("memsci:health:read_service", mapping=data)
-    client.expire("memsci:health:read_service", int(settings.HEALTH_CHECK_SECONDS))
+#     client.hset("memsci:health:read_service", mapping=data)
+#     client.expire("memsci:health:read_service", int(settings.HEALTH_CHECK_SECONDS))
 
-    return data
+#     return data
 
 
 @celery_app.task(name="app.controllers.memory_storage_controller.search_all")

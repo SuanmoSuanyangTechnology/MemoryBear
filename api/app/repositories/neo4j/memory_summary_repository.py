@@ -209,7 +209,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         
         results = await self.connector.execute_query(
             query,
-            group_id=group_id,
+            end_user_id=end_user_id,
             days=days,
             limit=limit
         )
@@ -253,7 +253,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         results = await self.connector.execute_query(query, **params)
         return [self._map_to_dict(r) for r in results]
     
-    async def get_summary_count_by_group(self, group_id: str) -> int:
+    async def get_summary_count_by_group(self, end_user_id: str) -> int:
         """Get count of memory summaries for a group
         
         Args:
@@ -268,6 +268,6 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         RETURN count(n) as count
         """
         
-        results = await self.connector.execute_query(query, end_user_id=group_id)
+        results = await self.connector.execute_query(query, end_user_id=end_user_id)
         return results[0]['count'] if results else 0
     

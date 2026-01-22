@@ -15,7 +15,7 @@ except Exception:
         return None
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.utils.config.definitions import SELECTED_end_user_id, PROJECT_ROOT
+from app.core.memory.utils.config.definitions import SELECTED_GROUP_ID, PROJECT_ROOT
 
 from app.core.memory.evaluation.memsciqa.evaluate_qa import run_memsciqa_eval
 from app.core.memory.evaluation.longmemeval.qwen_search_eval import run_longmemeval_test
@@ -37,7 +37,7 @@ async def run(
     max_contexts_per_item: int | None = None,
 ) -> Dict[str, Any]:
     # 恢复原始风格：统一入口做路由，并沿用各数据集既有默认
-    end_user_id = end_user_id or SELECTED_end_user_id
+    end_user_id = end_user_id or SELECTED_GROUP_ID
 
     if reset_group:
         connector = Neo4jConnector()

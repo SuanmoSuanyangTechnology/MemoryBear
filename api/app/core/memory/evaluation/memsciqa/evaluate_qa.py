@@ -27,7 +27,7 @@ from app.core.memory.storage_services.search import run_hybrid_search
 from app.core.memory.utils.config.definitions import (
     PROJECT_ROOT,
     SELECTED_EMBEDDING_ID,
-    SELECTED_end_user_id,
+    SELECTED_GROUP_ID,
     SELECTED_LLM_ID,
 )
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -136,7 +136,7 @@ def _combine_dialogues_for_hybrid(results: Dict[str, Any]) -> List[Dict[str, Any
 
 
 async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid", memory_config: "MemoryConfig" = None) -> Dict[str, Any]:
-    end_user_id = end_user_id or SELECTED_end_user_id
+    end_user_id = end_user_id or SELECTED_GROUP_ID
     # Load data
     data_path = os.path.join(PROJECT_ROOT, "data", "msc_self_instruct.jsonl")
     if not os.path.exists(data_path):
