@@ -57,7 +57,8 @@ const MemoryInsight = forwardRef<MemoryInsightRef>((_props, ref) => {
         : Object.keys(data).length > 0
         ? <Space size={16} direction="vertical" className="rb:w-full">
             {['memory_insight', 'key_findings', 'behavior_pattern', 'growth_trajectory'].map(key => {
-              if (data[key as keyof Data]) {
+              const value = data[key as keyof Data];
+              if (Array.isArray(value) && value.length > 0 || (!Array.isArray(value) && value)) {
                 return (
                   <div key={key} className="rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:py-3 rb:text-[#5B6167] rb:leading-5">
                     <div className={clsx(`rb:relative rb:before:content-[''] rb:before:block rb:before:h-4 rb:before:absolute rb:before:top-0.5 rb:before:left-0 rb:before:w-1 rb:pl-4 rb:mb-2 rb:font-medium rb:leading-5`, {
