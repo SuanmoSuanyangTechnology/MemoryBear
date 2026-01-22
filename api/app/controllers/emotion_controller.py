@@ -53,7 +53,7 @@ async def get_emotion_tags(
         api_logger.info(
             f"用户 {current_user.username} 请求获取情绪标签统计",
             extra={
-                "group_id": request.group_id,
+                "end_user_id": request.end_user_id,
                 "emotion_type": request.emotion_type,
                 "start_date": request.start_date,
                 "end_date": request.end_date,
@@ -63,7 +63,7 @@ async def get_emotion_tags(
 
         # 调用服务层
         data = await emotion_service.get_emotion_tags(
-            end_user_id=request.group_id,
+            end_user_id=request.end_user_id,
             emotion_type=request.emotion_type,
             start_date=request.start_date,
             end_date=request.end_date,
@@ -73,7 +73,7 @@ async def get_emotion_tags(
         api_logger.info(
             "情绪标签统计获取成功",
             extra={
-                "group_id": request.group_id,
+                "end_user_id": request.end_user_id,
                 "total_count": data.get("total_count", 0),
                 "tags_count": len(data.get("tags", []))
             }
@@ -84,7 +84,7 @@ async def get_emotion_tags(
     except Exception as e:
         api_logger.error(
             f"获取情绪标签统计失败: {str(e)}",
-            extra={"group_id": request.group_id},
+            extra={"end_user_id": request.end_user_id},
             exc_info=True
         )
         raise HTTPException(
@@ -105,7 +105,7 @@ async def get_emotion_wordcloud(
         api_logger.info(
             f"用户 {current_user.username} 请求获取情绪词云数据",
             extra={
-                "group_id": request.group_id,
+                "end_user_id": request.end_user_id,
                 "emotion_type": request.emotion_type,
                 "limit": request.limit
             }
@@ -113,7 +113,7 @@ async def get_emotion_wordcloud(
 
         # 调用服务层
         data = await emotion_service.get_emotion_wordcloud(
-            end_user_id=request.group_id,
+            end_user_id=request.end_user_id,
             emotion_type=request.emotion_type,
             limit=request.limit
         )
@@ -121,7 +121,7 @@ async def get_emotion_wordcloud(
         api_logger.info(
             "情绪词云数据获取成功",
             extra={
-                "group_id": request.group_id,
+                "end_user_id": request.end_user_id,
                 "total_keywords": data.get("total_keywords", 0)
             }
         )
@@ -131,7 +131,7 @@ async def get_emotion_wordcloud(
     except Exception as e:
         api_logger.error(
             f"获取情绪词云数据失败: {str(e)}",
-            extra={"group_id": request.group_id},
+            extra={"end_user_id": request.end_user_id},
             exc_info=True
         )
         raise HTTPException(
@@ -159,21 +159,21 @@ async def get_emotion_health(
         api_logger.info(
             f"用户 {current_user.username} 请求获取情绪健康指数",
             extra={
-                "group_id": request.group_id,
+                "end_user_id": request.end_user_id,
                 "time_range": request.time_range
             }
         )
 
         # 调用服务层
         data = await emotion_service.calculate_emotion_health_index(
-            end_user_id=request.group_id,
+            end_user_id=request.end_user_id,
             time_range=request.time_range
         )
 
         api_logger.info(
             "情绪健康指数获取成功",
             extra={
-                "group_id": request.group_id,
+                "end_user_id": request.end_user_id,
                 "health_score": data.get("health_score", 0),
                 "level": data.get("level", "未知")
             }
@@ -186,7 +186,7 @@ async def get_emotion_health(
     except Exception as e:
         api_logger.error(
             f"获取情绪健康指数失败: {str(e)}",
-            extra={"group_id": request.group_id},
+            extra={"end_user_id": request.end_user_id},
             exc_info=True
         )
         raise HTTPException(
@@ -206,7 +206,7 @@ async def get_emotion_suggestions(
     """获取个性化情绪建议（从缓存读取）
 
     Args:
-        request: 包含 group_id 和可选的 config_id
+        request: 包含 end_user_id 和可选的 config_id
         db: 数据库会话
         current_user: 当前用户
 
@@ -217,22 +217,22 @@ async def get_emotion_suggestions(
         api_logger.info(
             f"用户 {current_user.username} 请求获取个性化情绪建议（缓存）",
             extra={
-                "group_id": request.group_id,
+                "end_user_id": request.end_user_id,
                 "config_id": request.config_id
             }
         )
 
         # 从缓存获取建议
         data = await emotion_service.get_cached_suggestions(
-            end_user_id=request.group_id,
+            end_user_id=request.end_user_id,
             db=db
         )
 
         if data is None:
             # 缓存不存在或已过期
             api_logger.info(
-                f"用户 {request.group_id} 的建议缓存不存在或已过期",
-                extra={"group_id": request.group_id}
+                f"用户 {request.end_user_id} 的建议缓存不存在或已过期",
+                extra={"end_user_id": request.end_user_id}
             )
             return fail(
                 BizCode.NOT_FOUND,
@@ -243,7 +243,7 @@ async def get_emotion_suggestions(
         api_logger.info(
             "个性化建议获取成功（缓存）",
             extra={
-                "group_id": request.group_id,
+                "end_user_id": request.end_user_id,
                 "suggestions_count": len(data.get("suggestions", []))
             }
         )
@@ -253,7 +253,7 @@ async def get_emotion_suggestions(
     except Exception as e:
         api_logger.error(
             f"获取个性化建议失败: {str(e)}",
-            extra={"group_id": request.group_id},
+            extra={"end_user_id": request.end_user_id},
             exc_info=True
         )
         raise HTTPException(
