@@ -5,7 +5,7 @@
 from typing import Optional
 import datetime
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends,Header
 
 from app.db import get_db
 from app.core.logging_config import get_api_logger
@@ -45,7 +45,7 @@ router = APIRouter(
 @router.get("/analytics/memory_insight/report", response_model=ApiResponse)
 async def get_memory_insight_report_api(
     end_user_id: str,
-    language_type: str = "zh",
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -82,7 +82,7 @@ async def get_memory_insight_report_api(
 @router.get("/analytics/user_summary", response_model=ApiResponse)
 async def get_user_summary_api(
     end_user_id: str,
-    language_type: str="zh",
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -385,7 +385,7 @@ async def update_end_user_profile(
             return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", error_msg)
 
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)
-async def memory_space_timeline_of_shared_memories(id: str, label: str,language_type: str="zh",
+async def memory_space_timeline_of_shared_memories(id: str, label: str,language_type: str = Header(default="zh", alias="X-Language-Type"),
                                       current_user: User = Depends(get_current_user),
                                       db: Session = Depends(get_db),
                                       ):
