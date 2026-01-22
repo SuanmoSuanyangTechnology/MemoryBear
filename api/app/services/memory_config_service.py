@@ -27,29 +27,73 @@ from uuid import UUID
 
 logger = get_logger(__name__)
 config_logger = get_config_logger()
+import uuid
+
+def _validate_config_id(config_id):
+    """Validate configuration ID format."""
+    if isinstance(config_id, uuid.UUID):
+        return config_id
+    if config_id is None:
+        raise InvalidConfigError(
+            "Configuration ID cannot be None",
+            field_name="config_id",
+            invalid_value=config_id,
+        )
+
+    if isinstance(config_id, int):
+        if config_id <= 0:
+            raise InvalidConfigError(
+                f"Configuration ID must be positive: {config_id}",
+                field_name="config_id",
+                invalid_value=config_id,
+            )
+        return config_id
+
+    if isinstance(config_id, str):
+        try:
+            parsed_id = int(config_id.strip())
+            if parsed_id <= 0:
+                raise InvalidConfigError(
+                    f"Configuration ID must be positive: {parsed_id}",
+                    field_name="config_id",
+                    invalid_value=config_id,
+                )
+            return parsed_id
+        except ValueError:
+            raise InvalidConfigError(
+                f"Invalid configuration ID format: '{config_id}'",
+                field_name="config_id",
+                invalid_value=config_id,
+            )
+
+    raise InvalidConfigError(
+        f"Invalid type for configuration ID: expected int or str, got {type(config_id).__name__}",
+        field_name="config_id",
+        invalid_value=config_id,
+    )
 
 
 class MemoryConfigService:
     """
     Centralized service for memory configuration loading and validation.
-    
+
     This class provides a single implementation of configuration loading logic
     that can be shared across multiple services, eliminating code duplication.
-    
+
     Usage:
         config_service = MemoryConfigService(db)
         memory_config = config_service.load_memory_config(config_id)
         model_config = config_service.get_model_config(model_id)
     """
-    
+
     def __init__(self, db: Session):
         """Initialize the service with a database session.
-        
+
         Args:
             db: SQLAlchemy database session
         """
         self.db = db
-    
+
     def load_memory_config(
         self,
         config_id: UUID,
@@ -57,19 +101,19 @@ class MemoryConfigService:
     ) -> MemoryConfig:
         """
         Load memory configuration from database by config_id.
-        
+
         Args:
             config_id: Configuration ID (UUID) from database
             service_name: Name of the calling service (for logging purposes)
-            
+
         Returns:
             MemoryConfig: Immutable configuration object
-            
+
         Raises:
             ConfigurationError: If validation fails
         """
         start_time = time.time()
-        
+        validated_config_id = _validate_config_id(config_id)
         config_logger.info(
             "Starting memory configuration loading",
             extra={
@@ -78,9 +122,9 @@ class MemoryConfigService:
                 "config_id": str(config_id),
             },
         )
-        
+
         logger.info(f"Loading memory configuration from database: config_id={config_id}")
-        
+
         try:
             # Validate config_id is UUID
             if not isinstance(config_id, UUID):
@@ -99,7 +143,7 @@ class MemoryConfigService:
                         field_name="config_id",
                         invalid_value=config_id,
                     )
-            
+
             # Step 1: Get config and workspace
             db_query_start = time.time()
             result = MemoryConfigRepository.get_config_with_workspace(self.db, config_id)
@@ -120,9 +164,9 @@ class MemoryConfigService:
                 raise ConfigurationError(
                     f"Configuration {config_id} not found in database"
                 )
-            
+
             memory_config, workspace = result
-            
+
             # Step 2: Validate embedding model (returns both UUID and name)
             embed_start = time.time()
             embedding_uuid, embedding_name = validate_embedding_model(
@@ -134,7 +178,7 @@ class MemoryConfigService:
             )
             embed_time = time.time() - embed_start
             logger.info(f"[PERF] Embedding validation: {embed_time:.4f}s")
-            
+
             # Step 3: Resolve LLM model
             llm_start = time.time()
             llm_uuid, llm_name = validate_and_resolve_model_id(
@@ -148,7 +192,7 @@ class MemoryConfigService:
             )
             llm_time = time.time() - llm_start
             logger.info(f"[PERF] LLM validation: {llm_time:.4f}s")
-            
+
             # Step 4: Resolve optional rerank model
             rerank_start = time.time()
             rerank_uuid = None
@@ -166,10 +210,10 @@ class MemoryConfigService:
             rerank_time = time.time() - rerank_start
             if memory_config.rerank_id:
                 logger.info(f"[PERF] Rerank validation: {rerank_time:.4f}s")
-            
+
             # Note: embedding_name is now returned from validate_embedding_model above
             # No need for redundant query!
-            
+
             # Create immutable MemoryConfig object
             config = MemoryConfig(
                 config_id=memory_config.config_id,
@@ -210,9 +254,9 @@ class MemoryConfigService:
                 pruning_scene=memory_config.pruning_scene or "education",
                 pruning_threshold=float(memory_config.pruning_threshold) if memory_config.pruning_threshold is not None else 0.5,
             )
-            
+
             elapsed_ms = (time.time() - start_time) * 1000
-            
+
             config_logger.info(
                 "Memory configuration loaded successfully",
                 extra={
@@ -225,13 +269,13 @@ class MemoryConfigService:
                     "elapsed_ms": elapsed_ms,
                 },
             )
-            
+
             logger.info(f"Memory configuration loaded successfully: {config.config_name}")
             return config
-            
+
         except Exception as e:
             elapsed_ms = (time.time() - start_time) * 1000
-            
+
             config_logger.error(
                 "Failed to load memory configuration",
                 extra={
@@ -245,7 +289,7 @@ class MemoryConfigService:
                 },
                 exc_info=True,
             )
-            
+
             logger.error(f"Failed to load memory configuration {config_id}: {e}")
             if isinstance(e, (ConfigurationError, ValueError)):
                 raise

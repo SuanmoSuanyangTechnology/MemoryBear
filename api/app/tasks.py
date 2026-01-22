@@ -383,7 +383,7 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
 
 
 @celery_app.task(name="app.core.memory.agent.read_message", bind=True)
-def read_message_task(self, end_user_id: str, message: str, history: List[Dict[str, Any]], search_switch: str, config_id: uuid.UUID, storage_type:str, user_rag_memory_id:str) -> Dict[str, Any]:
+def read_message_task(self, end_user_id: str, message: str, history: List[Dict[str, Any]], search_switch: str, config_id: str, storage_type:str, user_rag_memory_id:str) -> Dict[str, Any]:
 
     """Celery task to process a read message via MemoryAgentService.
 
@@ -392,7 +392,7 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
         message: User message to process
         history: Conversation history
         search_switch: Search switch parameter
-        config_id: Optional configuration ID
+        config_id: Configuration ID as string (will be converted to UUID)
         
     Returns:
         Dict containing the result and metadata
@@ -402,8 +402,16 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
     """
     start_time = time.time()
     
+    # Convert config_id string to UUID
+    actual_config_id = None
+    if config_id:
+        try:
+            actual_config_id = uuid.UUID(config_id) if isinstance(config_id, str) else config_id
+        except (ValueError, AttributeError):
+            # If conversion fails, leave as None and try to resolve
+            pass
+    
     # Resolve config_id if None
-    actual_config_id = config_id
     if actual_config_id is None:
         try:
             from app.services.memory_agent_service import get_end_user_connected_config
@@ -473,13 +481,13 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True)
-def write_message_task(self, end_user_id: str, message: str, config_id: uuid.UUID, storage_type:str, user_rag_memory_id:str) -> Dict[str, Any]:
+def write_message_task(self, end_user_id: str, message: str, config_id: str, storage_type:str, user_rag_memory_id:str) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     
     Args:
         end_user_id: Group ID for the memory agent (also used as end_user_id)
         message: Message to write
-        config_id: Optional configuration ID
+        config_id: Configuration ID as string (will be converted to UUID)
         
     Returns:
         Dict containing the result and metadata
@@ -493,8 +501,24 @@ def write_message_task(self, end_user_id: str, message: str, config_id: uuid.UUI
     logger.info(f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
     start_time = time.time()
     
+    # Convert config_id string to UUID
+    actual_config_id = None
+    if config_id:
+        try:
+            actual_config_id = uuid.UUID(config_id) if isinstance(config_id, str) else config_id
+            logger.info(f"[CELERY WRITE] Converted config_id to UUID: {actual_config_id} (type: {type(actual_config_id).__name__})")
+        except (ValueError, AttributeError) as e:
+            logger.error(f"[CELERY WRITE] Invalid config_id format: {config_id}, error: {e}")
+            return {
+                "status": "FAILURE",
+                "error": f"Invalid config_id format: {config_id}",
+                "end_user_id": end_user_id,
+                "config_id": config_id,
+                "elapsed_time": 0.0,
+                "task_id": self.request.id
+            }
+    
     # Resolve config_id if None
-    actual_config_id = config_id
     if actual_config_id is None:
         try:
             from app.services.memory_agent_service import get_end_user_connected_config
@@ -511,7 +535,7 @@ def write_message_task(self, end_user_id: str, message: str, config_id: uuid.UUI
     async def _run() -> str:
         db = next(get_db())
         try:
-            logger.info(f"[CELERY WRITE] Executing MemoryAgentService.write_memory")
+            logger.info(f"[CELERY WRITE] Executing MemoryAgentService.write_memory with config_id={actual_config_id} (type: {type(actual_config_id).__name__})")
             service = MemoryAgentService()
             result = await service.write_memory(end_user_id, message, actual_config_id, db, storage_type, user_rag_memory_id)
             logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
