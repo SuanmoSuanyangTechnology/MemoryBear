@@ -79,7 +79,7 @@ class MemoryAPIService:
         # Verify end_user belongs to the workspace via App relationship
         app = self.db.query(App).filter(
             App.id == end_user.app_id,
-            App.is_active == True
+            App.is_active.is_(True)
         ).first()
         
         if not app:

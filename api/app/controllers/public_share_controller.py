@@ -321,7 +321,7 @@ async def chat(
         from app.models.app_model import App
         app = db.query(App).filter(
             App.id == appid,
-            App.is_active == True
+            App.is_active.is_(True)
         ).first()
         if not app:
             raise BusinessException("应用不存在", BizCode.APP_NOT_FOUND)
