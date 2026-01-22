@@ -35,13 +35,13 @@ const PageHeader: FC<ConfigHeaderProps> = ({
         {operation}
       </div>
 
-      <Space size={12}>
-        <Button type="primary" ghost className="rb:group rb:h-6! rb:px-2!" onClick={goBack}>
+      <div className="rb:flex rb:items-center rb:gap-3">
+        <Button type="primary" ghost className="rb:h-6! rb:px-2! rb:leading-5.5!" onClick={goBack}>
           <img src={logoutIcon} className="rb:w-4 rb:h-4" />
           {t('common.return')}
         </Button>
         {extra}
-      </Space>
+      </div>
     </Header>
   );
 };
