@@ -22,12 +22,12 @@ class DialogueChunker:
 
         Args:
             chunker_strategy: The chunking strategy to use (default: RecursiveChunker)
-                             Options include: SemanticChunker, RecursiveChunker, LateChunker, NeuralChunker
+                             Options: SemanticChunker, RecursiveChunker, LateChunker, NeuralChunker
         """
         self.chunker_strategy = chunker_strategy
         chunker_config_dict = get_chunker_config(chunker_strategy)
         self.chunker_config = ChunkerConfig.model_validate(chunker_config_dict)
-        # 对于 LLMChunker，需要传入 llm_client
+        
         if self.chunker_config.chunker_strategy == "LLMChunker":
             self.chunker_client = ChunkerClient(self.chunker_config, llm_client)
         else:
@@ -41,29 +41,19 @@ class DialogueChunker:
 
         Returns:
             A list of Chunk objects
+
+        Raises:
+            ValueError: If chunking fails or returns empty chunks
         """
         result_dialogue = await self.chunker_client.generate_chunks(dialogue)
-        # Defensive fallback: ensure at least one chunk is returned for non-empty content
-        try:
-            chunks = result_dialogue.chunks
-        except Exception:
-            chunks = []
+        chunks = result_dialogue.chunks
 
         if not chunks or len(chunks) == 0:
-            # If the dialogue has content, return a single fallback chunk built from messages
-            content_str = getattr(result_dialogue, "content", "") or getattr(dialogue, "content", "")
-            if content_str and len(content_str.strip()) > 0:
-                fallback_chunk = Chunk.from_messages(
-                    dialogue.context.msgs,
-                    metadata={
-                        "fallback": "single_chunk",
-                        "chunker_strategy": self.chunker_config.chunker_strategy,
-                        "source": "DialogueChunkerFallback",
-                    },
-                )
-                return [fallback_chunk]
-            # No content: return empty list
-            return []
+            raise ValueError(
+                f"Chunking failed: No chunks generated for dialogue {dialogue.ref_id}. "
+                f"Messages: {len(dialogue.context.msgs) if dialogue.context else 0}, "
+                f"Strategy: {self.chunker_config.chunker_strategy}"
+            )
 
         return chunks
 
@@ -72,22 +62,25 @@ class DialogueChunker:
 
         Args:
             dialogue: The processed DialogData object with chunks
-            output_path: Optional path to save the output (default: chunker_output_{strategy}.txt)
+            output_path: Optional path to save the output
 
         Returns:
             The path where the output was saved
         """
         if not output_path:
-            output_path = os.path.join(os.path.dirname(__file__), "..", "..",
-                                      f"chunker_output_{self.chunker_strategy.lower()}.txt")
+            output_path = os.path.join(
+                os.path.dirname(__file__), "..", "..",
+                f"chunker_output_{self.chunker_strategy.lower()}.txt"
+            )
 
-        output_lines = []
-        output_lines.append(f"=== Chunking Results ({self.chunker_strategy}) ===")
-        output_lines.append(f"Dialogue ID: {dialogue.ref_id}")
-        output_lines.append(f"Original conversation has {len(dialogue.context.msgs)} messages")
-        output_lines.append(f"Total characters: {len(dialogue.content)}")
-
-        output_lines.append(f"Generated {len(dialogue.chunks)} chunks:")
+        output_lines = [
+            f"=== Chunking Results ({self.chunker_strategy}) ===",
+            f"Dialogue ID: {dialogue.ref_id}",
+            f"Original conversation has {len(dialogue.context.msgs)} messages",
+            f"Total characters: {len(dialogue.content)}",
+            f"Generated {len(dialogue.chunks)} chunks:"
+        ]
+        
         for i, chunk in enumerate(dialogue.chunks):
             output_lines.append(f"  Chunk {i+1}: {len(chunk.content)} characters")
             output_lines.append(f"    Content preview: {chunk.content}...")

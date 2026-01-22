@@ -550,7 +550,7 @@ class ExtractionOrchestrator:
         self, dialog_data_list: List[DialogData]
     ) -> List[Dict[str, Any]]:
         """
-        从对话中提取情绪信息（优化版：全局陈述句级并行）
+        从对话中提取情绪信息（仅针对用户消息，全局陈述句级并行）
 
         Args:
             dialog_data_list: 对话数据列表
@@ -558,7 +558,7 @@ class ExtractionOrchestrator:
         Returns:
             情绪信息映射列表，每个对话对应一个字典
         """
-        logger.info("开始情绪信息提取（全局陈述句级并行）")
+        logger.info("开始情绪信息提取（仅处理用户消息）")
 
         # 收集所有陈述句及其配置
         all_statements = []
@@ -597,15 +597,22 @@ class ExtractionOrchestrator:
         if not data_config or not data_config.emotion_enabled:
             logger.info("情绪提取未启用，跳过")
             return [{} for _ in dialog_data_list]
+
+        # 收集所有陈述句（只收集 speaker 为 "user" 的）
+        total_statements = 0
+        filtered_statements = 0
         
-        # 收集所有陈述句
         for d_idx, dialog in enumerate(dialog_data_list):
             for chunk in dialog.chunks:
                 for statement in chunk.statements:
-                    all_statements.append((statement, data_config))
-                    statement_metadata.append((d_idx, statement.id))
+                    total_statements += 1
+                    # 只处理用户的陈述句 (role 为 "user")
+                    if hasattr(statement, 'speaker') and statement.speaker == "user":
+                        all_statements.append((statement, data_config))
+                        statement_metadata.append((d_idx, statement.id))
+                        filtered_statements += 1
 
-        logger.info(f"收集到 {len(all_statements)} 个陈述句，开始全局并行提取情绪")
+        logger.info(f"总陈述句: {total_statements}, 用户陈述句: {filtered_statements}, 开始全局并行提取情绪")
 
         # 初始化情绪提取服务
         from app.services.emotion_extraction_service import EmotionExtractionService
@@ -1033,6 +1040,7 @@ class ExtractionOrchestrator:
                         apply_id=dialog_data.apply_id,
                         run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                         statement=statement.statement,
+                        speaker=getattr(statement, 'speaker', None),  # 添加 speaker 字段
                         statement_embedding=statement.statement_embedding,
                         valid_at=statement.temporal_validity.valid_at if hasattr(statement, 'temporal_validity') and statement.temporal_validity else None,
                         invalid_at=statement.temporal_validity.invalid_at if hasattr(statement, 'temporal_validity') and statement.temporal_validity else None,

@@ -5,8 +5,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core.memory.models.message_models import DialogData, Statement
-
-#避免在测试收集阶段因为 OpenAIClient 间接引入 langfuse 导致 ModuleNotFoundError 。这只是类型注解与导入时机的调整，不改变实现。
 from app.core.memory.models.variate_config import StatementExtractionConfig
 from app.core.memory.utils.data.ontology import (
     LABEL_DEFINITIONS,
@@ -22,11 +20,10 @@ logger = logging.getLogger(__name__)
 class ExtractedStatement(BaseModel):
     """Schema for extracted statement from LLM"""
     statement: str = Field(..., description="The extracted statement text")
-    statement_type: str = Field(..., description="FACT, OPINION,SUGGESTION or PREDICTION")
+    statement_type: str = Field(..., description="FACT, OPINION, SUGGESTION or PREDICTION")
     temporal_type: str = Field(..., description="STATIC, DYNAMIC, ATEMPORAL")
     relevence: str = Field(..., description="RELEVANT or IRRELEVANT")
 
-# 统一使用 StatementExtractionResponse 作为 LLM 的结构化返回（仅语句）
 class StatementExtractionResponse(BaseModel):
     statements: List[ExtractedStatement] = Field(default_factory=list, description="List of extracted statements")
     
@@ -58,10 +55,9 @@ class StatementExtractionResponse(BaseModel):
         return v
 
 class StatementExtractor:
-    """Class for extracting statements from dialog chunks using LLM (relations separated)"""
+    """Class for extracting statements from dialog chunks using LLM"""
 
     def __init__(self, llm_client: Any, config: StatementExtractionConfig = None):
-        # 避免在测试收集阶段因为 OpenAIClient 间接引入 langfuse 导致 ModuleNotFoundError 。这只是类型注解与导入时机的调整，不改变实现。
         """Initialize the StatementExtractor with an LLM client and configuration
 
         Args:
@@ -70,6 +66,21 @@ class StatementExtractor:
         """
         self.llm_client = llm_client
         self.config = config or StatementExtractionConfig()
+
+    def _get_speaker_from_chunk(self, chunk) -> Optional[str]:
+        """Get speaker directly from Chunk
+        
+        Args:
+            chunk: Chunk object containing speaker field
+            
+        Returns:
+            Speaker role ("user"/"assistant") or None if cannot be determined
+        """
+        if hasattr(chunk, 'speaker') and chunk.speaker:
+            return chunk.speaker
+        
+        logger.warning(f"Chunk {getattr(chunk, 'id', 'unknown')} has no speaker field or is empty")
+        return None
 
     async def _extract_statements(self, chunk, group_id: Optional[str] = None, dialogue_content: str = None) -> List[Statement]:
         """Process a single chunk and return extracted statements
@@ -82,10 +93,12 @@ class StatementExtractor:
         Returns:
             List of ExtractedStatement objects extracted from the chunk
         """
-        # Prepare the chunk content for processing
         chunk_content = chunk.content
+        
+        if not chunk_content or len(chunk_content.strip()) < 5:
+            logger.warning(f"Chunk {chunk.id} content too short or empty, skipping")
+            return []
 
-        # Render the prompt using helper function
         prompt_content = await render_statement_extraction_prompt(
             chunk_content=chunk_content,
             definitions=LABEL_DEFINITIONS,
@@ -136,7 +149,9 @@ class StatementExtractor:
                     relevence_info = RelevenceInfo[relevence_str] if relevence_str in RelevenceInfo.__members__ else RelevenceInfo.RELEVANT
                 except (KeyError, ValueError):
                     relevence_info = RelevenceInfo.RELEVANT
-
+               
+                chunk_speaker = self._get_speaker_from_chunk(chunk)
+            
                 chunk_statement = Statement(
                     statement=extracted_stmt.statement,
                     stmt_type=stmt_type,
@@ -144,7 +159,9 @@ class StatementExtractor:
                     relevence_info=relevence_info,
                     chunk_id=chunk.id,
                     group_id=group_id,
+                    speaker=chunk_speaker,
                 )
+                
                 chunk_statements.append(chunk_statement)
 
             # 分离强弱关系分类：不在句子提取阶段进行，也不写入 chunk.metadata
@@ -226,12 +243,7 @@ class StatementExtractor:
         return output_path
 
     def save_relations(self, dialogs: List[DialogData], output_path: str = None) -> str:
-        """按对话分组聚合强/弱关系并写入 TXT 文件。
-        - 每个对话单独成段：输出该对话的 `Dialog ID`、`Group ID`、`Content`
-        - 在该对话段内再分为 Strong Relations / Weak Relations 两部分
-        - Strong: 逐条输出 `Chunk ID` 与 `Triple`
-        - Weak: 逐条输出 `Chunk ID` 与 `Entity`
-        """
+        """Group and aggregate strong/weak relations by dialogue and write to TXT file."""
         print("\n=== Relations Classify ===")
 
         # 使用全局配置的输出路径

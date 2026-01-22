@@ -12,6 +12,7 @@ from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
 from app.core.api_key_utils import timestamp_to_datetime
+from app.services.memory_base_service import Translation_English
 from app.services.user_memory_service import (
     UserMemoryService,
     analytics_memory_types,
@@ -20,7 +21,7 @@ from app.services.user_memory_service import (
 from app.services.memory_entity_relationship_service import MemoryEntityService,MemoryEmotion,MemoryInteraction
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import GenerateCacheRequest
-
+from app.repositories.workspace_repository import WorkspaceRepository
 from app.schemas.end_user_schema import (
     EndUserProfileResponse,
     EndUserProfileUpdate,
@@ -44,6 +45,7 @@ router = APIRouter(
 @router.get("/analytics/memory_insight/report", response_model=ApiResponse)
 async def get_memory_insight_report_api(
     end_user_id: str,
+    language_type: str = "zh",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -53,10 +55,18 @@ async def get_memory_insight_report_api(
     此接口仅查询数据库中已缓存的记忆洞察数据，不执行生成操作。
     如需生成新的洞察报告，请使用专门的生成接口。
     """
+    workspace_id = current_user.current_workspace_id
+    workspace_repo = WorkspaceRepository(db)
+    workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
+
+    if workspace_models:
+        model_id = workspace_models.get("llm", None)
+    else:
+        model_id = None
     api_logger.info(f"记忆洞察报告查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
         # 调用服务层获取缓存数据
-        result = await user_memory_service.get_cached_memory_insight(db, end_user_id)
+        result = await user_memory_service.get_cached_memory_insight(db, end_user_id,model_id,language_type)
 
         if result["is_cached"]:
             api_logger.info(f"成功返回缓存的记忆洞察报告: end_user_id={end_user_id}")
@@ -72,6 +82,7 @@ async def get_memory_insight_report_api(
 @router.get("/analytics/user_summary", response_model=ApiResponse)
 async def get_user_summary_api(
     end_user_id: str,
+    language_type: str="zh",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -81,10 +92,18 @@ async def get_user_summary_api(
     此接口仅查询数据库中已缓存的用户摘要数据，不执行生成操作。
     如需生成新的用户摘要，请使用专门的生成接口。
     """
+    workspace_id = current_user.current_workspace_id
+    workspace_repo = WorkspaceRepository(db)
+    workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
+
+    if workspace_models:
+        model_id = workspace_models.get("llm", None)
+    else:
+        model_id = None
     api_logger.info(f"用户摘要查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
         # 调用服务层获取缓存数据
-        result = await user_memory_service.get_cached_user_summary(db, end_user_id)
+        result = await user_memory_service.get_cached_user_summary(db, end_user_id,model_id,language_type)
 
         if result["is_cached"]:
             api_logger.info(f"成功返回缓存的用户摘要: end_user_id={end_user_id}")
@@ -253,7 +272,6 @@ async def get_graph_data_api(
             depth=depth,
             center_node_id=center_node_id
         )
-
         # 检查是否有错误消息
         if "message" in result and result["statistics"]["total_nodes"] == 0:
             api_logger.warning(f"图数据查询返回空结果: {result.get('message')}")
@@ -278,7 +296,13 @@ async def get_end_user_profile(
     db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
+    workspace_repo = WorkspaceRepository(db)
+    workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
 
+    if workspace_models:
+        model_id = workspace_models.get("llm", None)
+    else:
+        model_id = None
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试查询用户信息但未选择工作空间")
@@ -296,7 +320,6 @@ async def get_end_user_profile(
         if not end_user:
             api_logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
             return fail(BizCode.INVALID_PARAMETER, "终端用户不存在", f"end_user_id={end_user_id}")
-
         # 构建响应数据
         profile_data = EndUserProfileResponse(
             id=end_user.id,
@@ -328,12 +351,11 @@ async def update_end_user_profile(
 
     该接口可以更新用户的姓名、职位、部门、联系方式、电话和入职日期等信息。
     所有字段都是可选的，只更新提供的字段。
-
     """
     workspace_id = current_user.current_workspace_id
     end_user_id = profile_update.end_user_id
 
-    # 检查用户是否已选择工作空间
+    # 验证工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新用户信息但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
@@ -343,65 +365,41 @@ async def update_end_user_profile(
         f"workspace={workspace_id}"
     )
 
-    try:
-        # 查询终端用户
-        end_user = db.query(EndUser).filter(EndUser.id == end_user_id).first()
+    # 调用 Service 层处理业务逻辑
+    result = user_memory_service.update_end_user_profile(db, end_user_id, profile_update)
 
-        if not end_user:
-            api_logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
-            return fail(BizCode.INVALID_PARAMETER, "终端用户不存在", f"end_user_id={end_user_id}")
-
-        # 更新字段（只更新提供的字段，排除 end_user_id）
-        # 允许 None 值来重置字段（如 hire_date）
-        update_data = profile_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
-
-        # 特殊处理 hire_date：如果提供了时间戳，转换为 DateTime
-        if 'hire_date' in update_data:
-            hire_date_timestamp = update_data['hire_date']
-            if hire_date_timestamp is not None:
-                update_data['hire_date'] = timestamp_to_datetime(hire_date_timestamp)
-            # 如果是 None，保持 None（允许清空）
-
-        for field, value in update_data.items():
-            setattr(end_user, field, value)
-
-        # 更新 updated_at 时间戳
-        end_user.updated_at = datetime.datetime.now()
-
-        # 更新 updatetime_profile 为当前时间
-        end_user.updatetime_profile = datetime.datetime.now()
-
-        # 提交更改
-        db.commit()
-        db.refresh(end_user)
-
-        # 构建响应数据
-        profile_data = EndUserProfileResponse(
-            id=end_user.id,
-            other_name=end_user.other_name,
-            position=end_user.position,
-            department=end_user.department,
-            contact=end_user.contact,
-            phone=end_user.phone,
-            hire_date=end_user.hire_date,
-            updatetime_profile=end_user.updatetime_profile
-        )
-
-        api_logger.info(f"成功更新用户信息: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
-        return success(data=UserMemoryService.convert_profile_to_dict_with_timestamp(profile_data), msg="更新成功")
-
-    except Exception as e:
-        db.rollback()
-        api_logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", str(e))
+    if result["success"]:
+        api_logger.info(f"成功更新用户信息: end_user_id={end_user_id}")
+        return success(data=result["data"], msg="更新成功")
+    else:
+        error_msg = result["error"]
+        api_logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={error_msg}")
+        
+        # 根据错误类型映射到合适的业务错误码
+        if error_msg == "终端用户不存在":
+            return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", error_msg)
+        elif error_msg == "无效的用户ID格式":
+            return fail(BizCode.INVALID_USER_ID, "无效的用户ID格式", error_msg)
+        else:
+            # 只有未预期的错误才使用 INTERNAL_ERROR
+            return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", error_msg)
 
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)
-async def memory_space_timeline_of_shared_memories(id: str, label: str,
+async def memory_space_timeline_of_shared_memories(id: str, label: str,language_type: str="zh",
                                       current_user: User = Depends(get_current_user),
                                       db: Session = Depends(get_db),
                                       ):
+    workspace_id=current_user.current_workspace_id
+    workspace_repo = WorkspaceRepository(db)
+    workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
+
+    if workspace_models:
+        model_id = workspace_models.get("llm", None)
+    else:
+        model_id = None
     MemoryEntity = MemoryEntityService(id, label)
-    timeline_memories_result = await MemoryEntity.get_timeline_memories_server()
+    timeline_memories_result = await MemoryEntity.get_timeline_memories_server(model_id, language_type)
+
     return success(data=timeline_memories_result, msg="共同记忆时间线")
 @router.get("/memory_space/relationship_evolution", response_model=ApiResponse)
 async def memory_space_relationship_evolution(id: str, label: str,

@@ -18,7 +18,7 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
 from app.services.implicit_memory_service import ImplicitMemoryService
-from app.services.memory_base_service import MemoryBaseService
+from app.services.memory_base_service import MemoryBaseService, MemoryTransService, Translation_English
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_perceptual_service import MemoryPerceptualService
 from app.services.memory_short_service import ShortService
@@ -357,10 +357,107 @@ class UserMemoryService:
                     data[key] = UserMemoryService._datetime_to_timestamp(original_value)
         return data
     
+    def update_end_user_profile(
+        self,
+        db: Session,
+        end_user_id: str,
+        profile_update: Any
+    ) -> Dict[str, Any]:
+        """
+        更新终端用户的基本信息
+        
+        Args:
+            db: 数据库会话
+            end_user_id: 终端用户ID (UUID)
+            profile_update: 包含更新字段的 Pydantic 模型
+            
+        Returns:
+            {
+                "success": bool,
+                "data": dict,  # 更新后的用户档案数据
+                "error": Optional[str]
+            }
+        """
+        try:
+            # 转换为UUID并查询用户
+            user_uuid = uuid.UUID(end_user_id)
+            repo = EndUserRepository(db)
+            end_user = repo.get_by_id(user_uuid)
+            
+            if not end_user:
+                logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "终端用户不存在"
+                }
+            
+            # 获取更新数据（排除 end_user_id 字段）
+            update_data = profile_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
+            
+            # 特殊处理 hire_date：如果提供了时间戳，转换为 DateTime
+            if 'hire_date' in update_data:
+                hire_date_timestamp = update_data['hire_date']
+                if hire_date_timestamp is not None:
+                    from app.core.api_key_utils import timestamp_to_datetime
+                    update_data['hire_date'] = timestamp_to_datetime(hire_date_timestamp)
+                # 如果是 None，保持 None（允许清空）
+            
+            # 更新字段
+            for field, value in update_data.items():
+                setattr(end_user, field, value)
+            
+            # 更新时间戳
+            end_user.updated_at = datetime.now()
+            end_user.updatetime_profile = datetime.now()
+            
+            # 提交更改
+            db.commit()
+            db.refresh(end_user)
+            
+            # 构建响应数据
+            from app.schemas.end_user_schema import EndUserProfileResponse
+            profile_data = EndUserProfileResponse(
+                id=end_user.id,
+                other_name=end_user.other_name,
+                position=end_user.position,
+                department=end_user.department,
+                contact=end_user.contact,
+                phone=end_user.phone,
+                hire_date=end_user.hire_date,
+                updatetime_profile=end_user.updatetime_profile
+            )
+            
+            logger.info(f"成功更新用户信息: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
+            
+            return {
+                "success": True,
+                "data": self.convert_profile_to_dict_with_timestamp(profile_data),
+                "error": None
+            }
+            
+        except ValueError:
+            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
+            return {
+                "success": False,
+                "data": None,
+                "error": "无效的用户ID格式"
+            }
+        except Exception as e:
+            db.rollback()
+            logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={str(e)}")
+            return {
+                "success": False,
+                "data": None,
+                "error": str(e)
+            }
+    
     async def get_cached_memory_insight(
         self, 
         db: Session, 
-        end_user_id: str
+        end_user_id: str,
+        model_id: str,
+        language_type: str
     ) -> Dict[str, Any]:
         """
         从数据库获取缓存的记忆洞察（四个维度）
@@ -419,11 +516,18 @@ class UserMemoryService:
                     key_findings_array = []
                 
                 logger.info(f"成功获取 end_user_id {end_user_id} 的缓存记忆洞察（四维度）")
+                memory_insight=end_user.memory_insight
+                behavior_pattern=end_user.behavior_pattern
+                growth_trajectory=end_user.growth_trajectory
+                if language_type!='zh':
+                    memory_insight=await Translation_English(model_id,memory_insight)
+                    behavior_pattern=await Translation_English(model_id,behavior_pattern)
+                    growth_trajectory=await Translation_English(model_id,growth_trajectory)
                 return {
-                    "memory_insight": end_user.memory_insight,  # 总体概述存储在 memory_insight
-                    "behavior_pattern": end_user.behavior_pattern,
+                    "memory_insight":memory_insight,  # 总体概述存储在 memory_insight
+                    "behavior_pattern":behavior_pattern,
                     "key_findings": key_findings_array,  # 返回数组
-                    "growth_trajectory": end_user.growth_trajectory,
+                    "growth_trajectory": growth_trajectory,
                     "updated_at": self._datetime_to_timestamp(end_user.memory_insight_updated_at),
                     "is_cached": True
                 }
@@ -457,7 +561,9 @@ class UserMemoryService:
     async def get_cached_user_summary(
         self, 
         db: Session, 
-        end_user_id: str
+        end_user_id: str,
+        model_id:str,
+        language_type:str="zh"
     ) -> Dict[str, Any]:
         """
         从数据库获取缓存的用户摘要（四个部分）
@@ -481,7 +587,6 @@ class UserMemoryService:
             user_uuid = uuid.UUID(end_user_id)
             repo = EndUserRepository(db)
             end_user = repo.get_by_id(user_uuid)
-            
             if not end_user:
                 logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
                 return {
@@ -495,20 +600,29 @@ class UserMemoryService:
                 }
             
             # 检查是否有缓存数据（至少有一个字段不为空）
+            user_summary=end_user.user_summary
+            personality_traits=end_user.personality_traits
+            core_values=end_user.core_values
+            one_sentence_summary=end_user.one_sentence_summary
+            if language_type!='zh':
+                user_summary=await Translation_English(model_id, user_summary)
+                personality_traits = await Translation_English(model_id, personality_traits)
+                core_values = await Translation_English(model_id, core_values)
+                one_sentence_summary = await Translation_English(model_id, one_sentence_summary)
             has_cache = any([
-                end_user.user_summary,
-                end_user.personality_traits,
-                end_user.core_values,
-                end_user.one_sentence_summary
+                user_summary,
+                personality_traits,
+                core_values,
+                one_sentence_summary
             ])
             
             if has_cache:
                 logger.info(f"成功获取 end_user_id {end_user_id} 的缓存用户摘要")
                 return {
-                    "user_summary": end_user.user_summary,
-                    "personality": end_user.personality_traits,
-                    "core_values": end_user.core_values,
-                    "one_sentence": end_user.one_sentence_summary,
+                    "user_summary": user_summary,
+                    "personality": personality_traits,
+                    "core_values":core_values,
+                    "one_sentence": one_sentence_summary,
                     "updated_at": self._datetime_to_timestamp(end_user.user_summary_updated_at),
                     "is_cached": True
                 }
@@ -1367,7 +1481,6 @@ async def analytics_memory_types(
     
     return memory_types
 
-
 async def analytics_graph_data(
     db: Session,
     end_user_id: str,
@@ -1557,7 +1670,7 @@ async def analytics_graph_data(
             f"成功获取图数据: end_user_id={end_user_id}, "
             f"nodes={len(nodes)}, edges={len(edges)}"
         )
-        
+
         return {
             "nodes": nodes,
             "edges": edges,
@@ -1606,11 +1719,7 @@ async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_
     
     # 获取该节点类型的白名单字段
     allowed_fields = field_whitelist.get(label, [])
-    
-    # 如果没有定义白名单，返回空字典（或者可以返回所有字段）
-    # if not allowed_fields:
-    #     # 对于未定义的节点类型，只返回基本字段
-    #     allowed_fields = ["name", "created_at", "caption"]
+
     count_neo4j=f"""MATCH (n)-[r]-(m) WHERE elementId(n) ="{node_id}" RETURN count(r) AS rel_count;"""
     node_results = await (_neo4j_connector.execute_query(count_neo4j))
     # 提取白名单中的字段
@@ -1618,13 +1727,12 @@ async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_
     for field in allowed_fields:
         if field in properties:
             value = properties[field]
-            if str(field) == 'entity_type':
+            if  str(field) == 'entity_type':
                 value=type_mapping.get(value,'')
             if str(field)=="emotion_type":
                 value=EmotionType.EMOTION_MAPPING.get(value)
-            if str(field)=="emotion_subject":
+            if  str(field)=="emotion_subject":
                 value=EmotionSubject.SUBJECT_MAPPING.get(value)
-            # 清理 Neo4j 特殊类型
             filtered_props[field] = _clean_neo4j_value(value)
     filtered_props['associative_memory']=[i['rel_count'] for i in node_results][0]
     return filtered_props
