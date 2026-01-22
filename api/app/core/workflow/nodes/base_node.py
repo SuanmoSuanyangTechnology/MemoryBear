@@ -9,7 +9,6 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator
 
-from langchain_core.messages import AIMessage
 from langgraph.config import get_stream_writer
 from typing_extensions import TypedDict, Annotated
 
