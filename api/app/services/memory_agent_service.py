@@ -564,7 +564,7 @@ class MemoryAgentService:
                         # 使用 upsert 方法
                         repo.upsert(
                             end_user_id=end_user_id,
-                            messages=message,
+                            messages=ori_message,
                             aimessages=summary,
                             retrieved_content=retrieved_content,
                             search_switch=str(search_switch)

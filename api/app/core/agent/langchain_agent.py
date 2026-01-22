@@ -145,33 +145,36 @@ class LangChainAgent:
         messages.append(HumanMessage(content=user_content))
 
         return messages
-    async def term_memory_save(self,messages,end_user_end,aimessages):
-        '''短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j'''
-        end_user_end=f"Term_{end_user_end}"
-        print(messages)
-        print(aimessages)
-        session_id = store.save_session(
-                        userid=end_user_end,
-                        messages=messages,
-                        apply_id=end_user_end,
-                        end_user_id=end_user_end,
-                        aimessages=aimessages
-                    )
-        store.delete_duplicate_sessions()
-        # logger.info(f'Redis_Agent:{end_user_end};{session_id}')
-        return session_id
-    async def term_memory_redis_read(self,end_user_end):
-        end_user_end = f"Term_{end_user_end}"
-        history = store.find_user_apply_group(end_user_end, end_user_end, end_user_end)
-        # logger.info(f'Redis_Agent:{end_user_end};{history}')
-        messagss_list=[]
-        retrieved_content=[]
-        for messages in history:
-            query = messages.get("Query")
-            aimessages = messages.get("Answer")
-            messagss_list.append(f'用户:{query}。AI回复:{aimessages}')
-            retrieved_content.append({query: aimessages})
-        return messagss_list,retrieved_content
+# TODO 乐力齐 - 累积多组对话批量写入功能已禁用
+    # async def term_memory_save(self,messages,end_user_end,aimessages):
+    #     '''短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j'''
+    #     end_user_end=f"Term_{end_user_end}"
+    #     print(messages)
+    #     print(aimessages)
+    #     session_id = store.save_session(
+    #                     userid=end_user_end,
+    #                     messages=messages,
+    #                     apply_id=end_user_end,
+    #                     group_id=end_user_end,
+    #                     aimessages=aimessages
+    #                 )
+    #     store.delete_duplicate_sessions()
+    #     # logger.info(f'Redis_Agent:{end_user_end};{session_id}')
+    #     return session_id
+
+# TODO 乐力齐 - 累积多组对话批量写入功能已禁用
+    # async def term_memory_redis_read(self,end_user_end):
+    #     end_user_end = f"Term_{end_user_end}"
+    #     history = store.find_user_apply_group(end_user_end, end_user_end, end_user_end)
+    #     # logger.info(f'Redis_Agent:{end_user_end};{history}')
+    #     messagss_list=[]
+    #     retrieved_content=[]
+    #     for messages in history:
+    #         query = messages.get("Query")
+    #         aimessages = messages.get("Answer")
+    #         messagss_list.append(f'用户:{query}。AI回复:{aimessages}')
+    #         retrieved_content.append({query: aimessages})
+    #     return messagss_list,retrieved_content
 
     async def write(self, storage_type, end_user_id, user_message, ai_message, user_rag_memory_id, actual_end_user_id, actual_config_id):
         """

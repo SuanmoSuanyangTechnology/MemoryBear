@@ -30,9 +30,10 @@ config_logger = get_config_logger()
 import uuid
 
 def _validate_config_id(config_id):
-    """Validate configuration ID format."""
+    """Validate configuration ID format (supports both UUID and integer)."""
     if isinstance(config_id, uuid.UUID):
         return config_id
+    
     if config_id is None:
         raise InvalidConfigError(
             "Configuration ID cannot be None",
@@ -50,8 +51,17 @@ def _validate_config_id(config_id):
         return config_id
 
     if isinstance(config_id, str):
+        config_id_stripped = config_id.strip()
+        
+        # Try parsing as UUID first
         try:
-            parsed_id = int(config_id.strip())
+            return uuid.UUID(config_id_stripped)
+        except ValueError:
+            pass
+        
+        # Fall back to integer parsing
+        try:
+            parsed_id = int(config_id_stripped)
             if parsed_id <= 0:
                 raise InvalidConfigError(
                     f"Configuration ID must be positive: {parsed_id}",
@@ -61,13 +71,13 @@ def _validate_config_id(config_id):
             return parsed_id
         except ValueError:
             raise InvalidConfigError(
-                f"Invalid configuration ID format: '{config_id}'",
+                f"Invalid configuration ID format: '{config_id}' (must be UUID or positive integer)",
                 field_name="config_id",
                 invalid_value=config_id,
             )
 
     raise InvalidConfigError(
-        f"Invalid type for configuration ID: expected int or str, got {type(config_id).__name__}",
+        f"Invalid type for configuration ID: expected UUID, int or str, got {type(config_id).__name__}",
         field_name="config_id",
         invalid_value=config_id,
     )
@@ -113,7 +123,7 @@ class MemoryConfigService:
             ConfigurationError: If validation fails
         """
         start_time = time.time()
-        validated_config_id = _validate_config_id(config_id)
+
         config_logger.info(
             "Starting memory configuration loading",
             extra={
@@ -126,27 +136,11 @@ class MemoryConfigService:
         logger.info(f"Loading memory configuration from database: config_id={config_id}")
 
         try:
-            # Validate config_id is UUID
-            if not isinstance(config_id, UUID):
-                if isinstance(config_id, str):
-                    try:
-                        config_id = UUID(config_id)
-                    except ValueError:
-                        raise InvalidConfigError(
-                            f"Invalid UUID format for config_id: {config_id}",
-                            field_name="config_id",
-                            invalid_value=config_id,
-                        )
-                else:
-                    raise InvalidConfigError(
-                        f"config_id must be UUID or valid UUID string, got {type(config_id).__name__}",
-                        field_name="config_id",
-                        invalid_value=config_id,
-                    )
+            validated_config_id = _validate_config_id(config_id)
 
             # Step 1: Get config and workspace
             db_query_start = time.time()
-            result = MemoryConfigRepository.get_config_with_workspace(self.db, config_id)
+            result = MemoryConfigRepository.get_config_with_workspace(self.db, validated_config_id)
             db_query_time = time.time() - db_query_start
             logger.info(f"[PERF] Config+Workspace query: {db_query_time:.4f}s")
             if not result:
@@ -170,7 +164,7 @@ class MemoryConfigService:
             # Step 2: Validate embedding model (returns both UUID and name)
             embed_start = time.time()
             embedding_uuid, embedding_name = validate_embedding_model(
-                config_id,
+                validated_config_id,
                 memory_config.embedding_id,
                 self.db,
                 workspace.tenant_id,
@@ -187,7 +181,7 @@ class MemoryConfigService:
                 self.db,
                 workspace.tenant_id,
                 required=True,
-                config_id=config_id,
+                config_id=validated_config_id,
                 workspace_id=workspace.id,
             )
             llm_time = time.time() - llm_start
@@ -204,7 +198,7 @@ class MemoryConfigService:
                     self.db,
                     workspace.tenant_id,
                     required=False,
-                    config_id=config_id,
+                    config_id=validated_config_id,
                     workspace_id=workspace.id,
                 )
             rerank_time = time.time() - rerank_start
@@ -262,7 +256,7 @@ class MemoryConfigService:
                 extra={
                     "operation": "load_memory_config",
                     "service": service_name,
-                    "config_id": str(config_id),
+                    "config_id": validated_config_id,
                     "config_name": config.config_name,
                     "workspace_id": str(config.workspace_id),
                     "load_result": "success",

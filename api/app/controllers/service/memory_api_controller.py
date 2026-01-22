@@ -50,7 +50,6 @@ async def write_memory_api_service(
         config_id=payload.config_id,
         storage_type=payload.storage_type,
         user_rag_memory_id=payload.user_rag_memory_id,
-        tenant_id=api_key_auth.tenant_id,
     )
     
     logger.info(f"Memory write successful for end_user: {payload.end_user_id}")

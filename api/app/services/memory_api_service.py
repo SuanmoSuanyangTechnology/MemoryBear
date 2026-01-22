@@ -139,7 +139,7 @@ class MemoryAPIService:
             # Delegate to MemoryAgentService
             result = await MemoryAgentService().write_memory(
                 end_user_id=end_user_id,
-                message=message,
+                messages=message,
                 config_id=config_id,
                 db=self.db,
                 storage_type=storage_type,

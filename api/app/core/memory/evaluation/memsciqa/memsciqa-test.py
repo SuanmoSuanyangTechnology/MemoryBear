@@ -33,7 +33,7 @@ from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.utils.config.definitions import (
     PROJECT_ROOT,
     SELECTED_EMBEDDING_ID,
-    SELECTED_end_user_id,
+    SELECTED_GROUP_ID,
     SELECTED_LLM_ID,
 )
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory

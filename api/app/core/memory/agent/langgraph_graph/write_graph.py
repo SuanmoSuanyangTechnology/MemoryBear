@@ -34,11 +34,17 @@ async def make_write_graph():
         end_user_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
     """
+    # workflow = StateGraph(WriteState)
+    # workflow.add_node("content_input", content_input_write)
+    # workflow.add_node("save_neo4j", write_node)
+    # workflow.add_edge(START, "content_input")
+    # workflow.add_edge("content_input", "save_neo4j")
+    # workflow.add_edge("save_neo4j", END)
+    #
+    # graph = workflow.compile()
     workflow = StateGraph(WriteState)
-    workflow.add_node("content_input", content_input_write)
     workflow.add_node("save_neo4j", write_node)
-    workflow.add_edge(START, "content_input")
-    workflow.add_edge("content_input", "save_neo4j")
+    workflow.add_edge(START, "save_neo4j")
     workflow.add_edge("save_neo4j", END)
 
     graph = workflow.compile()

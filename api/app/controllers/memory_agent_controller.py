@@ -223,9 +223,12 @@ async def write_server_async(
         if knowledge: user_rag_memory_id = str(knowledge.id)
     api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     try:
+        # 获取标准化的消息列表
+        messages_list = memory_agent_service.get_messages_list(user_input)
+
         task = celery_app.send_task(
             "app.core.memory.agent.write_message",
-            args=[user_input.end_user_id, user_input.message, config_id, storage_type, user_rag_memory_id]
+            args=[user_input.end_user_id, messages_list, config_id, storage_type, user_rag_memory_id]
         )
         api_logger.info(f"Write task queued: {task.id}")
         
@@ -598,7 +601,7 @@ async def status_type(
             last_user_message = " ".join([msg.get('content', '') for msg in messages_list])
 
         result = await memory_agent_service.classify_message_type(
-            user_input.messages,
+            last_user_message,
             user_input.config_id,
             db
         )

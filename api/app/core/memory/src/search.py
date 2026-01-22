@@ -693,9 +693,6 @@ async def run_hybrid_search(
     # Start overall timing
     search_start_time = time.time()
     latency_metrics = {}
-    print(100*'-')
-    print(memory_config)
-    print(100 * '-')
     logger.info(f"using embedding_id:{memory_config.embedding_model_id}...")
 
     # Clean and normalize the incoming query before use/logging

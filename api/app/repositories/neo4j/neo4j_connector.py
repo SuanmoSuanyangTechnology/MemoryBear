@@ -70,11 +70,7 @@ class Neo4jConnector:
             List[Dict[str, Any]]: 查询结果列表，每个元素是一个字典
             
         Example:
-            >>> connector = Neo4jConnector()
-            >>> results = await connector.execute_query(
-            ...     "MATCH (n:Person {name: $name}) RETURN n",
-            ...     name="Alice"
-            ... )
+
         """
         result = await self.driver.execute_query(
             query,
@@ -98,17 +94,7 @@ class Neo4jConnector:
             Any: 事务函数的返回值
             
         Example:
-            >>> async def create_node(tx, name):
-            ...     result = await tx.run(
-            ...         "CREATE (n:Person {name: $name}) RETURN n",
-            ...         name=name
-            ...     )
-            ...     return await result.single()
-            >>> 
-            >>> connector = Neo4jConnector()
-            >>> result = await connector.execute_write_transaction(
-            ...     create_node, name="Alice"
-            ... )
+
         """
         async with self.driver.session(database="neo4j") as session:
             return await session.execute_write(transaction_func, **kwargs)
@@ -126,17 +112,7 @@ class Neo4jConnector:
             Any: 事务函数的返回值
             
         Example:
-            >>> async def get_node(tx, name):
-            ...     result = await tx.run(
-            ...         "MATCH (n:Person {name: $name}) RETURN n",
-            ...         name=name
-            ...     )
-            ...     return await result.single()
-            >>> 
-            >>> connector = Neo4jConnector()
-            >>> result = await connector.execute_read_transaction(
-            ...     get_node, name="Alice"
-            ... )
+
         """
         async with self.driver.session(database="neo4j") as session:
             return await session.execute_read(transaction_func, **kwargs)
@@ -151,8 +127,6 @@ class Neo4jConnector:
             end_user_id: 要删除的组ID
             
         Example:
-            >>> connector = Neo4jConnector()
-            >>> await connector.delete_group("group_123")
             Group group_123 deleted.
         """
         # 删除节点（DETACH DELETE会同时删除相关的边）
