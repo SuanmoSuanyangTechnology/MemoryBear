@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+from uuid import UUID
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
@@ -160,7 +161,7 @@ def create_config(
 
 @router.delete("/delete_config", response_model=ApiResponse)  # 删除数据库中的内容（按配置名称）
 def delete_config(
-    config_id: str,
+    config_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     ) -> dict:
@@ -232,7 +233,7 @@ def update_config_extracted(
 
 @router.get("/read_config_extracted", response_model=ApiResponse) # 通过查询参数读取某条配置（固定路径） 没有意义的话就删除
 def read_config_extracted(
-    config_id: str,
+    config_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     ) -> dict:

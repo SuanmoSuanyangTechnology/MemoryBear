@@ -11,6 +11,7 @@
 """
 
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -128,7 +129,7 @@ async def trigger_forgetting_cycle(
 
 @router.get("/read_config", response_model=ApiResponse)
 async def read_forgetting_config(
-    config_id: int,
+    config_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

@@ -4,6 +4,7 @@ import os
 import re
 import time
 import uuid
+from uuid import UUID
 from datetime import datetime, timezone
 from math import ceil
 from typing import Any, Dict, List, Optional
@@ -382,7 +383,7 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
 
 
 @celery_app.task(name="app.core.memory.agent.read_message", bind=True)
-def read_message_task(self, end_user_id: str, message: str, history: List[Dict[str, Any]], search_switch: str, config_id: str,storage_type:str,user_rag_memory_id:str) -> Dict[str, Any]:
+def read_message_task(self, end_user_id: str, message: str, history: List[Dict[str, Any]], search_switch: str, config_id: uuid.UUID, storage_type:str, user_rag_memory_id:str) -> Dict[str, Any]:
 
     """Celery task to process a read message via MemoryAgentService.
 
@@ -472,7 +473,7 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True)
-def write_message_task(self, end_user_id: str, message: str, config_id: str,storage_type:str,user_rag_memory_id:str) -> Dict[str, Any]:
+def write_message_task(self, end_user_id: str, message: str, config_id: uuid.UUID, storage_type:str, user_rag_memory_id:str) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     
     Args:
@@ -1084,7 +1085,7 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
 
 
 @celery_app.task(name="app.tasks.run_forgetting_cycle_task", bind=True)
-def run_forgetting_cycle_task(self, config_id: Optional[int] = None) -> Dict[str, Any]:
+def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
     """定时任务：运行遗忘周期
     
     定期执行遗忘周期，识别并融合低激活值的知识节点。
