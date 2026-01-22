@@ -24,6 +24,7 @@ class IterationRuntime:
 
     def __init__(
             self,
+            start_id: str,
             graph: CompiledStateGraph,
             node_id: str,
             config: dict[str, Any],
@@ -38,6 +39,7 @@ class IterationRuntime:
             config: Dictionary containing iteration node configuration.
             state: Current workflow state at the point of iteration.
         """
+        self.start_id = start_id
         self.graph = graph
         self.state = state
         self.node_id = node_id
@@ -70,6 +72,7 @@ class IterationRuntime:
             "index": idx,
         }
         loopstate["looping"] = True
+        loopstate["activate"][self.start_id] = True
         return loopstate
 
     async def run_task(self, item, idx):

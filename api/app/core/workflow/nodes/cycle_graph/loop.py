@@ -26,6 +26,7 @@ class LoopRuntime:
 
     def __init__(
             self,
+            start_id: str,
             graph: CompiledStateGraph,
             node_id: str,
             config: dict[str, Any],
@@ -40,6 +41,7 @@ class LoopRuntime:
             config: Raw configuration dictionary for the loop node.
             state: The current workflow state before entering the loop.
         """
+        self.start_id = start_id
         self.graph = graph
         self.state = state
         self.node_id = node_id
@@ -87,6 +89,7 @@ class LoopRuntime:
             **self.state
         )
         loopstate["looping"] = True
+        loopstate["activate"][self.start_id] = True
         return loopstate
 
     @staticmethod
