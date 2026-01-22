@@ -8,7 +8,10 @@ try:
     from app.core.memory.utils.config.definitions import PROJECT_ROOT
 except Exception:
     # Fallback: derive project root from this file location
-    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # 当前文件在 api/app/core/memory/analytics/recent_activity_stats.py
+    # 需要向上 5 级到达 api/ 目录
+    current_file = os.path.abspath(__file__)
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file)))))
 
 
 def _get_latest_prompt_log_path() -> str | None:
@@ -67,44 +70,43 @@ def parse_stats_from_log(log_path: str) -> dict:
     triplet_relations_count = 0
     temporal_count = 0
 
-    # Patterns
+    # 正则表达式模式 - 匹配当前日志格式
     pat_chunk_render = re.compile(r"===\s*RENDERED\s*STATEMENT\s*EXTRACTION\s*PROMPT\s*===")
-    pat_triplet_start = re.compile(r"\[Triplet\].*statements_to_process\s*=\s*(\d+)")
-    pat_triplet_done = re.compile(
-        r"\[Triplet\].*completed,\s*total_triplets\s*=\s*(\d+),\s*total_entities\s*=\s*(\d+)"
+    pat_triplet_started = re.compile(r"\[Triplet\]\s+Started\s+-\s+statement_id=")
+    pat_triplet_completed = re.compile(
+        r"\[Triplet\]\s+Completed\s+-\s+statement_id=[^,]+,\s+triplets=(\d+),\s+entities=(\d+)"
     )
-    pat_temporal_done = re.compile(
-        r"\[Temporal\].*completed,\s*extracted_valid_ranges\s*=\s*(\d+)"
+    pat_temporal_completed = re.compile(
+        r"\[Temporal\]\s+Completed\s+-\s+statement_id=[^,]+,\s+valid_ranges=(\d+)"
     )
 
     with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
-            # Chunk prompts count (each chunk triggers one statement-extraction prompt render)
+            # 文本块数量（每个块触发一次陈述提取提示）
             if pat_chunk_render.search(line):
                 chunk_count += 1
                 continue
 
-            m1 = pat_triplet_start.search(line)
-            if m1:
+            # 陈述数量（每个 Triplet Started 代表一个陈述被处理）
+            if pat_triplet_started.search(line):
+                statements_count += 1
+                continue
+
+            # 三元组完成：[Triplet] Completed - statement_id=xxx, triplets=X, entities=Y
+            m_triplet = pat_triplet_completed.search(line)
+            if m_triplet:
                 try:
-                    statements_count += int(m1.group(1))
+                    triplet_relations_count += int(m_triplet.group(1))
+                    triplet_entities_count += int(m_triplet.group(2))
                 except Exception:
                     pass
                 continue
 
-            m2 = pat_triplet_done.search(line)
-            if m2:
+            # 时间信息完成：[Temporal] Completed - statement_id=xxx, valid_ranges=X
+            m_temporal = pat_temporal_completed.search(line)
+            if m_temporal:
                 try:
-                    triplet_relations_count += int(m2.group(1))
-                    triplet_entities_count += int(m2.group(2))
-                except Exception:
-                    pass
-                continue
-
-            m3 = pat_temporal_done.search(line)
-            if m3:
-                try:
-                    temporal_count += int(m3.group(1))
+                    temporal_count += int(m_temporal.group(1))
                 except Exception:
                     pass
                 continue
@@ -120,15 +122,20 @@ def parse_stats_from_log(log_path: str) -> dict:
 
 
 def get_recent_activity_stats() -> Tuple[dict, str]:
-    """Get aggregated stats from all prompt logs in logs/.
+    """Get stats from the latest prompt log file only.
 
     Returns (stats_dict, message).
     """
-    all_logs = _get_all_prompt_logs()
-    # Fallback to recursive search if none found in logs/
-    if not all_logs:
+    # 获取最新的日志文件
+    latest_log = _get_latest_prompt_log_path()
+    
+    # 如果没有找到，尝试递归搜索
+    if not latest_log:
         all_logs = _get_any_logs_recursive()
-    if not all_logs:
+        if all_logs:
+            latest_log = all_logs[-1]  # 取最新的
+    
+    if not latest_log:
         return (
             {
                 "chunk_count": 0,
@@ -141,24 +148,13 @@ def get_recent_activity_stats() -> Tuple[dict, str]:
             "未找到日志文件，请确认已运行过提取流程。",
         )
 
-    agg = {
-        "chunk_count": 0,
-        "statements_count": 0,
-        "triplet_entities_count": 0,
-        "triplet_relations_count": 0,
-        "temporal_count": 0,
-    }
-    for path in all_logs:
-        s = parse_stats_from_log(path)
-        agg["chunk_count"] += s.get("chunk_count", 0)
-        agg["statements_count"] += s.get("statements_count", 0)
-        agg["triplet_entities_count"] += s.get("triplet_entities_count", 0)
-        agg["triplet_relations_count"] += s.get("triplet_relations_count", 0)
-        agg["temporal_count"] += s.get("temporal_count", 0)
-
-    # Attach a summary of files combined
-    agg["log_path"] = f"{len(all_logs)} 个日志文件，最新：{all_logs[-1]}"
-    return agg, "成功汇总 logs 目录中所有提示日志。"
+    # 只解析最新的日志文件
+    stats = parse_stats_from_log(latest_log)
+    
+    # 添加日志文件路径信息
+    stats["log_path"] = f"最新：{latest_log}"
+    
+    return stats, "成功读取最近一次记忆活动统计。"
 
 
 def _format_summary(stats: dict) -> str:
