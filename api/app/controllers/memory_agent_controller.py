@@ -162,9 +162,10 @@ async def write_server(
     
     api_logger.info(f"Write service requested for group {user_input.end_user_id}, storage_type: {storage_type}, user_rag_memory_id: {user_rag_memory_id}")
     try:
+        messages_list = memory_agent_service.get_messages_list(user_input)
         result = await memory_agent_service.write_memory(
             user_input.end_user_id,
-            user_input.messages,
+            messages_list,
             config_id,
             db,
             storage_type, 
