@@ -233,7 +233,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         """
         # Build keyword search conditions
         keyword_conditions = []
-        params = {"group_id": group_id, "limit": limit}
+        params = {"end_user_id": group_id, "limit": limit}
         
         for i, keyword in enumerate(keywords):
             keyword_conditions.append(f"toLower(n.content) CONTAINS toLower($keyword_{i})")
@@ -243,7 +243,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         
         query = f"""
         MATCH (n:{self.node_label})
-        WHERE n.group_id = $group_id
+        WHERE n.end_user_id = $end_user_id
         AND ({keyword_filter})
         RETURN n
         ORDER BY n.created_at DESC
@@ -264,10 +264,10 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         """
         query = f"""
         MATCH (n:{self.node_label})
-        WHERE n.group_id = $group_id
+        WHERE n.end_user_id = $end_user_id
         RETURN count(n) as count
         """
         
-        results = await self.connector.execute_query(query, group_id=group_id)
+        results = await self.connector.execute_query(query, end_user_id=group_id)
         return results[0]['count'] if results else 0
     

@@ -700,7 +700,7 @@ MATCH (ms:MemorySummary {id: e.summary_id, run_id: e.run_id})
 MATCH (c:Chunk {id: e.chunk_id, run_id: e.run_id})
 MATCH (c)-[:CONTAINS]->(s:Statement {run_id: e.run_id})
 MERGE (ms)-[r:DERIVED_FROM_STATEMENT]->(s)
-SET r.group_id = e.group_id,
+SET r.end_user_id = e.end_user_id,
     r.run_id = e.run_id,
     r.created_at = e.created_at,
     r.expired_at = e.expired_at
@@ -729,7 +729,7 @@ FOREACH (rel IN CASE WHEN r IS NOT NULL THEN [r] ELSE [] END |
         source_statement_id: rel.source_statement_id,
         valid_at: rel.valid_at,
         invalid_at: rel.invalid_at,
-        group_id: rel.group_id,
+        end_user_id: rel.end_user_id,
         user_id: rel.user_id,
         apply_id: rel.apply_id,
         run_id: rel.run_id,
@@ -751,7 +751,7 @@ FOREACH (rel IN CASE WHEN r IS NOT NULL THEN [r] ELSE [] END |
         source_statement_id: rel.source_statement_id,
         valid_at: rel.valid_at,
         invalid_at: rel.invalid_at,
-        group_id: rel.group_id,
+        end_user_id: rel.end_user_id,
         user_id: rel.user_id,
         apply_id: rel.apply_id,
         run_id: rel.run_id,

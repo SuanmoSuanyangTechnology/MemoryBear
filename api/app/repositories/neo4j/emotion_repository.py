@@ -227,7 +227,7 @@ class EmotionRepository:
         try:
             results = await self.connector.execute_query(
                 query,
-                group_id=group_id,
+                end_user_id=end_user_id,
                 start_date=start_date
             )
             formatted_results = [

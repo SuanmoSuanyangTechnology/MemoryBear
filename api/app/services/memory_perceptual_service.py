@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.models.memory_perceptual_model import PerceptualType, FileStorageType
+from app.models.memory_perceptual_model import PerceptualType, FileStorageService
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
 from app.schemas.memory_perceptual_schema import (
     PerceptualQuerySchema,
@@ -92,15 +92,17 @@ class MemoryPerceptualService:
 
             result = {
                 "id": str(memory.id),
+                "perceptual_type": perceptual_type,
                 "file_name": memory.file_name,
                 "file_path": memory.file_path,
-                "storage_type": memory.storage_service,
+                "file_ext": memory.file_ext,
+                "storage_service": memory.storage_service,  
+                "meta_data": memory.meta_data,
                 "summary": memory.summary,
                 "keywords": content.keywords,
                 "topic": content.topic,
                 "domain": content.domain,
                 "created_time": int(memory.created_time.timestamp()*1000),
-                **detail
             }
 
             business_logger.info(
@@ -150,7 +152,7 @@ class MemoryPerceptualService:
                     domain=content.domain,
                     keywords=content.keywords,
                     created_time=int(memory.created_time.timestamp()*1000),
-                    storage_type=FileStorageType(memory.storage_service),
+                    storage_service=FileStorageService(memory.storage_service),
                 )
                 memory_items.append(memory_item)
 
