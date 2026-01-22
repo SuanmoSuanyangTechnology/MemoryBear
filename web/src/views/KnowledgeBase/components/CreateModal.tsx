@@ -164,6 +164,26 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     });
     
     setModelOptionsByType(next);
+
+    // 如果不是编辑模式，为每个类型的下拉框设置默认值为第一条数据
+    if (!datasets?.id) {
+      const defaultValues: Record<string, string> = {};
+      types.forEach((tp) => {
+        const fieldKey = typeToFieldKey(tp);
+        const options = tp.toLowerCase() === 'llm' 
+          ? [...(next['llm'] || []), ...(next['chat'] || [])]
+          : next[tp] || [];
+        
+        // 如果有选项且当前字段没有值，设置第一个选项为默认值
+        if (options.length > 0 && !form.getFieldValue(fieldKey)) {
+          defaultValues[fieldKey] = options[0].value;
+        }
+      });
+      
+      if (Object.keys(defaultValues).length > 0) {
+        form.setFieldsValue(defaultValues as Partial<KnowledgeBaseFormData>);
+      }
+    }
   };
 
   const setBaseFields = (record: KnowledgeBaseListItem | null, type?: string) => {
