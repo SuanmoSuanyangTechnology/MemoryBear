@@ -122,6 +122,11 @@ service.interceptors.response.use(
     }
   },
   (error) => {
+    // 如果是取消请求，不显示错误提示
+    if (axios.isCancel(error) || error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+      return Promise.reject(error);
+    }
+    
     // 处理网络错误、超时等
     let msg = error.response?.data?.error || error.response?.error;
     const status = error?.response ? error.response.status : error;
