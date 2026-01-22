@@ -6,7 +6,7 @@ import { Form, Button, Select, Space, Divider, InputNumber, Radio, type SelectPr
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
 import Editor from '../../Editor'
-import { edgeAttrs } from '../../../constant'
+import { edgeAttrs, portArgs } from '../../../constant'
 
 interface CaseListProps {
   value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; operator: string; right: string; input_type?: string; }[] }>;
@@ -92,6 +92,7 @@ const CaseList: FC<CaseListProps> = ({
     selectedNode.addPort({
       id: 'CASE1',
       group: 'right',
+      args: portArgs,
       attrs: { text: { text: 'IF', fontSize: 12, fill: '#5B6167' }}
     });
     
@@ -100,6 +101,7 @@ const CaseList: FC<CaseListProps> = ({
       selectedNode.addPort({
         id: `CASE${i + 1}`,
         group: 'right',
+        args: portArgs,
         attrs: { text: { text: 'ELIF', fontSize: 12, fill: '#5B6167' }}
       });
     }
@@ -108,6 +110,7 @@ const CaseList: FC<CaseListProps> = ({
     selectedNode.addPort({
       id: `CASE${caseCount + 1}`,
       group: 'right',
+      args: portArgs,
       attrs: { text: { text: 'ELSE', fontSize: 12, fill: '#5B6167' }}
     });
     

@@ -564,6 +564,7 @@ const defaultPortItems = [
   // { group: 'bottom' },
   { group: 'left' }
 ];
+export const portArgs = { dy: 18 }
 export const graphNodeLibrary: Record<string, NodeConfig> = {
   iteration: {
     width: 240,
@@ -591,8 +592,8 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       groups: defaultPortGroups,
       items: [
         { group: 'left' },
-        { group: 'right', id: 'CASE1', args: { dy: 24 }, attrs: { text: { text: 'IF', fontSize: 12, color: '#5B6167' }} },
-        { group: 'right', id: 'CASE2', attrs: { text: { text: 'ELSE', fontSize: 12, color: '#5B6167' }} }
+        { group: 'right', id: 'CASE1', args: portArgs, attrs: { text: { text: 'IF', fontSize: 12, color: '#5B6167' }} },
+        { group: 'right', id: 'CASE2', args: portArgs, attrs: { text: { text: 'ELSE', fontSize: 12, color: '#5B6167' }} }
       ],
     },
   },
@@ -604,8 +605,8 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       groups: defaultPortGroups,
       items: [
         { group: 'left' },
-        { group: 'right', id: 'CASE1', args: { dy: 24 }, attrs: { text: { text: '分类1', fontSize: 12, color: '#5B6167' } } },
-        { group: 'right', id: 'CASE2', attrs: { text: { text: '分类2', fontSize: 12, color: '#5B6167' } } }
+        { group: 'right', id: 'CASE1', args: portArgs, attrs: { text: { text: '分类1', fontSize: 12, color: '#5B6167' } } },
+        { group: 'right', id: 'CASE2', args: portArgs, attrs: { text: { text: '分类2', fontSize: 12, color: '#5B6167' } } }
       ],
     },
   },

@@ -20,14 +20,22 @@ const ImplicitDetail = forwardRef<{ handleRefresh: () => void; }>((_props, ref) 
   const habitsRef = useRef<{ handleRefresh: () => void; }>(null)
 
   const handleRefresh = () => {
-    if (!id) return
-    generateProfile(id)
-      .then(() => {
-        preferencesRef.current?.handleRefresh()
-        portraitRef.current?.handleRefresh()
-        interestAreasRef.current?.handleRefresh()
-        habitsRef.current?.handleRefresh()
-      })
+    if (!id) {
+      return Promise.resolve()
+    }
+    return new Promise((resolve, reject) => {
+      generateProfile(id)
+        .then(() => {
+          preferencesRef.current?.handleRefresh()
+          portraitRef.current?.handleRefresh()
+          interestAreasRef.current?.handleRefresh()
+          habitsRef.current?.handleRefresh()
+          resolve(true)
+        })
+        .catch((error) => {
+          reject(error)
+        })
+    })
   }
   useImperativeHandle(ref, () => ({
     handleRefresh

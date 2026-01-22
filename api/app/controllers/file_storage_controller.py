@@ -267,25 +267,27 @@ async def delete_file(
 async def get_file_url(
     file_id: uuid.UUID,
     expires: int = None,
+    permanent: bool = False,
     db: Session = Depends(get_db),
     storage_service: FileStorageService = Depends(get_file_storage_service),
 ):
     """
-    Get a temporary access URL for a file (no authentication required).
+    Get an access URL for a file (no authentication required).
 
     Args:
         file_id: The UUID of the file.
         expires: URL validity period in seconds (default from FILE_URL_EXPIRES env).
+        permanent: If True, return a permanent URL without expiration.
         db: Database session.
         storage_service: The file storage service.
 
     Returns:
-        ApiResponse with the temporary access URL.
+        ApiResponse with the access URL.
     """
     if expires is None:
         expires = settings.FILE_URL_EXPIRES
 
-    api_logger.info(f"Get file URL request: file_id={file_id}, expires={expires}")
+    api_logger.info(f"Get file URL request: file_id={file_id}, expires={expires}, permanent={permanent}")
 
     # Query file metadata from database
     file_metadata = db.query(FileMetadata).filter(FileMetadata.id == file_id).first()
@@ -306,6 +308,20 @@ async def get_file_url(
     storage = storage_service.storage
 
     try:
+        if permanent:
+            # Generate permanent URL (no expiration check)
+            server_url = f"http://{settings.SERVER_IP}:8000/api"
+            url = f"{server_url}/storage/permanent/{file_id}"
+            return success(
+                data={
+                    "url": url,
+                    "expires_in": None,
+                    "permanent": True,
+                    "file_name": file_metadata.file_name,
+                },
+                msg="Permanent file URL generated successfully"
+            )
+
         if isinstance(storage, LocalStorage):
             # For local storage, generate signed URL with expiration
             url = generate_signed_url(str(file_id), expires)
@@ -318,6 +334,7 @@ async def get_file_url(
             data={
                 "url": url,
                 "expires_in": expires,
+                "permanent": False,
                 "file_name": file_metadata.file_name,
             },
             msg="File URL generated successfully"
@@ -403,6 +420,76 @@ async def public_download_file(
         # For remote storage, redirect to presigned URL
         try:
             presigned_url = await storage_service.get_file_url(file_key, expires=3600)
+            return RedirectResponse(url=presigned_url, status_code=status.HTTP_302_FOUND)
+        except Exception as e:
+            api_logger.error(f"Failed to get presigned URL: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to retrieve file: {str(e)}"
+            )
+
+
+@router.get("/permanent/{file_id}", response_model=Any)
+async def permanent_download_file(
+    file_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    storage_service: FileStorageService = Depends(get_file_storage_service),
+) -> Any:
+    """
+    Permanent file download endpoint (no expiration, no signature required).
+
+    This endpoint allows downloading files without authentication or expiration.
+    Use with caution as URLs are permanently accessible.
+
+    Args:
+        file_id: The UUID of the file.
+        db: Database session.
+        storage_service: The file storage service.
+
+    Returns:
+        FileResponse for the requested file.
+    """
+    api_logger.info(f"Permanent download request: file_id={file_id}")
+
+    # Query file metadata from database
+    file_metadata = db.query(FileMetadata).filter(FileMetadata.id == file_id).first()
+    if not file_metadata:
+        api_logger.warning(f"File not found in database: file_id={file_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The file does not exist"
+        )
+
+    if file_metadata.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File upload not completed, status: {file_metadata.status}"
+        )
+
+    file_key = file_metadata.file_key
+    storage = storage_service.storage
+
+    if isinstance(storage, LocalStorage):
+        full_path = storage._get_full_path(file_key)
+
+        if not full_path.exists():
+            api_logger.warning(f"File not found on disk: file_key={file_key}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found"
+            )
+
+        api_logger.info(f"Serving permanent file: file_key={file_key}")
+        return FileResponse(
+            path=str(full_path),
+            filename=file_metadata.file_name,
+            media_type=file_metadata.content_type or "application/octet-stream"
+        )
+    else:
+        # For remote storage, redirect to presigned URL with long expiration
+        try:
+            # Use a very long expiration (7 days max for most cloud providers)
+            presigned_url = await storage_service.get_file_url(file_key, expires=604800)
             return RedirectResponse(url=presigned_url, status_code=status.HTTP_302_FOUND)
         except Exception as e:
             api_logger.error(f"Failed to get presigned URL: {e}")

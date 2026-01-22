@@ -128,7 +128,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
       let allTools = Array.isArray(response.tools) ? response.tools : []
       form.setFieldsValue({
         ...response,
-        tools: allTools
+        tools: allTools,
+        memory: {
+          ...response.memory,
+          memory_content: response.memory?.memory_content ? Number(response.memory?.memory_content) : undefined
+        }
       })
       setData({
         ...response,

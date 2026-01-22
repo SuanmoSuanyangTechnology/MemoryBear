@@ -5,7 +5,7 @@ import { Graph, Node } from '@antv/x6';
 
 import Editor from '../../Editor';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
-import { edgeAttrs } from '../../../constant'
+import { edgeAttrs, portArgs } from '../../../constant'
 
 interface CategoryListProps {
   parentName: string;
@@ -55,7 +55,7 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
       selectedNode.addPort({
         id: `CASE${i + 1}`,
         group: 'right',
-        args: i === 0 ? { dy: 24 } : undefined,
+        args: portArgs,
         attrs: { text: { text: `分类${i + 1}`, fontSize: 12, fill: '#5B6167' } }
       });
     }
