@@ -180,6 +180,6 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
             List[DialogueNode]: 对话列表
         """
         return await self.find(
-            {"config_id": config_id, "group_id": group_id},
+            {"config_id": config_id, "end_user_id": end_user_id},
             limit=limit
         )

@@ -41,48 +41,48 @@ class MemoryConfigRepository:
 
     # Dialogue count by group
     SEARCH_FOR_DIALOGUE = """
-    MATCH (n:Dialogue) WHERE n.group_id = $group_id RETURN COUNT(n) AS num
+    MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
     """
 
     # Chunk count by group
     SEARCH_FOR_CHUNK = """
-    MATCH (n:Chunk) WHERE n.group_id = $group_id RETURN COUNT(n) AS num
+    MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
     """
 
     # Statement count by group
     SEARCH_FOR_STATEMENT = """
-    MATCH (n:Statement) WHERE n.group_id = $group_id RETURN COUNT(n) AS num
+    MATCH (n:Statement) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
     """
 
     # ExtractedEntity count by group
     SEARCH_FOR_ENTITY = """
-    MATCH (n:ExtractedEntity) WHERE n.group_id = $group_id RETURN COUNT(n) AS num
+    MATCH (n:ExtractedEntity) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
     """
 
     # All counts by label and total
     SEARCH_FOR_ALL = """
-    OPTIONAL MATCH (n:Dialogue) WHERE n.group_id = $group_id RETURN 'Dialogue' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id RETURN 'Dialogue' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n:Chunk) WHERE n.group_id = $group_id RETURN 'Chunk' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id RETURN 'Chunk' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n:Statement) WHERE n.group_id = $group_id RETURN 'Statement' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:Statement) WHERE n.end_user_id = $end_user_id RETURN 'Statement' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n:ExtractedEntity) WHERE n.group_id = $group_id RETURN 'ExtractedEntity' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:ExtractedEntity) WHERE n.end_user_id = $end_user_id RETURN 'ExtractedEntity' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n) WHERE n.group_id = $group_id RETURN 'ALL' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n) WHERE n.end_user_id = $end_user_id RETURN 'ALL' AS Label, COUNT(n) AS Count
     """
 
     # Extracted entity details within group/app/user
     SEARCH_FOR_DETIALS = """
     MATCH (n:ExtractedEntity)
-    WHERE n.group_id = $group_id
+    WHERE n.end_user_id = $end_user_id
     RETURN n.entity_idx AS entity_idx, 
         n.connect_strength AS connect_strength, 
         n.description AS description, 
         n.entity_type AS entity_type, 
         n.name AS name,
         COALESCE(n.fact_summary, '') AS fact_summary,
-        n.group_id AS group_id,
+        n.end_user_id AS end_user_id,
         n.apply_id AS apply_id,
         n.user_id AS user_id,
         n.id AS id
@@ -91,9 +91,9 @@ class MemoryConfigRepository:
     # Edges between extracted entities within group/app/user
     SEARCH_FOR_EDGES = """
     MATCH (n:ExtractedEntity)-[r]->(m:ExtractedEntity)
-    WHERE n.group_id = $group_id
+    WHERE n.end_user_id = $end_user_id
     RETURN
-      r.group_id AS group_id,
+      r.end_user_id AS end_user_id,
       r.apply_id AS apply_id,
       r.user_id AS user_id,
       elementId(r) AS rel_id,
