@@ -1217,7 +1217,7 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     """
     from app.models.app_release_model import AppRelease
     from app.models.end_user_model import EndUser
-    from app.models.memory_config_model import MemoryConfig
+    from app.models.data_config_model import DataConfig
     from sqlalchemy import select
 
     logger.info(f"Batch getting connected configs for {len(end_user_ids)} end_users")
@@ -1275,8 +1275,8 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     # 批量查询 memory_config_name
     config_id_to_name = {}
     if memory_config_ids:
-        memory_configs = db.query(MemoryConfig).filter(MemoryConfig.id.in_(memory_config_ids)).all()
-        config_id_to_name = {str(mc.id): mc.config_name for mc in memory_configs}
+        memory_configs = db.query(DataConfig).filter(DataConfig.config_id.in_(memory_config_ids)).all()
+        config_id_to_name = {str(mc.config_id): mc.config_name for mc in memory_configs}
 
     # 4. 构建最终结果
     for end_user_id, app_id in user_to_app.items():
@@ -1293,7 +1293,7 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
         memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
         
         # 获取配置名称
-        memory_config_name = config_id_to_name.get(memory_config_id) if memory_config_id else None
+        memory_config_name = config_id_to_name.get(str(memory_config_id)) if memory_config_id else None
 
         result[end_user_id] = {
             "memory_config_id": memory_config_id,

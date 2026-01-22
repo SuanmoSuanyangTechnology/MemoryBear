@@ -697,7 +697,7 @@ async def get_user_profile_api(
     current_user: User = Depends(get_current_user)
 ):
     """
-    获取用户详情，包含：
+    获取工作空间下Popular Memory Tags，包含：
     - name: 用户名字（直接使用 end_user_id）
     - tags: 3个用户特征标签（从语句和实体中LLM总结）
     - hot_tags: 4个热门记忆标签
