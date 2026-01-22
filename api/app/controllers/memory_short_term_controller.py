@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status,Header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.db import get_db
@@ -20,7 +20,7 @@ router = APIRouter(
 @router.get("/short_term")
 async def short_term_configs(
         end_user_id: str,
-        language_type:Optional[str] = "zh",
+        language_type:str = Header(default="zh", alias="X-Language-Type"),
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ):
