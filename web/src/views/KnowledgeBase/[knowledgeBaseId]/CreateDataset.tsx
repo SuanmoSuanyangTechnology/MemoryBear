@@ -261,15 +261,15 @@ const CreateDataset = () => {
       dataIndex: 'progress',
       key: 'progress',
       render: (value: number, record: any) => {
-        // value = 1 时完成，0～1 时显示进度条
-        if (value === 1) {
+        // value >= 1 时完成，0～1 时显示进度条
+        if (value >= 1) {
           return (
             <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
               <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#369F21' }}></span>
               <span>{t('knowledgeBase.completed')}</span>
             </span>
           );
-        } else if (value > 0 && value < 1) {
+        } else if (value >= 0 && value < 1) {
           // 处理中，显示进度条
           return (
             <div className="rb:flex rb:items-center rb:gap-2">
@@ -277,7 +277,10 @@ const CreateDataset = () => {
                 percent={Math.round(value * 100)} 
                 size="small" 
                 status="active"
-                strokeColor="#1677ff"
+                strokeColor={{
+                  '0%': '#108ee9',
+                  '100%': '#87d068',
+                }}
                 style={{ width: '120px' }}
               />
             </div>
@@ -383,6 +386,9 @@ const CreateDataset = () => {
       },
     })
       .then((res: UploadFileResponse) => {
+        // 上传成功，移除 AbortController
+        abortControllersRef.current.delete(fileUid);
+        
         onSuccess?.(res, new XMLHttpRequest());
         if (res?.id) {
           setRechunkFileIds((prev) => {
@@ -578,6 +584,8 @@ const CreateDataset = () => {
                         abortController.abort();
                         abortControllersRef.current.delete(fileUid);
                         console.log('已取消上传:', (file as any).name);
+                        // 取消上传后直接返回 true，允许移除文件
+                        return true;
                       }
                       
                       // 只有当文件已经上传成功（有response.id）时，才删除服务器上的文件
@@ -586,6 +594,7 @@ const CreateDataset = () => {
                           await deleteDocument(file.response.id);
                           setRechunkFileIds(prev => prev.filter(id => id !== file.response.id));
                           console.log('已删除服务器文件:', file.response.id);
+                          return true;
                         } catch (error) {
                           console.error('删除文件失败:', error);
                           messageApi.error(t('common.deleteFailed') || '删除文件失败');
@@ -593,7 +602,7 @@ const CreateDataset = () => {
                         }
                       }
                       
-                      // 允许移除文件（无论是取消上传还是删除成功）
+                      // 其他情况（如上传失败的文件）也允许移除
                       return true;
                     }} />
             )}
