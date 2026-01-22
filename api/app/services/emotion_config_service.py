@@ -10,7 +10,7 @@ Classes:
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 
-from app.models.data_config_model import DataConfig
+from app.models.memory_config_model import MemoryConfig
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
@@ -61,8 +61,8 @@ class EmotionConfigService:
             logger.info(f"获取情绪配置: config_id={config_id}")
             
             # 查询配置
-            config = self.db.query(DataConfig).filter(
-                DataConfig.config_id == config_id
+            config = self.db.query(MemoryConfig).filter(
+                MemoryConfig.config_id == config_id
             ).first()
             
             if not config:
@@ -173,8 +173,8 @@ class EmotionConfigService:
             self.validate_emotion_config(config_data)
             
             # 查询配置
-            config = self.db.query(DataConfig).filter(
-                DataConfig.config_id == config_id
+            config = self.db.query(MemoryConfig).filter(
+                MemoryConfig.config_id == config_id
             ).first()
             
             if not config:

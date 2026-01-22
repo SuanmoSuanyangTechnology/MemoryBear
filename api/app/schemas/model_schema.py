@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_serializer, ConfigDict
+from pydantic import BaseModel, Field, field_serializer, field_validator, ConfigDict
 from typing import Optional, List, Dict, Any
 import datetime
 import uuid
@@ -90,6 +90,18 @@ class ModelApiKey(ModelApiKeyBase):
     last_used_at: Optional[datetime.datetime]
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+    @field_validator("config", mode="before")
+    @classmethod
+    def parse_config(cls, v):
+        """处理 config 字段，如果是字符串则解析为字典"""
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return {}
+        return v
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):

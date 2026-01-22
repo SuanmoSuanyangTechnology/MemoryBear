@@ -13,7 +13,7 @@ import logging
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 
-from app.repositories.data_config_repository import DataConfigRepository
+from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
 
 
@@ -66,7 +66,7 @@ def load_actr_config_from_db(
     """
     从数据库加载 ACT-R 配置参数
     
-    从 PostgreSQL 的 data_config 表读取配置参数，
+    从 PostgreSQL 的 memory_config 表读取配置参数，
     并计算派生参数（如 forgetting_rate）。
     
     Args:
@@ -99,7 +99,7 @@ def load_actr_config_from_db(
     
     # 从数据库加载配置
     try:
-        repository = DataConfigRepository()
+        repository = MemoryConfigRepository()
         db_config = repository.get_by_id(db, config_id)
         
         if db_config is None:

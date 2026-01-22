@@ -1,7 +1,7 @@
 import uuid
 import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict, field_serializer
+from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
 
 
 # ---------- Input Schemas ----------
@@ -87,6 +87,18 @@ class SharedReleaseInfo(BaseModel):
     
     # 嵌入配置
     allow_embed: bool
+
+    @field_validator("config", mode="before")
+    @classmethod
+    def parse_config(cls, v):
+        """处理 config 字段，如果是字符串则解析为字典"""
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return {}
+        return v if v is not None else {}
 
 
 class EmbedCode(BaseModel):
