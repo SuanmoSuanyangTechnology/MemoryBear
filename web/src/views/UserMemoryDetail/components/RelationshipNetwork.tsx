@@ -266,7 +266,7 @@ const RelationshipNetwork:FC = () => {
                 size={[197.81, 150]}
               />
               : <>
-                <div className="rb:bg-[#F6F8FC] rb:border-t rb:border-b rb:border-[#DFE4ED] rb:font-medium rb:py-2 rb:px-4 rb:h-10">{selectedNode.name}</div>
+                {selectedNode.name && <div className="rb:bg-[#F6F8FC] rb:border-t rb:border-b rb:border-[#DFE4ED] rb:font-medium rb:py-2 rb:px-4 rb:h-10">{selectedNode.name}</div>}
                 <div className="rb:p-4">
                   <>
                     <div className="rb:font-medium rb:leading-5">{t('userMemory.memoryContent')}</div>
@@ -297,7 +297,8 @@ const RelationshipNetwork:FC = () => {
                     {selectedNode.label === 'Statement' && <>
                       {(['emotion_keywords', 'emotion_type', 'emotion_subject', 'importance_score'] as const).map(key => {
                         const statementProps = selectedNode.properties as StatementNodeProperties;
-                        if ((key === 'emotion_keywords' && statementProps[key]?.length > 0) || statementProps[key]) {
+                        if ((key === 'emotion_keywords' && statementProps[key]?.length > 0) || typeof statementProps[key] === 'string') {
+                          console.log('statementProps[key]', statementProps[key])
                           return (
                             <div className="rb:mt-4" key={key}>
                               {t(`userMemory.Statement_${key}`)}
@@ -321,7 +322,10 @@ const RelationshipNetwork:FC = () => {
                             <div className="rb:mt-4" key={key}>
                               {t(`userMemory.ExtractedEntity_${key}`)}
                               <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
-                                {entityProps[key]}
+                                {Array.isArray(entityProps[key]) && entityProps[key].length > 0 
+                                  ? entityProps[key].map((vo, index) => <div key={index}>- {vo}</div>)
+                                  : entityProps[key]
+                                }
                               </div>
                             </div>
                           )
