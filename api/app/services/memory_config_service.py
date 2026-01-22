@@ -14,7 +14,7 @@ from app.core.validators.memory_config_validators import (
     validate_embedding_model,
     validate_model_exists_and_active,
 )
-from app.repositories.data_config_repository import DataConfigRepository
+from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.memory_config_schema import (
     ConfigurationError,
     InvalidConfigError,
@@ -127,7 +127,7 @@ class MemoryConfigService:
             
             # Step 1: Get config and workspace
             db_query_start = time.time()
-            result = DataConfigRepository.get_config_with_workspace(self.db, validated_config_id)
+            result = MemoryConfigRepository.get_config_with_workspace(self.db, validated_config_id)
             db_query_time = time.time() - db_query_start
             logger.info(f"[PERF] Config+Workspace query: {db_query_time:.4f}s")
             if not result:

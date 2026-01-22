@@ -1249,7 +1249,7 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     """
     from app.models.app_release_model import AppRelease
     from app.models.end_user_model import EndUser
-    from app.models.data_config_model import DataConfig
+    from app.models.memory_config_model import MemoryConfig
     from sqlalchemy import select
 
     logger.info(f"Batch getting connected configs for {len(end_user_ids)} end_users")

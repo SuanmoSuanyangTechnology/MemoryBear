@@ -23,7 +23,7 @@ from app.core.memory.storage_services.forgetting_engine.config_utils import (
     load_actr_config_from_db,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.data_config_repository import DataConfigRepository
+from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.forgetting_cycle_history_repository import ForgettingCycleHistoryRepository
 
 
@@ -70,7 +70,7 @@ class MemoryForgetService:
     
     def __init__(self):
         """初始化服务"""
-        self.config_repository = DataConfigRepository()
+        self.config_repository = MemoryConfigRepository()
         self.history_repository = ForgettingCycleHistoryRepository()
     
     def _get_neo4j_connector(self) -> Neo4jConnector:

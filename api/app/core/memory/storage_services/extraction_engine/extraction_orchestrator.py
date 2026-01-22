@@ -569,32 +569,32 @@ class ExtractionOrchestrator:
         if dialog_data_list and hasattr(dialog_data_list[0], 'config_id'):
             config_id = dialog_data_list[0].config_id
         
-        # 加载DataConfig
-        data_config = None
+        # 加载MemoryConfig
+        memory_config = None
         if config_id:
             try:
                 from app.db import SessionLocal
-                from app.repositories.data_config_repository import DataConfigRepository
+                from app.repositories.memory_config_repository import MemoryConfigRepository
                 
                 db = SessionLocal()
                 try:
-                    data_config = DataConfigRepository.get_by_id(db, config_id)
+                    memory_config = MemoryConfigRepository.get_by_id(db, config_id)
                 finally:
                     db.close()
                     
-                if data_config and not data_config.emotion_enabled:
+                if memory_config and not memory_config.emotion_enabled:
                     logger.info("情绪提取已在配置中禁用，跳过情绪提取")
                     return [{} for _ in dialog_data_list]
                     
             except Exception as e:
-                logger.warning(f"加载DataConfig失败: {e}，将跳过情绪提取")
+                logger.warning(f"加载MemoryConfig失败: {e}，将跳过情绪提取")
                 return [{} for _ in dialog_data_list]
         else:
             logger.info("未找到config_id，跳过情绪提取")
             return [{} for _ in dialog_data_list]
         
         # 如果配置未启用情绪提取，直接返回空映射
-        if not data_config or not data_config.emotion_enabled:
+        if not memory_config or not memory_config.emotion_enabled:
             logger.info("情绪提取未启用，跳过")
             return [{} for _ in dialog_data_list]
 
@@ -608,7 +608,7 @@ class ExtractionOrchestrator:
                     total_statements += 1
                     # 只处理用户的陈述句 (role 为 "user")
                     if hasattr(statement, 'speaker') and statement.speaker == "user":
-                        all_statements.append((statement, data_config))
+                        all_statements.append((statement, memory_config))
                         statement_metadata.append((d_idx, statement.id))
                         filtered_statements += 1
 
@@ -617,7 +617,7 @@ class ExtractionOrchestrator:
         # 初始化情绪提取服务
         from app.services.emotion_extraction_service import EmotionExtractionService
         emotion_service = EmotionExtractionService(
-            llm_id=data_config.emotion_model_id if data_config.emotion_model_id else None
+            llm_id=memory_config.emotion_model_id if memory_config.emotion_model_id else None
         )
 
         # 全局并行处理所有陈述句

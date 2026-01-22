@@ -539,11 +539,11 @@ class ForgettingStrategy:
             LLM 客户端实例，如果无法获取则返回 None
         """
         try:
-            from app.repositories.data_config_repository import DataConfigRepository
+            from app.repositories.memory_config_repository import MemoryConfigRepository
             from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
             
             # 从数据库读取配置
-            repository = DataConfigRepository()
+            repository = MemoryConfigRepository()
             db_config = repository.get_by_id(db, config_id)
             
             if db_config is None or db_config.llm_id is None:

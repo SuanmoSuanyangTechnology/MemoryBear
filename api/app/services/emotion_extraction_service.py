@@ -14,7 +14,7 @@ from app.core.memory.llm_tools.llm_client import LLMClientException
 from app.core.memory.models.emotion_models import EmotionExtraction
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
-from app.models.data_config_model import DataConfig
+from app.models.memory_config_model import MemoryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class EmotionExtractionService:
     async def extract_emotion(
         self,
         statement: str,
-        config: DataConfig
+        config: MemoryConfig
     ) -> Optional[EmotionExtraction]:
         """Extract emotion information from a statement.
         

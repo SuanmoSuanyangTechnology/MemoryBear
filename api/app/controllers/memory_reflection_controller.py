@@ -11,7 +11,7 @@ from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
-from app.repositories.data_config_repository import DataConfigRepository
+from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_reflection_schemas import Memory_Reflection
 from app.services.memory_reflection_service import (
@@ -50,7 +50,7 @@ async def save_reflection_config(
 
         api_logger.info(f"用户 {current_user.username} 保存反思配置，config_id: {config_id}")
 
-        data_config = DataConfigRepository.update_reflection_config(
+        memory_config = MemoryConfigRepository.update_reflection_config(
             db,
             config_id=config_id,
             enable_self_reflexion=request.reflection_enabled,
@@ -63,17 +63,17 @@ async def save_reflection_config(
         )
 
         db.commit()
-        db.refresh(data_config)
+        db.refresh(memory_config)
 
         reflection_result={
-                "config_id": data_config.config_id,
-                "enable_self_reflexion": data_config.enable_self_reflexion,
-                "iteration_period": data_config.iteration_period,
-                "reflexion_range": data_config.reflexion_range,
-                "baseline": data_config.baseline,
-                "reflection_model_id": data_config.reflection_model_id,
-                "memory_verify": data_config.memory_verify,
-                "quality_assessment": data_config.quality_assessment}
+                "config_id": memory_config.config_id,
+                "enable_self_reflexion": memory_config.enable_self_reflexion,
+                "iteration_period": memory_config.iteration_period,
+                "reflexion_range": memory_config.reflexion_range,
+                "baseline": memory_config.baseline,
+                "reflection_model_id": memory_config.reflection_model_id,
+                "memory_verify": memory_config.memory_verify,
+                "quality_assessment": memory_config.quality_assessment}
 
         return success(data=reflection_result, msg="反思配置成功")
         
@@ -111,14 +111,14 @@ async def start_workspace_reflection(
         reflection_results = []
         
         for data in result['apps_detailed_info']:
-            if data['data_configs'] == []: 
+            if data['memory_configs'] == []: 
                 continue
                 
             releases = data['releases']
-            data_configs = data['data_configs']
+            memory_configs = data['memory_configs']
             end_users = data['end_users']
             
-            for base, config, user in zip(releases, data_configs, end_users):
+            for base, config, user in zip(releases, memory_configs, end_users):
                 # 安全地转换为整数，处理空字符串和None的情况
                 print(base['config'])
                 try:
@@ -160,10 +160,10 @@ async def start_reflection_configs(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ) -> dict:
-    """通过config_id查询data_config表中的反思配置信息"""
+    """通过config_id查询memory_config表中的反思配置信息"""
     try:
         api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
-        result = DataConfigRepository.query_reflection_config_by_id(db, config_id)
+        result = MemoryConfigRepository.query_reflection_config_by_id(db, config_id)
         # 构建返回数据
         reflection_config = {
             "config_id": result.config_id,
@@ -200,8 +200,8 @@ async def reflection_run(
 
     api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
 
-    # 使用DataConfigRepository查询反思配置
-    result = DataConfigRepository.query_reflection_config_by_id(db, config_id)
+    # 使用MemoryConfigRepository查询反思配置
+    result = MemoryConfigRepository.query_reflection_config_by_id(db, config_id)
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
