@@ -1207,6 +1207,16 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
 
     # 3. 从 config 中提取 memory_config_id
     config = latest_release.config or {}
+    
+    # 如果 config 是字符串，解析为字典
+    if isinstance(config, str):
+        import json
+        try:
+            config = json.loads(config)
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse config JSON for release {latest_release.id}")
+            config = {}
+    
     memory_obj = config.get('memory', {})
     memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
 
