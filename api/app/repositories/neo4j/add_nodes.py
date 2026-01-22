@@ -101,6 +101,8 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
                 #     "entities": [entity.model_dump() for entity in statement.triplet_extraction_info.entities] if statement.triplet_extraction_info else []
                 # }) if statement.triplet_extraction_info else json.dumps({"triplets": [], "entities": []}),
                 "statement_embedding": statement.statement_embedding if statement.statement_embedding else None,
+                # 添加 speaker 字段（用于基于角色的情绪提取）
+                "speaker": statement.speaker if hasattr(statement, 'speaker') else None,
                 # 添加情绪字段处理
                 "emotion_type": statement.emotion_type,
                 "emotion_intensity": statement.emotion_intensity,
@@ -163,7 +165,9 @@ async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) ->
                 "chunk_embedding": chunk.chunk_embedding if chunk.chunk_embedding else None,
                 "sequence_number": chunk.sequence_number,
                 "start_index": metadata.get("start_index"),
-                "end_index": metadata.get("end_index")
+                "end_index": metadata.get("end_index"),
+                # 添加 speaker 字段（用于基于角色的情绪提取）
+                "speaker": chunk.speaker if hasattr(chunk, 'speaker') else None
             }
             flattened_chunks.append(flattened_chunk)
 

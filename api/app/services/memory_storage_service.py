@@ -506,27 +506,6 @@ async def search_edges(end_user_id: Optional[str] = None) -> List[Dict[str, Any]
     return result
 
 
-async def search_entity_graph(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    """搜索所有实体之间的关系网络（group 维度）。"""
-    result = await _neo4j_connector.execute_query(
-        DataConfigRepository.SEARCH_FOR_ENTITY_GRAPH,
-        group_id=end_user_id,
-    )
-    # 对source_node 和 target_node 的 fact_summary进行截取，只截取前三条的内容（需要提取前三条“来源”）
-    for item in result:
-        source_fact = item["sourceNode"]["fact_summary"]
-        target_fact = item["targetNode"]["fact_summary"]
-        # 截取前三条“来源”
-        item["sourceNode"]["fact_summary"] = source_fact.split("\n")[:4] if source_fact else []
-        item["targetNode"]["fact_summary"] = target_fact.split("\n")[:4] if target_fact else []
-    # 与现有返回风格保持一致，携带搜索类型、数量与详情
-    data = {
-        "search_for": "entity_graph",
-        "num": len(result),
-        "detials": result,
-    }
-    return data
-
 
 async def analytics_hot_memory_tags(
     db: Session, 

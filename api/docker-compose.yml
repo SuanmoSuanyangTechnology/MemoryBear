@@ -7,10 +7,6 @@ services:
       - "8002:8000"
     env_file:
       - .env
-    environment:
-      - SERVER_IP=0.0.0.0
-      # 如果代码里必须要 MCP_SERVER_URL，可以先注释或指向占位
-      # - MCP_SERVER_URL=
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
@@ -19,20 +15,53 @@ services:
     networks:
       - default
       - celery
+    depends_on:
+      - worker-memory
+      - worker-document
 
-  # Celery worker
-  worker:
+  # Memory worker - Memory read/write tasks (threads pool for asyncio)
+  worker-memory:
     image: redbear-mem-open:latest
-    container_name: worker
+    container_name: worker-memory
     env_file:
       - .env
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
-    command: celery -A app.celery_worker.celery_app worker --loglevel=info
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks -n memory_worker@%h
     restart: unless-stopped
     networks:
       - celery
+
+  # Document worker - Document parsing tasks (prefork for CPU-bound)
+  worker-document:
+    image: redbear-mem-open:latest
+    container_name: worker-document
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks --max-tasks-per-child=100 -n document_worker@%h
+    restart: unless-stopped
+    networks:
+      - celery
+
+  # Celery Beat - scheduler
+  beat:
+    image: redbear-mem-open:latest
+    container_name: celery-beat
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: celery -A app.celery_worker.celery_app beat --loglevel=info
+    restart: unless-stopped
+    networks:
+      - celery
+    depends_on:
+      - worker-memory
 
 networks:
   celery:
