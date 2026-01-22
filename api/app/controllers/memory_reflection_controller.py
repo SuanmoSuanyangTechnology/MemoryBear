@@ -20,7 +20,7 @@ from app.services.memory_reflection_service import (
 )
 from app.services.model_service import ModelConfigService
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status,Header
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -192,7 +192,7 @@ async def start_reflection_configs(
 @router.get("/reflection/run")
 async def reflection_run(
     config_id: int,
-    language_type: str = "zh",
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:

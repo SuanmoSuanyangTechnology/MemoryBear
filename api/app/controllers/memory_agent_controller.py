@@ -18,7 +18,7 @@ from app.services import task_service, workspace_service
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_service import ModelConfigService
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile,Header
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
@@ -652,7 +652,7 @@ async def get_knowledge_type_stats_api(
 @router.get("/analytics/hot_memory_tags/by_user", response_model=ApiResponse)
 async def get_hot_memory_tags_by_user_api(
     end_user_id: Optional[str] = Query(None, description="用户ID（可选）"),
-    language_type: Optional[str] ="zh",
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     limit: int = Query(20, description="返回标签数量限制"),
     current_user: User = Depends(get_current_user),
     db: Session=Depends(get_db),
