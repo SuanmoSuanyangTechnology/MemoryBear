@@ -21,7 +21,14 @@ export interface UserState {
   clearUserInfo: () => void;
   logout: () => void;
   getStorageType: () => void;
+  checkJump: () => void;
 }
+
+export const whitePage = [
+  '/conversation',
+  '/login',
+  '/invite-register'
+]
 
 export const useUser = create<UserState>((set, get) => ({
   user: localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user') || '{}') as User : {} as User,
@@ -36,8 +43,10 @@ export const useUser = create<UserState>((set, get) => ({
     if (!cookieUtils.get('authToken')) {
       return
     }
+    const { checkJump } = get()
     const localUser = JSON.parse(localStorage.getItem('user') || '{}') as User;
     if (localUser.id) {
+      checkJump()
       return
     }
     getUsers()
@@ -87,5 +96,14 @@ export const useUser = create<UserState>((set, get) => ({
       .catch(() => {
         console.error('Failed to load storage type');
       })
-  }
+  },
+  checkJump: () => {
+    const localUser = JSON.parse(localStorage.getItem('user') || '{}') as User;
+    const hash = window.location.hash;
+
+    if (localUser.id && (!localUser.current_workspace_id || localUser.current_workspace_id === '') && !whitePage.find(vo => hash.includes(vo))) {
+      console.log('whitePage', whitePage.find(vo => hash.includes(vo)))
+      window.location.href = '/#/index'
+    }
+  },
 }))
