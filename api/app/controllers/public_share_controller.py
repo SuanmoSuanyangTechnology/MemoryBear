@@ -317,9 +317,12 @@ async def chat(
         appid = share.app_id
         """获取存储类型和工作空间的ID"""
 
-        # 直接通过 SQLAlchemy 查询 app
+        # 直接通过 SQLAlchemy 查询 app（仅查询未删除的应用）
         from app.models.app_model import App
-        app = db.query(App).filter(App.id == appid).first()
+        app = db.query(App).filter(
+            App.id == appid,
+            App.is_active == True
+        ).first()
         if not app:
             raise BusinessException("应用不存在", BizCode.APP_NOT_FOUND)
 
