@@ -11,6 +11,7 @@ Functions:
 
 import logging
 from typing import Optional, Dict, Any
+from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.repositories.memory_config_repository import MemoryConfigRepository
@@ -61,7 +62,7 @@ def calculate_forgetting_rate(lambda_time: float, lambda_mem: float) -> float:
 
 def load_actr_config_from_db(
     db: Session,
-    config_id: Optional[int] = None
+    config_id: Optional[UUID] = None
 ) -> Dict[str, Any]:
     """
     从数据库加载 ACT-R 配置参数
@@ -150,7 +151,7 @@ def load_actr_config_from_db(
 
 def create_actr_calculator_from_config(
     db: Session,
-    config_id: Optional[int] = None
+    config_id: Optional[UUID] = None
 ) -> ACTRCalculator:
     """
     从数据库配置创建 ACTRCalculator 实例
@@ -168,11 +169,6 @@ def create_actr_calculator_from_config(
         ValueError: 如果指定的 config_id 不存在
     
     Examples:
-        >>> from sqlalchemy.orm import Session
-        >>> db = Session()
-        >>> calculator = create_actr_calculator_from_config(db, config_id=1)
-        >>> # 使用计算器
-        >>> activation = calculator.calculate_memory_activation(...)
     """
     # 加载配置
     config = load_actr_config_from_db(db, config_id)

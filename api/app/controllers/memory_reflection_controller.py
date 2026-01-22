@@ -1,6 +1,7 @@
 import asyncio
 import time
 import uuid
+from uuid import UUID
 
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.reflection_engine.self_reflexion import (
@@ -156,7 +157,7 @@ async def start_workspace_reflection(
 
 @router.get("/reflection/configs")
 async def start_reflection_configs(
-        config_id: int,
+        config_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ) -> dict:
@@ -191,7 +192,7 @@ async def start_reflection_configs(
 
 @router.get("/reflection/run")
 async def reflection_run(
-    config_id: int,
+    config_id: UUID,
     language_type: str = Header(default="zh", alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

@@ -16,6 +16,7 @@ Classes:
 
 import logging
 from typing import Dict, Any, Optional
+from uuid import UUID
 from datetime import datetime
 
 from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
@@ -69,7 +70,7 @@ class ForgettingScheduler:
         end_user_id: Optional[str] = None,
         max_merge_batch_size: int = 100,
         min_days_since_access: int = 30,
-        config_id: Optional[int] = None,
+        config_id: Optional[UUID] = None,
         db = None
     ) -> Dict[str, Any]:
         """

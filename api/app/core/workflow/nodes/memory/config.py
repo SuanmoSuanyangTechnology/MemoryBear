@@ -1,4 +1,5 @@
 import uuid
+from uuid import UUID
 
 from pydantic import Field
 from typing import Literal
@@ -11,7 +12,7 @@ class MemoryReadNodeConfig(BaseNodeConfig):
         ...
     )
 
-    config_id: int = Field(
+    config_id: UUID = Field(
         ...
     )
 
@@ -26,6 +27,6 @@ class MemoryWriteNodeConfig(BaseNodeConfig):
         ...
     )
 
-    config_id: int = Field(
+    config_id: UUID = Field(
         ...
     )

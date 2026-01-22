@@ -9,6 +9,7 @@ Classes:
 """
 
 import uuid
+from uuid import UUID
 from typing import Dict, List, Optional, Tuple
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_db_logger
@@ -107,7 +108,7 @@ class MemoryConfigRepository:
     @staticmethod
     def update_reflection_config(
             db: Session,
-            config_id: int,
+            config_id: uuid.UUID,
             enable_self_reflexion: bool,
             iteration_period: str,
             reflexion_range: str,
@@ -151,7 +152,7 @@ class MemoryConfigRepository:
         return memory_config_obj
 
     @staticmethod
-    def query_reflection_config_by_id(db: Session, config_id: int) -> MemoryConfig:
+    def query_reflection_config_by_id(db: Session, config_id: uuid.UUID) -> MemoryConfig:
         """构建反思配置查询语句，通过config_id查询反思配置（SQLAlchemy text() 命名参数）
 
         Args:
@@ -222,6 +223,7 @@ class MemoryConfigRepository:
 
         try:
             db_config = MemoryConfig(
+                config_id=uuid.uuid4(),
                 config_name=params.config_name,
                 config_desc=params.config_desc,
                 workspace_id=params.workspace_id,
@@ -408,7 +410,7 @@ class MemoryConfigRepository:
             raise
 
     @staticmethod
-    def get_extracted_config(db: Session, config_id: int) -> Optional[Dict]:
+    def get_extracted_config(db: Session, config_id: UUID) -> Optional[Dict]:
         """获取萃取配置，通过主键查询某条配置
 
         Args:
@@ -457,7 +459,7 @@ class MemoryConfigRepository:
             raise
 
     @staticmethod
-    def get_forget_config(db: Session, config_id: int) -> Optional[Dict]:
+    def get_forget_config(db: Session, config_id: UUID) -> Optional[Dict]:
         """获取遗忘配置，通过主键查询某条配置
 
         Args:
@@ -489,7 +491,7 @@ class MemoryConfigRepository:
             raise
 
     @staticmethod
-    def get_by_id(db: Session, config_id: int) -> Optional[MemoryConfig]:
+    def get_by_id(db: Session, config_id: uuid.UUID) -> Optional[MemoryConfig]:
         """根据ID获取记忆配置
 
         Args:
@@ -513,7 +515,7 @@ class MemoryConfigRepository:
             db_logger.error(f"根据ID查询记忆配置失败: config_id={config_id} - {str(e)}")
             raise
     @staticmethod
-    def get_config_with_workspace(db: Session, config_id: int) -> Optional[tuple]:
+    def get_config_with_workspace(db: Session, config_id: uuid.UUID) -> Optional[tuple]:
         """Get memory config and its associated workspace information
         
         Args:
@@ -664,7 +666,7 @@ class MemoryConfigRepository:
             raise
 
     @staticmethod
-    def delete(db: Session, config_id: int) -> bool:
+    def delete(db: Session, config_id: uuid.UUID) -> bool:
         """删除记忆配置
 
         Args:

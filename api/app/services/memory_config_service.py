@@ -23,51 +23,10 @@ from app.schemas.memory_config_schema import (
     ModelNotFoundError,
 )
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 logger = get_logger(__name__)
 config_logger = get_config_logger()
-
-
-def _validate_config_id(config_id):
-    """Validate configuration ID format."""
-    if config_id is None:
-        raise InvalidConfigError(
-            "Configuration ID cannot be None",
-            field_name="config_id",
-            invalid_value=config_id,
-        )
-    
-    if isinstance(config_id, int):
-        if config_id <= 0:
-            raise InvalidConfigError(
-                f"Configuration ID must be positive: {config_id}",
-                field_name="config_id",
-                invalid_value=config_id,
-            )
-        return config_id
-    
-    if isinstance(config_id, str):
-        try:
-            parsed_id = int(config_id.strip())
-            if parsed_id <= 0:
-                raise InvalidConfigError(
-                    f"Configuration ID must be positive: {parsed_id}",
-                    field_name="config_id",
-                    invalid_value=config_id,
-                )
-            return parsed_id
-        except ValueError:
-            raise InvalidConfigError(
-                f"Invalid configuration ID format: '{config_id}'",
-                field_name="config_id",
-                invalid_value=config_id,
-            )
-    
-    raise InvalidConfigError(
-        f"Invalid type for configuration ID: expected int or str, got {type(config_id).__name__}",
-        field_name="config_id",
-        invalid_value=config_id,
-    )
 
 
 class MemoryConfigService:
@@ -93,14 +52,14 @@ class MemoryConfigService:
     
     def load_memory_config(
         self,
-        config_id: int,
+        config_id: UUID,
         service_name: str = "MemoryConfigService",
     ) -> MemoryConfig:
         """
         Load memory configuration from database by config_id.
         
         Args:
-            config_id: Configuration ID from database
+            config_id: Configuration ID (UUID) from database
             service_name: Name of the calling service (for logging purposes)
             
         Returns:
@@ -116,18 +75,34 @@ class MemoryConfigService:
             extra={
                 "operation": "load_memory_config",
                 "service": service_name,
-                "config_id": config_id,
+                "config_id": str(config_id),
             },
         )
         
         logger.info(f"Loading memory configuration from database: config_id={config_id}")
         
         try:
-            validated_config_id = _validate_config_id(config_id)
+            # Validate config_id is UUID
+            if not isinstance(config_id, UUID):
+                if isinstance(config_id, str):
+                    try:
+                        config_id = UUID(config_id)
+                    except ValueError:
+                        raise InvalidConfigError(
+                            f"Invalid UUID format for config_id: {config_id}",
+                            field_name="config_id",
+                            invalid_value=config_id,
+                        )
+                else:
+                    raise InvalidConfigError(
+                        f"config_id must be UUID or valid UUID string, got {type(config_id).__name__}",
+                        field_name="config_id",
+                        invalid_value=config_id,
+                    )
             
             # Step 1: Get config and workspace
             db_query_start = time.time()
-            result = MemoryConfigRepository.get_config_with_workspace(self.db, validated_config_id)
+            result = MemoryConfigRepository.get_config_with_workspace(self.db, config_id)
             db_query_time = time.time() - db_query_start
             logger.info(f"[PERF] Config+Workspace query: {db_query_time:.4f}s")
             if not result:
@@ -136,14 +111,14 @@ class MemoryConfigService:
                     "Configuration not found in database",
                     extra={
                         "operation": "load_memory_config",
-                        "config_id": validated_config_id,
+                        "config_id": str(config_id),
                         "load_result": "not_found",
                         "elapsed_ms": elapsed_ms,
                         "service": service_name,
                     },
                 )
                 raise ConfigurationError(
-                    f"Configuration {validated_config_id} not found in database"
+                    f"Configuration {config_id} not found in database"
                 )
             
             memory_config, workspace = result
@@ -151,7 +126,7 @@ class MemoryConfigService:
             # Step 2: Validate embedding model (returns both UUID and name)
             embed_start = time.time()
             embedding_uuid, embedding_name = validate_embedding_model(
-                validated_config_id,
+                config_id,
                 memory_config.embedding_id,
                 self.db,
                 workspace.tenant_id,
@@ -168,7 +143,7 @@ class MemoryConfigService:
                 self.db,
                 workspace.tenant_id,
                 required=True,
-                config_id=validated_config_id,
+                config_id=config_id,
                 workspace_id=workspace.id,
             )
             llm_time = time.time() - llm_start
@@ -185,7 +160,7 @@ class MemoryConfigService:
                     self.db,
                     workspace.tenant_id,
                     required=False,
-                    config_id=validated_config_id,
+                    config_id=config_id,
                     workspace_id=workspace.id,
                 )
             rerank_time = time.time() - rerank_start
@@ -243,7 +218,7 @@ class MemoryConfigService:
                 extra={
                     "operation": "load_memory_config",
                     "service": service_name,
-                    "config_id": validated_config_id,
+                    "config_id": str(config_id),
                     "config_name": config.config_name,
                     "workspace_id": str(config.workspace_id),
                     "load_result": "success",

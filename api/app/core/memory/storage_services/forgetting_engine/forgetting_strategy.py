@@ -13,6 +13,7 @@ Classes:
 
 import logging
 from typing import List, Dict, Any, Optional
+from uuid import UUID
 from datetime import datetime, timedelta
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -176,7 +177,7 @@ class ForgettingStrategy:
         self,
         statement_node: Dict[str, Any],
         entity_node: Dict[str, Any],
-        config_id: Optional[int] = None,
+        config_id: Optional[UUID] = None,
         db = None
     ) -> str:
         """
@@ -462,7 +463,7 @@ class ForgettingStrategy:
         statement_text: str,
         entity_name: str,
         entity_type: str,
-        config_id: Optional[int] = None,
+        config_id: Optional[UUID] = None,
         db = None
     ) -> str:
         """
@@ -527,7 +528,7 @@ class ForgettingStrategy:
                 statement_text, entity_name, entity_type
             )
     
-    async def _get_llm_client(self, db, config_id: int):
+    async def _get_llm_client(self, db, config_id: UUID):
         """
         从数据库获取 LLM 客户端
         

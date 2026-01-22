@@ -1,6 +1,7 @@
 """情绪分析相关的请求和响应模型"""
 
 from typing import Optional
+from uuid import UUID
 from pydantic import BaseModel, Field
 
 class EmotionTagsRequest(BaseModel):
@@ -30,7 +31,7 @@ class EmotionHealthRequest(BaseModel):
 class EmotionSuggestionsRequest(BaseModel):
     """获取个性化情绪建议请求"""
     end_user_id: str = Field(..., description="组ID")
-    config_id: Optional[int] = Field(None, description="配置ID（用于指定LLM模型）")
+    config_id: Optional[UUID] = Field(None, description="配置ID（用于指定LLM模型）")
 
 
 class EmotionGenerateSuggestionsRequest(BaseModel):

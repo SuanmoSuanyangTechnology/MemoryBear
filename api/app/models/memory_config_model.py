@@ -9,7 +9,7 @@ class MemoryConfig(Base):
     __tablename__ = "memory_config"
 
     # 主键
-    config_id = Column(Integer, primary_key=True, autoincrement=True, comment="配置ID")
+    config_id = Column(UUID(as_uuid=True), primary_key=True,  comment="配置ID")
 
     # 基本信息
     config_name = Column(String, nullable=False, comment="配置名称")

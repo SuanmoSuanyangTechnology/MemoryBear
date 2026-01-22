@@ -12,6 +12,7 @@
 
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -87,7 +88,7 @@ class MemoryForgetService:
     async def _get_forgetting_components(
         self,
         db: Session,
-        config_id: Optional[int] = None
+        config_id: Optional[UUID] = None
     ) -> Tuple[ACTRCalculator, ForgettingStrategy, ForgettingScheduler, Dict[str, Any]]:
         """
         获取遗忘引擎组件（计算器、策略、调度器）
@@ -294,7 +295,7 @@ class MemoryForgetService:
         end_user_id: str,
         max_merge_batch_size: Optional[int] = None,
         min_days_since_access: Optional[int] = None,
-        config_id: Optional[int] = None
+        config_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         手动触发遗忘周期
@@ -389,7 +390,7 @@ class MemoryForgetService:
     def read_forgetting_config(
         self,
         db: Session,
-        config_id: int
+        config_id: UUID
     ) -> Dict[str, Any]:
         """
         获取遗忘引擎配置
@@ -416,7 +417,7 @@ class MemoryForgetService:
     def update_forgetting_config(
         self,
         db: Session,
-        config_id: int,
+        config_id: UUID,
         update_fields: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
@@ -466,7 +467,7 @@ class MemoryForgetService:
         self,
         db: Session,
         end_user_id: Optional[str] = None,
-        config_id: Optional[int] = None
+        config_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         获取遗忘引擎统计信息
@@ -677,7 +678,7 @@ class MemoryForgetService:
         db: Session,
         importance_score: float,
         days: int,
-        config_id: Optional[int] = None
+        config_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         获取遗忘曲线数据
