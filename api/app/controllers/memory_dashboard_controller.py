@@ -5,7 +5,6 @@ from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
-from app.schemas.memory_agent_schema import End_User_Information
 from app.schemas.response_schema import ApiResponse
 
 from app.services import memory_dashboard_service, memory_storage_service, workspace_service
@@ -40,54 +39,7 @@ def get_workspace_total_end_users(
     api_logger.info(f"成功获取最新用户总数: total_num={total_end_users.get('total_num', 0)}")
     return success(data=total_end_users, msg="用户数量获取成功")
 
-@router.post("/update/end_users", response_model=ApiResponse)
-async def update_workspace_end_users(
-    user_input: End_User_Information,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    更新工作空间的宿主信息
-    """
-    username = user_input.end_user_name  # 要更新的用户名
-    end_user_input_id = user_input.id  # 宿主ID
-    workspace_id = current_user.current_workspace_id
-    
-    api_logger.info(f"用户 {current_user.username} 请求更新工作空间 {workspace_id} 的宿主信息")
-    api_logger.info(f"更新参数: username={username}, end_user_id={end_user_input_id}")
 
-    try:
-        # 导入更新函数
-        from app.repositories.end_user_repository import update_end_user_other_name
-        import uuid
-        
-        # 转换 end_user_id 为 UUID 类型
-        end_user_uuid = uuid.UUID(end_user_input_id)
-        
-        # 直接更新数据库中的 other_name 字段
-        updated_count = update_end_user_other_name(
-            db=db,
-            end_user_id=end_user_uuid,
-            other_name=username
-        )
-        
-        api_logger.info(f"成功更新宿主 {end_user_input_id} 的 other_name 为: {username}")
-
-        return success(
-            data={
-                "updated_count": updated_count,
-                "end_user_id": end_user_input_id,
-                "updated_other_name": username
-            },
-            msg=f"成功更新 {updated_count} 个宿主的信息"
-        )
-        
-    except Exception as e:
-        api_logger.error(f"更新宿主信息失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"更新宿主信息失败: {str(e)}"
-        )
 
 
 
