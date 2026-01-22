@@ -34,7 +34,6 @@ class CycleGraphNode(BaseNode):
         self.cycle_nodes = list()  # Nodes belonging to this cycle
         self.cycle_edges = list()  # Edges connecting nodes within the cycle
         self.start_node_id = None  # ID of the start node within the cycle
-        self.end_node_ids = []  # IDs of end nodes within the cycle
 
         self.graph: StateGraph | CompiledStateGraph | None = None
         self.build_graph()
@@ -105,13 +104,15 @@ class CycleGraphNode(BaseNode):
         """
         from app.core.workflow.graph_builder import GraphBuilder
         self.cycle_nodes, self.cycle_edges = self.pure_cycle_graph()
-        self.graph = GraphBuilder(
+        builder = GraphBuilder(
             {
                 "nodes": self.cycle_nodes,
                 "edges": self.cycle_edges,
             },
             subgraph=True
-        ).build()
+        )
+        self.start_node_id = builder.start_node_id
+        self.graph = builder.build()
 
     async def execute(self, state: WorkflowState) -> Any:
         """
@@ -132,6 +133,7 @@ class CycleGraphNode(BaseNode):
         """
         if self.node_type == NodeType.LOOP:
             return await LoopRuntime(
+                start_id=self.start_node_id,
                 graph=self.graph,
                 node_id=self.node_id,
                 config=self.config,
@@ -139,6 +141,7 @@ class CycleGraphNode(BaseNode):
             ).run()
         if self.node_type == NodeType.ITERATION:
             return await IterationRuntime(
+                start_id=self.start_node_id,
                 graph=self.graph,
                 node_id=self.node_id,
                 config=self.config,
