@@ -4,6 +4,7 @@ from .workspace_model import Workspace, WorkspaceMember, WorkspaceRole
 from .knowledge_model import Knowledge
 from .document_model import Document
 from .file_model import File
+from .file_metadata_model import FileMetadata
 from .generic_file_model import GenericFile
 from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey
 from .memory_short_model import ShortTermMemory, LongTermMemory
@@ -37,6 +38,7 @@ __all__ = [
     "Knowledge",
     "Document",
     "File",
+    "FileMetadata",
     "GenericFile",
     "ModelConfig",
     "ModelProvider",

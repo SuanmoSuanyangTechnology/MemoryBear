@@ -14,6 +14,7 @@ from . import (
     emotion_config_controller,
     emotion_controller,
     file_controller,
+    file_storage_controller,
     home_page_controller,
     implicit_memory_controller,
     knowledge_controller,
@@ -88,5 +89,6 @@ manager_router.include_router(home_page_controller.router)
 manager_router.include_router(implicit_memory_controller.router)
 manager_router.include_router(memory_perceptual_controller.router)
 manager_router.include_router(memory_working_controller.router)
+manager_router.include_router(file_storage_controller.router)
 
 __all__ = ["manager_router"]
