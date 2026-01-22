@@ -291,7 +291,69 @@ const Properties: FC<PropertiesProps> = ({
       return filteredList;
     }
     if (nodeType === 'iteration' && key === 'output') {
-      return variableList.filter(variable => variable.value.includes('sys.'));
+      let filteredList = variableList.filter(variable => variable.value.includes('sys.'));
+      // Add child node output variables for loop nodes
+      if (selectedNode) {
+        const graph = graphRef.current;
+        if (graph) {
+          const nodes = graph.getNodes();
+          const childNodes = nodes.filter(node => {
+            const nodeData = node.getData();
+            return nodeData?.cycle === selectedNode.id;
+          });
+
+          // Add output variables from child nodes
+          childNodes.forEach(childNode => {
+            const childData = childNode.getData();
+            const childNodeId = childData.id;
+
+            // Add child node output variables based on their type
+            switch (childData.type) {
+              case 'llm':
+              case 'jinja-render':
+              case 'tool':
+                const outputKey = `${childNodeId}_output`;
+                const existingOutput = filteredList.find(v => v.key === outputKey);
+                if (!existingOutput) {
+                  filteredList.push({
+                    key: outputKey,
+                    label: 'output',
+                    type: 'variable',
+                    dataType: 'string',
+                    value: `${childNodeId}.output`,
+                    nodeData: childData,
+                  });
+                }
+                break;
+              case 'http-request':
+                const bodyKey = `${childNodeId}_body`;
+                const statusKey = `${childNodeId}_status_code`;
+                if (!filteredList.find(v => v.key === bodyKey)) {
+                  filteredList.push({
+                    key: bodyKey,
+                    label: 'body',
+                    type: 'variable',
+                    dataType: 'string',
+                    value: `${childNodeId}.body`,
+                    nodeData: childData,
+                  });
+                }
+                if (!filteredList.find(v => v.key === statusKey)) {
+                  filteredList.push({
+                    key: statusKey,
+                    label: 'status_code',
+                    type: 'variable',
+                    dataType: 'number',
+                    value: `${childNodeId}.status_code`,
+                    nodeData: childData,
+                  });
+                }
+                break;
+            }
+          });
+        }
+      }
+      return filteredList;
     }
     if (nodeType === 'iteration') {
       return variableList.filter(variable => variable.dataType.includes('array'));
@@ -411,7 +473,7 @@ const Properties: FC<PropertiesProps> = ({
               />
             : selectedNode?.data?.type === 'tool'
             ? <ToolConfig options={variableList} />
-            : selectedNode?.data.type === 'jinja-render'
+            : selectedNode?.data?.type === 'jinja-render'
             ? <JinjaRender
               selectedNode={selectedNode}
               options={getFilteredVariableList(selectedNode?.data?.type, 'mapping')}

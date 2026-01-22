@@ -13,11 +13,20 @@ const StatementDetail = forwardRef((_props, ref) => {
   const { id } = useParams()
   const suggestionsRef = useRef<{ handleRefresh: () => void; }>(null)
   const handleRefresh = () => {
-    if (!id) return
-    generateSuggestions(id)
-      .then(() => {
-        suggestionsRef.current?.handleRefresh()
-      })
+    if (!id) {
+      return Promise.resolve()
+    }
+
+    return new Promise((resolve, reject) => {
+      generateSuggestions(id)
+        .then(() => {
+          suggestionsRef.current?.handleRefresh()
+          resolve(true)
+        })
+        .catch((error) => {
+          reject(error)
+        })
+    })
   }
   useImperativeHandle(ref, () => ({
     handleRefresh
