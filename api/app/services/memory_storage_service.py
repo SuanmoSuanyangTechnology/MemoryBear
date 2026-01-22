@@ -12,7 +12,11 @@ from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from app.core.logging_config import get_config_logger, get_logger
-from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
+from app.core.memory.analytics.hot_memory_tags import (
+    get_hot_memory_tags,
+    get_raw_tags_from_db,
+    filter_tags_with_llm,
+)
 from app.core.memory.analytics.recent_activity_stats import get_recent_activity_stats
 from app.models.user_model import User
 from app.repositories.data_config_repository import DataConfigRepository
@@ -515,6 +519,12 @@ async def analytics_hot_memory_tags(
 ) -> List[Dict[str, Any]]:
     """
     获取热门记忆标签，按数量排序并返回前N个
+    
+    优化策略：
+    1. 先从所有用户收集原始标签（不调用LLM）
+    2. 聚合并合并相同标签的频率
+    3. 排序后取前N个
+    4. 只调用一次LLM进行筛选
     """
     workspace_id = current_user.current_workspace_id
     # 获取更多标签供LLM筛选（获取limit*4个标签）
@@ -522,20 +532,65 @@ async def analytics_hot_memory_tags(
     from app.services.memory_dashboard_service import get_workspace_end_users
     end_users = get_workspace_end_users(db, workspace_id, current_user)
     
-    tags = []
-    for end_user in end_users:
-        tag = await get_hot_memory_tags(str(end_user.id), limit=raw_limit)
-        if tag:
-            # 将每个用户的标签列表展平到总列表中
-            tags.extend(tag)
-
-    # 按频率降序排序（虽然数据库已经排序，但为了确保正确性再次排序）
-    sorted_tags = sorted(tags, key=lambda x: x[1], reverse=True)
+    if not end_users:
+        return []
     
-    # 只返回前limit个
-    top_tags = sorted_tags[:limit]
-    
-    return [{"name": t, "frequency": f} for t, f in top_tags]
+    # 步骤1: 收集所有用户的原始标签（不调用LLM）
+    connector = Neo4jConnector()
+    try:
+        all_raw_tags = []
+        for end_user in end_users:
+            raw_tags = await get_raw_tags_from_db(
+                connector, 
+                str(end_user.id), 
+                limit=raw_limit, 
+                by_user=False
+            )
+            if raw_tags:
+                all_raw_tags.extend(raw_tags)
+        
+        if not all_raw_tags:
+            return []
+        
+        # 步骤2: 聚合相同标签的频率
+        tag_frequency_map = {}
+        for tag_name, frequency in all_raw_tags:
+            if tag_name in tag_frequency_map:
+                tag_frequency_map[tag_name] += frequency
+            else:
+                tag_frequency_map[tag_name] = frequency
+        
+        # 步骤3: 按频率降序排序，取前raw_limit个
+        sorted_tags = sorted(
+            tag_frequency_map.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )[:raw_limit]
+        
+        if not sorted_tags:
+            return []
+        
+        # 步骤4: 只调用一次LLM进行筛选
+        tag_names = [tag for tag, _ in sorted_tags]
+        
+        # 使用第一个用户的group_id来获取LLM配置
+        # 因为同一工作空间下的用户应该使用相同的配置
+        first_end_user_id = str(end_users[0].id)
+        filtered_tag_names = await filter_tags_with_llm(tag_names, first_end_user_id)
+        
+        # 步骤5: 根据LLM筛选结果构建最终列表（保留频率）
+        final_tags = []
+        for tag, freq in sorted_tags:
+            if tag in filtered_tag_names:
+                final_tags.append((tag, freq))
+        
+        # 步骤6: 只返回前limit个
+        top_tags = final_tags[:limit]
+        
+        return [{"name": t, "frequency": f} for t, f in top_tags]
+        
+    finally:
+        await connector.close()
 
 
 async def analytics_recent_activity_stats() -> Dict[str, Any]:
