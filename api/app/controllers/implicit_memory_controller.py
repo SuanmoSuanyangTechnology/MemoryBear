@@ -162,7 +162,7 @@ async def get_preference_tags(
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
             return fail(
                 BizCode.NOT_FOUND,
-                "画像缓存不存在或已过期，请调用 /generate_profile 接口生成新画像",
+                "画像缓存不存在或已过期，请右上角刷新生成新画像",
                 ""
             )
         
@@ -233,7 +233,7 @@ async def get_dimension_portrait(
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
             return fail(
                 BizCode.NOT_FOUND,
-                "画像缓存不存在或已过期，请调用 /generate_profile 接口生成新画像",
+                "画像缓存不存在或已过期，请右上角刷新生成新画像",
                 ""
             )
         
@@ -281,7 +281,7 @@ async def get_interest_area_distribution(
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
             return fail(
                 BizCode.NOT_FOUND,
-                "画像缓存不存在或已过期，请调用 /generate_profile 接口生成新画像",
+                "画像缓存不存在或已过期，请右上角刷新生成新画像",
                 ""
             )
         
@@ -333,7 +333,7 @@ async def get_behavior_habits(
             api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
             return fail(
                 BizCode.NOT_FOUND,
-                "画像缓存不存在或已过期，请调用 /generate_profile 接口生成新画像",
+                "画像缓存不存在或已过期，请右上角刷新生成新画像",
                 ""
             )
         
