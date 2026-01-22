@@ -2,7 +2,7 @@ import { type FC, useEffect, useState, useMemo } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Select, Form, Space, Skeleton, Input, Button, Divider } from 'antd'
+import { Row, Col, Skeleton, Button, Divider, Tooltip } from 'antd'
 import RbCard from '@/components/RbCard/Card'
 import {
   getConversations,
@@ -10,7 +10,6 @@ import {
   getConversationDetail,
 } from '@/api/memory'
 import { formatDateTime } from '@/utils/format'
-import Tag from '@/components/Tag'
 import RbAlert from '@/components/RbAlert'
 import Empty from '@/components/Empty'
 import ChatContent from '@/components/Chat/ChatContent'
@@ -33,7 +32,6 @@ interface Detail {
 const WorkingDetail: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
-  const [form] = Form.useForm()
   const [loading, setLoading] = useState<boolean>(false)
   const [data, setData] = useState<Conversation[]>([])
   const [messagesLoading, setMessagesLoading] = useState<boolean>(false)
@@ -110,13 +108,15 @@ const WorkingDetail: FC = () => {
               <div className="rb:h-full! rb:border-r rb:border-[#EAECEE] rb:py-3 rb:px-4">
                 {data.map(item => (
                   <div key={item.id} className="rb:mb-3">
-                    <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
-                      'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === selected?.id,
-                    })}
-                      onClick={() => setSelected(item)}
-                    >
-                      {item.title}
-                    </div>
+                    <Tooltip title={item.title}>
+                      <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap", {
+                        'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === selected?.id,
+                      })}
+                        onClick={() => setSelected(item)}
+                      >
+                        {item.title}
+                      </div>
+                    </Tooltip>
                   </div>
                 ))}
               </div>

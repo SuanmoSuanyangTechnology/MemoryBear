@@ -21,6 +21,7 @@ interface Suggestions {
 const Suggestions = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
+  const [loading, setLoading] = useState(false)
   const [suggestions, setSuggestions] = useState<Suggestions | null>(null)
 
   useEffect(() => {
@@ -31,9 +32,13 @@ const Suggestions = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => 
     if (!id) {
       return
     }
+    setLoading(true)
     getEmotionSuggestions(id)
       .then((res) => {
         setSuggestions(res as Suggestions)
+      })
+      .finally(() => {
+        setLoading(false)
       })
   }
 
@@ -63,7 +68,7 @@ const Suggestions = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => 
             ))}
           </div>
         </>
-        : <Empty size={88} className="rb:h-full" />
+        : <Empty size={88} subTitle={t(loading ? 'statementDetail.suggestionLoading' : 'empty.tableEmpty')} className="rb:h-full" />
       }
     </RbCard>
   )

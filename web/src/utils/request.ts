@@ -52,6 +52,8 @@ service.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
     }
+    const language = localStorage.getItem('language')
+    config.headers['X-Language-Type'] = language || 'en';
     config.headers.Cookie = undefined
     return config;
   },
@@ -146,7 +148,7 @@ service.interceptors.response.use(
         break;
       default:
         if (!msg && Array.isArray(error.response?.data?.detail)) {
-          msg = error.response?.data?.detail?.map(item => item.msg).join(';')
+          msg = error.response?.data?.detail?.map((item: { msg: string }) => item.msg).join(';')
         } else {
           msg = msg || i18n.t('common.unknownError');
         }
