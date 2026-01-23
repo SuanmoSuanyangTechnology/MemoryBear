@@ -3,10 +3,15 @@ import asyncio
 import json
 import os
 from typing import Any, Dict
+from pathlib import Path
 from dotenv import load_dotenv
 
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.evaluation.config import SELECTED_GROUP_ID, DATASET_DIR
 
 from app.core.memory.evaluation.memsciqa.evaluate_qa import run_memsciqa_eval
 from app.core.memory.evaluation.longmemeval.qwen_search_eval import run_longmemeval_test
@@ -28,7 +33,7 @@ async def run(
     max_contexts_per_item: int | None = None,
 ) -> Dict[str, Any]:
     # 恢复原始风格：统一入口做路由，并沿用各数据集既有默认
-    group_id = group_id or SELECTED_GROUP_ID
+    group_id = group_id or os.getenv("EVAL_GROUP_ID", "locomo_benchmark")
 
     if reset_group:
         connector = Neo4jConnector()

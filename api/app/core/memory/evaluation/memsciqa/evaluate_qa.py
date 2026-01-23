@@ -5,11 +5,16 @@ import os
 import time
 from datetime import datetime
 from typing import List, Dict, Any
+from pathlib import Path
 from dotenv import load_dotenv
+
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent.parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.src.search import run_hybrid_search  # 使用旧版本（重构前）
-from app.core.memory.evaluation.config import DATASET_DIR, SELECTED_GROUP_ID, SELECTED_EMBEDDING_ID, SELECTED_LLM_ID
 from app.core.memory.utils.llm.llm_utils import get_llm_client
 from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
 from app.core.memory.evaluation.common.metrics import exact_match, latency_stats, avg_context_tokens
@@ -116,13 +121,16 @@ def _combine_dialogues_for_hybrid(results: Dict[str, Any]) -> List[Dict[str, Any
 
 
 async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid") -> Dict[str, Any]:
-    group_id = group_id or SELECTED_GROUP_ID
+    group_id = group_id or os.getenv("EVAL_GROUP_ID", "locomo_benchmark")
+    
     # Load data
-    data_path = os.path.join(DATASET_DIR, "msc_self_instruct.jsonl")
+    dataset_dir = Path(__file__).resolve().parent.parent / "dataset"
+    data_path = dataset_dir / "msc_self_instruct.jsonl"
+    
     if not os.path.exists(data_path):
         raise FileNotFoundError(
             f"数据集文件不存在: {data_path}\n"
-            f"请将 msc_self_instruct.jsonl 放置在: {DATASET_DIR}"
+            f"请将 msc_self_instruct.jsonl 放置在: {dataset_dir}"
         )
     with open(data_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
@@ -133,7 +141,13 @@ async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, s
     await ingest_contexts_via_full_pipeline(contexts, group_id)
 
     # LLM client (使用异步调用)
-    llm_client = get_llm_client(SELECTED_LLM_ID)
+    from app.db import get_db
+    
+    db = next(get_db())
+    try:
+        llm_client = get_llm_client(os.getenv("EVAL_LLM_ID"), db)
+    finally:
+        db.close()
 
     # Evaluate each item
     connector = Neo4jConnector()

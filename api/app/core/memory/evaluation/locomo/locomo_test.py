@@ -8,16 +8,21 @@ import math
 import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
+from pathlib import Path
 from dotenv import load_dotenv
+
+# Load main .env
 load_dotenv()
 
-# 导入配置
-try:
-    from app.core.memory.evaluation.config import SELECTED_GROUP_ID
-    print(f"✅ 使用配置的 group_id: {SELECTED_GROUP_ID}")
-except ImportError as e:
-    print(f"⚠️ 无法导入 SELECTED_GROUP_ID: {e}，使用默认值")
-    SELECTED_GROUP_ID = "locomo_test"
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent.parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+    print(f"✅ 加载评估配置: {eval_config_path}")
+
+# Get group_id from config
+group_id = os.getenv("EVAL_GROUP_ID", "locomo_test")
+print(f"✅ 使用配置的 group_id: {group_id}")
 
 # 首先定义 _loc_normalize 函数，因为其他函数依赖它
 def _loc_normalize(text: str) -> str:
@@ -409,6 +414,9 @@ def enhanced_context_selection(contexts: List[str], question: str, question_inde
 async def run_enhanced_evaluation():
     """使用增强方法进行完整评估 - 解决中间性能衰减问题"""
     from dotenv import load_dotenv
+    from uuid import UUID
+    from datetime import datetime
+    from dataclasses import dataclass
     
     # 修正导入路径：使用 app.core.memory.src 前缀
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -417,7 +425,12 @@ async def run_enhanced_evaluation():
     from app.core.models.base import RedBearModelConfig
     from app.core.memory.utils.llm.llm_utils import get_llm_client
     from app.core.memory.utils.config.config_utils import get_embedder_config
-    from app.core.memory.evaluation.config import SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
+    from app.schemas.memory_config_schema import MemoryConfig
+    from app.services.memory_config_service import MemoryConfigService
+    
+    # Get model IDs from config
+    llm_id = os.getenv("EVAL_LLM_ID", "6dc52e1b-9cec-4194-af66-a74c6307fc3f")
+    embedding_id = os.getenv("EVAL_EMBEDDING_ID", "e2a6392d-ca63-4d59-a523-647420b59cb2")
 
     # 加载数据 - 使用统一的 dataset 目录
     data_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dataset", "locomo10.json")
@@ -439,8 +452,11 @@ async def run_enhanced_evaluation():
             qa_items.extend(entry.get("qa", []))
     else:
         qa_items.extend(raw.get("qa", []))
-    
-    items = qa_items[:20]  # 测试多少个问题
+
+    # 测试多少个问题 - 可通过环境变量设置
+    sample_size = int(os.getenv("LOCOMO_SAMPLE_SIZE", "20"))
+    items = qa_items[:sample_size]
+    print(f"📊 将测试 {len(items)} 个问题（总共 {len(qa_items)} 个可用）")  
     
     # 初始化增强监控器
     monitor = EnhancedEvaluationMonitor(reset_interval=5, performance_threshold=0.6)
@@ -450,13 +466,54 @@ async def run_enhanced_evaluation():
     db = next(get_db())
     
     try:
-        llm = get_llm_client(SELECTED_LLM_ID, db)
+        llm = get_llm_client(llm_id, db)
         
         # 初始化embedder
-        cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID, db)
+        cfg_dict = get_embedder_config(embedding_id, db)
         embedder = OpenAIEmbedderClient(
             model_config=RedBearModelConfig.model_validate(cfg_dict)
         )
+        
+        # 🔧 创建 MemoryConfig 对象用于搜索
+        # 方案1：如果有配置ID，从数据库加载
+        config_id = os.getenv("EVAL_CONFIG_ID")
+        if config_id:
+            print(f"📋 从数据库加载配置 ID: {config_id}")
+            memory_config_service = MemoryConfigService(db)
+            memory_config = memory_config_service.load_memory_config(config_id, service_name="locomo_test")
+        else:
+            # 方案2：创建临时配置对象用于测试
+            print(f"📋 创建临时测试配置")
+            from uuid import UUID
+            from datetime import datetime
+            
+            # 将字符串 ID 转换为 UUID
+            try:
+                embedding_uuid = UUID(embedding_id)
+                llm_uuid = UUID(llm_id)
+            except ValueError as e:
+                raise ValueError(f"无效的 UUID 格式: {e}")
+            
+            memory_config = MemoryConfig(
+                config_id=1,  # 临时 ID
+                config_name="locomo_test_config",
+                workspace_id=UUID("00000000-0000-0000-0000-000000000000"),  # 临时 workspace
+                workspace_name="test_workspace",
+                tenant_id=UUID("00000000-0000-0000-0000-000000000000"),  # 临时 tenant
+                embedding_model_id=embedding_uuid,
+                embedding_model_name="test_embedding",
+                llm_model_id=llm_uuid,
+                llm_model_name="test_llm",
+                storage_type="neo4j",
+                chunker_strategy="RecursiveChunker",
+                reflexion_enabled=False,
+                reflexion_iteration_period=3,
+                reflexion_range="partial",
+                reflexion_baseline="Time",
+                loaded_at=datetime.now()
+            )
+        
+        print(f"✅ MemoryConfig 已准备: embedding_id={memory_config.embedding_model_id}, llm_id={memory_config.llm_model_id}")
         
         # 初始化连接器
         connector = Neo4jConnector()
@@ -529,16 +586,17 @@ async def run_enhanced_evaluation():
                 from app.core.memory.src.search import run_hybrid_search
                 
                 print(f"🔀 使用混合搜索服务（旧版本）...")
-                print(f"📍 检索参数: group_id={SELECTED_GROUP_ID}, limit=20, search_type=hybrid")
+                print(f"📍 检索参数: group_id={group_id}, limit=20, search_type=hybrid")
                 print(f"📍 查询文本: {q}")
                 
                 search_results = await run_hybrid_search(
                     query_text=q,
                     search_type="hybrid",
-                    group_id=SELECTED_GROUP_ID,  # 使用配置的 group_id
+                    group_id=group_id,  # 使用配置的 group_id
                     limit=20,
                     include=["statements", "chunks", "entities", "summaries"],
                     output_path=None,
+                    memory_config=memory_config,  # 🔧 添加必需的 memory_config 参数
                     rerank_alpha=0.6,  # BM25权重
                     use_forgetting_rerank=False,
                     use_llm_rerank=False

@@ -7,8 +7,16 @@ import re
 import statistics
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
+from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent.parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+    print(f"✅ 加载评估配置: {eval_config_path}")
+
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
 from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
@@ -17,7 +25,6 @@ from app.core.models.base import RedBearModelConfig
 from app.core.memory.utils.config.config_utils import get_embedder_config
 from app.core.memory.utils.llm.llm_utils import get_llm_client
 from app.core.memory.evaluation.dialogue_queries import SEARCH_ENTITIES_BY_NAME
-from app.core.memory.evaluation.config import DATASET_DIR, SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
 from app.core.memory.evaluation.common.metrics import f1_score as common_f1, jaccard, latency_stats, avg_context_tokens
 from app.core.memory.evaluation.common.metrics import exact_match
 
@@ -603,11 +610,13 @@ async def run_longmemeval_test(
     # 数据路径
     if not data_path:
         # 固定使用中文数据集：dataset/longmemeval_oracle_zh.json
-        data_path = os.path.join(DATASET_DIR, "longmemeval_oracle_zh.json")
+        dataset_dir = Path(__file__).resolve().parent.parent / "dataset"
+        data_path = str(dataset_dir / "longmemeval_oracle_zh.json")
+        
         if not os.path.exists(data_path):
             raise FileNotFoundError(
                 f"数据集文件不存在: {data_path}\n"
-                f"请将 longmemeval_oracle_zh.json 放置在: {DATASET_DIR}"
+                f"请将 longmemeval_oracle_zh.json 放置在: {dataset_dir}"
             )
 
     qa_list: List[Dict[str, Any]] = load_dataset_any(data_path)
@@ -660,12 +669,19 @@ async def run_longmemeval_test(
             )
 
     # 初始化组件（摄入后再初始化连接器）- 使用异步LLM客户端
-    llm_client = get_llm_client(SELECTED_LLM_ID)
+    from app.db import get_db
+    
+    db = next(get_db())
+    try:
+        llm_client = get_llm_client(os.getenv("EVAL_LLM_ID"), db)
+        cfg_dict = get_embedder_config(os.getenv("EVAL_EMBEDDING_ID"), db)
+        embedder = OpenAIEmbedderClient(
+            model_config=RedBearModelConfig.model_validate(cfg_dict)
+        )
+    finally:
+        db.close()
+    
     connector = Neo4jConnector()
-    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
-    embedder = OpenAIEmbedderClient(
-        model_config=RedBearModelConfig.model_validate(cfg_dict)
-    )
 
     # 指标收集
     latencies_llm: List[float] = []
@@ -1182,8 +1198,8 @@ async def run_longmemeval_test(
                 "search_limit": search_limit,
                 "context_char_budget": context_char_budget,
                 "search_type": search_type,
-                "llm_id": SELECTED_LLM_ID,
-                "embedding_id": SELECTED_EMBEDDING_ID,
+                "llm_id": os.getenv("EVAL_LLM_ID"),
+                "embedding_id": os.getenv("EVAL_EMBEDDING_ID"),
                 "sample_size": sample_size,
                 "start_index": start_index,
             },
@@ -1303,7 +1319,8 @@ def main():
 
     # 保存结果到文件
     try:
-        out_dir = os.path.join(PROJECT_ROOT, "evaluation", "longmemeval", "results")
+        # 使用相对路径而不是 PROJECT_ROOT
+        out_dir = Path(__file__).resolve().parent / "results"
         os.makedirs(out_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_path = os.path.join(out_dir, f"longmemeval_{result['params']['search_type']}_{ts}.json")
