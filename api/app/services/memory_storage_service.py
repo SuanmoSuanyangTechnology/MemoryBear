@@ -530,7 +530,8 @@ async def analytics_hot_memory_tags(
     # 获取更多标签供LLM筛选（获取limit*4个标签）
     raw_limit = limit * 4
     from app.services.memory_dashboard_service import get_workspace_end_users
-    end_users = get_workspace_end_users(db, workspace_id, current_user)
+    # 使用 asyncio.to_thread 避免阻塞事件循环
+    end_users = await asyncio.to_thread(get_workspace_end_users, db, workspace_id, current_user)
     
     if not end_users:
         return []

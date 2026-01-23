@@ -95,6 +95,11 @@ async def get_workspace_end_users(
     
     if not end_users:
         api_logger.info("工作空间下没有宿主")
+        # 缓存空结果，避免重复查询
+        try:
+            await aio_redis_set(cache_key, json.dumps([]), expire=30)
+        except Exception as e:
+            api_logger.warning(f"Redis 缓存写入失败: {str(e)}")
         return success(data=[], msg="宿主列表获取成功")
     
     end_user_ids = [str(user.id) for user in end_users]
@@ -103,9 +108,7 @@ async def get_workspace_end_users(
     async def get_memory_configs():
         """获取记忆配置（在线程池中执行同步查询）"""
         try:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None,
+            return await asyncio.to_thread(
                 get_end_users_connected_configs_batch,
                 end_user_ids, db
             )
@@ -118,9 +121,7 @@ async def get_workspace_end_users(
         if current_workspace_type == "rag":
             # RAG 模式：批量查询
             try:
-                loop = asyncio.get_event_loop()
-                chunk_map = await loop.run_in_executor(
-                    None,
+                chunk_map = await asyncio.to_thread(
                     memory_dashboard_service.get_users_total_chunk_batch,
                     end_user_ids, db, current_user
                 )
@@ -130,13 +131,18 @@ async def get_workspace_end_users(
                 return {uid: {"total": 0} for uid in end_user_ids}
         
         elif current_workspace_type == "neo4j":
-            # Neo4j 模式：并发查询
+            # Neo4j 模式：并发查询（带并发限制）
+            # 使用信号量限制并发数，避免大量用户时压垮 Neo4j
+            MAX_CONCURRENT_QUERIES = 10
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
+            
             async def get_neo4j_memory_num(end_user_id: str):
-                try:
-                    return await memory_storage_service.search_all(end_user_id)
-                except Exception as e:
-                    api_logger.error(f"获取用户 {end_user_id} Neo4j 记忆数量失败: {str(e)}")
-                    return {"total": 0}
+                async with semaphore:
+                    try:
+                        return await memory_storage_service.search_all(end_user_id)
+                    except Exception as e:
+                        api_logger.error(f"获取用户 {end_user_id} Neo4j 记忆数量失败: {str(e)}")
+                        return {"total": 0}
             
             memory_nums_list = await asyncio.gather(*[get_neo4j_memory_num(uid) for uid in end_user_ids])
             return {end_user_ids[i]: memory_nums_list[i] for i in range(len(end_user_ids))}
