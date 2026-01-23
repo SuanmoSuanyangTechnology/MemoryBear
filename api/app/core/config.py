@@ -184,7 +184,7 @@ class Settings:
     ENABLE_TOOL_MANAGEMENT: bool = os.getenv("ENABLE_TOOL_MANAGEMENT", "true").lower() == "true"
 
     # official environment system version
-    SYSTEM_VERSION: str = os.getenv("SYSTEM_VERSION", "v0.2.0")
+    SYSTEM_VERSION: str = os.getenv("SYSTEM_VERSION", "v0.2.1")
 
     # workflow config
     WORKFLOW_NODE_TIMEOUT: int = int(os.getenv("WORKFLOW_NODE_TIMEOUT", 600))
