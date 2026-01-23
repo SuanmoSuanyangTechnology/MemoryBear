@@ -12,7 +12,7 @@ from app.core.memory.agent.utils.session_tools import SessionService
 from app.core.memory.agent.utils.template_tools import TemplateService
 from app.core.memory.agent.services.optimized_llm_service import LLMServiceMixin
 
-template_root = os.path.join(PROJECT_ROOT_, 'agent', 'utils', 'prompt')
+template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
 db_session = next(get_db())
 logger = get_agent_logger(__name__)
 

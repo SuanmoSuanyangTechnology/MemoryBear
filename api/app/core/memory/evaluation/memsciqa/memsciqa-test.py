@@ -15,9 +15,10 @@ except Exception:
 
 # 路径与模块导入保持与现有评估脚本一致
 import sys
+from pathlib import Path
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))
+_THIS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = str(_THIS_DIR.parents[1])
 _SRC_DIR = os.path.join(_PROJECT_ROOT, "src")
 for _p in (_SRC_DIR, _PROJECT_ROOT):
     if _p not in sys.path:

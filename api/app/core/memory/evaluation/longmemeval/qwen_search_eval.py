@@ -16,9 +16,10 @@ except Exception:
 
 # 确保可以找到 src 及项目根路径
 import sys
+from pathlib import Path
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(_THIS_DIR)))
+_THIS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = str(_THIS_DIR.parents[2])
 _SRC_DIR = os.path.join(_PROJECT_ROOT, "src")
 for _p in (_SRC_DIR, _PROJECT_ROOT):
     if _p not in sys.path:

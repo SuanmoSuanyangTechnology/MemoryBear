@@ -89,21 +89,25 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
 
   // 处理文件移除
   const handleRemove = (file: UploadFile) => {
-    // 如果有自定义的 onRemove 回调，先执行它
-    if (customOnRemove) {
-      const result = customOnRemove(file);
-      // 如果返回 false，阻止移除
-      if (result === false) {
-        return false;
-      }
-    }
-    
+    // 显示确认弹窗
     confirm({
       title: `${t('common.confirmRemoveFile')}`,
       okText: `${t('common.confirm')}`,
       okType: 'danger',
       cancelText: `${t('common.cancel')}`,
-      onOk: () => {
+      onOk: async () => {
+        // 如果有自定义的 onRemove 回调，在确认后执行
+        if (customOnRemove) {
+          const result = customOnRemove(file);
+          // 等待 Promise 结果
+          const finalResult = result instanceof Promise ? await result : result;
+          // 如果返回 false，阻止移除
+          if (finalResult === false) {
+            return;
+          }
+        }
+        
+        // 移除文件
         const newFileList = fileList.filter((item) => item.uid !== file.uid);
         setFileList(newFileList);
         onChange?.(newFileList);

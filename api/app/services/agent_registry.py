@@ -55,8 +55,8 @@ class AgentRegistry:
         """
         # 构建查询
         stmt = select(AgentConfig).join(App).where(
-            AgentConfig.is_active == True,
-            App.is_active == True
+            AgentConfig.is_active.is_(True),
+            App.is_active.is_(True)
         )
         
         # 工作空间过滤（同工作空间或公开）
