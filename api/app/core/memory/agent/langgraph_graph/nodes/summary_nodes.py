@@ -310,7 +310,7 @@ async def Summary_fails(state: ReadState)-> ReadState:
         "retrieve_info": retrieve_info_str
     }
     aimessages = await  summary_llm(state, history, data,
-                                    'fail_summary_prompt.jinja2', 'summary', SummaryResponse, 0)
+                                 'fail_summary_prompt.jinja2', 'summary', SummaryResponse, 0)
     result= {
         "status": "success",
         "summary_result": aimessages,
