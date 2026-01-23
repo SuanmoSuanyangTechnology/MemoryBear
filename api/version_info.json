@@ -1,0 +1,98 @@
+{
+  "v0.2.1": {
+    "introduction": {
+      "codeName": "启知",
+      "releaseDate": "2026-1-23",
+      "upgradePosition": "\uD83D\uDC3B 本次更新主要优化使用体验和修复已知问题，让系统更稳定、更好用。",
+      "coreUpgrades": [
+        "1. 工作流更好用了\n* 界面更清晰，一眼看懂怎么配置\n* 新增节点输出变量展示，方便其他节点引用\n* 修复了几个影响体验的bug",
+        "2. 智能体配置更简单\n* 提示词和变量联动更顺畅\n* 配置界面重新整理，找功能更方便",
+        "3. 记忆系统更稳定\n* 优化了情绪记忆和隐性记忆的缓存更新\n* 修复了记忆配置页面的报错问题\n* 现在能自动识别用户和AI的身份了",
+        "4. 知识库体验提升\n* 修复了文档解析异常的问题\n* 上传文档时能看到处理进度了\n* 取消了操作也不会报错了",
+        "5. 系统整体更可靠\n* 修复了新用户访问跳转问题\n* 流式接口更稳定，长对话不断线\n* 调整了菜单顺序，操作更顺手\n",
+        "这次更新虽然不大，但让记忆熊的基础更扎实、体验更流畅。我们继续努力，让AI记忆更好用！",
+        "记忆熊，记得更牢，用得更好。\uD83D\uDC3B✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "Qizhi",
+      "releaseDate": "2026-1-23",
+      "upgradePosition": "\uD83D\uDC3B This update focuses on improving usability and fixing known issues, making the system more stable and easier to use overall.",
+      "coreUpgrades": [
+        "1. Improved Workflow Experience\nCleaner, more intuitive UI for easier configuration at a glance\nAdded visibility of node output variables, making them easier to reference in downstream nodes\nFixed several usability-related bugs that affected the workflow experience",
+        "2. Simpler Agent Configuration\nSmoother linkage between prompts and variables\nReorganized configuration layout for easier navigation and better clarity",
+        "3. More Stable Memory System\nOptimized cache refresh for emotional memory and implicit memory\nFixed error issues on the memory configuration page\nThe system can now automatically distinguish between user and AI roles",
+        "4. Enhanced Knowledge Base Experience\nFixed issues with document parsing failures\nUpload progress is now displayed during document processing\nCanceling an upload no longer triggers errors",
+        "5. Overall System Reliability Improvements\nFixed redirect issues affecting new users\nImproved stability of streaming APIs to prevent interruptions during long conversations\nAdjusted menu ordering for a smoother and more intuitive workflow\n",
+        "Although this is a relatively small update, it strengthens MemoryBear’s foundation and delivers a noticeably smoother experience.\nWe’ll keep refining the system to make AI memory more powerful and easier to use.",
+        "MemoryBear — remember better, work smarter. \uD83D\uDC3B✨"
+      ]
+    }
+  },
+  "v0.2.0": {
+    "introduction": {
+      "codeName": "启知",
+      "releaseDate": "2026-1-16",
+      "upgradePosition": "本次为架构升级，核心目标是把\"被动存储\"升级为\"主动认知\"，让系统具备情绪感知、情景理解与类人记忆机制，为后续多智能体协作与专业场景落地奠定底座。",
+      "coreUpgrades": [
+        "记忆详情：拟人记忆——情绪引擎、情景记忆、短期记忆、工作记忆、感知记忆、显性记忆、隐性记忆，并配套类脑遗忘机制，实现从感知→情绪→情景→长期沉淀的完整人类记忆闭环",
+        "可视化工作流：拖拽式节点编排（LLM、知识库、逻辑、工具），业务落地周期由天缩至小时。",
+        "多模态知识处理：PDF、PPT、MP3、MP4 一键解析，时间感知检索准确率 94.3%，问答对数据即插即用。",
+        "Agent集群内置\"记忆-知识-工具-审核\"四类角色模板，用户一键生成；主控Agent把复杂任务拆为子任务并行分发，再靠情景记忆统一消解冲突、校验一致性，输出完整报告。"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "Qizhi",
+      "releaseDate": "2026-1-16",
+      "upgradePosition": "This release marks a foundational upgrade to the system’s cognitive architecture. The core objective is to evolve the platform from passive information storage into active cognitive intelligence—enabling emotional awareness, situational understanding, and human-like memory mechanisms. This upgrade lays the groundwork for future multi-agent collaboration and domain-specific, production-grade AI applications.",
+      "coreUpgrades": [
+        "Human-Like Memory Architecture: A comprehensive, human-inspired memory system is introduced, encompassing emotional processing, situational memory, short-term and working memory, perceptual memory, as well as explicit and implicit memory. Combined with brain-inspired forgetting mechanisms, the system now supports a complete cognitive loop—from perception → emotion → context → long-term consolidation, closely mirroring human memory formation.",
+        "Visual Workflow Orchestration: A fully visual, drag-and-drop workflow enables modular composition of LLMs, knowledge bases, logic, and tools. This dramatically reduces the time required to move from experimentation to production—from days to hours.",
+        "Multimodal Knowledge Processing: The system now supports one-click parsing and ingestion of PDF, PPT, MP3, and MP4 content. With time-aware retrieval accuracy reaching 94.3%, structured Q&A data becomes instantly usable for downstream reasoning and generation.",
+        "Built-in Agent Clusters: Predefined role templates across four categories—Memory, Knowledge, Tools, and Review—can be generated with a single click. A Coordinator Agent decomposes complex tasks into parallel subtasks, while situational memory is used to resolve conflicts, validate consistency, and synthesize outputs into a coherent, end-to-end report."
+      ]
+    }
+  },
+  "v0.1.0": {
+    "introduction": {
+      "codeName": "初心",
+      "releaseDate": "2025-12-01",
+      "upgradePosition": "这是一款专注于管理和利用AI记忆的工具，支持RAG和知识图谱两种主流存储方式，旨在为AI应用提供持久化、结构化的\"记忆\"能力。",
+      "coreUpgrades": [
+        "记忆空间：用户可以创建独立的空间来隔离不同记忆，并灵活选择存储方式。",
+        "记忆配置：简化了配置流程，内置自动提取关键信息的\"记忆萃取\"和管理生命周期的\"遗忘\"引擎。",
+        "知识检索：提供语义、分词和混合三种检索模式，并支持多种参数微调和结果重排序，以提升召回效果。",
+        "全局管理：支持统一设置默认检索参数，并可一键应用到所有知识库。",
+        "测试与调试：内置\"召回测试\"功能，方便用户实时验证检索效果并调整参数，支持通过分享码与他人协作。",
+        "记忆洞察：可查看详细的对话记录、用户画像和分析报告，帮助理解AI的\"记忆\"内容。",
+        "集成与管理：提供API Key用于系统集成，并包含基本的用户管理功能。",
+        "界面与体验：采用现代化的卡片式布局和渐变色设计，注重交互的流畅性和视觉美感。",
+        "起步与使用：文档中提供了清晰的基础使用流程，引导用户从创建空间、配置记忆到测试检索快速上手。",
+        "版本说明与限制: 记忆熊 v0.1.0 版本\"初心\"囊括智能记忆管理的核心思路和基础能力，为后续开发奠定了基础。",
+        "文档资源：用户手册、API文档、FAQ",
+        "问题反馈：GitHub Issues、邮件支持",
+        "致谢：感谢所有参与测试和提供反馈的用户！"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "Original Intent",
+      "releaseDate": "2025-12-01",
+      "upgradePosition": "A tool focused on managing and utilizing AI memory, supporting both RAG and knowledge graph storage methods, aiming to provide persistent and structured 'memory' capabilities for AI applications.",
+      "coreUpgrades": [
+        "Memory Space: Users can create independent spaces to isolate different memories and flexibly choose storage methods.",
+        "Memory Configuration: Simplified configuration process with built-in 'memory extraction' for automatic key information extraction and 'forgetting' engine for lifecycle management.",
+        "Knowledge Retrieval: Provides semantic, tokenization, and hybrid retrieval modes with various parameter tuning and result reranking to improve recall.",
+        "Global Management: Supports unified default retrieval parameter settings with one-click application to all knowledge bases.",
+        "Testing & Debugging: Built-in 'recall testing' for real-time verification of retrieval effects and parameter adjustment, with sharing code support for collaboration.",
+        "Memory Insights: View detailed conversation records, user profiles, and analysis reports to understand AI 'memory' content.",
+        "Integration & Management: Provides API Key for system integration with basic user management features.",
+        "Interface & Experience: Modern card-based layout with gradient design, focusing on interaction fluidity and visual aesthetics.",
+        "Getting Started: Documentation provides clear basic usage flow, guiding users from creating spaces, configuring memory to testing retrieval.",
+        "Version Notes: MemoryBear v0.1.0 'Original Intent' encompasses core concepts and basic capabilities of intelligent memory management, laying foundation for future development.",
+        "Documentation: User Manual, API Documentation, FAQ",
+        "Feedback: GitHub Issues, Email Support",
+        "Acknowledgments: Thanks to all users who participated in testing and provided feedback!"
+      ]
+    }
+  }
+}
