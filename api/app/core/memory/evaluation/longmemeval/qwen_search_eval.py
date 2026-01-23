@@ -2,100 +2,60 @@ import argparse
 import asyncio
 import json
 import os
+import time
 import re
 import statistics
-import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import List, Dict, Any
 
-try:
-    from dotenv import load_dotenv
-except Exception:
-    def load_dotenv():
-        return None
-
-# 确保可以找到 src 及项目根路径
-import sys
-from pathlib import Path
-
-_THIS_DIR = Path(__file__).resolve().parent
-_PROJECT_ROOT = str(_THIS_DIR.parents[2])
-_SRC_DIR = os.path.join(_PROJECT_ROOT, "src")
-for _p in (_SRC_DIR, _PROJECT_ROOT):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-# 与现有评估脚本保持一致的导入方式
+from dotenv import load_dotenv
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-
-try:
-    # 优先从 extraction_utils1 导入
-    from app.core.memory.evaluation.extraction_utils import (
-        ingest_contexts_via_full_pipeline,  # type: ignore
-    )
-except Exception:
-    ingest_contexts_via_full_pipeline = None  # 在运行时做兜底检查
-from app.core.memory.evaluation.common.metrics import (
-    avg_context_tokens,
-    jaccard,
-    latency_stats,
-)
-from app.core.memory.evaluation.common.metrics import f1_score as common_f1
-from app.core.memory.evaluation.dialogue_queries import SEARCH_ENTITIES_BY_NAME
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.memory.utils.config.definitions import (
-    PROJECT_ROOT,
-    SELECTED_EMBEDDING_ID,
-    SELECTED_LLM_ID,
-)
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-from app.core.models.base import RedBearModelConfig
-from app.db import get_db_context
+from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
 from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
-from app.services.memory_config_service import MemoryConfigService
-
-try:
-    from app.core.memory.evaluation.common.metrics import exact_match
-except Exception:
-    # 兜底：简单的大小写不敏感比较
-    def exact_match(pred: str, ref: str) -> bool:
-        return str(pred).strip().lower() == str(ref).strip().lower()
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.models.base import RedBearModelConfig
+from app.core.memory.utils.config.config_utils import get_embedder_config
+from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.core.memory.evaluation.dialogue_queries import SEARCH_ENTITIES_BY_NAME
+from app.core.memory.utils.config.definitions import PROJECT_ROOT, SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
+from app.core.memory.evaluation.common.metrics import f1_score as common_f1, jaccard, latency_stats, avg_context_tokens
+from app.core.memory.evaluation.common.metrics import exact_match
 
 
 def load_dataset_any(path: str) -> List[Dict[str, Any]]:
-    """健壮地加载数据集（兼容 list 或多段 JSON）。"""
+    """健壮地加载数据集，支持三种格式：
+    1. 标准 JSON 数组: [{...}, {...}]
+    2. 单个 JSON 对象: {...}
+    3. JSONL 格式（每行一个 JSON）: {...}\n{...}\n{...}
+    """
     with open(path, "r", encoding="utf-8") as f:
-        s = f.read().strip()
+        content = f.read().strip()
+    
+    # 尝试标准 JSON 解析
     try:
-        obj = json.loads(s)
-        if isinstance(obj, list):
-            return obj
-        elif isinstance(obj, dict):
-            return [obj]
+        data = json.loads(content)
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        elif isinstance(data, dict):
+            return [data]
     except json.JSONDecodeError:
         pass
-    dec = json.JSONDecoder()
-    idx = 0
-    items: List[Dict[str, Any]] = []
-    while idx < len(s):
-        while idx < len(s) and s[idx].isspace():
-            idx += 1
-        if idx >= len(s):
-            break
+    
+    # 尝试 JSONL 格式（每行一个 JSON 对象）
+    items = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
         try:
-            obj, end = dec.raw_decode(s, idx)
-            if isinstance(obj, list):
-                for it in obj:
-                    if isinstance(it, dict):
-                        items.append(it)
-            elif isinstance(obj, dict):
+            obj = json.loads(line)
+            if isinstance(obj, dict):
                 items.append(obj)
-            idx = end
+            elif isinstance(obj, list):
+                items.extend(item for item in obj if isinstance(item, dict))
         except json.JSONDecodeError:
-            nl = s.find("\n", idx)
-            if nl == -1:
-                break
-            idx = nl + 1
+            continue
+    
     return items
 
 
@@ -702,13 +662,9 @@ async def run_longmemeval_test(
             )
 
     # 初始化组件（摄入后再初始化连接器）- 使用异步LLM客户端
-    with get_db_context() as db:
-        factory = MemoryClientFactory(db)
-        llm_client = factory.get_llm_client(SELECTED_LLM_ID)
+    llm_client = get_llm_client(SELECTED_LLM_ID)
     connector = Neo4jConnector()
-    with get_db_context() as db:
-        config_service = MemoryConfigService(db)
-        cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
+    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
     embedder = OpenAIEmbedderClient(
         model_config=RedBearModelConfig.model_validate(cfg_dict)
     )
@@ -768,10 +724,10 @@ async def run_longmemeval_test(
                         if stmt_text:
                             contexts_all.append(stmt_text)
                     
-                    # for sm in summaries:
-                    #     summary_text = str(sm.get("summary", "")).strip()
-                    #     if summary_text:
-                    #         contexts_all.append(summary_text)
+                    for sm in summaries:
+                        summary_text = str(sm.get("summary", "")).strip()
+                        if summary_text:
+                            contexts_all.append(summary_text)
                     
                     # 实体摘要（最多3个）
                     scored = [e for e in entities if e.get("score") is not None]
