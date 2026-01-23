@@ -21,14 +21,14 @@ from dotenv import load_dotenv
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.models.base import RedBearModelConfig
-from app.core.memory.utils.config_utils import get_embedder_config
-from app.core.memory.utils.definitions import (
-    PROJECT_ROOT,
+from app.core.memory.utils.config.config_utils import get_embedder_config
+from app.core.memory.evaluation.config import (
+    DATASET_DIR,
     SELECTED_GROUP_ID,
     SELECTED_LLM_ID,
     SELECTED_EMBEDDING_ID
 )
-from app.core.memory.utils.llm_utils import get_llm_client
+from app.core.memory.utils.llm.llm_utils import get_llm_client
 from app.core.memory.evaluation.common.metrics import (
     f1_score,
     bleu1,
@@ -154,7 +154,7 @@ def step_initialize_clients() -> tuple[Neo4jConnector, Any, OpenAIEmbedderClient
 # ============================================================================
 # Step 4: Question Processing
 # ============================================================================
-
+# 单个问题处理
 async def step_process_single_question(
     item: Dict[str, Any],
     idx: int,
@@ -197,7 +197,7 @@ async def step_process_single_question(
     print(f"❓ Question: {question}")
     print(f"✅ Ground Truth: {ground_truth_str}")
     
-    # Retrieve relevant information
+    # Step1： Retrieve relevant information （检索相关信息）
     t_search_start = time.time()
     try:
         retrieved_info = await retrieve_relevant_information(
@@ -215,13 +215,13 @@ async def step_process_single_question(
         retrieved_info = []
         search_latency = 0.0
     
-    # Select and format context
+    # Step2： Select and format context （选择格式和上下文）
     context_text = select_and_format_information(
         retrieved_info=retrieved_info,
         question=question,
         max_chars=context_char_budget
     )
-    
+    # Step3： 解析相对时间
     context_text = resolve_temporal_references(context_text, anchor_date)
     
     if context_text:
@@ -231,7 +231,7 @@ async def step_process_single_question(
     
     print(f"📝 Context: {len(context_text)} chars, {len(retrieved_info)} docs")
     
-    # Generate answer with LLM
+    # Step4： Generate answer with LLM （构建提示）
     messages = [
         {
             "role": "system",
@@ -249,7 +249,7 @@ async def step_process_single_question(
             "content": f"Question: {question}\n\nContext:\n{context_text}"
         }
     ]
-    
+    # Step5. LLM 生成答案
     t_llm_start = time.time()
     try:
         response = await llm_client.chat(messages=messages)
@@ -268,11 +268,12 @@ async def step_process_single_question(
         prediction = "Unknown"
         llm_latency = 0.0
     
-    # Calculate metrics
+    # Step6： Calculate metrics（计算指标）
     f1_val = f1_score(prediction, ground_truth_str)
     bleu1_val = bleu1(prediction, ground_truth_str)
     jaccard_val = jaccard(prediction, ground_truth_str)
     
+    # LoCoMo 专用F1
     if item.get("category") == 1:
         locomo_f1_val = locomo_multi_f1(prediction, ground_truth_str)
     else:
@@ -533,9 +534,12 @@ async def run_locomo_benchmark(
     group_id = group_id or SELECTED_GROUP_ID
     
     # Determine data path
-    data_path = os.path.join(PROJECT_ROOT, "data", "locomo10.json")
+    data_path = os.path.join(DATASET_DIR, "locomo10.json")
     if not os.path.exists(data_path):
-        data_path = os.path.join(os.getcwd(), "data", "locomo10.json")
+        raise FileNotFoundError(
+            f"数据集文件不存在: {data_path}\n"
+            f"请将 locomo10.json 放置在: {DATASET_DIR}"
+        )
     
     # Print configuration
     print(f"\n{'='*60}")
@@ -550,7 +554,7 @@ async def run_locomo_benchmark(
     print(f"   Data path: {data_path}")
     print(f"{'='*60}\n")
     
-    # Step 1: Load LoCoMo data
+    # Step 1: Load LoCoMo data （加载数据）
     try:
         qa_items = step_load_data(data_path, sample_size)
     except Exception as e:
@@ -560,13 +564,13 @@ async def run_locomo_benchmark(
             "timestamp": datetime.now().isoformat()
         }
     
-    # Step 2: Ingest data if needed
+    # Step 2: Ingest data if needed（数据摄入）
     await step_ingest_data(data_path, group_id, skip_ingest, reset_group)
     
-    # Step 3: Initialize clients
+    # Step 3: Initialize clients （初始化客户端）
     connector, llm_client, embedder = step_initialize_clients()
     
-    # Step 4: Process all questions
+    # Step 4: Process all questions （处理所有问题）
     try:
         samples = await step_process_all_questions(
             qa_items=qa_items,
@@ -581,10 +585,10 @@ async def run_locomo_benchmark(
     finally:
         await connector.close()
     
-    # Step 5: Aggregate results
+    # Step 5: Aggregate results （聚合答案）
     aggregated = step_aggregate_results(samples)
     
-    # Build final result dictionary
+    # Build final result dictionary 
     result = {
         "dataset": "locomo",
         "sample_size": len(qa_items),
@@ -604,7 +608,7 @@ async def run_locomo_benchmark(
         "samples": samples
     }
     
-    # Step 6: Save results
+    # Step 6: Save results （保存结果）
     step_save_results(result, output_dir)
     
     return result

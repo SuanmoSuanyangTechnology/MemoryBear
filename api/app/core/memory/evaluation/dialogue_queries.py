@@ -4,6 +4,8 @@ This file contains Cypher queries for searching dialogues, entities, and chunks.
 Placed in evaluation directory to avoid circular imports with src modules.
 """
 
+# 应该是neo4j browser的cypher语句，需要修改文件名
+
 # Entity search queries
 SEARCH_ENTITIES_BY_NAME = """
 MATCH (e:Entity)

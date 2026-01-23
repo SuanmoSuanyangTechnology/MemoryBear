@@ -6,7 +6,7 @@ from typing import Any, Dict
 from dotenv import load_dotenv
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.utils.config.definitions import SELECTED_GROUP_ID, PROJECT_ROOT
+from app.core.memory.evaluation.config import SELECTED_GROUP_ID, DATASET_DIR
 
 from app.core.memory.evaluation.memsciqa.evaluate_qa import run_memsciqa_eval
 from app.core.memory.evaluation.longmemeval.qwen_search_eval import run_longmemeval_test
