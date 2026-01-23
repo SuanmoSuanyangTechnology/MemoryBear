@@ -2,81 +2,23 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import time
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import List, Dict, Any
+import re
 
-try:
-    from dotenv import load_dotenv
-except Exception:
-    def load_dotenv():
-        return None
-
-# 路径与模块导入保持与现有评估脚本一致
-import sys
-from pathlib import Path
-
-_THIS_DIR = Path(__file__).resolve().parent
-_PROJECT_ROOT = str(_THIS_DIR.parents[1])
-_SRC_DIR = os.path.join(_PROJECT_ROOT, "src")
-for _p in (_SRC_DIR, _PROJECT_ROOT):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-# 对齐 locomo_test 的检索逻辑：直接使用 graph_search 与 Neo4jConnector/Embedder1
-from app.core.memory.evaluation.common.metrics import (
-    avg_context_tokens,
-    exact_match,
-    latency_stats,
-)
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.memory.utils.config.definitions import (
-    PROJECT_ROOT,
-    SELECTED_EMBEDDING_ID,
-    SELECTED_GROUP_ID,
-    SELECTED_LLM_ID,
-)
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-from app.core.models.base import RedBearModelConfig
-from app.db import get_db_context
-from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
+from dotenv import load_dotenv
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.services.memory_config_service import MemoryConfigService
+from app.core.memory.src.search import run_hybrid_search  # 使用与 evaluate_qa.py 相同的检索函数
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.models.base import RedBearModelConfig
+from app.core.memory.utils.config.config_utils import get_embedder_config
 
-try:
-    from app.core.memory.evaluation.common.metrics import bleu1, f1_score, jaccard
-except Exception:
-    # 兜底：简单实现（必要时）
-    def f1_score(pred: str, ref: str) -> float:
-        ps = pred.lower().split()
-        rs = ref.lower().split()
-        if not ps or not rs:
-            return 0.0
-        tp = len(set(ps) & set(rs))
-        if tp == 0:
-            return 0.0
-        precision = tp / len(ps)
-        recall = tp / len(rs)
-        if precision + recall == 0:
-            return 0.0
-        return 2 * precision * recall / (precision + recall)
+from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.core.memory.utils.config.definitions import PROJECT_ROOT, SELECTED_GROUP_ID, SELECTED_EMBEDDING_ID, SELECTED_LLM_ID
+from app.core.memory.evaluation.common.metrics import exact_match, latency_stats, avg_context_tokens
 
-    def bleu1(pred: str, ref: str) -> float:
-        ps = pred.lower().split()
-        rs = ref.lower().split()
-        if not ps or not rs:
-            return 0.0
-        overlap = len([w for w in ps if w in rs])
-        return overlap / max(len(ps), 1)
-
-    def jaccard(pred: str, ref: str) -> float:
-        ps = set(pred.lower().split())
-        rs = set(ref.lower().split())
-        union = len(ps | rs)
-        if union == 0:
-            return 0.0
-        return len(ps & rs) / union
+from app.core.memory.evaluation.common.metrics import f1_score, bleu1, jaccard
 
 
 def smart_context_selection(contexts: List[str], question: str, max_chars: int = 4000) -> str:
@@ -238,17 +180,13 @@ async def run_memsciqa_test(
         items = all_items[start_index:start_index + sample_size]
 
     # 初始化 LLM（纯测试：不进行摄入）
-    with get_db_context() as db:
-        factory = MemoryClientFactory(db)
-        llm = factory.get_llm_client(SELECTED_LLM_ID)
+    llm = get_llm_client(SELECTED_LLM_ID)
 
     # 初始化 Neo4j 连接与向量检索 Embedder（对齐 locomo_test）
     connector = Neo4jConnector()
     embedder = None
     if search_type in ("embedding", "hybrid"):
-        with get_db_context() as db:
-            config_service = MemoryConfigService(db)
-            cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
+        cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
         embedder = OpenAIEmbedderClient(
             model_config=RedBearModelConfig.model_validate(cfg_dict)
         )
@@ -273,7 +211,7 @@ async def run_memsciqa_test(
         question = item.get("self_instruct", {}).get("B", "") or item.get("question", "")
         reference = item.get("self_instruct", {}).get("A", "") or item.get("answer", "")
 
-        # 三路检索：chunks/statements/entities/summaries（对齐 qwen_search_eval.py）
+        # 检索：使用与 evaluate_qa.py 相同的 run_hybrid_search
         t0 = time.time()
         results = None
         try:
@@ -302,57 +240,94 @@ async def run_memsciqa_test(
         search_ms = (t1 - t0) * 1000
         latencies_search.append(search_ms)
 
-        # 构建上下文：包含 chunks、陈述、摘要和实体（对齐 qwen_search_eval.py）
+        # 构建上下文：与 evaluate_qa.py 完全一致的逻辑
         contexts_all: List[str] = []
         retrieved_counts: Dict[str, int] = {}
         if results:
-            chunks = results.get("chunks", [])
-            statements = results.get("statements", [])
-            entities = results.get("entities", [])
-            summaries = results.get("summaries", [])
+            # 处理 hybrid 搜索结果
+            if search_type == "hybrid":
+                emb = results.get("embedding_search", {}) if isinstance(results.get("embedding_search"), dict) else {}
+                kw = results.get("keyword_search", {}) if isinstance(results.get("keyword_search"), dict) else {}
+                emb_dialogs = emb.get("dialogues", [])
+                emb_statements = emb.get("statements", [])
+                emb_entities = emb.get("entities", [])
+                kw_dialogs = kw.get("dialogues", [])
+                kw_statements = kw.get("statements", [])
+                kw_entities = kw.get("entities", [])
+                all_dialogs = emb_dialogs + kw_dialogs
+                all_statements = emb_statements + kw_statements
+                all_entities = emb_entities + kw_entities
+                
+                # 简单去重
+                seen_dialog = set()
+                dialogues = []
+                for d in all_dialogs:
+                    key = (str(d.get("uuid", "")), str(d.get("content", "")))
+                    if key not in seen_dialog:
+                        dialogues.append(d)
+                        seen_dialog.add(key)
+                
+                seen_stmt = set()
+                statements = []
+                for s in all_statements:
+                    key = str(s.get("statement", ""))
+                    if key not in seen_stmt:
+                        statements.append(s)
+                        seen_stmt.add(key)
+                
+                seen_ent = set()
+                entities = []
+                for e in all_entities:
+                    key = str(e.get("name", ""))
+                    if key not in seen_ent:
+                        entities.append(e)
+                        seen_ent.add(key)
+            else:
+                # embedding 或 keyword 单独搜索
+                dialogues = results.get("dialogues", [])
+                statements = results.get("statements", [])
+                entities = results.get("entities", [])
+            
             retrieved_counts = {
-                "chunks": len(chunks),
+                "dialogues": len(dialogues),
                 "statements": len(statements),
                 "entities": len(entities),
-                "summaries": len(summaries),
             }
-            # 优先使用 chunks
-            for c in chunks:
-                text = str(c.get("content", "")).strip()
+            
+            # 构建上下文文本
+            for d in dialogues:
+                text = str(d.get("content", "")).strip()
                 if text:
                     contexts_all.append(text)
-            # 然后是 statements
+            
             for s in statements:
                 text = str(s.get("statement", "")).strip()
                 if text:
                     contexts_all.append(text)
-            # 然后是 summaries
-            for sm in summaries:
-                text = str(sm.get("summary", "")).strip()
-                if text:
-                    contexts_all.append(text)
-            # 实体摘要：最多加入前3个高分实体（对齐 qwen_search_eval.py）
-            scored = [e for e in entities if e.get("score") is not None]
-            top_entities = sorted(scored, key=lambda x: x.get("score", 0), reverse=True)[:3] if scored else entities[:3]
-            if top_entities:
-                summary_lines = []
-                for e in top_entities:
-                    name = str(e.get("name", "")).strip()
-                    etype = str(e.get("entity_type", "")).strip()
-                    score = e.get("score")
-                    if name:
-                        meta = []
-                        if etype:
-                            meta.append(f"type={etype}")
-                        if isinstance(score, (int, float)):
-                            meta.append(f"score={score:.3f}")
-                        summary_lines.append(f"EntitySummary: {name}{(' [' + '; '.join(meta) + ']') if meta else ''}")
-                if summary_lines:
-                    contexts_all.append("\n".join(summary_lines))
+            
+            # 实体摘要
+            if entities:
+                scored = [e for e in entities if e.get("score") is not None]
+                top_entities = sorted(scored, key=lambda x: x.get("score", 0), reverse=True)[:3] if scored else entities[:3]
+                if top_entities:
+                    summary_lines = []
+                    for e in top_entities:
+                        name = str(e.get("name", "")).strip()
+                        etype = str(e.get("entity_type", "")).strip()
+                        score = e.get("score")
+                        if name:
+                            meta = []
+                            if etype:
+                                meta.append(f"type={etype}")
+                            if isinstance(score, (int, float)):
+                                meta.append(f"score={score:.3f}")
+                            summary_lines.append(f"EntitySummary: {name}{(' [' + '; '.join(meta) + ']') if meta else ''}")
+                    if summary_lines:
+                        contexts_all.append("\n".join(summary_lines))
 
         if verbose:
             if retrieved_counts:
-                print(f"✅ 检索成功: {retrieved_counts.get('chunks',0)} chunks, {retrieved_counts.get('statements',0)} 条陈述, {retrieved_counts.get('entities',0)} 个实体, {retrieved_counts.get('summaries',0)} 个摘要")
+                print(f"✅ 检索成功: {retrieved_counts.get('dialogues',0)} dialogues, {retrieved_counts.get('statements',0)} 条陈述, {retrieved_counts.get('entities',0)} 个实体, {retrieved_counts.get('summaries',0)} 个摘要")
             print(f"📊 有效上下文数量: {len(contexts_all)}")
             q_keywords = extract_question_keywords(question, max_keywords=8)
             if q_keywords:
@@ -522,7 +497,7 @@ async def run_memsciqa_test(
 def main():
     load_dotenv()
     parser = argparse.ArgumentParser(description="memsciqa 测试脚本（三路检索 + 智能上下文选择）")
-    parser.add_argument("--sample-size", type=int, default=30, help="样本数量（<=0 表示全部）")
+    parser.add_argument("--sample-size", type=int, default=10, help="样本数量（<=0 表示全部）")
     parser.add_argument("--all", action="store_true", help="评估全部样本（覆盖 --sample-size）")
     parser.add_argument("--start-index", type=int, default=0, help="起始样本索引")
     parser.add_argument("--group-id", type=str, default="group_memsci", help="图数据库 Group ID（默认 group_memsci）")

@@ -15,31 +15,37 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Dict, Any, Optional
+from dotenv import load_dotenv
 
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    def load_dotenv():
-        pass
-
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.models.base import RedBearModelConfig
+from app.core.memory.utils.config_utils import get_embedder_config
+from app.core.memory.utils.definitions import (
+    PROJECT_ROOT,
+    SELECTED_GROUP_ID,
+    SELECTED_LLM_ID,
+    SELECTED_EMBEDDING_ID
+)
+from app.core.memory.utils.llm_utils import get_llm_client
 from app.core.memory.evaluation.common.metrics import (
-    avg_context_tokens,
-    bleu1,
     f1_score,
+    bleu1,
     jaccard,
     latency_stats,
+    avg_context_tokens
 )
 from app.core.memory.evaluation.locomo.locomo_metrics import (
-    get_category_name,
     locomo_f1_score,
     locomo_multi_f1,
+    get_category_name
 )
 from app.core.memory.evaluation.locomo.locomo_utils import (
-    extract_conversations,
-    ingest_conversations_if_needed,
     load_locomo_data,
+    extract_conversations,
     resolve_temporal_references,
+    select_and_format_information,
     retrieve_relevant_information,
     select_and_format_information,
 )
@@ -68,20 +74,7 @@ async def run_locomo_benchmark(
     output_dir: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Run LoCoMo benchmark evaluation.
-    
-    This function orchestrates the complete evaluation pipeline:
-    1. Load LoCoMo dataset (only QA pairs from first conversation)
-    2. Check/ingest conversations into database (only first conversation, unless skip_ingest=True)
-    3. For each question:
-       - Retrieve relevant information
-       - Generate answer using LLM
-       - Calculate metrics
-    4. Aggregate results and save to file
-    
-    Note: By default, only the first conversation is ingested into the database,
-    and only QA pairs from that conversation are evaluated. This ensures that
-    all questions have corresponding memory in the database for retrieval.
+    Load LoCoMo QA pairs from the first conversation.
     
     Args:
         sample_size: Number of QA pairs to evaluate (from first conversation)
@@ -119,19 +112,33 @@ async def run_locomo_benchmark(
     
     # Step 1: Load LoCoMo data
     print("📂 Loading LoCoMo dataset...")
-    try:
-        # Only load QA pairs from the first conversation (index 0)
-        # since we only ingest the first conversation into the database
-        qa_items = load_locomo_data(data_path, sample_size, conversation_index=0)
-        print(f"✅ Loaded {len(qa_items)} QA pairs from conversation 0\n")
-    except Exception as e:
-        print(f"❌ Failed to load data: {e}")
-        return {
-            "error": f"Data loading failed: {e}",
-            "timestamp": datetime.now().isoformat()
-        }
+    qa_items = load_locomo_data(data_path, sample_size, conversation_index=0)
+    print(f"✅ Loaded {len(qa_items)} QA pairs from conversation 0\n")
+    return qa_items
+
+
+# ============================================================================
+# Step 2: Data Ingestion
+# ============================================================================
+
+async def step_ingest_data(
+    data_path: str,
+    group_id: str,
+    skip_ingest: bool,
+    reset_group: bool
+) -> bool:
+    """
+    Ingest conversations into Neo4j database if needed.
     
-    # Step 2: Extract conversations and ingest if needed
+    Args:
+        data_path: Path to locomo10.json file
+        group_id: Database group ID
+        skip_ingest: Whether to skip ingestion
+        reset_group: Whether to reset the group before ingestion
+        
+    Returns:
+        True if ingestion succeeded or was skipped, False otherwise
+    """
     if skip_ingest:
         print("⏭️  Skipping data ingestion (using existing data in Neo4j)")
         print(f"   Group ID: {end_user_id}\n")
@@ -160,20 +167,14 @@ async def run_locomo_benchmark(
     
     # Step 3: Initialize clients
     print("🔧 Initializing clients...")
+    
     connector = Neo4jConnector()
-    
-    # Initialize LLM client with database context
-    with get_db_context() as db:
-        factory = MemoryClientFactory(db)
-        llm_client = factory.get_llm_client(SELECTED_LLM_ID)
-    
-    # Initialize embedder
-    with get_db_context() as db:
-        config_service = MemoryConfigService(db)
-        cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
+    llm_client = get_llm_client(SELECTED_LLM_ID)
+    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
     embedder = OpenAIEmbedderClient(
         model_config=RedBearModelConfig.model_validate(cfg_dict)
     )
+    
     print("✅ Clients initialized\n")
     
     # Step 4: Process questions
@@ -366,6 +367,21 @@ async def run_locomo_benchmark(
     print("📊 Aggregating Results")
     print(f"{'='*60}\n")
     
+    # Extract metrics
+    f1_scores = [s["metrics"]["f1"] for s in samples]
+    bleu1_scores = [s["metrics"]["bleu1"] for s in samples]
+    jaccard_scores = [s["metrics"]["jaccard"] for s in samples]
+    locomo_f1_scores = [s["metrics"]["locomo_f1"] for s in samples]
+    
+    # Extract timing
+    latencies_search = [s["timing"]["search_ms"] for s in samples]
+    latencies_llm = [s["timing"]["llm_ms"] for s in samples]
+    
+    # Extract context stats
+    context_counts = [s["retrieval"]["num_docs"] for s in samples]
+    context_chars = [s["retrieval"]["context_length"] for s in samples]
+    context_tokens = [s["context_tokens"] for s in samples]
+    
     # Overall metrics
     overall_metrics = {
         "f1": sum(f1_scores) / max(len(f1_scores), 1) if f1_scores else 0.0,
@@ -375,19 +391,29 @@ async def run_locomo_benchmark(
     }
     
     # Per-category metrics
+    category_data: Dict[str, Dict[str, List[float]]] = {}
+    for sample in samples:
+        cat = sample["category"]
+        if cat not in category_data:
+            category_data[cat] = {
+                "f1": [],
+                "bleu1": [],
+                "jaccard": [],
+                "locomo_f1": []
+            }
+        category_data[cat]["f1"].append(sample["metrics"]["f1"])
+        category_data[cat]["bleu1"].append(sample["metrics"]["bleu1"])
+        category_data[cat]["jaccard"].append(sample["metrics"]["jaccard"])
+        category_data[cat]["locomo_f1"].append(sample["metrics"]["locomo_f1"])
+    
     by_category: Dict[str, Dict[str, Any]] = {}
-    for cat in category_counts:
-        f1_list = category_f1.get(cat, [])
-        b1_list = category_bleu1.get(cat, [])
-        j_list = category_jaccard.get(cat, [])
-        lf_list = category_locomo_f1.get(cat, [])
-        
+    for cat, metrics_lists in category_data.items():
         by_category[cat] = {
-            "count": category_counts[cat],
-            "f1": sum(f1_list) / max(len(f1_list), 1) if f1_list else 0.0,
-            "bleu1": sum(b1_list) / max(len(b1_list), 1) if b1_list else 0.0,
-            "jaccard": sum(j_list) / max(len(j_list), 1) if j_list else 0.0,
-            "locomo_f1": sum(lf_list) / max(len(lf_list), 1) if lf_list else 0.0
+            "count": len(metrics_lists["f1"]),
+            "f1": sum(metrics_lists["f1"]) / len(metrics_lists["f1"]),
+            "bleu1": sum(metrics_lists["bleu1"]) / len(metrics_lists["bleu1"]),
+            "jaccard": sum(metrics_lists["jaccard"]) / len(metrics_lists["jaccard"]),
+            "locomo_f1": sum(metrics_lists["locomo_f1"]) / len(metrics_lists["locomo_f1"])
         }
     
     # Latency statistics
@@ -419,11 +445,28 @@ async def run_locomo_benchmark(
         "overall_metrics": overall_metrics,
         "by_category": by_category,
         "latency": latency,
-        "context_stats": context_stats,
-        "samples": samples
+        "context_stats": context_stats
     }
+
+
+# ============================================================================
+# Step 6: Result Saving
+# ============================================================================
+
+def step_save_results(
+    result: Dict[str, Any],
+    output_dir: Optional[str]
+) -> str:
+    """
+    Save evaluation results to JSON file.
     
-    # Step 6: Save results
+    Args:
+        result: Complete result dictionary
+        output_dir: Directory to save results (uses default if None)
+        
+    Returns:
+        Path to saved file
+    """
     if output_dir is None:
         output_dir = os.path.join(
             os.path.dirname(__file__),
@@ -432,7 +475,6 @@ async def run_locomo_benchmark(
     
     os.makedirs(output_dir, exist_ok=True)
     
-    # Generate timestamped filename
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(output_dir, f"locomo_{timestamp_str}.json")
     
@@ -440,10 +482,135 @@ async def run_locomo_benchmark(
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         print(f"✅ Results saved to: {output_path}\n")
+        return output_path
     except Exception as e:
         print(f"❌ Failed to save results: {e}")
         print("📊 Printing results to console instead:\n")
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        return ""
+
+
+# ============================================================================
+# Main Orchestration Function
+# ============================================================================
+
+
+async def run_locomo_benchmark(
+    sample_size: int = 20,
+    group_id: Optional[str] = None,
+    search_type: str = "hybrid",
+    search_limit: int = 12,
+    context_char_budget: int = 8000,
+    reset_group: bool = False,
+    skip_ingest: bool = False,
+    output_dir: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Run LoCoMo benchmark evaluation.
+    
+    This function orchestrates the complete evaluation pipeline by calling
+    well-defined step functions:
+    1. Load LoCoMo dataset (only QA pairs from first conversation)
+    2. Ingest conversations into database (unless skip_ingest=True)
+    3. Initialize clients (Neo4j, LLM, Embedder)
+    4. Process all questions (retrieve, generate, calculate metrics)
+    5. Aggregate results
+    6. Save results to file
+    
+    Note: By default, only the first conversation is ingested into the database,
+    and only QA pairs from that conversation are evaluated. This ensures that
+    all questions have corresponding memory in the database for retrieval.
+    
+    Args:
+        sample_size: Number of QA pairs to evaluate (from first conversation)
+        group_id: Database group ID for retrieval (uses default if None)
+        search_type: "keyword", "embedding", or "hybrid"
+        search_limit: Max documents to retrieve per query
+        context_char_budget: Max characters for context
+        reset_group: Whether to clear and re-ingest data
+        skip_ingest: If True, skip data ingestion and use existing data in Neo4j
+        output_dir: Directory to save results (uses default if None)
+        
+    Returns:
+        Dictionary with evaluation results including metrics, timing, and samples
+    """
+    # Use default group_id if not provided
+    group_id = group_id or SELECTED_GROUP_ID
+    
+    # Determine data path
+    data_path = os.path.join(PROJECT_ROOT, "data", "locomo10.json")
+    if not os.path.exists(data_path):
+        data_path = os.path.join(os.getcwd(), "data", "locomo10.json")
+    
+    # Print configuration
+    print(f"\n{'='*60}")
+    print("🚀 Starting LoCoMo Benchmark Evaluation")
+    print(f"{'='*60}")
+    print("📊 Configuration:")
+    print(f"   Sample size: {sample_size}")
+    print(f"   Group ID: {group_id}")
+    print(f"   Search type: {search_type}")
+    print(f"   Search limit: {search_limit}")
+    print(f"   Context budget: {context_char_budget} chars")
+    print(f"   Data path: {data_path}")
+    print(f"{'='*60}\n")
+    
+    # Step 1: Load LoCoMo data
+    try:
+        qa_items = step_load_data(data_path, sample_size)
+    except Exception as e:
+        print(f"❌ Failed to load data: {e}")
+        return {
+            "error": f"Data loading failed: {e}",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    # Step 2: Ingest data if needed
+    await step_ingest_data(data_path, group_id, skip_ingest, reset_group)
+    
+    # Step 3: Initialize clients
+    connector, llm_client, embedder = step_initialize_clients()
+    
+    # Step 4: Process all questions
+    try:
+        samples = await step_process_all_questions(
+            qa_items=qa_items,
+            group_id=group_id,
+            search_type=search_type,
+            search_limit=search_limit,
+            context_char_budget=context_char_budget,
+            connector=connector,
+            embedder=embedder,
+            llm_client=llm_client
+        )
+    finally:
+        await connector.close()
+    
+    # Step 5: Aggregate results
+    aggregated = step_aggregate_results(samples)
+    
+    # Build final result dictionary
+    result = {
+        "dataset": "locomo",
+        "sample_size": len(qa_items),
+        "timestamp": datetime.now().isoformat(),
+        "params": {
+            "group_id": group_id,
+            "search_type": search_type,
+            "search_limit": search_limit,
+            "context_char_budget": context_char_budget,
+            "llm_id": SELECTED_LLM_ID,
+            "embedding_id": SELECTED_EMBEDDING_ID
+        },
+        "overall_metrics": aggregated["overall_metrics"],
+        "by_category": aggregated["by_category"],
+        "latency": aggregated["latency"],
+        "context_stats": aggregated["context_stats"],
+        "samples": samples
+    }
+    
+    # Step 6: Save results
+    step_save_results(result, output_dir)
     
     return result
 

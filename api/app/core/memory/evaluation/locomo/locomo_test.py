@@ -1,29 +1,23 @@
 # file name: check_neo4j_connection_fixed.py
 import asyncio
-import json
-import math
 import os
-import re
 import sys
+import json
 import time
+import math
+import re
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
-from pathlib import Path
-
+from typing import List, Dict, Any
 from dotenv import load_dotenv
-
-# 1
-# 添加项目根目录到路径
-current_dir = Path(__file__).resolve().parent
-project_root = str(current_dir.parent)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-# 关键：将 src 目录置于最前，确保从当前仓库加载模块
-src_dir = os.path.join(project_root, "src")
-if src_dir not in sys.path:
-    sys.path.insert(0, src_dir)
-
 load_dotenv()
+
+# 导入配置
+try:
+    from app.core.memory.utils.config.definitions import SELECTED_GROUP_ID
+    print(f"✅ 使用配置的 group_id: {SELECTED_GROUP_ID}")
+except ImportError as e:
+    print(f"⚠️ 无法导入 SELECTED_GROUP_ID: {e}，使用默认值")
+    SELECTED_GROUP_ID = "locomo_test"
 
 # 首先定义 _loc_normalize 函数，因为其他函数依赖它
 def _loc_normalize(text: str) -> str:
@@ -37,7 +31,7 @@ def _loc_normalize(text: str) -> str:
 
 # 尝试从 metrics.py 导入基础指标
 try:
-    from common.metrics import bleu1, f1_score, jaccard
+    from app.core.memory.evaluation.common.metrics import f1_score, bleu1, jaccard
     print("✅ 从 metrics.py 导入基础指标成功")
 except ImportError as e:
     print(f"❌ 从 metrics.py 导入失败: {e}")
@@ -107,23 +101,8 @@ except ImportError as e:
 
 # 尝试从 qwen_search_eval.py 导入 LoCoMo 特定指标
 try:
-    # 添加 evaluation 目录路径
-    evaluation_dir = os.path.join(project_root, "evaluation")
-    if evaluation_dir not in sys.path:
-        sys.path.insert(0, evaluation_dir)
-
-    # 尝试从不同位置导入
-    try:
-        from locomo.qwen_search_eval import (
-            _resolve_relative_times,
-            loc_f1_score,
-            loc_multi_f1,
-        )
-        print("✅ 从 locomo.qwen_search_eval 导入 LoCoMo 特定指标成功")
-    except ImportError:
-        from qwen_search_eval import _resolve_relative_times, loc_f1_score, loc_multi_f1
-        print("✅ 从 qwen_search_eval 导入 LoCoMo 特定指标成功")
-
+    from app.core.memory.evaluation.locomo.qwen_search_eval import loc_f1_score, loc_multi_f1, _resolve_relative_times
+    print("✅ 从 qwen_search_eval 导入 LoCoMo 特定指标成功")
 except ImportError as e:
     print(f"❌ 从 qwen_search_eval.py 导入失败: {e}")
     # 回退到本地实现 LoCoMo 特定函数
@@ -429,24 +408,16 @@ def enhanced_context_selection(contexts: List[str], question: str, question_inde
 
 async def run_enhanced_evaluation():
     """使用增强方法进行完整评估 - 解决中间性能衰减问题"""
-    try:
-        from dotenv import load_dotenv
-    except Exception:
-        def load_dotenv():
-            return None
-     
+    from dotenv import load_dotenv
+    
     # 修正导入路径：使用 app.core.memory.src 前缀
-    from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-    from app.core.memory.utils.config.definitions import (
-        SELECTED_EMBEDDING_ID,
-        SELECTED_LLM_ID,
-    )
-    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-    from app.core.models.base import RedBearModelConfig
-    from app.db import get_db_context
-    from app.repositories.neo4j.graph_search import search_graph_by_embedding
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-    from app.services.memory_config_service import MemoryConfigService
+    from app.repositories.neo4j.graph_search import search_graph_by_embedding
+    from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+    from app.core.models.base import RedBearModelConfig
+    from app.core.memory.utils.llm.llm_utils import get_llm_client
+    from app.core.memory.utils.config.config_utils import get_embedder_config
+    from app.core.memory.utils.config.definitions import SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
 
     # 加载数据
     # 获取项目根目录
@@ -469,14 +440,10 @@ async def run_enhanced_evaluation():
     # 初始化增强监控器
     monitor = EnhancedEvaluationMonitor(reset_interval=5, performance_threshold=0.6)
     
-    with get_db_context() as db:
-        factory = MemoryClientFactory(db)
-        llm = factory.get_llm_client(SELECTED_LLM_ID)
+    llm = get_llm_client(SELECTED_LLM_ID)
     
     # 初始化embedder
-    with get_db_context() as db:
-        config_service = MemoryConfigService(db)
-        cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
+    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
     embedder = OpenAIEmbedderClient(
         model_config=RedBearModelConfig.model_validate(cfg_dict)
     )
@@ -548,10 +515,12 @@ async def run_enhanced_evaluation():
             contexts_all = []
 
             try:
-                # 使用统一的搜索服务
-                from app.core.memory.storage_services.search import run_hybrid_search
+                # 使用旧版本的搜索服务（重构前的版本）
+                from app.core.memory.src.search import run_hybrid_search
                 
-                print("🔀 使用混合搜索服务...")
+                print(f"🔀 使用混合搜索服务（旧版本）...")
+                print(f"📍 检索参数: group_id={SELECTED_GROUP_ID}, limit=20, search_type=hybrid")
+                print(f"📍 查询文本: {q}")
                 
                 search_results = await run_hybrid_search(
                     query_text=q,
@@ -559,15 +528,26 @@ async def run_enhanced_evaluation():
                     end_user_id="locomo_sk",
                     limit=20,
                     include=["statements", "chunks", "entities", "summaries"],
-                    alpha=0.6,  # BM25权重
-                    embedding_id=SELECTED_EMBEDDING_ID
+                    output_path=None,
+                    rerank_alpha=0.6,  # BM25权重
+                    use_forgetting_rerank=False,
+                    use_llm_rerank=False
                 )
                 
-                # 处理搜索结果 - 新的搜索服务返回统一的结构
-                chunks = search_results.get("chunks", [])
-                statements = search_results.get("statements", [])
-                entities = search_results.get("entities", [])
-                summaries = search_results.get("summaries", [])
+                # 处理搜索结果 - 旧版本返回包含 reranked_results 的结构
+                # 对于 hybrid 搜索，使用 reranked_results
+                if "reranked_results" in search_results:
+                    reranked = search_results["reranked_results"]
+                    chunks = reranked.get("chunks", [])
+                    statements = reranked.get("statements", [])
+                    entities = reranked.get("entities", [])
+                    summaries = reranked.get("summaries", [])
+                else:
+                    # 单一搜索类型的结果
+                    chunks = search_results.get("chunks", [])
+                    statements = search_results.get("statements", [])
+                    entities = search_results.get("entities", [])
+                    summaries = search_results.get("summaries", [])
                 
                 print(f"✅ 混合检索成功: {len(chunks)} chunks, {len(statements)} 条陈述, {len(entities)} 个实体, {len(summaries)} 个摘要")
 
@@ -609,6 +589,8 @@ async def run_enhanced_evaluation():
                 print(f"📊 有效上下文数量: {len(contexts_all)}")
             except Exception as e:
                 print(f"❌ 检索失败: {e}")
+                import traceback
+                print(f"详细错误信息:\n{traceback.format_exc()}")
                 contexts_all = []
 
             t1 = time.time()

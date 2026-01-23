@@ -1,34 +1,22 @@
+import os
 import asyncio
 import json
-import os
-import re
+from typing import List, Dict, Any, Optional
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+import re
 
 from app.core.memory.llm_tools.openai_client import LLMClient
-from app.core.memory.models.message_models import (
-    ConversationContext,
-    ConversationMessage,
-    DialogData,
-)
+from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import DialogueChunker
+from app.core.memory.models.message_models import DialogData, ConversationContext, ConversationMessage
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.core.memory.utils.config.definitions import SELECTED_CHUNKER_STRATEGY, SELECTED_EMBEDDING_ID
 
 # 使用新的模块化架构
-from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import (
-    ExtractionOrchestrator,
-)
-from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import (
-    DialogueChunker,
-)
-from app.core.memory.utils.config.definitions import (
-    SELECTED_CHUNKER_STRATEGY,
-    SELECTED_EMBEDDING_ID,
-)
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-from app.db import get_db_context
+from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import ExtractionOrchestrator
 
 # Import from database module
 from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 # Cypher queries for evaluation
 # Note: Entity, chunk, and dialogue search queries have been moved to evaluation/dialogue_queries.py
@@ -42,10 +30,12 @@ async def ingest_contexts_via_full_pipeline(
     save_chunk_output: bool = False,
     save_chunk_output_path: str | None = None,
 ) -> bool:
-    """DEPRECATED: 此函数使用旧的流水线架构，建议使用新的 ExtractionOrchestrator
+    """
+    使用新的 ExtractionOrchestrator 运行完整的提取流水线
     
     Run the full extraction pipeline on provided dialogue contexts and save to Neo4j.
-    This function mirrors the steps in main(), but starts from raw text contexts.
+    This function uses the new ExtractionOrchestrator architecture for better maintainability.
+    
     Args:
         contexts: List of dialogue texts, each containing lines like "role: message".
         end_user_id: Group ID to assign to generated DialogData and graph nodes.
@@ -59,19 +49,17 @@ async def ingest_contexts_via_full_pipeline(
     chunker_strategy = chunker_strategy or SELECTED_CHUNKER_STRATEGY
     embedding_name = embedding_name or SELECTED_EMBEDDING_ID
 
-    # Initialize llm client with graceful fallback
+    # Step 1: Initialize LLM client
     llm_client = None
-    llm_available = True
     try:
         from app.core.memory.utils.config import definitions as config_defs
-        with get_db_context() as db:
-            factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client(config_defs.SELECTED_LLM_ID)
+        llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
     except Exception as e:
-        print(f"[Ingestion] LLM client unavailable, will skip LLM-dependent steps: {e}")
-        llm_available = False
+        print(f"[Ingestion] LLM client unavailable: {e}")
+        return False
 
-    # Step A: Build DialogData list from contexts with robust parsing
+    # Step 2: Parse contexts and create DialogData with chunks
+    print(f"[Ingestion] Parsing {len(contexts)} contexts...")
     chunker = DialogueChunker(chunker_strategy)
     dialog_data_list: List[DialogData] = []
 
@@ -94,7 +82,7 @@ async def ingest_contexts_via_full_pipeline(
                 line = raw.strip()
                 if not line:
                     continue
-                m = re.match(r'^\s*([^:：]+)\s*[：:]\s*(.+)$', line)
+                m = re.match(r'^\s*([^:：]+)\s*[：:]\s*(.+)', line)
                 if m:
                     role = m.group(1).strip()
                     msg = m.group(2).strip()
@@ -118,10 +106,12 @@ async def ingest_contexts_via_full_pipeline(
         dialog_data_list.append(dialog)
 
     if not dialog_data_list:
-        print("No dialogs to process for ingestion.")
+        print("[Ingestion] No dialogs to process.")
         return False
 
-    # Optionally save chunking outputs for debugging
+    print(f"[Ingestion] Parsed {len(dialog_data_list)} dialogs with chunks")
+
+    # Step 3: Optionally save chunking outputs for debugging
     if save_chunk_output:
         try:
             def _serialize_datetime(obj):
@@ -137,33 +127,28 @@ async def ingest_contexts_via_full_pipeline(
             combined_output = [dd.model_dump() for dd in dialog_data_list]
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(combined_output, f, ensure_ascii=False, indent=4, default=_serialize_datetime)
-            print(f"Saved chunking results to: {out_path}")
+            print(f"[Ingestion] Saved chunking results to: {out_path}")
         except Exception as e:
-            print(f"Failed to save chunking results: {e}")
+            print(f"[Ingestion] Failed to save chunking results: {e}")
 
-    # Step B-G: 使用新的 ExtractionOrchestrator 执行完整的提取流水线
-    if not llm_available:
-        print("[Ingestion] Skipping extraction pipeline (no LLM).")
-        return False
-    
-    # 初始化 embedder 客户端
-    from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+    # Step 4: Initialize embedder client
     from app.core.models.base import RedBearModelConfig
-    from app.services.memory_config_service import MemoryConfigService
+    from app.core.memory.utils.config.config_utils import get_embedder_config
+    from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
     
     try:
-        with get_db_context() as db:
-            embedder_config_dict = MemoryConfigService(db).get_embedder_config(embedding_name or SELECTED_EMBEDDING_ID)
+        embedder_config_dict = get_embedder_config(embedding_name)
         embedder_config = RedBearModelConfig(**embedder_config_dict)
         embedder_client = OpenAIEmbedderClient(embedder_config)
     except Exception as e:
         print(f"[Ingestion] Failed to initialize embedder client: {e}")
-        print("[Ingestion] Skipping extraction pipeline (embedder initialization failed).")
         return False
     
+    # Step 5: Initialize Neo4j connector
     connector = Neo4jConnector()
     
-    # 初始化并运行 ExtractionOrchestrator
+    # Step 6: Initialize and run ExtractionOrchestrator
+    print("[Ingestion] Running extraction pipeline with ExtractionOrchestrator...")
     from app.core.memory.utils.config.config_utils import get_pipeline_config
     config = get_pipeline_config()
     
@@ -174,99 +159,52 @@ async def ingest_contexts_via_full_pipeline(
         config=config,
     )
     
-    # 创建一个包装的 orchestrator 来修复时间提取器的输出
-    # 保存原始的 _assign_extracted_data 方法
-    original_assign = orchestrator._assign_extracted_data
-    
-    def clean_temporal_value(value):
-        """清理 temporal_validity 字段的值，将无效值转换为 None"""
-        if value is None:
-            return None
-        if isinstance(value, str):
-            # 处理字符串形式的 'null', 'None', 空字符串等
-            if value.lower() in ('null', 'none', '') or value.strip() == '':
-                return None
-        return value
-    
-    async def patched_assign_extracted_data(*args, **kwargs):
-        """包装方法：在赋值后清理 temporal_validity 中的无效字符串"""
-        result = await original_assign(*args, **kwargs)
+    try:
+        # Run the complete extraction pipeline
+        # Returns: (dialogue_nodes, chunk_nodes, statement_nodes), 
+        #          (entity_nodes_before, stmt_entity_edges_before, entity_entity_edges_before),
+        #          (entity_nodes_after, stmt_entity_edges_after, entity_entity_edges_after)
+        result = await orchestrator.run(dialog_data_list, is_pilot_run=False)
         
-        # 清理返回的 dialog_data_list 中的 temporal_validity
-        for dialog in result:
-            if hasattr(dialog, 'chunks') and dialog.chunks:
-                for chunk in dialog.chunks:
-                    if hasattr(chunk, 'statements') and chunk.statements:
-                        for statement in chunk.statements:
-                            if hasattr(statement, 'temporal_validity') and statement.temporal_validity:
-                                tv = statement.temporal_validity
-                                # 清理 valid_at 和 invalid_at
-                                if hasattr(tv, 'valid_at'):
-                                    tv.valid_at = clean_temporal_value(tv.valid_at)
-                                if hasattr(tv, 'invalid_at'):
-                                    tv.invalid_at = clean_temporal_value(tv.invalid_at)
-        return result
-    
-    # 替换方法
-    orchestrator._assign_extracted_data = patched_assign_extracted_data
-    
-    # 同时包装 _create_nodes_and_edges 方法，在创建节点前再次清理
-    original_create = orchestrator._create_nodes_and_edges
-    
-    async def patched_create_nodes_and_edges(dialog_data_list_arg):
-        """包装方法：在创建节点前再次清理 temporal_validity"""
-        # 最后一次清理，确保万无一失
-        for dialog in dialog_data_list_arg:
-            if hasattr(dialog, 'chunks') and dialog.chunks:
-                for chunk in dialog.chunks:
-                    if hasattr(chunk, 'statements') and chunk.statements:
-                        for statement in chunk.statements:
-                            if hasattr(statement, 'temporal_validity') and statement.temporal_validity:
-                                tv = statement.temporal_validity
-                                if hasattr(tv, 'valid_at'):
-                                    tv.valid_at = clean_temporal_value(tv.valid_at)
-                                if hasattr(tv, 'invalid_at'):
-                                    tv.invalid_at = clean_temporal_value(tv.invalid_at)
+        # Unpack the result tuple
+        (
+            dialogue_nodes,
+            chunk_nodes,
+            statement_nodes,
+            entity_nodes,
+            statement_chunk_edges,
+            statement_entity_edges,
+            entity_entity_edges,
+        ) = result
         
-        return await original_create(dialog_data_list_arg)
-    
-    orchestrator._create_nodes_and_edges = patched_create_nodes_and_edges
-    
-    # 运行完整的提取流水线
-    # orchestrator.run 返回 7 个元素的元组
-    result = await orchestrator.run(dialog_data_list, is_pilot_run=False)
-    (
-        dialogue_nodes,
-        chunk_nodes,
-        statement_nodes,
-        entity_nodes,
-        statement_chunk_edges,
-        statement_entity_edges,
-        entity_entity_edges,
-    ) = result
-    
-    # statement_chunk_edges 已经由 orchestrator 创建，无需重复创建
+        print(f"[Ingestion] Extraction completed: {len(statement_nodes)} statements, {len(entity_nodes)} entities")
+        
+    except Exception as e:
+        print(f"[Ingestion] Extraction pipeline failed: {e}")
+        await connector.close()
+        return False
 
-    # Step G: 生成记忆摘要
+    # Step 7: Generate memory summaries
     print("[Ingestion] Generating memory summaries...")
     try:
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
-            memory_summary_generation,
+            Memory_summary_generation,
         )
-        from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
         from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
+        from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
         
-        summaries = await memory_summary_generation(
+        summaries = await Memory_summary_generation(
             chunked_dialogs=dialog_data_list,
             llm_client=llm_client,
-            embedder_client=embedder_client
+            embedding_id=embedding_name
         )
         print(f"[Ingestion] Generated {len(summaries)} memory summaries")
     except Exception as e:
         print(f"[Ingestion] Warning: Failed to generate memory summaries: {e}")
         summaries = []
 
-    # Step H: Save to Neo4j
+    # Step 8: Save to Neo4j
+    print("[Ingestion] Saving to Neo4j...")
     try:
         success = await save_dialog_and_statements_to_neo4j(
             dialogue_nodes=dialogue_nodes,
@@ -284,18 +222,21 @@ async def ingest_contexts_via_full_pipeline(
             try:
                 await add_memory_summary_nodes(summaries, connector)
                 await add_memory_summary_statement_edges(summaries, connector)
-                print(f"Successfully saved {len(summaries)} memory summary nodes to Neo4j")
+                print(f"[Ingestion] Saved {len(summaries)} memory summary nodes to Neo4j")
             except Exception as e:
-                print(f"Warning: Failed to save summary nodes: {e}")
+                print(f"[Ingestion] Warning: Failed to save summary nodes: {e}")
         
         await connector.close()
+        
         if success:
-            print("Successfully saved extracted data to Neo4j!")
+            print("[Ingestion] Successfully saved all data to Neo4j!")
         else:
-            print("Failed to save data to Neo4j")
+            print("[Ingestion] Failed to save data to Neo4j")
         return success
+        
     except Exception as e:
-        print(f"Failed to save data to Neo4j: {e}")
+        print(f"[Ingestion] Failed to save data to Neo4j: {e}")
+        await connector.close()
         return False
 
 
