@@ -1023,7 +1023,7 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
                             end_users = data['end_users']
 
                             for base, config, user in zip(releases, data_configs, end_users):
-                                if int(base['config']) == int(config['config_id']) and base['app_id'] == user['app_id']:
+                                if str(base['config']) == str(config['config_id']) and str(base['app_id']) == str(user['app_id']):
                                     # 调用反思服务
                                     api_logger.info(f"为用户 {user['id']} 启动反思，config_id: {config['config_id']}")
 
