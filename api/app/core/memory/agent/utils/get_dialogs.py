@@ -18,7 +18,7 @@ async def get_chunked_dialogs(
 
     Args:
         chunker_strategy: The chunking strategy to use (default: RecursiveChunker)
-        group_id: Group identifier
+        end_user_id: Group identifier
         messages: Structured message list [{"role": "user", "content": "..."}, ...]
         ref_id: Reference identifier
         config_id: Configuration ID for processing

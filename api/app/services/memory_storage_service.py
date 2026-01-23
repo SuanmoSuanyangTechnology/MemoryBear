@@ -572,7 +572,7 @@ async def analytics_hot_memory_tags(
         # 步骤4: 只调用一次LLM进行筛选
         tag_names = [tag for tag, _ in sorted_tags]
         
-        # 使用第一个用户的group_id来获取LLM配置
+        # 使用第一个用户的end_user_id来获取LLM配置
         # 因为同一工作空间下的用户应该使用相同的配置
         first_end_user_id = str(end_users[0].id)
         filtered_tag_names = await filter_tags_with_llm(tag_names, first_end_user_id)

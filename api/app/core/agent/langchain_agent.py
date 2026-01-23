@@ -155,7 +155,7 @@ class LangChainAgent:
     #                     userid=end_user_end,
     #                     messages=messages,
     #                     apply_id=end_user_end,
-    #                     group_id=end_user_end,
+    #                     end_user_id=end_user_end,
     #                     aimessages=aimessages
     #                 )
     #     store.delete_duplicate_sessions()
@@ -228,7 +228,7 @@ class LangChainAgent:
             # 6. 每个 Chunk 保存到 Neo4j，包含 speaker 字段
             logger.info(f"[WRITE] Submitting Celery task - user={actual_end_user_id}, messages={len(structured_messages)}, config={actual_config_id}")
             write_id = write_message_task.delay(
-                actual_end_user_id,  # group_id: 用户ID
+                actual_end_user_id,  # end_user_id: 用户ID
                 structured_messages,  # message: 结构化消息列表 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
                 actual_config_id,    # config_id: 配置ID
                 storage_type,        # storage_type: "neo4j"
