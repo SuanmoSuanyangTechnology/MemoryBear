@@ -17,7 +17,7 @@ class MemoryConfig(Base):
 
     # 组织信息
     workspace_id = Column(UUID(as_uuid=True), nullable=True, comment="工作空间ID")
-    group_id = Column(String, nullable=True, comment="组ID")
+    end_user_id = Column(String, nullable=True, comment="组ID")
     user_id = Column(String, nullable=True, comment="用户ID")
     apply_id = Column(String, nullable=True, comment="应用ID")
 
