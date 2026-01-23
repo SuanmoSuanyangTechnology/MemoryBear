@@ -33,7 +33,7 @@ class WorkflowConfigRepository:
         """
         return self.db.query(WorkflowConfig).filter(
             WorkflowConfig.app_id == app_id,
-            WorkflowConfig.is_active == True
+            WorkflowConfig.is_active.is_(True)
         ).first()
     
     def create_or_update(

@@ -46,7 +46,8 @@ def import_all_models_from_package(package_name: str):
     
     # Add the project root to sys.path if not already there
     # This is crucial for relative imports like 'app.db' to work
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    from pathlib import Path
+    project_root = str(Path(__file__).resolve().parent.parent)
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
 
