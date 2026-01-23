@@ -298,7 +298,7 @@ async def read_server(
 
             # 调用 memory_agent_service 的方法生成最终答案
             result['answer'] = await memory_agent_service.generate_summary_from_retrieve(
-                end_user_id=user_input.group_id,
+                end_user_id=user_input.end_user_id,
                 retrieve_info=retrieve_info,
                 history=history,
                 query=query,
