@@ -92,17 +92,15 @@ class MemoryPerceptualService:
 
             result = {
                 "id": str(memory.id),
-                "perceptual_type": perceptual_type,
                 "file_name": memory.file_name,
                 "file_path": memory.file_path,
-                "file_ext": memory.file_ext,
-                "storage_service": memory.storage_service,  
-                "meta_data": memory.meta_data,
+                "storage_type": memory.storage_service,
                 "summary": memory.summary,
                 "keywords": content.keywords,
                 "topic": content.topic,
                 "domain": content.domain,
                 "created_time": int(memory.created_time.timestamp()*1000),
+                **detail
             }
 
             business_logger.info(
