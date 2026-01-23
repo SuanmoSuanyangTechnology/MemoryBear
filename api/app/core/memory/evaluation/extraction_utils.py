@@ -350,15 +350,15 @@ async def ingest_contexts_via_full_pipeline(
     print("[Ingestion] Generating memory summaries...")
     try:
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
-            memory_summary_generation,
+            Memory_summary_generation,
         )
         from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
         from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
         
-        summaries = await memory_summary_generation(
+        summaries = await Memory_summary_generation(
             chunked_dialogs=dialog_data_list,
             llm_client=llm_client,
-            embedder_client=embedder_client
+            embedding_id=embedding_name
         )
         print(f"[Ingestion] Generated {len(summaries)} memory summaries")
     except Exception as e:
