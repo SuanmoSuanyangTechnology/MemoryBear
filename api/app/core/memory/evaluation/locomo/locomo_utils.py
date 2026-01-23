@@ -385,7 +385,7 @@ async def retrieve_relevant_information(
         search_graph,
         search_graph_by_embedding
     )
-    from app.core.memory.storage_services.search import run_hybrid_search
+    from app.core.memory.src.search import run_hybrid_search
     
     contexts_all: List[str] = []
     

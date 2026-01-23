@@ -2,17 +2,8 @@ import argparse
 import asyncio
 import json
 import os
-import sys
 from typing import Any, Dict
-
-# Add src directory to Python path for proper imports when running from evaluation directory
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
-
-try:
-    from dotenv import load_dotenv
-except Exception:
-    def load_dotenv():
-        return None
+from dotenv import load_dotenv
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.utils.config.definitions import SELECTED_GROUP_ID, PROJECT_ROOT
