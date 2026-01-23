@@ -217,14 +217,14 @@ class MemorySummaryRepository(BaseNeo4jRepository):
     
     async def find_by_content_keywords(
         self,
-        group_id: str,
+        end_user_id: str,
         keywords: List[str],
         limit: int = 100
     ) -> List[Dict[str, Any]]:
         """Query memory summaries by content keywords
         
         Args:
-            group_id: Group ID to filter by
+            end_user_id: Group ID to filter by
             keywords: List of keywords to search for in content
             limit: Maximum number of results to return
             
@@ -233,7 +233,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         """
         # Build keyword search conditions
         keyword_conditions = []
-        params = {"end_user_id": group_id, "limit": limit}
+        params = {"end_user_id": end_user_id, "limit": limit}
         
         for i, keyword in enumerate(keywords):
             keyword_conditions.append(f"toLower(n.content) CONTAINS toLower($keyword_{i})")
@@ -257,7 +257,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         """Get count of memory summaries for a group
         
         Args:
-            group_id: Group ID to count summaries for
+            end_user_id: Group ID to count summaries for
             
         Returns:
             int: Number of memory summaries

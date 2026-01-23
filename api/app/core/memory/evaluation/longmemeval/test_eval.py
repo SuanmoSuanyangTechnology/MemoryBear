@@ -876,7 +876,7 @@ async def run_longmemeval_test(
                                     opt_res = await search_graph(
                                         connector=connector,
                                         q=str(opt),
-                                        end_user_id=group_id,
+                                        end_user_id=end_user_id,
                                         limit=max(3, search_limit // 2),
                                     )
                                     if isinstance(opt_res, dict):
@@ -971,7 +971,7 @@ async def run_longmemeval_test(
                         kw_fallback = await search_graph(
                             connector=connector,
                             q=question,
-                            group_id=group_id,
+                            end_user_id=end_user_id,
                             limit=max(search_limit, 5),
                         )
                         fb_dialogs = kw_fallback.get("dialogues", []) or []
@@ -1199,7 +1199,7 @@ async def run_longmemeval_test(
                 "count_avg": statistics.mean(per_query_context_counts) if per_query_context_counts else 0.0,
             },
             "params": {
-                "group_id": group_id,
+                "end_user_id": end_user_id,
                 "search_limit": search_limit,
                 "context_char_budget": context_char_budget,
                 "search_type": search_type,
@@ -1278,7 +1278,7 @@ def main():
     result = asyncio.run(
         run_longmemeval_test(
             sample_size=sample_size,
-            group_id=args.group_id,
+            end_user_id=args.end_user_id,
             search_limit=args.search_limit,
             context_char_budget=args.context_char_budget,
             llm_temperature=args.llm_temperature,

@@ -1009,7 +1009,7 @@ async def run_longmemeval_test(
                         kw_fallback = await search_graph(
                             connector=connector,
                             q=question,
-                            group_id=group_id,
+                            end_user_id=end_user_id,
                             limit=max(search_limit, 5),
                         )
                         fb_dialogs = kw_fallback.get("dialogues", []) or []
@@ -1223,7 +1223,7 @@ async def run_longmemeval_test(
                 "count_avg": statistics.mean(per_query_context_counts) if per_query_context_counts else 0.0,
             },
             "params": {
-                "group_id": group_id,
+                "end_user_id": end_user_id,
                 "search_limit": search_limit,
                 "context_char_budget": context_char_budget,
                 "search_type": search_type,
