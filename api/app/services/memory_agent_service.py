@@ -542,9 +542,8 @@ class MemoryAgentService:
                             if intermediate_type == "search_result":
                                 query = intermediate.get('query', '')
                                 raw_results = intermediate.get('raw_results', {})
-                                reranked_results = raw_results.get('reranked_results', [])
-                                
                                 try:
+                                    reranked_results = raw_results.get('reranked_results', [])
                                     statements = [statement['statement'] for statement in reranked_results.get('statements', [])]
                                 except Exception:
                                     statements = []
