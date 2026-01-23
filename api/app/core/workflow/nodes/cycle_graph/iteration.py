@@ -58,10 +58,10 @@ class IterationRuntime:
             idx: Index of the element in the input array.
 
         Returns:
-            A deep copy of the workflow state with iteration-specific variables set.
+            A copy of the workflow state with iteration-specific variables set.
         """
         loopstate = WorkflowState(
-            **copy.deepcopy(self.state)
+            **self.state
         )
         loopstate["runtime_vars"][self.node_id] = {
             "item": item,
@@ -71,7 +71,7 @@ class IterationRuntime:
             "item": item,
             "index": idx,
         }
-        loopstate["looping"] = True
+        loopstate["looping"] = 1
         loopstate["activate"][self.start_id] = True
         return loopstate
 
@@ -89,7 +89,7 @@ class IterationRuntime:
             self.result.extend(output)
         else:
             self.result.append(output)
-        if not result["looping"]:
+        if result["looping"] == 2:
             self.looping = False
         return result
 
@@ -150,10 +150,9 @@ class IterationRuntime:
                     self.result.extend(output)
                 else:
                     self.result.append(output)
-                if not result["looping"]:
+                if result["looping"] == 2:
                     self.looping = False
                 idx += 1
-
         logger.info(f"Iteration node {self.node_id}: execution completed")
         return {
             "output": self.result,
