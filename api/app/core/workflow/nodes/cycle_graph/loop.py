@@ -46,6 +46,7 @@ class LoopRuntime:
         self.state = state
         self.node_id = node_id
         self.typed_config = LoopNodeConfig(**config)
+        self.looping = True
 
     def _init_loop_state(self):
         """
@@ -88,7 +89,7 @@ class LoopRuntime:
         loopstate = WorkflowState(
             **self.state
         )
-        loopstate["looping"] = True
+        loopstate["looping"] = 1
         loopstate["activate"][self.start_id] = True
         return loopstate
 
@@ -179,9 +180,12 @@ class LoopRuntime:
         loopstate = self._init_loop_state()
         loop_time = self.typed_config.max_loop
         child_state = []
-        while self.evaluate_conditional(loopstate) and loopstate["looping"] and loop_time > 0:
+        while self.evaluate_conditional(loopstate) and self.looping and loop_time > 0:
             logger.info(f"loop node {self.node_id}: running")
-            child_state.append(await self.graph.ainvoke(loopstate))
+            result = await self.graph.ainvoke(loopstate)
+            child_state.append(result)
+            if result["looping"] == 2:
+                self.looping = False
             loop_time -= 1
 
         logger.info(f"loop node {self.node_id}: execution completed")

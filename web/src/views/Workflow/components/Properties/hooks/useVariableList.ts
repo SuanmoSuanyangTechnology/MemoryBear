@@ -135,6 +135,78 @@ export const getCurrentNodeVariables = (nodeData: any, values: any): Suggestion[
   return nodeData.type === 'var-aggregator' && !nodeData.config.group.defaultValue ? [] : list;
 };
 
+export const getChildNodeVariables = (
+  selectedNode: Node,
+  graphRef: React.MutableRefObject<Graph | undefined>
+): Suggestion[] => {
+  const graph = graphRef.current;
+  if (!graph) return [];
+
+  const list: Suggestion[] = [];
+  const nodes = graph.getNodes();
+  const edges = graph.getEdges();
+  const keys = new Set<string>();
+
+  const childNodes = nodes.filter(node => node.getData()?.cycle === selectedNode.id);
+
+  const getConnectedNodes = (nodeId: string, visited = new Set<string>()): string[] => {
+    if (visited.has(nodeId)) return [];
+    visited.add(nodeId);
+    const prev = edges.filter(e => e.getTargetCellId() === nodeId).map(e => e.getSourceCellId());
+    return [...prev, ...prev.flatMap(id => getConnectedNodes(id, visited))];
+  };
+
+  const relevantIds = new Set<string>();
+  childNodes.forEach(child => {
+    relevantIds.add(child.id);
+    getConnectedNodes(child.id).forEach(id => relevantIds.add(id));
+  });
+
+  relevantIds.forEach(id => {
+    const node = nodes.find(n => n.id === id);
+    if (!node) return;
+
+    const nodeData = node.getData();
+    const nodeId = nodeData.id;
+    const { type } = nodeData;
+
+    if (type in NODE_VARIABLES) {
+      NODE_VARIABLES[type as keyof typeof NODE_VARIABLES].forEach(({ label, dataType, field }) => {
+        const varKey = `${nodeId}_${label}`;
+        if (!keys.has(varKey)) {
+          keys.add(varKey);
+          list.push({
+            key: varKey,
+            label,
+            type: 'variable',
+            dataType,
+            value: `${nodeId}.${field}`,
+            nodeData,
+          });
+        }
+      });
+    }
+
+    if (type === 'parameter-extractor') {
+      (nodeData.config?.params?.defaultValue || []).forEach((p: any) => {
+        if (p?.name && !keys.has(`${nodeId}_${p.name}`)) {
+          keys.add(`${nodeId}_${p.name}`);
+          list.push({
+            key: `${nodeId}_${p.name}`,
+            label: p.name,
+            type: 'variable',
+            dataType: p.type || 'string',
+            value: `${nodeId}.${p.name}`,
+            nodeData,
+          });
+        }
+      });
+    }
+  });
+
+  return list;
+};
+
 export const useVariableList = (
   selectedNode: Node | null | undefined,
   graphRef: React.MutableRefObject<Graph | undefined>,
@@ -187,13 +259,13 @@ export const useVariableList = (
       } else if (pd.type === 'iteration' && pd.config.input.defaultValue) {
         let itemType = 'object';
         const iv = list.find(v => `{{${v.value}}}` === pd.config.input.defaultValue);
-        if (iv?.dataType.startsWith('array[')) itemType = iv.dataType.replace(/^array\[(.+)\]$/, '$1');
+        if (iv?.dataType.startsWith('array[')) {itemType = iv.dataType.replace(/^array\[(.+)\]$/, '$1');}
         addVariable(list, keys, `${pid}_item`, 'item', itemType, `${pid}.item`, pd);
         addVariable(list, keys, `${pid}_index`, 'index', 'number', `${pid}.index`, pd);
       } else if (pd.type === 'iteration' && !pd.config.input.defaultValue) {
         let itemType = 'object';
         const iv = list.find(v => `{{${v.value}}}` === pd.config.input.defaultValue);
-        if (iv?.dataType.startsWith('array[')) itemType = iv.dataType.replace(/^array\[(.+)\]$/, '$1');
+        if (iv?.dataType.startsWith('array[')) {itemType = iv.dataType.replace(/^array\[(.+)\]$/, '$1');}
         addVariable(list, keys, `${pid}_item`, 'item', 'string', `${pid}.item`, pd);
         addVariable(list, keys, `${pid}_index`, 'index', 'number', `${pid}.index`, pd);
       }

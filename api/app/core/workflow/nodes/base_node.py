@@ -19,11 +19,15 @@ from app.core.workflow.variable_pool import VariablePool
 logger = logging.getLogger(__name__)
 
 
-def merget_activate_state(x, y):
+def merge_activate_state(x, y):
     return {
         k: x.get(k, False) or y.get(k, False)
         for k in set(x) | set(y)
     }
+
+
+def merge_looping_state(x, y):
+    return y if y > x else x
 
 
 class WorkflowState(TypedDict):
@@ -36,7 +40,7 @@ class WorkflowState(TypedDict):
 
     # Set of loop node IDs, used for assigning values in loop nodes
     cycle_nodes: list
-    looping: Annotated[bool, lambda x, y: x and y]
+    looping: Annotated[int, merge_looping_state]
 
     # Input variables (passed from configured variables)
     # Uses a deep merge function, supporting nested dict updates (e.g., conv.xxx)
@@ -68,7 +72,7 @@ class WorkflowState(TypedDict):
     streaming_buffer: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
 
     # node activate status
-    activate: Annotated[dict[str, bool], merget_activate_state]
+    activate: Annotated[dict[str, bool], merge_activate_state]
 
 
 class BaseNode(ABC):

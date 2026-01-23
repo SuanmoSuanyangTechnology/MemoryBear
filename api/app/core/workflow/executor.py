@@ -133,7 +133,7 @@ class WorkflowExecutor:
                 for node in self.workflow_config.get("nodes")
                 if node.get("type") in [NodeType.LOOP, NodeType.ITERATION]
             ],  # loop, iteration node id
-            "looping": False,  # loop runing flag, only use in loop node,not use in main loop
+            "looping": 0,  # loop runing flag, only use in loop node,not use in main loop
             "activate": {
                 self.start_node_id: True
             }
@@ -358,6 +358,7 @@ class WorkflowExecutor:
 
                 elif mode == "updates":
                     # Handle state updates - store final state
+                    # TODO:流式输出点
                     logger.debug(f"[UPDATES] 收到 state 更新 from {list(data.keys())} "
                                  f"- execution_id: {self.execution_id}")
 
