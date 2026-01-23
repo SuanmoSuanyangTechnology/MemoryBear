@@ -4,35 +4,15 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import List, Dict, Any
+from dotenv import load_dotenv
 
-if TYPE_CHECKING:
-    from app.schemas.memory_config_schema import MemoryConfig
-
-try:
-    from dotenv import load_dotenv
-except Exception:
-    def load_dotenv():
-        return None
-
-from app.core.memory.evaluation.common.metrics import (
-    avg_context_tokens,
-    exact_match,
-    latency_stats,
-)
-from app.core.memory.evaluation.extraction_utils import (
-    ingest_contexts_via_full_pipeline,
-)
-from app.core.memory.storage_services.search import run_hybrid_search
-from app.core.memory.utils.config.definitions import (
-    PROJECT_ROOT,
-    SELECTED_EMBEDDING_ID,
-    SELECTED_GROUP_ID,
-    SELECTED_LLM_ID,
-)
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-from app.db import get_db_context
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.memory.src.search import run_hybrid_search  # 使用旧版本（重构前）
+from app.core.memory.utils.config.definitions import PROJECT_ROOT, SELECTED_GROUP_ID, SELECTED_EMBEDDING_ID, SELECTED_LLM_ID
+from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
+from app.core.memory.evaluation.common.metrics import exact_match, latency_stats, avg_context_tokens
 
 
 def smart_context_selection(contexts: List[str], question: str, max_chars: int = 4000) -> str:
@@ -150,9 +130,7 @@ async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None
     await ingest_contexts_via_full_pipeline(contexts, end_user_id)
 
     # LLM client (使用异步调用)
-    with get_db_context() as db:
-        factory = MemoryClientFactory(db)
-        llm_client = factory.get_llm_client(SELECTED_LLM_ID)
+    llm_client = get_llm_client(SELECTED_LLM_ID)
 
     # Evaluate each item
     connector = Neo4jConnector()
@@ -177,7 +155,6 @@ async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None
                     limit=search_limit,
                     include=["dialogues", "statements", "entities"],
                     output_path=None,
-                    memory_config=memory_config,
                 )
             except Exception:
                 results = None
@@ -261,11 +238,7 @@ async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None
             pred = resp.content.strip() if hasattr(resp, 'content') else (resp["choices"][0]["message"]["content"].strip() if isinstance(resp, dict) else str(resp).strip())
             # Metrics: F1, BLEU-1, Jaccard; keep exact match for reference
             correct_flags.append(exact_match(pred, reference))
-            from app.core.memory.evaluation.common.metrics import (
-                bleu1,
-                f1_score,
-                jaccard,
-            )
+            from app.core.memory.evaluation.common.metrics import f1_score, bleu1, jaccard
             f1s.append(f1_score(str(pred), str(reference)))
             b1s.append(bleu1(str(pred), str(reference)))
             jss.append(jaccard(str(pred), str(reference)))
