@@ -246,9 +246,9 @@ class DialogData(BaseModel):
         return []
 
     def assign_group_id_to_statements(self) -> None:
-        """Assign this dialog's group_id to all statements in all chunks.
+        """Assign this dialog's end_user_id to all statements in all chunks.
 
-        This method updates statements that don't have a group_id set.
+        This method updates statements that don't have a end_user_id set.
         """
         for chunk in self.chunks:
             for statement in chunk.statements:

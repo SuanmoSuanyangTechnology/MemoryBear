@@ -1307,7 +1307,7 @@ def main():
     result = asyncio.run(
         run_longmemeval_test(
             sample_size=sample_size,
-            group_id=args.group_id,
+            end_user_id=args.end_user_id,
             search_limit=args.search_limit,
             context_char_budget=args.context_char_budget,
             llm_temperature=args.llm_temperature,

@@ -40,7 +40,7 @@ async def write(
     Args:
         user_id: User identifier
         apply_id: Application identifier
-        group_id: Group identifier
+        end_user_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
         messages: Structured message list [{"role": "user", "content": "..."}, ...]
         ref_id: Reference ID, defaults to "wyl20251027"

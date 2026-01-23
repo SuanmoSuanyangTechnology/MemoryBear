@@ -8,19 +8,7 @@ import uuid
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 
-# ============================================================================
-# 原 UserInput 相关 Schema (保留原有功能)
-# ============================================================================
-class UserInput(BaseModel):
-    message: str
-    history: list[dict]
-    search_switch: str
-    group_id: str
 
-
-class Write_UserInput(BaseModel):
-    message: str
-    group_id: str
 
 
 # ============================================================================

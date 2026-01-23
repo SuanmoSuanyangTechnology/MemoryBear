@@ -716,7 +716,7 @@ class MemoryAgentService:
                 if "No memory configuration found" in str(e):
                     raise  # Re-raise our specific error
                 logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
-                raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
+                raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
         logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
         
         try:
