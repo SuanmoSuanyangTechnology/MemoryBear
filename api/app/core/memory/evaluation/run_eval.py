@@ -3,10 +3,15 @@ import asyncio
 import json
 import os
 from typing import Any, Dict
+from pathlib import Path
 from dotenv import load_dotenv
 
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.evaluation.config import SELECTED_GROUP_ID, DATASET_DIR
 
 from app.core.memory.evaluation.memsciqa.evaluate_qa import run_memsciqa_eval
 from app.core.memory.evaluation.longmemeval.qwen_search_eval import run_longmemeval_test

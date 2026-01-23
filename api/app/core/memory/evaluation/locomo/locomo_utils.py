@@ -15,8 +15,14 @@ import json
 import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
+from pathlib import Path
+from dotenv import load_dotenv
 
-from app.core.memory.utils.definitions import PROJECT_ROOT
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent.parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+
 from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
 
 
@@ -347,6 +353,49 @@ def select_and_format_information(
     
     return "\n\n".join(selected)
 
+# 记忆系统核心能力：写入与读取
+async def ingest_conversations_if_needed(
+    conversations: List[str],
+    group_id: str,
+    reset: bool = False
+) -> bool:
+    """
+    Wrapper for conversation ingestion using external extraction pipeline.
+    
+    This function populates the Neo4j database with processed conversation data
+    (chunks, statements, entities) so that the retrieval system has memory to search.
+    
+    The ingestion process:
+    1. Parses conversation text into dialogue messages
+    2. Chunks the dialogues into semantic units
+    3. Extracts statements and entities using LLM
+    4. Generates embeddings for all content
+    5. Stores everything in Neo4j graph database
+    
+    Args:
+        conversations: List of raw conversation texts from LoCoMo dataset
+                      Example: ["User: I went to Paris. AI: When was that?", ...]
+        group_id: Target group ID for database storage
+        reset: Whether to clear existing data first (not implemented in wrapper)
+        
+    Returns:
+        True if successful, False otherwise
+        
+    Note:
+        The external function uses "contexts" to mean "conversation texts".
+        This runs the full extraction pipeline: chunking → entity extraction → 
+        statement extraction → embedding → Neo4j storage.
+    """
+    try:
+        success = await ingest_contexts_via_full_pipeline(
+            contexts=conversations,
+            group_id=group_id,
+            save_chunk_output=True
+        )
+        return success
+    except Exception as e:
+        print(f"[Ingestion] Failed to ingest conversations: {e}")
+        return False
 
 async def retrieve_relevant_information(
     question: str,
