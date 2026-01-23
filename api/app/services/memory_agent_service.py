@@ -175,10 +175,9 @@ class MemoryAgentService:
         """
         logger.info("Reading log file")
 
-
-        current_file = os.path.abspath(__file__)  # app/services/memory_agent_service.py
-        app_dir = os.path.dirname(os.path.dirname(current_file))  # app directory
-        project_root = os.path.dirname(app_dir)  # redbear-mem directory
+        # Get log file path - use project root directory
+        from pathlib import Path
+        project_root = str(Path(__file__).resolve().parents[2])  # api directory
         log_path = os.path.join(project_root, "logs", "agent_service.log")
 
         summer = ''
@@ -217,9 +216,8 @@ class MemoryAgentService:
         logger.info("Starting log content streaming")
 
         # Get log file path - use project root directory
-        current_file = os.path.abspath(__file__)  # app/services/memory_agent_service.py
-        app_dir = os.path.dirname(os.path.dirname(current_file))  # app directory
-        project_root = os.path.dirname(app_dir)  # redbear-mem directory
+        from pathlib import Path
+        project_root = str(Path(__file__).resolve().parents[2])  # api directory
         log_path = os.path.join(project_root, "logs", "agent_service.log")
 
         # Check if file exists before starting stream
@@ -431,13 +429,15 @@ class MemoryAgentService:
             audit_logger = None
 
 
+        config_load_start = time.time()
         try:
             config_service = MemoryConfigService(db)
             memory_config = config_service.load_memory_config(
                 config_id=config_id,
                 service_name="MemoryAgentService"
             )
-            logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
+            config_load_time = time.time() - config_load_start
+            logger.info(f"[PERF] Configuration loaded in {config_load_time:.4f}s: {memory_config.config_name}")
         except ConfigurationError as e:
             error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
             logger.error(error_msg)
@@ -578,6 +578,8 @@ class MemoryAgentService:
                     logger.error(f"保存短期记忆失败: {str(save_error)}", exc_info=True)
 
                 # Log successful operation
+                total_time = time.time() - start_time
+                logger.info(f"[PERF] read_memory completed successfully in {total_time:.4f}s (config: {config_load_time:.4f}s, graph: {graph_exec_time:.4f}s)")
                 if audit_logger:
                     duration = time.time() - start_time
                     audit_logger.log_operation(
@@ -668,6 +670,8 @@ class MemoryAgentService:
         """
         logger.info("Classifying message type")
 
+
+
         # Load configuration to get LLM model ID
         config_service = MemoryConfigService(db)
         memory_config = config_service.load_memory_config(
@@ -681,10 +685,11 @@ class MemoryAgentService:
 
     async def generate_summary_from_retrieve(
         self,
+        end_user_id: str,
         retrieve_info: str,
         history: List[Dict],
         query: str,
-        config_id: UUID,
+        config_id: str,
         db: Session
     ) -> str:
         """
@@ -702,6 +707,18 @@ class MemoryAgentService:
         Returns:
             生成的答案文本
         """
+        if config_id is None:
+            try:
+                config_id = get_end_user_connected_config(end_user_id, db)
+                config_id = config_id.get('memory_config_id')
+                if config_id is None:
+                    raise ValueError(
+                        f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
+            except Exception as e:
+                if "No memory configuration found" in str(e):
+                    raise  # Re-raise our specific error
+                logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+                raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
         logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
         
         try:
@@ -727,7 +744,7 @@ class MemoryAgentService:
                 state=state,
                 history=history,
                 retrieve_info=retrieve_info,
-                template_name='Retrieve_Summary_prompt.jinja2',
+                template_name='direct_summary_prompt.jinja2',
                 operation_name='retrieve_summary',
                 response_model=RetrieveSummaryResponse,
                 search_mode="1"
@@ -1075,9 +1092,8 @@ class MemoryAgentService:
         logger.info("Starting log content streaming")
 
         # Get log file path - use project root directory
-        current_file = os.path.abspath(__file__)  # app/services/memory_agent_service.py
-        app_dir = os.path.dirname(os.path.dirname(current_file))  # app directory
-        project_root = os.path.dirname(app_dir)  # redbear-mem directory
+        from pathlib import Path
+        project_root = str(Path(__file__).resolve().parents[2])  # api directory
         log_path = os.path.join(project_root, "logs", "agent_service.log")
 
         # Check if file exists before starting stream
@@ -1175,7 +1191,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
 
     # 3. 从 config 中提取 memory_config_id
     config = latest_release.config or {}
-    
+
     # 如果 config 是字符串，解析为字典
     if isinstance(config, str):
         import json
@@ -1184,7 +1200,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
         except json.JSONDecodeError:
             logger.warning(f"Failed to parse config JSON for release {latest_release.id}")
             config = {}
-    
+
     memory_obj = config.get('memory', {})
     memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
 
@@ -1195,10 +1211,6 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
         "release_version": latest_release.version,
         "memory_config_id": memory_config_id
     }
-
-    print(188*'*')
-    print(result)
-    print(188 * '*')
 
     logger.info(f"Successfully retrieved connected config: memory_config_id={memory_config_id}")
     return result

@@ -8,13 +8,14 @@ import sys
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 # 1
 # 添加项目根目录到路径
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
+current_dir = Path(__file__).resolve().parent
+project_root = str(current_dir.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 # 关键：将 src 目录置于最前，确保从当前仓库加载模块

@@ -77,7 +77,10 @@ class MemoryAPIService:
             )
         
         # Verify end_user belongs to the workspace via App relationship
-        app = self.db.query(App).filter(App.id == end_user.app_id).first()
+        app = self.db.query(App).filter(
+            App.id == end_user.app_id,
+            App.is_active.is_(True)
+        ).first()
         
         if not app:
             logger.warning(f"App not found for end_user: {end_user_id}")

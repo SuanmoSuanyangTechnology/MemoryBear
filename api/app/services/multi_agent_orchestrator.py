@@ -2548,7 +2548,7 @@ class MultiAgentOrchestrator:
             # 获取 API Key 配置
             api_key_config = self.db.query(ModelApiKey).filter(
                 ModelApiKey.model_config_id == default_model_config_id,
-                ModelApiKey.is_active == True
+                ModelApiKey.is_active.is_(True)
             ).first()
 
             if not api_key_config:
@@ -2705,7 +2705,7 @@ class MultiAgentOrchestrator:
             # 获取 API Key 配置
             api_key_config = self.db.query(ModelApiKey).filter(
                 ModelApiKey.model_config_id == default_model_config_id,
-                ModelApiKey.is_active == True
+                ModelApiKey.is_active.is_(True)
             ).first()
 
             if not api_key_config:

@@ -728,7 +728,7 @@ class DraftRunService:
             select(ModelApiKey)
             .where(
                 ModelApiKey.model_config_id == model_config_id,
-                ModelApiKey.is_active == True
+                ModelApiKey.is_active.is_(True)
             )
             .order_by(ModelApiKey.priority.desc())
             .limit(1)

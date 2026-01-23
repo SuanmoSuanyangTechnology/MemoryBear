@@ -761,7 +761,10 @@ class WorkflowService:
 
         # 4. 获取工作空间 ID（从 app 获取）
         from app.models import App
-        app = self.db.query(App).filter(App.id == app_id).first()
+        app = self.db.query(App).filter(
+            App.id == app_id,
+            App.is_active.is_(True)
+        ).first()
         if not app:
             raise BusinessException(
                 code=BizCode.NOT_FOUND,

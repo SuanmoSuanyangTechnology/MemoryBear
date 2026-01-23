@@ -1,11 +1,12 @@
 import os
 from collections import defaultdict
+from pathlib import Path
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
 
-PROJECT_ROOT_ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT_ = str(Path(__file__).resolve().parents[3])
 
 class WriteState(TypedDict):
     '''

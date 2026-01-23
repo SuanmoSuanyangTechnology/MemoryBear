@@ -54,7 +54,7 @@ async def create_workflow_config(
         app = db.query(App).filter(
             App.id == app_id,
             App.workspace_id == current_user.current_workspace_id,
-            App.is_active == True
+            App.is_active.is_(True)
         ).first()
 
         if not app:
@@ -214,7 +214,7 @@ async def delete_workflow_config(
         app = db.query(App).filter(
             App.id == app_id,
             App.workspace_id == current_user.current_workspace_id,
-            App.is_active == True
+            App.is_active.is_(True)
         ).first()
 
         if not app:
@@ -259,7 +259,7 @@ async def validate_workflow_config(
         app = db.query(App).filter(
             App.id == app_id,
             App.workspace_id == current_user.current_workspace_id,
-            App.is_active == True
+            App.is_active.is_(True)
         ).first()
 
         if not app:
@@ -329,7 +329,7 @@ async def get_workflow_executions(
         app = db.query(App).filter(
             App.id == app_id,
             App.workspace_id == current_user.current_workspace_id,
-            App.is_active == True
+            App.is_active.is_(True)
         ).first()
 
         if not app:
@@ -389,7 +389,7 @@ async def get_workflow_execution(
         app = db.query(App).filter(
             App.id == execution.app_id,
             App.workspace_id == current_user.current_workspace_id,
-            App.is_active == True
+            App.is_active.is_(True)
         ).first()
 
         if not app:
@@ -440,7 +440,7 @@ async def run_workflow(
         app = db.query(App).filter(
             App.id == app_id,
             App.workspace_id == current_user.current_workspace_id,
-            App.is_active == True
+            App.is_active.is_(True)
         ).first()
 
         if not app:
@@ -578,7 +578,7 @@ async def cancel_workflow_execution(
         app = db.query(App).filter(
             App.id == execution.app_id,
             App.workspace_id == current_user.current_workspace_id,
-            App.is_active == True
+            App.is_active.is_(True)
         ).first()
 
         if not app:

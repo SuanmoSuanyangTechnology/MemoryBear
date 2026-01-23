@@ -91,15 +91,11 @@ const VariableSelect: FC<VariableSelectProps> = ({
       onChange={handleChange}
       showSearch
       allowClear={allowClear}
+      optionFilterProp="value"
       filterOption={(input, option) => {
         if (input === '/') return true;
-        if (option?.options) {
-          return option.label?.toLowerCase().includes(input.toLowerCase()) ||
-                 option.options.some((opt: any) => 
-                   opt.value.toLowerCase().includes(input.toLowerCase())
-                 );
-        }
-        return option?.label?.toLowerCase().includes(input.toLowerCase()) ?? false;
+        const value = 'value' in option! ? option.value as string : '';
+        return value.toLowerCase().includes(input.toLowerCase());
       }}
     />
   )

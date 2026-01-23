@@ -19,7 +19,7 @@ from app.core.memory.agent.utils.session_tools import SessionService
 from app.core.memory.agent.utils.template_tools import TemplateService
 from app.db import get_db
 
-template_root = os.path.join(PROJECT_ROOT_, 'agent', 'utils', 'prompt')
+template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
 logger = get_agent_logger(__name__)
 db_session = next(get_db())
 

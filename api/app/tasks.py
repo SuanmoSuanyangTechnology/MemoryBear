@@ -690,8 +690,11 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
             try:
                 workspace_uuid = uuid.UUID(workspace_id)
                 
-                # 1. 查询当前workspace下的所有app
-                apps = db.query(App).filter(App.workspace_id == workspace_uuid).all()
+                # 1. 查询当前workspace下的所有app（仅未删除的）
+                apps = db.query(App).filter(
+                    App.workspace_id == workspace_uuid,
+                    App.is_active.is_(True)
+                ).all()
                 
                 if not apps:
                     # 如果没有app，总量为0
