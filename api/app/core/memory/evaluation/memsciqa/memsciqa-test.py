@@ -15,7 +15,7 @@ from app.core.models.base import RedBearModelConfig
 from app.core.memory.utils.config.config_utils import get_embedder_config
 
 from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.utils.config.definitions import PROJECT_ROOT, SELECTED_GROUP_ID, SELECTED_EMBEDDING_ID, SELECTED_LLM_ID
+from app.core.memory.evaluation.config import DATASET_DIR, SELECTED_GROUP_ID, SELECTED_EMBEDDING_ID, SELECTED_LLM_ID
 from app.core.memory.evaluation.common.metrics import exact_match, latency_stats, avg_context_tokens
 
 from app.core.memory.evaluation.common.metrics import f1_score, bleu1, jaccard
@@ -161,16 +161,14 @@ async def run_memsciqa_test(
     # 默认使用指定的 memsci 组 ID
     group_id = group_id or "group_memsci"
 
-    # 数据路径解析（项目根与当前工作目录兜底）
+    # 数据路径解析
     if not data_path:
-        proj_path = os.path.join(PROJECT_ROOT, "data", "msc_self_instruct.jsonl")
-        cwd_path = os.path.join(os.getcwd(), "data", "msc_self_instruct.jsonl")
-        if os.path.exists(proj_path):
-            data_path = proj_path
-        elif os.path.exists(cwd_path):
-            data_path = cwd_path
-        else:
-            raise FileNotFoundError("未找到数据集: data/msc_self_instruct.jsonl，请确保其存在于项目根目录或当前工作目录的 data 目录下。")
+        data_path = os.path.join(DATASET_DIR, "msc_self_instruct.jsonl")
+        if not os.path.exists(data_path):
+            raise FileNotFoundError(
+                f"数据集文件不存在: {data_path}\n"
+                f"请将 msc_self_instruct.jsonl 放置在: {DATASET_DIR}"
+            )
 
     # 加载数据
     all_items = load_dataset_memsciqa(data_path)

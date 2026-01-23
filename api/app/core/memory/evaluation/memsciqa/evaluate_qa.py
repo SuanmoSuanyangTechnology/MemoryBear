@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.src.search import run_hybrid_search  # 使用旧版本（重构前）
-from app.core.memory.utils.config.definitions import PROJECT_ROOT, SELECTED_GROUP_ID, SELECTED_EMBEDDING_ID, SELECTED_LLM_ID
+from app.core.memory.evaluation.config import DATASET_DIR, SELECTED_GROUP_ID, SELECTED_EMBEDDING_ID, SELECTED_LLM_ID
 from app.core.memory.utils.llm.llm_utils import get_llm_client
 from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
 from app.core.memory.evaluation.common.metrics import exact_match, latency_stats, avg_context_tokens
@@ -118,9 +118,12 @@ def _combine_dialogues_for_hybrid(results: Dict[str, Any]) -> List[Dict[str, Any
 async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid") -> Dict[str, Any]:
     group_id = group_id or SELECTED_GROUP_ID
     # Load data
-    data_path = os.path.join(PROJECT_ROOT, "data", "msc_self_instruct.jsonl")
+    data_path = os.path.join(DATASET_DIR, "msc_self_instruct.jsonl")
     if not os.path.exists(data_path):
-        data_path = os.path.join(os.getcwd(), "data", "msc_self_instruct.jsonl")
+        raise FileNotFoundError(
+            f"数据集文件不存在: {data_path}\n"
+            f"请将 msc_self_instruct.jsonl 放置在: {DATASET_DIR}"
+        )
     with open(data_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
     items: List[Dict[str, Any]] = [json.loads(l) for l in lines[:sample_size]]

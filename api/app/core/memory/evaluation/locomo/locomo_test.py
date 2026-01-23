@@ -13,7 +13,7 @@ load_dotenv()
 
 # 导入配置
 try:
-    from app.core.memory.utils.config.definitions import SELECTED_GROUP_ID
+    from app.core.memory.evaluation.config import SELECTED_GROUP_ID
     print(f"✅ 使用配置的 group_id: {SELECTED_GROUP_ID}")
 except ImportError as e:
     print(f"⚠️ 无法导入 SELECTED_GROUP_ID: {e}，使用默认值")
@@ -417,14 +417,19 @@ async def run_enhanced_evaluation():
     from app.core.models.base import RedBearModelConfig
     from app.core.memory.utils.llm.llm_utils import get_llm_client
     from app.core.memory.utils.config.config_utils import get_embedder_config
-    from app.core.memory.utils.config.definitions import SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
+    from app.core.memory.evaluation.config import SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
 
-    # 加载数据
-    # 获取项目根目录
-    current_file = os.path.abspath(__file__)
-    evaluation_dir = os.path.dirname(os.path.dirname(current_file))  # evaluation目录
-    memory_dir = os.path.dirname(evaluation_dir)  # memory目录
-    data_path = os.path.join(memory_dir, "data", "locomo10.json")
+    # 加载数据 - 使用统一的 dataset 目录
+    data_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dataset", "locomo10.json")
+    
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(
+            f"数据集文件不存在: {data_path}\n"
+            f"请将 locomo10.json 放置在: api/app/core/memory/evaluation/dataset/"
+        )
+    
+    print(f"✅ 找到数据文件: {data_path}")
+    
     with open(data_path, "r", encoding="utf-8") as f:
         raw = json.load(f)
 
@@ -440,54 +445,59 @@ async def run_enhanced_evaluation():
     # 初始化增强监控器
     monitor = EnhancedEvaluationMonitor(reset_interval=5, performance_threshold=0.6)
     
-    llm = get_llm_client(SELECTED_LLM_ID)
+    # 获取数据库会话并初始化 LLM 客户端
+    from app.db import get_db
+    db = next(get_db())
     
-    # 初始化embedder
-    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
-    embedder = OpenAIEmbedderClient(
-        model_config=RedBearModelConfig.model_validate(cfg_dict)
-    )
-    
-    # 初始化连接器
-    connector = Neo4jConnector()
-
-    # 初始化结果字典
-    results = {
-        "questions": [],
-        "overall_metrics": {"f1": 0.0, "b1": 0.0, "j": 0.0, "loc_f1": 0.0},
-        "category_metrics": {},
-        "retrieval_stats": {"total_questions": len(items), "avg_context_length": 0, "avg_retrieved_docs": 0},
-        "performance_trend": "stable",
-        "timestamp": datetime.now().isoformat(),
-        "enhanced_strategy": True
-    }
-
-    total_f1 = 0.0
-    total_bleu1 = 0.0
-    total_jaccard = 0.0
-    total_loc_f1 = 0.0
-    total_context_length = 0
-    total_retrieved_docs = 0
-    category_stats = {}
-
     try:
-        for i, item in enumerate(items):
-            monitor.question_count += 1
+        llm = get_llm_client(SELECTED_LLM_ID, db)
+        
+        # 初始化embedder
+        cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID, db)
+        embedder = OpenAIEmbedderClient(
+            model_config=RedBearModelConfig.model_validate(cfg_dict)
+        )
+        
+        # 初始化连接器
+        connector = Neo4jConnector()
 
-            # 获取近期性能用于重置判断
-            recent_performance = monitor.get_recent_performance()
+        # 初始化结果字典
+        results = {
+            "questions": [],
+            "overall_metrics": {"f1": 0.0, "b1": 0.0, "j": 0.0, "loc_f1": 0.0},
+            "category_metrics": {},
+            "retrieval_stats": {"total_questions": len(items), "avg_context_length": 0, "avg_retrieved_docs": 0},
+            "performance_trend": "stable",
+            "timestamp": datetime.now().isoformat(),
+            "enhanced_strategy": True
+        }
 
-            # 增强的重置判断
-            should_reset = monitor.should_reset_connections(current_f1=recent_performance)
-            if should_reset and i > 0:
-                print(f"🔄 重置Neo4j连接 (问题 {i+1}/{len(items)}, 近期性能: {recent_performance:.3f})...")
-                await connector.close()
-                connector = Neo4jConnector()  # 创建新连接
-                print("✅ 连接重置完成")
+        total_f1 = 0.0
+        total_bleu1 = 0.0
+        total_jaccard = 0.0
+        total_loc_f1 = 0.0
+        total_context_length = 0
+        total_retrieved_docs = 0
+        category_stats = {}
 
-            q = item.get("question", "")
-            ref = item.get("answer", "")
-            ref_str = str(ref) if ref is not None else ""
+        try:
+            for i, item in enumerate(items):
+                monitor.question_count += 1
+
+                # 获取近期性能用于重置判断
+                recent_performance = monitor.get_recent_performance()
+
+                # 增强的重置判断
+                should_reset = monitor.should_reset_connections(current_f1=recent_performance)
+                if should_reset and i > 0:
+                    print(f"🔄 重置Neo4j连接 (问题 {i+1}/{len(items)}, 近期性能: {recent_performance:.3f})...")
+                    await connector.close()
+                    connector = Neo4jConnector()  # 创建新连接
+                    print("✅ 连接重置完成")
+
+                q = item.get("question", "")
+                ref = item.get("answer", "")
+                ref_str = str(ref) if ref is not None else ""
 
             print(f"\n🔍 [{i+1}/{len(items)}] 问题: {q}")
             print(f"✅ 真实答案: {ref_str}")
@@ -710,14 +720,17 @@ async def run_enhanced_evaluation():
 
             print("="*60)
 
-    except Exception as e:
-        print(f"❌ 评估过程中发生错误: {e}")
-        # 即使出错，也返回已有的结果
-        import traceback
-        traceback.print_exc()
+        except Exception as e:
+            print(f"❌ 评估过程中发生错误: {e}")
+            # 即使出错，也返回已有的结果
+            import traceback
+            traceback.print_exc()
 
+        finally:
+            await connector.close()
+    
     finally:
-        await connector.close()
+        db.close()  # 关闭数据库会话
 
     # 计算总体指标
     n = len(items)

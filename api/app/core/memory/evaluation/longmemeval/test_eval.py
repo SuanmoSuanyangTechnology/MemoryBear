@@ -18,7 +18,7 @@ from app.core.models.base import RedBearModelConfig
 from app.core.memory.utils.config.config_utils import get_embedder_config
 from app.core.memory.utils.llm.llm_utils import get_llm_client
 from app.core.memory.evaluation.dialogue_queries import SEARCH_ENTITIES_BY_NAME
-from app.core.memory.utils.config.definitions import PROJECT_ROOT, SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
+from app.core.memory.evaluation.config import DATASET_DIR, SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
 from app.core.memory.evaluation.common.metrics import f1_score as common_f1, jaccard, latency_stats, avg_context_tokens
 from app.core.memory.evaluation.common.metrics import exact_match
 
@@ -620,15 +620,13 @@ async def run_longmemeval_test(
 
     # 数据路径
     if not data_path:
-        # 固定使用中文数据集：data/longmemeval_oracle_zh.json
-        zh_proj = os.path.join(PROJECT_ROOT, "data", "longmemeval_oracle_zh.json")
-        zh_cwd = os.path.join(os.getcwd(), "data", "longmemeval_oracle_zh.json")
-        if os.path.exists(zh_proj):
-            data_path = zh_proj
-        elif os.path.exists(zh_cwd):
-            data_path = zh_cwd
-        else:
-            raise FileNotFoundError("未找到数据集: data/longmemeval_oracle_zh.json，请确保其存在于项目根目录或当前工作目录的 data 目录下。")
+        # 固定使用中文数据集：dataset/longmemeval_oracle_zh.json
+        data_path = os.path.join(DATASET_DIR, "longmemeval_oracle_zh.json")
+        if not os.path.exists(data_path):
+            raise FileNotFoundError(
+                f"数据集文件不存在: {data_path}\n"
+                f"请将 longmemeval_oracle_zh.json 放置在: {DATASET_DIR}"
+            )
 
     qa_list: List[Dict[str, Any]] = load_dataset_any(data_path)
     # 支持评估全部样本：当 sample_size <= 0 时，取从 start_index 到末尾
