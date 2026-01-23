@@ -262,9 +262,7 @@ async def read_server(
     """
     config_id = user_input.config_id
     workspace_id = current_user.current_workspace_id
-    api_logger.info(f"Read service: workspace_id={workspace_id}, config_id={config_id}")
 
-    # 获取 storage_type，如果为 None 则使用默认值
     storage_type = workspace_service.get_workspace_storage_type(
         db=db,
         workspace_id=workspace_id,
@@ -300,6 +298,7 @@ async def read_server(
             
             # 调用 memory_agent_service 的方法生成最终答案
             result['answer'] = await memory_agent_service.generate_summary_from_retrieve(
+                group_id=user_input.group_id,
                 retrieve_info=retrieve_info,
                 history=history,
                 query=query,

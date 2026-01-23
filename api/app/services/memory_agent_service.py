@@ -410,8 +410,8 @@ class MemoryAgentService:
         # Resolve config_id if None using end_user's connected config
         if config_id is None:
             try:
-                connected_config = get_end_user_connected_config(group_id, db)
-                config_id = connected_config.get("memory_config_id")
+                config_id = get_end_user_connected_config(group_id, db)
+                config_id=config_id.get('memory_config_id')
                 if config_id is None:
                     raise ValueError(f"No memory configuration found for end_user {group_id}. Please ensure the user has a connected memory configuration.")
             except Exception as e:
@@ -670,6 +670,8 @@ class MemoryAgentService:
         """
         logger.info("Classifying message type")
 
+
+
         # Load configuration to get LLM model ID
         config_service = MemoryConfigService(db)
         memory_config = config_service.load_memory_config(
@@ -683,6 +685,7 @@ class MemoryAgentService:
 
     async def generate_summary_from_retrieve(
         self,
+        group_id: str,
         retrieve_info: str,
         history: List[Dict],
         query: str,
@@ -704,6 +707,19 @@ class MemoryAgentService:
         Returns:
             生成的答案文本
         """
+        if config_id is None:
+            try:
+                config_id = get_end_user_connected_config(group_id, db)
+                config_id = config_id.get('memory_config_id')
+                if config_id is None:
+                    raise ValueError(
+                        f"No memory configuration found for end_user {group_id}. Please ensure the user has a connected memory configuration.")
+            except Exception as e:
+                if "No memory configuration found" in str(e):
+                    raise  # Re-raise our specific error
+                logger.error(f"Failed to get connected config for end_user {group_id}: {e}")
+                raise ValueError(f"Unable to determine memory configuration for end_user {group_id}: {e}")
+
         logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
         
         try:
