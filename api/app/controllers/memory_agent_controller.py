@@ -306,6 +306,8 @@ async def read_server(
                 config_id=config_id,
                 db=db
             )
+            if "信息不足，无法回答" in result['answer']:
+                result['answer']=retrieve_info
         return success(data=result, msg="回复对话消息成功")
     except BaseException as e:
         # Handle ExceptionGroup from TaskGroup (Python 3.11+) or BaseExceptionGroup
