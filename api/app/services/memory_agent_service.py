@@ -682,7 +682,6 @@ class MemoryAgentService:
         status = await status_typle(message, memory_config.llm_model_id)
         logger.debug(f"Message type: {status}")
         return status
-
     async def generate_summary_from_retrieve(
         self,
         end_user_id: str,
