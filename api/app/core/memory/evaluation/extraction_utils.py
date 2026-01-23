@@ -10,7 +10,7 @@ from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chu
 from app.core.memory.models.message_models import DialogData, ConversationContext, ConversationMessage
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.utils.config.definitions import SELECTED_CHUNKER_STRATEGY, SELECTED_EMBEDDING_ID
+from app.core.memory.evaluation.config import SELECTED_CHUNKER_STRATEGY, SELECTED_EMBEDDING_ID
 
 # 使用新的模块化架构
 from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import ExtractionOrchestrator

@@ -147,7 +147,7 @@ def extract_conversations(data_path: str, max_dialogues: int = 1) -> List[str]:
     
     return contents
 
-
+# 时间解析：将相对时间表达转换为绝对日期
 def resolve_temporal_references(text: str, anchor_date: datetime) -> str:
     """
     Resolve relative temporal references to absolute dates.
@@ -225,6 +225,8 @@ def resolve_temporal_references(text: str, anchor_date: datetime) -> str:
         t,
         flags=re.IGNORECASE
     )
+    
+    # 中文支持
     t = re.sub(
         r"\bnext\s+week\b",
         (anchor_date + timedelta(days=7)).date().isoformat(),
