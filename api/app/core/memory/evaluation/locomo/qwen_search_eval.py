@@ -7,14 +7,21 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any
 import statistics
 import re
+from pathlib import Path
 from dotenv import load_dotenv
+
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent.parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+    print(f"✅ 加载评估配置: {eval_config_path}")
+
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.models.base import RedBearModelConfig
 from app.core.memory.utils.config.config_utils import get_embedder_config
 from app.core.memory.src.search import run_hybrid_search  # 使用旧版本（重构前）
-from app.core.memory.evaluation.config import DATASET_DIR, SELECTED_GROUP_ID, SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
 from app.core.memory.utils.llm.llm_utils import get_llm_client
 from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
 from app.core.memory.evaluation.common.metrics import f1_score as common_f1, bleu1, jaccard, latency_stats, avg_context_tokens
@@ -246,7 +253,7 @@ async def run_locomo_eval(
     if not os.path.exists(data_path):
         raise FileNotFoundError(
             f"数据集文件不存在: {data_path}\n"
-            f"请将 locomo10.json 放置在: {DATASET_DIR}"
+            f"请将 locomo10.json 放置在: {dataset_dir}"
         )
     with open(data_path, "r", encoding="utf-8") as f:
         raw = json.load(f)
@@ -325,9 +332,9 @@ async def run_locomo_eval(
     await ingest_contexts_via_full_pipeline(contents, end_user_id, save_chunk_output=True)
 
     # 使用异步LLM客户端
-    llm_client = get_llm_client(SELECTED_LLM_ID)
+    llm_client = get_llm_client(llm_id)
     # 初始化embedder用于直接调用
-    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
+    cfg_dict = get_embedder_config(embedding_id)
     embedder = OpenAIEmbedderClient(
         model_config=RedBearModelConfig.model_validate(cfg_dict)
     )
@@ -787,8 +794,9 @@ async def run_locomo_eval(
                 "search_limit": search_limit,
                 "context_char_budget": context_char_budget,
                 "search_type": search_type,
-                "llm_id": SELECTED_LLM_ID,
-                "retrieval_embedding_id": SELECTED_EMBEDDING_ID,
+                "llm_id": llm_id,
+                "retrieval_embedding_id": embedding_id,
+                "chunker_strategy": os.getenv("EVAL_CHUNKER_STRATEGY", "RecursiveChunker"),
                 "skip_ingest_if_exists": skip_ingest_if_exists,
                 "llm_timeout": llm_timeout,
                 "llm_max_retries": llm_max_retries,
