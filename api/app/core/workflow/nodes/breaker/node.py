@@ -28,6 +28,6 @@ class BreakNode(BaseNode):
         Returns:
             Optional dictionary indicating the loop has been stopped.
         """
-        state["looping"] = False
+        state["looping"] = 2
         logger.info(f"Setting cycle node exit flag, cycle={self.cycle}, looping={state['looping']}")
 
