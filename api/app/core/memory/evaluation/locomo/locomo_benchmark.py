@@ -21,14 +21,14 @@ from dotenv import load_dotenv
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.models.base import RedBearModelConfig
-from app.core.memory.utils.config_utils import get_embedder_config
-from app.core.memory.utils.definitions import (
-    PROJECT_ROOT,
+from app.core.memory.utils.config.config_utils import get_embedder_config
+from app.core.memory.evaluation.config import (
+    DATASET_DIR,
     SELECTED_GROUP_ID,
     SELECTED_LLM_ID,
     SELECTED_EMBEDDING_ID
 )
-from app.core.memory.utils.llm_utils import get_llm_client
+from app.core.memory.utils.llm.llm_utils import get_llm_client
 from app.core.memory.evaluation.common.metrics import (
     f1_score,
     bleu1,
@@ -538,9 +538,12 @@ async def run_locomo_benchmark(
     group_id = group_id or SELECTED_GROUP_ID
     
     # Determine data path
-    data_path = os.path.join(PROJECT_ROOT, "data", "locomo10.json")
+    data_path = os.path.join(DATASET_DIR, "locomo10.json")
     if not os.path.exists(data_path):
-        data_path = os.path.join(os.getcwd(), "data", "locomo10.json")
+        raise FileNotFoundError(
+            f"数据集文件不存在: {data_path}\n"
+            f"请将 locomo10.json 放置在: {DATASET_DIR}"
+        )
     
     # Print configuration
     print(f"\n{'='*60}")
@@ -555,7 +558,7 @@ async def run_locomo_benchmark(
     print(f"   Data path: {data_path}")
     print(f"{'='*60}\n")
     
-    # Step 1: Load LoCoMo data
+    # Step 1: Load LoCoMo data （加载数据）
     try:
         qa_items = step_load_data(data_path, sample_size)
     except Exception as e:
@@ -565,13 +568,13 @@ async def run_locomo_benchmark(
             "timestamp": datetime.now().isoformat()
         }
     
-    # Step 2: Ingest data if needed
+    # Step 2: Ingest data if needed（数据摄入）
     await step_ingest_data(data_path, group_id, skip_ingest, reset_group)
     
-    # Step 3: Initialize clients
+    # Step 3: Initialize clients （初始化客户端）
     connector, llm_client, embedder = step_initialize_clients()
     
-    # Step 4: Process all questions
+    # Step 4: Process all questions （处理所有问题）
     try:
         samples = await step_process_all_questions(
             qa_items=qa_items,
@@ -586,10 +589,10 @@ async def run_locomo_benchmark(
     finally:
         await connector.close()
     
-    # Step 5: Aggregate results
+    # Step 5: Aggregate results （聚合答案）
     aggregated = step_aggregate_results(samples)
     
-    # Build final result dictionary
+    # Build final result dictionary 
     result = {
         "dataset": "locomo",
         "sample_size": len(qa_items),
@@ -609,7 +612,7 @@ async def run_locomo_benchmark(
         "samples": samples
     }
     
-    # Step 6: Save results
+    # Step 6: Save results （保存结果）
     step_save_results(result, output_dir)
     
     return result
