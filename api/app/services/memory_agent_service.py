@@ -729,7 +729,7 @@ class MemoryAgentService:
                 state=state,
                 history=history,
                 retrieve_info=retrieve_info,
-                template_name='Retrieve_Summary_prompt.jinja2',
+                template_name='direct_summary_prompt.jinja2',
                 operation_name='retrieve_summary',
                 response_model=RetrieveSummaryResponse,
                 search_mode="1"
