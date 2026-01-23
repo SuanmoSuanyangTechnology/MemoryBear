@@ -6,8 +6,16 @@ import time
 from datetime import datetime
 from typing import List, Dict, Any
 import re
+from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent.parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+    print(f"✅ 加载评估配置: {eval_config_path}")
+
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.src.search import run_hybrid_search  # 使用与 evaluate_qa.py 相同的检索函数
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
@@ -15,7 +23,6 @@ from app.core.models.base import RedBearModelConfig
 from app.core.memory.utils.config.config_utils import get_embedder_config
 
 from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.evaluation.config import DATASET_DIR, SELECTED_GROUP_ID, SELECTED_EMBEDDING_ID, SELECTED_LLM_ID
 from app.core.memory.evaluation.common.metrics import exact_match, latency_stats, avg_context_tokens
 
 from app.core.memory.evaluation.common.metrics import f1_score, bleu1, jaccard
@@ -163,11 +170,13 @@ async def run_memsciqa_test(
 
     # 数据路径解析
     if not data_path:
-        data_path = os.path.join(DATASET_DIR, "msc_self_instruct.jsonl")
+        dataset_dir = Path(__file__).resolve().parent.parent / "dataset"
+        data_path = str(dataset_dir / "msc_self_instruct.jsonl")
+        
         if not os.path.exists(data_path):
             raise FileNotFoundError(
                 f"数据集文件不存在: {data_path}\n"
-                f"请将 msc_self_instruct.jsonl 放置在: {DATASET_DIR}"
+                f"请将 msc_self_instruct.jsonl 放置在: {dataset_dir}"
             )
 
     # 加载数据
@@ -178,13 +187,13 @@ async def run_memsciqa_test(
         items = all_items[start_index:start_index + sample_size]
 
     # 初始化 LLM（纯测试：不进行摄入）
-    llm = get_llm_client(SELECTED_LLM_ID)
+    llm = get_llm_client(os.getenv("EVAL_LLM_ID"))
 
     # 初始化 Neo4j 连接与向量检索 Embedder（对齐 locomo_test）
     connector = Neo4jConnector()
     embedder = None
     if search_type in ("embedding", "hybrid"):
-        cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
+        cfg_dict = get_embedder_config(os.getenv("EVAL_EMBEDDING_ID"))
         embedder = OpenAIEmbedderClient(
             model_config=RedBearModelConfig.model_validate(cfg_dict)
         )
@@ -480,8 +489,8 @@ async def run_memsciqa_test(
             "llm_max_tokens": llm_max_tokens,
             "search_type": search_type,
             "start_index": start_index,
-            "llm_id": SELECTED_LLM_ID,
-            "retrieval_embedding_id": SELECTED_EMBEDDING_ID
+            "llm_id": os.getenv("EVAL_LLM_ID"),
+            "retrieval_embedding_id": os.getenv("EVAL_EMBEDDING_ID")
         },
         "timestamp": datetime.now().isoformat(),
     }

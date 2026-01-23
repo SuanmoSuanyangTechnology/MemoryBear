@@ -8,9 +8,19 @@ import re
 from app.core.memory.llm_tools.openai_client import LLMClient
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import DialogueChunker
 from app.core.memory.models.message_models import DialogData, ConversationContext, ConversationMessage
+import os
+import sys
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent / "app" / "core" / "memory" / "evaluation" / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+    print(f"✅ 加载评估配置: {eval_config_path}")
+
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.utils.llm.llm_utils import get_llm_client
-from app.core.memory.evaluation.config import SELECTED_CHUNKER_STRATEGY, SELECTED_EMBEDDING_ID
 
 # 使用新的模块化架构
 from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import ExtractionOrchestrator
@@ -46,14 +56,25 @@ async def ingest_contexts_via_full_pipeline(
     Returns:
         True if data saved successfully, False otherwise.
     """
-    chunker_strategy = chunker_strategy or SELECTED_CHUNKER_STRATEGY
-    embedding_name = embedding_name or SELECTED_EMBEDDING_ID
+    chunker_strategy = chunker_strategy or os.getenv("EVAL_CHUNKER_STRATEGY", "RecursiveChunker")
+    embedding_name = embedding_name or os.getenv("EVAL_EMBEDDING_ID")
 
     # Step 1: Initialize LLM client
     llm_client = None
     try:
-        from app.core.memory.utils.config import definitions as config_defs
-        llm_client = get_llm_client(config_defs.SELECTED_LLM_ID)
+        # 使用评估配置中的 LLM ID
+        llm_id = os.getenv("EVAL_LLM_ID")
+        if not llm_id:
+            print("[Ingestion] ❌ EVAL_LLM_ID not set in .env.evaluation")
+            return False
+            
+        from app.db import get_db
+        
+        db = next(get_db())
+        try:
+            llm_client = get_llm_client(llm_id, db)
+        finally:
+            db.close()
     except Exception as e:
         print(f"[Ingestion] LLM client unavailable: {e}")
         return False
@@ -135,11 +156,16 @@ async def ingest_contexts_via_full_pipeline(
     from app.core.models.base import RedBearModelConfig
     from app.core.memory.utils.config.config_utils import get_embedder_config
     from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+    from app.db import get_db
     
     try:
-        embedder_config_dict = get_embedder_config(embedding_name)
-        embedder_config = RedBearModelConfig(**embedder_config_dict)
-        embedder_client = OpenAIEmbedderClient(embedder_config)
+        db = next(get_db())
+        try:
+            embedder_config_dict = get_embedder_config(embedding_name, db)
+            embedder_config = RedBearModelConfig(**embedder_config_dict)
+            embedder_client = OpenAIEmbedderClient(embedder_config)
+        finally:
+            db.close()
     except Exception as e:
         print(f"[Ingestion] Failed to initialize embedder client: {e}")
         return False
@@ -147,40 +173,101 @@ async def ingest_contexts_via_full_pipeline(
     # Step 5: Initialize Neo4j connector
     connector = Neo4jConnector()
     
-    # Step 6: Initialize and run ExtractionOrchestrator
+    # Step 6: Load MemoryConfig from database (REQUIRED)
+    config_id = os.getenv("EVAL_CONFIG_ID")
+    from app.schemas.memory_config_schema import MemoryConfig
+    from app.services.memory_config_service import MemoryConfigService
+    from app.db import get_db
+    
+    if not config_id:
+        print("[Ingestion] ❌ EVAL_CONFIG_ID is not set in .env.evaluation")
+        print("[Ingestion] Please set EVAL_CONFIG_ID to a valid config_id from the database")
+        print("[Ingestion] Example: EVAL_CONFIG_ID=1")
+        await connector.close()
+        return False
+    
+    # Load config from database
+    try:
+        db = next(get_db())
+        try:
+            config_service = MemoryConfigService(db)
+            memory_config = config_service.load_memory_config(config_id, service_name="extraction_utils")
+            print(f"[Ingestion] ✅ Loaded MemoryConfig from database (config_id={config_id})")
+            print(f"[Ingestion]    Config name: {memory_config.config_name}")
+            print(f"[Ingestion]    LLM: {memory_config.llm_model_name}")
+            print(f"[Ingestion]    Embedding: {memory_config.embedding_model_name}")
+            print(f"[Ingestion]    Chunker: {memory_config.chunker_strategy}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[Ingestion] ❌ Failed to load config from database: {e}")
+        print(f"[Ingestion] Please check:")
+        print(f"[Ingestion]   1. EVAL_CONFIG_ID={config_id} exists in data_config table")
+        print(f"[Ingestion]   2. Database connection is working")
+        print(f"[Ingestion]   3. Config has valid LLM and embedding model IDs")
+        await connector.close()
+        return False
+    
+    # Step 7: Initialize and run ExtractionOrchestrator
     print("[Ingestion] Running extraction pipeline with ExtractionOrchestrator...")
-    from app.core.memory.utils.config.config_utils import get_pipeline_config
-    config = get_pipeline_config()
+    from app.services.memory_config_service import MemoryConfigService
+    config = MemoryConfigService.get_pipeline_config(memory_config)
     
     orchestrator = ExtractionOrchestrator(
         llm_client=llm_client,
         embedder_client=embedder_client,
         connector=connector,
         config=config,
+        embedding_id=str(memory_config.embedding_model_id),  # 传递 embedding_id
     )
     
     try:
         # Run the complete extraction pipeline
-        # Returns: (dialogue_nodes, chunk_nodes, statement_nodes), 
-        #          (entity_nodes_before, stmt_entity_edges_before, entity_entity_edges_before),
-        #          (entity_nodes_after, stmt_entity_edges_after, entity_entity_edges_after)
         result = await orchestrator.run(dialog_data_list, is_pilot_run=False)
         
-        # Unpack the result tuple
-        (
-            dialogue_nodes,
-            chunk_nodes,
-            statement_nodes,
-            entity_nodes,
-            statement_chunk_edges,
-            statement_entity_edges,
-            entity_entity_edges,
-        ) = result
+        # Handle different return formats:
+        # - Pilot mode: 7 values (without dedup_details)
+        # - Normal mode: 8 values (with dedup_details at the end)
+        if len(result) == 8:
+            # Normal mode: includes dedup_details
+            (
+                dialogue_nodes,
+                chunk_nodes,
+                statement_nodes,
+                entity_nodes,
+                statement_chunk_edges,
+                statement_entity_edges,
+                entity_entity_edges,
+                _,  # dedup_details - not needed here
+            ) = result
+        elif len(result) == 7:
+            # Pilot mode or older version: no dedup_details
+            (
+                dialogue_nodes,
+                chunk_nodes,
+                statement_nodes,
+                entity_nodes,
+                statement_chunk_edges,
+                statement_entity_edges,
+                entity_entity_edges,
+            ) = result
+        else:
+            raise ValueError(f"Unexpected number of return values: {len(result)}")
         
         print(f"[Ingestion] Extraction completed: {len(statement_nodes)} statements, {len(entity_nodes)} entities")
         
+    except ValueError as e:
+        # If unpacking fails, provide helpful error message
+        print(f"[Ingestion] Extraction pipeline result unpacking failed: {e}")
+        print(f"[Ingestion] Result type: {type(result)}, length: {len(result) if hasattr(result, '__len__') else 'N/A'}")
+        if hasattr(result, '__len__') and len(result) > 0:
+            print(f"[Ingestion] First element type: {type(result[0])}")
+        await connector.close()
+        return False
     except Exception as e:
         print(f"[Ingestion] Extraction pipeline failed: {e}")
+        import traceback
+        traceback.print_exc()
         await connector.close()
         return False
 

@@ -1,0 +1,12 @@
+# 忽略实际的评估配置文件（包含敏感信息）
+.env.evaluation
+
+# 保留示例文件
+!.env.evaluation.example
+
+# 忽略测试结果
+*/results/*.json
+*/results/*.log
+
+# 保留 results 目录结构
+!*/results/.gitkeep
