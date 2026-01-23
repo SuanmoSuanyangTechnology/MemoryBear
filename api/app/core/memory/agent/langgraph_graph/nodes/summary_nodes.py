@@ -236,7 +236,7 @@ async def Retrieve_Summary(state: ReadState)-> ReadState:
     retrieve_info_str='\n'.join(retrieve_info_str)
 
     aimessages=await  summary_llm(state,history,retrieve_info_str,
-                                  'Retrieve_Summary_prompt.jinja2','retrieve_summary',RetrieveSummaryResponse,"1")
+                                  'direct_summary_prompt.jinja2','retrieve_summary',RetrieveSummaryResponse,"1")
     if '信息不足，无法回答' not in str(aimessages) or str(aimessages) != "":
         await summary_redis_save(state, aimessages)
     if aimessages == '':
@@ -276,7 +276,6 @@ async def Summary(state: ReadState)-> ReadState:
     aimessages=await  summary_llm(state,history,data,
                                   'summary_prompt.jinja2','summary',SummaryResponse,0)
 
-
     if '信息不足，无法回答' not in str(aimessages) or str(aimessages) != "":
         await summary_redis_save(state, aimessages)
     if aimessages == '':
@@ -295,9 +294,26 @@ async def Summary(state: ReadState)-> ReadState:
 async def Summary_fails(state: ReadState)-> ReadState:
     storage_type=state.get("storage_type", '')
     user_rag_memory_id=state.get("user_rag_memory_id", '')
+    history = await summary_history(state)
+    query = state.get("data", '')
+    verify = state.get("verify", '')
+    verify_expansion_issue = verify.get("verified_data", '')
+    retrieve_info_str = ''
+    for data in verify_expansion_issue:
+        for key, value in data.items():
+            if key == 'answer_small':
+                for i in value:
+                    retrieve_info_str += i + '\n'
+    data = {
+        "query": query,
+        "history": history,
+        "retrieve_info": retrieve_info_str
+    }
+    aimessages = await  summary_llm(state, history, data,
+                                 'fail_summary_prompt.jinja2', 'summary', SummaryResponse, 0)
     result= {
         "status": "success",
-        "summary_result": "没有相关数据",
+        "summary_result": aimessages,
         "storage_type": storage_type,
         "user_rag_memory_id": user_rag_memory_id
     }
