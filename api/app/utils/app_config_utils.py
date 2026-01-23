@@ -57,7 +57,7 @@ def dict_to_model_parameters(data: Optional[Dict[str, Any]]) -> Optional[Any]:
     if data is None:
         return None
 
-    from app.schemas import ModelParameters
+    from app.schemas.app_schema import ModelParameters
 
     if isinstance(data, ModelParameters):
         return data

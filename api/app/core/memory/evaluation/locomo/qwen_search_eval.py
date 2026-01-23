@@ -2,43 +2,22 @@ import argparse
 import asyncio
 import json
 import os
-import statistics
 import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
-
-try:
-    from dotenv import load_dotenv
-except Exception:
-    def load_dotenv():
-        return None
-
+from typing import List, Dict, Any
+import statistics
 import re
-
-from app.core.memory.evaluation.common.metrics import (
-    avg_context_tokens,
-    bleu1,
-    jaccard,
-    latency_stats,
-)
-from app.core.memory.evaluation.common.metrics import f1_score as common_f1
-from app.core.memory.evaluation.extraction_utils import (
-    ingest_contexts_via_full_pipeline,
-)
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.memory.storage_services.search import run_hybrid_search
-from app.core.memory.utils.config.definitions import (
-    PROJECT_ROOT,
-    SELECTED_EMBEDDING_ID,
-    SELECTED_GROUP_ID,
-    SELECTED_LLM_ID,
-)
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-from app.core.models.base import RedBearModelConfig
-from app.db import get_db_context
-from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
+from dotenv import load_dotenv
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.services.memory_config_service import MemoryConfigService
+from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.models.base import RedBearModelConfig
+from app.core.memory.utils.config.config_utils import get_embedder_config
+from app.core.memory.src.search import run_hybrid_search  # 使用旧版本（重构前）
+from app.core.memory.evaluation.config import DATASET_DIR, SELECTED_GROUP_ID, SELECTED_LLM_ID, SELECTED_EMBEDDING_ID
+from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
+from app.core.memory.evaluation.common.metrics import f1_score as common_f1, bleu1, jaccard, latency_stats, avg_context_tokens
 
 
 # 参考 evaluation/locomo/evaluation.py 的 F1 计算逻辑（移除外部依赖，内联实现）
@@ -265,7 +244,10 @@ async def run_locomo_eval(
     end_user_id = end_user_id or SELECTED_end_user_id
     data_path = os.path.join(PROJECT_ROOT, "data", "locomo10.json")
     if not os.path.exists(data_path):
-        data_path = os.path.join(os.getcwd(), "data", "locomo10.json")
+        raise FileNotFoundError(
+            f"数据集文件不存在: {data_path}\n"
+            f"请将 locomo10.json 放置在: {DATASET_DIR}"
+        )
     with open(data_path, "r", encoding="utf-8") as f:
         raw = json.load(f)
     # LoCoMo 数据结构：顶层为若干对象，每个对象下有 qa 列表
@@ -343,13 +325,9 @@ async def run_locomo_eval(
     await ingest_contexts_via_full_pipeline(contents, end_user_id, save_chunk_output=True)
 
     # 使用异步LLM客户端
-    with get_db_context() as db:
-        factory = MemoryClientFactory(db)
-        llm_client = factory.get_llm_client(SELECTED_LLM_ID)
+    llm_client = get_llm_client(SELECTED_LLM_ID)
     # 初始化embedder用于直接调用
-    with get_db_context() as db:
-        config_service = MemoryConfigService(db)
-        cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
+    cfg_dict = get_embedder_config(SELECTED_EMBEDDING_ID)
     embedder = OpenAIEmbedderClient(
         model_config=RedBearModelConfig.model_validate(cfg_dict)
     )
@@ -480,8 +458,8 @@ async def run_locomo_eval(
                             contexts_all.append(f"EntitySummary: {', '.join(entity_names)}")
 
                 else:  # hybrid
-                    # 🎯 关键修复：混合检索使用更严格的回退机制
-                    print("🔀 使用混合检索（带回退机制）...")
+                    # 使用旧版本的混合检索（重构前）
+                    print("🔀 使用混合检索（旧版本）...")
                     try:
                         search_results = await run_hybrid_search(
                             query_text=q,
@@ -490,16 +468,26 @@ async def run_locomo_eval(
                             limit=adjusted_limit,
                             include=["chunks", "statements", "entities", "summaries"],
                             output_path=None,
+                            rerank_alpha=0.6,
+                            use_forgetting_rerank=False,
+                            use_llm_rerank=False
                         )
                         
-                        # 🎯 关键修复：正确处理混合检索的扁平结构
-                        # 新的API返回扁平结构，直接从顶层获取结果
+                        # 处理旧版本的返回结构（包含 reranked_results）
                         if search_results and isinstance(search_results, dict):
-                            # 新API返回扁平结构：直接从顶层获取
-                            chunks = search_results.get("chunks", [])
-                            statements = search_results.get("statements", [])
-                            entities = search_results.get("entities", [])
-                            summaries = search_results.get("summaries", [])
+                            # 对于 hybrid 搜索，使用 reranked_results
+                            if "reranked_results" in search_results:
+                                reranked = search_results["reranked_results"]
+                                chunks = reranked.get("chunks", [])
+                                statements = reranked.get("statements", [])
+                                entities = reranked.get("entities", [])
+                                summaries = reranked.get("summaries", [])
+                            else:
+                                # 单一搜索类型的结果
+                                chunks = search_results.get("chunks", [])
+                                statements = search_results.get("statements", [])
+                                entities = search_results.get("entities", [])
+                                summaries = search_results.get("summaries", [])
                             
                             # 检查是否有有效结果
                             if chunks or statements or entities or summaries:

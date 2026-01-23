@@ -11,7 +11,10 @@
         python -m app.core.memory.evaluation.run_eval --dataset longmemeval --sample-size 10 --start-index 0 --group-id longmemeval_zh_bak_2 --search-limit 8 --context-char-budget 4000 --search-type hybrid --max-contexts-per-item 2 --reset-group
     memsciqa：
         python -m app.core.memory.evaluation.run_eval --dataset memsciqa --sample-size 10 --reset-group --group-id group_memsci
-
+只评估1个样本       
+ python -m app.core.memory.evaluation.run_eval --dataset memsciqa --sample-size 1 --reset-group --group-id group_memsci
+ 
+# 乐力齐：这是单独检索某个group_id的内容吗？
 单独检索评估运行命令：
     python -m app.core.memory.evaluation.locomo.locomo_test
     python -m app.core.memory.evaluation.longmemeval.test_eval
