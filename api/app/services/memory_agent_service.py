@@ -728,7 +728,6 @@ class MemoryAgentService:
                 config_id=config_id,
                 service_name="MemoryAgentService"
             )
-            
             # 导入必要的模块
             from app.core.memory.agent.langgraph_graph.nodes.summary_nodes import summary_llm
             from app.core.memory.agent.models.summary_models import RetrieveSummaryResponse
