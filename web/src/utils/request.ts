@@ -52,6 +52,8 @@ service.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
     }
+    const language = localStorage.getItem('language')
+    config.headers['X-Language-Type'] = language || 'en';
     config.headers.Cookie = undefined
     return config;
   },
@@ -120,6 +122,11 @@ service.interceptors.response.use(
     }
   },
   (error) => {
+    // 如果是取消请求，不显示错误提示
+    if (axios.isCancel(error) || error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+      return Promise.reject(error);
+    }
+    
     // 处理网络错误、超时等
     let msg = error.response?.data?.error || error.response?.error;
     const status = error?.response ? error.response.status : error;
@@ -146,7 +153,7 @@ service.interceptors.response.use(
         break;
       default:
         if (!msg && Array.isArray(error.response?.data?.detail)) {
-          msg = error.response?.data?.detail?.map(item => item.msg).join(';')
+          msg = error.response?.data?.detail?.map((item: { msg: string }) => item.msg).join(';')
         } else {
           msg = msg || i18n.t('common.unknownError');
         }

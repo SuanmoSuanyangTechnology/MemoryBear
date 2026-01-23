@@ -74,7 +74,7 @@ class MultiAgentService:
             select(MultiAgentConfig)
             .where(
                 MultiAgentConfig.app_id == app_id,
-                MultiAgentConfig.is_active == True
+                MultiAgentConfig.is_active.is_(True)
             )
             .order_by(MultiAgentConfig.updated_at.desc())
         ).first()
@@ -144,7 +144,7 @@ class MultiAgentService:
             select(MultiAgentConfig)
             .where(
                 MultiAgentConfig.app_id == app_id,
-                MultiAgentConfig.is_active == True
+                MultiAgentConfig.is_active.is_(True)
             )
             .order_by(MultiAgentConfig.updated_at.desc())
         ).first()

@@ -173,10 +173,9 @@ class MemoryAgentService:
         """
         logger.info("Reading log file")
 
-
-        current_file = os.path.abspath(__file__)  # app/services/memory_agent_service.py
-        app_dir = os.path.dirname(os.path.dirname(current_file))  # app directory
-        project_root = os.path.dirname(app_dir)  # redbear-mem directory
+        # Get log file path - use project root directory
+        from pathlib import Path
+        project_root = str(Path(__file__).resolve().parents[2])  # api directory
         log_path = os.path.join(project_root, "logs", "agent_service.log")
 
         summer = ''
@@ -215,9 +214,8 @@ class MemoryAgentService:
         logger.info("Starting log content streaming")
 
         # Get log file path - use project root directory
-        current_file = os.path.abspath(__file__)  # app/services/memory_agent_service.py
-        app_dir = os.path.dirname(os.path.dirname(current_file))  # app directory
-        project_root = os.path.dirname(app_dir)  # redbear-mem directory
+        from pathlib import Path
+        project_root = str(Path(__file__).resolve().parents[2])  # api directory
         log_path = os.path.join(project_root, "logs", "agent_service.log")
 
         # Check if file exists before starting stream
@@ -1079,9 +1077,8 @@ class MemoryAgentService:
         logger.info("Starting log content streaming")
 
         # Get log file path - use project root directory
-        current_file = os.path.abspath(__file__)  # app/services/memory_agent_service.py
-        app_dir = os.path.dirname(os.path.dirname(current_file))  # app directory
-        project_root = os.path.dirname(app_dir)  # redbear-mem directory
+        from pathlib import Path
+        project_root = str(Path(__file__).resolve().parents[2])  # api directory
         log_path = os.path.join(project_root, "logs", "agent_service.log")
 
         # Check if file exists before starting stream

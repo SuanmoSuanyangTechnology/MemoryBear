@@ -237,7 +237,8 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             ValueError: 当配置无效或参数缺失时
             RuntimeError: 当管线执行失败时
         """
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from pathlib import Path
+        project_root = str(Path(__file__).resolve().parents[2])
         
         try:
             # 发出初始进度事件

@@ -139,7 +139,8 @@ def parse_api_docs(file_path: str) -> Dict[str, Any]:
 
 
 def get_default_docs_path() -> str:
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    from pathlib import Path
+    project_root = str(Path(__file__).resolve().parents[2])
     return os.path.join(project_root, "src", "analytics", "API接口.md")
 
 

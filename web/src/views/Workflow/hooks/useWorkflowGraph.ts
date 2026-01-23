@@ -5,7 +5,7 @@ import { App } from 'antd'
 import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portArgs } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import type { PortMetadata } from '@antv/x6/lib/model/port';
@@ -132,7 +132,7 @@ export const useWorkflowGraph = ({
           
           const portItems: PortMetadata[] = [
             { group: 'left' },
-            { group: 'right', id: 'CASE1', args: { dy: 24 }, attrs: { text: { text: 'IF', fontSize: 12, fill: '#5B6167' }} }
+            { group: 'right', id: 'CASE1', args: portArgs, attrs: { text: { text: 'IF', fontSize: 12, fill: '#5B6167' }} }
           ];
           
           // 添加 ELIF 端口
@@ -140,6 +140,7 @@ export const useWorkflowGraph = ({
             portItems.push({
               group: 'right',
               id: `CASE${i + 1}`,
+              args: portArgs,
               attrs: { text: { text: 'ELIF', fontSize: 12, fill: '#5B6167' }}
             });
           }
@@ -148,6 +149,7 @@ export const useWorkflowGraph = ({
           portItems.push({
             group: 'right',
             id: `CASE${caseCount + 1}`,
+            args: portArgs,
             attrs: { text: { text: 'ELSE', fontSize: 12, fill: '#5B6167' }}
           });
           
@@ -173,12 +175,12 @@ export const useWorkflowGraph = ({
           ];
           
           // 添加分类端口
-          config.categories.forEach((category: any, index: number) => {
+          config.categories.forEach((_category: any, index: number) => {
             portItems.push({
               group: 'right',
               id: `CASE${index + 1}`,
-              args: index === 0 ? { dy: 24 } : undefined,
-              attrs: { text: { text: category.class_name || `分类${index + 1}`, fontSize: 12, fill: '#5B6167' }}
+              args: portArgs,
+              attrs: { text: { text: `分类${index + 1}`, fontSize: 12, fill: '#5B6167' }}
             });
           });
           

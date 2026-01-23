@@ -1,5 +1,5 @@
 import {  useMemo,useRef, useState, useEffect } from 'react';
-import { Button, Flex, Radio, Steps, Modal, Input, Spin, message, Checkbox, Select, Form} from 'antd';
+import { Button, Flex, Radio, Steps, Modal, Input, Spin, message, Checkbox, Select, Form, Progress} from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Table, { type TableRef } from '@/components/Table'
@@ -261,12 +261,39 @@ const CreateDataset = () => {
       dataIndex: 'progress',
       key: 'progress',
       render: (value: number, record: any) => {
-        return (
-          <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
-            <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: value === 1 ? '#369F21' : '#FF8A4C' }}></span>
-            <span>{value === 1 ? t('knowledgeBase.completed') : value === 0 ? t('knowledgeBase.pending') : t('knowledgeBase.processing')}</span>
-          </span>
-        );
+        // value >= 1 时完成，0～1 时显示进度条
+        if (value >= 1) {
+          return (
+            <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
+              <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#369F21' }}></span>
+              <span>{t('knowledgeBase.completed')}</span>
+            </span>
+          );
+        } else if (value >= 0 && value < 1) {
+          // 处理中，显示进度条
+          return (
+            <div className="rb:flex rb:items-center rb:gap-2">
+              <Progress 
+                percent={Math.round(value * 100)} 
+                size="small" 
+                status="active"
+                strokeColor={{
+                  '0%': '#108ee9',
+                  '100%': '#87d068',
+                }}
+                style={{ width: '120px' }}
+              />
+            </div>
+          );
+        } else {
+          // value = 0 或其他情况，显示待处理
+          return (
+            <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
+              <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#FF8A4C' }}></span>
+              <span>{t('knowledgeBase.pending')}</span>
+            </span>
+          );
+        }
       }
     },
     {
@@ -359,6 +386,9 @@ const CreateDataset = () => {
       },
     })
       .then((res: UploadFileResponse) => {
+        // 上传成功，移除 AbortController
+        abortControllersRef.current.delete(fileUid);
+        
         onSuccess?.(res, new XMLHttpRequest());
         if (res?.id) {
           setRechunkFileIds((prev) => {
@@ -553,21 +583,27 @@ const CreateDataset = () => {
                       if (abortController) {
                         abortController.abort();
                         abortControllersRef.current.delete(fileUid);
-                        
+                        console.log('已取消上传:', (file as any).name);
+                        // 取消上传后直接返回 true，允许移除文件
+                        return true;
                       }
-                      console.log('文件移除前:', uploadRef.current?.fileList);
-                      // 如果文件已经上传成功，删除服务器上的文件并从rechunkFileIds中移除对应的ID
+                      
+                      // 只有当文件已经上传成功（有response.id）时，才删除服务器上的文件
                       if (file.response?.id) {
                         try {
                           await deleteDocument(file.response.id);
                           setRechunkFileIds(prev => prev.filter(id => id !== file.response.id));
+                          console.log('已删除服务器文件:', file.response.id);
+                          return true;
                         } catch (error) {
                           console.error('删除文件失败:', error);
-                          messageApi.error('删除文件失败');
+                          messageApi.error(t('common.deleteFailed') || '删除文件失败');
+                          return false; // 删除失败时不移除文件
                         }
                       }
                       
-                      return true; // 允许移除文件
+                      // 其他情况（如上传失败的文件）也允许移除
+                      return true;
                     }} />
             )}
             {source && source === 'link' && (
@@ -776,7 +812,7 @@ const CreateDataset = () => {
       )} */}
 
       {current === 2 && (
-        <Spin spinning={pollingLoading} tip={t('knowledgeBase.processingDocuments') || '正在处理文档...'}>
+        // <Spin spinning={pollingLoading} tip={t('knowledgeBase.processingDocuments') || '正在处理文档...'}>
           <div className='rb:text-sm rb:text-gray-500 rb:mt-4 rb:h-[calc(100%-160px)] rb:overflow-y-auto'>
             {rechunkFileIds.length > 0 ? (
               <Table
@@ -797,7 +833,7 @@ const CreateDataset = () => {
               />
             )}
           </div>
-        </Spin>
+        // </Spin>
       )}
 
       <div className={`rb:flex rb:gap-3 rb:mt-6 ${current === 1 || (source == 'link' && current === 0) || (source == 'text' && current === 0) ? 'rb:pl-40 rb:mt-10' : ''}`}>
@@ -810,7 +846,6 @@ const CreateDataset = () => {
           type='primary' 
           onClick={current === 2 ? handleStartUpload : handleNext}
           disabled={pollingLoading || (current === 0 && rechunkFileIds.length === 0)}
-          loading={pollingLoading}
         >
           {current === 2 ? t('knowledgeBase.startUploading') || 'Start Upload' : t('common.next') || 'Next'}
         </Button>
