@@ -505,7 +505,7 @@ class EmotionAnalyticsService:
                     )
                     config_service = MemoryConfigService(db)
                     memory_config = config_service.load_memory_config(
-                        config_id=int(config_id),
+                        config_id=(config_id),
                         service_name="EmotionAnalyticsService.generate_emotion_suggestions"
                     )
                     from app.core.memory.utils.llm.llm_utils import MemoryClientFactory

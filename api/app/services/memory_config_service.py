@@ -61,7 +61,7 @@ def _validate_config_id(config_id):
         
         # Fall back to integer parsing
         try:
-            parsed_id = int(config_id_stripped)
+            parsed_id = config_id_stripped
             if parsed_id <= 0:
                 raise InvalidConfigError(
                     f"Configuration ID must be positive: {parsed_id}",

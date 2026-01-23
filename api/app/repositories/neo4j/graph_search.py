@@ -305,11 +305,18 @@ async def search_graph(
             results[key] = _deduplicate_results(results[key])
     
     # 更新知识节点的激活值（Statement, ExtractedEntity, MemorySummary）
-    results = await _update_search_results_activation(
-        connector=connector,
-        results=results,
-        end_user_id=end_user_id
+    # Skip activation updates if only searching summaries (optimization)
+    needs_activation_update = any(
+        key in include and key in results and results[key]
+        for key in ['statements', 'entities', 'chunks']
     )
+
+    if needs_activation_update:
+        results = await _update_search_results_activation(
+            connector=connector,
+            results=results,
+            end_user_id=end_user_id
+        )
     
     return results
 
@@ -417,14 +424,23 @@ async def search_graph_by_embedding(
             results[key] = _deduplicate_results(results[key])
 
     # 更新知识节点的激活值（Statement, ExtractedEntity, MemorySummary）
-    update_start = time.time()
-    results = await _update_search_results_activation(
-        connector=connector,
-        results=results,
-        end_user_id=end_user_id
+    # Skip activation updates if only searching summaries (optimization)
+    needs_activation_update = any(
+        key in include and key in results and results[key]
+        for key in ['statements', 'entities', 'chunks']
     )
-    update_time = time.time() - update_start
-    print(f"[PERF] Activation value updates took: {update_time:.4f}s")
+
+    if needs_activation_update:
+        update_start = time.time()
+        results = await _update_search_results_activation(
+            connector=connector,
+            results=results,
+            end_user_id=end_user_id
+        )
+        update_time = time.time() - update_start
+        logger.info(f"[PERF] Activation value updates took: {update_time:.4f}s")
+    else:
+        logger.info(f"[PERF] Skipping activation updates (only summaries)")
 
     return results
 async def get_dedup_candidates_for_entities(  # 适配新版查询：使用全文索引按名称检索候选实体
