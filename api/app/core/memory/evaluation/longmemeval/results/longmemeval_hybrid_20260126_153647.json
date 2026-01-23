@@ -1,0 +1,121 @@
+{
+  "dataset": "longmemeval",
+  "items": 3,
+  "accuracy_by_type": {
+    "single-session-user": 0.6666666666666666
+  },
+  "f1_by_type": {
+    "single-session-user": 0.6666666666666666
+  },
+  "jaccard_by_type": {
+    "single-session-user": 0.6666666666666666
+  },
+  "samples": [
+    {
+      "question": "What degree did I graduate with?",
+      "prediction": "Business Administration",
+      "answer": "Business Administration",
+      "question_type": "single-session-user",
+      "is_temporal": false,
+      "question_id": "e47becba",
+      "options": [],
+      "context_count": 10,
+      "context_chars": 951,
+      "retrieved_dialogue_count": 0,
+      "retrieved_statement_count": 9,
+      "metrics": {
+        "exact_match": true,
+        "f1": 1.0,
+        "jaccard": 1.0
+      },
+      "timing": {
+        "search_ms": 1777.5132656097412,
+        "llm_ms": 3547.1348762512207
+      }
+    },
+    {
+      "question": "How long is my daily commute to work?",
+      "prediction": "45 minutes each way",
+      "answer": "45 minutes each way",
+      "question_type": "single-session-user",
+      "is_temporal": false,
+      "question_id": "118b2229",
+      "options": [],
+      "context_count": 10,
+      "context_chars": 771,
+      "retrieved_dialogue_count": 0,
+      "retrieved_statement_count": 9,
+      "metrics": {
+        "exact_match": true,
+        "f1": 1.0,
+        "jaccard": 1.0
+      },
+      "timing": {
+        "search_ms": 1453.0456066131592,
+        "llm_ms": 2107.447385787964
+      }
+    },
+    {
+      "question": "Where did I redeem a $5 coupon on coffee creamer?",
+      "prediction": "Unknown",
+      "answer": "Target",
+      "question_type": "single-session-user",
+      "is_temporal": false,
+      "question_id": "51a45a95",
+      "options": [],
+      "context_count": 9,
+      "context_chars": 734,
+      "retrieved_dialogue_count": 0,
+      "retrieved_statement_count": 8,
+      "metrics": {
+        "exact_match": false,
+        "f1": 0.0,
+        "jaccard": 0.0
+      },
+      "timing": {
+        "search_ms": 1395.3397274017334,
+        "llm_ms": 1881.0505867004395
+      }
+    }
+  ],
+  "latency": {
+    "search": {
+      "mean": 1541.966199874878,
+      "p50": 1453.0456066131592,
+      "p95": 1745.066499710083,
+      "iqr": 191.0867691040039
+    },
+    "llm": {
+      "mean": 2511.8776162465415,
+      "p50": 2107.447385787964,
+      "p95": 3403.166127204895,
+      "iqr": 833.0421447753906
+    }
+  },
+  "context": {
+    "avg_tokens": 133.0,
+    "avg_chars": 818.6666666666666,
+    "count_avg": 9.666666666666666
+  },
+  "params": {
+    "end_user_id": "longmemeval_zh_bak_3",
+    "search_limit": 8,
+    "context_char_budget": 4000,
+    "search_type": "hybrid",
+    "llm_id": "2c9b0782-7a85-4740-ba84-4baf77f256c4",
+    "embedding_id": "e2a6392d-ca63-4d59-a523-647420b59cb2",
+    "sample_size": 3,
+    "start_index": 0
+  },
+  "timestamp": "2026-01-26T15:36:47.183721",
+  "metric_summary": {
+    "score_accuracy": 66.66666666666666,
+    "latency_median_s": 3.560492992401123,
+    "latency_iqr_s": 1.0241289138793945,
+    "avg_context_tokens_k": 0.133
+  },
+  "diagnostics": {
+    "duplicate_previews_top": [],
+    "unique_preview_count": 3
+  }
+}
