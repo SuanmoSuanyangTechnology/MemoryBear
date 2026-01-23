@@ -531,7 +531,9 @@ class MemoryAgentService:
                 # 保存短期记忆到数据库
                 # 只有 search_switch 不为 "2"（快速检索）时才保存
                 try:
-                    from app.repositories.memory_short_repository import ShortTermMemoryRepository
+                    from app.repositories.memory_short_repository import (
+                        ShortTermMemoryRepository,
+                    )
                     
                     retrieved_content = []
                     repo = ShortTermMemoryRepository(db)
@@ -1141,6 +1143,29 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
+
+def get_end_user_memory_config_id(end_user_id: str, db: Session) -> Optional[int]:
+    """
+    快速获取终端用户的 memory_config_id（直接从 end_user 表读取）
+    
+    如果 end_user 已有缓存的 memory_config_id，直接返回；
+    否则返回 None，调用方应使用 get_end_user_connected_config 获取完整配置。
+    
+    Args:
+        end_user_id: 终端用户ID
+        db: 数据库会话
+        
+    Returns:
+        memory_config_id 或 None
+    """
+    from app.models.end_user_model import EndUser
+    
+    end_user = db.query(EndUser).filter(EndUser.id == end_user_id).first()
+    if end_user and end_user.memory_config_id:
+        return end_user.memory_config_id
+    return None
+
+
 def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, Any]:
     """
     获取终端用户关联的记忆配置
@@ -1203,6 +1228,16 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
 
     memory_obj = config.get('memory', {})
     memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
+
+    # 4. 更新 end_user 的 memory_config_id（懒更新）
+    if memory_config_id is not None and end_user.memory_config_id != memory_config_id:
+        try:
+            end_user.memory_config_id = memory_config_id
+            db.commit()
+            logger.debug(f"Updated end_user memory_config_id: {end_user_id} -> {memory_config_id}")
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"Failed to update end_user memory_config_id: {e}")
 
     result = {
         "end_user_id": str(end_user_id),
