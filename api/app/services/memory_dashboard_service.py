@@ -53,18 +53,28 @@ def get_workspace_end_users(
     workspace_id: uuid.UUID, 
     current_user: User
 ) -> List[EndUser]:
-    """获取工作空间的所有宿主"""
+    """获取工作空间的所有宿主（优化版本：减少数据库查询次数）"""
     business_logger.info(f"获取工作空间宿主列表: workspace_id={workspace_id}, 操作者: {current_user.username}")
     
     try:        
-        # 查询应用（ORM）并转换为 Pydantic 模型
+        # 查询应用（ORM）
         apps_orm = app_repository.get_apps_by_workspace_id(db, workspace_id)
-        apps = [AppSchema.model_validate(h) for h in apps_orm]
-        app_ids = [app.id for app in apps]
-        end_users = []
-        for app_id in app_ids:
-            end_user_orm_list = end_user_repository.get_end_users_by_app_id(db, app_id)
-            end_users.extend([EndUserSchema.model_validate(h) for h in end_user_orm_list])
+        
+        if not apps_orm:
+            business_logger.info("工作空间下没有应用")
+            return []
+        
+        # 提取所有 app_id
+        app_ids = [app.id for app in apps_orm]
+        
+        # 批量查询所有 end_users（一次查询而非循环查询）
+        from app.models.end_user_model import EndUser as EndUserModel
+        end_users_orm = db.query(EndUserModel).filter(
+            EndUserModel.app_id.in_(app_ids)
+        ).all()
+        
+        # 转换为 Pydantic 模型（只在需要时转换）
+        end_users = [EndUserSchema.model_validate(eu) for eu in end_users_orm]
         
         business_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
         return end_users
@@ -413,6 +423,67 @@ def get_current_user_total_chunk(
     except Exception as e:
         business_logger.error(f"获取用户总chunk数失败: end_user_id={end_user_id} - {str(e)}")
         raise
+
+
+def get_users_total_chunk_batch(
+    end_user_ids: List[str],
+    db: Session,
+    current_user: User
+) -> dict:
+    """
+    批量获取多个用户的总chunk数（性能优化版本）
+    
+    Args:
+        end_user_ids: 用户ID列表
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        字典，key为end_user_id，value为chunk总数
+        格式: {"user_id_1": 100, "user_id_2": 50, ...}
+    """
+    business_logger.info(f"批量获取 {len(end_user_ids)} 个用户的总chunk数, 操作者: {current_user.username}")
+    
+    try:
+        from app.models.document_model import Document
+        from sqlalchemy import func, case
+        
+        if not end_user_ids:
+            return {}
+        
+        # 构造所有文件名
+        file_names = [f"{user_id}.txt" for user_id in end_user_ids]
+        
+        # 一次查询获取所有用户的chunk总数
+        # 使用 GROUP BY file_name 来分组统计
+        results = db.query(
+            Document.file_name,
+            func.sum(Document.chunk_num).label('total_chunk')
+        ).filter(
+            Document.file_name.in_(file_names)
+        ).group_by(
+            Document.file_name
+        ).all()
+        
+        # 构建结果字典
+        chunk_map = {}
+        for file_name, total_chunk in results:
+            # 从文件名中提取 end_user_id (去掉 .txt 后缀)
+            user_id = file_name.replace('.txt', '')
+            chunk_map[user_id] = int(total_chunk or 0)
+        
+        # 对于没有记录的用户，设置为0
+        for user_id in end_user_ids:
+            if user_id not in chunk_map:
+                chunk_map[user_id] = 0
+        
+        business_logger.info(f"成功批量获取 {len(chunk_map)} 个用户的总chunk数")
+        return chunk_map
+        
+    except Exception as e:
+        business_logger.error(f"批量获取用户总chunk数失败: {str(e)}")
+        raise
+
 
 def get_rag_content(
     end_user_id: str,
