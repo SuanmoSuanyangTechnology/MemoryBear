@@ -126,7 +126,8 @@ async def step_ingest_data(
     data_path: str,
     group_id: str,
     skip_ingest: bool,
-    reset_group: bool
+    reset_group: bool,
+    max_messages: Optional[int] = None
 ) -> bool:
     """
     Ingest conversations into Neo4j database if needed.
@@ -136,6 +137,7 @@ async def step_ingest_data(
         group_id: Database group ID
         skip_ingest: Whether to skip ingestion
         reset_group: Whether to reset the group before ingestion
+        max_messages: Maximum messages per dialogue to ingest (for testing)
         
     Returns:
         True if ingestion succeeded or was skipped, False otherwise
@@ -510,7 +512,8 @@ async def run_locomo_benchmark(
     context_char_budget: int = 8000,
     reset_group: bool = False,
     skip_ingest: bool = False,
-    output_dir: Optional[str] = None
+    output_dir: Optional[str] = None,
+    max_ingest_messages: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Run LoCoMo benchmark evaluation.
@@ -537,12 +540,15 @@ async def run_locomo_benchmark(
         reset_group: Whether to clear and re-ingest data
         skip_ingest: If True, skip data ingestion and use existing data in Neo4j
         output_dir: Directory to save results (uses default if None)
+        max_ingest_messages: Max messages per dialogue to ingest (for testing, None = all)
         
     Returns:
         Dictionary with evaluation results including metrics, timing, and samples
     """
     # Use default group_id if not provided
-    group_id = group_id or os.getenv("EVAL_GROUP_ID", "locomo_benchmark")
+    # 优先级：命令行参数 > LOCOMO_GROUP_ID > EVAL_GROUP_ID > 默认值
+    if group_id is None:
+        group_id = os.getenv("LOCOMO_GROUP_ID") or os.getenv("EVAL_GROUP_ID", "locomo_benchmark")
     
     # Get model IDs from config
     llm_id = os.getenv("EVAL_LLM_ID", "6dc52e1b-9cec-4194-af66-a74c6307fc3f")
@@ -568,6 +574,8 @@ async def run_locomo_benchmark(
     print(f"   Search limit: {search_limit}")
     print(f"   Context budget: {context_char_budget} chars")
     print(f"   Data path: {data_path}")
+    if max_ingest_messages:
+        print(f"   Max ingest messages: {max_ingest_messages} (testing mode)")
     print(f"{'='*60}\n")
     
     # Step 1: Load LoCoMo data （加载数据）
@@ -581,7 +589,7 @@ async def run_locomo_benchmark(
         }
     
     # Step 2: Ingest data if needed（数据摄入）
-    await step_ingest_data(data_path, group_id, skip_ingest, reset_group)
+    await step_ingest_data(data_path, group_id, skip_ingest, reset_group, max_ingest_messages)
     
     # Step 3: Initialize clients （初始化客户端）
     connector, llm_client, embedder = step_initialize_clients(llm_id, embedding_id)
@@ -689,6 +697,12 @@ def main():
         default=None,
         help="Directory to save results (uses default if not specified)"
     )
+    parser.add_argument(
+        "--max_ingest_messages",
+        type=int,
+        default=None,
+        help="Maximum messages per dialogue to ingest (for testing, default: all messages)"
+    )
     
     args = parser.parse_args()
     
@@ -704,7 +718,8 @@ def main():
         context_char_budget=args.context_char_budget,
         reset_group=args.reset_group,
         skip_ingest=args.skip_ingest,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        max_ingest_messages=args.max_ingest_messages
     ))
     
     # Print summary
