@@ -121,7 +121,7 @@ def _combine_dialogues_for_hybrid(results: Dict[str, Any]) -> List[Dict[str, Any
 
 
 async def run_memsciqa_eval(sample_size: int = 1, group_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid") -> Dict[str, Any]:
-    group_id = group_id or os.getenv("EVAL_GROUP_ID", "locomo_benchmark")
+    group_id = group_id or os.getenv("MEMSCIQA_GROUP_ID") or os.getenv("EVAL_GROUP_ID", "memsciqa_benchmark")
     
     # Load data
     dataset_dir = Path(__file__).resolve().parent.parent / "dataset"
