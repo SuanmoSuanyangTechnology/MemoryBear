@@ -88,7 +88,7 @@ def load_locomo_data(
     return qa_items[:sample_size]
 
 
-def extract_conversations(data_path: str, max_dialogues: int = 1) -> List[str]:
+def extract_conversations(data_path: str, max_dialogues: int = 1, max_messages_per_dialogue: Optional[int] = None) -> List[str]:
     """
     Extract conversation texts from LoCoMo data for ingestion.
     
@@ -99,6 +99,7 @@ def extract_conversations(data_path: str, max_dialogues: int = 1) -> List[str]:
     Args:
         data_path: Path to locomo10.json file
         max_dialogues: Maximum number of dialogues to extract (default: 1)
+        max_messages_per_dialogue: Maximum messages per dialogue (default: None = all messages)
         
     Returns:
         List of conversation strings formatted for ingestion.
@@ -147,6 +148,14 @@ def extract_conversations(data_path: str, max_dialogues: int = 1) -> List[str]:
                         continue
                     
                     lines.append(f"{role}: {text}")
+                    
+                    # Limit messages if specified
+                    if max_messages_per_dialogue and len(lines) >= max_messages_per_dialogue:
+                        break
+            
+            # Break outer loop if we've reached the message limit
+            if max_messages_per_dialogue and len(lines) >= max_messages_per_dialogue:
+                break
         
         if lines:
             contents.append("\n".join(lines))

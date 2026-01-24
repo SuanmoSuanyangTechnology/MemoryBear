@@ -3,6 +3,7 @@ import asyncio
 import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from uuid import UUID
 import re
 
 from app.core.memory.llm_tools.openai_client import LLMClient
@@ -173,38 +174,86 @@ async def ingest_contexts_via_full_pipeline(
     # Step 5: Initialize Neo4j connector
     connector = Neo4jConnector()
     
-    # Step 6: Load MemoryConfig from database (REQUIRED)
-    config_id = os.getenv("EVAL_CONFIG_ID")
+    # Step 6: 构建 MemoryConfig（从环境变量直接构建，不依赖数据库）
+    print("[Ingestion] 构建 MemoryConfig from environment variables...")
     from app.schemas.memory_config_schema import MemoryConfig
-    from app.services.memory_config_service import MemoryConfigService
-    from app.db import get_db
     
-    if not config_id:
-        print("[Ingestion] ❌ EVAL_CONFIG_ID is not set in .env.evaluation")
-        print("[Ingestion] Please set EVAL_CONFIG_ID to a valid config_id from the database")
-        print("[Ingestion] Example: EVAL_CONFIG_ID=1")
-        await connector.close()
-        return False
-    
-    # Load config from database
     try:
+        # 从环境变量获取配置参数
+        llm_id = os.getenv("EVAL_LLM_ID")
+        embedding_id = os.getenv("EVAL_EMBEDDING_ID")
+        chunker_strategy_env = os.getenv("EVAL_CHUNKER_STRATEGY", "RecursiveChunker")
+        
+        if not llm_id or not embedding_id:
+            print("[Ingestion] ❌ EVAL_LLM_ID or EVAL_EMBEDDING_ID is not set in .env.evaluation")
+            print("[Ingestion] Please set both EVAL_LLM_ID and EVAL_EMBEDDING_ID")
+            await connector.close()
+            return False
+        
+        # 从数据库获取模型信息（仅用于显示名称）
+        from app.db import get_db
         db = next(get_db())
         try:
-            config_service = MemoryConfigService(db)
-            memory_config = config_service.load_memory_config(config_id, service_name="extraction_utils")
-            print(f"[Ingestion] ✅ Loaded MemoryConfig from database (config_id={config_id})")
-            print(f"[Ingestion]    Config name: {memory_config.config_name}")
-            print(f"[Ingestion]    LLM: {memory_config.llm_model_name}")
-            print(f"[Ingestion]    Embedding: {memory_config.embedding_model_name}")
-            print(f"[Ingestion]    Chunker: {memory_config.chunker_strategy}")
+            from sqlalchemy import text
+            # 获取 LLM 模型信息（从 model_configs 表）
+            llm_result = db.execute(
+                text("SELECT name FROM model_configs WHERE id = :id"),
+                {"id": llm_id}
+            ).fetchone()
+            llm_model_name = llm_result[0] if llm_result else "Unknown LLM"
+            
+            # 获取 Embedding 模型信息（从 model_configs 表）
+            emb_result = db.execute(
+                text("SELECT name FROM model_configs WHERE id = :id"),
+                {"id": embedding_id}
+            ).fetchone()
+            embedding_model_name = emb_result[0] if emb_result else "Unknown Embedding"
+        except Exception as e:
+            # 如果查询失败，使用默认名称
+            print(f"[Ingestion] Warning: Failed to query model names from database: {e}")
+            llm_model_name = f"LLM ({llm_id[:8]}...)"
+            embedding_model_name = f"Embedding ({embedding_id[:8]}...)"
         finally:
             db.close()
+        
+        # 构建 MemoryConfig 对象（使用最小必需配置）
+        from uuid import uuid4
+        memory_config = MemoryConfig(
+            config_id=0,  # 评估环境不需要真实的 config_id
+            config_name="evaluation_config",
+            workspace_id=uuid4(),  # 临时 workspace_id
+            workspace_name="evaluation_workspace",
+            tenant_id=uuid4(),  # 临时 tenant_id
+            llm_model_id=UUID(llm_id),
+            llm_model_name=llm_model_name,
+            embedding_model_id=UUID(embedding_id),
+            embedding_model_name=embedding_model_name,
+            storage_type="neo4j",
+            chunker_strategy=chunker_strategy_env,
+            reflexion_enabled=False,
+            reflexion_iteration_period=3,
+            reflexion_range="partial",
+            reflexion_baseline="TIME",
+            loaded_at=datetime.now(),
+            # 可选字段使用默认值
+            rerank_model_id=None,
+            rerank_model_name=None,
+            llm_params={},
+            embedding_params={},
+            config_version="2.0",
+        )
+        
+        print(f"[Ingestion] ✅ 构建 MemoryConfig 成功")
+        print(f"[Ingestion]    LLM: {llm_model_name}")
+        print(f"[Ingestion]    Embedding: {embedding_model_name}")
+        print(f"[Ingestion]    Chunker: {chunker_strategy_env}")
+        
     except Exception as e:
-        print(f"[Ingestion] ❌ Failed to load config from database: {e}")
+        print(f"[Ingestion] ❌ Failed to build MemoryConfig: {e}")
         print(f"[Ingestion] Please check:")
-        print(f"[Ingestion]   1. EVAL_CONFIG_ID={config_id} exists in data_config table")
-        print(f"[Ingestion]   2. Database connection is working")
-        print(f"[Ingestion]   3. Config has valid LLM and embedding model IDs")
+        print(f"[Ingestion]   1. EVAL_LLM_ID and EVAL_EMBEDDING_ID are set in .env.evaluation")
+        print(f"[Ingestion]   2. Model IDs exist in the models table")
+        print(f"[Ingestion]   3. Database connection is working")
         await connector.close()
         return False
     
@@ -275,15 +324,15 @@ async def ingest_contexts_via_full_pipeline(
     print("[Ingestion] Generating memory summaries...")
     try:
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
-            Memory_summary_generation,
+            memory_summary_generation,
         )
         from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
         from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
         
-        summaries = await Memory_summary_generation(
+        summaries = await memory_summary_generation(
             chunked_dialogs=dialog_data_list,
             llm_client=llm_client,
-            embedding_id=embedding_name
+            embedder_client=embedder_client
         )
         print(f"[Ingestion] Generated {len(summaries)} memory summaries")
     except Exception as e:
