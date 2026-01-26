@@ -17,7 +17,7 @@ sys.excepthook = excepthook
 # Load security library if available
 lib = ctypes.CDLL("./libpython.so")
 lib.init_seccomp.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool]
-lib.init_seccomp.restype = None
+lib.init_seccomp.restype = None  # TODO: raise error info
 
 # Get running path
 running_path = sys.argv[1]

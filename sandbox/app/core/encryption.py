@@ -12,9 +12,10 @@ def encrypt_code(code: bytes, key: bytes) -> str:
     Returns:
         Base64 encoded encrypted code
     """
+    key_length = len(key)
     encrypted_code = bytearray(len(code))
     for i in range(len(code)):
-        encrypted_code[i] = code[i] ^ key[i % 64]
+        encrypted_code[i] = code[i] ^ key[i % key_length]
     encoded_code = base64.b64encode(encrypted_code).decode("utf-8")
     return encoded_code
 
