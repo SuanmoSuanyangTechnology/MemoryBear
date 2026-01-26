@@ -399,7 +399,8 @@ async def ingest_conversations_if_needed(
         success = await ingest_contexts_via_full_pipeline(
             contexts=conversations,
             group_id=group_id,
-            save_chunk_output=True
+            save_chunk_output=True,
+            reset_group=reset
         )
         return success
     except Exception as e:
