@@ -4,35 +4,20 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import List, Dict, Any
+from pathlib import Path
+from dotenv import load_dotenv
 
-if TYPE_CHECKING:
-    from app.schemas.memory_config_schema import MemoryConfig
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent.parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
 
-try:
-    from dotenv import load_dotenv
-except Exception:
-    def load_dotenv():
-        return None
-
-from app.core.memory.evaluation.common.metrics import (
-    avg_context_tokens,
-    exact_match,
-    latency_stats,
-)
-from app.core.memory.evaluation.extraction_utils import (
-    ingest_contexts_via_full_pipeline,
-)
-from app.core.memory.storage_services.search import run_hybrid_search
-from app.core.memory.utils.config.definitions import (
-    PROJECT_ROOT,
-    SELECTED_EMBEDDING_ID,
-    SELECTED_GROUP_ID,
-    SELECTED_LLM_ID,
-)
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-from app.db import get_db_context
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.memory.src.search import run_hybrid_search  # 使用旧版本（重构前）
+from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
+from app.core.memory.evaluation.common.metrics import exact_match, latency_stats, avg_context_tokens
 
 
 def smart_context_selection(contexts: List[str], question: str, max_chars: int = 4000) -> str:
@@ -135,24 +120,37 @@ def _combine_dialogues_for_hybrid(results: Dict[str, Any]) -> List[Dict[str, Any
     return merged
 
 
+
 async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid", memory_config: "MemoryConfig" = None) -> Dict[str, Any]:
     end_user_id = end_user_id or SELECTED_GROUP_ID
+
     # Load data
-    data_path = os.path.join(PROJECT_ROOT, "data", "msc_self_instruct.jsonl")
+    dataset_dir = Path(__file__).resolve().parent.parent / "dataset"
+    data_path = dataset_dir / "msc_self_instruct.jsonl"
+    
     if not os.path.exists(data_path):
-        data_path = os.path.join(os.getcwd(), "data", "msc_self_instruct.jsonl")
+        raise FileNotFoundError(
+            f"数据集文件不存在: {data_path}\n"
+            f"请将 msc_self_instruct.jsonl 放置在: {dataset_dir}"
+        )
     with open(data_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
     items: List[Dict[str, Any]] = [json.loads(l) for l in lines[:sample_size]]
+
+
     # 改为：每条样本仅摄入一个上下文（完整对话转录），避免多上下文摄入
     # 说明：memsciqa 数据集的每个样本天然只有一个对话，保持按样本一上下文的策略
     contexts: List[str] = [build_context_from_dialog(item) for item in items]
     await ingest_contexts_via_full_pipeline(contexts, end_user_id)
 
     # LLM client (使用异步调用)
-    with get_db_context() as db:
-        factory = MemoryClientFactory(db)
-        llm_client = factory.get_llm_client(SELECTED_LLM_ID)
+    from app.db import get_db
+    
+    db = next(get_db())
+    try:
+        llm_client = get_llm_client(os.getenv("EVAL_LLM_ID"), db)
+    finally:
+        db.close()
 
     # Evaluate each item
     connector = Neo4jConnector()
@@ -177,7 +175,6 @@ async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None
                     limit=search_limit,
                     include=["dialogues", "statements", "entities"],
                     output_path=None,
-                    memory_config=memory_config,
                 )
             except Exception:
                 results = None
@@ -261,11 +258,7 @@ async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None
             pred = resp.content.strip() if hasattr(resp, 'content') else (resp["choices"][0]["message"]["content"].strip() if isinstance(resp, dict) else str(resp).strip())
             # Metrics: F1, BLEU-1, Jaccard; keep exact match for reference
             correct_flags.append(exact_match(pred, reference))
-            from app.core.memory.evaluation.common.metrics import (
-                bleu1,
-                f1_score,
-                jaccard,
-            )
+            from app.core.memory.evaluation.common.metrics import f1_score, bleu1, jaccard
             f1s.append(f1_score(str(pred), str(reference)))
             b1s.append(bleu1(str(pred), str(reference)))
             jss.append(jaccard(str(pred), str(reference)))
@@ -295,15 +288,39 @@ async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None
 
 
 def main():
+    # Load environment variables first
     load_dotenv()
+    
+    # Get defaults from environment variables
+    env_sample_size = os.getenv("MEMSCIQA_SAMPLE_SIZE")
+    env_search_limit = os.getenv("MEMSCIQA_SEARCH_LIMIT")
+    env_context_budget = os.getenv("MEMSCIQA_CONTEXT_CHAR_BUDGET")
+    env_llm_max_tokens = os.getenv("MEMSCIQA_LLM_MAX_TOKENS")
+    env_skip_ingest = os.getenv("MEMSCIQA_SKIP_INGEST", "false").lower() in ("true", "1", "yes")
+    env_output_dir = os.getenv("MEMSCIQA_OUTPUT_DIR")
+    
+    # Convert to appropriate types with fallback to code defaults
+    default_sample_size = int(env_sample_size) if env_sample_size else 1
+    default_search_limit = int(env_search_limit) if env_search_limit else 8
+    default_context_budget = int(env_context_budget) if env_context_budget else 4000
+    default_llm_max_tokens = int(env_llm_max_tokens) if env_llm_max_tokens else 64
+    default_output_dir = env_output_dir if env_output_dir else None
+    
     parser = argparse.ArgumentParser(description="Evaluate DMR (memsciqa) with graph search and Qwen")
+
     parser.add_argument("--sample-size", type=int, default=1, help="评测样本数量")
-    parser.add_argument("--group-id", type=str, default=None, help="可选 end_user_id，默认取 runtime.json")
+    parser.add_argument("--end-user-id", type=str, default=None, help="可选 end_user_id，默认使用环境变量")
     parser.add_argument("--search-limit", type=int, default=8, help="每类检索最大返回数")
     parser.add_argument("--context-char-budget", type=int, default=4000, help="上下文字符预算")
+
     parser.add_argument("--llm-temperature", type=float, default=0.0, help="LLM 温度")
-    parser.add_argument("--llm-max-tokens", type=int, default=64, help="LLM 最大生成长度")
+    parser.add_argument("--llm-max-tokens", type=int, default=default_llm_max_tokens, 
+                        help=f"LLM 最大生成长度 (env: MEMSCIQA_LLM_MAX_TOKENS={env_llm_max_tokens or 'not set'})")
     parser.add_argument("--search-type", type=str, choices=["keyword","embedding","hybrid"], default="hybrid", help="检索类型")
+    parser.add_argument("--skip-ingest", action="store_true", default=env_skip_ingest,
+                        help=f"跳过数据摄入，使用 Neo4j 中的现有数据 (env: MEMSCIQA_SKIP_INGEST={os.getenv('MEMSCIQA_SKIP_INGEST', 'false')})")
+    parser.add_argument("--output-dir", type=str, default=default_output_dir,
+                        help=f"结果保存目录 (env: MEMSCIQA_OUTPUT_DIR={env_output_dir or 'not set'})")
     args = parser.parse_args()
 
     result = asyncio.run(
@@ -315,9 +332,37 @@ def main():
             llm_temperature=args.llm_temperature,
             llm_max_tokens=args.llm_max_tokens,
             search_type=args.search_type,
+            skip_ingest=args.skip_ingest,
         )
     )
+    
+    # Print results to console
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    
+    # Save results to file
+    output_dir = args.output_dir
+    if output_dir is None:
+        # Use absolute path to ensure results are saved in the correct location
+        script_dir = Path(__file__).resolve().parent
+        output_dir = script_dir / "results"
+    elif not Path(output_dir).is_absolute():
+        # If relative path, make it relative to this script's directory
+        script_dir = Path(__file__).resolve().parent
+        output_dir = script_dir / output_dir
+    else:
+        output_dir = Path(output_dir)
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = output_dir / f"memsciqa_{timestamp_str}.json"
+    
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        print(f"\n✅ 结果已保存到: {output_path}")
+    except Exception as e:
+        print(f"\n❌ 保存结果失败: {e}")
 
 
 if __name__ == "__main__":
