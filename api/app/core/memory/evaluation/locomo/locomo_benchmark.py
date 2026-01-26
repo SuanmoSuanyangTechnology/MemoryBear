@@ -644,7 +644,25 @@ def main():
     
     This function provides a CLI interface for running LoCoMo benchmarks
     with configurable parameters.
+    
+    Configuration priority: Command-line args > Environment variables > Code defaults
     """
+    # Load environment variables first
+    load_dotenv()
+    
+    # Get defaults from environment variables
+    env_sample_size = os.getenv("LOCOMO_SAMPLE_SIZE")
+    env_search_limit = os.getenv("LOCOMO_SEARCH_LIMIT")
+    env_context_budget = os.getenv("LOCOMO_CONTEXT_CHAR_BUDGET")
+    env_output_dir = os.getenv("LOCOMO_OUTPUT_DIR")
+    env_skip_ingest = os.getenv("LOCOMO_SKIP_INGEST", "false").lower() in ("true", "1", "yes")
+    
+    # Convert to appropriate types with fallback to code defaults
+    default_sample_size = int(env_sample_size) if env_sample_size else 20
+    default_search_limit = int(env_search_limit) if env_search_limit else 12
+    default_context_budget = int(env_context_budget) if env_context_budget else 8000
+    default_output_dir = env_output_dir if env_output_dir else None
+    
     parser = argparse.ArgumentParser(
         description="Run LoCoMo benchmark evaluation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -653,14 +671,14 @@ def main():
     parser.add_argument(
         "--sample_size",
         type=int,
-        default=20,
-        help="Number of QA pairs to evaluate"
+        default=default_sample_size,
+        help=f"Number of QA pairs to evaluate (env: LOCOMO_SAMPLE_SIZE={env_sample_size or 'not set'}, 0 for all)"
     )
     parser.add_argument(
         "--end_user_id",
         type=str,
         default=None,
-        help="Database group ID for retrieval (uses default if not specified)"
+        help="Database group ID for retrieval (uses LOCOMO_GROUP_ID or EVAL_GROUP_ID if not specified)"
     )
     parser.add_argument(
         "--search_type",
@@ -672,14 +690,14 @@ def main():
     parser.add_argument(
         "--search_limit",
         type=int,
-        default=12,
-        help="Maximum number of documents to retrieve per query"
+        default=default_search_limit,
+        help=f"Maximum number of documents to retrieve per query (env: LOCOMO_SEARCH_LIMIT={env_search_limit or 'not set'})"
     )
     parser.add_argument(
         "--context_char_budget",
         type=int,
-        default=8000,
-        help="Maximum characters for context"
+        default=default_context_budget,
+        help=f"Maximum characters for context (env: LOCOMO_CONTEXT_CHAR_BUDGET={env_context_budget or 'not set'})"
     )
     parser.add_argument(
         "--reset_group",
@@ -689,13 +707,14 @@ def main():
     parser.add_argument(
         "--skip_ingest",
         action="store_true",
-        help="Skip data ingestion and use existing data in Neo4j"
+        default=env_skip_ingest,
+        help=f"Skip data ingestion and use existing data in Neo4j (env: LOCOMO_SKIP_INGEST={os.getenv('LOCOMO_SKIP_INGEST', 'false')})"
     )
     parser.add_argument(
         "--output_dir",
         type=str,
-        default=None,
-        help="Directory to save results (uses default if not specified)"
+        default=default_output_dir,
+        help=f"Directory to save results (env: LOCOMO_OUTPUT_DIR={env_output_dir or 'not set'})"
     )
     parser.add_argument(
         "--max_ingest_messages",
@@ -705,9 +724,6 @@ def main():
     )
     
     args = parser.parse_args()
-    
-    # Load environment variables
-    load_dotenv()
     
     # Run benchmark
     result = asyncio.run(run_locomo_benchmark(
