@@ -28,7 +28,7 @@ class RedisSessionStore:
             return text
 
     # 修改后的 save_session 方法
-    def save_session(self, userid, messages, aimessages, apply_id, group_id):
+    def save_session(self, userid, messages, aimessages, apply_id, end_user_id):
         """
         写入一条会话数据，返回 session_id
         优化版本：确保写入时间不超过1秒
@@ -46,7 +46,7 @@ class RedisSessionStore:
                 "id": self.uudi,
                 "sessionid": userid,
                 "apply_id": apply_id,
-                "group_id": group_id,
+                "end_user_id": end_user_id,
                 "messages": messages,
                 "aimessages": aimessages,
                 "starttime": starttime
@@ -67,7 +67,7 @@ class RedisSessionStore:
     def save_sessions_batch(self, sessions_data):
         """
         批量写入多条会话数据，返回 session_id 列表
-        sessions_data: list of dict, 每个 dict 包含 userid, messages, aimessages, apply_id, group_id
+        sessions_data: list of dict, 每个 dict 包含 userid, messages, aimessages, apply_id, end_user_id
         优化版本：批量操作，大幅提升性能
         """
         try:
@@ -83,7 +83,7 @@ class RedisSessionStore:
                     "id": self.uudi,
                     "sessionid": session.get('userid'),
                     "apply_id": session.get('apply_id'),
-                    "group_id": session.get('group_id'),
+                    "end_user_id": session.get('end_user_id'),
                     "messages": session.get('messages'),
                     "aimessages": session.get('aimessages'),
                     "starttime": starttime
@@ -108,9 +108,9 @@ class RedisSessionStore:
         data = self.r.hgetall(key)
         return data if data else None
 
-    def get_session_apply_group(self, sessionid, apply_id, group_id):
+    def get_session_apply_group(self, sessionid, apply_id, end_user_id):
         """
-        根据 sessionid、apply_id 和 group_id 三个条件查询会话数据
+        根据 sessionid、apply_id 和 end_user_id 三个条件查询会话数据
         """
         result_items = []
 
@@ -124,7 +124,7 @@ class RedisSessionStore:
             # 检查三个条件是否都匹配
             if (data.get('sessionid') == sessionid and
                     data.get('apply_id') == apply_id and
-                    data.get('group_id') == group_id):
+                    data.get('end_user_id') == end_user_id):
                 result_items.append(data)
 
         return result_items
@@ -172,7 +172,7 @@ class RedisSessionStore:
     def delete_duplicate_sessions(self):
         """
         删除重复会话数据，条件：
-        "sessionid"、"user_id"、"group_id"、"messages"、"aimessages" 五个字段都相同的只保留一个，其他删除
+        "sessionid"、"user_id"、"end_user_id"、"messages"、"aimessages" 五个字段都相同的只保留一个，其他删除
         优化版本：使用 pipeline 批量操作，确保在1秒内完成
         """
         import time
@@ -202,12 +202,12 @@ class RedisSessionStore:
             # 获取五个字段的值
             sessionid = data.get('sessionid', '')
             user_id = data.get('id', '')
-            group_id = data.get('group_id', '')
+            end_user_id = data.get('end_user_id', '')
             messages = data.get('messages', '')
             aimessages = data.get('aimessages', '')
 
             # 用五元组作为唯一标识
-            identifier = (sessionid, user_id, group_id, messages, aimessages)
+            identifier = (sessionid, user_id, end_user_id, messages, aimessages)
 
             if identifier in seen:
                 # 重复，标记为待删除
@@ -248,9 +248,9 @@ class RedisSessionStore:
             result_items = []
         return (result_items)
 
-    def find_user_apply_group(self, sessionid, apply_id, group_id):
+    def find_user_apply_group(self, sessionid, apply_id, end_user_id):
         """
-        根据 sessionid、apply_id 和 group_id 三个条件查询会话数据，返回最新的6条
+        根据 sessionid、apply_id 和 end_user_id 三个条件查询会话数据，返回最新的6条
         """
         import time
         start_time = time.time()
@@ -276,7 +276,7 @@ class RedisSessionStore:
             # 检查是否符合三个条件
 
             if (data.get('apply_id') == apply_id and
-                    data.get('group_id') == group_id):
+                    data.get('end_user_id') == end_user_id):
                 # 支持模糊匹配 sessionid 或者完全匹配
                 if sessionid in data.get('sessionid', '') or data.get('sessionid') == sessionid:
                     matched_items.append({

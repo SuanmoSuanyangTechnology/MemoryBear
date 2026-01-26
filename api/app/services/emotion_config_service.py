@@ -8,9 +8,11 @@ Classes:
 """
 
 from typing import Dict, Any
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 
-from app.models.data_config_model import DataConfig
+from app.models.memory_config_model import MemoryConfig
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
@@ -37,7 +39,7 @@ class EmotionConfigService:
         self.db = db
         logger.info("情绪配置服务初始化完成")
     
-    def get_emotion_config(self, config_id: int) -> Dict[str, Any]:
+    def get_emotion_config(self, config_id: UUID) -> Dict[str, Any]:
         """获取情绪引擎配置
         
         查询指定配置ID的情绪相关配置字段。
@@ -61,8 +63,8 @@ class EmotionConfigService:
             logger.info(f"获取情绪配置: config_id={config_id}")
             
             # 查询配置
-            config = self.db.query(DataConfig).filter(
-                DataConfig.config_id == config_id
+            config = self.db.query(MemoryConfig).filter(
+                MemoryConfig.config_id == config_id
             ).first()
             
             if not config:
@@ -144,7 +146,7 @@ class EmotionConfigService:
     
     def update_emotion_config(
         self,
-        config_id: int,
+        config_id: UUID,
         config_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """更新情绪引擎配置
@@ -173,8 +175,8 @@ class EmotionConfigService:
             self.validate_emotion_config(config_data)
             
             # 查询配置
-            config = self.db.query(DataConfig).filter(
-                DataConfig.config_id == config_id
+            config = self.db.query(MemoryConfig).filter(
+                MemoryConfig.config_id == config_id
             ).first()
             
             if not config:

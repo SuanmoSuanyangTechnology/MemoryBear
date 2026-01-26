@@ -498,11 +498,11 @@ def smart_context_selection(contexts: List[str], question: str, max_chars: int =
 
 
 # 通过别名匹配进行实体关键词检索（多token合并）
-async def _search_entities_by_aliases(connector: Neo4jConnector, tokens: List[str], group_id: str | None, limit: int) -> List[Dict[str, Any]]:
+async def _search_entities_by_aliases(connector: Neo4jConnector, tokens: List[str], end_user_id: str | None, limit: int) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
     try:
         for tok in tokens:
-            rows = await connector.execute_query(SEARCH_ENTITIES_BY_NAME, q=tok, group_id=group_id, limit=limit)
+            rows = await connector.execute_query(SEARCH_ENTITIES_BY_NAME, q=tok, end_user_id=end_user_id, limit=limit)
             if rows:
                 results.extend(rows)
     except Exception:
@@ -522,15 +522,15 @@ async def _search_entities_by_aliases(connector: Neo4jConnector, tokens: List[st
 # 通过对话/陈述中的entity_ids反查实体名称
 _FETCH_ENTITIES_BY_IDS = """
 MATCH (e:ExtractedEntity)
-WHERE e.id IN $ids AND ($group_id IS NULL OR e.group_id = $group_id)
-RETURN e.id AS id, e.name AS name, e.group_id AS group_id, e.entity_type AS entity_type
+WHERE e.id IN $ids AND ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+RETURN e.id AS id, e.name AS name, e.end_user_id AS end_user_id, e.entity_type AS entity_type
 """
 
-async def _fetch_entities_by_ids(connector: Neo4jConnector, ids: List[str], group_id: str | None) -> List[Dict[str, Any]]:
+async def _fetch_entities_by_ids(connector: Neo4jConnector, ids: List[str], end_user_id: str | None) -> List[Dict[str, Any]]:
     if not ids:
         return []
     try:
-        rows = await connector.execute_query(_FETCH_ENTITIES_BY_IDS, ids=list({i for i in ids if i}), group_id=group_id)
+        rows = await connector.execute_query(_FETCH_ENTITIES_BY_IDS, ids=list({i for i in ids if i}), end_user_id=end_user_id)
         return rows or []
     except Exception:
         return []
@@ -540,18 +540,18 @@ async def _fetch_entities_by_ids(connector: Neo4jConnector, ids: List[str], grou
 _TIME_ENTITY_SEARCH = """
 MATCH (e:ExtractedEntity)
 WHERE e.entity_type CONTAINS "TIME" OR e.entity_type CONTAINS "DATE" OR e.name =~ $date_pattern
-AND ($group_id IS NULL OR e.group_id = $group_id)
-RETURN e.id AS id, e.name AS name, e.group_id AS group_id, e.entity_type AS entity_type
+AND ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+RETURN e.id AS id, e.name AS name, e.end_user_id AS end_user_id, e.entity_type AS entity_type
 LIMIT $limit
 """
 
-async def _search_time_entities(connector: Neo4jConnector, group_id: str | None, limit: int = 5) -> List[Dict[str, Any]]:
+async def _search_time_entities(connector: Neo4jConnector, end_user_id: str | None, limit: int = 5) -> List[Dict[str, Any]]:
     """专门搜索时间相关的实体"""
     try:
         date_pattern = r".*\d{4}.*|.*\d{1,2}月\d{1,2}日.*"
         rows = await connector.execute_query(_TIME_ENTITY_SEARCH,
                                            date_pattern=date_pattern,
-                                           group_id=group_id,
+                                           end_user_id=end_user_id,
                                            limit=limit)
         return rows or []
     except Exception:
@@ -559,25 +559,25 @@ async def _search_time_entities(connector: Neo4jConnector, group_id: str | None,
 
 
 # 技术术语专门检索
-async def _search_tech_terms(connector: Neo4jConnector, question: str, group_id: str | None, limit: int = 3) -> List[Dict[str, Any]]:
+async def _search_tech_terms(connector: Neo4jConnector, question: str, end_user_id: str | None, limit: int = 3) -> List[Dict[str, Any]]:
     """专门搜索技术术语相关的实体"""
     tech_entities = []
     try:
         # GPS相关
         if any(term in question for term in ["GPS", "导航", "定位系统"]):
-            gps_rows = await connector.execute_query(SEARCH_ENTITIES_BY_NAME, q="GPS", group_id=group_id, limit=limit)
+            gps_rows = await connector.execute_query(SEARCH_ENTITIES_BY_NAME, q="GPS", end_user_id=end_user_id, limit=limit)
             if gps_rows:
                 tech_entities.extend(gps_rows)
 
         # 活动相关
         if any(term in question for term in ["工作坊", "研讨会", "网络研讨会"]):
-            workshop_rows = await connector.execute_query(SEARCH_ENTITIES_BY_NAME, q="工作坊", group_id=group_id, limit=limit)
+            workshop_rows = await connector.execute_query(SEARCH_ENTITIES_BY_NAME, q="工作坊", end_user_id=end_user_id, limit=limit)
             if workshop_rows:
                 tech_entities.extend(workshop_rows)
 
         # 时间顺序相关
         if any(term in question for term in ["先", "后", "第一个"]):
-            time_rows = await connector.execute_query(SEARCH_ENTITIES_BY_NAME, q="第一次", group_id=group_id, limit=limit)
+            time_rows = await connector.execute_query(SEARCH_ENTITIES_BY_NAME, q="第一次", end_user_id=end_user_id, limit=limit)
             if time_rows:
                 tech_entities.extend(time_rows)
 
@@ -627,7 +627,7 @@ def _resolve_relative_times_cn_en(text: str, anchor: datetime) -> str:
 
 async def run_longmemeval_test(
     sample_size: int = 3,
-    group_id: str = "longmemeval_zh_bak_2",
+    end_user_id: str = "longmemeval_zh_bak_2",
     search_limit: int = 8,
     context_char_budget: int = 4000,
     llm_temperature: float = 0.0,
@@ -707,7 +707,7 @@ async def run_longmemeval_test(
                         connector=connector,
                         embedder_client=embedder,
                         query_text=question,
-                        group_id=group_id,
+                        end_user_id=end_user_id,
                         limit=search_limit,
                         include=["dialogues", "statements", "entities"],
                     )
@@ -746,7 +746,7 @@ async def run_longmemeval_test(
                     search_results = await search_graph(
                         connector=connector,
                         q=question,
-                        group_id=group_id,
+                        end_user_id=end_user_id,
                         limit=search_limit,
                     )
                     dialogs = search_results.get("dialogues", [])
@@ -776,7 +776,7 @@ async def run_longmemeval_test(
                             connector=connector,
                             embedder_client=embedder,
                             query_text=question,
-                            group_id=group_id,
+                            end_user_id=end_user_id,
                             limit=search_limit,
                             include=["dialogues", "statements", "entities"],
                         )
@@ -792,7 +792,7 @@ async def run_longmemeval_test(
                         kw_res = await search_graph(
                             connector=connector,
                             q=question,
-                            group_id=group_id,
+                            end_user_id=end_user_id,
                             limit=search_limit,
                         )
                         if isinstance(kw_res, dict):
@@ -801,14 +801,14 @@ async def run_longmemeval_test(
                             kw_entities = kw_res.get("entities", []) or []
 
                             # 技术术语专门检索
-                            tech_entities = await _search_tech_terms(connector, question, group_id, search_limit//2)
+                            tech_entities = await _search_tech_terms(connector, question, end_user_id, search_limit//2)
                             if tech_entities:
                                 kw_entities.extend(tech_entities)
 
                             # 时间推理问题的特殊处理
                             if is_temporal:
                                 # 专门搜索时间实体
-                                time_entities = await _search_time_entities(connector, group_id, search_limit//2)
+                                time_entities = await _search_time_entities(connector, end_user_id, search_limit//2)
                                 if time_entities:
                                     kw_entities.extend(time_entities)
                                 # 添加时间相关关键词检索
@@ -818,7 +818,7 @@ async def run_longmemeval_test(
                                         time_res = await search_graph(
                                             connector=connector,
                                             q=tk,
-                                            group_id=group_id,
+                                            end_user_id=end_user_id,
                                             limit=2,
                                         )
                                         if isinstance(time_res, dict):
@@ -829,7 +829,7 @@ async def run_longmemeval_test(
 
                             # 中文关键词拆分后做别名匹配
                             cn_tokens = generate_query_keywords_cn(question)  # 使用增强版关键词提取
-                            alias_entities = await _search_entities_by_aliases(connector, cn_tokens, group_id, search_limit)
+                            alias_entities = await _search_entities_by_aliases(connector, cn_tokens, end_user_id, search_limit)
                             if alias_entities:
                                 kw_entities.extend(alias_entities)
 
@@ -843,7 +843,7 @@ async def run_longmemeval_test(
                             except Exception:
                                 pass
                             if ids:
-                                id_entities = await _fetch_entities_by_ids(connector, ids, group_id)
+                                id_entities = await _fetch_entities_by_ids(connector, ids, end_user_id)
                                 if id_entities:
                                     kw_entities.extend(id_entities)
 
@@ -857,7 +857,7 @@ async def run_longmemeval_test(
                                     sub_res = await search_graph(
                                         connector=connector,
                                         q=str(kw),
-                                        group_id=group_id,
+                                        end_user_id=end_user_id,
                                         limit=max(3, search_limit // 2),
                                     )
                                     if isinstance(sub_res, dict):
@@ -876,7 +876,7 @@ async def run_longmemeval_test(
                                     opt_res = await search_graph(
                                         connector=connector,
                                         q=str(opt),
-                                        group_id=group_id,
+                                        end_user_id=end_user_id,
                                         limit=max(3, search_limit // 2),
                                     )
                                     if isinstance(opt_res, dict):
@@ -971,7 +971,7 @@ async def run_longmemeval_test(
                         kw_fallback = await search_graph(
                             connector=connector,
                             q=question,
-                            group_id=group_id,
+                            end_user_id=end_user_id,
                             limit=max(search_limit, 5),
                         )
                         fb_dialogs = kw_fallback.get("dialogues", []) or []
@@ -1199,7 +1199,7 @@ async def run_longmemeval_test(
                 "count_avg": statistics.mean(per_query_context_counts) if per_query_context_counts else 0.0,
             },
             "params": {
-                "group_id": group_id,
+                "end_user_id": end_user_id,
                 "search_limit": search_limit,
                 "context_char_budget": context_char_budget,
                 "search_type": search_type,
@@ -1278,7 +1278,7 @@ def main():
     result = asyncio.run(
         run_longmemeval_test(
             sample_size=sample_size,
-            group_id=args.group_id,
+            end_user_id=args.end_user_id,
             search_limit=args.search_limit,
             context_char_budget=args.context_char_budget,
             llm_temperature=args.llm_temperature,

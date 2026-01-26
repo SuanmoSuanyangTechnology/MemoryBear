@@ -450,12 +450,12 @@ async def create_document_chunk(
 
     return success(data=chunk, msg="文档块创建成功")
 
-async def write_rag(group_id, message, user_rag_memory_id):
+async def write_rag(end_user_id, message, user_rag_memory_id):
     """
     将消息写入 RAG 知识库
 
     Args:
-        group_id: 组ID，用作文件标题
+        end_user_id: 组ID，用作文件标题
         message: 消息内容
         user_rag_memory_id: 知识库ID（必须是有效的UUID）
 
@@ -487,10 +487,10 @@ async def write_rag(group_id, message, user_rag_memory_id):
     db = next(db_gen)
 
     try:
-        create_data = CustomTextFileCreate(title=group_id, content=message)
+        create_data = CustomTextFileCreate(title=end_user_id, content=message)
         current_user = SimpleUser(user_rag_memory_id)
         # 检查文档是否已存在
-        document = find_document_id_by_kb_and_filename(db=db, kb_id=user_rag_memory_id, file_name=f"{group_id}.txt")
+        document = find_document_id_by_kb_and_filename(db=db, kb_id=user_rag_memory_id, file_name=f"{end_user_id}.txt")
         print('======',document)
         api_logger.info(f"查找文档结果: document_id={document}")
         if document is not None:
@@ -508,7 +508,7 @@ async def write_rag(group_id, message, user_rag_memory_id):
             return result
         else:
             # 文档不存在，创建新文档
-            api_logger.info(f"文档不存在，创建新文档: group_id={group_id}")
+            api_logger.info(f"文档不存在，创建新文档: end_user_id={end_user_id}")
             result = await memory_konwledges_up(
                 kb_id=user_rag_memory_id,
                 parent_id=user_rag_memory_id,
@@ -520,13 +520,13 @@ async def write_rag(group_id, message, user_rag_memory_id):
             new_document_id = find_document_id_by_kb_and_filename(
                 db=db,
                 kb_id=user_rag_memory_id,
-                file_name=f"{group_id}.txt"
+                file_name=f"{end_user_id}.txt"
             )
 
             if new_document_id:
                 await parse_document_by_id(new_document_id, db=db, current_user=current_user)
             else:
-                api_logger.error(f"创建文档后无法找到文档ID: group_id={group_id}")
+                api_logger.error(f"创建文档后无法找到文档ID: end_user_id={end_user_id}")
             return result
     finally:
         # 确保数据库会话被关闭

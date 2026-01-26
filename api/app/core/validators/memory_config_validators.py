@@ -26,7 +26,7 @@ logger = get_config_logger()
 
 
 def _parse_model_id(model_id: Union[str, UUID, None], model_type: str,
-                    config_id: Optional[int] = None, workspace_id: Optional[UUID] = None) -> Optional[UUID]:
+                    config_id: Optional[UUID] = None, workspace_id: Optional[UUID] = None) -> Optional[UUID]:
     """Parse model ID from string or UUID."""
     if model_id is None:
         return None
@@ -59,7 +59,7 @@ def validate_model_exists_and_active(
     model_type: str,
     db: Session,
     tenant_id: Optional[UUID] = None,
-    config_id: Optional[int] = None,
+    config_id: Optional[UUID] = None,
     workspace_id: Optional[UUID] = None
 ) -> tuple[str, bool]:
     """Validate that a model exists and is active.
@@ -166,7 +166,7 @@ def validate_and_resolve_model_id(
     db: Session,
     tenant_id: Optional[UUID] = None,
     required: bool = False,
-    config_id: Optional[int] = None,
+    config_id: Optional[UUID] = None,
     workspace_id: Optional[UUID] = None
 ) -> tuple[Optional[UUID], Optional[str]]:
     """Validate and resolve a model ID, checking existence and active status.
@@ -204,7 +204,7 @@ def validate_and_resolve_model_id(
 
 
 def validate_embedding_model(
-    config_id: int,
+    config_id: UUID,
     embedding_id: Union[str, UUID, None],
     db: Session,
     tenant_id: Optional[UUID] = None,
@@ -256,7 +256,7 @@ def validate_embedding_model(
 
 
 def validate_llm_model(
-    config_id: int,
+    config_id: UUID,
     llm_id: Union[str, UUID, None],
     db: Session,
     tenant_id: Optional[UUID] = None,

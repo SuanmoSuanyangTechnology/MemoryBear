@@ -6,7 +6,7 @@ from sqlalchemy import and_, desc
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_db_logger
-from app.models.memory_perceptual_model import MemoryPerceptualModel, PerceptualType, FileStorageType
+from app.models.memory_perceptual_model import MemoryPerceptualModel, PerceptualType, FileStorageService
 from app.schemas.memory_perceptual_schema import PerceptualQuerySchema
 
 db_logger = get_db_logger()
@@ -28,7 +28,7 @@ class MemoryPerceptualRepository:
             file_ext: str,
             summary: Optional[str] = None,
             meta_data: Optional[dict] = None,
-            storage_service: FileStorageType = FileStorageType.LOCAL
+            storage_service: FileStorageService = FileStorageService.LOCAL
 
     ) -> MemoryPerceptualModel:
 

@@ -299,6 +299,18 @@ class AppRelease(BaseModel):
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
+    @field_validator("config", mode="before")
+    @classmethod
+    def parse_config(cls, v):
+        """处理 config 字段，如果是字符串则解析为字典"""
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return {}
+        return v if v is not None else {}
+
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None

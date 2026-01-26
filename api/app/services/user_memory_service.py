@@ -155,10 +155,10 @@ class MemoryInsightHelper:
         """
         query = """
         MATCH (d:Dialogue)
-        WHERE d.group_id = $group_id AND d.created_at IS NOT NULL AND d.created_at <> ''
+        WHERE d.end_user_id = $end_user_id AND d.created_at IS NOT NULL AND d.created_at <> ''
         RETURN d.created_at AS creation_time
         """
-        records = await self.neo4j_connector.execute_query(query, group_id=self.user_id)
+        records = await self.neo4j_connector.execute_query(query, end_user_id=self.user_id)
         
         if not records:
             return []
@@ -211,17 +211,17 @@ class MemoryInsightHelper:
     async def get_social_connections(self) -> dict | None:
         """Find the user with whom the most memories are shared."""
         query = """
-        MATCH (c1:Chunk {group_id: $group_id})
+        MATCH (c1:Chunk {end_user_id: $end_user_id})
         OPTIONAL MATCH (c1)-[:CONTAINS]->(s:Statement)
         OPTIONAL MATCH (s)<-[:CONTAINS]-(c2:Chunk)
-        WHERE c1.group_id <> c2.group_id AND s IS NOT NULL AND c2 IS NOT NULL
-        WITH c2.group_id AS other_user_id, COUNT(DISTINCT s) AS common_statements
+        WHERE c1.end_user_id <> c2.end_user_id AND s IS NOT NULL AND c2 IS NOT NULL
+        WITH c2.end_user_id AS other_user_id, COUNT(DISTINCT s) AS common_statements
         WHERE common_statements > 0
         RETURN other_user_id, common_statements
         ORDER BY common_statements DESC
         LIMIT 1
         """
-        records = await self.neo4j_connector.execute_query(query, group_id=self.user_id)
+        records = await self.neo4j_connector.execute_query(query, end_user_id=self.user_id)
         if not records or not records[0].get("other_user_id"):
             return None
         
@@ -230,7 +230,7 @@ class MemoryInsightHelper:
         
         time_range_query = """
         MATCH (c:Chunk)
-        WHERE c.group_id IN [$user_id, $other_user_id]
+        WHERE c.end_user_id IN [$user_id, $other_user_id]
         RETURN min(c.created_at) AS start_time, max(c.created_at) AS end_time
         """
         time_records = await self.neo4j_connector.execute_query(
@@ -294,11 +294,11 @@ class UserSummaryHelper:
         """Fetch recent statements authored by the user/group for context."""
         query = (
             "MATCH (s:Statement) "
-            "WHERE s.group_id = $group_id AND s.statement IS NOT NULL "
+            "WHERE s.end_user_id = $end_user_id AND s.statement IS NOT NULL "
             "RETURN s.statement AS statement, s.created_at AS created_at "
             "ORDER BY created_at DESC LIMIT $limit"
         )
-        rows = await self.connector.execute_query(query, group_id=self.user_id, limit=limit)
+        rows = await self.connector.execute_query(query, end_user_id=self.user_id, limit=limit)
         records = []
         for r in rows:
             try:
@@ -1152,7 +1152,7 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
     import re
     
     # 创建 UserSummaryHelper 实例
-    user_summary_tool = UserSummaryHelper(end_user_id or os.getenv("SELECTED_GROUP_ID", "group_123"))
+    user_summary_tool = UserSummaryHelper(end_user_id or os.getenv("SELECTED_end_user_id", "group_123"))
     
     try:
         # 1) 收集上下文数据
@@ -1273,10 +1273,10 @@ async def analytics_node_statistics(
         if end_user_id:
             query = f"""
             MATCH (n:{node_type})
-            WHERE n.group_id = $group_id
+            WHERE n.end_user_id = $end_user_id
             RETURN count(n) as count
             """
-            result = await _neo4j_connector.execute_query(query, group_id=end_user_id)
+            result = await _neo4j_connector.execute_query(query, end_user_id=end_user_id)
         else:
             query = f"""
             MATCH (n:{node_type})
@@ -1387,10 +1387,10 @@ async def analytics_memory_types(
             # 查询 Statement 节点数量
             query = """
             MATCH (n:Statement)
-            WHERE n.group_id = $group_id
+            WHERE n.end_user_id = $end_user_id
             RETURN count(n) as count
             """
-            result = await _neo4j_connector.execute_query(query, group_id=end_user_id)
+            result = await _neo4j_connector.execute_query(query, end_user_id=end_user_id)
             statement_count = result[0]["count"] if result and len(result) > 0 else 0
             # 取三分之一作为隐性记忆数量
             implicit_count = round(statement_count / 3)
@@ -1504,7 +1504,7 @@ async def analytics_graph_data(
         包含节点、边和统计信息的字典
     """
     try:
-        # 1. 获取 group_id
+        # 1. 获取 end_user_id
         user_uuid = uuid.UUID(end_user_id)
         repo = EndUserRepository(db)
         end_user = repo.get_by_id(user_uuid)
@@ -1528,7 +1528,7 @@ async def analytics_graph_data(
             # 基于中心节点的扩展查询
             node_query = f"""
             MATCH path = (center)-[*1..{depth}]-(connected)
-            WHERE center.group_id = $group_id
+            WHERE center.end_user_id = $end_user_id
               AND elementId(center) = $center_node_id
             WITH collect(DISTINCT center) + collect(DISTINCT connected) as all_nodes
             UNWIND all_nodes as n
@@ -1539,7 +1539,7 @@ async def analytics_graph_data(
             LIMIT $limit
             """
             node_params = {
-                "group_id": end_user_id,
+                "end_user_id": end_user_id,
                 "center_node_id": center_node_id,
                 "limit": limit
             }
@@ -1547,7 +1547,7 @@ async def analytics_graph_data(
             # 按节点类型过滤查询
             node_query = """
             MATCH (n)
-            WHERE n.group_id = $group_id
+            WHERE n.end_user_id = $end_user_id
               AND labels(n)[0] IN $node_types
             RETURN 
                 elementId(n) as id,
@@ -1556,7 +1556,7 @@ async def analytics_graph_data(
             LIMIT $limit
             """
             node_params = {
-                "group_id": end_user_id,
+                "end_user_id": end_user_id,
                 "node_types": node_types,
                 "limit": limit
             }
@@ -1564,7 +1564,7 @@ async def analytics_graph_data(
             # 查询所有节点
             node_query = """
             MATCH (n)
-            WHERE n.group_id = $group_id
+            WHERE n.end_user_id = $end_user_id
             RETURN 
                 elementId(n) as id,
                 labels(n)[0] as label,
@@ -1572,7 +1572,7 @@ async def analytics_graph_data(
             LIMIT $limit
             """
             node_params = {
-                "group_id": end_user_id,
+                "end_user_id": end_user_id,
                 "limit": limit
             }
 

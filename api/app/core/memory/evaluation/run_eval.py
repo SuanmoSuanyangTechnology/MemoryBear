@@ -26,7 +26,7 @@ async def run(
     dataset: str,
     sample_size: int,
     reset_group: bool,
-    group_id: str | None,
+    end_user_id: str | None,
     judge_model: str | None = None,
     search_limit: int | None = None,
     context_char_budget: int | None = None,
@@ -37,17 +37,17 @@ async def run(
     max_contexts_per_item: int | None = None,
 ) -> Dict[str, Any]:
     # 恢复原始风格：统一入口做路由，并沿用各数据集既有默认
-    group_id = group_id or SELECTED_GROUP_ID
+    end_user_id = end_user_id or SELECTED_GROUP_ID
 
     if reset_group:
         connector = Neo4jConnector()
         try:
-            await connector.delete_group(group_id)
+            await connector.delete_group(end_user_id)
         finally:
             await connector.close()
 
     if dataset == "locomo":
-        kwargs: Dict[str, Any] = {"sample_size": sample_size, "group_id": group_id}
+        kwargs: Dict[str, Any] = {"sample_size": sample_size, "end_user_id": end_user_id}
         if search_limit is not None:
             kwargs["search_limit"] = search_limit
         if context_char_budget is not None:
@@ -61,7 +61,7 @@ async def run(
         return await run_locomo_eval(**kwargs)
 
     if dataset == "memsciqa":
-        kwargs: Dict[str, Any] = {"sample_size": sample_size, "group_id": group_id}
+        kwargs: Dict[str, Any] = {"sample_size": sample_size, "end_user_id": end_user_id}
         if search_limit is not None:
             kwargs["search_limit"] = search_limit
         if context_char_budget is not None:
@@ -75,7 +75,7 @@ async def run(
         return await run_memsciqa_eval(**kwargs)
 
     if dataset == "longmemeval":
-        kwargs: Dict[str, Any] = {"sample_size": sample_size, "group_id": group_id}
+        kwargs: Dict[str, Any] = {"sample_size": sample_size, "end_user_id": end_user_id}
         if search_limit is not None:
             kwargs["search_limit"] = search_limit
         if context_char_budget is not None:
@@ -99,8 +99,8 @@ def main():
     parser = argparse.ArgumentParser(description="统一评估入口：memsciqa / longmemeval / locomo")
     parser.add_argument("--dataset", choices=["memsciqa", "longmemeval", "locomo"], required=True)
     parser.add_argument("--sample-size", type=int, default=1, help="先用一条数据跑通")
-    parser.add_argument("--reset-group", action="store_true", help="运行前清空当前 group_id 的图数据")
-    parser.add_argument("--group-id", type=str, default=None, help="可选 group_id，默认取 runtime.json")
+    parser.add_argument("--reset-group", action="store_true", help="运行前清空当前 end_user_id 的图数据")
+    parser.add_argument("--group-id", type=str, default=None, help="可选 end_user_id，默认取 runtime.json")
     parser.add_argument("--judge-model", type=str, default=None, help="可选：longmemeval 判别式评测模型名")
     parser.add_argument("--search-limit", type=int, default=None, help="检索返回的对话节点数量上限（不提供则使用各脚本默认）")
     parser.add_argument("--context-char-budget", type=int, default=None, help="上下文字符预算（不提供则使用各脚本默认）")
@@ -117,7 +117,7 @@ def main():
         args.dataset,
         args.sample_size,
         args.reset_group,
-        args.group_id,
+        args.end_user_id,
         args.judge_model,
         args.search_limit,
         args.context_char_budget,

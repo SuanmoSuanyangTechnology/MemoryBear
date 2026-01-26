@@ -58,7 +58,7 @@ class SearchStrategy(ABC):
     async def search(
         self,
         query_text: str,
-        group_id: Optional[str] = None,
+        end_user_id: Optional[str] = None,
         limit: int = 50,
         include: Optional[List[str]] = None,
         **kwargs
@@ -67,7 +67,7 @@ class SearchStrategy(ABC):
 
         Args:
             query_text: 查询文本
-            group_id: 可选的组ID过滤
+            end_user_id: 可选的组ID过滤
             limit: 每个类别的最大结果数
             include: 要包含的搜索类别列表（statements, chunks, entities, summaries）
             **kwargs: 其他搜索参数
@@ -81,7 +81,7 @@ class SearchStrategy(ABC):
         self,
         query_text: str,
         search_type: str,
-        group_id: Optional[str] = None,
+        end_user_id: Optional[str] = None,
         limit: int = 50,
         **kwargs
     ) -> Dict[str, Any]:
@@ -90,7 +90,7 @@ class SearchStrategy(ABC):
         Args:
             query_text: 查询文本
             search_type: 搜索类型
-            group_id: 组ID
+            end_user_id: 组ID
             limit: 结果限制
             **kwargs: 其他元数据
 
@@ -100,7 +100,7 @@ class SearchStrategy(ABC):
         metadata = {
             "query": query_text,
             "search_type": search_type,
-            "group_id": group_id,
+            "end_user_id": end_user_id,
             "limit": limit,
             "timestamp": datetime.now().isoformat()
         }

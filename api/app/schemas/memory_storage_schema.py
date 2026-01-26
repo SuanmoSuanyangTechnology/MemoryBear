@@ -1,5 +1,5 @@
 """
-所有的内容是放错误地方了，应该放在models
+
 """
 
 from typing import Any, Optional, List, Dict, Literal, Union
@@ -8,19 +8,7 @@ import uuid
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 
-# ============================================================================
-# 原 UserInput 相关 Schema (保留原有功能)
-# ============================================================================
-class UserInput(BaseModel):
-    message: str
-    history: list[dict]
-    search_switch: str
-    group_id: str
 
-
-class Write_UserInput(BaseModel):
-    message: str
-    group_id: str
 
 
 # ============================================================================
@@ -159,7 +147,7 @@ class ReflexionResultSchema(BaseModel):
 # Composite key identifying a config row
 class ConfigKey(BaseModel):  # 配置参数键模型
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
-    config_id: int = Field("config_id", description="配置唯一标识（字符串）")
+    config_id: uuid.UUID = Field("config_id", description="配置唯一标识（UUID）")
     user_id: str = Field("user_id", description="用户标识（字符串）")
     apply_id: str = Field("apply_id", description="应用或场景标识（字符串）")
 
@@ -250,17 +238,17 @@ class ConfigParamsCreate(BaseModel):  # 创建配置参数模型（仅 body，�
 class ConfigParamsDelete(BaseModel):  # 删除配置参数模型（请求体）
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     # config_name: str = Field("配置名称", description="配置名称（字符串）")
-    config_id: int = Field("配置ID", description="配置ID（字符串）")
+    config_id: uuid.UUID = Field("配置ID", description="配置ID（UUID）")
 
 
 class ConfigUpdate(BaseModel):  # 更新记忆萃取引擎配置参数时使用的模型
-    config_id: Optional[int] = None
+    config_id: Optional[uuid.UUID] = None
     config_name: str = Field("配置名称", description="配置名称（字符串）")
     config_desc: str = Field("配置描述", description="配置描述（字符串）")
 
 
 class ConfigUpdateExtracted(BaseModel):  # 更新记忆萃取引擎配置参数时使用的模型
-    config_id: Optional[int] = None
+    config_id: Optional[uuid.UUID] = None
     llm_id: Optional[str] = Field(None, description="LLM模型配置ID")
     embedding_id: Optional[str] = Field(None, description="嵌入模型配置ID")
     rerank_id: Optional[str] = Field(None, description="重排序模型配置ID")
@@ -327,14 +315,14 @@ class ConfigUpdateExtracted(BaseModel):  # 更新记忆萃取引擎配置参数�
 
 class ConfigUpdateForget(BaseModel):  # 更新遗忘引擎配置参数时使用的模型
     # 遗忘引擎配置参数更新模型
-    config_id: Optional[int] = None
+    config_id: Optional[uuid.UUID] = None
     lambda_time: Optional[float] = Field(0.5, ge=0.0, le=1.0, description="最低保持度，0-1 小数；默认 0.5")
     lambda_mem: Optional[float] = Field(0.5, ge=0.0, le=1.0, description="遗忘率，0-1 小数；默认 0.5")
     offset: Optional[float] = Field(0.0, ge=0.0, le=1.0, description="偏移度，0-1 小数；默认 0.0")
 
 
 class ConfigPilotRun(BaseModel):  # 试运行触发请求模型
-    config_id: int = Field(..., description="配置ID（唯一）")
+    config_id: uuid.UUID = Field(..., description="配置ID（唯一）")
     dialogue_text: str = Field(..., description="前端传入的对话文本，格式如 '用户: ...\nAI: ...' 可多行，试运行必填")
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -342,7 +330,7 @@ class ConfigPilotRun(BaseModel):  # 试运行触发请求模型
 class ConfigFilter(BaseModel):  # 查询配置参数时使用的模型
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    config_id: Optional[int] = None
+    config_id: Optional[uuid.UUID] = None
     user_id: Optional[str] = None
     apply_id: Optional[str] = None
 
@@ -418,7 +406,7 @@ class ForgettingConfigResponse(BaseModel):
     """遗忘引擎配置响应模型"""
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     
-    config_id: int = Field(..., description="配置ID")
+    config_id: uuid.UUID = Field(..., description="配置ID")
     decay_constant: float = Field(..., description="衰减常数 d")
     lambda_time: float = Field(..., description="时间衰减参数")
     lambda_mem: float = Field(..., description="记忆衰减参数")
@@ -436,7 +424,7 @@ class ForgettingConfigUpdateRequest(BaseModel):
     """遗忘引擎配置更新请求模型"""
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     
-    config_id: int = Field(..., description="配置ID")
+    config_id: uuid.UUID = Field(..., description="配置ID")
     decay_constant: Optional[float] = Field(None, ge=0.0, le=1.0, description="衰减常数 d")
     lambda_time: Optional[float] = Field(None, ge=0.0, le=1.0, description="时间衰减参数")
     lambda_mem: Optional[float] = Field(None, ge=0.0, le=1.0, description="记忆衰减参数")
@@ -511,7 +499,7 @@ class ForgettingCurveRequest(BaseModel):
     
     importance_score: float = Field(0.5, ge=0.0, le=1.0, description="重要性分数（0-1）")
     days: int = Field(60, ge=1, le=365, description="模拟天数（默认60天）")
-    config_id: Optional[int] = Field(None, description="配置ID（可选，如果为None则使用默认配置）")
+    config_id: Optional[uuid.UUID] = Field(None, description="配置ID（可选，如果为None则使用默认配置）")
 
 
 class ForgettingCurveResponse(BaseModel):
