@@ -8,6 +8,7 @@ import { type FC, useRef, useEffect } from 'react'
 import clsx from 'clsx'
 import Markdown from '@/components/Markdown'
 import type { ChatContentProps } from './types'
+import { Spin } from 'antd'
 
 /**
  * 聊天内容显示组件
@@ -21,7 +22,8 @@ const ChatContent: FC<ChatContentProps> = ({
   empty,
   labelPosition = 'bottom',
   labelFormat,
-  errorDesc
+  errorDesc,
+  renderRuntime
 }) => {
   // 滚动容器引用，用于控制自动滚动到底部
   const scrollContainerRef = useRef<(HTMLDivElement | null)>(null)
@@ -45,8 +47,8 @@ const ChatContent: FC<ChatContentProps> = ({
             'rb:left-0 rb:text-left': item.role === 'assistant', // 助手消息左对齐
           })}>
             {/* 流式加载时且内容为空则不显示 */}
-            {streamLoading && item.content === ''
-              ? null
+            {streamLoading && item.content === '' && !renderRuntime
+              ? <Spin />
               : <>
                 {/* 顶部标签（如时间戳、用户名等） */}
                 {labelPosition === 'top' &&
@@ -55,16 +57,17 @@ const ChatContent: FC<ChatContentProps> = ({
                   </div>
                 }
                 {/* 消息气泡框 */}
-                <div className={clsx('rb:border rb:text-left rb:rounded-lg rb:mt-1.5 rb:leading-4.5 rb:p-[10px_12px_2px_12px] rb:inline-block rb:max-w-[520px] rb:wrap-break-word', contentClassNames, {
+                <div className={clsx('rb:border rb:text-left rb:rounded-lg rb:mt-1.5 rb:leading-4.5 rb:p-[10px_12px_2px_12px] rb:inline-block rb:max-w-130 rb:wrap-break-word', contentClassNames, {
                   // 错误消息样式（内容为null且非助手消息）
-                  'rb:border-[rgba(255,93,52,0.30)] rb:bg-[rgba(255,93,52,0.08)] rb:text-[#FF5D34]': errorDesc && item.role === 'assistant' && item.content === null,
+                  'rb:border-[rgba(255,93,52,0.30)] rb:bg-[rgba(255,93,52,0.08)] rb:text-[#FF5D34]': errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime,
                   // 助手消息样式
                   'rb:bg-[rgba(21,94,239,0.08)] rb:border-[rgba(21,94,239,0.30)]': item.role === 'user',
                   // 用户消息样式
-                  'rb:bg-[#FFFFFF] rb:border-[#EBEBEB]': item.role === 'assistant' && (item.content || item.content === ''),
+                  'rb:bg-[#FFFFFF] rb:border-[#EBEBEB]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
                 })}>
+                  {item.subContent && renderRuntime && renderRuntime(item, index)}
                   {/* 使用Markdown组件渲染消息内容 */}
-                  <Markdown content={item.content ?? errorDesc ?? ''} />
+                  <Markdown content={renderRuntime ? item.content ?? '' : item.content ?? errorDesc ?? ''} />
                 </div>
                 {/* 底部标签（如时间戳、用户名等） */}
                 {labelPosition === 'bottom' &&
