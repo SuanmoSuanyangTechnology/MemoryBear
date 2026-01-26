@@ -137,8 +137,19 @@ class MemoryPerceptualService:
             memory_items = []
             for memory in memories:
                 meta_data = memory.meta_data or {}
-                content = meta_data.get("content")
-                content = Content(**content)
+                content = meta_data.get("content", {})
+                
+                # 安全地提取 content 字段，提供默认值
+                if content:
+                    content_obj = Content(**content)
+                    topic = content_obj.topic
+                    domain = content_obj.domain
+                    keywords = content_obj.keywords
+                else:
+                    topic = "Unknown"
+                    domain = "Unknown"
+                    keywords = []
+                
                 memory_item = PerceptualMemoryItem(
                     id=memory.id,
                     perceptual_type=PerceptualType(memory.perceptual_type),
@@ -146,9 +157,10 @@ class MemoryPerceptualService:
                     file_name=memory.file_name,
                     file_ext=memory.file_ext,
                     summary=memory.summary,
-                    topic=content.topic,
-                    domain=content.domain,
-                    keywords=content.keywords,
+                    meta_data=meta_data,
+                    topic=topic,
+                    domain=domain,
+                    keywords=keywords,
                     created_time=int(memory.created_time.timestamp()*1000),
                     storage_service=FileStorageService(memory.storage_service),
                 )
