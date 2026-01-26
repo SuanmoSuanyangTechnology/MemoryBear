@@ -365,7 +365,7 @@ def select_and_format_information(
 # 记忆系统核心能力：写入与读取
 async def ingest_conversations_if_needed(
     conversations: List[str],
-    group_id: str,
+    end_user_id: str,
     reset: bool = False
 ) -> bool:
     """
@@ -384,7 +384,7 @@ async def ingest_conversations_if_needed(
     Args:
         conversations: List of raw conversation texts from LoCoMo dataset
                       Example: ["User: I went to Paris. AI: When was that?", ...]
-        group_id: Target group ID for database storage
+        end_user_id: Target end_user ID for database storage
         reset: Whether to clear existing data first (not implemented in wrapper)
         
     Returns:
@@ -398,7 +398,7 @@ async def ingest_conversations_if_needed(
     try:
         success = await ingest_contexts_via_full_pipeline(
             contexts=conversations,
-            group_id=group_id,
+            end_user_id=end_user_id,
             save_chunk_output=True,
             reset_group=reset
         )

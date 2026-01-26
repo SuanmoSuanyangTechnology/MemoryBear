@@ -14,7 +14,7 @@ python -m app.core.memory.evaluation.locomo.locomo_benchmark
 **检查neo4j指定的grou_id是否摄入数据**
 ```python
 # 1. 进入交互模式
-python -m app.core.memory.evaluation.check_group_data
+python -m app.core.memory.evaluation.check_enduser_data
 
 # 2. 选择 "1" 检查指定 group
 # 3. 输入 group_id，例如: locomo_benchmark

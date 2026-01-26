@@ -68,22 +68,22 @@ async def ingest_contexts_via_full_pipeline(
     
     # Step 0: Reset group if requested
     if reset_group:
-        print(f"[Ingestion] 🗑️  清空 group '{group_id}' 的现有数据...")
+        print(f"[Ingestion] 🗑️  清空 end_user '{end_user_id}' 的现有数据...")
         try:
             from app.repositories.neo4j.neo4j_connector import Neo4jConnector
             connector = Neo4jConnector()
             try:
-                # 删除该 group 的所有节点和关系
+                # 删除该 end_user 的所有节点和关系
                 query = """
-                MATCH (n {group_id: $group_id})
+                MATCH (n {end_user_id: $end_user_id})
                 DETACH DELETE n
                 """
-                await connector.execute_query(query, group_id=group_id)
-                print(f"[Ingestion] ✅ Group '{group_id}' 已清空")
+                await connector.execute_query(query, end_user_id=end_user_id)
+                print(f"[Ingestion] ✅ End User '{end_user_id}' 已清空")
             finally:
                 await connector.close()
         except Exception as e:
-            print(f"[Ingestion] ⚠️  清空 group 失败: {e}")
+            print(f"[Ingestion] ⚠️  清空 end_user 失败: {e}")
             # 继续执行，不中断摄入流程
 
     # Step 1: Initialize LLM client
