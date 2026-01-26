@@ -120,10 +120,9 @@ def _combine_dialogues_for_hybrid(results: Dict[str, Any]) -> List[Dict[str, Any
     return merged
 
 
-
-
 async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid", memory_config: "MemoryConfig" = None) -> Dict[str, Any]:
     end_user_id = end_user_id or SELECTED_GROUP_ID
+
 
     # Load data
     dataset_dir = Path(__file__).resolve().parent.parent / "dataset"
@@ -138,10 +137,12 @@ async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None
         lines = f.readlines()
     items: List[Dict[str, Any]] = [json.loads(l) for l in lines[:sample_size]]
 
+
     # 改为：每条样本仅摄入一个上下文（完整对话转录），避免多上下文摄入
     # 说明：memsciqa 数据集的每个样本天然只有一个对话，保持按样本一上下文的策略
     contexts: List[str] = [build_context_from_dialog(item) for item in items]
     await ingest_contexts_via_full_pipeline(contexts, end_user_id)
+
 
     # LLM client (使用异步调用)
     from app.db import get_db
