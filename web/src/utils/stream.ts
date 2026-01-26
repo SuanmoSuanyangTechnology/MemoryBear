@@ -131,7 +131,7 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
         break
       case 400:
         const error = await response.json();
-        message.warning(errorData.error);
+        message.warning(error.error);
         throw error || 'Bad Request';
       case 504:
         const errorJson = await response.json();
