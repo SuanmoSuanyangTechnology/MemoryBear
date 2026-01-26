@@ -284,7 +284,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           input: {
             type: 'variableList',
-            filterNodeTypes: ['knowledge-retrieval', 'iteration', 'loop'],
+            filterNodeTypes: ['knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor'],
             filterVariableNames: ['message']
           },
           parallel: {

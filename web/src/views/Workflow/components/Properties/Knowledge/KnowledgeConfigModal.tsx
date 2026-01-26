@@ -66,7 +66,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
   useEffect(() => {
     if (values?.retrieve_type) {
       const fieldsToReset = Object.keys(values).filter(key => 
-        key !== 'kb_id' && key !== 'retrieve_type'
+        key !== 'kb_id' && key !== 'retrieve_type' && key !== 'top_k'
       ) as (keyof KnowledgeConfigForm)[];
       form.resetFields(fieldsToReset);
     }
@@ -108,6 +108,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
               label: t(`application.${key}`),
               value: key,
             }))}
+            // onChange={handleChange}
           />
         </FormItem>
         {/* Top K */}
@@ -116,13 +117,12 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           label={t('application.top_k')}
           rules={[{ required: true, message: t('common.pleaseEnter') }]}
           extra={t('application.top_k_desc')}
-          initialValue={5}
         >
           <InputNumber
             style={{ width: '100%' }}
             min={1}
             max={20}
-            onChange={(value) => form.setFieldValue('top_k', value)}
+            // onChange={(value) => form.setFieldValue('top_k', value)}
           />
         </FormItem>
         {/* 语义相似度阈值 similarity_threshold */}
