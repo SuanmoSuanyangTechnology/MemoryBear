@@ -43,7 +43,7 @@ class PerceptualMemoryItem(BaseModel):
     file_name: str = Field(..., description="File name")
     file_ext: str = Field(..., description="File extension")
     summary: Optional[str] = Field(None, description="summary")
-    meta_data: str = Field(...,description="")
+    meta_data: Optional[dict] = Field(None, description="Metadata information")
     created_time: int = Field(..., description="create time")
 
     topic: str = Field(..., description="topic")
