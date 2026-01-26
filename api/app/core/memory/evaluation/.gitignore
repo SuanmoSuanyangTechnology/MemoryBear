@@ -4,9 +4,10 @@
 # 保留示例文件
 !.env.evaluation.example
 
-# 忽略测试结果
+# 忽略测试结果文件
 */results/*.json
 */results/*.log
 
-# 保留 results 目录结构
-!*/results/.gitkeep
+# 忽略数据集文件（文件过大，不应提交到 Git）
+dataset/*.json
+dataset/*.jsonl
