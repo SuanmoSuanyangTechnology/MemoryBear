@@ -591,7 +591,7 @@ def _resolve_relative_times_cn_en(text: str, anchor: datetime) -> str:
 
 async def run_longmemeval_test(
     sample_size: int = 3,
-    end_user_id: str = "longmemeval_zh_bak_3",
+    end_user_id: str | None = None,
     search_limit: int = 8,
     context_char_budget: int = 4000,
     llm_temperature: float = 0.0,
@@ -606,6 +606,10 @@ async def run_longmemeval_test(
     skip_ingest: bool = False,
 ) -> Dict[str, Any]:
     """LongMemEval 评估测试：增强时间推理能力"""
+    
+    # Use environment variable with fallback chain
+    if end_user_id is None:
+        end_user_id = os.getenv("LONGMEMEVAL_END_USER_ID") or os.getenv("EVAL_END_USER_ID", "longmemeval_zh_bak_3")
 
     # 数据路径
     if not data_path:
@@ -1258,7 +1262,7 @@ def main():
     parser.add_argument("--sample-size", type=int, default=3, help="样本数量（<=0 表示全部）")
     parser.add_argument("--all", action="store_true", help="评估全部样本（覆盖 --sample-size）")
     parser.add_argument("--start-index", type=int, default=0, help="起始样本索引")
-    parser.add_argument("--group-id", type=str, default="longmemeval_zh_bak_3", help="图数据库 Group ID")
+    parser.add_argument("--end-user-id", type=str, default=None, help="图数据库 End User ID，默认使用环境变量")
     parser.add_argument("--search-limit", type=int, default=8, help="检索条数上限")
     parser.add_argument("--context-char-budget", type=int, default=4000, help="上下文字符预算")
     parser.add_argument("--llm-temperature", type=float, default=0.0, help="LLM 温度")

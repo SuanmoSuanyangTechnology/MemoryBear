@@ -8,13 +8,13 @@ Placed in evaluation directory to avoid circular imports with src modules.
 
 # Entity search queries
 SEARCH_ENTITIES_BY_NAME = """
-MATCH (e:Entity)
+MATCH (e:ExtractedEntity)
 WHERE e.name = $name
 RETURN e
 """
 
 SEARCH_ENTITIES_BY_NAME_FALLBACK = """
-MATCH (e:Entity)
+MATCH (e:ExtractedEntity)
 WHERE e.name CONTAINS $name
 RETURN e
 """

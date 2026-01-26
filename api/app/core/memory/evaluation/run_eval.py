@@ -32,8 +32,9 @@ async def run(
     start_index: int | None = None,
     max_contexts_per_item: int | None = None,
 ) -> Dict[str, Any]:
-    # 恢复原始风格：统一入口做路由，并沿用各数据集既有默认
-    end_user_id = end_user_id or SELECTED_GROUP_ID
+    # Use environment variable with fallback chain if not provided
+    if end_user_id is None:
+        end_user_id = os.getenv("EVAL_END_USER_ID", "benchmark_default")
 
     if reset_group:
         connector = Neo4jConnector()
