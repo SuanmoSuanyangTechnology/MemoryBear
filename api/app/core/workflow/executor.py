@@ -368,7 +368,9 @@ class WorkflowExecutor:
                                 "timestamp": int(datetime.datetime.fromisoformat(
                                     data.get("timestamp")
                                 ).timestamp() * 1000),
-                                "state": result.get("node_outputs", {}).get(node_name),
+                                "input": result.get("node_outputs", {}).get(node_name, {}).get("input"),
+                                "output": result.get("node_outputs", {}).get(node_name, {}).get("output"),
+                                "elapsed_time": result.get("node_outputs", {}).get(node_name, {}).get("elapsed_time"),
                             }
                         }
 
