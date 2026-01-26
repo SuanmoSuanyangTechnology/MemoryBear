@@ -121,6 +121,7 @@ def _combine_dialogues_for_hybrid(results: Dict[str, Any]) -> List[Dict[str, Any
 
 
 
+
 async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid", memory_config: "MemoryConfig" = None) -> Dict[str, Any]:
     end_user_id = end_user_id or SELECTED_GROUP_ID
 
@@ -312,7 +313,6 @@ def main():
     parser.add_argument("--group-id", type=str, default=None, help="可选 end_user_id，默认取 runtime.json")
     parser.add_argument("--search-limit", type=int, default=8, help="每类检索最大返回数")
     parser.add_argument("--context-char-budget", type=int, default=4000, help="上下文字符预算")
-
     parser.add_argument("--llm-temperature", type=float, default=0.0, help="LLM 温度")
     parser.add_argument("--llm-max-tokens", type=int, default=default_llm_max_tokens, 
                         help=f"LLM 最大生成长度 (env: MEMSCIQA_LLM_MAX_TOKENS={env_llm_max_tokens or 'not set'})")
