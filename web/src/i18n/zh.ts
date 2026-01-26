@@ -2076,6 +2076,10 @@ export const zh = {
       arrange: '整理',
       redo: '重做',
       undo: '撤销',
+
+      input: '输入',
+      output: '输出',
+      error: '错误信息',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',

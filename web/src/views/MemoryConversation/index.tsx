@@ -45,7 +45,7 @@ const searchSwitchList = [
 ]
 
 export interface TestParams {
-  group_id: string;
+  end_user_id: string;
   message: string;
   search_switch: string;
   history: { role: string; content: string }[];
@@ -107,7 +107,7 @@ const MemoryConversation: FC = () => {
     setLoading(true)
     readService({
       message: msg,
-      group_id: userId,
+      end_user_id: userId,
       search_switch: search_switch,
       history: [],
     })
@@ -204,7 +204,7 @@ const MemoryConversation: FC = () => {
                       }
                     )}
                   >
-                    <div className="rb:text-[16px] rb:font-medium rb:leading-[22px] rb:mb-6">{log.title}</div>
+                    <div className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:mb-6">{log.title}</div>
                     {log.type === 'problem_split' && Array.isArray(log.data) && log.data.length > 0 
                       ? <Space size={12} direction="vertical" style={{width: '100%'}}>
                         {log.data.map(vo => (

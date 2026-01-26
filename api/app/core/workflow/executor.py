@@ -133,7 +133,7 @@ class WorkflowExecutor:
                 for node in self.workflow_config.get("nodes")
                 if node.get("type") in [NodeType.LOOP, NodeType.ITERATION]
             ],  # loop, iteration node id
-            "looping": False,  # loop runing flag, only use in loop node,not use in main loop
+            "looping": 0,  # loop runing flag, only use in loop node,not use in main loop
             "activate": {
                 self.start_node_id: True
             }
@@ -261,7 +261,7 @@ class WorkflowExecutor:
             "data": {
                 "execution_id": self.execution_id,
                 "workspace_id": self.workspace_id,
-                "timestamp": start_time.isoformat()
+                "timestamp": int(start_time.timestamp() * 1000)
             }
         }
 
@@ -293,20 +293,33 @@ class WorkflowExecutor:
                     # Handle custom streaming events (chunks from nodes via stream writer)
                     chunk_count += 1
                     event_type = data.get("type", "node_chunk")  # "message" or "node_chunk"
-                    logger.info(f"[CUSTOM] ✅ 收到 {event_type} #{chunk_count} from {data.get('node_id')}"
-                                f"- execution_id: {self.execution_id}")
-                    yield {
-                        "event": event_type,  # "message" or "node_chunk"
-                        "data": {
-                            "node_id": data.get("node_id"),
-                            "chunk": data.get("chunk"),
-                            "full_content": data.get("full_content"),
-                            "chunk_index": data.get("chunk_index"),
-                            "is_prefix": data.get("is_prefix"),
-                            "is_suffix": data.get("is_suffix"),
-                            "conversation_id": input_data.get("conversation_id"),
+                    if event_type in ("message", "node_chunk"):
+                        logger.info(f"[CUSTOM] ✅ 收到 {event_type} #{chunk_count} from {data.get('node_id')}"
+                                    f"- execution_id: {self.execution_id}")
+                        yield {
+                            "event": event_type,  # "message" or "node_chunk"
+                            "data": {
+                                "node_id": data.get("node_id"),
+                                "chunk": data.get("chunk"),
+                                "full_content": data.get("full_content"),
+                                "chunk_index": data.get("chunk_index"),
+                                "is_prefix": data.get("is_prefix"),
+                                "is_suffix": data.get("is_suffix"),
+                                "conversation_id": input_data.get("conversation_id"),
+                            }
                         }
-                    }
+                    elif event_type == "node_error":
+                        yield {
+                            "event": event_type,  # "message" or "node_chunk"
+                            "data": {
+                                "node_id": data.get("node_id"),
+                                "status": "failed",
+                                "input": data.get("input_data"),
+                                "elapsed_time": data.get("elapsed_time"),
+                                "output": None,
+                                "error": data.get("error")
+                            }
+                        }
 
                 elif mode == "debug":
                     # Handle debug information (node execution status)
@@ -325,14 +338,15 @@ class WorkflowExecutor:
                         conversation_id = input_data.get("conversation_id")
                         logger.info(f"[NODE-START] Node starts execution: {node_name} "
                                     f"- execution_id: {self.execution_id}")
-
                         yield {
                             "event": "node_start",
                             "data": {
                                 "node_id": node_name,
                                 "conversation_id": conversation_id,
                                 "execution_id": self.execution_id,
-                                "timestamp": data.get("timestamp"),
+                                "timestamp": int(datetime.datetime.fromisoformat(
+                                    data.get("timestamp")
+                                ).timestamp() * 1000),
                             }
                         }
                     elif event_type == "task_result":
@@ -351,13 +365,18 @@ class WorkflowExecutor:
                                 "node_id": node_name,
                                 "conversation_id": conversation_id,
                                 "execution_id": self.execution_id,
-                                "timestamp": data.get("timestamp"),
-                                "state": result.get("node_outputs", {}).get(node_name),
+                                "timestamp": int(datetime.datetime.fromisoformat(
+                                    data.get("timestamp")
+                                ).timestamp() * 1000),
+                                "input": result.get("node_outputs", {}).get(node_name, {}).get("input"),
+                                "output": result.get("node_outputs", {}).get(node_name, {}).get("output"),
+                                "elapsed_time": result.get("node_outputs", {}).get(node_name, {}).get("elapsed_time"),
                             }
                         }
 
                 elif mode == "updates":
                     # Handle state updates - store final state
+                    # TODO:流式输出点
                     logger.debug(f"[UPDATES] 收到 state 更新 from {list(data.keys())} "
                                  f"- execution_id: {self.execution_id}")
 

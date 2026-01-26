@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2026-01-12 16:34:59
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-01-16 15:38:35
+ * @LastEditTime: 2026-01-23 19:07:36
  */
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -21,6 +21,13 @@ const GuideCard: React.FC = () => {
     if (!versionInfo) return null;
     const currentLang = i18n.language;
     return currentLang === 'zh' ? versionInfo.introduction : (versionInfo.introduction_en || versionInfo.introduction);
+  };
+
+  // 解析换行符和HTML的方法
+  const parseContent = (text: string) => {
+    if (!text) return '';
+    // 将 \n 转换为 <br/> 标签
+    return text.replace(/\\n/g, '<br/>');
   };
 
   useEffect(() => {
@@ -58,13 +65,16 @@ const GuideCard: React.FC = () => {
                       {t('version.name')}: {introduction.codeName}
                     </span>
                 </div>
-                <p className='rb:text-sm rb:text-[#5B6167] rb:leading-5 rb:mt-2 '>  
-                    {introduction.upgradePosition}
-                </p>
+                <p 
+                  className='rb:text-sm rb:text-[#5B6167] rb:leading-5 rb:mt-2'
+                  dangerouslySetInnerHTML={{ __html: introduction.upgradePosition }}
+                />
                 {introduction.coreUpgrades?.map((item: string, index: number) => (
-                    <p key={index} className='rb:text-sm rb:text-[#5B6167] rb:leading-5'>
-                      {index + 1}. {item}
-                    </p>
+                    <p 
+                      key={index} 
+                      className='rb:text-sm rb:text-[#5B6167] rb:leading-5'
+                      dangerouslySetInnerHTML={{ __html: item }}
+                    />
                 ))}
               </>) : null;
             })()}
