@@ -4,7 +4,7 @@ import datetime
 from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
-from app.schemas import ModelParameters
+from app.schemas.app_schema import ModelParameters
 
 
 # ==================== 子 Agent 配置 ====================

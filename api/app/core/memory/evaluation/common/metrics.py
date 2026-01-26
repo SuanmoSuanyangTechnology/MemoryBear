@@ -2,7 +2,7 @@ import math
 import re
 from typing import List, Dict
 
-
+# 评估指标的实现
 def _normalize(text: str) -> List[str]:
     """Lowercase, strip punctuation, and split into tokens."""
     text = text.lower().strip()

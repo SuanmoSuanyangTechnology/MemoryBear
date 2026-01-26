@@ -15,8 +15,14 @@ import json
 import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
+from pathlib import Path
+from dotenv import load_dotenv
 
-from app.core.memory.utils.definitions import PROJECT_ROOT
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent.parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+
 from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
 
 
@@ -82,7 +88,7 @@ def load_locomo_data(
     return qa_items[:sample_size]
 
 
-def extract_conversations(data_path: str, max_dialogues: int = 1) -> List[str]:
+def extract_conversations(data_path: str, max_dialogues: int = 1, max_messages_per_dialogue: Optional[int] = None) -> List[str]:
     """
     Extract conversation texts from LoCoMo data for ingestion.
     
@@ -93,6 +99,7 @@ def extract_conversations(data_path: str, max_dialogues: int = 1) -> List[str]:
     Args:
         data_path: Path to locomo10.json file
         max_dialogues: Maximum number of dialogues to extract (default: 1)
+        max_messages_per_dialogue: Maximum messages per dialogue (default: None = all messages)
         
     Returns:
         List of conversation strings formatted for ingestion.
@@ -141,13 +148,21 @@ def extract_conversations(data_path: str, max_dialogues: int = 1) -> List[str]:
                         continue
                     
                     lines.append(f"{role}: {text}")
+                    
+                    # Limit messages if specified
+                    if max_messages_per_dialogue and len(lines) >= max_messages_per_dialogue:
+                        break
+            
+            # Break outer loop if we've reached the message limit
+            if max_messages_per_dialogue and len(lines) >= max_messages_per_dialogue:
+                break
         
         if lines:
             contents.append("\n".join(lines))
     
     return contents
 
-
+# 时间解析：将相对时间表达转换为绝对日期
 def resolve_temporal_references(text: str, anchor_date: datetime) -> str:
     """
     Resolve relative temporal references to absolute dates.
@@ -225,6 +240,8 @@ def resolve_temporal_references(text: str, anchor_date: datetime) -> str:
         t,
         flags=re.IGNORECASE
     )
+    
+    # 中文支持
     t = re.sub(
         r"\bnext\s+week\b",
         (anchor_date + timedelta(days=7)).date().isoformat(),
@@ -345,6 +362,50 @@ def select_and_format_information(
     
     return "\n\n".join(selected)
 
+# 记忆系统核心能力：写入与读取
+async def ingest_conversations_if_needed(
+    conversations: List[str],
+    end_user_id: str,
+    reset: bool = False
+) -> bool:
+    """
+    Wrapper for conversation ingestion using external extraction pipeline.
+    
+    This function populates the Neo4j database with processed conversation data
+    (chunks, statements, entities) so that the retrieval system has memory to search.
+    
+    The ingestion process:
+    1. Parses conversation text into dialogue messages
+    2. Chunks the dialogues into semantic units
+    3. Extracts statements and entities using LLM
+    4. Generates embeddings for all content
+    5. Stores everything in Neo4j graph database
+    
+    Args:
+        conversations: List of raw conversation texts from LoCoMo dataset
+                      Example: ["User: I went to Paris. AI: When was that?", ...]
+        end_user_id: Target end_user ID for database storage
+        reset: Whether to clear existing data first (not implemented in wrapper)
+        
+    Returns:
+        True if successful, False otherwise
+        
+    Note:
+        The external function uses "contexts" to mean "conversation texts".
+        This runs the full extraction pipeline: chunking → entity extraction → 
+        statement extraction → embedding → Neo4j storage.
+    """
+    try:
+        success = await ingest_contexts_via_full_pipeline(
+            contexts=conversations,
+            end_user_id=end_user_id,
+            save_chunk_output=True,
+            reset_group=reset
+        )
+        return success
+    except Exception as e:
+        print(f"[Ingestion] Failed to ingest conversations: {e}")
+        return False
 
 async def retrieve_relevant_information(
     question: str,
@@ -385,7 +446,7 @@ async def retrieve_relevant_information(
         search_graph,
         search_graph_by_embedding
     )
-    from app.core.memory.storage_services.search import run_hybrid_search
+    from app.core.memory.src.search import run_hybrid_search
     
     contexts_all: List[str] = []
     

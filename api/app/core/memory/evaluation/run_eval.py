@@ -2,20 +2,16 @@ import argparse
 import asyncio
 import json
 import os
-import sys
 from typing import Any, Dict
+from pathlib import Path
+from dotenv import load_dotenv
 
-# Add src directory to Python path for proper imports when running from evaluation directory
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
-
-try:
-    from dotenv import load_dotenv
-except Exception:
-    def load_dotenv():
-        return None
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.utils.config.definitions import SELECTED_GROUP_ID, PROJECT_ROOT
 
 from app.core.memory.evaluation.memsciqa.evaluate_qa import run_memsciqa_eval
 from app.core.memory.evaluation.longmemeval.qwen_search_eval import run_longmemeval_test
@@ -36,8 +32,9 @@ async def run(
     start_index: int | None = None,
     max_contexts_per_item: int | None = None,
 ) -> Dict[str, Any]:
-    # 恢复原始风格：统一入口做路由，并沿用各数据集既有默认
-    end_user_id = end_user_id or SELECTED_GROUP_ID
+    # Use environment variable with fallback chain if not provided
+    if end_user_id is None:
+        end_user_id = os.getenv("EVAL_END_USER_ID", "benchmark_default")
 
     if reset_group:
         connector = Neo4jConnector()
