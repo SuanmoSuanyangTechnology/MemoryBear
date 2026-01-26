@@ -40,6 +40,7 @@ async def ingest_contexts_via_full_pipeline(
     embedding_name: str | None = None,
     save_chunk_output: bool = False,
     save_chunk_output_path: str | None = None,
+    reset_group: bool = False,
 ) -> bool:
     """
     使用新的 ExtractionOrchestrator 运行完整的提取流水线
@@ -54,11 +55,36 @@ async def ingest_contexts_via_full_pipeline(
         embedding_name: Optional embedding model ID; defaults to SELECTED_EMBEDDING_ID.
         save_chunk_output: If True, write chunked DialogData list to a JSON file for debugging.
         save_chunk_output_path: Optional output path; defaults to src/chunker_test_output.txt.
+        reset_group: If True, clear existing data for this group before ingestion.
     Returns:
         True if data saved successfully, False otherwise.
     """
     chunker_strategy = chunker_strategy or os.getenv("EVAL_CHUNKER_STRATEGY", "RecursiveChunker")
     embedding_name = embedding_name or os.getenv("EVAL_EMBEDDING_ID")
+    
+    # Check if we should reset from environment variable if not explicitly set
+    if not reset_group:
+        reset_group = os.getenv("EVAL_RESET_ON_INGEST", "false").lower() in ("true", "1", "yes")
+    
+    # Step 0: Reset group if requested
+    if reset_group:
+        print(f"[Ingestion] 🗑️  清空 group '{group_id}' 的现有数据...")
+        try:
+            from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+            connector = Neo4jConnector()
+            try:
+                # 删除该 group 的所有节点和关系
+                query = """
+                MATCH (n {group_id: $group_id})
+                DETACH DELETE n
+                """
+                await connector.execute_query(query, group_id=group_id)
+                print(f"[Ingestion] ✅ Group '{group_id}' 已清空")
+            finally:
+                await connector.close()
+        except Exception as e:
+            print(f"[Ingestion] ⚠️  清空 group 失败: {e}")
+            # 继续执行，不中断摄入流程
 
     # Step 1: Initialize LLM client
     llm_client = None
