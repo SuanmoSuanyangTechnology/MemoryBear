@@ -123,6 +123,20 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
     let response = await makeSSERequest(url, data, token || '', config);
 
     switch (response.status) {
+      case 500:
+      case 502:
+        const errorData = await response.json();
+        errorData.error || i18n.t('common.serviceUpgrading');
+        message.warning(errorData.error || i18n.t('common.serviceUpgrading'));
+        break
+      case 400:
+        const error = await response.json();
+        message.warning(error.error);
+        throw error || 'Bad Request';
+      case 504:
+        const errorJson = await response.json();
+        message.warning(errorJson.error || i18n.t('common.serverError'));
+        break
       case 401:
         if (url?.includes('/public')) {
           return message.warning(i18n.t('common.publicApiCannotRefreshToken'));

@@ -59,6 +59,11 @@ const PerceptualLastInfo: FC<{ type: 'last_visual' | 'last_listen' | 'last_text'
     })
   }
 
+  const handleDownload = () => {
+    if (!data.file_path) return
+    window.open(data.file_path, '_blank')
+  }
+
   return (
     <RbCard
       title={t(`perceptualDetail.${type}`)}
@@ -78,17 +83,17 @@ const PerceptualLastInfo: FC<{ type: 'last_visual' | 'last_listen' | 'last_text'
                     <Image src={data.file_path} alt={data.file_name} />
                     // <img src={data.file_path} alt={data.file_name} className="rb:max-w-full rb:max-h-full rb:object-contain" />
                   ) : (
-                    <div className="rb:text-gray-500">{data.file_name}</div>
+                    <div className="rb:text-[#5B6167]">{data.file_name}</div>
                   )
                 ) : type === 'last_listen' && /\.(mp3|wav|ogg|m4a|aac)$/i.test(data.file_name) ? (
                   <audio controls className="rb:w-full">
                     <source src={data.file_path} />
                   </audio>
                 ) : (
-                  <div className="rb:text-gray-500">{data.file_name}</div>
+                  <div className="rb:text-[#5B6167] rb:cursor-pointer" onClick={handleDownload}>{data.file_name}</div>
                 )
               ) : (
-                <div className="rb:text-gray-400">No file</div>
+                <div className="rb:text-[#5B6167]">{t('empty.tableEmpty')}</div>
               )}
             </div>
             <Space size={4} direction="vertical" className="rb:w-full rb:mt-3">
