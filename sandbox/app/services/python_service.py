@@ -37,7 +37,7 @@ async def run_python_code(code: str, preload: str, options: RunnerOptions):
         if result.exit_code == -signal.SIGSYS:
             return error_response(31, "sandbox security policy violation")
 
-        if result.stderr:
+        if result.stderr and result.exit_code != 0:
             return error_response(500, result.stderr)
         
         return success_response(RunCodeResponse(
