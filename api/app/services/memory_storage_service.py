@@ -188,7 +188,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "config_desc": config.config_desc,
                 "workspace_id": str(config.workspace_id) if config.workspace_id else None,
                 "end_user_id": config.end_user_id,
-                "config_id_old": config.user_id,
+                "config_id_old": config.config_id_old,
                 "apply_id": config.apply_id,
                 "llm_id": config.llm_id,
                 "embedding_id": config.embedding_id,
