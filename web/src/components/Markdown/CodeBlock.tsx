@@ -6,6 +6,9 @@ import CopyBtn from './CopyBtn';
 
 type ICodeBlockProps = {
   value: string;
+  needCopy?: boolean;
+  size?: 'small' | 'default';
+  showLineNumbers?: boolean;
 }
 
 // enum languageType {
@@ -16,6 +19,9 @@ type ICodeBlockProps = {
 
 const CodeBlock: FC<ICodeBlockProps> = ({
   value,
+  needCopy = true,
+  size = 'default',
+  showLineNumbers = false
 }) => {
 
   return (
@@ -23,24 +29,26 @@ const CodeBlock: FC<ICodeBlockProps> = ({
       <SyntaxHighlighter
         style={atelierHeathLight}
         customStyle={{
-          padding: '16px 20px 16px 24px',
+          padding: '8px 12px 8px 12px',
           backgroundColor: '#F0F3F8',
           borderRadius: 8,
+          fontSize: size === 'small' ? 12 : 14,
+          wordBreak: 'break-all'
         }}
         language="json"
-        showLineNumbers={false}
+        showLineNumbers={showLineNumbers}
         PreTag="div"
       >
         {value}
       </SyntaxHighlighter>
-      <CopyBtn
+      {needCopy && <CopyBtn
         value={value}
         style={{
           position: 'absolute',
           top: 20,
           right: 20,
         }}
-      />
+      />}
     </div>
   )
 }

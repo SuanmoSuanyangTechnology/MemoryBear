@@ -1064,13 +1064,16 @@ class ExtractionOrchestrator:
                     if statement.triplet_extraction_info:
                         triplet_info = statement.triplet_extraction_info
 
-                        # 创建实体索引到ID的映射
+                        # 创建实体索引到ID的映射（支持多种索引方式）
                         entity_idx_to_id = {}
                         
                         # 创建实体节点
                         for entity_idx, entity in enumerate(triplet_info.entities):
-                            # 映射实体索引到实体ID
+                            # 映射实体索引到实体ID（使用多个键以提高容错性）
+                            # 1. 使用实体自己的 entity_idx
                             entity_idx_to_id[entity.entity_idx] = entity.id
+                            # 2. 使用枚举索引（从0开始）
+                            entity_idx_to_id[entity_idx] = entity.id
                             
                             if entity.id not in entity_id_set:
                                 entity_connect_strength = getattr(entity, 'connect_strength', 'Strong')
@@ -1149,9 +1152,18 @@ class ExtractionOrchestrator:
                                         relationship_result
                                     )
                             else:
-                                logger.warning(
-                                    f"跳过三元组 - 无法找到实体ID: subject_id={triplet.subject_id}, "
-                                    f"object_id={triplet.object_id}, statement_id={statement.id}"
+                                # 改进的警告信息，包含更多调试信息
+                                missing_subject = "subject" if not subject_entity_id else ""
+                                missing_object = "object" if not object_entity_id else ""
+                                missing_both = " and " if (not subject_entity_id and not object_entity_id) else ""
+                                
+                                logger.debug(
+                                    f"跳过三元组 - 无法找到{missing_subject}{missing_both}{missing_object}实体ID: "
+                                    f"subject_id={triplet.subject_id} ({triplet.subject_name}), "
+                                    f"object_id={triplet.object_id} ({triplet.object_name}), "
+                                    f"predicate={triplet.predicate}, "
+                                    f"statement_id={statement.id}, "
+                                    f"available_indices={sorted(entity_idx_to_id.keys())}"
                                 )
 
         logger.info(

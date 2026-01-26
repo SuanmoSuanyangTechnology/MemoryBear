@@ -2,81 +2,67 @@ import argparse
 import asyncio
 import json
 import os
+import time
 import re
 import statistics
-import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import List, Dict, Any
+from pathlib import Path
 
-try:
-    from dotenv import load_dotenv
-except Exception:
-    def load_dotenv():
-        return None
+from dotenv import load_dotenv
+
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent.parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+    print(f"✅ 加载评估配置: {eval_config_path}")
 
 # 与现有评估脚本保持一致的导入方式
-from app.core.memory.evaluation.common.metrics import (
-    avg_context_tokens,
-    jaccard,
-    latency_stats,
-)
-from app.core.memory.evaluation.common.metrics import f1_score as common_f1
-from app.core.memory.evaluation.dialogue_queries import SEARCH_ENTITIES_BY_NAME
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.memory.utils.config.definitions import (
-    PROJECT_ROOT,
-    SELECTED_EMBEDDING_ID,
-    SELECTED_LLM_ID,
-)
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-from app.core.models.base import RedBearModelConfig
-from app.db import get_db_context
-from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.services.memory_config_service import MemoryConfigService
-
-try:
-    from app.core.memory.evaluation.common.metrics import exact_match
-except Exception:
-    # 兜底：简单的大小写不敏感比较
-    def exact_match(pred: str, ref: str) -> bool:
-        return str(pred).strip().lower() == str(ref).strip().lower()
+from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
+from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+from app.core.models.base import RedBearModelConfig
+from app.core.memory.utils.config.config_utils import get_embedder_config
+from app.core.memory.utils.llm.llm_utils import get_llm_client
+from app.core.memory.evaluation.dialogue_queries import SEARCH_ENTITIES_BY_NAME
+from app.core.memory.evaluation.common.metrics import f1_score as common_f1, jaccard, latency_stats, avg_context_tokens
+from app.core.memory.evaluation.common.metrics import exact_match
 
 
 def load_dataset_any(path: str) -> List[Dict[str, Any]]:
-    """健壮地加载数据集（兼容 list 或多段 JSON）。"""
+    """健壮地加载数据集，支持三种格式：
+    1. 标准 JSON 数组: [{...}, {...}]
+    2. 单个 JSON 对象: {...}
+    3. JSONL 格式（每行一个 JSON）: {...}\n{...}\n{...}
+    """
     with open(path, "r", encoding="utf-8") as f:
-        s = f.read().strip()
+        content = f.read().strip()
+    
+    # 尝试标准 JSON 解析
     try:
-        obj = json.loads(s)
-        if isinstance(obj, list):
-            return obj
-        elif isinstance(obj, dict):
-            return [obj]
+        data = json.loads(content)
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        elif isinstance(data, dict):
+            return [data]
     except json.JSONDecodeError:
         pass
-    dec = json.JSONDecoder()
-    idx = 0
-    items: List[Dict[str, Any]] = []
-    while idx < len(s):
-        while idx < len(s) and s[idx].isspace():
-            idx += 1
-        if idx >= len(s):
-            break
+    
+    # 尝试 JSONL 格式（每行一个 JSON 对象）
+    items = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
         try:
-            obj, end = dec.raw_decode(s, idx)
-            if isinstance(obj, list):
-                for it in obj:
-                    if isinstance(it, dict):
-                        items.append(it)
-            elif isinstance(obj, dict):
+            obj = json.loads(line)
+            if isinstance(obj, dict):
                 items.append(obj)
-            idx = end
+            elif isinstance(obj, list):
+                items.extend(item for item in obj if isinstance(item, dict))
         except json.JSONDecodeError:
-            nl = s.find("\n", idx)
-            if nl == -1:
-                break
-            idx = nl + 1
+            continue
+    
     return items
 
 
@@ -640,15 +626,15 @@ async def run_longmemeval_test(
 
     # 数据路径
     if not data_path:
-        # 固定使用中文数据集：data/longmemeval_oracle_zh.json
-        zh_proj = os.path.join(PROJECT_ROOT, "data", "longmemeval_oracle_zh.json")
-        zh_cwd = os.path.join(os.getcwd(), "data", "longmemeval_oracle_zh.json")
-        if os.path.exists(zh_proj):
-            data_path = zh_proj
-        elif os.path.exists(zh_cwd):
-            data_path = zh_cwd
-        else:
-            raise FileNotFoundError("未找到数据集: data/longmemeval_oracle_zh.json，请确保其存在于项目根目录或当前工作目录的 data 目录下。")
+        # 固定使用中文数据集：dataset/longmemeval_oracle_zh.json
+        dataset_dir = Path(__file__).resolve().parent.parent / "dataset"
+        data_path = str(dataset_dir / "longmemeval_oracle_zh.json")
+        
+        if not os.path.exists(data_path):
+            raise FileNotFoundError(
+                f"数据集文件不存在: {data_path}\n"
+                f"请将 longmemeval_oracle_zh.json 放置在: {dataset_dir}"
+            )
 
     qa_list: List[Dict[str, Any]] = load_dataset_any(data_path)
     # 支持评估全部样本：当 sample_size <= 0 时，取从 start_index 到末尾
@@ -658,13 +644,9 @@ async def run_longmemeval_test(
         items = qa_list[start_index:start_index + sample_size]
 
     # 初始化组件 - 使用异步LLM客户端
-    with get_db_context() as db:
-        factory = MemoryClientFactory(db)
-        llm_client = factory.get_llm_client(SELECTED_LLM_ID)
+    llm_client = get_llm_client(os.getenv("EVAL_LLM_ID"))
     connector = Neo4jConnector()
-    with get_db_context() as db:
-        config_service = MemoryConfigService(db)
-        cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
+    cfg_dict = get_embedder_config(os.getenv("EVAL_EMBEDDING_ID"))
     embedder = OpenAIEmbedderClient(
         model_config=RedBearModelConfig.model_validate(cfg_dict)
     )
@@ -1203,8 +1185,8 @@ async def run_longmemeval_test(
                 "search_limit": search_limit,
                 "context_char_budget": context_char_budget,
                 "search_type": search_type,
-                "llm_id": SELECTED_LLM_ID,
-                "embedding_id": SELECTED_EMBEDDING_ID,
+                "llm_id": os.getenv("EVAL_LLM_ID"),
+                "embedding_id": os.getenv("EVAL_EMBEDDING_ID"),
                 "sample_size": sample_size,
                 "start_index": start_index,
             },

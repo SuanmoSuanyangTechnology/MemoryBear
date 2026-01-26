@@ -1,29 +1,28 @@
 # file name: check_neo4j_connection_fixed.py
 import asyncio
-import json
-import math
 import os
-import re
 import sys
+import json
 import time
+import math
+import re
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import List, Dict, Any
 from pathlib import Path
-
 from dotenv import load_dotenv
 
-# 1
-# 添加项目根目录到路径
-current_dir = Path(__file__).resolve().parent
-project_root = str(current_dir.parent)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-# 关键：将 src 目录置于最前，确保从当前仓库加载模块
-src_dir = os.path.join(project_root, "src")
-if src_dir not in sys.path:
-    sys.path.insert(0, src_dir)
-
+# Load main .env
 load_dotenv()
+
+# Load evaluation config
+eval_config_path = Path(__file__).resolve().parent.parent / ".env.evaluation"
+if eval_config_path.exists():
+    load_dotenv(eval_config_path, override=True)
+    print(f"✅ 加载评估配置: {eval_config_path}")
+
+# Get group_id from config
+group_id = os.getenv("EVAL_GROUP_ID", "locomo_test")
+print(f"✅ 使用配置的 group_id: {group_id}")
 
 # 首先定义 _loc_normalize 函数，因为其他函数依赖它
 def _loc_normalize(text: str) -> str:
@@ -37,7 +36,7 @@ def _loc_normalize(text: str) -> str:
 
 # 尝试从 metrics.py 导入基础指标
 try:
-    from common.metrics import bleu1, f1_score, jaccard
+    from app.core.memory.evaluation.common.metrics import f1_score, bleu1, jaccard
     print("✅ 从 metrics.py 导入基础指标成功")
 except ImportError as e:
     print(f"❌ 从 metrics.py 导入失败: {e}")
@@ -107,23 +106,8 @@ except ImportError as e:
 
 # 尝试从 qwen_search_eval.py 导入 LoCoMo 特定指标
 try:
-    # 添加 evaluation 目录路径
-    evaluation_dir = os.path.join(project_root, "evaluation")
-    if evaluation_dir not in sys.path:
-        sys.path.insert(0, evaluation_dir)
-
-    # 尝试从不同位置导入
-    try:
-        from locomo.qwen_search_eval import (
-            _resolve_relative_times,
-            loc_f1_score,
-            loc_multi_f1,
-        )
-        print("✅ 从 locomo.qwen_search_eval 导入 LoCoMo 特定指标成功")
-    except ImportError:
-        from qwen_search_eval import _resolve_relative_times, loc_f1_score, loc_multi_f1
-        print("✅ 从 qwen_search_eval 导入 LoCoMo 特定指标成功")
-
+    from app.core.memory.evaluation.locomo.qwen_search_eval import loc_f1_score, loc_multi_f1, _resolve_relative_times
+    print("✅ 从 qwen_search_eval 导入 LoCoMo 特定指标成功")
 except ImportError as e:
     print(f"❌ 从 qwen_search_eval.py 导入失败: {e}")
     # 回退到本地实现 LoCoMo 特定函数
@@ -429,31 +413,36 @@ def enhanced_context_selection(contexts: List[str], question: str, question_inde
 
 async def run_enhanced_evaluation():
     """使用增强方法进行完整评估 - 解决中间性能衰减问题"""
-    try:
-        from dotenv import load_dotenv
-    except Exception:
-        def load_dotenv():
-            return None
-     
+    from dotenv import load_dotenv
+    from uuid import UUID
+    from datetime import datetime
+    from dataclasses import dataclass
+    
     # 修正导入路径：使用 app.core.memory.src 前缀
-    from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-    from app.core.memory.utils.config.definitions import (
-        SELECTED_EMBEDDING_ID,
-        SELECTED_LLM_ID,
-    )
-    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-    from app.core.models.base import RedBearModelConfig
-    from app.db import get_db_context
-    from app.repositories.neo4j.graph_search import search_graph_by_embedding
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+    from app.repositories.neo4j.graph_search import search_graph_by_embedding
+    from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+    from app.core.models.base import RedBearModelConfig
+    from app.core.memory.utils.llm.llm_utils import get_llm_client
+    from app.core.memory.utils.config.config_utils import get_embedder_config
+    from app.schemas.memory_config_schema import MemoryConfig
     from app.services.memory_config_service import MemoryConfigService
+    
+    # Get model IDs from config
+    llm_id = os.getenv("EVAL_LLM_ID", "6dc52e1b-9cec-4194-af66-a74c6307fc3f")
+    embedding_id = os.getenv("EVAL_EMBEDDING_ID", "e2a6392d-ca63-4d59-a523-647420b59cb2")
 
-    # 加载数据
-    # 获取项目根目录
-    current_file = os.path.abspath(__file__)
-    evaluation_dir = os.path.dirname(os.path.dirname(current_file))  # evaluation目录
-    memory_dir = os.path.dirname(evaluation_dir)  # memory目录
-    data_path = os.path.join(memory_dir, "data", "locomo10.json")
+    # 加载数据 - 使用统一的 dataset 目录
+    data_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dataset", "locomo10.json")
+    
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(
+            f"数据集文件不存在: {data_path}\n"
+            f"请将 locomo10.json 放置在: api/app/core/memory/evaluation/dataset/"
+        )
+    
+    print(f"✅ 找到数据文件: {data_path}")
+    
     with open(data_path, "r", encoding="utf-8") as f:
         raw = json.load(f)
 
@@ -463,64 +452,109 @@ async def run_enhanced_evaluation():
             qa_items.extend(entry.get("qa", []))
     else:
         qa_items.extend(raw.get("qa", []))
-    
-    items = qa_items[:20]  # 测试多少个问题
+
+    # 测试多少个问题 - 可通过环境变量设置
+    sample_size = int(os.getenv("LOCOMO_SAMPLE_SIZE", "20"))
+    items = qa_items[:sample_size]
+    print(f"📊 将测试 {len(items)} 个问题（总共 {len(qa_items)} 个可用）")  
     
     # 初始化增强监控器
     monitor = EnhancedEvaluationMonitor(reset_interval=5, performance_threshold=0.6)
     
-    with get_db_context() as db:
-        factory = MemoryClientFactory(db)
-        llm = factory.get_llm_client(SELECTED_LLM_ID)
+    # 获取数据库会话并初始化 LLM 客户端
+    from app.db import get_db
+    db = next(get_db())
     
-    # 初始化embedder
-    with get_db_context() as db:
-        config_service = MemoryConfigService(db)
-        cfg_dict = config_service.get_embedder_config(SELECTED_EMBEDDING_ID)
-    embedder = OpenAIEmbedderClient(
-        model_config=RedBearModelConfig.model_validate(cfg_dict)
-    )
-    
-    # 初始化连接器
-    connector = Neo4jConnector()
-
-    # 初始化结果字典
-    results = {
-        "questions": [],
-        "overall_metrics": {"f1": 0.0, "b1": 0.0, "j": 0.0, "loc_f1": 0.0},
-        "category_metrics": {},
-        "retrieval_stats": {"total_questions": len(items), "avg_context_length": 0, "avg_retrieved_docs": 0},
-        "performance_trend": "stable",
-        "timestamp": datetime.now().isoformat(),
-        "enhanced_strategy": True
-    }
-
-    total_f1 = 0.0
-    total_bleu1 = 0.0
-    total_jaccard = 0.0
-    total_loc_f1 = 0.0
-    total_context_length = 0
-    total_retrieved_docs = 0
-    category_stats = {}
-
     try:
-        for i, item in enumerate(items):
-            monitor.question_count += 1
+        llm = get_llm_client(llm_id, db)
+        
+        # 初始化embedder
+        cfg_dict = get_embedder_config(embedding_id, db)
+        embedder = OpenAIEmbedderClient(
+            model_config=RedBearModelConfig.model_validate(cfg_dict)
+        )
+        
+        # 🔧 创建 MemoryConfig 对象用于搜索
+        # 方案1：如果有配置ID，从数据库加载
+        config_id = os.getenv("EVAL_CONFIG_ID")
+        if config_id:
+            print(f"📋 从数据库加载配置 ID: {config_id}")
+            memory_config_service = MemoryConfigService(db)
+            memory_config = memory_config_service.load_memory_config(config_id, service_name="locomo_test")
+        else:
+            # 方案2：创建临时配置对象用于测试
+            print(f"📋 创建临时测试配置")
+            from uuid import UUID
+            from datetime import datetime
+            
+            # 将字符串 ID 转换为 UUID
+            try:
+                embedding_uuid = UUID(embedding_id)
+                llm_uuid = UUID(llm_id)
+            except ValueError as e:
+                raise ValueError(f"无效的 UUID 格式: {e}")
+            
+            memory_config = MemoryConfig(
+                config_id=1,  # 临时 ID
+                config_name="locomo_test_config",
+                workspace_id=UUID("00000000-0000-0000-0000-000000000000"),  # 临时 workspace
+                workspace_name="test_workspace",
+                tenant_id=UUID("00000000-0000-0000-0000-000000000000"),  # 临时 tenant
+                embedding_model_id=embedding_uuid,
+                embedding_model_name="test_embedding",
+                llm_model_id=llm_uuid,
+                llm_model_name="test_llm",
+                storage_type="neo4j",
+                chunker_strategy="RecursiveChunker",
+                reflexion_enabled=False,
+                reflexion_iteration_period=3,
+                reflexion_range="partial",
+                reflexion_baseline="Time",
+                loaded_at=datetime.now()
+            )
+        
+        print(f"✅ MemoryConfig 已准备: embedding_id={memory_config.embedding_model_id}, llm_id={memory_config.llm_model_id}")
+        
+        # 初始化连接器
+        connector = Neo4jConnector()
 
-            # 获取近期性能用于重置判断
-            recent_performance = monitor.get_recent_performance()
+        # 初始化结果字典
+        results = {
+            "questions": [],
+            "overall_metrics": {"f1": 0.0, "b1": 0.0, "j": 0.0, "loc_f1": 0.0},
+            "category_metrics": {},
+            "retrieval_stats": {"total_questions": len(items), "avg_context_length": 0, "avg_retrieved_docs": 0},
+            "performance_trend": "stable",
+            "timestamp": datetime.now().isoformat(),
+            "enhanced_strategy": True
+        }
 
-            # 增强的重置判断
-            should_reset = monitor.should_reset_connections(current_f1=recent_performance)
-            if should_reset and i > 0:
-                print(f"🔄 重置Neo4j连接 (问题 {i+1}/{len(items)}, 近期性能: {recent_performance:.3f})...")
-                await connector.close()
-                connector = Neo4jConnector()  # 创建新连接
-                print("✅ 连接重置完成")
+        total_f1 = 0.0
+        total_bleu1 = 0.0
+        total_jaccard = 0.0
+        total_loc_f1 = 0.0
+        total_context_length = 0
+        total_retrieved_docs = 0
+        category_stats = {}
 
-            q = item.get("question", "")
-            ref = item.get("answer", "")
-            ref_str = str(ref) if ref is not None else ""
+        try:
+            for i, item in enumerate(items):
+                monitor.question_count += 1
+
+                # 获取近期性能用于重置判断
+                recent_performance = monitor.get_recent_performance()
+
+                # 增强的重置判断
+                should_reset = monitor.should_reset_connections(current_f1=recent_performance)
+                if should_reset and i > 0:
+                    print(f"🔄 重置Neo4j连接 (问题 {i+1}/{len(items)}, 近期性能: {recent_performance:.3f})...")
+                    await connector.close()
+                    connector = Neo4jConnector()  # 创建新连接
+                    print("✅ 连接重置完成")
+
+                q = item.get("question", "")
+                ref = item.get("answer", "")
+                ref_str = str(ref) if ref is not None else ""
 
             print(f"\n🔍 [{i+1}/{len(items)}] 问题: {q}")
             print(f"✅ 真实答案: {ref_str}")
@@ -548,10 +582,12 @@ async def run_enhanced_evaluation():
             contexts_all = []
 
             try:
-                # 使用统一的搜索服务
-                from app.core.memory.storage_services.search import run_hybrid_search
+                # 使用旧版本的搜索服务（重构前的版本）
+                from app.core.memory.src.search import run_hybrid_search
                 
-                print("🔀 使用混合搜索服务...")
+                print(f"🔀 使用混合搜索服务（旧版本）...")
+                print(f"📍 检索参数: group_id={group_id}, limit=20, search_type=hybrid")
+                print(f"📍 查询文本: {q}")
                 
                 search_results = await run_hybrid_search(
                     query_text=q,
@@ -559,15 +595,27 @@ async def run_enhanced_evaluation():
                     end_user_id="locomo_sk",
                     limit=20,
                     include=["statements", "chunks", "entities", "summaries"],
-                    alpha=0.6,  # BM25权重
-                    embedding_id=SELECTED_EMBEDDING_ID
+                    output_path=None,
+                    memory_config=memory_config,  # 🔧 添加必需的 memory_config 参数
+                    rerank_alpha=0.6,  # BM25权重
+                    use_forgetting_rerank=False,
+                    use_llm_rerank=False
                 )
                 
-                # 处理搜索结果 - 新的搜索服务返回统一的结构
-                chunks = search_results.get("chunks", [])
-                statements = search_results.get("statements", [])
-                entities = search_results.get("entities", [])
-                summaries = search_results.get("summaries", [])
+                # 处理搜索结果 - 旧版本返回包含 reranked_results 的结构
+                # 对于 hybrid 搜索，使用 reranked_results
+                if "reranked_results" in search_results:
+                    reranked = search_results["reranked_results"]
+                    chunks = reranked.get("chunks", [])
+                    statements = reranked.get("statements", [])
+                    entities = reranked.get("entities", [])
+                    summaries = reranked.get("summaries", [])
+                else:
+                    # 单一搜索类型的结果
+                    chunks = search_results.get("chunks", [])
+                    statements = search_results.get("statements", [])
+                    entities = search_results.get("entities", [])
+                    summaries = search_results.get("summaries", [])
                 
                 print(f"✅ 混合检索成功: {len(chunks)} chunks, {len(statements)} 条陈述, {len(entities)} 个实体, {len(summaries)} 个摘要")
 
@@ -609,6 +657,8 @@ async def run_enhanced_evaluation():
                 print(f"📊 有效上下文数量: {len(contexts_all)}")
             except Exception as e:
                 print(f"❌ 检索失败: {e}")
+                import traceback
+                print(f"详细错误信息:\n{traceback.format_exc()}")
                 contexts_all = []
 
             t1 = time.time()
@@ -728,14 +778,17 @@ async def run_enhanced_evaluation():
 
             print("="*60)
 
-    except Exception as e:
-        print(f"❌ 评估过程中发生错误: {e}")
-        # 即使出错，也返回已有的结果
-        import traceback
-        traceback.print_exc()
+        except Exception as e:
+            print(f"❌ 评估过程中发生错误: {e}")
+            # 即使出错，也返回已有的结果
+            import traceback
+            traceback.print_exc()
 
+        finally:
+            await connector.close()
+    
     finally:
-        await connector.close()
+        db.close()  # 关闭数据库会话
 
     # 计算总体指标
     n = len(items)
