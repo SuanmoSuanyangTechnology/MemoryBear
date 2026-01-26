@@ -120,11 +120,8 @@ def _combine_dialogues_for_hybrid(results: Dict[str, Any]) -> List[Dict[str, Any
     return merged
 
 
-
-
 async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None, search_limit: int = 8, context_char_budget: int = 4000, llm_temperature: float = 0.0, llm_max_tokens: int = 64, search_type: str = "hybrid", memory_config: "MemoryConfig" = None) -> Dict[str, Any]:
     end_user_id = end_user_id or SELECTED_GROUP_ID
-
 
     # Load data
     dataset_dir = Path(__file__).resolve().parent.parent / "dataset"
@@ -138,6 +135,7 @@ async def run_memsciqa_eval(sample_size: int = 1, end_user_id: str | None = None
     with open(data_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
     items: List[Dict[str, Any]] = [json.loads(l) for l in lines[:sample_size]]
+
 
     # 改为：每条样本仅摄入一个上下文（完整对话转录），避免多上下文摄入
     # 说明：memsciqa 数据集的每个样本天然只有一个对话，保持按样本一上下文的策略
@@ -310,7 +308,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate DMR (memsciqa) with graph search and Qwen")
 
     parser.add_argument("--sample-size", type=int, default=1, help="评测样本数量")
-    parser.add_argument("--group-id", type=str, default=None, help="可选 end_user_id，默认取 runtime.json")
+    parser.add_argument("--end-user-id", type=str, default=None, help="可选 end_user_id，默认使用环境变量")
     parser.add_argument("--search-limit", type=int, default=8, help="每类检索最大返回数")
     parser.add_argument("--context-char-budget", type=int, default=4000, help="上下文字符预算")
     parser.add_argument("--llm-temperature", type=float, default=0.0, help="LLM 温度")
@@ -342,16 +340,20 @@ def main():
     # Save results to file
     output_dir = args.output_dir
     if output_dir is None:
-        # Use default directory relative to this script
-        output_dir = os.path.join(os.path.dirname(__file__), "results")
-    elif not os.path.isabs(output_dir):
+        # Use absolute path to ensure results are saved in the correct location
+        script_dir = Path(__file__).resolve().parent
+        output_dir = script_dir / "results"
+    elif not Path(output_dir).is_absolute():
         # If relative path, make it relative to this script's directory
-        output_dir = os.path.join(os.path.dirname(__file__), output_dir)
+        script_dir = Path(__file__).resolve().parent
+        output_dir = script_dir / output_dir
+    else:
+        output_dir = Path(output_dir)
     
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(output_dir, f"memsciqa_{timestamp_str}.json")
+    output_path = output_dir / f"memsciqa_{timestamp_str}.json"
     
     try:
         with open(output_path, "w", encoding="utf-8") as f:
