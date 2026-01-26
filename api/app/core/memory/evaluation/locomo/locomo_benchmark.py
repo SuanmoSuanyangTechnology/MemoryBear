@@ -48,73 +48,39 @@ from app.core.memory.evaluation.locomo.locomo_utils import (
     resolve_temporal_references,
     select_and_format_information,
     retrieve_relevant_information,
-    select_and_format_information,
-)
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.memory.utils.definitions import (
-    PROJECT_ROOT,
-    SELECTED_EMBEDDING_ID,
-    SELECTED_end_user_id,
-    SELECTED_LLM_ID,
 )
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-from app.core.models.base import RedBearModelConfig
 from app.db import get_db_context
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.memory_config_service import MemoryConfigService
 
+# Get configuration from environment variables
+PROJECT_ROOT = str(Path(__file__).resolve().parents[5])  # api directory
+SELECTED_EMBEDDING_ID = os.getenv("EVAL_EMBEDDING_ID", "e2a6392d-ca63-4d59-a523-647420b59cb2")
+SELECTED_end_user_id = os.getenv("LOCOMO_END_USER_ID") or os.getenv("EVAL_END_USER_ID", "locomo_benchmark")
+SELECTED_LLM_ID = os.getenv("EVAL_LLM_ID", "2c9b0782-7a85-4740-ba84-4baf77f256c4")
 
-async def run_locomo_benchmark(
-    sample_size: int = 20,
-    end_user_id: Optional[str] = None,
-    search_type: str = "hybrid",
-    search_limit: int = 12,
-    context_char_budget: int = 8000,
-    reset_group: bool = False,
-    skip_ingest: bool = False,
-    output_dir: Optional[str] = None
-) -> Dict[str, Any]:
+
+# ============================================================================
+# Step 1: Data Loading
+# ============================================================================
+
+def step_load_data(data_path: str, sample_size: int) -> List[Dict[str, Any]]:
     """
-    Load LoCoMo QA pairs from the first conversation.
+    Load QA pairs from LoCoMo dataset.
     
     Args:
-        sample_size: Number of QA pairs to evaluate (from first conversation)
-        end_user_id: Database group ID for retrieval (uses default if None)
-        search_type: "keyword", "embedding", or "hybrid"
-        search_limit: Max documents to retrieve per query
-        context_char_budget: Max characters for context
-        reset_group: Whether to clear and re-ingest data (not implemented)
-        skip_ingest: If True, skip data ingestion and use existing data in Neo4j
-        output_dir: Directory to save results (uses default if None)
+        data_path: Path to locomo10.json file
+        sample_size: Number of QA pairs to load (0 for all)
         
     Returns:
-        Dictionary with evaluation results including metrics, timing, and samples
+        List of QA items from the first conversation
     """
-    # Use default end_user_id if not provided
-    end_user_id = end_user_id or SELECTED_end_user_id
+    print("📂 Loading LoCoMo data...")
     
-    # Determine data path
-    data_path = os.path.join(PROJECT_ROOT, "data", "locomo10.json")
-    if not os.path.exists(data_path):
-        # Fallback to current directory
-        data_path = os.path.join(os.getcwd(), "data", "locomo10.json")
+    # Load the dataset
+    qa_items = load_locomo_data(data_path, sample_size)
     
-    print(f"\n{'='*60}")
-    print("🚀 Starting LoCoMo Benchmark Evaluation")
-    print(f"{'='*60}")
-    print("📊 Configuration:")
-    print(f"   Sample size: {sample_size}")
-    print(f"   Group ID: {end_user_id}")
-    print(f"   Search type: {search_type}")
-    print(f"   Search limit: {search_limit}")
-    print(f"   Context budget: {context_char_budget} chars")
-    print(f"   Data path: {data_path}")
-    print(f"{'='*60}\n")
-    
-    # Step 1: Load LoCoMo data
-    print("📂 Loading LoCoMo dataset...")
-    qa_items = load_locomo_data(data_path, sample_size, conversation_index=0)
-    print(f"✅ Loaded {len(qa_items)} QA pairs from conversation 0\n")
+    print(f"✅ Loaded {len(qa_items)} QA pairs from first conversation\n")
     return qa_items
 
 
@@ -122,9 +88,39 @@ async def run_locomo_benchmark(
 # Step 2: Data Ingestion
 # ============================================================================
 
+async def ingest_conversations_if_needed(
+    conversations: List[str],
+    end_user_id: str,
+    reset: bool = False
+) -> bool:
+    """
+    Ingest conversations into Neo4j database.
+    
+    Args:
+        conversations: List of conversation strings (already formatted)
+        end_user_id: Database end_user ID
+        reset: Whether to reset the group before ingestion
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        from app.core.memory.evaluation.extraction_utils import ingest_contexts_via_full_pipeline
+        
+        # Conversations are already formatted as strings, use them directly
+        await ingest_contexts_via_full_pipeline(conversations, end_user_id)
+        return True
+        
+    except Exception as e:
+        print(f"⚠️  Ingestion error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 async def step_ingest_data(
     data_path: str,
-    group_id: str,
+    end_user_id: str,
     skip_ingest: bool,
     reset_group: bool,
     max_messages: Optional[int] = None
@@ -134,7 +130,7 @@ async def step_ingest_data(
     
     Args:
         data_path: Path to locomo10.json file
-        group_id: Database group ID
+        end_user_id: Database end_user ID
         skip_ingest: Whether to skip ingestion
         reset_group: Whether to reset the group before ingestion
         max_messages: Maximum messages per dialogue to ingest (for testing)
@@ -144,15 +140,20 @@ async def step_ingest_data(
     """
     if skip_ingest:
         print("⏭️  Skipping data ingestion (using existing data in Neo4j)")
-        print(f"   Group ID: {end_user_id}\n")
+        print(f"   End User ID: {end_user_id}\n")
     else:
         print("💾 Checking database ingestion...")
         try:
-            conversations = extract_conversations(data_path, max_dialogues=1)
+            # Extract conversations with optional message limit
+            conversations = extract_conversations(
+                data_path, 
+                max_dialogues=1,
+                max_messages_per_dialogue=max_messages
+            )
             print(f"📝 Extracted {len(conversations)} conversations")
             
             # Always ingest for now (ingestion check not implemented)
-            print(f"🔄 Ingesting conversations into group '{end_user_id}'...")
+            print(f"🔄 Ingesting conversations into end_user '{end_user_id}'...")
             success = await ingest_conversations_if_needed(
                 conversations=conversations,
                 end_user_id=end_user_id,
@@ -166,14 +167,34 @@ async def step_ingest_data(
         
         except Exception as e:
             print(f"❌ Ingestion failed: {e}")
+            import traceback
+            traceback.print_exc()
             print("⚠️  Continuing with evaluation (database may be empty)\n")
     
-    # Step 3: Initialize clients
+    return True
+
+
+# ============================================================================
+# Step 3: Initialize Clients
+# ============================================================================
+
+def step_initialize_clients(llm_id: str, embedding_id: str):
+    """
+    Initialize Neo4j connector, LLM client, and embedder.
+    
+    Args:
+        llm_id: LLM model ID
+        embedding_id: Embedding model ID
+        
+    Returns:
+        Tuple of (connector, llm_client, embedder)
+    """
     print("🔧 Initializing clients...")
     
     connector = Neo4jConnector()
     
-    # 获取数据库会话
+    # Get database session
+    from app.db import get_db
     db = next(get_db())
     try:
         llm_client = get_llm_client(llm_id, db)
@@ -185,196 +206,162 @@ async def step_ingest_data(
         db.close()
     
     print("✅ Clients initialized\n")
-    
-    # Step 4: Process questions
+    return connector, llm_client, embedder
+
+
+# ============================================================================
+# Step 4: Process Questions
+# ============================================================================
+
+async def step_process_all_questions(
+    qa_items: List[Dict[str, Any]],
+    end_user_id: str,
+    search_type: str,
+    search_limit: int,
+    context_char_budget: int,
+    connector: Neo4jConnector,
+    embedder: OpenAIEmbedderClient,
+    llm_client: Any
+) -> List[Dict[str, Any]]:
+    """Process all QA items: retrieve, generate, and calculate metrics."""
     print(f"🔍 Processing {len(qa_items)} questions...")
     print(f"{'='*60}\n")
     
-    # Tracking variables
-    latencies_search: List[float] = []
-    latencies_llm: List[float] = []
-    context_counts: List[int] = []
-    context_chars: List[int] = []
-    context_tokens: List[int] = []
-    
-    # Metric lists
-    f1_scores: List[float] = []
-    bleu1_scores: List[float] = []
-    jaccard_scores: List[float] = []
-    locomo_f1_scores: List[float] = []
-    
-    # Per-category tracking
-    category_counts: Dict[str, int] = {}
-    category_f1: Dict[str, List[float]] = {}
-    category_bleu1: Dict[str, List[float]] = {}
-    category_jaccard: Dict[str, List[float]] = {}
-    category_locomo_f1: Dict[str, List[float]] = {}
-    
-    # Detailed samples
     samples: List[Dict[str, Any]] = []
-    
-    # Fixed anchor date for temporal resolution
     anchor_date = datetime(2023, 5, 8)
     
-    try:
-        for idx, item in enumerate(qa_items, 1):
-            question = item.get("question", "")
-            ground_truth = item.get("answer", "")
-            category = get_category_name(item)
-            
-            # Ensure ground truth is a string
-            ground_truth_str = str(ground_truth) if ground_truth is not None else ""
-            
-            print(f"[{idx}/{len(qa_items)}] Category: {category}")
-            print(f"❓ Question: {question}")
-            print(f"✅ Ground Truth: {ground_truth_str}")
-            
-            # Step 4a: Retrieve relevant information
-            t_search_start = time.time()
-            try:
-                retrieved_info = await retrieve_relevant_information(
-                    question=question,
-                    end_user_id=end_user_id,
-                    search_type=search_type,
-                    search_limit=search_limit,
-                    connector=connector,
-                    embedder=embedder
-                )
-                t_search_end = time.time()
-                search_latency = (t_search_end - t_search_start) * 1000
-                latencies_search.append(search_latency)
-                
-                print(f"🔍 Retrieved {len(retrieved_info)} documents ({search_latency:.1f}ms)")
-                
-            except Exception as e:
-                print(f"❌ Retrieval failed: {e}")
-                retrieved_info = []
-                search_latency = 0.0
-                latencies_search.append(search_latency)
-            
-            # Step 4b: Select and format context
-            context_text = select_and_format_information(
-                retrieved_info=retrieved_info,
+    for idx, item in enumerate(qa_items, 1):
+        question = item.get("question", "")
+        ground_truth = item.get("answer", "")
+        category = get_category_name(item)
+        ground_truth_str = str(ground_truth) if ground_truth is not None else ""
+        
+        print(f"[{idx}/{len(qa_items)}] Category: {category}")
+        print(f"❓ Question: {question}")
+        print(f"✅ Ground Truth: {ground_truth_str}")
+        
+        # Retrieve
+        t_search_start = time.time()
+        try:
+            retrieved_info = await retrieve_relevant_information(
                 question=question,
-                max_chars=context_char_budget
+                end_user_id=end_user_id,
+                search_type=search_type,
+                search_limit=search_limit,
+                connector=connector,
+                embedder=embedder
             )
-            
-            # Resolve temporal references
-            context_text = resolve_temporal_references(context_text, anchor_date)
-            
-            # Add reference date to context
-            if context_text:
-                context_text = f"Reference date: {anchor_date.date().isoformat()}\n\n{context_text}"
+            search_latency = (time.time() - t_search_start) * 1000
+            print(f"🔍 Retrieved {len(retrieved_info)} documents ({search_latency:.1f}ms)")
+        except Exception as e:
+            print(f"❌ Retrieval failed: {e}")
+            retrieved_info = []
+            search_latency = 0.0
+        
+        # Format context
+        context_text = select_and_format_information(
+            retrieved_info=retrieved_info,
+            question=question,
+            max_chars=context_char_budget
+        )
+        context_text = resolve_temporal_references(context_text, anchor_date)
+        if context_text:
+            context_text = f"Reference date: {anchor_date.date().isoformat()}\n\n{context_text}"
+        else:
+            context_text = "No relevant context found."
+        
+        print(f"📝 Context: {len(context_text)} chars, {len(retrieved_info)} docs")
+        
+        # Generate answer
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a precise QA assistant. Answer following these rules:\n"
+                    "1) Extract the EXACT information mentioned in the context\n"
+                    "2) For time questions: calculate actual dates from relative times\n"
+                    "3) Return ONLY the answer text in simplest form\n"
+                    "4) For dates, use format 'DD Month YYYY' (e.g., '7 May 2023')\n"
+                    "5) If no clear answer found, respond with 'Unknown'"
+                )
+            },
+            {
+                "role": "user",
+                "content": f"Question: {question}\n\nContext:\n{context_text}"
+            }
+        ]
+        
+        t_llm_start = time.time()
+        try:
+            response = await llm_client.chat(messages=messages)
+            llm_latency = (time.time() - t_llm_start) * 1000
+            if hasattr(response, 'content'):
+                prediction = response.content.strip()
+            elif isinstance(response, dict):
+                prediction = response["choices"][0]["message"]["content"].strip()
             else:
-                context_text = "No relevant context found."
-            
-            # Track context statistics
-            context_counts.append(len(retrieved_info))
-            context_chars.append(len(context_text))
-            context_tokens.append(len(context_text.split()))
-            
-            print(f"📝 Context: {len(context_text)} chars, {len(retrieved_info)} docs")
-            
-            # Step 4c: Generate answer with LLM
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a precise QA assistant. Answer following these rules:\n"
-                        "1) Extract the EXACT information mentioned in the context\n"
-                        "2) For time questions: calculate actual dates from relative times\n"
-                        "3) Return ONLY the answer text in simplest form\n"
-                        "4) For dates, use format 'DD Month YYYY' (e.g., '7 May 2023')\n"
-                        "5) If no clear answer found, respond with 'Unknown'"
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": f"Question: {question}\n\nContext:\n{context_text}"
-                }
-            ]
-            
-            t_llm_start = time.time()
-            try:
-                response = await llm_client.chat(messages=messages)
-                t_llm_end = time.time()
-                llm_latency = (t_llm_end - t_llm_start) * 1000
-                latencies_llm.append(llm_latency)
-                
-                # Extract prediction from response
-                if hasattr(response, 'content'):
-                    prediction = response.content.strip()
-                elif isinstance(response, dict):
-                    prediction = response["choices"][0]["message"]["content"].strip()
-                else:
-                    prediction = "Unknown"
-                
-                print(f"🤖 Prediction: {prediction} ({llm_latency:.1f}ms)")
-                
-            except Exception as e:
-                print(f"❌ LLM failed: {e}")
                 prediction = "Unknown"
-                llm_latency = 0.0
-                latencies_llm.append(llm_latency)
-            
-            # Step 4d: Calculate metrics
-            f1_val = f1_score(prediction, ground_truth_str)
-            bleu1_val = bleu1(prediction, ground_truth_str)
-            jaccard_val = jaccard(prediction, ground_truth_str)
-            
-            # LoCoMo-specific F1: use multi-answer for category 1 (Multi-Hop)
-            if item.get("category") == 1:
-                locomo_f1_val = locomo_multi_f1(prediction, ground_truth_str)
-            else:
-                locomo_f1_val = locomo_f1_score(prediction, ground_truth_str)
-            
-            # Accumulate metrics
-            f1_scores.append(f1_val)
-            bleu1_scores.append(bleu1_val)
-            jaccard_scores.append(jaccard_val)
-            locomo_f1_scores.append(locomo_f1_val)
-            
-            # Track by category
-            category_counts[category] = category_counts.get(category, 0) + 1
-            category_f1.setdefault(category, []).append(f1_val)
-            category_bleu1.setdefault(category, []).append(bleu1_val)
-            category_jaccard.setdefault(category, []).append(jaccard_val)
-            category_locomo_f1.setdefault(category, []).append(locomo_f1_val)
-            
-            print(f"📊 Metrics - F1: {f1_val:.3f}, BLEU-1: {bleu1_val:.3f}, "
-                  f"Jaccard: {jaccard_val:.3f}, LoCoMo F1: {locomo_f1_val:.3f}")
-            print()
-            
-            # Save sample details
-            samples.append({
-                "question": question,
-                "ground_truth": ground_truth_str,
-                "prediction": prediction,
-                "category": category,
-                "metrics": {
-                    "f1": f1_val,
-                    "bleu1": bleu1_val,
-                    "jaccard": jaccard_val,
-                    "locomo_f1": locomo_f1_val
-                },
-                "retrieval": {
-                    "num_docs": len(retrieved_info),
-                    "context_length": len(context_text)
-                },
-                "timing": {
-                    "search_ms": search_latency,
-                    "llm_ms": llm_latency
-                }
-            })
+            print(f"🤖 Prediction: {prediction} ({llm_latency:.1f}ms)")
+        except Exception as e:
+            print(f"❌ LLM failed: {e}")
+            prediction = "Unknown"
+            llm_latency = 0.0
+        
+        # Calculate metrics
+        f1_val = f1_score(prediction, ground_truth_str)
+        bleu1_val = bleu1(prediction, ground_truth_str)
+        jaccard_val = jaccard(prediction, ground_truth_str)
+        if item.get("category") == 1:
+            locomo_f1_val = locomo_multi_f1(prediction, ground_truth_str)
+        else:
+            locomo_f1_val = locomo_f1_score(prediction, ground_truth_str)
+        
+        print(f"📊 Metrics - F1: {f1_val:.3f}, BLEU-1: {bleu1_val:.3f}, "
+              f"Jaccard: {jaccard_val:.3f}, LoCoMo F1: {locomo_f1_val:.3f}")
+        print()
+        
+        samples.append({
+            "question": question,
+            "ground_truth": ground_truth_str,
+            "prediction": prediction,
+            "category": category,
+            "metrics": {
+                "f1": f1_val,
+                "bleu1": bleu1_val,
+                "jaccard": jaccard_val,
+                "locomo_f1": locomo_f1_val
+            },
+            "retrieval": {
+                "num_docs": len(retrieved_info),
+                "context_length": len(context_text)
+            },
+            "context_tokens": len(context_text.split()),
+            "timing": {
+                "search_ms": search_latency,
+                "llm_ms": llm_latency
+            }
+        })
     
-    finally:
-        # Close connector
-        await connector.close()
-    
-    # Step 5: Aggregate results
+    return samples
+
+
+# ============================================================================
+# Step 5: Aggregate Results
+# ============================================================================
+
+def step_aggregate_results(samples: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate metrics from all samples."""
     print(f"\n{'='*60}")
     print("📊 Aggregating Results")
     print(f"{'='*60}\n")
+    
+    if not samples:
+        return {
+            "overall_metrics": {},
+            "by_category": {},
+            "latency": {},
+            "context_stats": {}
+        }
     
     # Extract metrics
     f1_scores = [s["metrics"]["f1"] for s in samples]
@@ -393,10 +380,10 @@ async def step_ingest_data(
     
     # Overall metrics
     overall_metrics = {
-        "f1": sum(f1_scores) / max(len(f1_scores), 1) if f1_scores else 0.0,
-        "bleu1": sum(bleu1_scores) / max(len(bleu1_scores), 1) if bleu1_scores else 0.0,
-        "jaccard": sum(jaccard_scores) / max(len(jaccard_scores), 1) if jaccard_scores else 0.0,
-        "locomo_f1": sum(locomo_f1_scores) / max(len(locomo_f1_scores), 1) if locomo_f1_scores else 0.0
+        "f1": sum(f1_scores) / len(f1_scores) if f1_scores else 0.0,
+        "bleu1": sum(bleu1_scores) / len(bleu1_scores) if bleu1_scores else 0.0,
+        "jaccard": sum(jaccard_scores) / len(jaccard_scores) if jaccard_scores else 0.0,
+        "locomo_f1": sum(locomo_f1_scores) / len(locomo_f1_scores) if locomo_f1_scores else 0.0
     }
     
     # Per-category metrics
@@ -433,24 +420,12 @@ async def step_ingest_data(
     
     # Context statistics
     context_stats = {
-        "avg_retrieved_docs": sum(context_counts) / max(len(context_counts), 1) if context_counts else 0.0,
-        "avg_context_chars": sum(context_chars) / max(len(context_chars), 1) if context_chars else 0.0,
-        "avg_context_tokens": sum(context_tokens) / max(len(context_tokens), 1) if context_tokens else 0.0
+        "avg_retrieved_docs": sum(context_counts) / len(context_counts) if context_counts else 0.0,
+        "avg_context_chars": sum(context_chars) / len(context_chars) if context_chars else 0.0,
+        "avg_context_tokens": sum(context_tokens) / len(context_tokens) if context_tokens else 0.0
     }
     
-    # Build result dictionary
-    result = {
-        "dataset": "locomo",
-        "sample_size": len(qa_items),
-        "timestamp": datetime.now().isoformat(),
-        "params": {
-            "end_user_id": end_user_id,
-            "search_type": search_type,
-            "search_limit": search_limit,
-            "context_char_budget": context_char_budget,
-            "llm_id": SELECTED_LLM_ID,
-            "embedding_id": SELECTED_EMBEDDING_ID
-        },
+    return {
         "overall_metrics": overall_metrics,
         "by_category": by_category,
         "latency": latency,
@@ -477,21 +452,28 @@ def step_save_results(
         Path to saved file
     """
     if output_dir is None:
-        output_dir = os.path.join(
-            os.path.dirname(__file__),
-            "results"
-        )
+        # Use absolute path to ensure results are saved in the correct location
+        script_dir = Path(__file__).resolve().parent
+        output_dir = script_dir / "results"
+    else:
+        # Convert to Path object
+        output_dir = Path(output_dir)
+        # If relative path, make it relative to script directory
+        if not output_dir.is_absolute():
+            script_dir = Path(__file__).resolve().parent
+            output_dir = script_dir / output_dir
     
-    os.makedirs(output_dir, exist_ok=True)
+    # Create directory if it doesn't exist
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(output_dir, f"locomo_{timestamp_str}.json")
+    output_path = output_dir / f"locomo_{timestamp_str}.json"
     
     try:
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         print(f"✅ Results saved to: {output_path}\n")
-        return output_path
+        return str(output_path)
     except Exception as e:
         print(f"❌ Failed to save results: {e}")
         print("📊 Printing results to console instead:\n")
@@ -506,7 +488,7 @@ def step_save_results(
 
 async def run_locomo_benchmark(
     sample_size: int = 20,
-    group_id: Optional[str] = None,
+    end_user_id: Optional[str] = None,
     search_type: str = "hybrid",
     search_limit: int = 12,
     context_char_budget: int = 8000,
@@ -533,7 +515,7 @@ async def run_locomo_benchmark(
     
     Args:
         sample_size: Number of QA pairs to evaluate (from first conversation)
-        group_id: Database group ID for retrieval (uses default if None)
+        end_user_id: Database end_user ID for retrieval (uses default if None)
         search_type: "keyword", "embedding", or "hybrid"
         search_limit: Max documents to retrieve per query
         context_char_budget: Max characters for context
@@ -545,10 +527,10 @@ async def run_locomo_benchmark(
     Returns:
         Dictionary with evaluation results including metrics, timing, and samples
     """
-    # Use default group_id if not provided
-    # 优先级：命令行参数 > LOCOMO_GROUP_ID > EVAL_GROUP_ID > 默认值
-    if group_id is None:
-        group_id = os.getenv("LOCOMO_GROUP_ID") or os.getenv("EVAL_GROUP_ID", "locomo_benchmark")
+    # Use default end_user_id if not provided
+    # 优先级：命令行参数 > LOCOMO_END_USER_ID > EVAL_END_USER_ID > 默认值
+    if end_user_id is None:
+        end_user_id = os.getenv("LOCOMO_END_USER_ID") or os.getenv("EVAL_END_USER_ID", "locomo_benchmark")
     
     # Get model IDs from config
     llm_id = os.getenv("EVAL_LLM_ID", "6dc52e1b-9cec-4194-af66-a74c6307fc3f")
@@ -569,7 +551,7 @@ async def run_locomo_benchmark(
     print(f"{'='*60}")
     print("📊 Configuration:")
     print(f"   Sample size: {sample_size}")
-    print(f"   Group ID: {group_id}")
+    print(f"   End User ID: {end_user_id}")
     print(f"   Search type: {search_type}")
     print(f"   Search limit: {search_limit}")
     print(f"   Context budget: {context_char_budget} chars")
@@ -589,7 +571,7 @@ async def run_locomo_benchmark(
         }
     
     # Step 2: Ingest data if needed（数据摄入）
-    await step_ingest_data(data_path, group_id, skip_ingest, reset_group, max_ingest_messages)
+    await step_ingest_data(data_path, end_user_id, skip_ingest, reset_group, max_ingest_messages)
     
     # Step 3: Initialize clients （初始化客户端）
     connector, llm_client, embedder = step_initialize_clients(llm_id, embedding_id)
@@ -598,7 +580,7 @@ async def run_locomo_benchmark(
     try:
         samples = await step_process_all_questions(
             qa_items=qa_items,
-            group_id=group_id,
+            end_user_id=end_user_id,
             search_type=search_type,
             search_limit=search_limit,
             context_char_budget=context_char_budget,
@@ -618,7 +600,7 @@ async def run_locomo_benchmark(
         "sample_size": len(qa_items),
         "timestamp": datetime.now().isoformat(),
         "params": {
-            "group_id": group_id,
+            "end_user_id": end_user_id,
             "search_type": search_type,
             "search_limit": search_limit,
             "context_char_budget": context_char_budget,
@@ -678,7 +660,7 @@ def main():
         "--end_user_id",
         type=str,
         default=None,
-        help="Database group ID for retrieval (uses LOCOMO_GROUP_ID or EVAL_GROUP_ID if not specified)"
+        help="Database end user ID for retrieval (uses LOCOMO_END_USER_ID or EVAL_END_USER_ID if not specified)"
     )
     parser.add_argument(
         "--search_type",
