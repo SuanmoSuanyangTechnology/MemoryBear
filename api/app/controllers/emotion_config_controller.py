@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from app.core.response_utils import success
 from app.dependencies import get_current_user
@@ -32,11 +33,11 @@ router = APIRouter(
 
 class EmotionConfigQuery(BaseModel):
     """情绪配置查询请求模型"""
-    config_id: int = Field(..., description="配置ID")
+    config_id: UUID = Field(..., description="配置ID")
 
 class EmotionConfigUpdate(BaseModel):
     """情绪配置更新请求模型"""
-    config_id: int = Field(..., description="配置ID")
+    config_id: UUID = Field(..., description="配置ID")
     emotion_enabled: bool = Field(..., description="是否启用情绪提取")
     emotion_model_id: Optional[str] = Field(None, description="情绪分析专用模型ID")
     emotion_extract_keywords: bool = Field(..., description="是否提取情绪关键词")
@@ -45,7 +46,7 @@ class EmotionConfigUpdate(BaseModel):
 
 @router.get("/read_config", response_model=ApiResponse)
 def get_emotion_config(
-    config_id: int = Query(..., description="配置ID"),
+    config_id: UUID = Query(..., description="配置ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

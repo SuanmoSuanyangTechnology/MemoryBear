@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
-"""数据配置Repository模块
+"""记忆配置Repository模块
 
-本模块提供data_config表的数据访问层，使用SQLAlchemy ORM进行数据库操作。
+本模块提供memory_config表的数据访问层，使用SQLAlchemy ORM进行数据库操作。
 包括CRUD操作和Neo4j Cypher查询常量。
 
 Classes:
-    DataConfigRepository: 数据配置仓储类，提供CRUD操作
+    MemoryConfigRepository: 记忆配置仓储类，提供CRUD操作
 """
 
 import uuid
+from uuid import UUID
 from typing import Dict, List, Optional, Tuple
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_db_logger
-from app.models.data_config_model import DataConfig
+from app.models.memory_config_model import MemoryConfig
 from app.schemas.memory_storage_schema import (
     ConfigKey,
     ConfigParamsCreate,
@@ -28,11 +29,11 @@ db_logger = get_db_logger()
 # 获取配置专用日志器
 config_logger = get_config_logger()
 
-TABLE_NAME = "data_config"
-class DataConfigRepository:
-    """数据配置Repository
+TABLE_NAME = "memory_config"
+class MemoryConfigRepository:
+    """记忆配置Repository
 
-    提供data_config表的数据访问方法，包括：
+    提供memory_config表的数据访问方法，包括：
     - SQLAlchemy ORM 数据库操作
     - Neo4j Cypher查询常量
     """
@@ -41,48 +42,48 @@ class DataConfigRepository:
 
     # Dialogue count by group
     SEARCH_FOR_DIALOGUE = """
-    MATCH (n:Dialogue) WHERE n.group_id = $group_id RETURN COUNT(n) AS num
+    MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
     """
 
     # Chunk count by group
     SEARCH_FOR_CHUNK = """
-    MATCH (n:Chunk) WHERE n.group_id = $group_id RETURN COUNT(n) AS num
+    MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
     """
 
     # Statement count by group
     SEARCH_FOR_STATEMENT = """
-    MATCH (n:Statement) WHERE n.group_id = $group_id RETURN COUNT(n) AS num
+    MATCH (n:Statement) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
     """
 
     # ExtractedEntity count by group
     SEARCH_FOR_ENTITY = """
-    MATCH (n:ExtractedEntity) WHERE n.group_id = $group_id RETURN COUNT(n) AS num
+    MATCH (n:ExtractedEntity) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
     """
 
     # All counts by label and total
     SEARCH_FOR_ALL = """
-    OPTIONAL MATCH (n:Dialogue) WHERE n.group_id = $group_id RETURN 'Dialogue' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id RETURN 'Dialogue' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n:Chunk) WHERE n.group_id = $group_id RETURN 'Chunk' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id RETURN 'Chunk' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n:Statement) WHERE n.group_id = $group_id RETURN 'Statement' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:Statement) WHERE n.end_user_id = $end_user_id RETURN 'Statement' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n:ExtractedEntity) WHERE n.group_id = $group_id RETURN 'ExtractedEntity' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:ExtractedEntity) WHERE n.end_user_id = $end_user_id RETURN 'ExtractedEntity' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n) WHERE n.group_id = $group_id RETURN 'ALL' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n) WHERE n.end_user_id = $end_user_id RETURN 'ALL' AS Label, COUNT(n) AS Count
     """
 
     # Extracted entity details within group/app/user
     SEARCH_FOR_DETIALS = """
     MATCH (n:ExtractedEntity)
-    WHERE n.group_id = $group_id
+    WHERE n.end_user_id = $end_user_id
     RETURN n.entity_idx AS entity_idx, 
         n.connect_strength AS connect_strength, 
         n.description AS description, 
         n.entity_type AS entity_type, 
         n.name AS name,
         COALESCE(n.fact_summary, '') AS fact_summary,
-        n.group_id AS group_id,
+        n.end_user_id AS end_user_id,
         n.apply_id AS apply_id,
         n.user_id AS user_id,
         n.id AS id
@@ -91,9 +92,9 @@ class DataConfigRepository:
     # Edges between extracted entities within group/app/user
     SEARCH_FOR_EDGES = """
     MATCH (n:ExtractedEntity)-[r]->(m:ExtractedEntity)
-    WHERE n.group_id = $group_id
+    WHERE n.end_user_id = $end_user_id
     RETURN
-      r.group_id AS group_id,
+      r.end_user_id AS end_user_id,
       r.apply_id AS apply_id,
       r.user_id AS user_id,
       elementId(r) AS rel_id,
@@ -107,7 +108,7 @@ class DataConfigRepository:
     @staticmethod
     def update_reflection_config(
             db: Session,
-            config_id: int,
+            config_id: uuid.UUID,
             enable_self_reflexion: bool,
             iteration_period: str,
             reflexion_range: str,
@@ -115,7 +116,7 @@ class DataConfigRepository:
             reflection_model_id: str,
             memory_verify: bool,
             quality_assessment: bool
-    ) -> DataConfig:
+    ) -> MemoryConfig:
         """构建反思配置更新语句（SQLAlchemy text() 命名参数）
 
         Args:
@@ -130,28 +131,28 @@ class DataConfigRepository:
             config_id: 配置ID
 
         Returns:
-            Data
+            MemoryConfig
 
         Raises:
             ValueError: 没有字段需要更新时抛出
         """
         db_logger.debug(f"构建反思配置更新语句: config_id={config_id}")
-        stmt = select(DataConfig).where(DataConfig.config_id == config_id)
-        data_config_obj = db.scalars(stmt).first()
-        if not data_config_obj:
+        stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+        memory_config_obj = db.scalars(stmt).first()
+        if not memory_config_obj:
             raise BusinessException
-        data_config_obj.enable_self_reflexion = enable_self_reflexion
-        data_config_obj.iteration_period = iteration_period
-        data_config_obj.reflexion_range = reflexion_range
-        data_config_obj.baseline = baseline
-        data_config_obj.reflection_model_id = reflection_model_id
-        data_config_obj.memory_verify = memory_verify
-        data_config_obj.quality_assessment = quality_assessment
+        memory_config_obj.enable_self_reflexion = enable_self_reflexion
+        memory_config_obj.iteration_period = iteration_period
+        memory_config_obj.reflexion_range = reflexion_range
+        memory_config_obj.baseline = baseline
+        memory_config_obj.reflection_model_id = reflection_model_id
+        memory_config_obj.memory_verify = memory_verify
+        memory_config_obj.quality_assessment = quality_assessment
 
-        return data_config_obj
+        return memory_config_obj
 
     @staticmethod
-    def query_reflection_config_by_id(db: Session, config_id: int) -> DataConfig:
+    def query_reflection_config_by_id(db: Session, config_id: uuid.UUID) -> MemoryConfig:
         """构建反思配置查询语句，通过config_id查询反思配置（SQLAlchemy text() 命名参数）
 
         Args:
@@ -162,13 +163,13 @@ class DataConfigRepository:
             Tuple[str, Dict]: (SQL查询字符串, 参数字典)
         """
         db_logger.debug(f"构建反思配置查询语句: config_id={config_id}")
-        stmt = select(DataConfig).where(DataConfig.config_id == config_id)
-        data_config = db.scalars(stmt).first()
-        if not data_config:
+        stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+        memory_config = db.scalars(stmt).first()
+        if not memory_config:
             raise RuntimeError("reflection config not found")
-        return data_config
+        return memory_config
     @staticmethod
-    def query_reflection_config_by_workspace_id(db: Session, workspace_id: uuid.UUID) -> DataConfig:
+    def query_reflection_config_by_workspace_id(db: Session, workspace_id: uuid.UUID) -> MemoryConfig:
         """构建查询所有配置的语句（SQLAlchemy text() 命名参数）
 
         Args:
@@ -180,11 +181,11 @@ class DataConfigRepository:
         """
         db_logger.debug(f"构建查询所有配置语句: workspace_id={workspace_id}")
 
-        stmt = select(DataConfig).where(DataConfig.workspace_id == workspace_id)
-        data_config = db.scalars(stmt).first()
-        if not data_config:
+        stmt = select(MemoryConfig).where(MemoryConfig.workspace_id == workspace_id)
+        memory_config = db.scalars(stmt).first()
+        if not memory_config:
             raise RuntimeError("reflection config not found")
-        return data_config
+        return memory_config
 
 
     @staticmethod
@@ -208,20 +209,21 @@ class DataConfigRepository:
         return query, params
 
     @staticmethod
-    def create(db: Session, params: ConfigParamsCreate) -> DataConfig:
-        """创建数据配置
+    def create(db: Session, params: ConfigParamsCreate) -> MemoryConfig:
+        """创建记忆配置
 
         Args:
             db: 数据库会话
             params: 配置参数创建模型
 
         Returns:
-            DataConfig: 创建的配置对象
+            MemoryConfig: 创建的配置对象
         """
-        db_logger.debug(f"创建数据配置: config_name={params.config_name}, workspace_id={params.workspace_id}")
+        db_logger.debug(f"创建记忆配置: config_name={params.config_name}, workspace_id={params.workspace_id}")
 
         try:
-            db_config = DataConfig(
+            db_config = MemoryConfig(
+                config_id=uuid.uuid4(),
                 config_name=params.config_name,
                 config_desc=params.config_desc,
                 workspace_id=params.workspace_id,
@@ -232,16 +234,16 @@ class DataConfigRepository:
             db.add(db_config)
             db.flush()  # 获取自增ID但不提交事务
 
-            db_logger.info(f"数据配置已添加到会话: {db_config.config_name} (ID: {db_config.config_id})")
+            db_logger.info(f"记忆配置已添加到会话: {db_config.config_name} (ID: {db_config.config_id})")
             return db_config
 
         except Exception as e:
             db.rollback()
-            db_logger.error(f"创建数据配置失败: {params.config_name} - {str(e)}")
+            db_logger.error(f"创建记忆配置失败: {params.config_name} - {str(e)}")
             raise
 
     @staticmethod
-    def update(db: Session, update: ConfigUpdate) -> Optional[DataConfig]:
+    def update(db: Session, update: ConfigUpdate) -> Optional[MemoryConfig]:
         """更新基础配置
 
         Args:
@@ -249,17 +251,17 @@ class DataConfigRepository:
             update: 配置更新模型
 
         Returns:
-            Optional[DataConfig]: 更新后的配置对象，不存在则返回None
+            Optional[MemoryConfig]: 更新后的配置对象，不存在则返回None
 
         Raises:
             ValueError: 没有字段需要更新时抛出
         """
-        db_logger.debug(f"更新数据配置: config_id={update.config_id}")
+        db_logger.debug(f"更新记忆配置: config_id={update.config_id}")
 
         try:
-            db_config = db.query(DataConfig).filter(DataConfig.config_id == update.config_id).first()
+            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == update.config_id).first()
             if not db_config:
-                db_logger.warning(f"数据配置不存在: config_id={update.config_id}")
+                db_logger.warning(f"记忆配置不存在: config_id={update.config_id}")
                 return None
 
             # 更新字段
@@ -277,17 +279,17 @@ class DataConfigRepository:
             db.commit()
             db.refresh(db_config)
 
-            db_logger.info(f"数据配置更新成功: {db_config.config_name} (ID: {update.config_id})")
+            db_logger.info(f"记忆配置更新成功: {db_config.config_name} (ID: {update.config_id})")
             return db_config
 
         except Exception as e:
             db.rollback()
-            db_logger.error(f"更新数据配置失败: config_id={update.config_id} - {str(e)}")
+            db_logger.error(f"更新记忆配置失败: config_id={update.config_id} - {str(e)}")
             raise
 
 
     @staticmethod
-    def update_extracted(db: Session, update: ConfigUpdateExtracted) -> Optional[DataConfig]:
+    def update_extracted(db: Session, update: ConfigUpdateExtracted) -> Optional[MemoryConfig]:
         """更新记忆萃取引擎配置
 
         Args:
@@ -295,7 +297,7 @@ class DataConfigRepository:
             update: 萃取配置更新模型
 
         Returns:
-            Optional[DataConfig]: 更新后的配置对象，不存在则返回None
+            Optional[MemoryConfig]: 更新后的配置对象，不存在则返回None
 
         Raises:
             ValueError: 没有字段需要更新时抛出
@@ -303,9 +305,9 @@ class DataConfigRepository:
         db_logger.debug(f"更新萃取配置: config_id={update.config_id}")
 
         try:
-            db_config = db.query(DataConfig).filter(DataConfig.config_id == update.config_id).first()
+            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == update.config_id).first()
             if not db_config:
-                db_logger.warning(f"数据配置不存在: config_id={update.config_id}")
+                db_logger.warning(f"记忆配置不存在: config_id={update.config_id}")
                 return None
 
             # 更新字段映射
@@ -360,7 +362,7 @@ class DataConfigRepository:
             raise
 
     @staticmethod
-    def update_forget(db: Session, update: ConfigUpdateForget) -> Optional[DataConfig]:
+    def update_forget(db: Session, update: ConfigUpdateForget) -> Optional[MemoryConfig]:
         """更新遗忘引擎配置
 
         Args:
@@ -368,7 +370,7 @@ class DataConfigRepository:
             update: 遗忘配置更新模型
 
         Returns:
-            Optional[DataConfig]: 更新后的配置对象，不存在则返回None
+            Optional[MemoryConfig]: 更新后的配置对象，不存在则返回None
 
         Raises:
             ValueError: 没有字段需要更新时抛出
@@ -376,9 +378,9 @@ class DataConfigRepository:
         db_logger.debug(f"更新遗忘配置: config_id={update.config_id}")
 
         try:
-            db_config = db.query(DataConfig).filter(DataConfig.config_id == update.config_id).first()
+            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == update.config_id).first()
             if not db_config:
-                db_logger.warning(f"数据配置不存在: config_id={update.config_id}")
+                db_logger.warning(f"记忆配置不存在: config_id={update.config_id}")
                 return None
 
             # 更新字段
@@ -408,7 +410,7 @@ class DataConfigRepository:
             raise
 
     @staticmethod
-    def get_extracted_config(db: Session, config_id: int) -> Optional[Dict]:
+    def get_extracted_config(db: Session, config_id: UUID) -> Optional[Dict]:
         """获取萃取配置，通过主键查询某条配置
 
         Args:
@@ -421,7 +423,7 @@ class DataConfigRepository:
         db_logger.debug(f"查询萃取配置: config_id={config_id}")
 
         try:
-            db_config = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
             if not db_config:
                 db_logger.debug(f"萃取配置不存在: config_id={config_id}")
                 return None
@@ -457,7 +459,7 @@ class DataConfigRepository:
             raise
 
     @staticmethod
-    def get_forget_config(db: Session, config_id: int) -> Optional[Dict]:
+    def get_forget_config(db: Session, config_id: UUID) -> Optional[Dict]:
         """获取遗忘配置，通过主键查询某条配置
 
         Args:
@@ -470,7 +472,7 @@ class DataConfigRepository:
         db_logger.debug(f"查询遗忘配置: config_id={config_id}")
 
         try:
-            db_config = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
             if not db_config:
                 db_logger.debug(f"遗忘配置不存在: config_id={config_id}")
                 return None
@@ -489,39 +491,39 @@ class DataConfigRepository:
             raise
 
     @staticmethod
-    def get_by_id(db: Session, config_id: int) -> Optional[DataConfig]:
-        """根据ID获取数据配置
+    def get_by_id(db: Session, config_id: uuid.UUID) -> Optional[MemoryConfig]:
+        """根据ID获取记忆配置
 
         Args:
             db: 数据库会话
             config_id: 配置ID
 
         Returns:
-            Optional[DataConfig]: 配置对象，不存在则返回None
+            Optional[MemoryConfig]: 配置对象，不存在则返回None
         """
-        db_logger.debug(f"根据ID查询数据配置: config_id={config_id}")
+        db_logger.debug(f"根据ID查询记忆配置: config_id={config_id}")
 
         try:
-            config = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+            config = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
 
             if config:
-                db_logger.debug(f"数据配置查询成功: {config.config_name} (ID: {config_id})")
+                db_logger.debug(f"记忆配置查询成功: {config.config_name} (ID: {config_id})")
             else:
-                db_logger.debug(f"数据配置不存在: config_id={config_id}")
+                db_logger.debug(f"记忆配置不存在: config_id={config_id}")
             return config
         except Exception as e:
-            db_logger.error(f"根据ID查询数据配置失败: config_id={config_id} - {str(e)}")
+            db_logger.error(f"根据ID查询记忆配置失败: config_id={config_id} - {str(e)}")
             raise
     @staticmethod
-    def get_config_with_workspace(db: Session, config_id: int) -> Optional[tuple]:
-        """Get data config and its associated workspace information
+    def get_config_with_workspace(db: Session, config_id: uuid.UUID) -> Optional[tuple]:
+        """Get memory config and its associated workspace information
         
         Args:
             db: Database session
             config_id: Configuration ID
             
         Returns:
-            Optional[tuple]: (DataConfig, Workspace) tuple, None if not found
+            Optional[tuple]: (MemoryConfig, Workspace) tuple, None if not found
             
         Raises:
             ValueError: Raised when config exists but workspace doesn't
@@ -541,19 +543,19 @@ class DataConfigRepository:
             }
         )
         
-        db_logger.debug(f"Querying data config and workspace: config_id={config_id}")
+        db_logger.debug(f"Querying memory config and workspace: config_id={config_id}")
         
         try:
             # Use join query to get both config and workspace
-            result = db.query(DataConfig, Workspace).join(
-                Workspace, DataConfig.workspace_id == Workspace.id
-            ).filter(DataConfig.config_id == config_id).first()
+            result = db.query(MemoryConfig, Workspace).join(
+                Workspace, MemoryConfig.workspace_id == Workspace.id
+            ).filter(MemoryConfig.config_id == config_id).first()
             
             elapsed_ms = (time.time() - start_time) * 1000
             
             if not result:
                 # Check if config exists but workspace is missing
-                config_only = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+                config_only = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
                 if config_only:
                     if config_only.workspace_id is None:
                         config_logger.error(
@@ -566,7 +568,7 @@ class DataConfigRepository:
                                 "elapsed_ms": elapsed_ms
                             }
                         )
-                        db_logger.error(f"Data config {config_id} has no associated workspace ID")
+                        db_logger.error(f"Memory config {config_id} has no associated workspace ID")
                         raise ValueError(f"Configuration {config_id} has no associated workspace")
                     else:
                         config_logger.error(
@@ -579,7 +581,7 @@ class DataConfigRepository:
                                 "elapsed_ms": elapsed_ms
                             }
                         )
-                        db_logger.error(f"Data config {config_id} references non-existent workspace {config_only.workspace_id}")
+                        db_logger.error(f"Memory config {config_id} references non-existent workspace {config_only.workspace_id}")
                         raise ValueError(f"Workspace {config_only.workspace_id} not found for configuration {config_id}")
                 
                 config_logger.debug(
@@ -591,7 +593,7 @@ class DataConfigRepository:
                         "elapsed_ms": elapsed_ms
                     }
                 )
-                db_logger.debug(f"Data config not found: config_id={config_id}")
+                db_logger.debug(f"Memory config not found: config_id={config_id}")
                 return None
             
             config, workspace = result
@@ -611,7 +613,7 @@ class DataConfigRepository:
                 }
             )
             
-            db_logger.debug(f"Data config and workspace query successful: config={config.config_name}, workspace={workspace.name}")
+            db_logger.debug(f"Memory config and workspace query successful: config={config.config_name}, workspace={workspace.name}")
             return (config, workspace)
             
         except ValueError:
@@ -633,10 +635,10 @@ class DataConfigRepository:
                 exc_info=True
             )
             
-            db_logger.error(f"Failed to query data config and workspace: config_id={config_id} - {str(e)}")
+            db_logger.error(f"Failed to query memory config and workspace: config_id={config_id} - {str(e)}")
             raise
     @staticmethod
-    def get_all(db: Session, workspace_id: Optional[uuid.UUID] = None) -> List[DataConfig]:
+    def get_all(db: Session, workspace_id: Optional[uuid.UUID] = None) -> List[MemoryConfig]:
         """获取所有配置参数
 
         Args:
@@ -644,17 +646,17 @@ class DataConfigRepository:
             workspace_id: 工作空间ID，用于过滤查询结果
 
         Returns:
-            List[DataConfig]: 配置列表
+            List[MemoryConfig]: 配置列表
         """
         db_logger.debug(f"查询所有配置: workspace_id={workspace_id}")
 
         try:
-            query = db.query(DataConfig)
+            query = db.query(MemoryConfig)
 
             if workspace_id:
-                query = query.filter(DataConfig.workspace_id == workspace_id)
+                query = query.filter(MemoryConfig.workspace_id == workspace_id)
 
-            configs = query.order_by(desc(DataConfig.updated_at)).all()
+            configs = query.order_by(desc(MemoryConfig.updated_at)).all()
 
             db_logger.debug(f"配置列表查询成功: 数量={len(configs)}")
             return configs
@@ -664,8 +666,8 @@ class DataConfigRepository:
             raise
 
     @staticmethod
-    def delete(db: Session, config_id: int) -> bool:
-        """删除数据配置
+    def delete(db: Session, config_id: uuid.UUID) -> bool:
+        """删除记忆配置
 
         Args:
             db: 数据库会话
@@ -674,22 +676,22 @@ class DataConfigRepository:
         Returns:
             bool: 删除成功返回True，配置不存在返回False
         """
-        db_logger.debug(f"删除数据配置: config_id={config_id}")
+        db_logger.debug(f"删除记忆配置: config_id={config_id}")
 
         try:
-            db_config = db.query(DataConfig).filter(DataConfig.config_id == config_id).first()
+            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
             if not db_config:
-                db_logger.warning(f"数据配置不存在: config_id={config_id}")
+                db_logger.warning(f"记忆配置不存在: config_id={config_id}")
                 return False
 
             db.delete(db_config)
             db.commit()
 
-            db_logger.info(f"数据配置删除成功: config_id={config_id}")
+            db_logger.info(f"记忆配置删除成功: config_id={config_id}")
             return True
 
         except Exception as e:
             db.rollback()
-            db_logger.error(f"删除数据配置失败: config_id={config_id} - {str(e)}")
+            db_logger.error(f"删除记忆配置失败: config_id={config_id} - {str(e)}")
             raise
 

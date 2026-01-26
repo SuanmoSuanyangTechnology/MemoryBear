@@ -199,7 +199,7 @@ def load_dataset_memsciqa(data_path: str) -> List[Dict[str, Any]]:
 
 async def run_memsciqa_test(
     sample_size: int = 3,
-    group_id: str | None = None,
+    end_user_id: str | None = None,
     search_limit: int = 8,
     context_char_budget: int = 4000,
     llm_temperature: float = 0.0,
@@ -217,7 +217,7 @@ async def run_memsciqa_test(
     """
 
     # 默认使用指定的 memsci 组 ID
-    group_id = group_id or "group_memsci"
+    end_user_id = end_user_id or "group_memsci"
 
     # 数据路径解析（项目根与当前工作目录兜底）
     if not data_path:
@@ -283,7 +283,7 @@ async def run_memsciqa_test(
                     connector=connector,
                     embedder_client=embedder,
                     query_text=question,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     limit=search_limit,
                     include=["chunks", "statements", "entities", "summaries"],  # 使用 chunks 而不是 dialogues
                 )
@@ -292,7 +292,7 @@ async def run_memsciqa_test(
                 results = await search_graph(
                     connector=connector,
                     q=question,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     limit=search_limit,
                     include=["chunks", "statements", "entities", "summaries"],  # 使用 chunks 而不是 dialogues
                 )
@@ -500,7 +500,7 @@ async def run_memsciqa_test(
         },
         "samples": samples,
         "params": {
-            "group_id": group_id,
+            "end_user_id": end_user_id,
             "search_limit": search_limit,
             "context_char_budget": context_char_budget,
             "llm_temperature": llm_temperature,
@@ -543,7 +543,7 @@ def main():
     result = asyncio.run(
         run_memsciqa_test(
             sample_size=sample_size,
-            group_id=args.group_id,
+            end_user_id=args.end_user_id,
             search_limit=args.search_limit,
             context_char_budget=args.context_char_budget,
             llm_temperature=args.llm_temperature,

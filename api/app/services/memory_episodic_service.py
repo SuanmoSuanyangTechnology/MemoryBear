@@ -34,7 +34,7 @@ class MemoryEpisodicService(MemoryBaseService):
         
         Args:
             summary_id: Summary节点的ID
-            end_user_id: 终端用户ID (group_id)
+            end_user_id: 终端用户ID (end_user_id)
             
         Returns:
             (标题, 类型)元组，如果不存在则返回默认值
@@ -43,14 +43,14 @@ class MemoryEpisodicService(MemoryBaseService):
             # 查询Summary节点的name(作为title)和memory_type(作为type)
             query = """
             MATCH (s:MemorySummary)
-            WHERE elementId(s) = $summary_id AND s.group_id = $group_id
+            WHERE elementId(s) = $summary_id AND s.end_user_id = $end_user_id
             RETURN s.name AS title, s.memory_type AS type
             """
             
             result = await self.neo4j_connector.execute_query(
                 query,
                 summary_id=summary_id,
-                group_id=end_user_id
+                end_user_id=end_user_id
             )
             
             if not result or len(result) == 0:
@@ -77,7 +77,7 @@ class MemoryEpisodicService(MemoryBaseService):
         
         Args:
             summary_id: Summary节点的ID
-            end_user_id: 终端用户ID (group_id)
+            end_user_id: 终端用户ID (end_user_id)
             
         Returns:
             前3个实体的name属性列表
@@ -87,7 +87,7 @@ class MemoryEpisodicService(MemoryBaseService):
             # 按activation_value降序排序,返回前3个
             query = """
             MATCH (s:MemorySummary)
-            WHERE elementId(s) = $summary_id AND s.group_id = $group_id
+            WHERE elementId(s) = $summary_id AND s.end_user_id = $end_user_id
             MATCH (s)-[:DERIVED_FROM_STATEMENT]->(stmt:Statement)
             MATCH (stmt)-[:REFERENCES_ENTITY]->(entity:ExtractedEntity)
             WHERE entity.activation_value IS NOT NULL
@@ -99,7 +99,7 @@ class MemoryEpisodicService(MemoryBaseService):
             result = await self.neo4j_connector.execute_query(
                 query,
                 summary_id=summary_id,
-                group_id=end_user_id
+                end_user_id=end_user_id
             )
             
             # 提取实体名称
@@ -123,7 +123,7 @@ class MemoryEpisodicService(MemoryBaseService):
         
         Args:
             summary_id: Summary节点的ID
-            end_user_id: 终端用户ID (group_id)
+            end_user_id: 终端用户ID (end_user_id)
             
         Returns:
             所有Statement节点的statement属性内容列表
@@ -132,7 +132,7 @@ class MemoryEpisodicService(MemoryBaseService):
             # 查询Summary节点指向的所有Statement节点
             query = """
             MATCH (s:MemorySummary)
-            WHERE elementId(s) = $summary_id AND s.group_id = $group_id
+            WHERE elementId(s) = $summary_id AND s.end_user_id = $end_user_id
             MATCH (s)-[:DERIVED_FROM_STATEMENT]->(stmt:Statement)
             WHERE stmt.statement IS NOT NULL AND stmt.statement <> ''
             RETURN stmt.statement AS statement
@@ -141,7 +141,7 @@ class MemoryEpisodicService(MemoryBaseService):
             result = await self.neo4j_connector.execute_query(
                 query,
                 summary_id=summary_id,
-                group_id=end_user_id
+                end_user_id=end_user_id
             )
             
             # 提取statement内容
@@ -214,12 +214,12 @@ class MemoryEpisodicService(MemoryBaseService):
             # 1. 先查询所有情景记忆的总数（不受筛选条件限制）
             total_all_query = """
             MATCH (s:MemorySummary)
-            WHERE s.group_id = $group_id
+            WHERE s.end_user_id = $end_user_id
             RETURN count(s) AS total_all
             """
             total_all_result = await self.neo4j_connector.execute_query(
                 total_all_query, 
-                group_id=end_user_id
+                end_user_id=end_user_id
             )
             total_all = total_all_result[0]["total_all"] if total_all_result else 0
             
@@ -229,7 +229,7 @@ class MemoryEpisodicService(MemoryBaseService):
             # 3. 构建Cypher查询
             query = """
             MATCH (s:MemorySummary)
-            WHERE s.group_id = $group_id
+            WHERE s.end_user_id = $end_user_id
             """
             
             # 添加时间范围过滤
@@ -248,7 +248,7 @@ class MemoryEpisodicService(MemoryBaseService):
             ORDER BY s.created_at DESC
             """
             
-            params = {"group_id": end_user_id}
+            params = {"end_user_id": end_user_id}
             if time_filter:
                 params["time_filter"] = time_filter
             if title_keyword:
@@ -333,14 +333,14 @@ class MemoryEpisodicService(MemoryBaseService):
             # 1. 查询指定的MemorySummary节点
             query = """
             MATCH (s:MemorySummary)
-            WHERE elementId(s) = $summary_id AND s.group_id = $group_id
+            WHERE elementId(s) = $summary_id AND s.end_user_id = $end_user_id
             RETURN elementId(s) AS id, s.created_at AS created_at
             """
             
             result = await self.neo4j_connector.execute_query(
                 query,
                 summary_id=summary_id,
-                group_id=end_user_id
+                end_user_id=end_user_id
             )
             
             # 2. 如果节点不存在，返回错误

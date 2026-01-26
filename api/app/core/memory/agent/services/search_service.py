@@ -91,7 +91,7 @@ class SearchService:
     
     async def execute_hybrid_search(
         self,
-        group_id: str,
+        end_user_id: str,
         question: str,
         limit: int = 5,
         search_type: str = "hybrid",
@@ -105,7 +105,7 @@ class SearchService:
         Execute hybrid search and return clean content.
         
         Args:
-            group_id: Group identifier for filtering results
+            end_user_id: Group identifier for filtering results
             question: Search query text
             limit: Maximum number of results to return (default: 5)
             search_type: Type of search - "hybrid", "keyword", or "embedding" (default: "hybrid")
@@ -130,7 +130,7 @@ class SearchService:
             answer = await run_hybrid_search(
                 query_text=cleaned_query,
                 search_type=search_type,
-                group_id=group_id,
+                end_user_id=end_user_id,
                 limit=limit,
                 include=include,
                 output_path=output_path,
@@ -186,7 +186,7 @@ class SearchService:
             
         except Exception as e:
             logger.error(
-                f"Search failed for query '{question}' in group '{group_id}': {e}",
+                f"Search failed for query '{question}' in group '{end_user_id}': {e}",
                 exc_info=True
             )
             # Return empty results on failure

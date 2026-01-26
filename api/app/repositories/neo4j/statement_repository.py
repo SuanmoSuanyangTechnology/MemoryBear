@@ -20,7 +20,7 @@ class StatementRepository(BaseNeo4jRepository[StatementNode]):
     """陈述句仓储
     
     管理陈述句节点的创建、查询、更新和删除操作。
-    提供按chunk_id、group_id、向量相似度等条件查询陈述句的方法。
+    提供按chunk_id、end_user_id、向量相似度等条件查询陈述句的方法。
     
     Attributes:
         connector: Neo4j连接器实例

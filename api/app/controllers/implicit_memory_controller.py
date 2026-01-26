@@ -122,10 +122,10 @@ def validate_confidence_threshold(threshold: float) -> None:
         raise ValueError("confidence_threshold must be between 0.0 and 1.0")
 
 
-@router.get("/preferences/{user_id}", response_model=ApiResponse)
+@router.get("/preferences/{end_user_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def get_preference_tags(
-    user_id: str,
+    end_user_id: str,
     confidence_threshold: float = Query(0.5, ge=0.0, le=1.0, description="Minimum confidence threshold"),
     tag_category: Optional[str] = Query(None, description="Filter by tag category"),
     start_date: Optional[datetime] = Query(None, description="Filter start date"),
@@ -137,7 +137,7 @@ async def get_preference_tags(
     Get user preference tags from cache.
     
     Args:
-        user_id: Target user ID
+        end_user_id: Target end user ID
         confidence_threshold: Minimum confidence score (0.0-1.0)
         tag_category: Optional category filter
         start_date: Optional start date filter
@@ -146,20 +146,20 @@ async def get_preference_tags(
     Returns:
         List of preference tags from cache
     """
-    api_logger.info(f"Preference tags requested for user: {user_id} (from cache)")
+    api_logger.info(f"Preference tags requested for user: {end_user_id} (from cache)")
     
     try:
         # Validate inputs
-        validate_user_id(user_id)
+        validate_user_id(end_user_id)
         
         # Create service with user-specific config
-        service = ImplicitMemoryService(db=db, end_user_id=user_id)
+        service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
         
         # Get cached profile
-        cached_profile = await service.get_cached_profile(end_user_id=user_id, db=db)
+        cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
         if cached_profile is None:
-            api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
+            api_logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
             return fail(
                 BizCode.NOT_FOUND,
                 "画像缓存不存在或已过期，请右上角刷新生成新画像",
@@ -192,17 +192,17 @@ async def get_preference_tags(
             
             filtered_preferences.append(pref)
         
-        api_logger.info(f"Retrieved {len(filtered_preferences)} preference tags for user: {user_id} (from cache)")
+        api_logger.info(f"Retrieved {len(filtered_preferences)} preference tags for user: {end_user_id} (from cache)")
         return success(data=filtered_preferences, msg="偏好标签获取成功（缓存）")
         
     except Exception as e:
-        return handle_implicit_memory_error(e, "偏好标签获取", user_id)
+        return handle_implicit_memory_error(e, "偏好标签获取", end_user_id)
 
 
-@router.get("/portrait/{user_id}", response_model=ApiResponse)
+@router.get("/portrait/{end_user_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def get_dimension_portrait(
-    user_id: str,
+    end_user_id: str,
     include_history: bool = Query(False, description="Include historical trends"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -211,26 +211,26 @@ async def get_dimension_portrait(
     Get user's four-dimension personality portrait from cache.
     
     Args:
-        user_id: Target user ID
+        end_user_id: Target end user ID
         include_history: Whether to include historical trend data (ignored for cached data)
         
     Returns:
         Four-dimension personality portrait from cache
     """
-    api_logger.info(f"Dimension portrait requested for user: {user_id} (from cache)")
+    api_logger.info(f"Dimension portrait requested for user: {end_user_id} (from cache)")
     
     try:
         # Validate inputs
-        validate_user_id(user_id)
+        validate_user_id(end_user_id)
         
         # Create service with user-specific config
-        service = ImplicitMemoryService(db=db, end_user_id=user_id)
+        service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
         
         # Get cached profile
-        cached_profile = await service.get_cached_profile(end_user_id=user_id, db=db)
+        cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
         if cached_profile is None:
-            api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
+            api_logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
             return fail(
                 BizCode.NOT_FOUND,
                 "画像缓存不存在或已过期，请右上角刷新生成新画像",
@@ -240,17 +240,17 @@ async def get_dimension_portrait(
         # Extract portrait from cache
         portrait = cached_profile.get("portrait", {})
         
-        api_logger.info(f"Dimension portrait retrieved for user: {user_id} (from cache)")
+        api_logger.info(f"Dimension portrait retrieved for user: {end_user_id} (from cache)")
         return success(data=portrait, msg="四维画像获取成功（缓存）")
         
     except Exception as e:
-        return handle_implicit_memory_error(e, "四维画像获取", user_id)
+        return handle_implicit_memory_error(e, "四维画像获取", end_user_id)
 
 
-@router.get("/interest-areas/{user_id}", response_model=ApiResponse)
+@router.get("/interest-areas/{end_user_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def get_interest_area_distribution(
-    user_id: str,
+    end_user_id: str,
     include_trends: bool = Query(False, description="Include trend analysis"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -259,26 +259,26 @@ async def get_interest_area_distribution(
     Get user's interest area distribution from cache.
     
     Args:
-        user_id: Target user ID
+        end_user_id: Target end user ID
         include_trends: Whether to include trend analysis data (ignored for cached data)
         
     Returns:
         Interest area distribution from cache
     """
-    api_logger.info(f"Interest area distribution requested for user: {user_id} (from cache)")
+    api_logger.info(f"Interest area distribution requested for user: {end_user_id} (from cache)")
     
     try:
         # Validate inputs
-        validate_user_id(user_id)
+        validate_user_id(end_user_id)
         
         # Create service with user-specific config
-        service = ImplicitMemoryService(db=db, end_user_id=user_id)
+        service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
         
         # Get cached profile
-        cached_profile = await service.get_cached_profile(end_user_id=user_id, db=db)
+        cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
         if cached_profile is None:
-            api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
+            api_logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
             return fail(
                 BizCode.NOT_FOUND,
                 "画像缓存不存在或已过期，请右上角刷新生成新画像",
@@ -288,17 +288,17 @@ async def get_interest_area_distribution(
         # Extract interest areas from cache
         interest_areas = cached_profile.get("interest_areas", {})
         
-        api_logger.info(f"Interest area distribution retrieved for user: {user_id} (from cache)")
+        api_logger.info(f"Interest area distribution retrieved for user: {end_user_id} (from cache)")
         return success(data=interest_areas, msg="兴趣领域分布获取成功（缓存）")
         
     except Exception as e:
-        return handle_implicit_memory_error(e, "兴趣领域分布获取", user_id)
+        return handle_implicit_memory_error(e, "兴趣领域分布获取", end_user_id)
 
 
-@router.get("/habits/{user_id}", response_model=ApiResponse)
+@router.get("/habits/{end_user_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def get_behavior_habits(
-    user_id: str,
+    end_user_id: str,
     confidence_level: Optional[str] = Query(None, regex="^(high|medium|low)$", description="Filter by confidence level"),
     frequency_pattern: Optional[str] = Query(None, regex="^(daily|weekly|monthly|seasonal|occasional|event_triggered)$", description="Filter by frequency pattern"),
     time_period: Optional[str] = Query(None, regex="^(current|past)$", description="Filter by time period"),
@@ -309,7 +309,7 @@ async def get_behavior_habits(
     Get user's behavioral habits from cache.
     
     Args:
-        user_id: Target user ID
+        end_user_id: Target end user ID
         confidence_level: Filter by confidence level (high, medium, low)
         frequency_pattern: Filter by frequency pattern (daily, weekly, monthly, seasonal, occasional, event_triggered)
         time_period: Filter by time period (current, past)
@@ -317,20 +317,20 @@ async def get_behavior_habits(
     Returns:
         List of behavioral habits from cache
     """
-    api_logger.info(f"Behavior habits requested for user: {user_id} (from cache)")
+    api_logger.info(f"Behavior habits requested for user: {end_user_id} (from cache)")
     
     try:
         # Validate inputs
-        validate_user_id(user_id)
+        validate_user_id(end_user_id)
         
         # Create service with user-specific config
-        service = ImplicitMemoryService(db=db, end_user_id=user_id)
+        service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
         
         # Get cached profile
-        cached_profile = await service.get_cached_profile(end_user_id=user_id, db=db)
+        cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
         if cached_profile is None:
-            api_logger.info(f"用户 {user_id} 的画像缓存不存在或已过期")
+            api_logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
             return fail(
                 BizCode.NOT_FOUND,
                 "画像缓存不存在或已过期，请右上角刷新生成新画像",
@@ -368,11 +368,11 @@ async def get_behavior_habits(
             
             filtered_habits.append(habit)
         
-        api_logger.info(f"Retrieved {len(filtered_habits)} behavior habits for user: {user_id} (from cache)")
+        api_logger.info(f"Retrieved {len(filtered_habits)} behavior habits for user: {end_user_id} (from cache)")
         return success(data=filtered_habits, msg="行为习惯获取成功（缓存）")
         
     except Exception as e:
-        return handle_implicit_memory_error(e, "行为习惯获取", user_id)
+        return handle_implicit_memory_error(e, "行为习惯获取", end_user_id)
 
 
 

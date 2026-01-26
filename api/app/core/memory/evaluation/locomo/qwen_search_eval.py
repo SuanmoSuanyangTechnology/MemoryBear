@@ -249,7 +249,7 @@ def get_search_params_by_category(category: str):
 
 async def run_locomo_eval(
     sample_size: int = 1,
-    group_id: str | None = None,
+    end_user_id: str | None = None,
     search_limit: int = 8,
     context_char_budget: int = 4000,  # 保持默认值不变
     llm_temperature: float = 0.0,
@@ -262,7 +262,7 @@ async def run_locomo_eval(
 ) -> Dict[str, Any]:
 
     # 函数内部使用三路检索逻辑，但保持参数签名不变
-    group_id = group_id or SELECTED_GROUP_ID
+    end_user_id = end_user_id or SELECTED_end_user_id
     data_path = os.path.join(PROJECT_ROOT, "data", "locomo10.json")
     if not os.path.exists(data_path):
         data_path = os.path.join(os.getcwd(), "data", "locomo10.json")
@@ -340,7 +340,7 @@ async def run_locomo_eval(
 
     # 关键修复：强制重新摄入纯净的对话数据
     print("🔄 强制重新摄入纯净的对话数据...")
-    await ingest_contexts_via_full_pipeline(contents, group_id, save_chunk_output=True)
+    await ingest_contexts_via_full_pipeline(contents, end_user_id, save_chunk_output=True)
 
     # 使用异步LLM客户端
     with get_db_context() as db:
@@ -405,7 +405,7 @@ async def run_locomo_eval(
                         connector=connector,
                         embedder_client=embedder,
                         query_text=q,
-                        group_id=group_id,
+                        end_user_id=end_user_id,
                         limit=adjusted_limit,
                         include=["chunks", "statements", "entities", "summaries"],  # 修复：使用正确的类型
                     )
@@ -456,7 +456,7 @@ async def run_locomo_eval(
                     search_results = await search_graph(
                         connector=connector,
                         q=q,
-                        group_id=group_id,
+                        end_user_id=end_user_id,
                         limit=adjusted_limit
                     )
                     dialogs = search_results.get("dialogues", [])
@@ -486,7 +486,7 @@ async def run_locomo_eval(
                         search_results = await run_hybrid_search(
                             query_text=q,
                             search_type=search_type,
-                            group_id=group_id,
+                            end_user_id=end_user_id,
                             limit=adjusted_limit,
                             include=["chunks", "statements", "entities", "summaries"],
                             output_path=None,
@@ -524,7 +524,7 @@ async def run_locomo_eval(
                             connector=connector,
                             embedder_client=embedder,
                             query_text=q,
-                            group_id=group_id,
+                            end_user_id=end_user_id,
                             limit=adjusted_limit,
                             include=["chunks", "statements", "entities", "summaries"],
                         )
@@ -597,7 +597,7 @@ async def run_locomo_eval(
                         "dialogues": [
                             {
                                 "uuid": d.get("uuid", ""),
-                                "group_id": d.get("group_id", ""),
+                                "end_user_id": d.get("end_user_id", ""),
                                 "content": d.get("content", "")[:200] + "..." if len(d.get("content", "")) > 200 else d.get("content", ""),
                                 "score": d.get("score", 0.0)
                             }
@@ -795,7 +795,7 @@ async def run_locomo_eval(
             },
             "samples": samples,
             "params": {
-                "group_id": group_id,
+                "end_user_id": end_user_id,
                 "search_limit": search_limit,
                 "context_char_budget": context_char_budget,
                 "search_type": search_type,
@@ -825,7 +825,7 @@ async def run_locomo_eval(
 def main():
     parser = argparse.ArgumentParser(description="Run LoCoMo evaluation with Qwen search")
     parser.add_argument("--sample_size", type=int, default=1, help="Number of samples to evaluate")
-    parser.add_argument("--group_id", type=str, default=None, help="Group ID for retrieval")
+    parser.add_argument("--end_user_id", type=str, default=None, help="Group ID for retrieval")
     parser.add_argument("--search_limit", type=int, default=8, help="Search limit per query")
     parser.add_argument("--context_char_budget", type=int, default=12000, help="Max characters for context")
     parser.add_argument("--llm_temperature", type=float, default=0.0, help="LLM temperature")
@@ -841,7 +841,7 @@ def main():
 
     result = asyncio.run(run_locomo_eval(
         sample_size=args.sample_size,
-        group_id=args.group_id,
+        end_user_id=args.end_user_id,
         search_limit=args.search_limit,
         context_char_budget=args.context_char_budget,
         llm_temperature=args.llm_temperature,

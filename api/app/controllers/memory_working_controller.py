@@ -20,18 +20,18 @@ router = APIRouter(
 )
 
 
-@router.get("/{group_id}/count", response_model=ApiResponse)
+@router.get("/{end_user_id}/count", response_model=ApiResponse)
 def get_memory_count(
-        group_id: uuid.UUID,
+        end_user_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
     pass
 
 
-@router.get("/{group_id}/conversations", response_model=ApiResponse)
+@router.get("/{end_user_id}/conversations", response_model=ApiResponse)
 def get_conversations(
-        group_id: uuid.UUID,
+        end_user_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
@@ -39,7 +39,7 @@ def get_conversations(
     Retrieve all conversations for the current user in a specific group.
 
     Args:
-        group_id (UUID): The group identifier.
+        end_user_id (UUID): The group identifier.
         current_user (User, optional): The authenticated user.
         db (Session, optional): SQLAlchemy session.
 
@@ -53,7 +53,7 @@ def get_conversations(
     """
     conversation_service = ConversationService(db)
     conversations = conversation_service.get_user_conversations(
-        group_id
+        end_user_id
     )
     return success(data=[
         {
@@ -63,7 +63,7 @@ def get_conversations(
     ], msg="get conversations success")
 
 
-@router.get("/{group_id}/messages", response_model=ApiResponse)
+@router.get("/{end_user_id}/messages", response_model=ApiResponse)
 def get_messages(
         conversation_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
@@ -100,7 +100,7 @@ def get_messages(
     return success(data=messages, msg="get conversation history success")
 
 
-@router.get("/{group_id}/detail", response_model=ApiResponse)
+@router.get("/{end_user_id}/detail", response_model=ApiResponse)
 async def get_conversation_detail(
         conversation_id: uuid.UUID,
         current_user: User = Depends(get_current_user),

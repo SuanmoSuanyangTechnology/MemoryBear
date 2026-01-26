@@ -83,6 +83,13 @@ class AgentConfigProxy:
 
 def agent_config_4_app_release(release: AppRelease) -> AgentConfig:
     config_dict = release.config
+    # 如果 config 是字符串，解析为字典
+    if isinstance(config_dict, str):
+        import json
+        try:
+            config_dict = json.loads(config_dict)
+        except json.JSONDecodeError:
+            config_dict = {}
 
     agent_config = AgentConfig(
         app_id=release.app_id,
@@ -100,6 +107,14 @@ def agent_config_4_app_release(release: AppRelease) -> AgentConfig:
 
 def multi_agent_config_4_app_release(release: AppRelease) -> MultiAgentConfig:
     config_dict = release.config
+    
+    # 如果 config 是字符串，解析为字典
+    if isinstance(config_dict, str):
+        import json
+        try:
+            config_dict = json.loads(config_dict)
+        except json.JSONDecodeError:
+            config_dict = {}
 
     agent_config = MultiAgentConfig(
         app_id=release.app_id,
@@ -120,6 +135,14 @@ def multi_agent_config_4_app_release(release: AppRelease) -> MultiAgentConfig:
 
 def workflow_config_4_app_release(release: AppRelease) -> WorkflowConfig:
     config_dict = release.config
+    
+    # 如果 config 是字符串，解析为字典
+    if isinstance(config_dict, str):
+        import json
+        try:
+            config_dict = json.loads(config_dict)
+        except json.JSONDecodeError:
+            config_dict = {}
 
     config = WorkflowConfig(
         id=config_dict.get("id"),

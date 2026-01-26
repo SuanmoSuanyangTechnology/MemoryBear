@@ -35,10 +35,10 @@ async def Split_The_Problem(state: ReadState) -> ReadState:
     """问题分解节点"""
     # 从状态中获取数据
     content = state.get('data', '')
-    group_id = state.get('group_id', '')
+    end_user_id = state.get('end_user_id', '')
     memory_config = state.get('memory_config', None)
 
-    history = await SessionService(store).get_history(group_id, group_id, group_id)
+    history = await SessionService(store).get_history(end_user_id, end_user_id, end_user_id)
 
     # 生成 JSON schema 以指导 LLM 输出正确格式
     json_schema = ProblemExtensionResponse.model_json_schema()
@@ -140,7 +140,7 @@ async def Problem_Extension(state: ReadState) -> ReadState:
     start = time.time()
     content = state.get('data', '')
     data = state.get('spit_data', '')['context']
-    group_id = state.get('group_id', '')
+    end_user_id = state.get('end_user_id', '')
     storage_type = state.get('storage_type', '')
     user_rag_memory_id = state.get('user_rag_memory_id', '')
     memory_config = state.get('memory_config', None)
@@ -156,7 +156,7 @@ async def Problem_Extension(state: ReadState) -> ReadState:
         databasets = {}
         data = []
 
-    history = await SessionService(store).get_history(group_id, group_id, group_id)
+    history = await SessionService(store).get_history(end_user_id, end_user_id, end_user_id)
 
     # 生成 JSON schema 以指导 LLM 输出正确格式
     json_schema = ProblemExtensionResponse.model_json_schema()

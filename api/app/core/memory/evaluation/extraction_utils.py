@@ -36,7 +36,7 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 async def ingest_contexts_via_full_pipeline(
     contexts: List[str],
-    group_id: str,
+    end_user_id: str,
     chunker_strategy: str | None = None,
     embedding_name: str | None = None,
     save_chunk_output: bool = False,
@@ -48,7 +48,7 @@ async def ingest_contexts_via_full_pipeline(
     This function mirrors the steps in main(), but starts from raw text contexts.
     Args:
         contexts: List of dialogue texts, each containing lines like "role: message".
-        group_id: Group ID to assign to generated DialogData and graph nodes.
+        end_user_id: Group ID to assign to generated DialogData and graph nodes.
         chunker_strategy: Optional chunker strategy; defaults to SELECTED_CHUNKER_STRATEGY.
         embedding_name: Optional embedding model ID; defaults to SELECTED_EMBEDDING_ID.
         save_chunk_output: If True, write chunked DialogData list to a JSON file for debugging.
@@ -109,7 +109,7 @@ async def ingest_contexts_via_full_pipeline(
         dialog = DialogData(
             context=context_model,
             ref_id=f"pipeline_item_{idx}",
-            group_id=group_id,
+            end_user_id=end_user_id,
             user_id="default_user",
             apply_id="default_application",
         )
@@ -318,16 +318,16 @@ async def handle_context_processing(args):
         print("No contexts provided for processing.")
         return False
 
-    return await main_from_contexts(contexts, args.context_group_id)
+    return await main_from_contexts(contexts, args.context_end_user_id)
 
 
-async def main_from_contexts(contexts: List[str], group_id: str):
+async def main_from_contexts(contexts: List[str], end_user_id: str):
     """Run the pipeline from provided dialogue contexts instead of test data."""
     print("=== Running pipeline from provided contexts ===")
 
     success = await ingest_contexts_via_full_pipeline(
         contexts=contexts,
-        group_id=group_id,
+        end_user_id=end_user_id,
         chunker_strategy=SELECTED_CHUNKER_STRATEGY,
         embedding_name=SELECTED_EMBEDDING_ID,
         save_chunk_output=True
