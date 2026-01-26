@@ -39,7 +39,7 @@ class CodeNodeConfig(BaseNodeConfig):
         description="output variables"
     )
 
-    code_content: str = Field(
+    code: str = Field(
         default="",
         description="code content"
     )

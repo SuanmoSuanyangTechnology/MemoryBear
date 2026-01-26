@@ -47,7 +47,7 @@ class CodeNode(BaseNode):
             result = {}
             for output in self.typed_config.output_variables:
                 value = exec_result.get(output.name)
-                if not value:
+                if value is None:
                     raise RuntimeError(f"Return value {output.name} does not exist")
                 match output.type:
                     case VariableType.STRING:
@@ -104,7 +104,7 @@ class CodeNode(BaseNode):
                     "x-api-key": 'redbear-sandbox'
                 },
                 json={
-                    "language": "python3",
+                    "language": self.typed_config.language,
                     "code": base64.b64encode(final_script.encode("utf-8")).decode("utf-8"),
                     "options": {
                         "enable_network": True
