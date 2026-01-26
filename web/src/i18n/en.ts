@@ -1982,6 +1982,10 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       arrange: 'Arrange',
       redo: 'Redo',
       undo: 'Undo',
+
+      input: 'Input',
+      output: 'Output',
+      error: 'Error Message',
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',
