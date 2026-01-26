@@ -23,7 +23,6 @@ export interface Memory {
   include_dialogue_context: boolean;
   max_context: string;
   lambda_mem: string;
-  lambda_mem: string;
   offset: string;
   state: boolean;
   created_at: string;
