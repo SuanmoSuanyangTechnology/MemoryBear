@@ -544,6 +544,11 @@ class BaseNode(ABC):
                 "error_node": self.node_id
             }
         else:
+            writer = get_stream_writer()
+            writer({
+                "type": "node_error",
+                **node_output
+            })
             # 无错误边：抛出异常停止工作流
             logger.error(f"节点 {self.node_id} 执行失败，停止工作流: {error_message}")
             raise Exception(f"节点 {self.node_id} 执行失败: {error_message}")
