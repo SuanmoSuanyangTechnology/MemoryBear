@@ -10,7 +10,7 @@ class MemoryConfig(Base):
 
     # 主键
     config_id = Column(UUID(as_uuid=True), primary_key=True,  comment="配置ID")
-
+    config_id_old = Column(Integer, nullable=True, comment="备份的配置ID")
     # 基本信息
     config_name = Column(String, nullable=False, comment="配置名称")
     config_desc = Column(String, nullable=True, comment="配置描述")
