@@ -10,6 +10,7 @@ pub static ALLOW_SYSCALLS: &[i32] = &[
     libc::SYS_ioctl as i32,
     libc::SYS_lseek as i32,
     libc::SYS_getdents64 as i32,
+    libc::SYS_fstat as i32,
 
     // thread
     libc::SYS_futex as i32,
@@ -77,7 +78,6 @@ pub static ALLOW_NETWORK_SYSCALLS: &[i32] = &[
     libc::SYS_sendmsg as i32,
     libc::SYS_sendmmsg as i32,
     libc::SYS_getsockopt as i32,
-    libc::SYS_fstat as i32,
     libc::SYS_fcntl as i32,
     libc::SYS_fstatfs as i32,
     libc::SYS_poll as i32,
