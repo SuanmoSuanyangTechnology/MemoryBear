@@ -1,7 +1,7 @@
 """本体提取服务层
 
-本模块提供本体提取的业务逻辑封装,协调OntologyExtractor、OntologyValidator和OWLValidator。
-包括本体提取、OWL文件导出、配置管理等功能。
+本模块提供本体提取的业务逻辑封装,协调OntologyExtractor和OWLValidator。
+包括本体提取、OWL文件导出等功能。
 
 Classes:
     OntologyService: 本体提取服务类,封装业务逻辑
@@ -22,7 +22,7 @@ from app.core.memory.storage_services.extraction_engine.knowledge_extraction.ont
     OntologyExtractor,
 )
 from app.core.memory.utils.validation.owl_validator import OWLValidator
-from app.repositories.ontology_config_repository import OntologyConfigRepository
+from app.repositories.ontology_result_repository import OntologyResultRepository
 
 
 logger = logging.getLogger(__name__)
@@ -33,15 +33,23 @@ class OntologyService:
     
     封装本体提取的业务逻辑,协调各个组件:
     - OntologyExtractor: 执行LLM驱动的本体提取
-    - OntologyValidator: 字符串验证
     - OWLValidator: OWL语义验证
-    - OntologyConfigRepository: 配置管理
+    - OntologyResultRepository: 结果存储
     
     Attributes:
         extractor: 本体提取器实例
         owl_validator: OWL验证器实例
         db: 数据库会话
     """
+    
+    # 默认配置参数
+    DEFAULT_MAX_CLASSES = 15
+    DEFAULT_MIN_CLASSES = 5
+    DEFAULT_MAX_DESCRIPTION_LENGTH = 500
+    DEFAULT_LLM_TEMPERATURE = 0.3
+    DEFAULT_LLM_MAX_TOKENS = 2000
+    DEFAULT_LLM_TIMEOUT = 30.0
+    DEFAULT_ENABLE_OWL_VALIDATION = True
     
     def __init__(
         self,
@@ -63,23 +71,21 @@ class OntologyService:
     async def extract_ontology(
         self,
         scenario: str,
-        domain: Optional[str] = None,
-        config_name: str = "default"
+        domain: Optional[str] = None
     ) -> OntologyExtractionResponse:
         """执行本体提取
         
-        从数据库读取配置参数,然后调用OntologyExtractor执行提取。
+        使用默认配置参数调用OntologyExtractor执行提取,并将结果保存到数据库。
         
         Args:
             scenario: 场景描述文本
             domain: 可选的领域提示
-            config_name: 配置名称,默认为"default"
             
         Returns:
             OntologyExtractionResponse: 提取结果
             
         Raises:
-            ValueError: 场景描述为空或配置不存在
+            ValueError: 场景描述为空
             RuntimeError: 提取过程失败
             
         Examples:
@@ -102,51 +108,52 @@ class OntologyService:
         logger.info(
             f"Starting ontology extraction service - "
             f"scenario_length={len(scenario)}, "
-            f"domain={domain}, "
-            f"config_name={config_name}"
+            f"domain={domain}"
         )
         
         try:
-            # 步骤1: 从数据库读取配置
-            logger.debug(f"Loading configuration: {config_name}")
-            config_start_time = time.time()
-            
-            config = self._get_config_internal(config_name)
-            
-            if not config:
-                error_msg = f"Configuration not found: {config_name}"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-            
-            config_duration = time.time() - config_start_time
-            logger.info(
-                f"Configuration loaded in {config_duration:.3f}s - "
-                f"max_classes={config['max_classes']}, "
-                f"min_classes={config['min_classes']}, "
-                f"enable_owl_validation={config['enable_owl_validation']}, "
-                f"timeout={config.get('llm_timeout')}"
-            )
-            
-            # 步骤2: 调用提取器执行提取
-            logger.info("Calling OntologyExtractor")
+            # 调用提取器执行提取(使用默认配置)
+            logger.info("Calling OntologyExtractor with default config")
             extraction_start_time = time.time()
             
             response = await self.extractor.extract_ontology_classes(
                 scenario=scenario,
                 domain=domain,
-                max_classes=config['max_classes'],
-                min_classes=config['min_classes'],
-                enable_owl_validation=config['enable_owl_validation'],
-                llm_temperature=config['llm_temperature'],
-                llm_max_tokens=config['llm_max_tokens'],
-                max_description_length=config['max_description_length'],
-                timeout=config.get('llm_timeout'),
+                max_classes=self.DEFAULT_MAX_CLASSES,
+                min_classes=self.DEFAULT_MIN_CLASSES,
+                enable_owl_validation=self.DEFAULT_ENABLE_OWL_VALIDATION,
+                llm_temperature=self.DEFAULT_LLM_TEMPERATURE,
+                llm_max_tokens=self.DEFAULT_LLM_MAX_TOKENS,
+                max_description_length=self.DEFAULT_MAX_DESCRIPTION_LENGTH,
+                timeout=self.DEFAULT_LLM_TIMEOUT,
             )
             
             extraction_duration = time.time() - extraction_start_time
+            
+            # 保存提取结果到数据库
+            try:
+                logger.debug("Saving extraction result to database")
+                classes_json = {
+                    "classes": [cls.model_dump() for cls in response.classes]
+                }
+                
+                OntologyResultRepository.create(
+                    db=self.db,
+                    scenario=scenario,
+                    domain=response.domain,
+                    namespace=response.namespace,
+                    classes_json=classes_json,
+                    extracted_count=len(response.classes)
+                )
+                self.db.commit()
+                logger.info("Extraction result saved to database")
+            except Exception as e:
+                logger.error(f"Failed to save extraction result: {str(e)}")
+                # 不影响提取结果的返回,继续执行
+            
             total_duration = time.time() - start_time
             
-            # 步骤3: 记录提取统计
+            # 记录提取统计
             logger.info(
                 f"Ontology extraction service completed - "
                 f"extracted_classes={len(response.classes)}, "
@@ -260,158 +267,3 @@ class OntologyService:
             error_msg = f"OWL export failed: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def get_config(self, config_name: str) -> Dict[str, Any]:
-        """获取配置
-        
-        从数据库读取指定名称的配置参数。
-        
-        Args:
-            config_name: 配置名称
-            
-        Returns:
-            Dict[str, Any]: 配置参数字典
-            
-        Raises:
-            ValueError: 配置不存在
-            RuntimeError: 数据库操作失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> config = service.get_config("default")
-            >>> config['max_classes']
-            15
-        """
-        logger.debug(f"Getting configuration: {config_name}")
-        
-        try:
-            config = self._get_config_internal(config_name)
-            
-            if not config:
-                error_msg = f"Configuration not found: {config_name}"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-            
-            logger.info(f"Configuration retrieved: {config_name}")
-            return config
-            
-        except ValueError:
-            raise
-        except Exception as e:
-            error_msg = f"Failed to get configuration: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise RuntimeError(error_msg) from e
-    
-    def update_config(
-        self,
-        config_name: str,
-        updates: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """更新配置
-        
-        更新指定配置的参数。
-        
-        Args:
-            config_name: 配置名称
-            updates: 要更新的字段字典
-            
-        Returns:
-            Dict[str, Any]: 更新后的配置参数字典
-            
-        Raises:
-            ValueError: 配置不存在或更新字段无效
-            RuntimeError: 数据库操作失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> updated_config = service.update_config(
-            ...     config_name="default",
-            ...     updates={"max_classes": 20}
-            ... )
-            >>> updated_config['max_classes']
-            20
-        """
-        logger.info(f"Updating configuration: {config_name}")
-        
-        try:
-            # 步骤1: 获取现有配置
-            db_config = OntologyConfigRepository.get_by_name(
-                db=self.db,
-                config_name=config_name
-            )
-            
-            if not db_config:
-                error_msg = f"Configuration not found: {config_name}"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-            
-            # 步骤2: 更新配置
-            logger.debug(f"Updating fields: {list(updates.keys())}")
-            updated_config = OntologyConfigRepository.update(
-                db=self.db,
-                config_id=db_config.id,
-                updates=updates
-            )
-            
-            if not updated_config:
-                error_msg = f"Failed to update configuration: {config_name}"
-                logger.error(error_msg)
-                raise RuntimeError(error_msg)
-            
-            # 步骤3: 转换为字典返回
-            result = {
-                "config_name": updated_config.config_name,
-                "max_classes": updated_config.max_classes,
-                "min_classes": updated_config.min_classes,
-                "max_description_length": updated_config.max_description_length,
-                "llm_temperature": updated_config.llm_temperature,
-                "llm_max_tokens": updated_config.llm_max_tokens,
-                "llm_timeout": updated_config.llm_timeout,
-                "enable_owl_validation": updated_config.enable_owl_validation,
-            }
-            
-            logger.info(f"Configuration updated successfully: {config_name}")
-            return result
-            
-        except ValueError:
-            raise
-        except Exception as e:
-            error_msg = f"Failed to update configuration: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise RuntimeError(error_msg) from e
-    
-    def _get_config_internal(self, config_name: str) -> Optional[Dict[str, Any]]:
-        """内部方法: 从数据库读取配置
-        
-        Args:
-            config_name: 配置名称
-            
-        Returns:
-            Optional[Dict[str, Any]]: 配置字典,不存在则返回None
-        """
-        try:
-            db_config = OntologyConfigRepository.get_by_name(
-                db=self.db,
-                config_name=config_name
-            )
-            
-            if not db_config:
-                return None
-            
-            # 转换为字典
-            config = {
-                "config_name": db_config.config_name,
-                "max_classes": db_config.max_classes,
-                "min_classes": db_config.min_classes,
-                "max_description_length": db_config.max_description_length,
-                "llm_temperature": db_config.llm_temperature,
-                "llm_max_tokens": db_config.llm_max_tokens,
-                "llm_timeout": db_config.llm_timeout,
-                "enable_owl_validation": db_config.enable_owl_validation,
-            }
-            
-            return config
-            
-        except Exception as e:
-            logger.error(f"Failed to read configuration from database: {str(e)}")
-            raise
