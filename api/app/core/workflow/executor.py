@@ -320,7 +320,9 @@ class WorkflowExecutor:
                     if event_type == "node_chunk":
                         node_id = data.get("node_id")
                         if self.activate_end:
-                            end_info = self.end_outputs[self.activate_end]
+                            end_info = self.end_outputs.get(self.activate_end)
+                            if not end_info or end_info.cursor >= len(end_info.outputs):
+                                continue
                             current_output = end_info.outputs[end_info.cursor]
                             if current_output.is_variable and node_id in current_output.literal:
                                 if data.get("done"):
