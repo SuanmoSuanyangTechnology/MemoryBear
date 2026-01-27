@@ -58,6 +58,12 @@ from app.core.memory.models.triplet_models import (
     TripletExtractionResponse,
 )
 
+# Ontology models
+from app.core.memory.models.ontology_models import (
+    OntologyClass,
+    OntologyExtractionResponse,
+)
+
 # Variable configuration models
 from app.core.memory.models.variate_config import (
     StatementExtractionConfig,
@@ -105,6 +111,9 @@ __all__ = [
     "Entity",
     "Triplet",
     "TripletExtractionResponse",
+    # Ontology models
+    "OntologyClass",
+    "OntologyExtractionResponse",
     # Variable configuration
     "StatementExtractionConfig",
     "ForgettingEngineConfig",
