@@ -31,7 +31,6 @@ class OntologyResultRepository:
         db: Session,
         scenario: str,
         domain: Optional[str],
-        namespace: Optional[str],
         classes_json: dict,
         extracted_count: int
     ) -> OntologyExtractionResult:
@@ -41,7 +40,6 @@ class OntologyResultRepository:
             db: 数据库会话
             scenario: 场景描述文本
             domain: 领域
-            namespace: 命名空间URI
             classes_json: 提取的类数据(JSON格式)
             extracted_count: 提取的类数量
 
@@ -57,7 +55,6 @@ class OntologyResultRepository:
             db_result = OntologyExtractionResult(
                 scenario=scenario,
                 domain=domain,
-                namespace=namespace,
                 classes_json=classes_json,
                 extracted_count=extracted_count
             )

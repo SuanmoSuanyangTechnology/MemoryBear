@@ -130,6 +130,11 @@ class OntologyService:
             
             extraction_duration = time.time() - extraction_start_time
             
+            # 检查是否成功提取到类
+            if not response.classes:
+                logger.error("Ontology extraction failed: No classes extracted (structured output may have failed)")
+                raise RuntimeError("本体提取失败：结构化输出失败，未能提取到任何本体类")
+            
             # 保存提取结果到数据库
             try:
                 logger.debug("Saving extraction result to database")
@@ -141,7 +146,6 @@ class OntologyService:
                     db=self.db,
                     scenario=scenario,
                     domain=response.domain,
-                    namespace=response.namespace,
                     classes_json=classes_json,
                     extracted_count=len(response.classes)
                 )
@@ -183,7 +187,6 @@ class OntologyService:
         classes: List[OntologyClass],
         output_path: str,
         format: str = "rdfxml",
-        namespace: Optional[str] = None
     ) -> str:
         """导出OWL文件
         
@@ -193,7 +196,6 @@ class OntologyService:
             classes: 本体类列表
             output_path: 输出文件路径
             format: 导出格式,可选值: "rdfxml", "turtle", "ntriples" (默认: "rdfxml")
-            namespace: 可选的命名空间URI
             
         Returns:
             str: 导出的OWL文件内容
@@ -233,7 +235,6 @@ class OntologyService:
             logger.debug("Validating ontology classes")
             is_valid, errors, world = self.owl_validator.validate_ontology_classes(
                 classes=classes,
-                namespace=namespace
             )
             
             if not is_valid:

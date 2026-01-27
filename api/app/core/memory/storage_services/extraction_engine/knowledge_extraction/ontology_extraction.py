@@ -147,7 +147,6 @@ class OntologyExtractor:
                     return OntologyExtractionResponse(
                         classes=[],
                         domain=domain or "Unknown",
-                        namespace=None,
                     )
             else:
                 # No timeout specified, call directly
@@ -193,7 +192,6 @@ class OntologyExtractor:
                 
                 is_valid, errors, world = self.owl_validator.validate_ontology_classes(
                     classes=response.classes,
-                    namespace=response.namespace,
                 )
                 
                 owl_duration = time.time() - owl_start_time
@@ -253,7 +251,6 @@ class OntologyExtractor:
             return OntologyExtractionResponse(
                 classes=[],
                 domain=domain or "Unknown",
-                namespace=None,
             )
     
     async def _call_llm_for_extraction(
@@ -426,7 +423,6 @@ class OntologyExtractor:
         return OntologyExtractionResponse(
             classes=validated_classes,
             domain=response.domain,
-            namespace=response.namespace,
         )
     
     def _filter_invalid_classes(
@@ -481,7 +477,6 @@ class OntologyExtractor:
             return OntologyExtractionResponse(
                 classes=filtered_classes,
                 domain=response.domain,
-                namespace=response.namespace,
             )
         
         return response

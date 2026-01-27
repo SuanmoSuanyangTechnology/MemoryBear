@@ -63,7 +63,6 @@ class OWLValidator:
     def validate_ontology_classes(
         self,
         classes: List[OntologyClass],
-        namespace: Optional[str] = None
     ) -> Tuple[bool, List[str], Optional[World]]:
         """Validate extracted ontology classes against OWL standards.
         
@@ -73,7 +72,6 @@ class OWLValidator:
         
         Args:
             classes: List of OntologyClass objects to validate
-            namespace: Optional custom namespace URI (uses base_namespace if not provided)
             
         Returns:
             Tuple of (is_valid, error_messages, world):
@@ -105,11 +103,14 @@ class OWLValidator:
             # Create a new world (isolated ontology environment)
             world = World()
             
-            # Use provided namespace or default
-            onto_namespace = namespace or self.base_namespace
+            # Use a proper ontology IRI
+            # Owlready2 expects the IRI to end with .owl or similar
+            onto_iri = self.base_namespace.rstrip('#/')
+            if not onto_iri.endswith('.owl'):
+                onto_iri = onto_iri + '.owl'
             
             # Create ontology
-            onto = world.get_ontology(onto_namespace)
+            onto = world.get_ontology(onto_iri)
             
             with onto:
                 # Dictionary to store created OWL classes for parent reference
@@ -118,13 +119,19 @@ class OWLValidator:
                 # First pass: Create all classes without parent relationships
                 for ontology_class in classes:
                     try:
-                        # Create OWL class inheriting from Thing
-                        owl_class = type(ontology_class.name, (Thing,), {
-                            "namespace": onto,
-                        })
+                        # Create OWL class dynamically using type() with Thing as base
+                        # The key is to NOT set namespace in the dict, let Owlready2 handle it
+                        owl_class = type(
+                            ontology_class.name,  # Class name
+                            (Thing,),              # Base classes
+                            {}                     # Class dict (empty, let Owlready2 manage)
+                        )
                         
-                        # Add label (rdfs:label)
-                        owl_class.label = [ontology_class.name]
+                        # Add label (rdfs:label) - include both English and Chinese names
+                        labels = [ontology_class.name]
+                        if ontology_class.name_chinese:
+                            labels.append(ontology_class.name_chinese)
+                        owl_class.label = labels
                         
                         # Add comment (rdfs:comment) with description
                         if ontology_class.description:
@@ -133,12 +140,16 @@ class OWLValidator:
                         # Store for parent relationship setup
                         owl_classes[ontology_class.name] = owl_class
                         
-                        logger.debug(f"Created OWL class: {ontology_class.name}")
+                        logger.debug(
+                            f"Created OWL class: {ontology_class.name} "
+                            f"(Chinese: {ontology_class.name_chinese}) "
+                            f"IRI: {owl_class.iri if hasattr(owl_class, 'iri') else 'N/A'}"
+                        )
                         
                     except Exception as e:
                         error_msg = f"Failed to create OWL class '{ontology_class.name}': {str(e)}"
                         errors.append(error_msg)
-                        logger.error(error_msg)
+                        logger.error(error_msg, exc_info=True)
                 
                 # Second pass: Set up parent relationships
                 for ontology_class in classes:
@@ -259,7 +270,8 @@ class OWLValidator:
         self,
         world: World,
         output_path: Optional[str] = None,
-        format: str = "rdfxml"
+        format: str = "rdfxml",
+        classes: Optional[List] = None
     ) -> str:
         """Export ontology to OWL file in specified format.
         
@@ -267,11 +279,13 @@ class OWLValidator:
         - rdfxml: RDF/XML format (default, most compatible)
         - turtle: Turtle format (more readable)
         - ntriples: N-Triples format (simplest)
+        - json: JSON format (simplified, human-readable)
         
         Args:
             world: Owlready2 World object containing the ontology
             output_path: Optional file path to save the ontology (if None, returns string)
-            format: Export format - "rdfxml", "turtle", or "ntriples" (default: "rdfxml")
+            format: Export format - "rdfxml", "turtle", "ntriples", or "json" (default: "rdfxml")
+            classes: Optional list of OntologyClass objects (required for json format)
             
         Returns:
             String representation of the exported ontology
@@ -288,15 +302,26 @@ class OWLValidator:
         if not OWLREADY2_AVAILABLE:
             raise RuntimeError("Owlready2 is not installed. Cannot export OWL file.")
         
-        if not world:
-            raise ValueError("World object is None. Cannot export ontology.")
-        
         # Validate format
-        valid_formats = ["rdfxml", "turtle", "ntriples"]
+        valid_formats = ["rdfxml", "turtle", "ntriples", "json"]
         if format not in valid_formats:
             raise ValueError(
                 f"Unsupported format '{format}'. Must be one of: {', '.join(valid_formats)}"
             )
+        
+        # JSON format doesn't need OWL processing
+        if format == "json":
+            if not classes:
+                raise ValueError("Classes list is required for JSON format export")
+            return self._export_to_json(classes)
+        
+        # For OWL formats, world is required
+        if not world:
+            raise ValueError("World object is None. Cannot export ontology.")
+        
+        # Note: Owlready2 has issues with turtle format export
+        # We'll handle it specially by converting from rdfxml
+        use_conversion = (format == "turtle")
         
         try:
             # Get all ontologies in the world
@@ -305,19 +330,61 @@ class OWLValidator:
             if not ontologies:
                 raise RuntimeError("No ontologies found in world")
             
-            # Use the first ontology (should be the one we created)
-            onto = ontologies[0]
+            # Find the ontology with classes (skip anonymous/empty ontologies)
+            onto = None
+            for ont in ontologies:
+                classes_count = len(list(ont.classes()))
+                logger.debug(f"Checking ontology {ont.base_iri}: {classes_count} classes")
+                if classes_count > 0:
+                    onto = ont
+                    break
+            
+            # If no ontology with classes found, use the last non-anonymous one
+            if onto is None:
+                for ont in reversed(ontologies):
+                    if ont.base_iri != "http://anonymous/":
+                        onto = ont
+                        break
+            
+            # If still no ontology, use the first one
+            if onto is None:
+                onto = ontologies[0]
+            
+            # Log ontology contents for debugging
+            logger.info(f"Ontology IRI: {onto.base_iri}")
+            logger.info(f"Ontology contains {len(list(onto.classes()))} classes")
+            
+            # List all classes in the ontology
+            all_classes = list(onto.classes())
+            for cls in all_classes:
+                logger.info(f"Class in ontology: {cls.name} (IRI: {cls.iri})")
+                if hasattr(cls, 'label'):
+                    logger.debug(f"  Labels: {cls.label}")
+                if hasattr(cls, 'comment'):
+                    logger.debug(f"  Comments: {cls.comment}")
+            
+            if len(all_classes) == 0:
+                logger.warning("No classes found in ontology! This may indicate a problem with class creation.")
             
             if output_path:
                 # Save to file
-                logger.info(f"Exporting ontology to {output_path} in {format} format")
-                onto.save(file=output_path, format=format)
+                export_format = "rdfxml" if use_conversion else format
+                logger.info(f"Exporting ontology to {output_path} in {export_format} format")
+                onto.save(file=output_path, format=export_format)
                 
                 # Read back the file content to return
                 with open(output_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 
+                # Convert to turtle if needed
+                if use_conversion:
+                    content = self._convert_to_turtle(content)
+                
                 logger.info(f"Successfully exported ontology to {output_path}")
+                
+                # Format the content for better readability
+                content = self._format_owl_content(content, format)
+                
                 return content
             else:
                 # Export to string (save to temporary location and read)
@@ -328,10 +395,18 @@ class OWLValidator:
                     tmp_path = tmp.name
                 
                 try:
-                    onto.save(file=tmp_path, format=format)
+                    export_format = "rdfxml" if use_conversion else format
+                    onto.save(file=tmp_path, format=export_format)
                     
                     with open(tmp_path, 'r', encoding='utf-8') as f:
                         content = f.read()
+                    
+                    # Convert to turtle if needed
+                    if use_conversion:
+                        content = self._convert_to_turtle(content)
+                    
+                    # Format the content for better readability
+                    content = self._format_owl_content(content, format)
                     
                     return content
                     
@@ -344,6 +419,123 @@ class OWLValidator:
             error_msg = f"Failed to export ontology: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
+    
+    def _export_to_json(self, classes: List) -> str:
+        """Export ontology classes to simplified JSON format.
+        
+        This format is more compact and easier to parse than OWL XML.
+        
+        Args:
+            classes: List of OntologyClass objects
+            
+        Returns:
+            JSON string representation (compact format)
+        """
+        import json
+        
+        result = {
+            "ontology": {
+                "namespace": self.base_namespace,
+                "classes": []
+            }
+        }
+        
+        for cls in classes:
+            class_data = {
+                "name": cls.name,
+                "name_chinese": cls.name_chinese,
+                "description": cls.description,
+                "entity_type": cls.entity_type,
+                "domain": cls.domain,
+                "parent_class": cls.parent_class,
+                "examples": cls.examples if hasattr(cls, 'examples') else []
+            }
+            result["ontology"]["classes"].append(class_data)
+        
+        # 使用紧凑格式：无缩进，使用分隔符减少空格
+        return json.dumps(result, ensure_ascii=False, separators=(',', ':'))
+    
+    def _convert_to_turtle(self, rdfxml_content: str) -> str:
+        """Convert RDF/XML content to Turtle format using rdflib.
+        
+        Args:
+            rdfxml_content: RDF/XML format content
+            
+        Returns:
+            Turtle format content
+        """
+        try:
+            from rdflib import Graph
+            
+            # Parse RDF/XML
+            g = Graph()
+            g.parse(data=rdfxml_content, format="xml")
+            
+            # Serialize to Turtle
+            turtle_content = g.serialize(format="turtle")
+            
+            # Handle bytes vs string
+            if isinstance(turtle_content, bytes):
+                turtle_content = turtle_content.decode('utf-8')
+            
+            return turtle_content
+            
+        except ImportError:
+            logger.warning(
+                "rdflib is not installed. Cannot convert to Turtle format. "
+                "Install with: pip install rdflib"
+            )
+            return rdfxml_content
+        except Exception as e:
+            logger.error(f"Failed to convert to Turtle format: {e}")
+            return rdfxml_content
+    
+    def _format_owl_content(self, content: str, format: str) -> str:
+        """Format OWL content for better readability.
+        
+        Args:
+            content: Raw OWL content string
+            format: Format type (rdfxml, turtle, ntriples)
+            
+        Returns:
+            Formatted OWL content string
+        """
+        if format == "rdfxml":
+            # Format XML with proper indentation
+            try:
+                import xml.dom.minidom as minidom
+                dom = minidom.parseString(content)
+                # Pretty print with 2-space indentation
+                formatted = dom.toprettyxml(indent="  ", encoding="utf-8").decode("utf-8")
+                
+                # Remove extra blank lines
+                lines = []
+                prev_blank = False
+                for line in formatted.split('\n'):
+                    is_blank = not line.strip()
+                    if not (is_blank and prev_blank):  # Skip consecutive blank lines
+                        lines.append(line)
+                    prev_blank = is_blank
+                
+                formatted = '\n'.join(lines)
+                
+                return formatted
+            except Exception as e:
+                logger.warning(f"Failed to format XML content: {e}")
+                return content
+        
+        elif format == "turtle":
+            # Turtle format is already relatively readable
+            # Just ensure consistent line endings and not empty
+            if not content or content.strip() == "":
+                logger.warning("Turtle content is empty, this may indicate an export issue")
+            return content.strip() + '\n' if content.strip() else content
+        
+        elif format == "ntriples":
+            # N-Triples format is line-based, ensure proper line endings
+            return content.strip() + '\n' if content.strip() else content
+        
+        return content
     
     def validate_with_protege_compatibility(
         self,
