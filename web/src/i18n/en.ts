@@ -866,7 +866,7 @@ export const en = {
 
       minimumRetention: 'Minimum retention (λ_time)',
       minimumRetentionDesc: 'Controls the minimum retention threshold of memory retention',
-      forgettingRate: 'Forgetting rate (λ_mem)',      
+      forgettingRate: 'Forgetting rate (λ_mem)',
       forgettingRateDesc: 'Control the speed of memory forgetting, the higher the value, the faster the forgetting',
       offset: 'Offset (offset)',
       offsetDesc: 'The offset of the minimum preservation degree',
@@ -934,7 +934,7 @@ export const en = {
       number: 'Number',
       checkbox: 'Checkbox',
       apiVariable: 'API Variable',
-      
+
       displayName: 'Display Name',
       maxLength: 'Max Length',
       required: 'Required',
@@ -1765,7 +1765,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       externalInteraction: 'External Interaction',
       "http-request": 'HTTP Request',
       tool: 'Tools',
-      code_execution: 'Code Execution',
+      code: 'Code Execution',
       "jinja-render": 'Template Rendering',
       cognitiveUpgrading: 'Cognitive Upgrading (Innovation)',
       'memory-read': 'Memory Retrieval',
@@ -1858,6 +1858,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           'array[number]': 'Array[Number]',
           'array[boolean]': 'Array[Boolean]',
           'array[object]': 'Array[Object]',
+          'object': 'Object',
           addParams: 'Add Extract Variable',
           promptPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
         },
@@ -1961,6 +1962,12 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           message: 'Message',
           config_id: 'Memory Configuration',
           search_switch: 'Search Mode',
+        },
+
+        'code': {
+          input_variables: 'Input Variables',
+          output_variables: 'Output Variables',
+          refreshTip: '同步函数签名至代码',
         },
         name: 'Key',
         type: 'Type',

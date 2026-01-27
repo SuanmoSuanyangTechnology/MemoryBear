@@ -68,7 +68,7 @@ const processNodeVariables = (
         if (p?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${p.name}`, p.name, p.type || 'string', `${dataNodeId}.${p.name}`, nodeData);
       });
       break;
-
+    
     case 'var-aggregator':
       if (config.group.defaultValue) {
         (config.group_variables.defaultValue || []).forEach((gv: any) => {
@@ -103,6 +103,11 @@ const processNodeVariables = (
 
     case 'loop':
       (config.cycle_vars.defaultValue || []).forEach((cv: any) => {
+        if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData);
+      });
+      break;
+    case 'code':
+      (config.output_variables.defaultValue || []).forEach((cv: any) => {
         if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData);
       });
       break;
