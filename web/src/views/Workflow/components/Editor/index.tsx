@@ -15,22 +15,24 @@ import CharacterCountPlugin from './plugin/CharacterCountPlugin'
 import InitialValuePlugin from './plugin/InitialValuePlugin';
 import CommandPlugin from './plugin/CommandPlugin';
 import Jinja2HighlightPlugin from './plugin/Jinja2HighlightPlugin';
+import Python3HighlightPlugin from './plugin/Python3HighlightPlugin';
+import JavaScriptHighlightPlugin from './plugin/JavaScriptHighlightPlugin';
 import LineNumberPlugin from './plugin/LineNumberPlugin';
 import BlurPlugin from './plugin/BlurPlugin';
 import { VariableNode } from './nodes/VariableNode'
 
-interface LexicalEditorProps {
+export interface LexicalEditorProps {
   placeholder?: string;
   value?: string;
   onChange?: (value: string) => void;
-  options: Suggestion[];
+  options?: Suggestion[];
   variant?: 'outlined' | 'borderless';
   height?: number;
   fontSize?: number;
   lineHeight?: number;
-  enableJinja2?: boolean;
   size?: 'default' | 'small';
-  type?: 'input' | 'textarea'
+  type?: 'input' | 'textarea',
+  language?: 'string' | 'jinja2' | 'python3' | 'javascript'
 }
 
 const theme = {
@@ -54,20 +56,25 @@ const Editor: FC<LexicalEditorProps> =({
   placeholder = "请输入内容...",
   value = "",
   onChange,
-  options,
+  options = [],
   variant = 'borderless',
-  enableJinja2 = false,
   size = 'default',
-  type = 'textarea'
+  type = 'textarea',
+  language = 'string'
 }) => {
-
   const [_count, setCount] = useState(0);
+  const [enableJinja2, setEnableJinja2] = useState(false)
+  const [enableLineNumbers, setEnableLineNumbers] = useState(false)
 
   useEffect(() => {
-    if (enableJinja2) {
-      const styleId = 'jinja2-styles';
+    const needsLineNumbers = language === 'jinja2' || language === 'python3' || language === 'javascript';
+    setEnableJinja2(language === 'jinja2');
+    setEnableLineNumbers(needsLineNumbers);
+
+    if (needsLineNumbers) {
+      const styleId = 'code-editor-styles';
       let existingStyle = document.getElementById(styleId);
-      
+
       if (!existingStyle) {
         const style = document.createElement('style');
         style.id = styleId;
@@ -119,6 +126,7 @@ const Editor: FC<LexicalEditorProps> =({
           }
           .editor-content-with-numbers {
             white-space: pre-wrap;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
           }
           .editor-content-with-numbers p {
             margin: 0;
@@ -128,7 +136,8 @@ const Editor: FC<LexicalEditorProps> =({
         document.head.appendChild(style);
       }
     }
-  }, [enableJinja2]);
+  }, [language])
+
   const initialConfig = {
     namespace: 'AutocompleteEditor',
     theme: enableJinja2 ? jinja2Theme : theme,
@@ -168,7 +177,7 @@ const Editor: FC<LexicalEditorProps> =({
       <div style={{ position: 'relative' }}>
         <RichTextPlugin
           contentEditable={
-            enableJinja2 ? (
+            enableLineNumbers ? (
               <div className="editor-with-line-numbers" style={{
                 border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
                 borderRadius: '6px',
@@ -212,8 +221,8 @@ const Editor: FC<LexicalEditorProps> =({
               style={{
                 minHeight: placeHolderMinheight,
                 position: 'absolute',
-                top: enableJinja2 ? '4px' : variant === 'borderless' ? '0' : '6px',
-                left: enableJinja2 ? '16px' : (variant === 'borderless' ? '0' : '11px'),
+                top: enableLineNumbers ? '4px' : variant === 'borderless' ? '0' : '6px',
+                left: enableLineNumbers ? '16px' : (variant === 'borderless' ? '0' : '11px'),
                 color: '#A8A9AA',
                 fontSize: fontSize,
                 lineHeight: placeHolderMinheight,
@@ -227,12 +236,14 @@ const Editor: FC<LexicalEditorProps> =({
         />
         <HistoryPlugin />
         <CommandPlugin />
-        {enableJinja2 && <Jinja2HighlightPlugin />}
-        {enableJinja2 && <LineNumberPlugin />}
+        {language === 'jinja2' && <Jinja2HighlightPlugin />}
+        {language === 'python3' && <Python3HighlightPlugin />}
+        {language === 'javascript' && <JavaScriptHighlightPlugin />}
+        {enableLineNumbers && <LineNumberPlugin />}
         <AutocompletePlugin options={options} enableJinja2={enableJinja2} />
         <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
         <InitialValuePlugin value={value} options={options} enableJinja2={enableJinja2} />
-        {enableJinja2 && <BlurPlugin />}
+        {enableLineNumbers && <BlurPlugin />}
       </div>
     </LexicalComposer>
   );

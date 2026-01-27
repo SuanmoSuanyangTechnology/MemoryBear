@@ -1609,11 +1609,6 @@ export const zh = {
       loadingEmpty: '内容正在加载中…',
       loadingEmptyDesc: '您的内容正在火箭运输中！很快就会降落在您的屏幕上'
     },
-    count: '计数: {{count}}',
-    increment: '增加',
-    decrement: '减少',
-    reset: '重置',
-    switchLanguage: '切换语言',
 
     home: {
       title: '首页',
@@ -1858,7 +1853,7 @@ export const zh = {
       externalInteraction: '外部交互',
       "http-request": 'HTTP请求',
       tool: '工具 (Tool)',
-      code_execution: '代码执行',
+      code: '代码执行',
       "jinja-render": '模板渲染',
       cognitiveUpgrading: '认知升级（创新）',
       'memory-read': '记忆提取',
@@ -1952,6 +1947,7 @@ export const zh = {
           'array[number]': 'Array[Number]',
           'array[boolean]': 'Array[Boolean]',
           'array[object]': 'Array[Object]',
+          'object': 'Object',
           addParams: '添加提取变量',
           promptPlaceholder: '在此处编写提示，输入“{”插入变量，输入“insert”插入',
         },
@@ -2055,6 +2051,12 @@ export const zh = {
           message: '消息',
           config_id: '记忆配置',
           search_switch: '检索模式',
+        },
+
+        'code': {
+          input_variables: '输入变量',
+          output_variables: '输出变量',
+          refreshTip: '同步函数签名至代码',
         },
         name: '键',
         type: '类型',
