@@ -163,6 +163,15 @@ class WorkflowExecutor:
             if self.end_outputs[node].activate and self.activate_end is None:
                 self.activate_end = node
 
+    @staticmethod
+    def _trans_output_string(content):
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list):
+            return "\n".join(content)
+        else:
+            return str(content)
+
     def build_graph(self, stream=False) -> CompiledStateGraph:
         """构建 LangGraph
 
@@ -430,6 +439,7 @@ class WorkflowExecutor:
                                         variables={},
                                         node_outputs=node_outputs
                                     )
+                                    chunk = self._trans_output_string(chunk)
                                     message += chunk
                                     full_content += chunk
                                 except ValueError:
@@ -472,6 +482,7 @@ class WorkflowExecutor:
                             variables=variables,
                             node_outputs=node_outputs
                         )
+                        chunk = self._trans_output_string(chunk)
                         message += chunk
                         full_content += chunk
                     except ValueError:
