@@ -11,6 +11,7 @@
 """
 
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -106,7 +107,7 @@ async def trigger_forgetting_cycle(
         # 调用服务层执行遗忘周期
         report = await forget_service.trigger_forgetting_cycle(
             db=db,
-            group_id=end_user_id,  # 服务层方法的参数名是 group_id
+            end_user_id=end_user_id,  # 服务层方法的参数名是 end_user_id
             max_merge_batch_size=payload.max_merge_batch_size,
             min_days_since_access=payload.min_days_since_access,
             config_id=config_id
@@ -128,7 +129,7 @@ async def trigger_forgetting_cycle(
 
 @router.get("/read_config", response_model=ApiResponse)
 async def read_forgetting_config(
-    config_id: int,
+    config_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -236,7 +237,7 @@ async def update_forgetting_config(
 
 @router.get("/stats", response_model=ApiResponse)
 async def get_forgetting_stats(
-    group_id: Optional[str] = None,
+    end_user_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -246,7 +247,7 @@ async def get_forgetting_stats(
     返回知识层节点统计、激活值分布等信息。
     
     Args:
-        group_id: 组ID（即 end_user_id，可选）
+        end_user_id: 组ID（即 end_user_id，可选）
         current_user: 当前用户
         db: 数据库会话
     
@@ -260,20 +261,20 @@ async def get_forgetting_stats(
         api_logger.warning(f"用户 {current_user.username} 尝试获取遗忘引擎统计但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
     
-    # 如果提供了 group_id，通过它获取 config_id
+    # 如果提供了 end_user_id，通过它获取 config_id
     config_id = None
-    if group_id:
+    if end_user_id:
         try:
             from app.services.memory_agent_service import get_end_user_connected_config
             
-            connected_config = get_end_user_connected_config(group_id, db)
+            connected_config = get_end_user_connected_config(end_user_id, db)
             config_id = connected_config.get("memory_config_id")
             
             if config_id is None:
-                api_logger.warning(f"终端用户 {group_id} 未关联记忆配置")
-                return fail(BizCode.INVALID_PARAMETER, f"终端用户 {group_id} 未关联记忆配置", "memory_config_id is None")
+                api_logger.warning(f"终端用户 {end_user_id} 未关联记忆配置")
+                return fail(BizCode.INVALID_PARAMETER, f"终端用户 {end_user_id} 未关联记忆配置", "memory_config_id is None")
             
-            api_logger.debug(f"通过 group_id={group_id} 获取到 config_id={config_id}")
+            api_logger.debug(f"通过 end_user_id={end_user_id} 获取到 config_id={config_id}")
         except ValueError as e:
             api_logger.warning(f"获取终端用户配置失败: {str(e)}")
             return fail(BizCode.INVALID_PARAMETER, str(e), "ValueError")
@@ -283,14 +284,14 @@ async def get_forgetting_stats(
     
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求获取遗忘引擎统计: "
-        f"group_id={group_id}, config_id={config_id}"
+        f"end_user_id={end_user_id}, config_id={config_id}"
     )
     
     try:
         # 调用服务层获取统计信息
         stats = await forget_service.get_forgetting_stats(
             db=db,
-            group_id=group_id,
+            end_user_id=end_user_id,
             config_id=config_id
         )
         

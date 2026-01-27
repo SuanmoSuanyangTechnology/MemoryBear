@@ -168,7 +168,7 @@ class SharedChatService:
             select(ModelApiKey)
             .where(
                 ModelApiKey.model_config_id == model_config_id,
-                ModelApiKey.is_active == True
+                ModelApiKey.is_active.is_(True)
             )
             .order_by(ModelApiKey.priority.desc())
             .limit(1)
@@ -362,7 +362,7 @@ class SharedChatService:
                 select(ModelApiKey)
                 .where(
                     ModelApiKey.model_config_id == model_config_id,
-                    ModelApiKey.is_active == True
+                    ModelApiKey.is_active.is_(True)
                 )
                 .order_by(ModelApiKey.priority.desc())
                 .limit(1)
@@ -598,7 +598,7 @@ class SharedChatService:
         # 获取多 Agent 配置
         multi_agent_config = self.db.query(MultiAgentConfig).filter(
             MultiAgentConfig.app_id == release.app_id,
-            MultiAgentConfig.is_active == True
+            MultiAgentConfig.is_active.is_(True)
         ).first()
         
         if not multi_agent_config:
@@ -695,7 +695,7 @@ class SharedChatService:
             # 获取多 Agent 配置
             multi_agent_config = self.db.query(MultiAgentConfig).filter(
                 MultiAgentConfig.app_id == release.app_id,
-                MultiAgentConfig.is_active == True
+                MultiAgentConfig.is_active.is_(True)
             ).first()
             
             if not multi_agent_config:

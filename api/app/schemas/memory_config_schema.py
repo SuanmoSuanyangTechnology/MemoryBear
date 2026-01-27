@@ -35,7 +35,7 @@ class ConfigurationError(Exception):
     def __init__(
         self,
         message: str,
-        config_id: Optional[int] = None,
+        config_id: Optional[UUID] = None,
         workspace_id: Optional[UUID] = None,
         context: Optional[Dict[str, Any]] = None,
     ):
@@ -72,7 +72,7 @@ class WorkspaceNotFoundError(ConfigurationError):
     def __init__(
         self,
         workspace_id: UUID,
-        config_id: Optional[int] = None,
+        config_id: Optional[UUID] = None,
         message: Optional[str] = None,
     ):
         if message is None:
@@ -89,7 +89,7 @@ class ModelNotFoundError(ConfigurationError):
         self,
         model_id: Union[str, UUID],
         model_type: str,
-        config_id: Optional[int] = None,
+        config_id: Optional[UUID] = None,
         workspace_id: Optional[UUID] = None,
         message: Optional[str] = None,
     ):
@@ -112,7 +112,7 @@ class ModelInactiveError(ConfigurationError):
         model_id: Union[str, UUID],
         model_name: str,
         model_type: str,
-        config_id: Optional[int] = None,
+        config_id: Optional[UUID] = None,
         workspace_id: Optional[UUID] = None,
         message: Optional[str] = None,
     ):
@@ -136,7 +136,7 @@ class InvalidConfigError(ConfigurationError):
         message: str,
         field_name: Optional[str] = None,
         invalid_value: Optional[Any] = None,
-        config_id: Optional[int] = None,
+        config_id: Optional[UUID] = None,
         workspace_id: Optional[UUID] = None,
     ):
         context = {}
@@ -155,7 +155,7 @@ class InvalidConfigError(ConfigurationError):
 class MemoryConfigValidation(BaseModel):
     """Pydantic model for validating memory configuration data from database."""
     
-    config_id: int = Field(..., gt=0, description="Configuration ID must be positive")
+    config_id: UUID = Field(..., description="Configuration ID (UUID)")
     config_name: str = Field(..., min_length=1, max_length=255)
     workspace_id: UUID = Field(..., description="Workspace UUID")
     workspace_name: str = Field(..., min_length=1, max_length=255)
@@ -275,7 +275,7 @@ class ModelValidation(BaseModel):
 
 
 def validate_memory_config_data(
-    config_data: Dict[str, Any], config_id: Optional[int] = None
+    config_data: Dict[str, Any], config_id: Optional[UUID] = None
 ) -> MemoryConfigValidation:
     """Validate memory configuration data using Pydantic model."""
     try:
@@ -302,7 +302,7 @@ def validate_memory_config_data(
 
 
 def validate_workspace_data(
-    workspace_data: Dict[str, Any], config_id: Optional[int] = None
+    workspace_data: Dict[str, Any], config_id: Optional[UUID] = None
 ) -> WorkspaceValidation:
     """Validate workspace data using Pydantic model."""
     try:
@@ -331,7 +331,7 @@ def validate_workspace_data(
 
 
 def validate_model_data(
-    model_data: Dict[str, Any], config_id: Optional[int] = None
+    model_data: Dict[str, Any], config_id: Optional[UUID] = None
 ) -> ModelValidation:
     """Validate model data using Pydantic model."""
     try:
@@ -364,7 +364,7 @@ def validate_model_data(
 class MemoryConfig:
     """Immutable memory configuration loaded from database."""
     
-    config_id: int
+    config_id: UUID
     config_name: str
     workspace_id: UUID
     workspace_name: str

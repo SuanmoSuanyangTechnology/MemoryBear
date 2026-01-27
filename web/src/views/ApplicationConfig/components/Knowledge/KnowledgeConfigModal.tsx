@@ -66,7 +66,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
   useEffect(() => {
     if (values?.retrieve_type) {
       const fieldsToReset = Object.keys(values).filter(key => 
-        key !== 'kb_id' && key !== 'retrieve_type'
+        key !== 'kb_id' && key !== 'retrieve_type' && key !== 'top_k'
       ) as (keyof KnowledgeConfigForm)[];
       form.resetFields(fieldsToReset);
     }

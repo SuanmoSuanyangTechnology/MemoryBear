@@ -19,7 +19,7 @@ from app.core.memory.agent.utils.session_tools import SessionService
 from app.core.memory.agent.utils.template_tools import TemplateService
 from app.db import get_db
 
-template_root = os.path.join(PROJECT_ROOT_, 'agent', 'utils', 'prompt')
+template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
 logger = get_agent_logger(__name__)
 db_session = next(get_db())
 
@@ -34,8 +34,8 @@ class SummaryNodeService(LLMServiceMixin):
 summary_service = SummaryNodeService()
 
 async def summary_history(state: ReadState) -> ReadState:
-    group_id = state.get("group_id", '')
-    history = await SessionService(store).get_history(group_id, group_id, group_id)
+    end_user_id = state.get("end_user_id", '')
+    history = await SessionService(store).get_history(end_user_id, end_user_id, end_user_id)
     return history
 
 async def summary_llm(state: ReadState, history, retrieve_info, template_name, operation_name, response_model,search_mode) -> str:
@@ -122,12 +122,12 @@ async def summary_llm(state: ReadState, history, retrieve_info, template_name, o
 
 async def summary_redis_save(state: ReadState,aimessages) -> ReadState:
     data = state.get("data", '')
-    group_id = state.get("group_id", '')
+    end_user_id = state.get("end_user_id", '')
     await SessionService(store).save_session(
-        user_id=group_id,
+        user_id=end_user_id,
         query=data,
-        apply_id=group_id,
-        group_id=group_id,
+        apply_id=end_user_id,
+        end_user_id=end_user_id,
         ai_response=aimessages
     )
     await SessionService(store).cleanup_duplicates()
@@ -175,11 +175,11 @@ async def Input_Summary(state: ReadState) -> ReadState:
     memory_config = state.get('memory_config', None)
     user_rag_memory_id=state.get("user_rag_memory_id",'')
     data=state.get("data", '')
-    group_id=state.get("group_id", '')
+    end_user_id=state.get("end_user_id", '')
     logger.info(f"Input_Summary: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     history = await summary_history( state)
     search_params = {
-        "group_id": group_id,
+        "end_user_id": end_user_id,
         "question": data,
         "return_raw_results": True,
         "include": ["summaries"]  # Only search summary nodes for faster performance
@@ -236,7 +236,7 @@ async def Retrieve_Summary(state: ReadState)-> ReadState:
     retrieve_info_str='\n'.join(retrieve_info_str)
 
     aimessages=await  summary_llm(state,history,retrieve_info_str,
-                                  'Retrieve_Summary_prompt.jinja2','retrieve_summary',RetrieveSummaryResponse,"1")
+                                  'direct_summary_prompt.jinja2','retrieve_summary',RetrieveSummaryResponse,"1")
     if '信息不足，无法回答' not in str(aimessages) or str(aimessages) != "":
         await summary_redis_save(state, aimessages)
     if aimessages == '':
@@ -276,7 +276,6 @@ async def Summary(state: ReadState)-> ReadState:
     aimessages=await  summary_llm(state,history,data,
                                   'summary_prompt.jinja2','summary',SummaryResponse,0)
 
-
     if '信息不足，无法回答' not in str(aimessages) or str(aimessages) != "":
         await summary_redis_save(state, aimessages)
     if aimessages == '':
@@ -295,9 +294,26 @@ async def Summary(state: ReadState)-> ReadState:
 async def Summary_fails(state: ReadState)-> ReadState:
     storage_type=state.get("storage_type", '')
     user_rag_memory_id=state.get("user_rag_memory_id", '')
+    history = await summary_history(state)
+    query = state.get("data", '')
+    verify = state.get("verify", '')
+    verify_expansion_issue = verify.get("verified_data", '')
+    retrieve_info_str = ''
+    for data in verify_expansion_issue:
+        for key, value in data.items():
+            if key == 'answer_small':
+                for i in value:
+                    retrieve_info_str += i + '\n'
+    data = {
+        "query": query,
+        "history": history,
+        "retrieve_info": retrieve_info_str
+    }
+    aimessages = await  summary_llm(state, history, data,
+                                 'fail_summary_prompt.jinja2', 'summary', SummaryResponse, 0)
     result= {
         "status": "success",
-        "summary_result": "没有相关数据",
+        "summary_result": aimessages,
         "storage_type": storage_type,
         "user_rag_memory_id": user_rag_memory_id
     }

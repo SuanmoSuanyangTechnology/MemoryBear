@@ -1,24 +1,23 @@
 import os
 from collections import defaultdict
+from pathlib import Path
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
 
-PROJECT_ROOT_ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT_ = str(Path(__file__).resolve().parents[3])
 
 class WriteState(TypedDict):
     '''
     Langgrapg Writing TypedDict
     '''
     messages: Annotated[list[AnyMessage], add_messages]
-    user_id:str
-    apply_id:str
-    group_id:str
+    end_user_id: str
     errors: list[dict]  # Track errors: [{"tool": "tool_name", "error": "message"}]
     memory_config: object
     write_result: dict
-    data:str
+    data: str
 
 class ReadState(TypedDict):
     """
@@ -28,7 +27,7 @@ class ReadState(TypedDict):
         messages: 消息列表，支持自动追加
         loop_count: 遍历次数
         search_switch: 搜索类型开关
-        group_id: 组标识
+        end_user_id: 组标识
         config_id: 配置ID，用于过滤结果
         data: 从content_input_node传递的内容数据
         spit_data: 从Split_The_Problem传递的分解结果
@@ -39,7 +38,7 @@ class ReadState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]  # 消息追加模式
     loop_count: int
     search_switch: str
-    group_id: str
+    end_user_id: str
     config_id: str
     data: str  # 新增字段用于传递内容
     spit_data: dict  # 新增字段用于传递问题分解结果

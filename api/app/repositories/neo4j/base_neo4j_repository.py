@@ -152,7 +152,7 @@ class BaseNeo4jRepository(BaseRepository[T]):
             
         Example:
             >>> results = await repository.find(
-            ...     {"group_id": "group_123", "user_id": "user_456"},
+            ...     {"end_user_id": "group_123", "user_id": "user_456"},
             ...     limit=50
             ... )
         """

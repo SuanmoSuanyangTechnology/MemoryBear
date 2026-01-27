@@ -12,10 +12,14 @@ from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from app.core.logging_config import get_config_logger, get_logger
-from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
+from app.core.memory.analytics.hot_memory_tags import (
+    get_hot_memory_tags,
+    get_raw_tags_from_db,
+    filter_tags_with_llm,
+)
 from app.core.memory.analytics.recent_activity_stats import get_recent_activity_stats
 from app.models.user_model import User
-from app.repositories.data_config_repository import DataConfigRepository
+from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import ConfigurationError
 from app.schemas.memory_storage_schema import (
@@ -125,7 +129,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             if not params.rerank_id:
                 params.rerank_id = configs.get('rerank')
 
-        config = DataConfigRepository.create(self.db, params)
+        config = MemoryConfigRepository.create(self.db, params)
         self.db.commit()
         return {"affected": 1, "config_id": config.config_id}
 
@@ -142,20 +146,20 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
 
     # --- Delete ---
     def delete(self, key: ConfigParamsDelete) -> Dict[str, Any]: # 删除配置参数（按配置ID）
-        success = DataConfigRepository.delete(self.db, key.config_id)
+        success = MemoryConfigRepository.delete(self.db, key.config_id)
         if not success:
             raise ValueError("未找到配置")
         return {"affected": 1}
 
     # --- Update ---
     def update(self, update: ConfigUpdate) -> Dict[str, Any]: # 部分更新配置参数
-        config = DataConfigRepository.update(self.db, update)
+        config = MemoryConfigRepository.update(self.db, update)
         if not config:
             raise ValueError("未找到配置")
         return {"affected": 1}
 
     def update_extracted(self, update: ConfigUpdateExtracted) -> Dict[str, Any]: # 更新记忆萃取引擎配置参数
-        config = DataConfigRepository.update_extracted(self.db, update)
+        config = MemoryConfigRepository.update_extracted(self.db, update)
         if not config:
             raise ValueError("未找到配置")
         return {"affected": 1}
@@ -166,14 +170,14 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
 
     # --- Read ---
     def get_extracted(self, key: ConfigKey) -> Dict[str, Any]: # 获取萃取配置参数
-        result = DataConfigRepository.get_extracted_config(self.db, key.config_id)
+        result = MemoryConfigRepository.get_extracted_config(self.db, key.config_id)
         if not result:
             raise ValueError("未找到配置")
         return result
 
     # --- Read All ---
     def get_all(self, workspace_id = None) -> List[Dict[str, Any]]: # 获取所有配置参数
-        configs = DataConfigRepository.get_all(self.db, workspace_id)
+        configs = MemoryConfigRepository.get_all(self.db, workspace_id)
 
         # 将 ORM 对象转换为字典列表
         data_list = []
@@ -183,8 +187,8 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "config_name": config.config_name,
                 "config_desc": config.config_desc,
                 "workspace_id": str(config.workspace_id) if config.workspace_id else None,
-                "group_id": config.group_id,
-                "user_id": config.user_id,
+                "end_user_id": config.end_user_id,
+                "config_id_old": int(config.user_id),
                 "apply_id": config.apply_id,
                 "llm_id": config.llm_id,
                 "embedding_id": config.embedding_id,
@@ -237,7 +241,8 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             ValueError: 当配置无效或参数缺失时
             RuntimeError: 当管线执行失败时
         """
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from pathlib import Path
+        project_root = str(Path(__file__).resolve().parents[2])
         
         try:
             # 发出初始进度事件
@@ -390,8 +395,8 @@ _neo4j_connector = Neo4jConnector()
 
 async def search_dialogue(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     result = await _neo4j_connector.execute_query(
-        DataConfigRepository.SEARCH_FOR_DIALOGUE,
-        group_id=end_user_id,
+        MemoryConfigRepository.SEARCH_FOR_DIALOGUE,
+        end_user_id=end_user_id,
     )
     data = {"search_for": "dialogue", "num": result[0]["num"]}
     return data
@@ -399,8 +404,8 @@ async def search_dialogue(end_user_id: Optional[str] = None) -> Dict[str, Any]:
 
 async def search_chunk(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     result = await _neo4j_connector.execute_query(
-        DataConfigRepository.SEARCH_FOR_CHUNK,
-        group_id=end_user_id,
+        MemoryConfigRepository.SEARCH_FOR_CHUNK,
+        end_user_id=end_user_id,
     )
     data = {"search_for": "chunk", "num": result[0]["num"]}
     return data
@@ -408,8 +413,8 @@ async def search_chunk(end_user_id: Optional[str] = None) -> Dict[str, Any]:
 
 async def search_statement(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     result = await _neo4j_connector.execute_query(
-        DataConfigRepository.SEARCH_FOR_STATEMENT,
-        group_id=end_user_id,
+        MemoryConfigRepository.SEARCH_FOR_STATEMENT,
+        end_user_id=end_user_id,
     )
     data = {"search_for": "statement", "num": result[0]["num"]}
     return data
@@ -417,8 +422,8 @@ async def search_statement(end_user_id: Optional[str] = None) -> Dict[str, Any]:
 
 async def search_entity(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     result = await _neo4j_connector.execute_query(
-        DataConfigRepository.SEARCH_FOR_ENTITY,
-        group_id=end_user_id,
+        MemoryConfigRepository.SEARCH_FOR_ENTITY,
+        end_user_id=end_user_id,
     )
     data = {"search_for": "entity", "num": result[0]["num"]}
     return data
@@ -426,8 +431,8 @@ async def search_entity(end_user_id: Optional[str] = None) -> Dict[str, Any]:
 
 async def search_all(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     result = await _neo4j_connector.execute_query(
-        DataConfigRepository.SEARCH_FOR_ALL,
-        group_id=end_user_id,
+        MemoryConfigRepository.SEARCH_FOR_ALL,
+        end_user_id=end_user_id,
     )
 
     # 检查结果是否为空或长度不足
@@ -461,8 +466,8 @@ async def kb_type_distribution(end_user_id: Optional[str] = None) -> Dict[str, A
     聚合 dialogue/chunk/statement/entity 四类计数，返回统一的分布结构，便于前端一次性消费。
     """
     result = await _neo4j_connector.execute_query(
-        DataConfigRepository.SEARCH_FOR_ALL,
-        group_id=end_user_id,
+        MemoryConfigRepository.SEARCH_FOR_ALL,
+        end_user_id=end_user_id,
     )
 
     # 检查结果是否为空或长度不足
@@ -492,20 +497,18 @@ async def kb_type_distribution(end_user_id: Optional[str] = None) -> Dict[str, A
 
 async def search_detials(end_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     result = await _neo4j_connector.execute_query(
-        DataConfigRepository.SEARCH_FOR_DETIALS,
-        group_id=end_user_id,
+        MemoryConfigRepository.SEARCH_FOR_DETIALS,
+        end_user_id=end_user_id,
     )
     return result
 
 
 async def search_edges(end_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     result = await _neo4j_connector.execute_query(
-        DataConfigRepository.SEARCH_FOR_EDGES,
-        group_id=end_user_id,
+        MemoryConfigRepository.SEARCH_FOR_EDGES,
+        end_user_id=end_user_id,
     )
     return result
-
-
 
 async def analytics_hot_memory_tags(
     db: Session, 
@@ -514,27 +517,79 @@ async def analytics_hot_memory_tags(
 ) -> List[Dict[str, Any]]:
     """
     获取热门记忆标签，按数量排序并返回前N个
+    
+    优化策略：
+    1. 先从所有用户收集原始标签（不调用LLM）
+    2. 聚合并合并相同标签的频率
+    3. 排序后取前N个
+    4. 只调用一次LLM进行筛选
     """
     workspace_id = current_user.current_workspace_id
     # 获取更多标签供LLM筛选（获取limit*4个标签）
     raw_limit = limit * 4
     from app.services.memory_dashboard_service import get_workspace_end_users
-    end_users = get_workspace_end_users(db, workspace_id, current_user)
+    # 使用 asyncio.to_thread 避免阻塞事件循环
+    end_users = await asyncio.to_thread(get_workspace_end_users, db, workspace_id, current_user)
     
-    tags = []
-    for end_user in end_users:
-        tag = await get_hot_memory_tags(str(end_user.id), limit=raw_limit)
-        if tag:
-            # 将每个用户的标签列表展平到总列表中
-            tags.extend(tag)
-
-    # 按频率降序排序（虽然数据库已经排序，但为了确保正确性再次排序）
-    sorted_tags = sorted(tags, key=lambda x: x[1], reverse=True)
+    if not end_users:
+        return []
     
-    # 只返回前limit个
-    top_tags = sorted_tags[:limit]
-    
-    return [{"name": t, "frequency": f} for t, f in top_tags]
+    # 步骤1: 收集所有用户的原始标签（不调用LLM）
+    connector = Neo4jConnector()
+    try:
+        all_raw_tags = []
+        for end_user in end_users:
+            raw_tags = await get_raw_tags_from_db(
+                connector, 
+                str(end_user.id), 
+                limit=raw_limit, 
+                by_user=False
+            )
+            if raw_tags:
+                all_raw_tags.extend(raw_tags)
+        
+        if not all_raw_tags:
+            return []
+        
+        # 步骤2: 聚合相同标签的频率
+        tag_frequency_map = {}
+        for tag_name, frequency in all_raw_tags:
+            if tag_name in tag_frequency_map:
+                tag_frequency_map[tag_name] += frequency
+            else:
+                tag_frequency_map[tag_name] = frequency
+        
+        # 步骤3: 按频率降序排序，取前raw_limit个
+        sorted_tags = sorted(
+            tag_frequency_map.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )[:raw_limit]
+        
+        if not sorted_tags:
+            return []
+        
+        # 步骤4: 只调用一次LLM进行筛选
+        tag_names = [tag for tag, _ in sorted_tags]
+        
+        # 使用第一个用户的end_user_id来获取LLM配置
+        # 因为同一工作空间下的用户应该使用相同的配置
+        first_end_user_id = str(end_users[0].id)
+        filtered_tag_names = await filter_tags_with_llm(tag_names, first_end_user_id)
+        
+        # 步骤5: 根据LLM筛选结果构建最终列表（保留频率）
+        final_tags = []
+        for tag, freq in sorted_tags:
+            if tag in filtered_tag_names:
+                final_tags.append((tag, freq))
+        
+        # 步骤6: 只返回前limit个
+        top_tags = final_tags[:limit]
+        
+        return [{"name": t, "frequency": f} for t, f in top_tags]
+        
+    finally:
+        await connector.close()
 
 
 async def analytics_recent_activity_stats() -> Dict[str, Any]:

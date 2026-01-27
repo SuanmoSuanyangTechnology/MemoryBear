@@ -16,7 +16,7 @@ class PerceptualType(IntEnum):
     CONVERSATION = 4
 
 
-class FileStorageType(IntEnum):
+class FileStorageService(IntEnum):
     LOCAL = 1
     REMOTE = 2
 

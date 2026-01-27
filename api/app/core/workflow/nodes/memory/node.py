@@ -22,7 +22,7 @@ class MemoryReadNode(BaseNode):
                 raise RuntimeError("End user id is required")
 
             return await MemoryAgentService().read_memory(
-                group_id=end_user_id,
+                end_user_id=end_user_id,
                 message=self._render_template(self.typed_config.message, state),
                 config_id=str(self.typed_config.config_id),
                 search_switch=self.typed_config.search_switch,

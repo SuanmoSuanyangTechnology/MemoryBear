@@ -103,7 +103,7 @@ class WorkspaceRepository:
                 workspaces = (
                     self.db.query(Workspace)
                     .filter(Workspace.tenant_id == user.tenant_id)
-                    .filter(Workspace.is_active == True)
+                    .filter(Workspace.is_active.is_(True))
                     .order_by(Workspace.updated_at.desc())
                     .all()
                 )
@@ -115,7 +115,7 @@ class WorkspaceRepository:
                 self.db.query(Workspace)
                 .join(WorkspaceMember, Workspace.id == WorkspaceMember.workspace_id)
                 .filter(WorkspaceMember.user_id == user_id)
-                .filter(Workspace.is_active == True)
+                .filter(Workspace.is_active.is_(True))
                 .order_by(Workspace.updated_at.desc())
                 .all()
             )
@@ -134,7 +134,7 @@ class WorkspaceRepository:
             workspaces = (
                 self.db.query(Workspace)
                 .filter(Workspace.tenant_id == tenant_id)
-                .filter(Workspace.is_active == True)
+                .filter(Workspace.is_active.is_(True))
                 .all()
             )
             db_logger.debug(f"租户工作空间查询成功: tenant_id={tenant_id}, 数量={len(workspaces)}")
@@ -169,7 +169,7 @@ class WorkspaceRepository:
             member = self.db.query(WorkspaceMember).filter(
                 WorkspaceMember.user_id == user_id,
                 WorkspaceMember.workspace_id == workspace_id,
-                WorkspaceMember.is_active == True,
+                WorkspaceMember.is_active.is_(True),
             ).first()
             if member:
                 db_logger.debug(f"工作空间成员查询成功: user_id={user_id}, workspace_id={workspace_id}, role={member.role}")
@@ -189,8 +189,8 @@ class WorkspaceRepository:
                 .join(User, WorkspaceMember.user_id == User.id)
                 .options(joinedload(WorkspaceMember.user), joinedload(WorkspaceMember.workspace))
                 .filter(WorkspaceMember.workspace_id == workspace_id)
-                .filter(WorkspaceMember.is_active == True)
-                .filter(User.is_active == True)
+                .filter(WorkspaceMember.is_active.is_(True))
+                .filter(User.is_active.is_(True))
                 .all()
             )
             db_logger.debug(f"成员列表查询成功: workspace_id={workspace_id}, 数量={len(members)}")
@@ -208,8 +208,8 @@ class WorkspaceRepository:
                 .join(User, WorkspaceMember.user_id == User.id)
                 .options(joinedload(WorkspaceMember.user), joinedload(WorkspaceMember.workspace))
                 .filter(WorkspaceMember.id == member_id)
-                .filter(WorkspaceMember.is_active == True)
-                .filter(User.is_active == True)
+                .filter(WorkspaceMember.is_active.is_(True))
+                .filter(User.is_active.is_(True))
                 .first()
             )
             if member:
@@ -226,7 +226,7 @@ class WorkspaceRepository:
             member = self.db.query(WorkspaceMember).filter(
                 WorkspaceMember.workspace_id == workspace_id,
                 WorkspaceMember.user_id == user_id,
-                WorkspaceMember.is_active == True,
+                WorkspaceMember.is_active.is_(True),
             ).first()
             if not member:
                 return None
@@ -243,7 +243,7 @@ class WorkspaceRepository:
             member = self.db.query(WorkspaceMember).filter(
                 WorkspaceMember.workspace_id == workspace_id,
                 WorkspaceMember.user_id == user_id,
-                WorkspaceMember.is_active == True,
+                WorkspaceMember.is_active.is_(True),
             ).first()
             if not member:
                 return None
@@ -259,7 +259,7 @@ class WorkspaceRepository:
         try:
             member = self.db.query(WorkspaceMember).filter(
                 WorkspaceMember.id == member_id,
-                WorkspaceMember.is_active == True,
+                WorkspaceMember.is_active.is_(True),
             ).first()
             if not member:
                 return None
@@ -275,7 +275,7 @@ class WorkspaceRepository:
         try:
             member = self.db.query(WorkspaceMember).filter(
                 WorkspaceMember.id == id,
-                WorkspaceMember.is_active == True,
+                WorkspaceMember.is_active.is_(True),
             ).first()
             if not member:
                 return None

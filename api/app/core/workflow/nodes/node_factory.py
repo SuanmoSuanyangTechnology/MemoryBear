@@ -10,6 +10,7 @@ from typing import Any, Union
 from app.core.workflow.nodes.agent import AgentNode
 from app.core.workflow.nodes.assigner import AssignerNode
 from app.core.workflow.nodes.base_node import BaseNode
+from app.core.workflow.nodes.code import CodeNode
 from app.core.workflow.nodes.cycle_graph.node import CycleGraphNode
 from app.core.workflow.nodes.end import EndNode
 from app.core.workflow.nodes.enums import NodeType
@@ -49,7 +50,8 @@ WorkflowNode = Union[
     QuestionClassifierNode,
     ToolNode,
     MemoryReadNode,
-    MemoryWriteNode
+    MemoryWriteNode,
+    CodeNode
 ]
 
 
@@ -81,6 +83,7 @@ class NodeFactory:
         NodeType.TOOL: ToolNode,
         NodeType.MEMORY_READ: MemoryReadNode,
         NodeType.MEMORY_WRITE: MemoryWriteNode,
+        NodeType.CODE: CodeNode,
     }
 
     @classmethod
