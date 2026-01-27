@@ -82,12 +82,12 @@ class StatementExtractor:
         logger.warning(f"Chunk {getattr(chunk, 'id', 'unknown')} has no speaker field or is empty")
         return None
 
-    async def _extract_statements(self, chunk, group_id: Optional[str] = None, dialogue_content: str = None) -> List[Statement]:
+    async def _extract_statements(self, chunk, end_user_id: Optional[str] = None, dialogue_content: str = None) -> List[Statement]:
         """Process a single chunk and return extracted statements
 
         Args:
             chunk: Chunk object to process
-            group_id: Group ID to assign to all statements in this chunk
+            end_user_id: Group ID to assign to all statements in this chunk
             dialogue_content: Full dialogue content to provide as context
 
         Returns:
@@ -158,7 +158,7 @@ class StatementExtractor:
                     temporal_info=temporal_type,
                     relevence_info=relevence_info,
                     chunk_id=chunk.id,
-                    group_id=group_id,
+                    end_user_id=end_user_id,
                     speaker=chunk_speaker,
                 )
                 
@@ -184,10 +184,10 @@ class StatementExtractor:
 
         logger.info(f"Processing {len(chunks_to_process)} chunks for statement extraction")
 
-        # Process all chunks concurrently, passing the group_id and dialogue content from dialog_data
+        # Process all chunks concurrently, passing the end_user_id and dialogue content from dialog_data
         dialogue_content = dialog_data.content if self.config.include_dialogue_context else None
         results = await asyncio.gather(
-            *[self._extract_statements(chunk, dialog_data.group_id, dialogue_content) for chunk in chunks_to_process],
+            *[self._extract_statements(chunk, dialog_data.end_user_id, dialogue_content) for chunk in chunks_to_process],
             return_exceptions=True
         )
 
@@ -225,7 +225,7 @@ class StatementExtractor:
             for i, statement in enumerate(statements, 1):
                 f.write(f"Statement {i}:\n")
                 f.write(f"Id: {statement.id}\n")
-                f.write(f"Group Id: {statement.group_id}\n")
+                f.write(f"Group Id: {statement.end_user_id}\n")
                 f.write(f"Content: {statement.statement}\n")
                 f.write(f"Type: {statement.stmt_type.value}\n")
                 f.write(f"Temporal Info: {statement.temporal_info.value}\n")
@@ -298,7 +298,7 @@ class StatementExtractor:
 
             dialog_sections.append({
                 "dialog_id": dialog.ref_id,
-                "group_id": dialog.group_id,
+                "end_user_id": dialog.end_user_id,
                 "content": dialog.content if getattr(dialog, "content", None) else "",
                 "strong": strong_relations,
                 "weak": weak_relations,
@@ -312,7 +312,7 @@ class StatementExtractor:
                 for idx, section in enumerate(dialog_sections, 1):
                     f.write(f"Dialog {idx}:\n")
                     f.write(f"Dialog ID: {section.get('dialog_id', '')}\n")
-                    f.write(f"Group ID: {section.get('group_id', '')}\n")
+                    f.write(f"Group ID: {section.get('end_user_id', '')}\n")
                     f.write("Content:\n")
                     f.write(f"{section.get('content', '')}\n")
                     f.write("-" * 40 + "\n\n")

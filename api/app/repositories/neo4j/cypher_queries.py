@@ -3,9 +3,7 @@ DIALOGUE_NODE_SAVE = """
     UNWIND $dialogues AS dialogue
     MERGE (n:Dialogue {id: dialogue.id})
     SET n.uuid = coalesce(n.uuid, dialogue.id),
-        n.group_id = dialogue.group_id,
-        n.user_id = dialogue.user_id,
-        n.apply_id = dialogue.apply_id,
+        n.end_user_id = dialogue.end_user_id,
         n.run_id = dialogue.run_id,
         n.ref_id = dialogue.ref_id,
         n.created_at = dialogue.created_at,
@@ -22,9 +20,7 @@ SET s += {
     id: statement.id,
     run_id: statement.run_id,
     chunk_id: statement.chunk_id,
-    group_id: statement.group_id,
-    user_id: statement.user_id,
-    apply_id: statement.apply_id,
+    end_user_id: statement.end_user_id,
     stmt_type: statement.stmt_type,
     statement: statement.statement,
     emotion_intensity: statement.emotion_intensity,
@@ -54,9 +50,7 @@ MERGE (c:Chunk {id: chunk.id})
 SET c += {
     id: chunk.id,
     name: chunk.name,
-    group_id: chunk.group_id,
-    user_id: chunk.user_id,
-    apply_id: chunk.apply_id,
+    end_user_id: chunk.end_user_id,
     run_id: chunk.run_id,
     created_at: chunk.created_at,
     expired_at: chunk.expired_at,
@@ -76,9 +70,7 @@ EXTRACTED_ENTITY_NODE_SAVE = """
 UNWIND $entities AS entity
 MERGE (e:ExtractedEntity {id: entity.id})
 SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity.name ELSE e.name END,
-    e.group_id = CASE WHEN entity.group_id IS NOT NULL AND entity.group_id <> '' THEN entity.group_id ELSE e.group_id END,
-    e.user_id = CASE WHEN entity.user_id IS NOT NULL AND entity.user_id <> '' THEN entity.user_id ELSE e.user_id END,
-    e.apply_id = CASE WHEN entity.apply_id IS NOT NULL AND entity.apply_id <> '' THEN entity.apply_id ELSE e.apply_id END,
+    e.end_user_id = CASE WHEN entity.end_user_id IS NOT NULL AND entity.end_user_id <> '' THEN entity.end_user_id ELSE e.end_user_id END,
     e.run_id = CASE WHEN entity.run_id IS NOT NULL AND entity.run_id <> '' THEN entity.run_id ELSE e.run_id END,
     e.created_at = CASE
         WHEN entity.created_at IS NOT NULL AND (e.created_at IS NULL OR entity.created_at < e.created_at)
@@ -134,9 +126,9 @@ RETURN e.id AS uuid
 # Add back ENTITY_RELATIONSHIP_SAVE to be used by graph_saver.save_entities_and_relationships
 ENTITY_RELATIONSHIP_SAVE = """
 UNWIND $relationships AS rel
-// Match entities by stable id within group, do not constrain by run_id
-MATCH (subject:ExtractedEntity {id: rel.source_id, group_id: rel.group_id})
-MATCH (object:ExtractedEntity {id: rel.target_id, group_id: rel.group_id})
+// Match entities by stable id within end_user_id, do not constrain by run_id
+MATCH (subject:ExtractedEntity {id: rel.source_id, end_user_id: rel.end_user_id})
+MATCH (object:ExtractedEntity {id: rel.target_id, end_user_id: rel.end_user_id})
 // Avoid duplicate edges across runs for the same endpoints
 MERGE (subject)-[r:EXTRACTED_RELATIONSHIP]->(object)
 SET r.predicate = rel.predicate,
@@ -148,7 +140,7 @@ SET r.predicate = rel.predicate,
     r.created_at = rel.created_at,
     r.expired_at = rel.expired_at,
     r.run_id = rel.run_id,
-    r.group_id = rel.group_id
+    r.end_user_id = rel.end_user_id
 RETURN elementId(r) AS uuid
 """
 
@@ -160,7 +152,7 @@ UNWIND $weak_entities AS entity
 MERGE (e:ExtractedEntity {id: entity.id, run_id: entity.run_id})
 SET e += {
     name: entity.name,
-    group_id: entity.group_id,
+    end_user_id: entity.end_user_id,
     run_id: entity.run_id,
     description: entity.description,
     chunk_id: entity.chunk_id,
@@ -175,11 +167,11 @@ RETURN e.id AS id
 SAVE_STRONG_TRIPLE_ENTITIES = """
 UNWIND $items AS item
 MERGE (s:ExtractedEntity {id: item.source_id, run_id: item.run_id})
-SET s += {name: item.subject, group_id: item.group_id, run_id: item.run_id}
+SET s += {name: item.subject, end_user_id: item.end_user_id, run_id: item.run_id}
 // Independent strong flag
 SET s.is_strong = true
 MERGE (o:ExtractedEntity {id: item.target_id, run_id: item.run_id})
-SET o += {name: item.object, group_id: item.group_id, run_id: item.run_id}
+SET o += {name: item.object, end_user_id: item.end_user_id, run_id: item.run_id}
 // Independent strong flag
 SET o.is_strong = true
 """
@@ -194,7 +186,7 @@ DIALOGUE_STATEMENT_EDGE_SAVE = """
     // 仅按端点去重，关系属性可更新
     MERGE (dialogue)-[e:MENTIONS]->(statement)
     SET e.uuid = edge.id,
-        e.group_id = edge.group_id,
+        e.end_user_id = edge.end_user_id,
         e.created_at = edge.created_at,
         e.expired_at = edge.expired_at
     RETURN e.uuid AS uuid
@@ -208,7 +200,7 @@ CHUNK_STATEMENT_EDGE_SAVE = """
     MATCH (statement:Statement {id: edge.source, run_id: edge.run_id})
     MATCH (chunk:Chunk {id: edge.target, run_id: edge.run_id})
     MERGE (chunk)-[e:CONTAINS {id: edge.id}]->(statement)
-    SET e.group_id = edge.group_id,
+    SET e.end_user_id = edge.end_user_id,
         e.run_id = edge.run_id,
         e.created_at = edge.created_at,
         e.expired_at = edge.expired_at
@@ -218,13 +210,12 @@ CHUNK_STATEMENT_EDGE_SAVE = """
 STATEMENT_ENTITY_EDGE_SAVE = """
 UNWIND $relationships AS rel
 // Statement nodes are per-run; keep run_id constraint on statements
-// Statement nodes are per-run; keep run_id constraint on statements
 MATCH (statement:Statement {id: rel.source, run_id: rel.run_id})
-// Entities are shared across runs within a group; do not constrain by run_id
-MATCH (entity:ExtractedEntity {id: rel.target, group_id: rel.group_id})
+// Entities are shared across runs within end_user_id; do not constrain by run_id
+MATCH (entity:ExtractedEntity {id: rel.target, end_user_id: rel.end_user_id})
 // Avoid duplicate edges across runs for same endpoints
 MERGE (statement)-[r:REFERENCES_ENTITY]->(entity)
-SET r.group_id = rel.group_id,
+SET r.end_user_id = rel.end_user_id,
     r.run_id = rel.run_id,
     r.created_at = rel.created_at,
     r.expired_at = rel.expired_at,
@@ -236,10 +227,10 @@ ENTITY_EMBEDDING_SEARCH = """
 CALL db.index.vector.queryNodes('entity_embedding_index', $limit * 100, $embedding)
 YIELD node AS e, score
 WHERE e.name_embedding IS NOT NULL
-  AND ($group_id IS NULL OR e.group_id = $group_id)
+  AND ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
 RETURN e.id AS id,
        e.name AS name,
-       e.group_id AS group_id,
+       e.end_user_id AS end_user_id,
        e.entity_type AS entity_type,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
        COALESCE(e.importance_score, 0.5) AS importance_score,
@@ -254,10 +245,10 @@ STATEMENT_EMBEDDING_SEARCH = """
 CALL db.index.vector.queryNodes('statement_embedding_index', $limit * 100, $embedding)
 YIELD node AS s, score
 WHERE s.statement_embedding IS NOT NULL
-  AND ($group_id IS NULL OR s.group_id = $group_id)
+  AND ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
 RETURN s.id AS id,
        s.statement AS statement,
-       s.group_id AS group_id,
+       s.end_user_id AS end_user_id,
        s.chunk_id AS chunk_id,
        s.created_at AS created_at,
        s.expired_at AS expired_at,
@@ -277,9 +268,9 @@ CHUNK_EMBEDDING_SEARCH = """
 CALL db.index.vector.queryNodes('chunk_embedding_index', $limit * 100, $embedding)
 YIELD node AS c, score
 WHERE c.chunk_embedding IS NOT NULL
-  AND ($group_id IS NULL OR c.group_id = $group_id)
+  AND ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
 RETURN c.id AS chunk_id,
-       c.group_id AS group_id,
+       c.end_user_id AS end_user_id,
        c.content AS content,
        c.dialog_id AS dialog_id,
        COALESCE(c.activation_value, 0.5) AS activation_value,
@@ -292,12 +283,12 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_BY_KEYWORD = """
 CALL db.index.fulltext.queryNodes("statementsFulltext", $q) YIELD node AS s, score
-WHERE ($group_id IS NULL OR s.group_id = $group_id)
+WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
 OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
 OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
 RETURN s.id AS id,
        s.statement AS statement,
-       s.group_id AS group_id,
+       s.end_user_id AS end_user_id,
        s.chunk_id AS chunk_id,
        s.created_at AS created_at,
        s.expired_at AS expired_at,
@@ -316,15 +307,13 @@ LIMIT $limit
 # 查询实体名称包含指定字符串的实体
 SEARCH_ENTITIES_BY_NAME = """
 CALL db.index.fulltext.queryNodes("entitiesFulltext", $q) YIELD node AS e, score
-WHERE ($group_id IS NULL OR e.group_id = $group_id)
+WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
 OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
 OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
 RETURN e.id AS id,
        e.name AS name,
-       e.group_id AS group_id,
+       e.end_user_id AS end_user_id,
        e.entity_type AS entity_type,
-       e.apply_id AS apply_id,
-       e.user_id AS user_id,
        e.created_at AS created_at,
        e.expired_at AS expired_at,
        e.entity_idx AS entity_idx,
@@ -347,11 +336,11 @@ LIMIT $limit
 
 SEARCH_CHUNKS_BY_CONTENT = """
 CALL db.index.fulltext.queryNodes("chunksFulltext", $q) YIELD node AS c, score
-WHERE ($group_id IS NULL OR c.group_id = $group_id)
+WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
 OPTIONAL MATCH (c)-[:CONTAINS]->(s:Statement)
 OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
 RETURN c.id AS chunk_id,
-       c.group_id AS group_id,
+       c.end_user_id AS end_user_id,
        c.content AS content,
        c.dialog_id AS dialog_id,
        c.sequence_number AS sequence_number,
@@ -413,10 +402,10 @@ LIMIT $limit
 
 SEARCH_DIALOGUE_BY_DIALOG_ID = """
 MATCH (d:Dialogue)
-WHERE ($group_id IS NULL OR d.group_id = $group_id)
+WHERE ($end_user_id IS NULL OR d.end_user_id = $end_user_id)
   AND d.id = $dialog_id
 RETURN d.id AS dialog_id,
-       d.group_id AS group_id,
+       d.end_user_id AS end_user_id,
        d.content AS content,
        d.created_at AS created_at,
        d.expired_at AS expired_at
@@ -426,10 +415,10 @@ LIMIT $limit
 
 SEARCH_CHUNK_BY_CHUNK_ID = """
 MATCH (c:Chunk)
-WHERE ($group_id IS NULL OR c.group_id = $group_id)
+WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
   AND c.id = $chunk_id
 RETURN c.id AS chunk_id,
-       c.group_id AS group_id,
+       c.end_user_id AS end_user_id,
        c.content AS content,
        c.dialog_id AS dialog_id,
        c.created_at AS created_at,
@@ -441,18 +430,14 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_BY_TEMPORAL = """
 MATCH (s:Statement)
-WHERE ($group_id IS NULL OR s.group_id = $group_id)
-  AND ($apply_id IS NULL OR s.apply_id = $apply_id)
-  AND ($user_id IS NULL OR s.user_id = $user_id)
+WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
   AND ((($start_date IS NULL OR datetime(s.created_at) >= datetime($start_date))
   AND ($end_date IS NULL OR datetime(s.created_at) <= datetime($end_date)))
   OR (($valid_date IS NULL OR (s.valid_at IS NOT NULL AND datetime(s.valid_at) >= datetime($valid_date)))
   AND ($invalid_date IS NULL OR (s.invalid_at IS NOT NULL AND datetime(s.invalid_at) <= datetime($invalid_date)))))
 RETURN s.id AS id,
        s.statement AS statement,
-       s.group_id AS group_id,
-       s.apply_id AS apply_id,
-       s.user_id AS user_id,
+       s.end_user_id AS end_user_id,
        s.chunk_id AS chunk_id,
        s.created_at AS created_at,
        s.valid_at AS valid_at,
@@ -468,9 +453,7 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL = """
 CALL db.index.fulltext.queryNodes("statementsFulltext", $q) YIELD node AS s, score
-WHERE ($group_id IS NULL OR s.group_id = $group_id)
-  AND ($apply_id IS NULL OR s.apply_id = $apply_id)
-  AND ($user_id IS NULL OR s.user_id = $user_id)
+WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
   AND ((($start_date IS NULL OR (s.created_at IS NOT NULL AND datetime(s.created_at) >= datetime($start_date)))
   AND ($end_date IS NULL OR (s.created_at IS NOT NULL AND datetime(s.created_at) <= datetime($end_date))))
   OR (($valid_date IS NULL OR (s.valid_at IS NOT NULL AND datetime(s.valid_at) >= datetime($valid_date)))
@@ -479,9 +462,7 @@ OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
 OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
 RETURN s.id AS id,
        s.statement AS statement,
-       s.group_id AS group_id,
-       s.apply_id AS apply_id,
-       s.user_id AS user_id,
+       s.end_user_id AS end_user_id,
        s.chunk_id AS chunk_id,
        s.created_at AS created_at,
        s.valid_at AS valid_at,
@@ -499,15 +480,11 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_BY_CREATED_AT = """
 MATCH (n:Statement)
-WHERE ($group_id IS NULL OR n.group_id = $group_id)
-  AND ($apply_id IS NULL OR n.apply_id = $apply_id)
-  AND ($user_id IS NULL OR n.user_id = $user_id)
+WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
   AND ($created_at IS NOT NULL AND date(substring(n.created_at, 0, 10)) = date($created_at))
 RETURN n.id AS id,
        n.statement AS statement,
-       n.group_id AS group_id,
-       n.apply_id AS apply_id,
-       n.user_id AS user_id,
+       n.end_user_id AS end_user_id,
        n.chunk_id AS chunk_id,
        n.created_at AS created_at,
        n.valid_at AS valid_at,
@@ -519,15 +496,11 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_BY_VALID_AT = """
 MATCH (n:Statement)
-WHERE ($group_id IS NULL OR n.group_id = $group_id)
-  AND ($apply_id IS NULL OR n.apply_id = $apply_id)
-  AND ($user_id IS NULL OR n.user_id = $user_id)
+WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
   AND ($valid_at IS NOT NULL AND date(substring(n.valid_at, 0, 10)) = date($valid_at))
 RETURN n.id AS id,
        n.statement AS statement,
-       n.group_id AS group_id,
-       n.apply_id AS apply_id,
-       n.user_id AS user_id,
+       n.end_user_id AS end_user_id,
        n.chunk_id AS chunk_id,
        n.created_at AS created_at,
        n.valid_at AS valid_at,
@@ -539,15 +512,11 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_G_CREATED_AT = """
 MATCH (n:Statement)
-WHERE ($group_id IS NULL OR n.group_id = $group_id)
-  AND ($apply_id IS NULL OR n.apply_id = $apply_id)
-  AND ($user_id IS NULL OR n.user_id = $user_id)
+WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
   AND ($created_at IS NOT NULL AND date(substring(n.created_at, 0, 19)) = date($created_at))
 RETURN n.id AS id,
        n.statement AS statement,
-       n.group_id AS group_id,
-       n.apply_id AS apply_id,
-       n.user_id AS user_id,
+       n.end_user_id AS end_user_id,
        n.chunk_id AS chunk_id,
        n.created_at AS created_at,
        n.valid_at AS valid_at,
@@ -559,15 +528,11 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_L_CREATED_AT = """
 MATCH (n:Statement)
-WHERE ($group_id IS NULL OR n.group_id = $group_id)
-  AND ($apply_id IS NULL OR n.apply_id = $apply_id)
-  AND ($user_id IS NULL OR n.user_id = $user_id)
+WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
   AND ($created_at IS NOT NULL AND date(substring(n.created_at, 0, 19)) < date($created_at))
 RETURN n.id AS id,
        n.statement AS statement,
-       n.group_id AS group_id,
-       n.apply_id AS apply_id,
-       n.user_id AS user_id,
+       n.end_user_id AS end_user_id,
        n.chunk_id AS chunk_id,
        n.created_at AS created_at,
        n.valid_at AS valid_at,
@@ -579,15 +544,11 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_G_VALID_AT = """
 MATCH (n:Statement)
-WHERE ($group_id IS NULL OR n.group_id = $group_id)
-  AND ($apply_id IS NULL OR n.apply_id = $apply_id)
-  AND ($user_id IS NULL OR n.user_id = $user_id)
+WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
   AND ($valid_at IS NOT NULL AND date(substring(n.valid_at, 0, 10)) > date($valid_at))
 RETURN n.id AS id,
        n.statement AS statement,
-       n.group_id AS group_id,
-       n.apply_id AS apply_id,
-       n.user_id AS user_id,
+       n.end_user_id AS end_user_id,
        n.chunk_id AS chunk_id,
        n.created_at AS created_at,
        n.valid_at AS valid_at,
@@ -599,15 +560,11 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_L_VALID_AT = """
 MATCH (n:Statement)
-WHERE ($group_id IS NULL OR n.group_id = $group_id)
-  AND ($apply_id IS NULL OR n.apply_id = $apply_id)
-  AND ($user_id IS NULL OR n.user_id = $user_id)
+WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
   AND ($valid_at IS NOT NULL AND date(substring(n.valid_at, 0, 10)) < date($valid_at))
 RETURN n.id AS id,
        n.statement AS statement,
-       n.group_id AS group_id,
-       n.apply_id AS apply_id,
-       n.user_id AS user_id,
+       n.end_user_id AS end_user_id,
        n.chunk_id AS chunk_id,
        n.created_at AS created_at,
        n.valid_at AS valid_at,
@@ -665,18 +622,18 @@ LIMIT $limit
 
 # 根据id修改句子的invalid_at的值
 UPDATE_STATEMENT_INVALID_AT = """
-MATCH (n:Statement {group_id: $group_id, id: $id})
+MATCH (n:Statement {end_user_id: $end_user_id, id: $id})
 SET n.invalid_at = $new_invalid_at
 """
 
 # MemorySummary keyword search using fulltext index
 SEARCH_MEMORY_SUMMARIES_BY_KEYWORD = """
 CALL db.index.fulltext.queryNodes("summariesFulltext", $q) YIELD node AS m, score
-WHERE ($group_id IS NULL OR m.group_id = $group_id)
+WHERE ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
 OPTIONAL MATCH (m)-[:DERIVED_FROM_STATEMENT]->(s:Statement)
 RETURN m.id AS id,
        m.name AS name,
-       m.group_id AS group_id,
+       m.end_user_id AS end_user_id,
        m.dialog_id AS dialog_id,
        m.chunk_ids AS chunk_ids,
        m.content AS content,
@@ -695,10 +652,10 @@ MEMORY_SUMMARY_EMBEDDING_SEARCH = """
 CALL db.index.vector.queryNodes('summary_embedding_index', $limit * 100, $embedding)
 YIELD node AS m, score
 WHERE m.summary_embedding IS NOT NULL
-  AND ($group_id IS NULL OR m.group_id = $group_id)
+  AND ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
 RETURN m.id AS id,
        m.name AS name,
-       m.group_id AS group_id,
+       m.end_user_id AS end_user_id,
        m.dialog_id AS dialog_id,
        m.chunk_ids AS chunk_ids,
        m.content AS content,
@@ -718,9 +675,7 @@ MERGE (m:MemorySummary {id: summary.id})
 SET m += {
     id: summary.id,
     name: summary.name,
-    group_id: summary.group_id,
-    user_id: summary.user_id,
-    apply_id: summary.apply_id,
+    end_user_id: summary.end_user_id,
     run_id: summary.run_id,
     created_at: summary.created_at,
     expired_at: summary.expired_at,
@@ -745,7 +700,7 @@ MATCH (ms:MemorySummary {id: e.summary_id, run_id: e.run_id})
 MATCH (c:Chunk {id: e.chunk_id, run_id: e.run_id})
 MATCH (c)-[:CONTAINS]->(s:Statement {run_id: e.run_id})
 MERGE (ms)-[r:DERIVED_FROM_STATEMENT]->(s)
-SET r.group_id = e.group_id,
+SET r.end_user_id = e.end_user_id,
     r.run_id = e.run_id,
     r.created_at = e.created_at,
     r.expired_at = e.expired_at
@@ -774,7 +729,7 @@ FOREACH (rel IN CASE WHEN r IS NOT NULL THEN [r] ELSE [] END |
         source_statement_id: rel.source_statement_id,
         valid_at: rel.valid_at,
         invalid_at: rel.invalid_at,
-        group_id: rel.group_id,
+        end_user_id: rel.end_user_id,
         user_id: rel.user_id,
         apply_id: rel.apply_id,
         run_id: rel.run_id,
@@ -796,7 +751,7 @@ FOREACH (rel IN CASE WHEN r IS NOT NULL THEN [r] ELSE [] END |
         source_statement_id: rel.source_statement_id,
         valid_at: rel.valid_at,
         invalid_at: rel.invalid_at,
-        group_id: rel.group_id,
+        end_user_id: rel.end_user_id,
         user_id: rel.user_id,
         apply_id: rel.apply_id,
         run_id: rel.run_id,
@@ -814,7 +769,7 @@ RETURN count(losing) as deleted
 
 neo4j_statement_part = '''
 MATCH (n:Statement)
-WHERE n.group_id = "{}" 
+WHERE n.end_user_id = "{}" 
   AND datetime(n.created_at) >= datetime() - duration('P3D')
 RETURN 
   n.statement as statement_name,
@@ -824,7 +779,7 @@ RETURN
 '''
 neo4j_statement_all = '''
 MATCH (n:Statement)
-WHERE n.group_id = "{}" 
+WHERE n.end_user_id = "{}" 
 RETURN 
   n.statement as statement_name,
   n.id as statement_id
@@ -832,7 +787,7 @@ RETURN
 '''
 neo4j_query_part = """
             MATCH (n)-[r]-(m:ExtractedEntity)
-            WHERE n.group_id = "{}" 
+            WHERE n.end_user_id = "{}" 
             AND datetime(n.created_at) >= datetime() - duration('P3D')
             WITH DISTINCT m
             OPTIONAL MATCH (m)-[rel]-(other:ExtractedEntity)
@@ -853,7 +808,7 @@ neo4j_query_part = """
                           """
 neo4j_query_all = """
                 MATCH (n)-[r]-(m:ExtractedEntity)
-                WHERE n.group_id = "{}" 
+                WHERE n.end_user_id = "{}" 
                 WITH DISTINCT m
                 OPTIONAL MATCH (m)-[rel]-(other:ExtractedEntity)
                 RETURN 
@@ -1027,14 +982,14 @@ RETURN DISTINCT
 
 Memory_Space_User="""
 MATCH (n)-[r]->(m)
-WHERE n.group_id = $group_id  AND m.name="用户" 
+WHERE n.end_user_id = $end_user_id  AND m.name="用户" 
 return DISTINCT elementId(m) as id
 """
 Memory_Space_Entity="""
 MATCH (n)-[]-(m)
 WHERE elementId(m) = $id AND  m.entity_type = "Person"
 RETURN
-DISTINCT m.name as name,m.group_id as group_id
+DISTINCT m.name as name,m.end_user_id as end_user_id
 """
 Memory_Space_Associative="""
 MATCH (u)-[]-(x)-[]-(h)

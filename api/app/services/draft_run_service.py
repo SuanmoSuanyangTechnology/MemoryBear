@@ -92,7 +92,7 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
             try:
                 memory_content = asyncio.run(
                     MemoryAgentService().read_memory(
-                        group_id=end_user_id,
+                        end_user_id=end_user_id,
                         message=question,
                         history=[],
                         search_switch="2",
@@ -728,7 +728,7 @@ class DraftRunService:
             select(ModelApiKey)
             .where(
                 ModelApiKey.model_config_id == model_config_id,
-                ModelApiKey.is_active == True
+                ModelApiKey.is_active.is_(True)
             )
             .order_by(ModelApiKey.priority.desc())
             .limit(1)

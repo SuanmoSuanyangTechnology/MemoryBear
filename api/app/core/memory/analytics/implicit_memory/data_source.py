@@ -75,8 +75,8 @@ class MemoryDataSource:
             start_date = time_range.start_date if time_range else None
             end_date = time_range.end_date if time_range else None
             
-            summary_dicts = await self.memory_summary_repo.find_by_group_id(
-                group_id=user_id,
+            summary_dicts = await self.memory_summary_repo.find_by_end_user_id(
+                end_user_id=user_id,
                 limit=limit,
                 start_date=start_date,
                 end_date=end_date

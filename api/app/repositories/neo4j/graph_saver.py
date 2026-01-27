@@ -44,9 +44,7 @@ async def save_entities_and_relationships(
             'created_at': edge.created_at.isoformat(),
             'expired_at': edge.expired_at.isoformat(),
             'run_id': edge.run_id,
-            'group_id': edge.group_id,
-            'user_id': edge.user_id,
-            'apply_id': edge.apply_id,
+            'end_user_id': edge.end_user_id,
         }
         all_relationships.append(relationship)
 
@@ -101,9 +99,7 @@ async def save_statement_chunk_edges(
             "id": edge.id,
             "source": edge.source,
             "target": edge.target,
-            "group_id": edge.group_id,
-            "user_id": edge.user_id,
-            "apply_id": edge.apply_id,
+            "end_user_id": edge.end_user_id,
             "run_id": edge.run_id,
             "created_at": edge.created_at.isoformat() if edge.created_at else None,
             "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
@@ -132,9 +128,7 @@ async def save_statement_entity_edges(
         edge_data = {
             "source": edge.source,
             "target": edge.target,
-            "group_id": edge.group_id,
-            "user_id": edge.user_id,
-            "apply_id": edge.apply_id,
+            "end_user_id": edge.end_user_id,
             "run_id": edge.run_id,
             "connect_strength": edge.connect_strength,
             "created_at": edge.created_at.isoformat() if edge.created_at else None,

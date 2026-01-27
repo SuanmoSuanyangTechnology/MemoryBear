@@ -193,9 +193,9 @@ async def _process_chunk_summary(
         node = MemorySummaryNode(
             id=uuid4().hex,
             name=title if title else f"MemorySummaryChunk_{chunk.id}",
-            group_id=dialog.group_id,
-            user_id=dialog.user_id,
-            apply_id=dialog.apply_id,
+            end_user_id=dialog.end_user_id,
+            user_id=dialog.end_user_id,
+            apply_id=dialog.end_user_id,
             run_id=dialog.run_id,  # 使用 dialog 的 run_id
             created_at=datetime.now(),
             expired_at=datetime(9999, 12, 31),

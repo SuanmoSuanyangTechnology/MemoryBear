@@ -19,7 +19,7 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
     """对话仓储
     
     管理对话节点的创建、查询、更新和删除操作。
-    提供按group_id、user_id、ref_id等条件查询对话的方法。
+    提供按end_user_id、user_id、ref_id等条件查询对话的方法。
     
     Attributes:
         connector: Neo4j连接器实例
@@ -54,17 +54,17 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
         
         return DialogueNode(**n)
     
-    async def find_by_group_id(self, group_id: str, limit: int = 100) -> List[DialogueNode]:
-        """根据group_id查询对话
+    async def find_by_end_user_id(self, end_user_id: str, limit: int = 100) -> List[DialogueNode]:
+        """根据end_user_id查询对话
         
         Args:
-            group_id: 组ID
+            end_user_id: 组ID
             limit: 返回结果的最大数量
             
         Returns:
             List[DialogueNode]: 对话列表
         """
-        return await self.find({"group_id": group_id}, limit=limit)
+        return await self.find({"end_user_id": end_user_id}, limit=limit)
     
     async def find_by_user_id(self, user_id: str, limit: int = 100) -> List[DialogueNode]:
         """根据user_id查询对话
@@ -94,14 +94,14 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
     
     async def find_by_group_and_user(
         self,
-        group_id: str,
+        end_user_id: str,
         user_id: str,
         limit: int = 100
     ) -> List[DialogueNode]:
-        """根据group_id和user_id查询对话
+        """根据end_user_id和user_id查询对话
         
         Args:
-            group_id: 组ID
+            end_user_id: 组ID
             user_id: 用户ID
             limit: 返回结果的最大数量
             
@@ -109,20 +109,20 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
             List[DialogueNode]: 对话列表
         """
         return await self.find(
-            {"group_id": group_id, "user_id": user_id},
+            {"end_user_id": end_user_id, "user_id": user_id},
             limit=limit
         )
     
     async def find_recent_dialogs(
         self,
-        group_id: str,
+        end_user_id: str,
         days: int = 7,
         limit: int = 100
     ) -> List[DialogueNode]:
         """查询最近的对话
         
         Args:
-            group_id: 组ID
+            end_user_id: 组ID
             days: 查询最近多少天的对话
             limit: 返回结果的最大数量
             
@@ -131,7 +131,7 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
         """
         query = f"""
         MATCH (n:{self.node_label})
-        WHERE n.group_id = $group_id
+        WHERE n.end_user_id = $end_user_id
         AND n.created_at >= datetime() - duration({{days: $days}})
         RETURN n
         ORDER BY n.created_at DESC
@@ -139,7 +139,7 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
         """
         results = await self.connector.execute_query(
             query,
-            group_id=group_id,
+            end_user_id=end_user_id,
             days=days,
             limit=limit
         )
@@ -164,22 +164,22 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
     async def find_by_config_and_group(
         self,
         config_id: str,
-        group_id: str,
+        end_user_id: str,
         limit: int = 100
     ) -> List[DialogueNode]:
-        """根据config_id和group_id查询对话
+        """根据config_id和end_user_id查询对话
         
         支持按配置ID和组ID同时过滤,确保只返回使用特定配置处理的对话。
         
         Args:
             config_id: 配置ID
-            group_id: 组ID
+            end_user_id: 组ID
             limit: 返回结果的最大数量
             
         Returns:
             List[DialogueNode]: 对话列表
         """
         return await self.find(
-            {"config_id": config_id, "group_id": group_id},
+            {"config_id": config_id, "end_user_id": end_user_id},
             limit=limit
         )

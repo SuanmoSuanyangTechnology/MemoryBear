@@ -18,7 +18,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
     """Memory Summary Repository
     
     Manages CRUD operations for MemorySummary nodes.
-    Provides methods to query summaries by group_id, user_id, and time ranges.
+    Provides methods to query summaries by end_user_id, user_id, and time ranges.
     
     Attributes:
         connector: Neo4j connector instance
@@ -51,17 +51,17 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         
         return dict(n)
     
-    async def find_by_group_id(
+    async def find_by_end_user_id(
         self, 
-        group_id: str, 
+        end_user_id: str,
         limit: int = 1000,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
-        """Query memory summaries by group_id
+        """Query memory summaries by end_user_id
         
         Args:
-            group_id: Group ID to filter by
+            end_user_id: Group ID to filter by
             limit: Maximum number of results to return
             start_date: Optional start date filter
             end_date: Optional end date filter
@@ -71,10 +71,10 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         """
         query = f"""
         MATCH (n:{self.node_label})
-        WHERE n.group_id = $group_id
+        WHERE n.end_user_id = $end_user_id
         """
         
-        params = {"group_id": group_id, "limit": limit}
+        params = {"end_user_id": end_user_id, "limit": limit}
         
         # Add date range filters if provided
         if start_date:
@@ -139,16 +139,16 @@ class MemorySummaryRepository(BaseNeo4jRepository):
     
     async def find_by_group_and_user(
         self,
-        group_id: str,
+        end_user_id: str,
         user_id: str,
         limit: int = 1000,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
-        """Query memory summaries by both group_id and user_id
+        """Query memory summaries by both end_user_id and user_id
         
         Args:
-            group_id: Group ID to filter by
+            end_user_id: Group ID to filter by
             user_id: User ID to filter by
             limit: Maximum number of results to return
             start_date: Optional start date filter
@@ -159,10 +159,10 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         """
         query = f"""
         MATCH (n:{self.node_label})
-        WHERE n.group_id = $group_id AND n.user_id = $user_id
+        WHERE n.end_user_id = $end_user_id AND n.user_id = $user_id
         """
         
-        params = {"group_id": group_id, "user_id": user_id, "limit": limit}
+        params = {"end_user_id": end_user_id, "user_id": user_id, "limit": limit}
         
         # Add date range filters if provided
         if start_date:
@@ -184,14 +184,14 @@ class MemorySummaryRepository(BaseNeo4jRepository):
     
     async def find_recent_summaries(
         self,
-        group_id: str,
+        end_user_id: str,
         days: int = 7,
         limit: int = 1000
     ) -> List[Dict[str, Any]]:
         """Query recent memory summaries
         
         Args:
-            group_id: Group ID to filter by
+            end_user_id: Group ID to filter by
             days: Number of recent days to query
             limit: Maximum number of results to return
             
@@ -200,7 +200,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         """
         query = f"""
         MATCH (n:{self.node_label})
-        WHERE n.group_id = $group_id
+        WHERE n.end_user_id = $end_user_id
         AND n.created_at >= datetime() - duration({{days: $days}})
         RETURN n
         ORDER BY n.created_at DESC
@@ -209,7 +209,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         
         results = await self.connector.execute_query(
             query,
-            group_id=group_id,
+            end_user_id=end_user_id,
             days=days,
             limit=limit
         )
@@ -217,14 +217,14 @@ class MemorySummaryRepository(BaseNeo4jRepository):
     
     async def find_by_content_keywords(
         self,
-        group_id: str,
+        end_user_id: str,
         keywords: List[str],
         limit: int = 100
     ) -> List[Dict[str, Any]]:
         """Query memory summaries by content keywords
         
         Args:
-            group_id: Group ID to filter by
+            end_user_id: Group ID to filter by
             keywords: List of keywords to search for in content
             limit: Maximum number of results to return
             
@@ -233,7 +233,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         """
         # Build keyword search conditions
         keyword_conditions = []
-        params = {"group_id": group_id, "limit": limit}
+        params = {"end_user_id": end_user_id, "limit": limit}
         
         for i, keyword in enumerate(keywords):
             keyword_conditions.append(f"toLower(n.content) CONTAINS toLower($keyword_{i})")
@@ -243,7 +243,7 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         
         query = f"""
         MATCH (n:{self.node_label})
-        WHERE n.group_id = $group_id
+        WHERE n.end_user_id = $end_user_id
         AND ({keyword_filter})
         RETURN n
         ORDER BY n.created_at DESC
@@ -253,21 +253,21 @@ class MemorySummaryRepository(BaseNeo4jRepository):
         results = await self.connector.execute_query(query, **params)
         return [self._map_to_dict(r) for r in results]
     
-    async def get_summary_count_by_group(self, group_id: str) -> int:
+    async def get_summary_count_by_group(self, end_user_id: str) -> int:
         """Get count of memory summaries for a group
         
         Args:
-            group_id: Group ID to count summaries for
+            end_user_id: Group ID to count summaries for
             
         Returns:
             int: Number of memory summaries
         """
         query = f"""
         MATCH (n:{self.node_label})
-        WHERE n.group_id = $group_id
+        WHERE n.end_user_id = $end_user_id
         RETURN count(n) as count
         """
         
-        results = await self.connector.execute_query(query, group_id=group_id)
+        results = await self.connector.execute_query(query, end_user_id=end_user_id)
         return results[0]['count'] if results else 0
     

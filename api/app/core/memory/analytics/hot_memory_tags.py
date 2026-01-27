@@ -16,13 +16,13 @@ class FilteredTags(BaseModel):
     """用于接收LLM筛选后的核心标签列表的模型。"""
     meaningful_tags: List[str] = Field(..., description="从原始列表中筛选出的具有核心代表意义的名词列表。")
 
-async def filter_tags_with_llm(tags: List[str], group_id: str) -> List[str]:
+async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
     """
     使用LLM筛选标签列表，仅保留具有代表性的核心名词。
     
     Args:
         tags: 原始标签列表
-        group_id: 用户组ID，用于获取配置
+        end_user_id: 用户组ID，用于获取配置
         
     Returns:
         筛选后的标签列表
@@ -37,12 +37,12 @@ async def filter_tags_with_llm(tags: List[str], group_id: str) -> List[str]:
                 get_end_user_connected_config,
             )
             
-            connected_config = get_end_user_connected_config(group_id, db)
+            connected_config = get_end_user_connected_config(end_user_id, db)
             config_id = connected_config.get("memory_config_id")
             
             if not config_id:
                 raise ValueError(
-                    f"No memory_config_id found for group_id: {group_id}. "
+                    f"No memory_config_id found for end_user_id: {end_user_id}. "
                     "Please ensure the user has a valid memory configuration."
                 )
             
@@ -87,7 +87,7 @@ async def filter_tags_with_llm(tags: List[str], group_id: str) -> List[str]:
 
 async def get_raw_tags_from_db(
     connector: Neo4jConnector,
-    group_id: str,
+    end_user_id: str,
     limit: int,
     by_user: bool = False
 ) -> List[Tuple[str, int]]:
@@ -99,9 +99,9 @@ async def get_raw_tags_from_db(
 
     Args:
         connector: Neo4j连接器实例
-        group_id: 如果by_user=False，则为group_id；如果by_user=True，则为user_id
+        end_user_id: 如果by_user=False，则为end_user_id；如果by_user=True，则为user_id
         limit: 返回的标签数量限制
-        by_user: 是否按user_id查询（默认False，按group_id查询）
+        by_user: 是否按user_id查询（默认False，按end_user_id查询）
         
     Returns:
         List[Tuple[str, int]]: 标签名称和频率的元组列表
@@ -119,7 +119,7 @@ async def get_raw_tags_from_db(
     else:
         query = (
             "MATCH (e:ExtractedEntity) "
-            "WHERE e.group_id = $id AND e.entity_type <> '人物' AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
+            "WHERE e.end_user_id = $id AND e.entity_type <> '人物' AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
             "RETURN e.name AS name, count(e) AS frequency "
             "ORDER BY frequency DESC "
             "LIMIT $limit"
@@ -128,44 +128,44 @@ async def get_raw_tags_from_db(
     # 使用项目的Neo4jConnector执行查询
     results = await connector.execute_query(
         query,
-        id=group_id,
+        id=end_user_id,
         limit=limit,
         names_to_exclude=names_to_exclude
     )
     
     return [(record["name"], record["frequency"]) for record in results]
 
-async def get_hot_memory_tags(group_id: str, limit: int = 40, by_user: bool = False) -> List[Tuple[str, int]]:
+async def get_hot_memory_tags(end_user_id: str, limit: int = 40, by_user: bool = False) -> List[Tuple[str, int]]:
     """
     获取原始标签，然后使用LLM进行筛选，返回最终的热门标签列表。
     查询更多的标签(limit=40)给LLM提供更丰富的上下文进行筛选。
 
     Args:
-        group_id: 必需参数。如果by_user=False，则为group_id；如果by_user=True，则为user_id
+        end_user_id: 必需参数。如果by_user=False，则为end_user_id；如果by_user=True，则为user_id
         limit: 返回的标签数量限制
-        by_user: 是否按user_id查询（默认False，按group_id查询）
+        by_user: 是否按user_id查询（默认False，按end_user_id查询）
         
     Raises:
-        ValueError: 如果group_id未提供或为空
+        ValueError: 如果end_user_id未提供或为空
     """
-    # 验证group_id必须提供且不为空
-    if not group_id or not group_id.strip():
+    # 验证end_user_id必须提供且不为空
+    if not end_user_id or not end_user_id.strip():
         raise ValueError(
-            "group_id is required. Please provide a valid group_id or user_id."
+            "end_user_id is required. Please provide a valid end_user_id or user_id."
         )
     
     # 使用项目的Neo4jConnector
     connector = Neo4jConnector()
     try:
         # 1. 从数据库获取原始排名靠前的标签
-        raw_tags_with_freq = await get_raw_tags_from_db(connector, group_id, limit, by_user=by_user)
+        raw_tags_with_freq = await get_raw_tags_from_db(connector, end_user_id, limit, by_user=by_user)
         if not raw_tags_with_freq:
             return []
 
         raw_tag_names = [tag for tag, freq in raw_tags_with_freq]
 
         # 2. 初始化LLM客户端并使用LLM筛选出有意义的标签
-        meaningful_tag_names = await filter_tags_with_llm(raw_tag_names, group_id)
+        meaningful_tag_names = await filter_tags_with_llm(raw_tag_names, end_user_id)
 
         # 3. 根据LLM的筛选结果，构建最终的标签列表（保留原始频率和顺序）
         final_tags = []

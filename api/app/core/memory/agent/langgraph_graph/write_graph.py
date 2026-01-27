@@ -14,6 +14,7 @@ from app.db import get_db
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.llm_tools import WriteState
 from app.core.memory.agent.langgraph_graph.nodes.write_nodes import write_node
+from app.core.memory.agent.langgraph_graph.nodes.data_nodes import content_input_write
 from app.services.memory_config_service import MemoryConfigService
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -26,9 +27,21 @@ async def make_write_graph():
     """
     Create a write graph workflow for memory operations.
 
-    The workflow directly processes messages from the initial state
-    and saves them to Neo4j storage.
+    Args:
+        user_id: User identifier
+        tools: MCP tools loaded from session
+        apply_id: Application identifier
+        end_user_id: Group identifier
+        memory_config: MemoryConfig object containing all configuration
     """
+    # workflow = StateGraph(WriteState)
+    # workflow.add_node("content_input", content_input_write)
+    # workflow.add_node("save_neo4j", write_node)
+    # workflow.add_edge(START, "content_input")
+    # workflow.add_edge("content_input", "save_neo4j")
+    # workflow.add_edge("save_neo4j", END)
+    #
+    # graph = workflow.compile()
     workflow = StateGraph(WriteState)
     workflow.add_node("save_neo4j", write_node)
     workflow.add_edge(START, "save_neo4j")
@@ -42,7 +55,7 @@ async def make_write_graph():
 async def main():
     """主函数 - 运行工作流"""
     message = "今天周一"
-    group_id = 'new_2025test1103'  # 组ID
+    end_user_id = 'new_2025test1103'  # 组ID
 
 
     # 获取数据库会话
@@ -54,9 +67,9 @@ async def main():
     )
     try:
         async with make_write_graph() as graph:
-            config = {"configurable": {"thread_id": group_id}}
+            config = {"configurable": {"thread_id": end_user_id}}
             # 初始状态 - 包含所有必要字段
-            initial_state = {"messages": [HumanMessage(content=message)],  "group_id": group_id, "memory_config": memory_config}
+            initial_state = {"messages": [HumanMessage(content=message)],  "end_user_id": end_user_id, "memory_config": memory_config}
 
             # 获取节点更新信息
             async for update_event in graph.astream(
