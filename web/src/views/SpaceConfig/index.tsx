@@ -66,7 +66,7 @@ const SpaceConfig: FC = () => {
           >
             <CustomSelect
               url={getModelListUrl}
-              params={{ type: 'llm', pagesize: 100 }}
+              params={{ type: 'llm', pagesize: 100, is_active: true }}
               valueKey="id"
               labelKey="name"
               hasAll={false}
@@ -80,7 +80,7 @@ const SpaceConfig: FC = () => {
           >
             <CustomSelect
               url={getModelListUrl}
-              params={{ type: 'embedding', pagesize: 100 }}
+              params={{ type: 'embedding', pagesize: 100, is_active: true }}
               valueKey="id"
               labelKey="name"
               hasAll={false}
@@ -94,7 +94,7 @@ const SpaceConfig: FC = () => {
           >
             <CustomSelect
               url={getModelListUrl}
-              params={{ type: 'rerank', pagesize: 100 }}
+              params={{ type: 'rerank', pagesize: 100, is_active: true }}
               valueKey="id"
               labelKey="name"
               hasAll={false}
