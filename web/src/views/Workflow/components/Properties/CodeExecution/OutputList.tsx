@@ -1,17 +1,24 @@
 import { type FC, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next'
-import { Button, Form, Input, Divider, Space } from 'antd';
-import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
-import VariableSelect from '../VariableSelect'
+import { Button, Form, Input, Divider, Space, Select } from 'antd';
 
-interface MappingListProps {
+interface OutputListProps {
   label: string;
   name: string;
-  options: Suggestion[];
   extra?: ReactNode;
-  valueKey?: string;
 }
-const MappingList: FC<MappingListProps> = ({ label, name, options, extra, valueKey = 'value' }) => {
+
+const types = [
+  'string',
+  'number',
+  'boolean',
+  'array[string]',
+  'array[number]',
+  'array[boolean]',
+  'array[object]',
+  'object'
+]
+const OutputList: FC<OutputListProps> = ({ label, name, extra }) => {
   const { t } = useTranslation()
   return (
     <>
@@ -26,7 +33,7 @@ const MappingList: FC<MappingListProps> = ({ label, name, options, extra, valueK
               <Space size={8}>
                 {extra}
                 <Button
-                  onClick={() => add()}
+                  onClick={() => add({ type: 'string' })}
                   className="rb:py-0! rb:px-1! rb:text-[12px]!"
                   size="small"
                 >
@@ -44,20 +51,23 @@ const MappingList: FC<MappingListProps> = ({ label, name, options, extra, valueK
                   <Input 
                     placeholder={t('common.pleaseEnter')} 
                     size="small"
-                    className="rb:w-24!"
+                    className="rb:w-45!"
                   />
                 </Form.Item>
                 <Form.Item
                   {...restField}
-                  name={[name, valueKey]}
+                  name={[name, 'type']}
                   noStyle
                 >
-                  <VariableSelect
-                    placeholder={t('common.pleaseSelect')}
-                    options={options}
-                    popupMatchSelectWidth={false}
+                  <Select
+                    placeholder={t('common.pleaseSelect')} 
+                    options={types.map(key => ({
+                      value: key,
+                      label: t(`workflow.config.parameter-extractor.${key}`),
+                    }))}
                     size="small"
-                    className="rb:w-39!"
+                    popupMatchSelectWidth={false}
+                    className="rb:w-22!"
                   />
                 </Form.Item>
                 <div
@@ -69,9 +79,8 @@ const MappingList: FC<MappingListProps> = ({ label, name, options, extra, valueK
           </>
         )}
       </Form.List>
-      <Divider />
     </>
   )
 };
 
-export default MappingList;
+export default OutputList;
