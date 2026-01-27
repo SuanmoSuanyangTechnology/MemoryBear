@@ -130,6 +130,7 @@ class Settings:
 
     # Server Configuration
     SERVER_IP: str = os.getenv("SERVER_IP", "127.0.0.1")
+    FILE_LOCAL_SERVER_URL : str = os.getenv("FILE_LOCAL_SERVER_URL", "http://localhost:8000/api")
 
     # ========================================================================
     # Internal Configuration (not in .env, used by application code)

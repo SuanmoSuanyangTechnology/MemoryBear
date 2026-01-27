@@ -36,7 +36,7 @@ def generate_signed_url(
     """
     if base_url is None:
         # Use SERVER_IP or default to localhost
-        server_url = f"http://{settings.SERVER_IP}:8000/api"
+        server_url = settings.FILE_LOCAL_SERVER_URL
         base_url = server_url
 
     # Calculate expiration timestamp
