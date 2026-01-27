@@ -5,6 +5,9 @@ export interface Query {
   is_public?: boolean;
   is_composite?: boolean;
   search?: string;
+
+  pagesize?: number;
+  page?: number;
 }
 export interface DescriptionItem {
   key: string;

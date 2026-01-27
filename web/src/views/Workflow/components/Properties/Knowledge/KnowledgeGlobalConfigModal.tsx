@@ -98,7 +98,7 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
           >
             <CustomSelect
               url={getModelListUrl}
-              params={{ type: 'rerank', pagesize: 100 }}
+              params={{ type: 'rerank', pagesize: 100, is_active: true }}
               valueKey="id"
               labelKey="name"
               hasAll={false}

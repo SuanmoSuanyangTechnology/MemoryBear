@@ -237,7 +237,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     })
   }
   const getModels = () => {
-    getModelList({ type: 'llm,chat', pagesize: 100, page: 1 })
+    getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
       .then(res => {
         const response = res as { items: Model[] }
         setModelList(response.items)

@@ -20,7 +20,7 @@ const configList = [
     key: 'emotion_model_id',
     type: 'customSelect',
     url: getModelListUrl,
-    params: { type: 'chat,llm', page: 1, pagesize: 100 }, // chat,llm
+    params: { type: 'chat,llm', page: 1, pagesize: 100, is_active: true }, // chat,llm
   },
   {
     key: 'emotion_min_intensity',

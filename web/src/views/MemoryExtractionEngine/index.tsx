@@ -1,14 +1,14 @@
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Space, Switch, Select, InputNumber, Slider, App, Form } from 'antd'
+import { Row, Col, Space, Select, InputNumber, Slider, App, Form } from 'antd'
 import clsx from 'clsx'
 import Card from './components/Card'
 import type { ConfigForm, Variable } from './types'
 import { getMemoryExtractionConfig, updateMemoryExtractionConfig } from '@/api/memory'
 import Markdown from '@/components/Markdown'
 import { getModelList } from '@/api/models';
-import type { Model } from '@/views/ModelManagement/types'
+import type { ModelListItem } from '@/views/ModelManagement/types'
 import { configList } from './constant'
 import Result from './components/Result'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
@@ -43,7 +43,7 @@ const MemoryExtractionEngine: FC = () => {
   const values = Form.useWatch<ConfigForm>([], form)
   const [loading, setLoading] = useState(false)
   const [iterationPeriodDisabled, setIterationPeriodDisabled] = useState(false)
-  const [modelList, setModelList] = useState<Model[]>([])
+  const [modelList, setModelList] = useState<ModelListItem[]>([])
 
   useEffect(() => {
     if (values?.reflexion_range === 'database') {
@@ -55,9 +55,9 @@ const MemoryExtractionEngine: FC = () => {
   }, [values])
 
   const getModels = () => {
-    getModelList({ type: 'llm,chat', pagesize: 100, page: 1 })
+    getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
       .then(res => {
-        const response = res as { items: Model[] }
+        const response = res as { items: ModelListItem[] }
         setModelList(response.items)
       })
   }
