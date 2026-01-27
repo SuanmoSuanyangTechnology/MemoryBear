@@ -18,6 +18,10 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
     last_login_at = Column(DateTime, nullable=True)  # 最后登录时间，可为空
     
+    # SSO 外部关联字段
+    external_id = Column(String(100), nullable=True)  # 外部用户ID
+    external_source = Column(String(50), nullable=True)  # 来源系统
+    
     current_workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True)  # 当前工作空间ID，可为空
     
     # Foreign key to tenant - each user belongs to exactly one tenant

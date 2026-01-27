@@ -1,8 +1,6 @@
-import uuid
 from uuid import UUID
 
 from pydantic import Field
-from typing import Literal
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
 
@@ -12,7 +10,7 @@ class MemoryReadNodeConfig(BaseNodeConfig):
         ...
     )
 
-    config_id: UUID = Field(
+    config_id: UUID | int = Field(
         ...
     )
 

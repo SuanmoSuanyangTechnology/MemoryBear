@@ -24,7 +24,7 @@ class MemoryReadNode(BaseNode):
             return await MemoryAgentService().read_memory(
                 end_user_id=end_user_id,
                 message=self._render_template(self.typed_config.message, state),
-                config_id=str(self.typed_config.config_id),
+                config_id=self.typed_config.config_id,
                 search_switch=self.typed_config.search_switch,
                 history=[],
                 db=db,
