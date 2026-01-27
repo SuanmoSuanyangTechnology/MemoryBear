@@ -1293,12 +1293,10 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
             memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
             if memory_config_id:
                 # 判断是否为UUID格式
-                try:
-                    # 尝试将其解析为UUID
+                if len(str(memory_config_id))>=5:
                     uuid.UUID(str(memory_config_id))
                     memory_config_ids.append(memory_config_id)
-                except (ValueError, AttributeError):
-                    # 如果不是UUID，则是旧的整数ID
+                else:
                     old_config_ids.append(str(memory_config_id))
     
     # 批量查询 memory_config_name
