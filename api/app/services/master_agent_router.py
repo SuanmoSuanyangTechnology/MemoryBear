@@ -5,7 +5,7 @@ import uuid
 from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
-from app.schemas import ModelParameters
+from app.schemas.app_schema import ModelParameters
 from app.services.conversation_state_manager import ConversationStateManager
 from app.models import ModelConfig, AgentConfig
 from app.core.logging_config import get_business_logger

@@ -31,6 +31,7 @@ def upgrade() -> None:
     op.execute("UPDATE memory_config SET config_id = apply_id::uuid")
     op.alter_column('memory_config', 'config_id', nullable=False)
     op.create_primary_key('memory_config_pkey', 'memory_config', ['config_id'])
+    op.execute("ALTER TABLE memory_config ALTER COLUMN config_id_old DROP DEFAULT")
     op.execute("DROP SEQUENCE IF EXISTS data_config_config_id_seq")
 
 
