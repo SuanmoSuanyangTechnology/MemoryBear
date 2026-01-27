@@ -182,13 +182,21 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
         # 将 ORM 对象转换为字典列表
         data_list = []
         for config in configs:
+            # 安全地转换 user_id 为 int
+            config_id_old = None
+            if config.user_id:
+                try:
+                    config_id_old = int(config.user_id)
+                except (ValueError, TypeError):
+                    config_id_old = None
+            
             config_dict = {
                 "config_id": config.config_id,
                 "config_name": config.config_name,
                 "config_desc": config.config_desc,
                 "workspace_id": str(config.workspace_id) if config.workspace_id else None,
                 "end_user_id": config.end_user_id,
-                "config_id_old": int(config.user_id),
+                "config_id_old": config_id_old,
                 "apply_id": config.apply_id,
                 "llm_id": config.llm_id,
                 "embedding_id": config.embedding_id,
@@ -268,7 +276,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             try:
                 config_service = MemoryConfigService(self.db)
                 memory_config = config_service.load_memory_config(
-                    config_id=int(cid),
+                    config_id=str(cid),
                     service_name="MemoryStorageService.pilot_run_stream"
                 )
                 logger.info(f"Configuration loaded successfully: {memory_config.config_name}")

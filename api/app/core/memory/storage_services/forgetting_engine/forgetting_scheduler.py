@@ -343,7 +343,7 @@ class ForgettingScheduler:
         
         params = {}
         if end_user_id:
-            end_user_id['end_user_id'] = end_user_id
+            params['end_user_id'] = end_user_id
         
         results = await self.connector.execute_query(query, **params)
         
