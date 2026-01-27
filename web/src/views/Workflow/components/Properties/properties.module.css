@@ -88,3 +88,6 @@
   font-size: 10px;
   inset-inline-end: 6px;
 }
+.properties :global(.ant-input-sm) {
+  padding: 3.6px 7px;
+}

@@ -15,7 +15,6 @@ class ExecutionResult:
         self.stdout = stdout
         self.stderr = stderr
         self.exit_code = exit_code
-        self.error = error
 
 
 class CodeExecutor(ABC):

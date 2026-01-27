@@ -109,6 +109,12 @@ export const useWorkflowGraph = ({
                 : group_variables
             } else if (type === 'http-request' && (key === 'headers' || key === 'params') && config[key] && typeof config[key] === 'object' && !Array.isArray(config[key]) && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
               nodeLibraryConfig.config[key].defaultValue = Object.entries(config[key]).map(([name, value]) => ({ name, value }))
+            } else if (type === 'code' && key === 'code' && config[key] && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+              try {
+                nodeLibraryConfig.config[key].defaultValue = atob(config[key] as string)
+              } catch {
+                nodeLibraryConfig.config[key].defaultValue = config[key]
+              }
             } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && config[key]) {
               nodeLibraryConfig.config[key].defaultValue = config[key]
             }
@@ -588,77 +594,6 @@ export const useWorkflowGraph = ({
       graphRef.current.resize(containerRef.current.offsetWidth, containerRef.current.offsetHeight);
     }
   };
-  
-  const nodeChangePosition = ({ node, options }: { node: Node; options: { skipParentHandler?: boolean } }) => {
-    const embedPadding = 50; // Define the embed padding constant
-    if (options.skipParentHandler) {
-      return
-    }
-
-    const children = node.getChildren()
-    if (children && children.length) {
-      node.prop('originPosition', node.getPosition())
-    }
-
-    const parent = node.getParent()
-    if (parent && parent.isNode()) {
-      let originSize = parent.prop('originSize')
-      if (originSize == null) {
-        originSize = parent.getSize()
-        parent.prop('originSize', originSize)
-      }
-
-      let originPosition = parent.prop('originPosition')
-      if (originPosition == null) {
-        originPosition = parent.getPosition()
-        parent.prop('originPosition', originPosition)
-      }
-
-      let x = originPosition.x
-      let y = originPosition.y
-      let cornerX = originPosition.x + originSize.width
-      let cornerY = originPosition.y + originSize.height
-      let hasChange = false
-
-      const children = parent.getChildren()
-      if (children) {
-        children.forEach((child) => {
-          const bbox = child.getBBox().inflate(embedPadding)
-          const corner = bbox.getCorner()
-
-          if (bbox.x < x) {
-            x = bbox.x
-            hasChange = true
-          }
-
-          if (bbox.y < y) {
-            y = bbox.y
-            hasChange = true
-          }
-
-          if (corner.x > cornerX) {
-            cornerX = corner.x
-            hasChange = true
-          }
-
-          if (corner.y > cornerY) {
-            cornerY = corner.y
-            hasChange = true
-          }
-        })
-      }
-
-      if (hasChange) {
-        parent.prop(
-          {
-            position: { x, y },
-            size: { width: cornerX - x, height: cornerY - y },
-          },
-          { skipParentHandler: true },
-        )
-      }
-    }
-  }
 
   // 初始化
   const init = () => {
@@ -912,7 +847,13 @@ export const useWorkflowGraph = ({
 
           if (data.config) {
             Object.keys(data.config).forEach(key => {
-              if (key === 'memory' && data.config[key] && 'defaultValue' in data.config[key]) {
+              if (data.type === 'code' && key === 'code' && data.config[key] && 'defaultValue' in data.config[key]) {
+                const code = data.config[key].defaultValue || ''
+                itemConfig = {
+                  ...itemConfig,
+                  code: btoa(code || '')
+                }
+              } else if (key === 'memory' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const { messages, ...rest } = data.config[key].defaultValue
                 let memoryMessage = { role: 'USER', content: data.config[key].defaultValue.messages }
                 itemConfig = {
