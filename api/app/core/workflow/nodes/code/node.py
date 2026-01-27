@@ -7,7 +7,6 @@ from textwrap import dedent
 from typing import Any
 
 import httpx
-from sympy.physics.vector import vlatex
 
 from app.core.workflow.nodes import BaseNode, WorkflowState
 from app.core.workflow.nodes.base_config import VariableType
