@@ -310,7 +310,7 @@ async def get_file_url(
     try:
         if permanent:
             # Generate permanent URL (no expiration check)
-            server_url = f"http://{settings.SERVER_IP}:8000/api"
+            server_url = settings.FILE_LOCAL_SERVER_URL
             url = f"{server_url}/storage/permanent/{file_id}"
             return success(
                 data={
