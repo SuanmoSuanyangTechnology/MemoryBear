@@ -1,70 +1,146 @@
-// 模型表单数据类型
-export interface ModelFormData extends ApiKey {
-  name: string;
-  type: string;
-  api_keys: ApiKey;
+export interface Query {
+  type?: string;
+  provider?: string;
+  is_active?: boolean;
+  is_public?: boolean;
+  is_composite?: boolean;
+  search?: string;
 }
-
 export interface DescriptionItem {
   key: string;
   label: string;
   children: string;
 }
+export interface CompositeModelForm {
+  logo?: any;
+  name: string;
+  type: string;
+  description: string;
+  api_key_ids: ModelApiKey[] | string[];
+}
+export interface GroupModelModalRef {
+  handleOpen: (model?: ModelListItem) => void;
+}
+export interface GroupModelModalProps {
+  refresh?: () => void;
+}
+export interface SubModelModalForm {
+  provider: string;
+  model_ids: string[]
+}
+export interface SubModelModalRef {
+  handleOpen: (model?: SubModelModalForm) => void;
+}
+export interface SubModelModalProps {
+  refresh?: () => void;
+}
+export interface ModelListDetailRef {
+  handleOpen: (vo: ProviderModelItem) => void;
+}
 
-// 模型类型定义
-export interface Model {
+
+export interface ModelApiKey {
+  model_name: string;
+  description: string | null;
+  provider: string;
+  api_key: string;
+  api_base: string;
+  config: any;
+  is_active: boolean;
+  priority: string;
+  id: string;
+  usage_count: string;
+  last_used_at: number;
+  created_at: number;
+  updated_at: number;
+  model_config_ids: string[];
+}
+export interface ModelListItem {
+  model_name?: string;
+  model_config_ids: string[];
+  name: string;
+  type: string;
+  logo: string;
+  description: string;
+  provider: string;
+  config: any;
+  is_active: boolean;
+  is_public: boolean;
+  id: string;
+  created_at: number;
+  updated_at: number;
+  api_keys: ModelApiKey[]
+}
+export interface ProviderModelItem {
+  provider: string;
+  logo?: string;
+  tags: string[];
+  models: ModelListItem[];
+}
+export interface KeyConfigModalForm {
+  provider: string;
+  api_key: string;
+  api_base: string;
+}
+export interface KeyConfigModalRef {
+  handleOpen: (vo: ProviderModelItem) => void;
+}
+export interface KeyConfigModalProps {
+  refresh?: () => void;
+}
+export interface MultiKeyForm {
+  model_config_id?: string;
+  model_name: string;
+  provider: string;
+  api_key: string;
+  api_base: string;
+}
+
+export interface MultiKeyConfigModalRef {
+  handleOpen: (vo: ModelListItem, provider?: string) => void;
+}
+export interface MultiKeyConfigModalProps {
+  refresh?: () => void;
+}
+
+
+export interface ModelPlaza {
+  provider: string;
+  models: ModelPlazaItem[];
+}
+export interface ModelPlazaItem {
   id: string;
   name: string;
   type: string;
-  description?: string;
-  config: Record<string, unknown>;
-  is_active: boolean;
-  is_public: boolean;
-  created_at: string | number;
-  updated_at: string | number;
-  api_keys: ApiKey[];
-
-  // provider: string;
-  // temperature: number,
-  // topP: number,
-  // status: string;
-  // vectorDimension: number;
-  // batchSize: number;
-  // truncateStrategy: string;
-  // created: string;
-  // updatedAt: string;
-  // descriptionItems?: Record<string, unknown>[];
-  // basicParameters?: string;
-  // normalization?: string;
-  // maxInputLength?: number;
-  // encodingFormat?: string;
-  // enablePooling?: boolean;
-  // poolingStrategy?: string;
-  // apiKey?: string;
-  // apiEndpoint?: string;
-  // timeout?: number;
-  // autoRetry?: boolean;
-  // retryCount?: number;
-}
-interface ApiKey {
-  model_name?: string;
   provider: string;
-  api_key?: string;
-  api_base?: string;
-  config?: Record<string, unknown>;
-  is_active?: boolean;
-  priority?: string;
-  id: string;
-  model_config_id?: string;
-  usage_count?: string;
-  last_used_at?: string | null;
-  created_at?: string;
-  updated_at?: string;
+  logo: string;
+  description: string;
+  is_deprecated: boolean;
+  is_official: boolean;
+  tags: string[];
+  add_count: number;
+  is_added: boolean;
 }
-// 定义组件暴露的方法接口
-export interface ConfigModalRef {
-  handleOpen: (model?: Model) => void;
+export interface ModelSquareDetailRef {
+  handleOpen: (vo: ModelPlaza) => void;
 }
-export interface ConfigModalProps {
+export interface CustomModelForm {
+  name: string;
+  type: string;
+  provider: string;
+  logo: string;
+  description: string;
+  is_official: boolean;
+  tags: string[];
+}
+export interface CustomModelModalRef {
+  handleOpen: (vo?: ModelPlazaItem) => void;
+}
+export interface CustomModelModalProps {
   refresh?: () => void;
+}
+
+
+export interface BaseRef {
+  getList: () => void;
 }
