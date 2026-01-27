@@ -333,7 +333,7 @@ class WorkflowExecutor:
                             if not end_info or end_info.cursor >= len(end_info.outputs):
                                 continue
                             current_output = end_info.outputs[end_info.cursor]
-                            if current_output.is_variable and node_id in current_output.literal:
+                            if current_output.is_variable and current_output.depends_on_node(node_id):
                                 if data.get("done"):
                                     end_info.cursor += 1
                                 else:
