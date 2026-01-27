@@ -26,7 +26,6 @@ class OntologyExtractionResult(Base):
     domain = Column(String(200), nullable=True, comment="领域")
 
     # 提取输出
-    namespace = Column(String(500), nullable=True, comment="本体命名空间URI")
     classes_json = Column(JSONB, nullable=False, comment="提取的本体类数据(JSON格式)")
     extracted_count = Column(Integer, nullable=False, comment="提取的类数量")
 

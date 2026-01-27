@@ -27,15 +27,18 @@ class ExtractionRequest(BaseModel):
     Attributes:
         scenario: 场景描述文本,不能为空
         domain: 可选的领域提示(如Healthcare, Education等)
+        llm_id: LLM模型ID,必须提供
     
     Examples:
         >>> request = ExtractionRequest(
         ...     scenario="医院管理患者记录...",
-        ...     domain="Healthcare"
+        ...     domain="Healthcare",
+        ...     llm_id="550e8400-e29b-41d4-a716-446655440000"
         ... )
     """
     scenario: str = Field(..., description="场景描述文本", min_length=1)
     domain: Optional[str] = Field(None, description="可选的领域提示")
+    llm_id: str = Field(..., description="LLM模型ID")
 
 
 class ExtractionResponse(BaseModel):
@@ -46,20 +49,17 @@ class ExtractionResponse(BaseModel):
     Attributes:
         classes: 提取的本体类列表
         domain: 识别的领域
-        namespace: 本体命名空间URI
         extracted_count: 提取的类数量
     
     Examples:
         >>> response = ExtractionResponse(
         ...     classes=[...],
         ...     domain="Healthcare",
-        ...     namespace="http://example.org/ontology#",
         ...     extracted_count=7
         ... )
     """
     classes: List[OntologyClass] = Field(default_factory=list, description="提取的本体类列表")
     domain: str = Field(..., description="识别的领域")
-    namespace: Optional[str] = Field(None, description="本体命名空间URI")
     extracted_count: int = Field(..., description="提取的类数量")
 
 
@@ -70,18 +70,19 @@ class ExportRequest(BaseModel):
     
     Attributes:
         classes: 要导出的本体类列表
-        format: 导出格式,可选值: rdfxml, turtle, ntriples
-        namespace: 可选的命名空间URI
+        format: 导出格式,可选值: rdfxml, turtle, ntriples, json
+        include_metadata: 是否包含完整的OWL元数据(命名空间等),默认True
     
     Examples:
         >>> request = ExportRequest(
         ...     classes=[...],
-        ...     format="rdfxml"
+        ...     format="rdfxml",
+        ...     include_metadata=True
         ... )
     """
     classes: List[OntologyClass] = Field(..., description="要导出的本体类列表", min_length=1)
-    format: str = Field("rdfxml", description="导出格式: rdfxml, turtle, ntriples")
-    namespace: Optional[str] = Field(None, description="可选的命名空间URI")
+    format: str = Field("rdfxml", description="导出格式: rdfxml, turtle, ntriples, json")
+    include_metadata: bool = Field(True, description="是否包含完整的OWL元数据")
 
 
 class ExportResponse(BaseModel):
@@ -115,7 +116,6 @@ class OntologyResultResponse(BaseModel):
         id: 结果ID (UUID)
         scenario: 场景描述文本
         domain: 领域
-        namespace: 本体命名空间URI
         classes_json: 提取的本体类数据(JSON格式)
         extracted_count: 提取的类数量
         user_id: 用户ID
@@ -126,7 +126,6 @@ class OntologyResultResponse(BaseModel):
         ...     id=uuid.uuid4(),
         ...     scenario="医院管理患者记录...",
         ...     domain="Healthcare",
-        ...     namespace="http://example.org/ontology#",
         ...     classes_json={"classes": [...]},
         ...     extracted_count=7,
         ...     user_id=123,
@@ -136,7 +135,6 @@ class OntologyResultResponse(BaseModel):
     id: UUID = Field(..., description="结果ID")
     scenario: str = Field(..., description="场景描述文本")
     domain: Optional[str] = Field(None, description="领域")
-    namespace: Optional[str] = Field(None, description="本体命名空间URI")
     classes_json: dict = Field(..., description="提取的本体类数据(JSON格式)")
     extracted_count: int = Field(..., description="提取的类数量")
     user_id: Optional[int] = Field(None, description="用户ID")

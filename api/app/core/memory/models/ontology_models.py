@@ -119,7 +119,6 @@ class OntologyExtractionResponse(BaseModel):
     Attributes:
         classes: List of extracted ontology classes
         domain: Domain/field the scenario belongs to
-        namespace: Optional OWL namespace URI for the ontology
 
     Config:
         extra: Ignore extra fields from LLM output
@@ -133,8 +132,4 @@ class OntologyExtractionResponse(BaseModel):
     domain: str = Field(
         ...,
         description="Domain/field the scenario belongs to"
-    )
-    namespace: Optional[str] = Field(
-        None,
-        description="OWL namespace URI for the ontology"
     )
