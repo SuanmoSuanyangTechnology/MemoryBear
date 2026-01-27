@@ -409,3 +409,42 @@ async def render_episodic_title_and_type_prompt(content: str) -> str:
     })
     
     return rendered_prompt
+
+
+async def render_ontology_extraction_prompt(
+    scenario: str,
+    domain: str | None = None,
+    max_classes: int = 15,
+    json_schema: dict | None = None
+) -> str:
+    """
+    Renders the ontology extraction prompt using the extract_ontology.jinja2 template.
+
+    Args:
+        scenario: The scenario description text to extract ontology classes from
+        domain: Optional domain hint for the scenario (e.g., "Healthcare", "Education")
+        max_classes: Maximum number of classes to extract (default: 15)
+        json_schema: JSON schema for the expected output format
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("extract_ontology.jinja2")
+    rendered_prompt = template.render(
+        scenario=scenario,
+        domain=domain,
+        max_classes=max_classes,
+        json_schema=json_schema
+    )
+    
+    # 记录渲染结果到提示日志
+    log_prompt_rendering('ontology extraction', rendered_prompt)
+    # 可选：记录模板渲染信息
+    log_template_rendering('extract_ontology.jinja2', {
+        'scenario_len': len(scenario) if scenario else 0,
+        'domain': domain,
+        'max_classes': max_classes,
+        'json_schema': 'OntologyExtractionResponse.schema'
+    })
+    
+    return rendered_prompt

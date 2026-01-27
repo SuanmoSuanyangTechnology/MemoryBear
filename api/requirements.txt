@@ -135,3 +135,4 @@ xlrd==2.0.2
 oss2>=2.18.0
 boto3>=1.28.0
 aiofiles>=23.0.0
+owlready2>=0.46

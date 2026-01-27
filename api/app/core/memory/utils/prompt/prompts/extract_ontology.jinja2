@@ -1,0 +1,210 @@
+===Task===
+Extract ontology classes from the given scenario description following ontology engineering standards.
+
+===Role===
+You are a professional ontology engineer with expertise in knowledge representation and OWL (Web Ontology Language) standards. Your task is to identify abstract classes and concepts from scenario descriptions, not concrete instances.
+
+===Scenario Description===
+{{ scenario }}
+
+{% if domain -%}
+===Domain Hint===
+This scenario belongs to the **{{ domain }}** domain. Consider domain-specific concepts and terminology when extracting classes.
+{%- endif %}
+
+===Extraction Rules===
+
+**1. Abstract Classes, Not Instances:**
+- Extract abstract categories and concepts (e.g., "MedicalProcedure", "Patient", "Diagnosis")
+- Do NOT extract concrete instances (e.g., "John Smith", "Room 301", "2024-01-15")
+- Think in terms of "types of things" rather than "specific things"
+
+**2. Naming Convention (PascalCase):**
+- Use PascalCase format for the "name" field: start with uppercase letter, capitalize each word, no spaces
+- Examples: "MedicalProcedure", "HealthcareProvider", "DiagnosticTest"
+- Avoid: "medical procedure", "healthcare_provider", "diagnostic-test"
+- Use clear, descriptive names in English
+- Avoid abbreviations unless they are standard in the domain (e.g., "API", "DNA")
+- Provide Chinese translation in the "name_chinese" field (e.g., "医疗程序", "医疗服务提供者", "诊断测试")
+
+**3. Domain Relevance:**
+- Focus on classes that are central to the scenario's domain
+- Prioritize classes that represent key concepts, entities, or relationships
+- Avoid overly generic classes (e.g., "Thing", "Object") unless they have specific domain meaning
+
+**4. Class Quantity:**
+- Extract between 5 and {{ max_classes }} classes
+- Aim for a balanced set covering the main concepts in the scenario
+- Quality over quantity: prefer well-defined classes over exhaustive lists
+
+**5. Clear Descriptions:**
+- Provide concise, informative descriptions in Chinese (max 500 characters)
+- Describe what the class represents, not specific instances
+- Use clear, natural Chinese language that explains the class's role in the domain
+
+**6. Concrete Examples:**
+- Provide 2-5 concrete instance examples in Chinese for each class
+- Examples should be specific, realistic instances of the class
+- Examples help clarify the class's scope and meaning
+- Use natural Chinese language for examples
+- Example format: ["示例1", "示例2", "示例3"]
+
+**7. Class Hierarchy:**
+- Identify parent-child relationships where applicable
+- Use the parent_class field to specify inheritance
+- Parent class must be one of the extracted classes or a standard OWL class
+- Leave parent_class as null for top-level classes
+
+**8. Entity Types:**
+- Classify each class with an appropriate entity_type
+- Common types: "Person", "Organization", "Location", "Event", "Concept", "Process", "Object", "Role"
+- Choose the most specific type that applies
+
+**9. OWL Reserved Words:**
+- Do NOT use OWL reserved words as class names
+- Reserved words include: "Thing", "Nothing", "Class", "Property", "ObjectProperty", "DatatypeProperty", "AnnotationProperty", "Ontology", "Individual", "Literal"
+- If a reserved word is needed, add a domain-specific prefix (e.g., "MedicalClass" instead of "Class")
+
+**10. Language Consistency:**
+- Extract all class names in English (PascalCase format) for the "name" field
+- Provide Chinese translation for class names in the "name_chinese" field
+- Descriptions MUST be in Chinese (中文)
+- Examples MUST be in Chinese (中文)
+- Use clear, natural Chinese language for descriptions and examples
+
+===Examples===
+
+**Example 1 (Healthcare Domain):**
+Scenario: "A hospital manages patient records, schedules appointments, and coordinates medical procedures. Doctors diagnose conditions and prescribe treatments."
+
+Output:
+{
+  "classes": [
+    {
+      "name": "Patient",
+      "name_chinese": "患者",
+      "description": "在医疗机构接受医疗护理或治疗的人",
+      "examples": ["张三", "李四", "患有糖尿病的老年患者"],
+      "parent_class": null,
+      "entity_type": "Person",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "MedicalProcedure",
+      "name_chinese": "医疗程序",
+      "description": "为医疗诊断或治疗而执行的系统性操作流程",
+      "examples": ["手术", "血液检查", "X光检查", "疫苗接种"],
+      "parent_class": null,
+      "entity_type": "Process",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "Diagnosis",
+      "name_chinese": "诊断",
+      "description": "基于症状和检查结果对疾病或状况的识别",
+      "examples": ["糖尿病诊断", "癌症诊断", "流感诊断"],
+      "parent_class": null,
+      "entity_type": "Concept",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "Doctor",
+      "name_chinese": "医生",
+      "description": "诊断和治疗患者的持证医疗专业人员",
+      "examples": ["全科医生", "外科医生", "心脏病专家"],
+      "parent_class": null,
+      "entity_type": "Role",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "Treatment",
+      "name_chinese": "治疗",
+      "description": "为治愈或管理疾病状况而提供的医疗护理或疗法",
+      "examples": ["药物治疗", "物理治疗", "化疗", "手术治疗"],
+      "parent_class": null,
+      "entity_type": "Process",
+      "domain": "Healthcare"
+    }
+  ],
+  "domain": "Healthcare",
+  "namespace": "http://example.org/healthcare#"
+}
+
+**Example 2 (Education Domain):**
+Scenario: "A university offers courses taught by professors. Students enroll in programs, attend lectures, and complete assignments to earn degrees."
+
+Output:
+{
+  "classes": [
+    {
+      "name": "Student",
+      "name_chinese": "学生",
+      "description": "在教育机构注册学习的人",
+      "examples": ["本科生", "研究生", "在职学生"],
+      "parent_class": null,
+      "entity_type": "Role",
+      "domain": "Education"
+    },
+    {
+      "name": "Course",
+      "name_chinese": "课程",
+      "description": "涵盖特定学科或主题的结构化教育课程",
+      "examples": ["计算机科学导论", "微积分I", "世界历史"],
+      "parent_class": null,
+      "entity_type": "Concept",
+      "domain": "Education"
+    },
+    {
+      "name": "Professor",
+      "name_chinese": "教授",
+      "description": "教授课程并进行研究的学术教师",
+      "examples": ["助理教授", "副教授", "正教授"],
+      "parent_class": null,
+      "entity_type": "Role",
+      "domain": "Education"
+    },
+    {
+      "name": "AcademicProgram",
+      "name_chinese": "学术项目",
+      "description": "通向学位或证书的结构化课程体系",
+      "examples": ["理学学士", "文学硕士", "博士项目"],
+      "parent_class": null,
+      "entity_type": "Concept",
+      "domain": "Education"
+    },
+    {
+      "name": "Assignment",
+      "name_chinese": "作业",
+      "description": "分配给学生以评估学习成果的任务或项目",
+      "examples": ["论文", "习题集", "研究报告", "实验报告"],
+      "parent_class": null,
+      "entity_type": "Object",
+      "domain": "Education"
+    },
+    {
+      "name": "Lecture",
+      "name_chinese": "讲座",
+      "description": "由教师进行的教育性演讲或讲座",
+      "examples": ["入门讲座", "客座讲座", "在线讲座"],
+      "parent_class": null,
+      "entity_type": "Event",
+      "domain": "Education"
+    }
+  ],
+  "domain": "Education",
+  "namespace": "http://example.org/education#"
+}
+
+===Output Format===
+
+**JSON Requirements:**
+- Use only ASCII double quotes (") for JSON structure
+- Never use Chinese quotation marks ("") or Unicode quotes
+- Escape quotation marks in text with backslashes (\")
+- Ensure proper string closure and comma separation
+- No line breaks within JSON string values
+- All class names must be in PascalCase format
+- All class names must be unique (case-insensitive)
+- Extract between 5 and {{ max_classes }} classes
+
+{{ json_schema }}
