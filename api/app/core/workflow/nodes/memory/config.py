@@ -10,7 +10,7 @@ class MemoryReadNodeConfig(BaseNodeConfig):
         ...
     )
 
-    config_id: UUID = Field(
+    config_id: UUID | int = Field(
         ...
     )
 
