@@ -49,7 +49,6 @@ def _validate_config_id(config_id, db: Session = None):
                 field_name="config_id",
                 invalid_value=config_id,
             )
-        
         # 如果提供了数据库会话，尝试通过 user_id 查询 config_id
         if db is not None:
             # 查询 user_id 匹配的记录
