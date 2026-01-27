@@ -1263,7 +1263,7 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
             result[user_id] = {"memory_config_id": None, "memory_config_name": None}
 
     # 2. 批量获取所有相关应用的最新发布版本
-    app_ids = list(user_to_app.values())
+    app_ids = list(set(user_to_app.values()))
     if not app_ids:
         return result
 
@@ -1295,8 +1295,8 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     # 批量查询 memory_config_name
     config_id_to_name = {}
     if memory_config_ids:
-        memory_configs = db.query(MemoryConfig).filter(MemoryConfig.id.in_(memory_config_ids)).all()
-        config_id_to_name = {str(mc.id): mc.config_name for mc in memory_configs}
+        memory_configs = db.query(MemoryConfig).filter(MemoryConfig.config_id.in_(memory_config_ids)).all()
+        config_id_to_name = {str(mc.config_id): mc.config_name for mc in memory_configs}
 
     # 4. 构建最终结果
     for end_user_id, app_id in user_to_app.items():
