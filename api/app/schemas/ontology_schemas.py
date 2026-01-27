@@ -7,13 +7,14 @@ Classes:
     ExtractionResponse: 本体提取响应模型
     ExportRequest: OWL文件导出请求模型
     ExportResponse: OWL文件导出响应模型
-    ConfigResponse: 配置查询响应模型
-    ConfigUpdateRequest: 配置更新请求模型
+    OntologyResultResponse: 本体提取结果响应模型(带毫秒时间戳)
 """
 
 from typing import List, Optional
+import datetime
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from app.core.memory.models.ontology_models import OntologyClass
 
@@ -26,7 +27,6 @@ class ExtractionRequest(BaseModel):
     Attributes:
         scenario: 场景描述文本,不能为空
         domain: 可选的领域提示(如Healthcare, Education等)
-        config_name: 配置名称,默认为"default"
     
     Examples:
         >>> request = ExtractionRequest(
@@ -36,7 +36,6 @@ class ExtractionRequest(BaseModel):
     """
     scenario: str = Field(..., description="场景描述文本", min_length=1)
     domain: Optional[str] = Field(None, description="可选的领域提示")
-    config_name: str = Field("default", description="配置名称")
 
 
 class ExtractionResponse(BaseModel):
@@ -107,69 +106,46 @@ class ExportResponse(BaseModel):
     classes_count: int = Field(..., description="导出的类数量")
 
 
-class ConfigResponse(BaseModel):
-    """配置查询响应模型
+class OntologyResultResponse(BaseModel):
+    """本体提取结果响应模型
     
-    用于GET /api/ontology/config/{config_name}端点的响应体。
-    
-    Attributes:
-        config_name: 配置名称
-        max_classes: 最大提取类数量
-        min_classes: 最小提取类数量
-        max_description_length: 描述最大字符数
-        llm_temperature: LLM温度参数
-        llm_max_tokens: LLM最大token数
-        llm_timeout: LLM调用超时时间(秒)
-        enable_owl_validation: 是否启用OWL验证
-    
-    Examples:
-        >>> response = ConfigResponse(
-        ...     config_name="default",
-        ...     max_classes=15,
-        ...     min_classes=5,
-        ...     max_description_length=500,
-        ...     llm_temperature=0.3,
-        ...     llm_max_tokens=2000,
-        ...     llm_timeout=30.0,
-        ...     enable_owl_validation=True
-        ... )
-    """
-    config_name: str = Field(..., description="配置名称")
-    max_classes: int = Field(..., description="最大提取类数量")
-    min_classes: int = Field(..., description="最小提取类数量")
-    max_description_length: int = Field(..., description="描述最大字符数")
-    llm_temperature: float = Field(..., description="LLM温度参数")
-    llm_max_tokens: int = Field(..., description="LLM最大token数")
-    llm_timeout: Optional[float] = Field(None, description="LLM调用超时时间(秒)")
-    enable_owl_validation: bool = Field(..., description="是否启用OWL验证")
-
-
-class ConfigUpdateRequest(BaseModel):
-    """配置更新请求模型
-    
-    用于PUT /api/ontology/config/{config_name}端点的请求体。
-    所有字段都是可选的,只更新提供的字段。
+    用于返回数据库中存储的提取结果,时间戳为毫秒级。
     
     Attributes:
-        max_classes: 最大提取类数量
-        min_classes: 最小提取类数量
-        max_description_length: 描述最大字符数
-        llm_temperature: LLM温度参数
-        llm_max_tokens: LLM最大token数
-        llm_timeout: LLM调用超时时间(秒)
-        enable_owl_validation: 是否启用OWL验证
+        id: 结果ID (UUID)
+        scenario: 场景描述文本
+        domain: 领域
+        namespace: 本体命名空间URI
+        classes_json: 提取的本体类数据(JSON格式)
+        extracted_count: 提取的类数量
+        user_id: 用户ID
+        created_at: 创建时间(毫秒时间戳)
     
     Examples:
-        >>> request = ConfigUpdateRequest(
-        ...     max_classes=20,
-        ...     llm_temperature=0.5,
-        ...     llm_timeout=60.0
+        >>> response = OntologyResultResponse(
+        ...     id=uuid.uuid4(),
+        ...     scenario="医院管理患者记录...",
+        ...     domain="Healthcare",
+        ...     namespace="http://example.org/ontology#",
+        ...     classes_json={"classes": [...]},
+        ...     extracted_count=7,
+        ...     user_id=123,
+        ...     created_at=datetime.now()
         ... )
     """
-    max_classes: Optional[int] = Field(None, description="最大提取类数量", ge=1, le=50)
-    min_classes: Optional[int] = Field(None, description="最小提取类数量", ge=1, le=50)
-    max_description_length: Optional[int] = Field(None, description="描述最大字符数", ge=100, le=2000)
-    llm_temperature: Optional[float] = Field(None, description="LLM温度参数", ge=0.0, le=2.0)
-    llm_max_tokens: Optional[int] = Field(None, description="LLM最大token数", ge=100, le=10000)
-    llm_timeout: Optional[float] = Field(None, description="LLM调用超时时间(秒)", ge=1.0, le=300.0)
-    enable_owl_validation: Optional[bool] = Field(None, description="是否启用OWL验证")
+    id: UUID = Field(..., description="结果ID")
+    scenario: str = Field(..., description="场景描述文本")
+    domain: Optional[str] = Field(None, description="领域")
+    namespace: Optional[str] = Field(None, description="本体命名空间URI")
+    classes_json: dict = Field(..., description="提取的本体类数据(JSON格式)")
+    extracted_count: int = Field(..., description="提取的类数量")
+    user_id: Optional[int] = Field(None, description="用户ID")
+    created_at: datetime.datetime = Field(..., description="创建时间")
+    
+    @field_serializer("created_at", when_used="json")
+    def _serialize_created_at(self, dt: datetime.datetime):
+        """将创建时间序列化为毫秒时间戳"""
+        return int(dt.timestamp() * 1000) if dt else None
+    
+    class Config:
+        from_attributes = True
