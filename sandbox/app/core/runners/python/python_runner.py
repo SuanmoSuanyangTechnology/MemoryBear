@@ -9,11 +9,14 @@ from app.config import SANDBOX_USER_ID, SANDBOX_GROUP_ID, get_config
 from app.core.encryption import generate_key, encrypt_code
 from app.core.executor import CodeExecutor, ExecutionResult
 from app.core.runners.python.settings import check_lib_avaiable, release_lib_binary, LIB_PATH
+from app.logger import get_logger
 from app.models import RunnerOptions
 
 # Python sandbox prescript template
 with open("app/core/runners/python/prescript.py") as f:
     PYTHON_PRESCRIPT = f.read()
+
+logger = get_logger()
 
 
 class PythonRunner(CodeExecutor):
@@ -106,6 +109,7 @@ class PythonRunner(CodeExecutor):
                 env["ALLOWED_SYSCALLS"] = ",".join(map(str, config.allowed_syscalls))
 
             # Execute with Python interpreter
+            logger.info(encoded_key)
 
             process = await asyncio.create_subprocess_exec(
                 config.python_path,
@@ -143,7 +147,6 @@ class PythonRunner(CodeExecutor):
                     stdout="",
                     stderr="Execution timeout",
                     exit_code=-1,
-                    error="Execution timeout"
                 )
 
         finally:
