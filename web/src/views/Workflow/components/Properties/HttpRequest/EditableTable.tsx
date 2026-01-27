@@ -144,6 +144,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
               icon={block ? undefined : <PlusOutlined />} 
               onClick={() => add(createNewRow())} 
               size="small"
+              block={block}
               className={block ? "rb:mt-1 rb:text-[12px]! rb:bg-transparent!" : "rb:text-[12px]!"}
             >
               {block && `+${t('common.add')}`}
@@ -155,7 +156,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
               {title && (
                 <div className="rb:flex rb:items-center rb:mb-2 rb:justify-between">
                   <div className="rb:font-medium rb:text-[12px] rb:leading-4.5">{title}</div>
-                  <AddButton block={true} />
+                  <AddButton block={false} />
                 </div>
               )}
               

@@ -196,6 +196,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
               placeholder={t('common.pleaseSelect')}
               options={options.filter(vo => vo.dataType.includes('file'))}
               filterBooleanType={true}
+              size="small"
             />
           </Form.Item>
         }

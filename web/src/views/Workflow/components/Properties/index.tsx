@@ -26,9 +26,10 @@ import MemoryConfig from './MemoryConfig'
 import VariableList from './VariableList'
 import { useVariableList, getCurrentNodeVariables, getChildNodeVariables } from './hooks/useVariableList'
 import styles from './properties.module.css'
-import Editor from "../Editor";
+import Editor, { type LexicalEditorProps } from "../Editor";
 import RbSlider from './RbSlider'
 import JinjaRender from './JinjaRender'
+import CodeExecution from './CodeExecution'
 
 interface PropertiesProps {
   selectedNode?: Node | null; 
@@ -364,6 +365,11 @@ const Properties: FC<PropertiesProps> = ({
               options={getFilteredVariableList(selectedNode?.data?.type, 'mapping')}
               templateOptions={getFilteredVariableList(selectedNode?.data?.type, 'template')}
             />
+            : selectedNode?.data?.type === 'code'
+            ? <CodeExecution
+              selectedNode={selectedNode}
+              options={getFilteredVariableList(selectedNode?.data?.type, 'mapping')}
+            />
             : configs && Object.keys(configs).length > 0 && Object.keys(configs).map((key) => {
               const config = configs[key] || {}
 
@@ -438,7 +444,7 @@ const Properties: FC<PropertiesProps> = ({
                       title={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                       isArray={!!config.isArray} 
                       parentName={key}
-                      enableJinja2={config.enableJinja2 as boolean}
+                      language={config.language as LexicalEditorProps['language']}
                       options={getFilteredVariableList(selectedNode?.data?.type, key)}
                       titleVariant={config.titleVariant}
                       size="small"
