@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class IfElseNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config: IfElseNodeConfig | None= None
+        self.typed_config: IfElseNodeConfig | None = None
 
     @staticmethod
     def _evaluate(operator, instance: CompareOperatorInstance) -> Any:

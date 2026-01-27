@@ -16,11 +16,11 @@ TEMPLATE_PATTERN = re.compile(r"\{\{.*?\}\}")
 
 class ToolNode(BaseNode):
     """工具节点"""
-    
+
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
         self.typed_config: ToolNodeConfig | None = None
-    
+
     async def execute(self, state: WorkflowState) -> dict[str, Any]:
         """执行工具"""
         self.typed_config = ToolNodeConfig(**self.config)
@@ -28,21 +28,21 @@ class ToolNode(BaseNode):
         tenant_id = self.get_variable("sys.tenant_id", state)
         user_id = self.get_variable("sys.user_id", state)
         workspace_id = self.get_variable("sys.workspace_id", state)
-        
+
         # 如果没有租户ID，尝试从工作流ID获取
         if not tenant_id:
             if workspace_id:
                 from app.repositories.tool_repository import ToolRepository
                 with get_db_read() as db:
                     tenant_id = ToolRepository.get_tenant_id_by_workspace_id(db, workspace_id)
-        
+
         if not tenant_id:
             logger.error(f"节点 {self.node_id} 缺少租户ID")
             return {
                 "success": False,
                 "data": "缺少租户ID"
             }
-        
+
         # 渲染工具参数
         rendered_parameters = {}
         for param_name, param_template in self.typed_config.tool_parameters.items():
@@ -55,9 +55,9 @@ class ToolNode(BaseNode):
                 # 非模板参数（数字/布尔/普通字符串）直接保留原值
                 rendered_value = param_template
             rendered_parameters[param_name] = rendered_value
-        
+
         logger.info(f"节点 {self.node_id} 执行工具 {self.typed_config.tool_id}，参数: {rendered_parameters}")
-        
+
         # 执行工具
         with get_db_read() as db:
             tool_service = ToolService(db)
@@ -79,7 +79,7 @@ class ToolNode(BaseNode):
         else:
             logger.error(f"节点 {self.node_id} 工具执行失败: {result.error}")
             return {
-                "data": result.error if isinstance(result.error, str) else  json.dumps(result.error, ensure_ascii=False),
+                "data": result.error if isinstance(result.error, str) else json.dumps(result.error, ensure_ascii=False),
                 "error_code": result.error_code,
                 "execution_time": result.execution_time
             }

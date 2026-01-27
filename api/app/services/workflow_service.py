@@ -528,7 +528,8 @@ class WorkflowService:
                     self.conversation_service.add_message(
                         conversation_id=conversation_id_uuid,
                         role=message["role"],
-                        content=message["content"]
+                        content=message["content"],
+                        meta_data=None if message["role"] == "user" else {"usage": token_usage}
                     )
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
@@ -678,7 +679,8 @@ class WorkflowService:
                             self.conversation_service.add_message(
                                 conversation_id=conversation_id_uuid,
                                 role=message["role"],
-                                content=message["content"]
+                                content=message["content"],
+                                meta_data=None if message["role"] == "user" else {"usage": token_usage}
                             )
                         logger.info(f"Workflow Run Success, "
                                     f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")

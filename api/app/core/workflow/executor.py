@@ -11,16 +11,12 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
-from app.core.workflow.graph_builder import GraphBuilder
+from app.core.workflow.expression_evaluator import evaluate_expression
+from app.core.workflow.graph_builder import GraphBuilder, StreamOutputConfig
 from app.core.workflow.nodes import WorkflowState
 from app.core.workflow.nodes.base_config import VariableType
 from app.core.workflow.nodes.enums import NodeType
-
-# from app.core.tools.registry import ToolRegistry
-# from app.core.tools.executor import ToolExecutor
-# from app.core.tools.langchain_adapter import LangchainAdapter
-# TOOL_MANAGEMENT_AVAILABLE = True
-# from app.db import get_db
+from app.core.workflow.template_renderer import render_template
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +51,8 @@ class WorkflowExecutor:
         self.execution_config = workflow_config.get("execution_config", {})
 
         self.start_node_id = None
+        self.end_outputs: dict[str, StreamOutputConfig] = {}
+        self.activate_end: str | None = None
 
         self.checkpoint_config = RunnableConfig(
             configurable={
@@ -127,7 +125,6 @@ class WorkflowExecutor:
             "user_id": self.user_id,
             "error": None,
             "error_node": None,
-            "streaming_buffer": {},  # 流式缓冲区
             "cycle_nodes": [
                 node.get("id")
                 for node in self.workflow_config.get("nodes")
@@ -139,9 +136,8 @@ class WorkflowExecutor:
             }
         }
 
-    def _build_final_output(self, result, elapsed_time):
+    def _build_final_output(self, result, elapsed_time, final_output):
         node_outputs = result.get("node_outputs", {})
-        final_output = self._extract_final_output(node_outputs)
         token_usage = self._aggregate_token_usage(node_outputs)
         conversation_id = None
         for node_id, node_output in node_outputs.items():
@@ -161,6 +157,21 @@ class WorkflowExecutor:
             "error": result.get("error"),
         }
 
+    def _update_end_activate(self, node_id):
+        for node in self.end_outputs.keys():
+            self.end_outputs[node].update_activate(node_id)
+            if self.end_outputs[node].activate and self.activate_end is None:
+                self.activate_end = node
+
+    @staticmethod
+    def _trans_output_string(content):
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list):
+            return "\n".join(content)
+        else:
+            return str(content)
+
     def build_graph(self, stream=False) -> CompiledStateGraph:
         """构建 LangGraph
 
@@ -173,6 +184,7 @@ class WorkflowExecutor:
             stream=stream,
         )
         self.start_node_id = builder.start_node_id
+        self.end_outputs = builder.end_node_map
         graph = builder.build()
         logger.info(f"工作流图构建完成: execution_id={self.execution_id}")
 
@@ -205,14 +217,34 @@ class WorkflowExecutor:
         try:
 
             result = await graph.ainvoke(initial_state, config=self.checkpoint_config)
-
+            full_content = ''
+            for end_info in self.end_outputs.values():
+                output_template = "".join([output.literal for output in end_info.outputs])
+                full_content += render_template(
+                    output_template,
+                    result.get("variables", {}),
+                    result.get("runtime_vars", {}),
+                    strict=False
+                )
+            result["messages"].extend(
+                [
+                    {
+                        "role": "user",
+                        "content": input_data.get("message", '')
+                    },
+                    {
+                        "role": "assistant",
+                        "content": full_content
+                    }
+                ]
+            )
             # 计算耗时
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
 
             logger.info(f"工作流执行完成: execution_id={self.execution_id}, elapsed_time={elapsed_time:.2f}s")
 
-            return self._build_final_output(result, elapsed_time)
+            return self._build_final_output(result, elapsed_time, full_content)
 
         except Exception as e:
             # 计算耗时（即使失败也记录）
@@ -273,6 +305,7 @@ class WorkflowExecutor:
         # 3. Execute workflow
         try:
             chunk_count = 0
+            full_content = ''
 
             async for event in graph.astream(
                     initial_state,
@@ -293,21 +326,27 @@ class WorkflowExecutor:
                     # Handle custom streaming events (chunks from nodes via stream writer)
                     chunk_count += 1
                     event_type = data.get("type", "node_chunk")  # "message" or "node_chunk"
-                    if event_type in ("message", "node_chunk"):
+                    if event_type == "node_chunk":
+                        node_id = data.get("node_id")
+                        if self.activate_end:
+                            end_info = self.end_outputs.get(self.activate_end)
+                            if not end_info or end_info.cursor >= len(end_info.outputs):
+                                continue
+                            current_output = end_info.outputs[end_info.cursor]
+                            if current_output.is_variable and current_output.depends_on_node(node_id):
+                                if data.get("done"):
+                                    end_info.cursor += 1
+                                else:
+                                    full_content += data.get("chunk")
+                                    yield {
+                                        "event": "message",
+                                        "data": {
+                                            "chunk": data.get("chunk")
+                                        }
+                                    }
                         logger.info(f"[CUSTOM] ✅ 收到 {event_type} #{chunk_count} from {data.get('node_id')}"
                                     f"- execution_id: {self.execution_id}")
-                        yield {
-                            "event": event_type,  # "message" or "node_chunk"
-                            "data": {
-                                "node_id": data.get("node_id"),
-                                "chunk": data.get("chunk"),
-                                "full_content": data.get("full_content"),
-                                "chunk_index": data.get("chunk_index"),
-                                "is_prefix": data.get("is_prefix"),
-                                "is_suffix": data.get("is_suffix"),
-                                "conversation_id": input_data.get("conversation_id"),
-                            }
-                        }
+
                     elif event_type == "node_error":
                         yield {
                             "event": event_type,  # "message" or "node_chunk"
@@ -376,14 +415,109 @@ class WorkflowExecutor:
 
                 elif mode == "updates":
                     # Handle state updates - store final state
-                    # TODO:流式输出点
+                    for node_id in data.keys():
+                        self._update_end_activate(node_id)
+                    wait = False
+                    state = graph.get_state(config=self.checkpoint_config)
+                    node_outputs = state.values.get("runtime_vars", {})
+                    for _ in data.keys():
+                        node_outputs = node_outputs | data.get(_).get("runtime_vars", {})
+
+                    while self.activate_end and not wait:
+                        message = ''
+                        logger.info(self.activate_end)
+                        end_info = self.end_outputs[self.activate_end]
+                        content = end_info.outputs[end_info.cursor]
+                        while content.activate:
+                            if not content.is_variable:
+                                full_content += content.literal
+                                message += content.literal
+                            else:
+                                try:
+                                    chunk = evaluate_expression(
+                                        content.literal,
+                                        variables={},
+                                        node_outputs=node_outputs
+                                    )
+                                    chunk = self._trans_output_string(chunk)
+                                    message += chunk
+                                    full_content += chunk
+                                except ValueError:
+                                    pass
+                            end_info.cursor += 1
+                            if end_info.cursor == len(end_info.outputs):
+                                break
+                            content = end_info.outputs[end_info.cursor]
+                        if end_info.cursor != len(end_info.outputs):
+                            wait = True
+                        else:
+                            self.end_outputs.pop(self.activate_end)
+                            self.activate_end = None
+                            for node_id in data.keys():
+                                self._update_end_activate(node_id)
+                        if message:
+                            yield {
+                                "event": "message",
+                                "data": {
+                                    "chunk": message
+                                }
+                            }
+
                     logger.debug(f"[UPDATES] 收到 state 更新 from {list(data.keys())} "
                                  f"- execution_id: {self.execution_id}")
+
+            result = graph.get_state(self.checkpoint_config).values
+            while self.activate_end:
+                message = ''
+                end_info = self.end_outputs[self.activate_end]
+                content = end_info.outputs[end_info.cursor]
+                if not content.is_variable:
+                    message += content.literal
+                else:
+                    node_outputs = result.get("runtime_vars", {})
+                    variables = result.get("variables", {})
+                    try:
+                        chunk = evaluate_expression(
+                            content.literal,
+                            variables=variables,
+                            node_outputs=node_outputs
+                        )
+                        chunk = self._trans_output_string(chunk)
+                        message += chunk
+                        full_content += chunk
+                    except ValueError:
+                        pass
+                end_info.cursor += 1
+                if end_info.cursor == len(end_info.outputs):
+                    self.end_outputs.pop(self.activate_end)
+                    self.activate_end = None
+                    if self.end_outputs:
+                        self.activate_end = list(self.end_outputs.keys())[0]
+                if message:
+                    yield {
+                        "event": "message",
+                        "data": {
+                            "chunk": message
+                        }
+                    }
 
             # 计算耗时
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
             result = graph.get_state(self.checkpoint_config).values
+            logger.info(result)
+            result["messages"].extend(
+                [
+                    {
+                        "role": "user",
+                        "content": input_data.get("message", '')
+                    },
+                    {
+                        "role": "assistant",
+                        "content": full_content
+                    }
+                ]
+            )
             logger.info(
                 f"Workflow execution completed (streaming), "
                 f"total chunks: {chunk_count}, elapsed: {elapsed_time:.2f}s, execution_id: {self.execution_id}"
@@ -392,7 +526,7 @@ class WorkflowExecutor:
             # 发送 workflow_end 事件
             yield {
                 "event": "workflow_end",
-                "data": self._build_final_output(result, elapsed_time)
+                "data": self._build_final_output(result, elapsed_time, full_content)
             }
 
         except Exception as e:
@@ -413,31 +547,6 @@ class WorkflowExecutor:
                     "timestamp": end_time.isoformat()
                 }
             }
-
-    @staticmethod
-    def _extract_final_output(node_outputs: dict[str, Any]) -> str | None:
-        """从节点输出中提取最终输出
-
-        优先级：
-        1. 最后一个执行的非 start/end 节点的 output
-        2. 如果没有节点输出，返回 None
-
-        Args:
-            node_outputs: 所有节点的输出
-
-        Returns:
-            最终输出字符串或 None
-        """
-        if not node_outputs:
-            return None
-
-        # 获取最后一个节点的输出
-        last_node_output = list(node_outputs.values())[-1] if node_outputs else None
-
-        if last_node_output and isinstance(last_node_output, dict):
-            return last_node_output.get("output")
-
-        return None
 
     @staticmethod
     def _aggregate_token_usage(node_outputs: dict[str, Any]) -> dict[str, int] | None:
@@ -529,178 +638,3 @@ async def execute_workflow_stream(
     )
     async for event in executor.execute_stream(input_data):
         yield event
-
-# ==================== 工具管理系统集成 ====================
-
-# def get_workflow_tools(workspace_id: str, user_id: str) -> list:
-#     """获取工作流可用的工具列表
-#
-#     Args:
-#         workspace_id: 工作空间ID
-#         user_id: 用户ID
-#
-#     Returns:
-#         可用工具列表
-#     """
-#     if not TOOL_MANAGEMENT_AVAILABLE:
-#         logger.warning("工具管理系统不可用")
-#         return []
-#
-#     try:
-#         db = next(get_db())
-#
-#         # 创建工具注册表
-#         registry = ToolRegistry(db)
-#
-#         # 注册内置工具类
-#         from app.core.tools.builtin import (
-#             DateTimeTool, JsonTool, BaiduSearchTool, MinerUTool, TextInTool
-#         )
-#         registry.register_tool_class(DateTimeTool)
-#         registry.register_tool_class(JsonTool)
-#         registry.register_tool_class(BaiduSearchTool)
-#         registry.register_tool_class(MinerUTool)
-#         registry.register_tool_class(TextInTool)
-#
-#         # 获取活跃的工具
-#         import uuid
-#         tools = registry.list_tools(workspace_id=uuid.UUID(workspace_id))
-#         active_tools = [tool for tool in tools if tool.status.value == "active"]
-#
-#         # 转换为Langchain工具
-#         langchain_tools = []
-#         for tool_info in active_tools:
-#             try:
-#                 tool_instance = registry.get_tool(tool_info.id)
-#                 if tool_instance:
-#                     langchain_tool = LangchainAdapter.convert_tool(tool_instance)
-#                     langchain_tools.append(langchain_tool)
-#             except Exception as e:
-#                 logger.error(f"转换工具失败: {tool_info.name}, 错误: {e}")
-#
-#         logger.info(f"为工作流获取了 {len(langchain_tools)} 个工具")
-#         return langchain_tools
-#
-#     except Exception as e:
-#         logger.error(f"获取工作流工具失败: {e}")
-#         return []
-#
-#
-# class ToolWorkflowNode:
-#     """工具工作流节点 - 在工作流中执行工具"""
-#
-#     def __init__(self, node_config: dict, workflow_config: dict):
-#         """初始化工具节点
-#
-#         Args:
-#             node_config: 节点配置
-#             workflow_config: 工作流配置
-#         """
-#         self.node_config = node_config
-#         self.workflow_config = workflow_config
-#         self.tool_id = node_config.get("tool_id")
-#         self.tool_parameters = node_config.get("parameters", {})
-#
-#     async def run(self, state: WorkflowState) -> WorkflowState:
-#         """执行工具节点"""
-#         if not TOOL_MANAGEMENT_AVAILABLE:
-#             logger.error("工具管理系统不可用")
-#             state["error"] = "工具管理系统不可用"
-#             return state
-#
-#         try:
-#             from sqlalchemy.orm import Session
-#             db = next(get_db())
-#
-#             # 创建工具执行器
-#             registry = ToolRegistry(db)
-#             executor = ToolExecutor(db, registry)
-#
-#             # 准备参数（支持变量替换）
-#             parameters = self._prepare_parameters(state)
-#
-#             # 执行工具
-#             result = await executor.execute_tool(
-#                 tool_id=self.tool_id,
-#                 parameters=parameters,
-#                 user_id=uuid.UUID(state["user_id"]),
-#                 workspace_id=uuid.UUID(state["workspace_id"])
-#             )
-#
-#             # 更新状态
-#             node_id = self.node_config.get("id")
-#             if result.success:
-#                 state["node_outputs"][node_id] = {
-#                     "type": "tool",
-#                     "tool_id": self.tool_id,
-#                     "output": result.data,
-#                     "execution_time": result.execution_time,
-#                     "token_usage": result.token_usage
-#                 }
-#
-#                 # 更新运行时变量
-#                 if isinstance(result.data, dict):
-#                     for key, value in result.data.items():
-#                         state["runtime_vars"][f"{node_id}.{key}"] = value
-#                 else:
-#                     state["runtime_vars"][f"{node_id}.result"] = result.data
-#             else:
-#                 state["error"] = result.error
-#                 state["error_node"] = node_id
-#                 state["node_outputs"][node_id] = {
-#                     "type": "tool",
-#                     "tool_id": self.tool_id,
-#                     "error": result.error,
-#                     "execution_time": result.execution_time
-#                 }
-#
-#             return state
-#
-#         except Exception as e:
-#             logger.error(f"工具节点执行失败: {e}")
-#             state["error"] = str(e)
-#             state["error_node"] = self.node_config.get("id")
-#             return state
-#
-#     def _prepare_parameters(self, state: WorkflowState) -> dict:
-#         """准备工具参数（支持变量替换）"""
-#         parameters = {}
-#
-#         for key, value in self.tool_parameters.items():
-#             if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
-#                 # 变量替换
-#                 var_path = value[2:-1]
-#
-#                 # 支持多层级变量访问，如 ${sys.message} 或 ${node1.result}
-#                 if "." in var_path:
-#                     parts = var_path.split(".")
-#                     current = state.get("variables", {})
-#
-#                     for part in parts:
-#                         if isinstance(current, dict) and part in current:
-#                             current = current[part]
-#                         else:
-#                             # 尝试从运行时变量获取
-#                             runtime_key = ".".join(parts)
-#                             current = state.get("runtime_vars", {}).get(runtime_key, value)
-#                             break
-#
-#                     parameters[key] = current
-#                 else:
-#                     # 简单变量
-#                     variables = state.get("variables", {})
-#                     parameters[key] = variables.get(var_path, value)
-#             else:
-#                 parameters[key] = value
-#
-#         return parameters
-#
-#
-# # 注册工具节点到NodeFactory（如果存在）
-# try:
-#     from app.core.workflow.nodes import NodeFactory
-#     if hasattr(NodeFactory, 'register_node_type'):
-#         NodeFactory.register_node_type("tool", ToolWorkflowNode)
-#     logger.info("工具节点已注册到工作流系统")
-# except Exception as e:
-#     logger.warning(f"注册工具节点失败: {e}")

@@ -5,6 +5,7 @@ from pydantic import Field, BaseModel
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
 
+
 class ClassifierConfig(BaseModel):
     """分类器节点配置"""
 
@@ -13,7 +14,7 @@ class ClassifierConfig(BaseModel):
 
 class QuestionClassifierNodeConfig(BaseNodeConfig):
     """问题分类器节点配置"""
-    
+
     model_id: uuid.UUID = Field(..., description="LLM模型ID")
     input_variable: str = Field(default="{{sys.message}}", description="输入变量选择器(用户问题)")
     user_supplement_prompt: Optional[str] = Field(default=None, description="用户补充提示词，额外分类指令")
