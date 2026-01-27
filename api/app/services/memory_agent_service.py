@@ -265,7 +265,7 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
-    async def write_memory(self, end_user_id: str, messages:  list[dict], config_id: Optional[uuid.UUID], db: Session, storage_type: str, user_rag_memory_id: str) -> str:
+    async def write_memory(self, end_user_id: str, messages:  list[dict], config_id: Optional[uuid.UUID]|int, db: Session, storage_type: str, user_rag_memory_id: str) -> str:
         """
         Process write operation with config_id
 
@@ -374,7 +374,7 @@ class MemoryAgentService:
         message: str,
         history: List[Dict],
         search_switch: str,
-        config_id: Optional[UUID],
+        config_id:  Optional[uuid.UUID]|int,
         db: Session,
         storage_type: str,
         user_rag_memory_id: str) -> Dict:

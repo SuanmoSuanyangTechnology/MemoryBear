@@ -7,7 +7,8 @@ This service eliminates code duplication between MemoryAgentService and MemorySt
 
 import time
 from datetime import datetime
-
+from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+from sqlalchemy import select
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
@@ -29,7 +30,7 @@ logger = get_logger(__name__)
 config_logger = get_config_logger()
 import uuid
 
-def _validate_config_id(config_id):
+def _validate_config_id(config_id, db: Session = None):
     """Validate configuration ID format (supports both UUID and integer)."""
     if isinstance(config_id, uuid.UUID):
         return config_id
@@ -48,6 +49,15 @@ def _validate_config_id(config_id):
                 field_name="config_id",
                 invalid_value=config_id,
             )
+        # 如果提供了数据库会话，尝试通过 user_id 查询 config_id
+        if db is not None:
+            # 查询 user_id 匹配的记录
+            stmt = select(MemoryConfigModel).where(MemoryConfigModel.config_id_old == str(config_id))
+            result = db.execute(stmt).scalars().first()
+            if result:
+                logger.info(f"Found config_id {result.config_id} for user_id {config_id}")
+                return result.config_id
+        
         return config_id
 
     if isinstance(config_id, str):
@@ -61,13 +71,24 @@ def _validate_config_id(config_id):
         
         # Fall back to integer parsing
         try:
-            parsed_id = config_id_stripped
+            parsed_id = int(config_id_stripped)
             if parsed_id <= 0:
                 raise InvalidConfigError(
                     f"Configuration ID must be positive: {parsed_id}",
                     field_name="config_id",
                     invalid_value=config_id,
                 )
+            
+            # 如果提供了数据库会话，尝试通过 user_id 查询 config_id
+            if db is not None:
+                # 查询 user_id 匹配的记录
+                stmt = select(MemoryConfigModel).where(MemoryConfigModel.user_id == str(parsed_id))
+                result = db.execute(stmt).scalars().first()
+                
+                if result:
+                    logger.info(f"Found config_id {result.config_id} for user_id {parsed_id}")
+                    return result.config_id
+            
             return parsed_id
         except ValueError:
             raise InvalidConfigError(
@@ -136,7 +157,7 @@ class MemoryConfigService:
         logger.info(f"Loading memory configuration from database: config_id={config_id}")
 
         try:
-            validated_config_id = _validate_config_id(config_id)
+            validated_config_id = _validate_config_id(config_id, self.db)
 
             # Step 1: Get config and workspace
             db_query_start = time.time()
