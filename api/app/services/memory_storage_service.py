@@ -184,7 +184,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
         for config in configs:
             # 安全地转换 user_id 为 int
             config_id_old = None
-            if config.user_id:
+            if config.config_id_old:
                 try:
                     config_id_old = int(config.config_id_old)
                 except (ValueError, TypeError):
