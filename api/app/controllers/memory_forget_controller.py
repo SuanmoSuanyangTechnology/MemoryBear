@@ -265,7 +265,6 @@ async def get_forgetting_stats(
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试获取遗忘引擎统计但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
     # 如果提供了 end_user_id，通过它获取 config_id
     config_id = None
     if end_user_id:
