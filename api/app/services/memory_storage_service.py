@@ -178,7 +178,6 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
     # --- Read All ---
     def get_all(self, workspace_id = None) -> List[Dict[str, Any]]: # 获取所有配置参数
         configs = MemoryConfigRepository.get_all(self.db, workspace_id)
-
         # 将 ORM 对象转换为字典列表
         data_list = []
         for config in configs:
