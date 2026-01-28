@@ -36,7 +36,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
       form.setFieldsValue({
         ...model,
         api_key_ids: model.api_keys,
-        logo: model.logo ? [{url: model.logo, uid: model.logo, status: 'done', name: 'logo'}] : undefined
+        logo: model.logo ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined
       })
     } else {
       setIsEdit(false);
@@ -48,7 +48,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
     form
       .validateFields()
       .then((values) => {
-        const { api_key_ids, logo, ...rest } = values
+        const { api_key_ids = [], logo, ...rest } = values
 
         const formData: CompositeModelForm = {
           ...rest,
@@ -62,6 +62,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
             handleUpdate(formData)
           })
         } else {
+          formData.logo = typeof logo === 'string' ? logo : logo.url
           handleUpdate(formData)
         }
       })

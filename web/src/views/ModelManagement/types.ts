@@ -27,16 +27,6 @@ export interface GroupModelModalRef {
 export interface GroupModelModalProps {
   refresh?: () => void;
 }
-export interface SubModelModalForm {
-  provider: string;
-  model_ids: string[]
-}
-export interface SubModelModalRef {
-  handleOpen: (model?: SubModelModalForm) => void;
-}
-export interface SubModelModalProps {
-  refresh?: () => void;
-}
 export interface ModelListDetailRef {
   handleOpen: (vo: ProviderModelItem) => void;
 }
@@ -131,7 +121,7 @@ export interface CustomModelForm {
   name: string;
   type: string;
   provider: string;
-  logo: string;
+  logo?: any;
   description: string;
   is_official: boolean;
   tags: string[];

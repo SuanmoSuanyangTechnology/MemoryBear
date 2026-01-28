@@ -34,6 +34,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       setModel(model);
       form.setFieldsValue({
         ...model,
+        logo: model.logo ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined
       });
     } else {
       setIsEdit(false);
@@ -48,7 +49,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         setLoading(true)
         values.is_official = false;
         const logo = values.logo as any;
-        if (typeof logo === 'object') {
+        if (typeof logo === 'object' && logo?.response?.data.file_id) {
           getFileLink(logo?.response?.data.file_id).then(res => {
             const logoRes = res as { url: string }
             values.logo = logoRes.url
@@ -64,6 +65,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
               });
           })
         } else {
+          values.logo = typeof logo === 'string' ? logo : logo.url
           updateCustomModel(model.id, values).then(() => {
             if (refresh) {
               refresh();
@@ -111,7 +113,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         <Form.Item
           name="name"
           label={t('modelNew.model_name')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.displayName') }) }]}
+          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.model_name') }) }]}
         >
           <Input placeholder={t('common.pleaseEnter')} />
         </Form.Item>

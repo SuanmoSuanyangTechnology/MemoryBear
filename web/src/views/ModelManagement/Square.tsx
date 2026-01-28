@@ -86,6 +86,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPl
       <ModelSquareDetail
         ref={modelSquareDetailRef}
         refresh={getList}
+        handleEdit={handleEdit}
       />
     </>
   )
