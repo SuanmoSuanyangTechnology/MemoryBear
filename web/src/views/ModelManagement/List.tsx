@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, type FC } from 'react';
-import { Button, Space, Row, Col } from 'antd'
+import { Button, Flex, Row, Col } from 'antd'
 import { useTranslation } from 'react-i18next';
 
 import type { ProviderModelItem, KeyConfigModalRef, ModelListDetailRef } from './types'
@@ -9,6 +9,7 @@ import PageEmpty from '@/components/Empty/PageEmpty';
 import Tag from '@/components/Tag';
 import KeyConfigModal from './components/KeyConfigModal'
 import ModelListDetail from './components/ModelListDetail'
+import { getLogoUrl } from './utils'
 
 const ModelList: FC<{ query: any }> = ({ query }) => {
   const { t } = useTranslation();
@@ -46,22 +47,25 @@ const ModelList: FC<{ query: any }> = ({ query }) => {
               <RbCard
                 key={item.provider}
                 title={item.provider}
-                avatarUrl={item.logo}
+                avatarUrl={getLogoUrl(item.logo)}
                 avatar={
                   <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
                     {item.provider[0]}
                   </div>
                 }
+                bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
               >
-                <Space>{item.tags.map(tag => <Tag key={tag}>{t(`modelNew.${tag}`)}</Tag>)}</Space>
-                <Row gutter={12} className="rb:mt-4">
-                  <Col span={12}>
-                    <Button block onClick={() => handleShowModel(item)}>{t('modelNew.showModel')}</Button>
-                  </Col>
-                  <Col span={12}>
-                    <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
-                  </Col>
-                </Row>
+                <Flex gap={8} wrap>{item.tags.map(tag => <Tag key={tag}>{t(`modelNew.${tag}`)}</Tag>)}</Flex>
+                <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Button block onClick={() => handleShowModel(item)}>{t('modelNew.showModel')}</Button>
+                    </Col>
+                    <Col span={12}>
+                      <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
+                    </Col>
+                  </Row>
+                </div>
               </RbCard>
             ))}
           </div>
