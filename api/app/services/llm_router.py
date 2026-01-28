@@ -5,6 +5,7 @@ import uuid
 from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
+from app.repositories.model_repository import ModelApiKeyRepository
 from app.services.conversation_state_manager import ConversationStateManager
 from app.models import ModelConfig, AgentConfig
 from app.core.logging_config import get_business_logger
@@ -382,11 +383,14 @@ class LLMRouter:
             from app.core.models.base import RedBearModelConfig
             from app.models import ModelApiKey, ModelType
             
-            # 获取 API Key 配置
-            api_key_config = self.db.query(ModelApiKey).filter(
-                ModelApiKey.model_config_id == self.routing_model_config.id,
-                ModelApiKey.is_active
-            ).first()
+            # 获取 API Key 配置（通过关联关系）
+            # api_key_config = self.db.query(ModelApiKey).join(
+            #     ModelConfig, ModelApiKey.model_configs
+            # ).filter(ModelConfig.id == self.routing_model_config.id,
+            #     ModelApiKey.is_active == True
+            # ).first()
+            api_keys = ModelApiKeyRepository.get_by_model_config(self.db, self.routing_model_config.id)
+            api_key_config = api_keys[0] if api_keys else None
             
             if not api_key_config:
                 raise Exception("路由模型没有可用的 API Key")
@@ -419,6 +423,9 @@ class LLMRouter:
             
             # 调用模型
             response = await llm.ainvoke(prompt)
+
+            from app.services.model_service import ModelApiKeyService
+            ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
             
             # 提取响应内容
             if hasattr(response, 'content'):
