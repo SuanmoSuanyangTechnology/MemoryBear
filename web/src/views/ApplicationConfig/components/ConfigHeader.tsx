@@ -17,7 +17,7 @@ import CopyModal from './CopyModal'
 
 const { Header } = Layout;
 
-const tabKeys = ['arrangement', 'api', 'release']
+const tabKeys = ['arrangement', 'api', 'release', 'statistics']
 const menuIcons: Record<string, string> = {
   edit: editIcon,
   copy: copyIcon,

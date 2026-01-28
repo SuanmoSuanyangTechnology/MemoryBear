@@ -16,6 +16,7 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.models import AgentConfig, ModelApiKey, ModelConfig
+from app.repositories.model_repository import ModelApiKeyRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services import task_service
@@ -724,17 +725,21 @@ class DraftRunService:
         Raises:
             BusinessException: 当没有可用的 API Key 时
         """
-        stmt = (
-            select(ModelApiKey)
-            .where(
-                ModelApiKey.model_config_id == model_config_id,
-                ModelApiKey.is_active.is_(True)
-            )
-            .order_by(ModelApiKey.priority.desc())
-            .limit(1)
-        )
-
-        api_key = self.db.scalars(stmt).first()
+        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
+        # stmt = (
+        #     select(ModelApiKey).join(
+        #         ModelConfig, ModelApiKey.model_configs
+        #     )
+        #     .where(
+        #         ModelConfig.id == model_config_id,
+        #         ModelApiKey.is_active.is_(True)
+        #     )
+        #     .order_by(ModelApiKey.priority.desc())
+        #     .limit(1)
+        # )
+        #
+        # api_key = self.db.scalars(stmt).first()
+        api_key = api_keys[0] if api_keys else None
 
         if not api_key:
             raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)

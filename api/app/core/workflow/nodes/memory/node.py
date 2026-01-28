@@ -36,9 +36,10 @@ class MemoryReadNode(BaseNode):
 class MemoryWriteNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = MemoryWriteNodeConfig(**self.config)
+        self.typed_config: MemoryWriteNodeConfig | None = None
 
     async def execute(self, state: WorkflowState) -> Any:
+        self.typed_config = MemoryWriteNodeConfig(**self.config)
         end_user_id = self.get_variable("sys.user_id", state)
 
         if not end_user_id:

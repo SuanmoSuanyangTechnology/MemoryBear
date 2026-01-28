@@ -151,3 +151,18 @@ export interface AiPromptForm {
 export interface ChatVariableConfigModalRef {
   handleOpen: (values: Variable[]) => void;
 }
+
+export interface StatisticsItem {
+  count: number;
+  date: string;
+}
+export interface StatisticsData {
+  daily_conversations: StatisticsItem[];
+  daily_new_users: StatisticsItem[];
+  daily_api_calls: StatisticsItem[];
+  daily_tokens: StatisticsItem[];
+  total_conversations: number;
+  total_new_users: number;
+  total_api_calls: number;
+  total_tokens: number;
+}

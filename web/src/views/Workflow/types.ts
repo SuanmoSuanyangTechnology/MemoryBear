@@ -14,7 +14,7 @@ export interface NodeConfig {
 
   url?: string;
   params?: { [key: string]: unknown; }
-  valueKey?: string | string[];
+  valueKey?: string;
   labelKey?: string;
 
   defaultValue?: any;

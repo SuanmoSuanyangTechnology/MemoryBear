@@ -15,7 +15,7 @@ interface ApiResponse<T> {
 interface CustomSelectProps extends Omit<SelectProps, 'filterOption'> {
   url: string;
   params?: Record<string, unknown>;
-  valueKey?: string | string[];
+  valueKey?: string;
   labelKey?: string;
   placeholder?: string;
   hasAll?: boolean;
@@ -66,18 +66,11 @@ const CustomSelect: FC<CustomSelectProps> = ({
       {...props}
     >
       {hasAll && <Select.Option value={null}>{allTitle || t('common.all')}</Select.Option>}
-      {displayOptions.map((option) => {
-        const getValue = () => {
-          if (typeof valueKey === 'string') return option[valueKey];
-          return valueKey.find(key => option[key] != null) ? option[valueKey.find(key => option[key] != null)!] : undefined;
-        };
-        const value = getValue();
-        return (
-          <Select.Option key={value} value={value}>
-            {String(option[labelKey])}
-          </Select.Option>
-        );
-      })}
+      {displayOptions.map((option) => (
+        <Select.Option key={option[valueKey]} value={option[valueKey]}>
+          {String(option[labelKey])}
+        </Select.Option>
+      ))}
     </Select>
   );
 };
