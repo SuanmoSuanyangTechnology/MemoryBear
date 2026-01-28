@@ -25,6 +25,8 @@ from fastapi import APIRouter, Depends, HTTPException, status,Header
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.utils.config_utils import resolve_config_id
+
 load_dotenv()
 api_logger = get_api_logger()
 
@@ -157,17 +159,19 @@ async def start_workspace_reflection(
 
 @router.get("/reflection/configs")
 async def start_reflection_configs(
-        config_id: uuid.UUID,
+        config_id: uuid.UUID|int,
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ) -> dict:
     """通过config_id查询memory_config表中的反思配置信息"""
     try:
+        config_id=resolve_config_id(config_id,db)
         api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
         result = MemoryConfigRepository.query_reflection_config_by_id(db, config_id)
+        memory_config_id = resolve_config_id(result.config_id, db)
         # 构建返回数据
         reflection_config = {
-            "config_id": result.config_id,
+            "config_id": memory_config_id,
             "reflection_enabled": result.enable_self_reflexion,
             "reflection_period_in_hours": result.iteration_period,
             "reflexion_range": result.reflexion_range,
@@ -192,7 +196,7 @@ async def start_reflection_configs(
 
 @router.get("/reflection/run")
 async def reflection_run(
-    config_id: UUID,
+    config_id: UUID|int,
     language_type: str = Header(default="zh", alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -200,7 +204,7 @@ async def reflection_run(
     """Activate the reflection function for all matching applications in the workspace"""
 
     api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
-
+    config_id = resolve_config_id(config_id, db)
     # 使用MemoryConfigRepository查询反思配置
     result = MemoryConfigRepository.query_reflection_config_by_id(db, config_id)
     if not result:
