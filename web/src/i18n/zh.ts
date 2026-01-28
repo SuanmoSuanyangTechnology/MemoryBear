@@ -111,7 +111,8 @@ export const zh = {
       pricing: '收费管理',
       orderPayment: '订单支付',
       orderHistory: '订单记录',
-      spaceConfig: '空间配置'
+      spaceConfig: '空间配置',
+      prompt: '提示词工程',
     },
     knowledgeBase: {
       home: '首页',
@@ -2449,6 +2450,21 @@ export const zh = {
       question: '踩过的坑',
       summary: '核心洞察',
       none: '无'
-    }
+    },
+    prompt: {
+      editor: '提示词生成器',
+      history: '我的历史',
+      historySearchPlaceholder: '按名称搜索',
+      model: '模型',
+      you: '你',
+      ai: 'AI 助手',
+      promptPlaceholder: '对话优化提示词将显示在这里',
+      promptChatEmpty: '目前没有对话内容',
+      promptChatPlaceholder: '描述你需要的提示词，例如：我需要一个客服助手',
+      conversationOptimizationPrompt: '对话优化提示词',
+      addVariable: '插入变量',
+      initialInput: '原始输入',
+      saveTitle: '标题',
+    },
   },
 }

@@ -112,7 +112,8 @@ export const en = {
       pricing: 'Pricing Management',
       orderPayment: 'Order Payment',
       orderHistory: 'Order History',
-      spaceConfig: 'Space Configuration'
+      spaceConfig: 'Space Configuration',
+      prompt: 'Prompt Engineering',
     },
     dashboard: {
       total_models: 'Available Models',
@@ -2355,6 +2356,21 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       question: 'Lessons Learned',
       summary: 'Core Insights',
       none: 'None'
-    }
+    },
+    prompt: {
+      editor: 'Prompt Generator',
+      history: 'My History',
+      historySearchPlaceholder: 'Search by name',
+      model: 'Model',
+      you: 'You',
+      ai: 'AI Assistant',
+      promptPlaceholder: 'Conversation optimization prompt will be displayed here',
+      promptChatEmpty: 'No conversation content available',
+      promptChatPlaceholder: 'Describe the prompt you need, e.g.: I need a customer service assistant',
+      conversationOptimizationPrompt: 'Conversation Optimization Prompt',
+      addVariable: 'Insert Variable',
+      initialInput: 'Original Input',
+      saveTitle: 'Title',
+    },
   },
 };

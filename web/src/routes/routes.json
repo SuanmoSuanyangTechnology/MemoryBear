@@ -34,6 +34,7 @@
       { "path": "/emotion-engine/:id", "element": "EmotionEngine" },
       { "path": "/reflection-engine/:id", "element": "SelfReflectionEngine" },
       { "path": "/space-config", "element": "SpaceConfig" },
+      { "path": "/prompt", "element": "Prompt" },
       { "path": "/no-permission", "element": "NoPermission" },
       { "path": "/*", "element": "NotFound" }
     ]
