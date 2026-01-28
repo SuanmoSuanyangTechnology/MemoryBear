@@ -79,7 +79,7 @@ const SelectWrapper: FC<{ title: string, desc: string, name: string | string[], 
           placeholder={t('common.pleaseSelect')}
           url={url}
           hasAll={false}
-          valueKey={['config_id_old', 'config_id']}
+          valueKey='config_id'
           labelKey="config_name"
         />
       </Form.Item>
@@ -126,14 +126,12 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
       let allTools = Array.isArray(response.tools) ? response.tools : []
-      const memoryContent = response.memory?.memory_content
-      const convertedMemoryContent = memoryContent && !isNaN(Number(memoryContent)) ? Number(memoryContent) : memoryContent
       form.setFieldsValue({
         ...response,
         tools: allTools,
         memory: {
           ...response.memory,
-          memory_content: convertedMemoryContent
+          memory_content: response.memory?.memory_content ? Number(response.memory?.memory_content) : undefined
         }
       })
       setData({

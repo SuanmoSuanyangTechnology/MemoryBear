@@ -200,7 +200,7 @@ export const nodeLibrary: NodeLibrary[] = [
           config_id: {
             type: 'customSelect',
             url: memoryConfigListUrl,
-            valueKey: ['config_id_old', 'config_id'],
+            valueKey: 'config_id',
             labelKey: 'config_name'
           },
           search_switch: {
@@ -223,7 +223,7 @@ export const nodeLibrary: NodeLibrary[] = [
           config_id: {
             type: 'customSelect',
             url: memoryConfigListUrl,
-            valueKey: ['config_id_old', 'config_id'],
+            valueKey: 'config_id',
             labelKey: 'config_name'
           }
         }
