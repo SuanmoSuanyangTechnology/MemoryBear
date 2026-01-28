@@ -178,6 +178,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
     # --- Read All ---
     def get_all(self, workspace_id = None) -> List[Dict[str, Any]]: # 获取所有配置参数
         configs = MemoryConfigRepository.get_all(self.db, workspace_id)
+
         # 将 ORM 对象转换为字典列表
         data_list = []
         for config in configs:
@@ -185,12 +186,17 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             config_id_old = None
             if config.user_id:
                 try:
-                    config_id_old = int(config.config_id_old)
+                    config_id_old = int(config.user_id)
                 except (ValueError, TypeError):
                     config_id_old = None
-            
+
+
+            if config_id_old:
+                memory_config=config_id_old
+            else:
+                memory_config=config.config_id
             config_dict = {
-                "config_id": config.config_id,
+                "config_id": memory_config,
                 "config_name": config.config_name,
                 "config_desc": config.config_desc,
                 "workspace_id": str(config.workspace_id) if config.workspace_id else None,
