@@ -86,6 +86,7 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
             检索到的历史记忆内容
         """
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
+
         try:
             from app.db import get_db
             db = next(get_db())
