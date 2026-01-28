@@ -261,7 +261,6 @@ async def get_forgetting_stats(
         ApiResponse: 包含统计信息的响应
     """
     workspace_id = current_user.current_workspace_id
-    
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试获取遗忘引擎统计但未选择工作空间")
