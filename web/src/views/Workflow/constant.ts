@@ -105,7 +105,7 @@ export const nodeLibrary: NodeLibrary[] = [
           model_id: {
             type: 'customSelect',
             url: getModelListUrl,
-            params: { type: 'llm,chat' }, // llm/chat
+            params: { type: 'llm,chat', is_active: true }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },
@@ -166,7 +166,7 @@ export const nodeLibrary: NodeLibrary[] = [
           model_id: {
             type: 'customSelect',
             url: getModelListUrl,
-            params: { type: 'llm,chat' }, // llm/chat
+            params: { type: 'llm,chat', is_active: true }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },
@@ -200,7 +200,7 @@ export const nodeLibrary: NodeLibrary[] = [
           config_id: {
             type: 'customSelect',
             url: memoryConfigListUrl,
-            valueKey: ['config_id_old', 'config_id'],
+            valueKey: 'config_id',
             labelKey: 'config_name'
           },
           search_switch: {
@@ -223,7 +223,7 @@ export const nodeLibrary: NodeLibrary[] = [
           config_id: {
             type: 'customSelect',
             url: memoryConfigListUrl,
-            valueKey: ['config_id_old', 'config_id'],
+            valueKey: 'config_id',
             labelKey: 'config_name'
           }
         }
@@ -259,7 +259,7 @@ export const nodeLibrary: NodeLibrary[] = [
           model_id: {
             type: 'customSelect',
             url: getModelListUrl,
-            params: { type: 'llm,chat' }, // llm/chat
+            params: { type: 'llm,chat', is_active: true }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },
