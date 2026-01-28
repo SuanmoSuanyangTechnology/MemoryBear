@@ -3,7 +3,7 @@ import { Form, Input, App, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ModelListItem, MultiKeyForm, MultiKeyConfigModalRef, MultiKeyConfigModalProps } from '../types';
 import RbModal from '@/components/RbModal'
-import { addModelApiKey, delteModelApiKey, getModelInfo } from '@/api/models'
+import { addModelApiKey, deleteModelApiKey, getModelInfo } from '@/api/models'
 
 const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigModalProps>(({ refresh }, ref) => {
   const { t } = useTranslation();
@@ -58,7 +58,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
       });
   }
   const handleDelete = (api_key_id: string) => {
-    delteModelApiKey(api_key_id)
+    deleteModelApiKey(api_key_id)
       .then(() => {
         message.success(t('common.deleteSuccess'))
         getData(model)
