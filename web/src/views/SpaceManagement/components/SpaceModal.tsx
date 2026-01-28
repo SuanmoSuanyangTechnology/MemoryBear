@@ -8,7 +8,7 @@ import { createWorkspace } from '@/api/workspaces'
 import RadioGroupCard from '@/components/RadioGroupCard'
 import { getModelListUrl, getModelList } from '@/api/models'
 import CustomSelect from '@/components/CustomSelect'
-import type { Model } from '@/views/ModelManagement/types'
+import type { ModelListItem } from '@/views/ModelManagement/types'
 
 const FormItem = Form.Item;
 
@@ -29,7 +29,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   const [form] = Form.useForm<SpaceModalData>();
   const [loading, setLoading] = useState(false)
   const [editVo, setEditVo] = useState<Space | null>(null)
-  const [modelList, setModelList] = useState<Model[]>([])
+  const [modelList, setModelList] = useState<ModelListItem[]>([])
 
   const values = Form.useWatch([], form);
 
@@ -80,9 +80,9 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   }, [])
   
   const getModels = () => {
-    getModelList({ type: 'llm,chat', pagesize: 100, page: 1 })
+    getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
       .then(res => {
-        const response = res as { items: Model[] }
+        const response = res as { items: ModelListItem[] }
         setModelList(response.items)
       })
   }
@@ -134,7 +134,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
         >
           <CustomSelect
             url={getModelListUrl}
-            params={{ type: 'embedding', pagesize: 100 }}
+            params={{ type: 'embedding', pagesize: 100, is_active: true }}
             valueKey="id"
             labelKey="name"
             hasAll={false}
@@ -148,7 +148,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
         >
           <CustomSelect
             url={getModelListUrl}
-            params={{ type: 'rerank', pagesize: 100 }}
+            params={{ type: 'rerank', pagesize: 100, is_active: true }}
             valueKey="id"
             labelKey="name"
             hasAll={false}

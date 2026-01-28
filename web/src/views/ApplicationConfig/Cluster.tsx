@@ -225,7 +225,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                     <Form.Item name="default_model_config_id" noStyle>
                       <CustomSelect
                         url={getModelListUrl}
-                        params={{ type: 'llm,chat', pagesize: 100 }}
+                        params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
                         valueKey="id"
                         labelKey="name"
                         hasAll={false}

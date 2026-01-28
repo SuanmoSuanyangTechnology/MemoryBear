@@ -658,7 +658,13 @@ export const zh = {
       priority: '结构化整合',
       addTool: '添加工具',
       tool: '工具',
-      variableConfig: '配置变量'
+      variableConfig: '配置变量',
+
+      statistics: '数据统计',
+      daily_conversations: '消息会话数',
+      daily_new_users: '新增用户数',
+      daily_api_calls: '调用次数',
+      daily_tokens: 'Token消耗',
     },
     role: {
       roleManagement: '角色管理',
@@ -967,6 +973,9 @@ export const zh = {
       statusEnabled: '可用',
       statusDisabled: '不可用',
       remove: '删除',
+
+      fileSizeTip: '文件大小不能超过 {{size}}MB',
+      fileAcceptTip: '不支持的文件类型:'
     },
     product: {
       applicationManagement: '应用管理',
@@ -1064,6 +1073,59 @@ export const zh = {
 
       saveConfig: '保存配置',
       apiKeyName: 'API密钥名称',
+
+      llm: 'LLM',
+      chat: 'Chat',
+      embedding: 'Embedding',
+      rerank: 'Rerank',
+      openai: "Openai",
+      dashscope: "Dashscope",
+      ollama: "Ollama",
+      xinference: "Xinference",
+      gpustack: "Gpustack",
+      bedrock: "Bedrock"
+    },
+    modelNew: {
+      group: '模型组合',
+      list: '模型列表',
+      square: '模型广场',
+      createGroupModel: '创建模型组合',
+      groupSearchPlaceholder: '搜索模型组合',
+      listSearchPlaceholder: '搜索可用模型',
+      squareSearchPlaceholder: '搜索平台模型',
+      status: '模型状态',
+      created_at: '创建时间',
+      configureBtn: '点击配置',
+      showModel: '显示模型',
+      keyConfig: '配置 KEY',
+
+      modelConfiguration: '模型配置',
+      logo: '模型LOGO',
+      name: '模型名称',
+      type: '模型类型',
+      modelImplement: '模型实现',
+      addImplement: '添加实现',
+      noAuth: '未授权(限1个实现)',
+      implementConfig: '配置模型实现',
+      provider: '模型供应商',
+      api_key_ids: '选择模型',
+      viewAll: '更多',
+      modelCount: '共 {{count}} 个模型',
+      modelList: '模型列表',
+      added: ' 已添加',
+      addSuccess: '添加成功',
+      model_name: '模型名称',
+      tags: '标签',
+      createCustomModel: '添加自定义模型',
+      edit: '编辑',
+      selectOneTip: '模型未配置API KEY，请先在模型广场配置',
+
+      api_key: 'API KEY',
+      api_base: 'API Base URL',
+      description: '描述',
+      add: '添加',
+      item: '个',
+      apiKeyNum: '个 API Key',
 
       llm: 'LLM',
       chat: 'Chat',
@@ -1607,7 +1669,9 @@ export const zh = {
       noPermissionDesc: '请联系管理员授予权限',
       tableEmpty: '目前没有数据',
       loadingEmpty: '内容正在加载中…',
-      loadingEmptyDesc: '您的内容正在火箭运输中！很快就会降落在您的屏幕上'
+      loadingEmptyDesc: '您的内容正在火箭运输中！很快就会降落在您的屏幕上',
+      pageEmpty: '哎呀！暂无搜索结果',
+      pageEmptyDesc: '红熊歪着头等待您更换新的关键词，让我们一起探索吧。',
     },
 
     home: {

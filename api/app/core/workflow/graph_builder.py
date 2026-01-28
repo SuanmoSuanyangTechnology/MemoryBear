@@ -53,114 +53,110 @@ class OutputContent(BaseModel):
         )
     )
 
-    def depends_on_node(self, node_id: str) -> bool:
+    def depends_on_scope(self, scope: str) -> bool:
         """
-        Check if this output segment depends on a specific node's variable.
-
-        This method examines the `literal` of the output segment to see if it
-        contains a variable placeholder referencing the given node in the form:
-
-            {{ node_id.field_name }}
-
-        It uses a regular expression to match the exact node ID, avoiding
-        false positives from substring matches (e.g., 'node1' should not match 'node10').
+        Check if this segment depends on a given scope.
 
         Args:
-            node_id (str): The ID of the node to check for in this segment's variable placeholders.
+            scope (str): Node ID or special variable prefix (e.g., "sys").
 
         Returns:
-            bool:
-                - True if the segment contains a variable referencing the given node.
-                - False otherwise.
-
-        Example:
-            literal = "{{node1.name}}"
-
-            depends_on_node("node1") -> True
-            depends_on_node("node2") -> False
-
-        Usage:
-            This method is primarily used in stream mode to determine whether
-            a particular variable output segment should be activated when a
-            specific upstream node completes execution.
+            bool: True if this segment references the given scope.
         """
-        variable_pattern = rf"\{{\{{\s*{re.escape(node_id)}\.[a-zA-Z0-9_]+\s*\}}\}}"
-        pattern = re.compile(variable_pattern)
-        match = pattern.search(self.literal)
-        if match:
-            return True
-        return False
+        pattern = rf"\{{\{{\s*{re.escape(scope)}\.[a-zA-Z0-9_]+\s*\}}\}}"
+        return bool(re.search(pattern, self.literal))
 
 
 class StreamOutputConfig(BaseModel):
     """
     Streaming output configuration for an End node.
 
-    This structure controls:
-    - whether the End node output is globally active
-    - which upstream branch nodes are responsible for activation
-    - how each output segment behaves in streaming mode
+    This configuration describes how the End node output behaves in streaming mode,
+    including:
+    - whether output emission is globally activated
+    - which upstream branch/control nodes gate the activation
+    - how each parsed output segment is streamed and activated
     """
 
     activate: bool = Field(
         ...,
         description=(
-            "Global activation state of the End node output.\n"
-            "If False, no output should be emitted until all control nodes are resolved."
+            "Global activation flag for the End node output.\n"
+            "When False, output segments should not be emitted even if available.\n"
+            "This flag typically becomes True once required control branch conditions "
+            "are satisfied."
         )
     )
 
-    control_nodes: list[str] = Field(
+    control_nodes: dict[str, str] = Field(
         ...,
         description=(
-            "List of upstream branch node IDs that control this End node.\n"
-            "Each node must signal completion before output becomes active."
+            "Control branch conditions for this End node output.\n"
+            "Mapping of `branch_node_id -> expected_branch_label`.\n"
+            "The End node output becomes globally active when a controlling branch node "
+            "reports a matching completion status."
         )
     )
 
     outputs: list[OutputContent] = Field(
         ...,
-        description="Ordered list of output segments parsed from the output template."
+        description=(
+            "Ordered list of output segments parsed from the output template.\n"
+            "Each segment represents either a literal text block or a variable placeholder "
+            "that may be activated independently."
+        )
     )
 
     cursor: int = Field(
         ...,
         description=(
             "Streaming cursor index.\n"
-            "Indicates how many output segments have already been emitted."
+            "Indicates the next output segment index to be emitted.\n"
+            "Segments with index < cursor are considered already streamed."
         )
     )
 
-    def update_activate(self, node_id):
+    def update_activate(self, scope: str, status=None):
         """
-        Update activation state based on an upstream node completion.
+        Update streaming activation state based on an upstream node or special variable.
 
-        This method is typically called when a branch/control node finishes execution.
+        Args:
+            scope (str):
+                Identifier of the completed upstream entity.
+                - If a control branch node, it should match a key in `control_nodes`.
+                - If a variable placeholder (e.g., "sys.xxx"), it may appear in output segments.
+            status (optional):
+                Completion status of the control branch node.
+                Required when `scope` refers to a control node.
 
         Behavior:
-        1. If the node is a control node:
-           - Remove it from `control_nodes`
-           - If all control nodes are resolved, activate the entire output
+        1. Control branch nodes:
+           - If `scope` matches a key in `control_nodes` and `status` matches the expected
+             branch label, the End node output becomes globally active (`activate = True`).
 
-        2. Activate variable output segments that depend on this node:
-           - If an output segment is a variable
-           - And its literal references the completed node_id
-           - Mark that segment as active
+        2. Variable output segments:
+           - For each segment that is a variable (`is_variable=True`):
+               - If the segment literal references `scope`, mark the segment as active.
+               - This applies both to regular node variables (e.g., "node_id.field")
+                 and special system variables (e.g., "sys.xxx").
+
+        Notes:
+        - This method does not emit output or advance the streaming cursor.
+        - It only updates activation flags based on upstream events or special variables.
         """
 
         # Case 1: resolve control branch dependency
-        if node_id in self.control_nodes:
-            self.control_nodes.remove(node_id)
-
-            # All branch constraints resolved → enable output
-            if not self.control_nodes:
+        if scope in self.control_nodes.keys():
+            if status is None:
+                raise RuntimeError("[Stream Output] Control node activation status not provided")
+            if status == self.control_nodes[scope]:
                 self.activate = True
 
         # Case 2: activate variable segments related to this node
         for i in range(len(self.outputs)):
             if (
                     self.outputs[i].is_variable
-                    and self.outputs[i].depends_on_node(node_id)
+                    and self.outputs[i].depends_on_scope(scope)
             ):
                 self.outputs[i].activate = True
 
@@ -184,11 +180,11 @@ class GraphBuilder:
         self._find_upstream_branch_node = lru_cache(
             maxsize=len(self.nodes) * 2
         )(self._find_upstream_branch_node)
-        self._analyze_end_node_output()
 
         self.graph = StateGraph(WorkflowState)
         self.add_nodes()
         self.add_edges()
+        self._analyze_end_node_output()
         # EDGES MUST BE ADDED AFTER NODES ARE ADDED.
 
     @property
@@ -216,30 +212,53 @@ class GraphBuilder:
         except KeyError:
             raise RuntimeError(f"Node not found: Id={node_id}")
 
-    def _find_upstream_branch_node(self, target_node: str) -> tuple[bool, tuple[str]]:
-        """Find upstream branch nodes for a given target node in the workflow graph.
+    def _find_upstream_branch_node(self, target_node: str) -> tuple[bool, tuple[tuple[str, str]]]:
+        """
+        Recursively find all upstream branch (control) nodes that influence the execution
+        of the given target node.
 
-        This method identifies all upstream control (branch) nodes that can affect
-        the execution of `target_node`. If `target_node` is reachable from a start
-        node (i.e., a node with no upstream nodes), the method returns an empty tuple.
+        This method walks upstream along the workflow graph starting from `target_node`.
+        It distinguishes between:
+          - branch nodes (node types listed in `BRANCH_NODES`)
+          - non-branch nodes (ordinary processing nodes)
 
-        The function distinguishes between branch nodes (defined in `BRANCH_NODES`)
-        and non-branch nodes, recursively traversing upstream through non-branch
-        nodes. If any non-branch upstream path does not lead to a branch node,
-        the result will indicate that no valid upstream branch node exists.
+        Traversal rules:
+        1. For each immediate upstream node:
+           - If it is a branch node, it is recorded as an affecting control node.
+           - If it is a non-branch node, the traversal continues recursively upstream.
+        2. If ANY upstream path reaches a START / CYCLE_START node without encountering
+           a branch node, the traversal is considered invalid:
+           - `has_branch` will be False
+           - no branch nodes are returned.
+        3. Only when ALL upstream non-branch paths eventually lead to at least one
+           branch node will `has_branch` be True.
+
+        Special case:
+        - If `target_node` has no upstream nodes AND its type is START or CYCLE_START,
+          it is considered directly reachable from the workflow entry, and therefore
+          has no controlling branch nodes.
 
         Args:
-            target_node (str): The identifier of the target node.
+            target_node (str):
+                The identifier of the node whose upstream control branches
+                are to be resolved.
 
         Returns:
-            tuple[bool, tuple[str]]:
-                - has_branch (bool): True if all upstream non-branch paths lead to at least
-                  one branch node; False if any path reaches a start node without a branch.
-                - branch_nodes (tuple[str]): A deduplicated tuple of upstream branch node IDs
-                  affecting `target_node`. Returns an empty tuple if `has_branch` is False.
+            tuple[bool, tuple[tuple[str, str]]]:
+                - has_branch (bool):
+                    True if every upstream path from `target_node` encounters
+                    at least one branch node.
+                    False if any path reaches a start node without a branch.
+                - branch_nodes (tuple[tuple[str, str]]):
+                    A deduplicated tuple of `(branch_node_id, branch_label)` pairs
+                    representing all branch nodes that can influence `target_node`.
+                    Returns an empty tuple if `has_branch` is False.
         """
         source_nodes = [
-            edge.get("source")
+            {
+                "id": edge.get("source"),
+                "branch": edge.get("label")
+            }
             for edge in self.edges
             if edge.get("target") == target_node
         ]
@@ -249,11 +268,13 @@ class GraphBuilder:
         branch_nodes = []
         non_branch_nodes = []
 
-        for node_id in source_nodes:
-            if self.get_node_type(node_id) in BRANCH_NODES:
-                branch_nodes.append(node_id)
+        for node_info in source_nodes:
+            if self.get_node_type(node_info["id"]) in BRANCH_NODES:
+                branch_nodes.append(
+                    (node_info["id"], node_info["branch"])
+                )
             else:
-                non_branch_nodes.append(node_id)
+                non_branch_nodes.append(node_info["id"])
 
         has_branch = True
         for node_id in non_branch_nodes:
@@ -334,7 +355,7 @@ class GraphBuilder:
                     activate=not has_branch,
 
                     # Branch nodes that control activation of this End node
-                    control_nodes=list(control_nodes),
+                    control_nodes=dict(control_nodes),
 
                     # Convert output segments into OutputContent objects
                     outputs=list(
@@ -362,7 +383,7 @@ class GraphBuilder:
             else:
                 self.end_node_map[end_node_id] = StreamOutputConfig(
                     activate=True,
-                    control_nodes=[],
+                    control_nodes={},
                     outputs=list(
                         [
                             OutputContent(
