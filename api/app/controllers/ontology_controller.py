@@ -462,15 +462,18 @@ async def create_scene(
         )
         
         # 构建响应
+        # 动态计算 type_num
+        type_num = len(scene.classes) if scene.classes else 0
+        
         response = SceneResponse(
             scene_id=scene.scene_id,
             scene_name=scene.scene_name,
             scene_description=scene.scene_description,
-            type_num=scene.type_num,
+            type_num=type_num,
             workspace_id=scene.workspace_id,
             created_at=scene.created_at,
             updated_at=scene.updated_at,
-            classes_count=0
+            classes_count=type_num
         )
         
         api_logger.info(f"Scene created successfully: {scene.scene_id}")
@@ -553,15 +556,18 @@ async def update_scene(
         )
         
         # 构建响应
+        # 动态计算 type_num
+        type_num = len(scene.classes) if scene.classes else 0
+        
         response = SceneResponse(
             scene_id=scene.scene_id,
             scene_name=scene.scene_name,
             scene_description=scene.scene_description,
-            type_num=scene.type_num,
+            type_num=type_num,
             workspace_id=scene.workspace_id,
             created_at=scene.created_at,
             updated_at=scene.updated_at,
-            classes_count=len(scene.classes) if scene.classes else 0
+            classes_count=type_num
         )
         
         api_logger.info(f"Scene updated successfully: {scene_id}")
@@ -656,55 +662,49 @@ async def delete_scene(
         return fail(BizCode.INTERNAL_ERROR, "场景删除失败", str(e))
 
 
-@router.get("/scene", response_model=ApiResponse)
-async def get_scene(
-    workspace_id: str,
-    scene_name: str,
+@router.get("/scenes", response_model=ApiResponse)
+async def get_scenes(
+    workspace_id: Optional[str] = None,
+    scene_name: Optional[str] = None,
+    page: Optional[int] = None,
+    page_size: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """搜索场景（模糊查询）
+    """获取场景列表（支持模糊搜索和全量查询，全量查询支持分页）
     
-    根据工作空间ID和场景名称关键词进行模糊搜索，返回匹配的场景列表。
+    根据是否提供 scene_name 参数，执行不同的查询：
+    - 提供 scene_name：进行模糊搜索，返回匹配的场景列表（不分页）
+    - 不提供 scene_name：返回工作空间下的所有场景（支持分页）
+    
     支持中文和英文的模糊匹配，不区分大小写。
     
     Args:
-        workspace_id: 工作空间ID
-        scene_name: 场景名称关键词（支持模糊匹配）
-        db: 数据库会话
-        current_user: 当前用户
-        
-    Returns:
-        ApiResponse: 包含匹配的场景列表
-        
-    Examples:
-        - 输入 "医疗" 可以匹配到 "医疗场景"、"智慧医疗"、"医疗管理系统" 等
-        - 输入 "health" 可以匹配到 "Healthcare"、"Health Management" 等
-    """
-    from app.controllers.ontology_secondary_routes import get_scene_handler
-    return await get_scene_handler(workspace_id, scene_name, db, current_user)
-
-
-@router.get("/scenes", response_model=ApiResponse)
-async def list_scenes(
-    workspace_id: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """获取工作空间下的所有场景
-    
-    获取指定工作空间下的所有本体场景列表。
-    
-    Args:
         workspace_id: 工作空间ID（可选，默认当前用户工作空间）
+        scene_name: 场景名称关键词（可选，支持模糊匹配）
+        page: 页码（可选，从1开始，仅在全量查询时有效）
+        page_size: 每页数量（可选，仅在全量查询时有效）
         db: 数据库会话
         current_user: 当前用户
         
     Returns:
         ApiResponse: 包含场景列表
+        
+    Examples:
+        - 模糊搜索：GET /scenes?workspace_id=xxx&scene_name=医疗
+          输入 "医疗" 可以匹配到 "医疗场景"、"智慧医疗"、"医疗管理系统" 等
+        - 全量查询（不分页）：GET /scenes?workspace_id=xxx
+          返回工作空间下的所有场景
+        - 全量查询（分页）：GET /scenes?workspace_id=xxx&page=1&page_size=10
+          返回第1页，每页10条数据
+          
+    Notes:
+        - 分页参数 page 和 page_size 必须同时提供
+        - 分页仅在全量查询时有效，模糊搜索不支持分页
+        - page 从1开始，page_size 必须大于0
     """
-    from app.controllers.ontology_secondary_routes import list_scenes_handler
-    return await list_scenes_handler(workspace_id, db, current_user)
+    from app.controllers.ontology_secondary_routes import scenes_handler
+    return await scenes_handler(workspace_id, scene_name, page, page_size, db, current_user)
 
 
 # ==================== 本体类型管理接口 ====================
@@ -777,52 +777,35 @@ async def delete_class(
     return await delete_class_handler(class_id, db, current_user)
 
 
-@router.get("/class", response_model=ApiResponse)
-async def get_class(
-    class_name: str,
+@router.get("/classes", response_model=ApiResponse)
+async def get_classes(
     scene_id: str,
+    class_name: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """搜索类型（模糊查询）
+    """获取类型列表（支持模糊搜索和全量查询）
     
-    根据类型名称关键词和场景ID进行模糊搜索，返回匹配的类型列表。
+    根据是否提供 class_name 参数，执行不同的查询：
+    - 提供 class_name：进行模糊搜索，返回匹配的类型列表
+    - 不提供 class_name：返回场景下的所有类型
+    
     支持中文和英文的模糊匹配，不区分大小写。
     
     Args:
-        class_name: 类型名称关键词（支持模糊匹配）
-        scene_id: 场景ID
-        db: 数据库会话
-        current_user: 当前用户
-        
-    Returns:
-        ApiResponse: 包含匹配的类型列表
-        
-    Examples:
-        - 输入 "患者" 可以匹配到 "患者"、"患者信息"、"门诊患者" 等
-        - 输入 "patient" 可以匹配到 "Patient"、"PatientRecord" 等
-    """
-    from app.controllers.ontology_secondary_routes import get_class_handler
-    return await get_class_handler(class_name, scene_id, db, current_user)
-
-
-@router.get("/classes", response_model=ApiResponse)
-async def list_classes(
-    scene_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """获取场景下的所有类型
-    
-    获取指定场景下的所有本体类型列表。
-    
-    Args:
-        scene_id: 场景ID（必填，作为查询参数）
+        scene_id: 场景ID（必填）
+        class_name: 类型名称关键词（可选，支持模糊匹配）
         db: 数据库会话
         current_user: 当前用户
         
     Returns:
         ApiResponse: 包含类型列表
+        
+    Examples:
+        - 模糊搜索：GET /classes?scene_id=xxx&class_name=患者
+          输入 "患者" 可以匹配到 "患者"、"患者信息"、"门诊患者" 等
+        - 全量查询：GET /classes?scene_id=xxx
+          返回场景下的所有类型
     """
-    from app.controllers.ontology_secondary_routes import list_classes_handler
-    return await list_classes_handler(scene_id, db, current_user)
+    from app.controllers.ontology_secondary_routes import classes_handler
+    return await classes_handler(scene_id, class_name, db, current_user)
