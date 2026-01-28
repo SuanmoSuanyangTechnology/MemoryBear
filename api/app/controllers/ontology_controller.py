@@ -67,7 +67,7 @@ def _get_ontology_service(
 ) -> OntologyService:
     """获取OntologyService实例的依赖注入函数
     
-    从当前工作空间或指定的llm_id获取LLM配置,创建OpenAIClient和OntologyService实例。
+    指定的llm_id获取LLM配置,创建OpenAIClient和OntologyService实例。
     
     Args:
         db: 数据库会话
@@ -172,9 +172,11 @@ async def extract_ontology(
     """提取本体类
     
     从场景描述中提取符合OWL规范的本体类。
+    提取结果会保存到ontology_extraction_result表，
+    同时将每个类的name_chinese和description保存到ontology_class表。
     
     Args:
-        request: 提取请求,包含scenario、domain和可选的llm_id
+        request: 提取请求,包含scenario、domain、llm_id和scene_id
         db: 数据库会话
         current_user: 当前用户
         
@@ -186,7 +188,19 @@ async def extract_ontology(
             "code": 200,
             "msg": "本体提取成功",
             "data": {
-                "classes": [...],
+                "classes": [
+                    {
+                        "id": "147d9db50b524a9e909e01a753d3acdd",
+                        "name": "Patient",
+                        "name_chinese": "患者",
+                        "description": "在医疗机构中接受诊疗、护理或健康管理的个体",
+                        "examples": ["糖尿病患者", "术后康复患者", "门诊初诊患者"],
+                        "parent_class": null,
+                        "entity_type": "Person",
+                        "domain": "Healthcare"
+                    },
+                    ...
+                ],
                 "domain": "Healthcare",
                 "extracted_count": 7
             }
@@ -196,10 +210,17 @@ async def extract_ontology(
         f"Ontology extraction requested by user {current_user.id}, "
         f"scenario_length={len(request.scenario)}, "
         f"domain={request.domain}, "
-        f"llm_id={request.llm_id}"
+        f"llm_id={request.llm_id}, "
+        f"scene_id={request.scene_id}"
     )
     
     try:
+        # 获取当前工作空间ID
+        workspace_id = current_user.current_workspace_id
+        if not workspace_id:
+            api_logger.warning(f"User {current_user.id} has no current workspace")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
         # 创建OntologyService实例,传入llm_id
         service = _get_ontology_service(
             db=db,
@@ -207,10 +228,12 @@ async def extract_ontology(
             llm_id=request.llm_id
         )
         
-        # 调用服务层执行提取
+        # 调用服务层执行提取，传入scene_id和workspace_id
         result = await service.extract_ontology(
             scenario=request.scenario,
-            domain=request.domain
+            domain=request.domain,
+            scene_id=request.scene_id,
+            workspace_id=workspace_id
         )
         
         # 构建响应
@@ -221,7 +244,8 @@ async def extract_ontology(
         )
         
         api_logger.info(
-            f"Ontology extraction completed, extracted {len(result.classes)} classes"
+            f"Ontology extraction completed, extracted {len(result.classes)} classes, "
+            f"saved to scene {request.scene_id}"
         )
         
         return success(data=response.model_dump(), msg="本体提取成功")
@@ -632,26 +656,33 @@ async def delete_scene(
         return fail(BizCode.INTERNAL_ERROR, "场景删除失败", str(e))
 
 
-@router.get("/scene/{scene_id}", response_model=ApiResponse)
+@router.get("/scene", response_model=ApiResponse)
 async def get_scene(
-    scene_id: str,
+    workspace_id: str,
+    scene_name: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取单个场景详情
+    """搜索场景（模糊查询）
     
-    获取指定场景的详细信息。
+    根据工作空间ID和场景名称关键词进行模糊搜索，返回匹配的场景列表。
+    支持中文和英文的模糊匹配，不区分大小写。
     
     Args:
-        scene_id: 场景ID
+        workspace_id: 工作空间ID
+        scene_name: 场景名称关键词（支持模糊匹配）
         db: 数据库会话
         current_user: 当前用户
         
     Returns:
-        ApiResponse: 包含场景详细信息
+        ApiResponse: 包含匹配的场景列表
+        
+    Examples:
+        - 输入 "医疗" 可以匹配到 "医疗场景"、"智慧医疗"、"医疗管理系统" 等
+        - 输入 "health" 可以匹配到 "Healthcare"、"Health Management" 等
     """
-    from app.controllers.ontology_scene_routes import get_scene_handler
-    return await get_scene_handler(scene_id, db, current_user)
+    from app.controllers.ontology_secondary_routes import get_scene_handler
+    return await get_scene_handler(workspace_id, scene_name, db, current_user)
 
 
 @router.get("/scenes", response_model=ApiResponse)
@@ -672,7 +703,7 @@ async def list_scenes(
     Returns:
         ApiResponse: 包含场景列表
     """
-    from app.controllers.ontology_scene_routes import list_scenes_handler
+    from app.controllers.ontology_secondary_routes import list_scenes_handler
     return await list_scenes_handler(workspace_id, db, current_user)
 
 
@@ -696,7 +727,7 @@ async def create_class(
     Returns:
         ApiResponse: 包含创建的类型信息
     """
-    from app.controllers.ontology_scene_routes import create_class_handler
+    from app.controllers.ontology_secondary_routes import create_class_handler
     return await create_class_handler(request, db, current_user)
 
 
@@ -720,7 +751,7 @@ async def update_class(
     Returns:
         ApiResponse: 包含更新后的类型信息
     """
-    from app.controllers.ontology_scene_routes import update_class_handler
+    from app.controllers.ontology_secondary_routes import update_class_handler
     return await update_class_handler(class_id, request, db, current_user)
 
 
@@ -742,7 +773,7 @@ async def delete_class(
     Returns:
         ApiResponse: 删除结果
     """
-    from app.controllers.ontology_scene_routes import delete_class_handler
+    from app.controllers.ontology_secondary_routes import delete_class_handler
     return await delete_class_handler(class_id, db, current_user)
 
 
@@ -753,20 +784,25 @@ async def get_class(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取单个类型详情
+    """搜索类型（模糊查询）
     
-    根据类型名称和场景ID获取指定类型的详细信息。
+    根据类型名称关键词和场景ID进行模糊搜索，返回匹配的类型列表。
+    支持中文和英文的模糊匹配，不区分大小写。
     
     Args:
-        class_name: 类型名称
+        class_name: 类型名称关键词（支持模糊匹配）
         scene_id: 场景ID
         db: 数据库会话
         current_user: 当前用户
         
     Returns:
-        ApiResponse: 包含类型详细信息
+        ApiResponse: 包含匹配的类型列表
+        
+    Examples:
+        - 输入 "患者" 可以匹配到 "患者"、"患者信息"、"门诊患者" 等
+        - 输入 "patient" 可以匹配到 "Patient"、"PatientRecord" 等
     """
-    from app.controllers.ontology_scene_routes import get_class_handler
+    from app.controllers.ontology_secondary_routes import get_class_handler
     return await get_class_handler(class_name, scene_id, db, current_user)
 
 
@@ -788,5 +824,5 @@ async def list_classes(
     Returns:
         ApiResponse: 包含类型列表
     """
-    from app.controllers.ontology_scene_routes import list_classes_handler
+    from app.controllers.ontology_secondary_routes import list_classes_handler
     return await list_classes_handler(scene_id, db, current_user)

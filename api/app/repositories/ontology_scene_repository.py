@@ -67,8 +67,7 @@ class OntologySceneRepository:
             scene = OntologyScene(
                 scene_name=scene_data.get("scene_name"),
                 scene_description=scene_data.get("scene_description"),
-                workspace_id=workspace_id,
-                type_num=0
+                workspace_id=workspace_id
             )
             
             self.db.add(scene)
@@ -118,6 +117,93 @@ class OntologySceneRepository:
         except Exception as e:
             logger.error(
                 f"Failed to get ontology scene by ID: {str(e)}",
+                exc_info=True
+            )
+            raise
+    
+    def get_by_name(self, scene_name: str, workspace_id: UUID) -> Optional[OntologyScene]:
+        """根据场景名称和工作空间ID获取场景（精确匹配）
+        
+        Args:
+            scene_name: 场景名称
+            workspace_id: 工作空间ID
+            
+        Returns:
+            Optional[OntologyScene]: 场景对象，不存在则返回None
+            
+        Examples:
+            >>> repo = OntologySceneRepository(db)
+            >>> scene = repo.get_by_name("医疗场景", workspace_id)
+        """
+        try:
+            logger.debug(
+                f"Getting ontology scene by name - "
+                f"scene_name={scene_name}, workspace_id={workspace_id}"
+            )
+            
+            scene = self.db.query(OntologyScene).options(
+                joinedload(OntologyScene.classes)
+            ).filter(
+                OntologyScene.scene_name == scene_name,
+                OntologyScene.workspace_id == workspace_id
+            ).first()
+            
+            if scene:
+                logger.debug(f"Ontology scene found: {scene_name}")
+            else:
+                logger.debug(f"Ontology scene not found: {scene_name}")
+            
+            return scene
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to get ontology scene by name: {str(e)}",
+                exc_info=True
+            )
+            raise
+    
+    def search_by_name(self, keyword: str, workspace_id: UUID) -> List[OntologyScene]:
+        """根据关键词模糊搜索场景
+        
+        使用 LIKE 进行模糊匹配，支持中文和英文。
+        
+        Args:
+            keyword: 搜索关键词
+            workspace_id: 工作空间ID
+            
+        Returns:
+            List[OntologyScene]: 匹配的场景列表
+            
+        Examples:
+            >>> repo = OntologySceneRepository(db)
+            >>> scenes = repo.search_by_name("医疗", workspace_id)
+        """
+        try:
+            logger.debug(
+                f"Searching ontology scenes by keyword - "
+                f"keyword={keyword}, workspace_id={workspace_id}"
+            )
+            
+            # 使用 ilike 进行不区分大小写的模糊匹配
+            scenes = self.db.query(OntologyScene).options(
+                joinedload(OntologyScene.classes)
+            ).filter(
+                OntologyScene.scene_name.ilike(f"%{keyword}%"),
+                OntologyScene.workspace_id == workspace_id
+            ).order_by(
+                OntologyScene.updated_at.desc()
+            ).all()
+            
+            logger.info(
+                f"Found {len(scenes)} ontology scenes matching keyword '{keyword}' "
+                f"in workspace {workspace_id}"
+            )
+            
+            return scenes
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to search ontology scenes by keyword: {str(e)}",
                 exc_info=True
             )
             raise
