@@ -7,14 +7,15 @@ import { useTranslation } from 'react-i18next';
 import PlusIcon from '@/assets/images/plus.svg'
 import { cookieUtils } from '@/utils/request'
 import { fileUploadUrl } from '@/api/fileStorage'
+import styles from './index.module.less'
 
-interface UploadImagesProps extends Omit<UploadProps, 'onChange'> {
+interface UploadImagesProps extends Omit<UploadProps, 'onChange' | 'fileList'> {
   /** 上传接口地址 */
   action?: string;
   /** 是否支持多选 */
   multiple?: boolean;
   /** 已上传的文件列表 */
-  fileList?: UploadFile[];
+  fileList?: UploadFile[] | UploadFile;
   /** 文件列表变化回调 */
   onChange?: (fileList?: UploadFile[] | UploadFile) => void;
   /** 禁用上传 */
@@ -73,11 +74,17 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
 }, ref) => {
   const { t } = useTranslation();
   const { message, modal } = App.useApp()
-  const [fileList, setFileList] = useState<UploadFile[]>(propFileList);
+  const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [accept, setAccept] = useState<string | undefined>();
   // const [loading, setLoading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState('');
+
+  useEffect(() => {
+    if (!Array.isArray(propFileList) && typeof propFileList === 'object') {
+      setFileList([propFileList]);
+    }
+  }, [propFileList])
 
   const updateValue = (list: UploadFile[]) => {
     if (maxCount === 1) {
@@ -185,6 +192,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
       showRemoveIcon: true,
       showDownloadIcon: false,
     },
+    className: `${styles.imageUpload} ${className}`,
     ...props,
   };
 
