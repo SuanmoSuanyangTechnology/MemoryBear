@@ -184,14 +184,19 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
         for config in configs:
             # 安全地转换 user_id 为 int
             config_id_old = None
-            if config.user_id:
+            if config.config_id_old:
                 try:
-                    config_id_old = int(config.user_id)
+                    config_id_old = int(config.config_id_old)
                 except (ValueError, TypeError):
                     config_id_old = None
-            
+
+
+            if config_id_old:
+                memory_config=config_id_old
+            else:
+                memory_config=config.config_id
             config_dict = {
-                "config_id": config.config_id,
+                "config_id": memory_config,
                 "config_name": config.config_name,
                 "config_desc": config.config_desc,
                 "workspace_id": str(config.workspace_id) if config.workspace_id else None,
