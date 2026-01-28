@@ -123,7 +123,7 @@ class OntologyClassRepository:
             raise
     
     def get_by_name(self, class_name: str, scene_id: UUID) -> Optional[OntologyClass]:
-        """根据类型名称和场景ID获取类型
+        """根据类型名称和场景ID获取类型（精确匹配）
         
         Args:
             class_name: 类型名称
@@ -154,6 +154,50 @@ class OntologyClassRepository:
         except Exception as e:
             logger.error(
                 f"Failed to get ontology class by name: {str(e)}",
+                exc_info=True
+            )
+            raise
+    
+    def search_by_name(self, keyword: str, scene_id: UUID) -> List[OntologyClass]:
+        """根据关键词模糊搜索类型
+        
+        使用 LIKE 进行模糊匹配，支持中文和英文。
+        
+        Args:
+            keyword: 搜索关键词
+            scene_id: 场景ID
+            
+        Returns:
+            List[OntologyClass]: 匹配的类型列表
+            
+        Examples:
+            >>> repo = OntologyClassRepository(db)
+            >>> classes = repo.search_by_name("患者", scene_id)
+        """
+        try:
+            logger.debug(
+                f"Searching ontology classes by keyword - "
+                f"keyword={keyword}, scene_id={scene_id}"
+            )
+            
+            # 使用 ilike 进行不区分大小写的模糊匹配
+            classes = self.db.query(OntologyClass).filter(
+                OntologyClass.class_name.ilike(f"%{keyword}%"),
+                OntologyClass.scene_id == scene_id
+            ).order_by(
+                OntologyClass.created_at.desc()
+            ).all()
+            
+            logger.info(
+                f"Found {len(classes)} ontology classes matching keyword '{keyword}' "
+                f"in scene {scene_id}"
+            )
+            
+            return classes
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to search ontology classes by keyword: {str(e)}",
                 exc_info=True
             )
             raise

@@ -25,7 +25,6 @@ class OntologyScene(Base):
     # 场景信息
     scene_name = Column(String(200), nullable=False, comment="场景名称")
     scene_description = Column(Text, nullable=True, comment="场景描述")
-    type_num = Column(Integer, default=0, nullable=False, comment="类型数量")
 
     # 外键：关联到工作空间
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True, comment="所属工作空间ID")
@@ -38,4 +37,4 @@ class OntologyScene(Base):
     classes = relationship("OntologyClass", back_populates="scene", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<OntologyScene(id={self.scene_id}, name={self.scene_name}, type_num={self.type_num})>"
+        return f"<OntologyScene(id={self.scene_id}, name={self.scene_name})>"

@@ -36,17 +36,20 @@ class ExtractionRequest(BaseModel):
         scenario: 场景描述文本,不能为空
         domain: 可选的领域提示(如Healthcare, Education等)
         llm_id: LLM模型ID,必须提供
+        scene_id: 场景ID,必须提供,用于将提取的类保存到指定场景
     
     Examples:
         >>> request = ExtractionRequest(
         ...     scenario="医院管理患者记录...",
         ...     domain="Healthcare",
-        ...     llm_id="550e8400-e29b-41d4-a716-446655440000"
+        ...     llm_id="550e8400-e29b-41d4-a716-446655440000",
+        ...     scene_id="660e8400-e29b-41d4-a716-446655440000"
         ... )
     """
     scenario: str = Field(..., description="场景描述文本", min_length=1)
     domain: Optional[str] = Field(None, description="可选的领域提示")
     llm_id: str = Field(..., description="LLM模型ID")
+    scene_id: UUID = Field(..., description="场景ID,用于将提取的类保存到指定场景")
 
 
 class ExtractionResponse(BaseModel):
@@ -209,8 +212,8 @@ class SceneResponse(BaseModel):
         scene_description: 场景描述
         type_num: 类型数量
         workspace_id: 所属工作空间ID
-        created_at: 创建时间
-        updated_at: 更新时间
+        created_at: 创建时间（毫秒时间戳）
+        updated_at: 更新时间（毫秒时间戳）
         classes_count: 类型数量
     
     Examples:
@@ -229,10 +232,21 @@ class SceneResponse(BaseModel):
     scene_name: str = Field(..., description="场景名称")
     scene_description: Optional[str] = Field(None, description="场景描述")
     type_num: int = Field(..., description="类型数量")
+    entity_type: Optional[List[str]] = Field(None, description="实体类型列表（最多3个class_name）")
     workspace_id: UUID = Field(..., description="所属工作空间ID")
-    created_at: datetime.datetime = Field(..., description="创建时间")
-    updated_at: datetime.datetime = Field(..., description="更新时间")
+    created_at: datetime.datetime = Field(..., description="创建时间（毫秒时间戳）")
+    updated_at: datetime.datetime = Field(..., description="更新时间（毫秒时间戳）")
     classes_count: int = Field(0, description="类型数量")
+    
+    @field_serializer("created_at", when_used="json")
+    def _serialize_created_at(self, dt: datetime.datetime):
+        """将创建时间序列化为毫秒时间戳"""
+        return int(dt.timestamp() * 1000) if dt else None
+    
+    @field_serializer("updated_at", when_used="json")
+    def _serialize_updated_at(self, dt: datetime.datetime):
+        """将更新时间序列化为毫秒时间戳"""
+        return int(dt.timestamp() * 1000) if dt else None
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -309,8 +323,8 @@ class ClassResponse(BaseModel):
         class_name: 类型名称
         class_description: 类型描述
         scene_id: 所属场景ID
-        created_at: 创建时间
-        updated_at: 更新时间
+        created_at: 创建时间（毫秒时间戳）
+        updated_at: 更新时间（毫秒时间戳）
     
     Examples:
         >>> response = ClassResponse(
@@ -326,8 +340,18 @@ class ClassResponse(BaseModel):
     class_name: str = Field(..., description="类型名称")
     class_description: Optional[str] = Field(None, description="类型描述")
     scene_id: UUID = Field(..., description="所属场景ID")
-    created_at: datetime.datetime = Field(..., description="创建时间")
-    updated_at: datetime.datetime = Field(..., description="更新时间")
+    created_at: datetime.datetime = Field(..., description="创建时间（毫秒时间戳）")
+    updated_at: datetime.datetime = Field(..., description="更新时间（毫秒时间戳）")
+    
+    @field_serializer("created_at", when_used="json")
+    def _serialize_created_at(self, dt: datetime.datetime):
+        """将创建时间序列化为毫秒时间戳"""
+        return int(dt.timestamp() * 1000) if dt else None
+    
+    @field_serializer("updated_at", when_used="json")
+    def _serialize_updated_at(self, dt: datetime.datetime):
+        """将更新时间序列化为毫秒时间戳"""
+        return int(dt.timestamp() * 1000) if dt else None
     
     model_config = ConfigDict(from_attributes=True)
 

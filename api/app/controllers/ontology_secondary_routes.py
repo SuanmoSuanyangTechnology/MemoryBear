@@ -51,62 +51,81 @@ def _get_dummy_ontology_service(db: Session) -> OntologyService:
 # 这些函数将被导入到主Controller中
 
 async def get_scene_handler(
-    scene_id: str,
+    workspace_id: str,
+    scene_name: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取单个场景详情"""
+    """获取场景列表（模糊搜索）
+    
+    根据工作空间ID和场景名称关键词进行模糊搜索，返回匹配的场景列表。
+    """
     api_logger.info(
-        f"Scene retrieval requested by user {current_user.id}, "
-        f"scene_id={scene_id}"
+        f"Scene search requested by user {current_user.id}, "
+        f"workspace_id={workspace_id}, keyword={scene_name}"
     )
     
     try:
         # 验证UUID格式
         try:
-            scene_uuid = UUID(scene_id)
+            ws_uuid = UUID(workspace_id)
         except ValueError:
-            api_logger.warning(f"Invalid scene_id format: {scene_id}")
-            return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的场景ID格式")
+            api_logger.warning(f"Invalid workspace_id format: {workspace_id}")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的工作空间ID格式")
         
-        # 获取当前工作空间ID
-        workspace_id = current_user.current_workspace_id
-        if not workspace_id:
-            api_logger.warning(f"User {current_user.id} has no current workspace")
-            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        # 验证场景名称关键词
+        if not scene_name or not scene_name.strip():
+            api_logger.warning("Empty scene_name provided")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "场景名称关键词不能为空")
         
         # 创建Service
         service = _get_dummy_ontology_service(db)
         
-        # 获取场景
-        scene = service.get_scene_by_id(scene_uuid, workspace_id)
+        # 模糊搜索场景
+        scenes = service.search_scenes_by_name(scene_name.strip(), ws_uuid)
         
         # 构建响应
-        response = SceneResponse(
-            scene_id=scene.scene_id,
-            scene_name=scene.scene_name,
-            scene_description=scene.scene_description,
-            type_num=scene.type_num,
-            workspace_id=scene.workspace_id,
-            created_at=scene.created_at,
-            updated_at=scene.updated_at,
-            classes_count=len(scene.classes) if scene.classes else 0
+        items = []
+        for scene in scenes:
+            # 获取前3个class_name作为entity_type
+            entity_type = [cls.class_name for cls in scene.classes[:3]] if scene.classes else None
+            # 动态计算 type_num
+            type_num = len(scene.classes) if scene.classes else 0
+            
+            items.append(SceneResponse(
+                scene_id=scene.scene_id,
+                scene_name=scene.scene_name,
+                scene_description=scene.scene_description,
+                type_num=type_num,
+                entity_type=entity_type,
+                workspace_id=scene.workspace_id,
+                created_at=scene.created_at,
+                updated_at=scene.updated_at,
+                classes_count=type_num
+            ))
+        
+        response = SceneListResponse(
+            total=len(items),
+            items=items
         )
         
-        api_logger.info(f"Scene retrieved successfully: {scene_id}")
+        api_logger.info(
+            f"Scene search completed: found {len(items)} scenes matching '{scene_name}' "
+            f"in workspace {workspace_id}"
+        )
         
-        return success(data=response.model_dump(), msg="查询成功")
+        return success(data=response.model_dump(mode='json'), msg="查询成功")
         
     except ValueError as e:
-        api_logger.warning(f"Validation error in scene retrieval: {str(e)}")
+        api_logger.warning(f"Validation error in scene search: {str(e)}")
         return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
         
     except RuntimeError as e:
-        api_logger.error(f"Runtime error in scene retrieval: {str(e)}", exc_info=True)
+        api_logger.error(f"Runtime error in scene search: {str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
         
     except Exception as e:
-        api_logger.error(f"Unexpected error in scene retrieval: {str(e)}", exc_info=True)
+        api_logger.error(f"Unexpected error in scene search: {str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
 
 
@@ -144,15 +163,21 @@ async def list_scenes_handler(
         # 构建响应
         items = []
         for scene in scenes:
+            # 获取前3个class_name作为entity_type
+            entity_type = [cls.class_name for cls in scene.classes[:3]] if scene.classes else None
+            # 动态计算 type_num
+            type_num = len(scene.classes) if scene.classes else 0
+            
             items.append(SceneResponse(
                 scene_id=scene.scene_id,
                 scene_name=scene.scene_name,
                 scene_description=scene.scene_description,
-                type_num=scene.type_num,
+                type_num=type_num,
+                entity_type=entity_type,
                 workspace_id=scene.workspace_id,
                 created_at=scene.created_at,
                 updated_at=scene.updated_at,
-                classes_count=len(scene.classes) if scene.classes else 0
+                classes_count=type_num
             ))
         
         response = SceneListResponse(
@@ -162,7 +187,7 @@ async def list_scenes_handler(
         
         api_logger.info(f"Scene list retrieved successfully, count={len(items)}")
         
-        return success(data=response.model_dump(), msg="查询成功")
+        return success(data=response.model_dump(mode='json'), msg="查询成功")
         
     except ValueError as e:
         api_logger.warning(f"Validation error in scene list: {str(e)}")
@@ -220,7 +245,7 @@ async def create_class_handler(
         
         api_logger.info(f"Class created successfully: {ontology_class.class_id}")
         
-        return success(data=response.model_dump(), msg="类型创建成功")
+        return success(data=response.model_dump(mode='json'), msg="类型创建成功")
         
     except ValueError as e:
         api_logger.warning(f"Validation error in class creation: {str(e)}")
@@ -284,7 +309,7 @@ async def update_class_handler(
         
         api_logger.info(f"Class updated successfully: {class_id}")
         
-        return success(data=response.model_dump(), msg="类型更新成功")
+        return success(data=response.model_dump(mode='json'), msg="类型更新成功")
         
     except ValueError as e:
         api_logger.warning(f"Validation error in class update: {str(e)}")
@@ -356,10 +381,13 @@ async def get_class_handler(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取单个类型详情"""
+    """获取类型列表（模糊搜索）
+    
+    根据类型名称关键词和场景ID进行模糊搜索，返回匹配的类型列表。
+    """
     api_logger.info(
-        f"Class retrieval requested by user {current_user.id}, "
-        f"class_name={class_name}, scene_id={scene_id}"
+        f"Class search requested by user {current_user.id}, "
+        f"keyword={class_name}, scene_id={scene_id}"
     )
     
     try:
@@ -370,6 +398,11 @@ async def get_class_handler(
             api_logger.warning(f"Invalid scene_id format: {scene_id}")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的场景ID格式")
         
+        # 验证类型名称关键词
+        if not class_name or not class_name.strip():
+            api_logger.warning("Empty class_name provided")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "类型名称关键词不能为空")
+        
         # 获取当前工作空间ID
         workspace_id = current_user.current_workspace_id
         if not workspace_id:
@@ -379,33 +412,44 @@ async def get_class_handler(
         # 创建Service
         service = _get_dummy_ontology_service(db)
         
-        # 获取类型
-        ontology_class = service.get_class_by_name(class_name, scene_uuid, workspace_id)
+        # 模糊搜索类型
+        classes = service.search_classes_by_name(class_name.strip(), scene_uuid, workspace_id)
         
         # 构建响应
-        response = ClassResponse(
-            class_id=ontology_class.class_id,
-            class_name=ontology_class.class_name,
-            class_description=ontology_class.class_description,
-            scene_id=ontology_class.scene_id,
-            created_at=ontology_class.created_at,
-            updated_at=ontology_class.updated_at
+        items = []
+        for ontology_class in classes:
+            items.append(ClassResponse(
+                class_id=ontology_class.class_id,
+                class_name=ontology_class.class_name,
+                class_description=ontology_class.class_description,
+                scene_id=ontology_class.scene_id,
+                created_at=ontology_class.created_at,
+                updated_at=ontology_class.updated_at
+            ))
+        
+        response = ClassListResponse(
+            total=len(items),
+            scene_id=scene_uuid,
+            items=items
         )
         
-        api_logger.info(f"Class retrieved successfully: {class_name}")
+        api_logger.info(
+            f"Class search completed: found {len(items)} classes matching '{class_name}' "
+            f"in scene {scene_id}"
+        )
         
-        return success(data=response.model_dump(), msg="查询成功")
+        return success(data=response.model_dump(mode='json'), msg="查询成功")
         
     except ValueError as e:
-        api_logger.warning(f"Validation error in class retrieval: {str(e)}")
+        api_logger.warning(f"Validation error in class search: {str(e)}")
         return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
         
     except RuntimeError as e:
-        api_logger.error(f"Runtime error in class retrieval: {str(e)}", exc_info=True)
+        api_logger.error(f"Runtime error in class search: {str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
         
     except Exception as e:
-        api_logger.error(f"Unexpected error in class retrieval: {str(e)}", exc_info=True)
+        api_logger.error(f"Unexpected error in class search: {str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
 
 
@@ -460,7 +504,7 @@ async def list_classes_handler(
         
         api_logger.info(f"Class list retrieved successfully, count={len(items)}")
         
-        return success(data=response.model_dump(), msg="查询成功")
+        return success(data=response.model_dump(mode='json'), msg="查询成功")
         
     except ValueError as e:
         api_logger.warning(f"Validation error in class list: {str(e)}")
