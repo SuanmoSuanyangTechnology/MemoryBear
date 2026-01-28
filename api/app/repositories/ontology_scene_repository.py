@@ -208,37 +208,52 @@ class OntologySceneRepository:
             )
             raise
     
-    def get_by_workspace(self, workspace_id: UUID) -> List[OntologyScene]:
-        """获取工作空间下的所有场景
+    def get_by_workspace(self, workspace_id: UUID, page: Optional[int] = None, page_size: Optional[int] = None) -> tuple:
+        """获取工作空间下的所有场景（支持分页）
         
         使用joinedload预加载classes关系以统计数量。
         
         Args:
             workspace_id: 工作空间ID
+            page: 页码（可选，从1开始）
+            page_size: 每页数量（可选）
             
         Returns:
-            List[OntologyScene]: 场景列表
+            tuple: (场景列表, 总数量)
             
         Examples:
             >>> repo = OntologySceneRepository(db)
-            >>> scenes = repo.get_by_workspace(workspace_id)
+            >>> scenes, total = repo.get_by_workspace(workspace_id)
+            >>> scenes, total = repo.get_by_workspace(workspace_id, page=1, page_size=10)
         """
         try:
-            logger.debug(f"Getting ontology scenes by workspace: {workspace_id}")
+            logger.debug(f"Getting ontology scenes by workspace: {workspace_id}, page={page}, page_size={page_size}")
             
-            scenes = self.db.query(OntologyScene).options(
+            # 构建基础查询
+            query = self.db.query(OntologyScene).options(
                 joinedload(OntologyScene.classes)
             ).filter(
                 OntologyScene.workspace_id == workspace_id
             ).order_by(
                 OntologyScene.updated_at.desc()
-            ).all()
-            
-            logger.info(
-                f"Found {len(scenes)} ontology scenes in workspace {workspace_id}"
             )
             
-            return scenes
+            # 获取总数
+            total = query.count()
+            
+            # 如果提供了分页参数，应用分页
+            if page is not None and page_size is not None:
+                offset = (page - 1) * page_size
+                query = query.offset(offset).limit(page_size)
+                logger.debug(f"Applying pagination: offset={offset}, limit={page_size}")
+            
+            scenes = query.all()
+            
+            logger.info(
+                f"Found {len(scenes)} ontology scenes (total: {total}) in workspace {workspace_id}"
+            )
+            
+            return scenes, total
             
         except Exception as e:
             logger.error(

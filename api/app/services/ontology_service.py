@@ -659,31 +659,36 @@ class OntologyService:
     
     def list_scenes(
         self,
-        workspace_id: Any
-    ) -> List:
-        """获取工作空间下的所有场景
+        workspace_id: Any,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None
+    ) -> tuple:
+        """获取工作空间下的所有场景（支持分页）
         
         Args:
             workspace_id: 工作空间ID
+            page: 页码（可选，从1开始）
+            page_size: 每页数量（可选）
             
         Returns:
-            List[OntologyScene]: 场景列表
+            tuple: (场景列表, 总数量)
             
         Raises:
             RuntimeError: 查询失败
             
         Examples:
             >>> service = OntologyService(llm_client, db)
-            >>> scenes = service.list_scenes(workspace_id)
+            >>> scenes, total = service.list_scenes(workspace_id)
+            >>> scenes, total = service.list_scenes(workspace_id, page=1, page_size=10)
         """
-        logger.debug(f"Listing scenes for workspace: {workspace_id}")
+        logger.debug(f"Listing scenes for workspace: {workspace_id}, page={page}, page_size={page_size}")
         
         try:
-            scenes = self.scene_repo.get_by_workspace(workspace_id)
+            scenes, total = self.scene_repo.get_by_workspace(workspace_id, page, page_size)
             
-            logger.info(f"Found {len(scenes)} scenes in workspace {workspace_id}")
+            logger.info(f"Found {len(scenes)} scenes (total: {total}) in workspace {workspace_id}")
             
-            return scenes
+            return scenes, total
             
         except Exception as e:
             error_msg = f"Failed to list scenes: {str(e)}"

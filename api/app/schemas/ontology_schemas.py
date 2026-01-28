@@ -252,22 +252,37 @@ class SceneResponse(BaseModel):
 
 
 class SceneListResponse(BaseModel):
-    """场景列表响应模型
+    """场景列表响应模型（支持分页）
     
     用于返回本体场景列表。
     
     Attributes:
         total: 总数量
         items: 场景列表
+        page: 当前页码（可选，分页时返回）
+        page_size: 每页数量（可选，分页时返回）
+        total_pages: 总页数（可选，分页时返回）
     
     Examples:
+        >>> # 不分页
         >>> response = SceneListResponse(
         ...     total=2,
         ...     items=[scene1, scene2]
         ... )
+        >>> # 分页
+        >>> response = SceneListResponse(
+        ...     total=25,
+        ...     items=[scene1, scene2, ...],
+        ...     page=1,
+        ...     page_size=10,
+        ...     total_pages=3
+        ... )
     """
     total: int = Field(..., description="总数量")
     items: List[SceneResponse] = Field(..., description="场景列表")
+    page: Optional[int] = Field(None, description="当前页码")
+    page_size: Optional[int] = Field(None, description="每页数量")
+    total_pages: Optional[int] = Field(None, description="总页数")
 
 
 # ==================== 本体类型相关 Schema ====================
