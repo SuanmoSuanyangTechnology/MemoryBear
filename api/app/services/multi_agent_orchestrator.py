@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.models import MultiAgentConfig, AgentConfig, ModelConfig
 from app.models.multi_agent_model import AggregationStrategy, OrchestrationMode
-from app.repositories.model_repository import ModelApiKeyRepository
 from app.services.agent_registry import AgentRegistry
 from app.services.master_agent_router import MasterAgentRouter
 from app.services.conversation_state_manager import ConversationStateManager
@@ -2547,14 +2546,10 @@ class MultiAgentOrchestrator:
                 return self._smart_merge_results(results, strategy)
 
             # 获取 API Key 配置
-            # api_key_config = self.db.query(ModelApiKey).join(
-            #     ModelConfig, ModelApiKey.model_configs
-            # ).filter(
-            #     ModelConfig.id == default_model_config_id,
-            #     ModelApiKey.is_active.is_(True)
-            # ).first()
-            api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
-            api_key_config = api_keys[0] if api_keys else None
+            api_key_config = self.db.query(ModelApiKey).filter(
+                ModelApiKey.model_config_id == default_model_config_id,
+                ModelApiKey.is_active.is_(True)
+            ).first()
 
             if not api_key_config:
                 logger.warning("Master Agent 没有可用的 API Key，使用简单整合")
@@ -2708,14 +2703,10 @@ class MultiAgentOrchestrator:
                 return
 
             # 获取 API Key 配置
-            # api_key_config = self.db.query(ModelApiKey).join(
-            #     ModelConfig, ModelApiKey.model_configs
-            # ).filter(
-            #     ModelConfig.id == default_model_config_id,
-            #     ModelApiKey.is_active.is_(True)
-            # ).first()
-            api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
-            api_key_config = api_keys[0] if api_keys else None
+            api_key_config = self.db.query(ModelApiKey).filter(
+                ModelApiKey.model_config_id == default_model_config_id,
+                ModelApiKey.is_active.is_(True)
+            ).first()
 
             if not api_key_config:
                 logger.warning("Master Agent 没有可用的 API Key，使用简单整合")
