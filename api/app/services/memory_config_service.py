@@ -330,24 +330,7 @@ class MemoryConfigService:
         if not config:
             logger.warning(f"Model ID {model_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
-        
-        # Check if api_keys is properly loaded and not empty
-        if not hasattr(config, 'api_keys') or config.api_keys is None:
-            logger.error(f"Model ID {model_id} (name: {config.name}) has no api_keys attribute or it's None")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"模型 '{config.name}' (ID: {model_id}) 配置加载失败"
-            )
-        
-        if len(config.api_keys) == 0:
-            logger.error(f"Model ID {model_id} (name: {config.name}) has no API keys configured")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail=f"模型 '{config.name}' (ID: {model_id}) 没有配置API密钥，请先配置API密钥"
-            )
-        
-        api_config: ModelApiKey = config.api_keys[0]
-        
+        api_config: ModelApiKey = config.api_keys
         return {
             "model_name": api_config.model_name,
             "provider": api_config.provider,
@@ -377,21 +360,6 @@ class MemoryConfigService:
         if not config:
             logger.warning(f"Embedding model ID {embedding_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="嵌入模型ID不存在")
-        
-        # Check if api_keys is properly loaded and not empty
-        if not hasattr(config, 'api_keys') or config.api_keys is None:
-            logger.error(f"Embedding model ID {embedding_id} (name: {config.name}) has no api_keys attribute or it's None")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"嵌入模型 '{config.name}' (ID: {embedding_id}) 配置加载失败"
-            )
-        
-        if len(config.api_keys) == 0:
-            logger.error(f"Embedding model ID {embedding_id} (name: {config.name}) has no API keys configured")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail=f"嵌入模型 '{config.name}' (ID: {embedding_id}) 没有配置API密钥，请先配置API密钥"
-            )
         
         api_config: ModelApiKey = config.api_keys[0]
         
