@@ -9,6 +9,7 @@ import ReleasePage from './ReleasePage'
 import Cluster from './Cluster'
 import { getApplication } from '@/api/application'
 import Workflow from '@/views/Workflow';
+import Statistics from './Statistics'
 
 const ApplicationConfig: React.FC = () => {
   const { id } = useParams();
@@ -68,6 +69,7 @@ const ApplicationConfig: React.FC = () => {
       {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} />}
       {activeTab === 'api' && <Api application={application} />}
       {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
+      {activeTab === 'statistics' && <Statistics application={application} />}
     </>
   );
 };

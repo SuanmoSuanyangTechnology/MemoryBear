@@ -658,7 +658,13 @@ export const zh = {
       priority: '结构化整合',
       addTool: '添加工具',
       tool: '工具',
-      variableConfig: '配置变量'
+      variableConfig: '配置变量',
+
+      statistics: '数据统计',
+      daily_conversations: '消息会话数',
+      daily_new_users: '新增用户数',
+      daily_api_calls: '调用次数',
+      daily_tokens: 'Token消耗',
     },
     role: {
       roleManagement: '角色管理',
