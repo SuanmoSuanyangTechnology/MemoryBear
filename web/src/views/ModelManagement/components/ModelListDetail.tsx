@@ -66,7 +66,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
 
   return (
     <RbDrawer
-      title={<>{data.provider} {t('modelNew.modelList')} ({list.length}{t('modelNew.item')})</>}
+      title={<>{t(`modelNew.${data.provider}`)} {t('modelNew.modelList')} ({list.length}{t('modelNew.item')})</>}
       open={open}
       onClose={handleClose}
     >
@@ -77,7 +77,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
             <RbCard
               key={item.id}
               title={item.name}
-              subTitle={<Space>
+              subTitle={<Space className="rb:mt-1!">
                 <Tag>{t(`modelNew.${item.type}`)}</Tag>
                 <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
               </Space>}

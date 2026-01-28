@@ -56,7 +56,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPl
                 <RbCard
                   key={item.id}
                   title={item.name}
-                  subTitle={<Tag>{t(`modelNew.${item.type}`)}</Tag>}
+                  subTitle={<Tag className="rb:mt-1">{t(`modelNew.${item.type}`)}</Tag>}
                   avatarUrl={getLogoUrl(item.logo)}
                   avatar={
                     <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
