@@ -3,13 +3,23 @@
 本模块提供本体提取系统的RESTful API端点。
 
 Endpoints:
-    POST /api/ontology/extract - 提取本体类
-    POST /api/ontology/export - 导出OWL文件
+    POST /api/memory/ontology/extract - 提取本体类
+    POST /api/memory/ontology/export - 导出OWL文件
+    POST /api/memory/ontology/scene - 创建本体场景
+    PUT /api/memory/ontology/scene/{scene_id} - 更新本体场景
+    DELETE /api/memory/ontology/scene/{scene_id} - 删除本体场景
+    GET /api/memory/ontology/scene/{scene_id} - 获取单个场景
+    GET /api/memory/ontology/scenes - 获取场景列表
+    POST /api/memory/ontology/class - 创建本体类型
+    PUT /api/memory/ontology/class/{class_id} - 更新本体类型
+    DELETE /api/memory/ontology/class/{class_id} - 删除本体类型
+    GET /api/memory/ontology/class/{class_id} - 获取单个类型
+    GET /api/memory/ontology/classes - 获取类型列表
 """
 
 import logging
 import tempfile
-from typing import Dict
+from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -25,6 +35,14 @@ from app.schemas.ontology_schemas import (
     ExportResponse,
     ExtractionRequest,
     ExtractionResponse,
+    SceneCreateRequest,
+    SceneUpdateRequest,
+    SceneResponse,
+    SceneListResponse,
+    ClassCreateRequest,
+    ClassUpdateRequest,
+    ClassResponse,
+    ClassListResponse,
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.ontology_service import OntologyService
@@ -364,3 +382,411 @@ async def export_owl(
         # 未知错误 (500)
         api_logger.error(f"Unexpected error in export: {str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "OWL文件导出失败", str(e))
+
+
+# ==================== 本体场景管理接口 ====================
+
+@router.post("/scene", response_model=ApiResponse)
+async def create_scene(
+    request: SceneCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """创建本体场景
+    
+    在当前工作空间下创建新的本体场景。
+    
+    Args:
+        request: 场景创建请求
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含创建的场景信息
+    """
+    api_logger.info(
+        f"Scene creation requested by user {current_user.id}, "
+        f"name={request.scene_name}"
+    )
+    
+    try:
+        # 获取当前工作空间ID
+        workspace_id = current_user.current_workspace_id
+        if not workspace_id:
+            api_logger.warning(f"User {current_user.id} has no current workspace")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        # 创建OntologyService实例（不需要LLM）
+        from app.core.memory.llm_tools.openai_client import OpenAIClient
+        from app.core.models.base import RedBearModelConfig
+        
+        # 创建一个空的LLM配置（场景管理不需要LLM）
+        dummy_config = RedBearModelConfig(
+            model_name="dummy",
+            provider="openai",
+            api_key="dummy",
+            base_url="https://api.openai.com/v1"
+        )
+        llm_client = OpenAIClient(model_config=dummy_config)
+        service = OntologyService(llm_client=llm_client, db=db)
+        
+        # 调用服务层创建场景
+        scene = service.create_scene(
+            scene_name=request.scene_name,
+            scene_description=request.scene_description,
+            workspace_id=workspace_id
+        )
+        
+        # 构建响应
+        response = SceneResponse(
+            scene_id=scene.scene_id,
+            scene_name=scene.scene_name,
+            scene_description=scene.scene_description,
+            type_num=scene.type_num,
+            workspace_id=scene.workspace_id,
+            created_at=scene.created_at,
+            updated_at=scene.updated_at,
+            classes_count=0
+        )
+        
+        api_logger.info(f"Scene created successfully: {scene.scene_id}")
+        
+        return success(data=response.model_dump(), msg="场景创建成功")
+        
+    except ValueError as e:
+        api_logger.warning(f"Validation error in scene creation: {str(e)}")
+        return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
+        
+    except RuntimeError as e:
+        api_logger.error(f"Runtime error in scene creation: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "场景创建失败", str(e))
+        
+    except Exception as e:
+        api_logger.error(f"Unexpected error in scene creation: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "场景创建失败", str(e))
+
+
+@router.put("/scene/{scene_id}", response_model=ApiResponse)
+async def update_scene(
+    scene_id: str,
+    request: SceneUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """更新本体场景
+    
+    更新指定场景的信息，只能更新当前工作空间下的场景。
+    
+    Args:
+        scene_id: 场景ID
+        request: 场景更新请求
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含更新后的场景信息
+    """
+    api_logger.info(
+        f"Scene update requested by user {current_user.id}, "
+        f"scene_id={scene_id}"
+    )
+    
+    try:
+        from uuid import UUID
+        
+        # 验证UUID格式
+        try:
+            scene_uuid = UUID(scene_id)
+        except ValueError:
+            api_logger.warning(f"Invalid scene_id format: {scene_id}")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的场景ID格式")
+        
+        # 获取当前工作空间ID
+        workspace_id = current_user.current_workspace_id
+        if not workspace_id:
+            api_logger.warning(f"User {current_user.id} has no current workspace")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        # 创建OntologyService实例
+        from app.core.memory.llm_tools.openai_client import OpenAIClient
+        from app.core.models.base import RedBearModelConfig
+        
+        dummy_config = RedBearModelConfig(
+            model_name="dummy",
+            provider="openai",
+            api_key="dummy",
+            base_url="https://api.openai.com/v1"
+        )
+        llm_client = OpenAIClient(model_config=dummy_config)
+        service = OntologyService(llm_client=llm_client, db=db)
+        
+        # 调用服务层更新场景
+        scene = service.update_scene(
+            scene_id=scene_uuid,
+            scene_name=request.scene_name,
+            scene_description=request.scene_description,
+            workspace_id=workspace_id
+        )
+        
+        # 构建响应
+        response = SceneResponse(
+            scene_id=scene.scene_id,
+            scene_name=scene.scene_name,
+            scene_description=scene.scene_description,
+            type_num=scene.type_num,
+            workspace_id=scene.workspace_id,
+            created_at=scene.created_at,
+            updated_at=scene.updated_at,
+            classes_count=len(scene.classes) if scene.classes else 0
+        )
+        
+        api_logger.info(f"Scene updated successfully: {scene_id}")
+        
+        return success(data=response.model_dump(), msg="场景更新成功")
+        
+    except ValueError as e:
+        api_logger.warning(f"Validation error in scene update: {str(e)}")
+        return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
+        
+    except RuntimeError as e:
+        api_logger.error(f"Runtime error in scene update: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "场景更新失败", str(e))
+        
+    except Exception as e:
+        api_logger.error(f"Unexpected error in scene update: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "场景更新失败", str(e))
+
+
+@router.delete("/scene/{scene_id}", response_model=ApiResponse)
+async def delete_scene(
+    scene_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """删除本体场景
+    
+    删除指定场景及其所有关联类型，只能删除当前工作空间下的场景。
+    
+    Args:
+        scene_id: 场景ID
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 删除结果
+    """
+    api_logger.info(
+        f"Scene deletion requested by user {current_user.id}, "
+        f"scene_id={scene_id}"
+    )
+    
+    try:
+        from uuid import UUID
+        
+        # 验证UUID格式
+        try:
+            scene_uuid = UUID(scene_id)
+        except ValueError:
+            api_logger.warning(f"Invalid scene_id format: {scene_id}")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的场景ID格式")
+        
+        # 获取当前工作空间ID
+        workspace_id = current_user.current_workspace_id
+        if not workspace_id:
+            api_logger.warning(f"User {current_user.id} has no current workspace")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        # 创建OntologyService实例
+        from app.core.memory.llm_tools.openai_client import OpenAIClient
+        from app.core.models.base import RedBearModelConfig
+        
+        dummy_config = RedBearModelConfig(
+            model_name="dummy",
+            provider="openai",
+            api_key="dummy",
+            base_url="https://api.openai.com/v1"
+        )
+        llm_client = OpenAIClient(model_config=dummy_config)
+        service = OntologyService(llm_client=llm_client, db=db)
+        
+        # 调用服务层删除场景
+        success_flag = service.delete_scene(
+            scene_id=scene_uuid,
+            workspace_id=workspace_id
+        )
+        
+        api_logger.info(f"Scene deleted successfully: {scene_id}")
+        
+        return success(data={"deleted": success_flag}, msg="场景删除成功")
+        
+    except ValueError as e:
+        api_logger.warning(f"Validation error in scene deletion: {str(e)}")
+        return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
+        
+    except RuntimeError as e:
+        api_logger.error(f"Runtime error in scene deletion: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "场景删除失败", str(e))
+        
+    except Exception as e:
+        api_logger.error(f"Unexpected error in scene deletion: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "场景删除失败", str(e))
+
+
+@router.get("/scene/{scene_id}", response_model=ApiResponse)
+async def get_scene(
+    scene_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取单个场景详情
+    
+    获取指定场景的详细信息。
+    
+    Args:
+        scene_id: 场景ID
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含场景详细信息
+    """
+    from app.controllers.ontology_scene_routes import get_scene_handler
+    return await get_scene_handler(scene_id, db, current_user)
+
+
+@router.get("/scenes", response_model=ApiResponse)
+async def list_scenes(
+    workspace_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取工作空间下的所有场景
+    
+    获取指定工作空间下的所有本体场景列表。
+    
+    Args:
+        workspace_id: 工作空间ID（可选，默认当前用户工作空间）
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含场景列表
+    """
+    from app.controllers.ontology_scene_routes import list_scenes_handler
+    return await list_scenes_handler(workspace_id, db, current_user)
+
+
+# ==================== 本体类型管理接口 ====================
+
+@router.post("/class", response_model=ApiResponse)
+async def create_class(
+    request: ClassCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """创建本体类型
+    
+    在指定场景下创建新的本体类型。
+    
+    Args:
+        request: 类型创建请求
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含创建的类型信息
+    """
+    from app.controllers.ontology_scene_routes import create_class_handler
+    return await create_class_handler(request, db, current_user)
+
+
+@router.put("/class/{class_id}", response_model=ApiResponse)
+async def update_class(
+    class_id: str,
+    request: ClassUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """更新本体类型
+    
+    更新指定类型的信息，只能更新当前工作空间下场景的类型。
+    
+    Args:
+        class_id: 类型ID
+        request: 类型更新请求
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含更新后的类型信息
+    """
+    from app.controllers.ontology_scene_routes import update_class_handler
+    return await update_class_handler(class_id, request, db, current_user)
+
+
+@router.delete("/class/{class_id}", response_model=ApiResponse)
+async def delete_class(
+    class_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """删除本体类型
+    
+    删除指定类型，只能删除当前工作空间下场景的类型。
+    
+    Args:
+        class_id: 类型ID
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 删除结果
+    """
+    from app.controllers.ontology_scene_routes import delete_class_handler
+    return await delete_class_handler(class_id, db, current_user)
+
+
+@router.get("/class", response_model=ApiResponse)
+async def get_class(
+    class_name: str,
+    scene_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取单个类型详情
+    
+    根据类型名称和场景ID获取指定类型的详细信息。
+    
+    Args:
+        class_name: 类型名称
+        scene_id: 场景ID
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含类型详细信息
+    """
+    from app.controllers.ontology_scene_routes import get_class_handler
+    return await get_class_handler(class_name, scene_id, db, current_user)
+
+
+@router.get("/classes", response_model=ApiResponse)
+async def list_classes(
+    scene_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取场景下的所有类型
+    
+    获取指定场景下的所有本体类型列表。
+    
+    Args:
+        scene_id: 场景ID（必填，作为查询参数）
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含类型列表
+    """
+    from app.controllers.ontology_scene_routes import list_classes_handler
+    return await list_classes_handler(scene_id, db, current_user)
