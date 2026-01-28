@@ -1,5 +1,5 @@
 import { type FC, type ReactNode } from 'react'
-import { Card } from 'antd';
+import { Card, Tooltip } from 'antd';
 import clsx from 'clsx';
 
 interface RbCardProps {
@@ -9,7 +9,7 @@ interface RbCardProps {
   extra?: ReactNode;
   children?: ReactNode;
   avatar?: ReactNode;
-  avatarUrl?: string;
+  avatarUrl?: string | null;
   bodyPadding?: string;
   bodyClassName?: string;
   headerType?: 'border' | 'borderless' | 'borderBL' | 'borderL';
@@ -63,7 +63,7 @@ const RbCard: FC<RbCardProps> = ({
               }
             )
           }>
-            <div className="rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{title}</div>
+            <Tooltip title={title}><div className="rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{title}</div></Tooltip>
             {subTitle && <div className="rb:text-[#5B6167] rb:text-[12px]">{subTitle}</div>}
           </div>
         </div> : null

@@ -181,7 +181,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
             >
               <CustomSelect
                 url={getModelListUrl}
-                params={{ type: 'llm,chat', pagesize: 100 }}
+                params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
                 valueKey="id"
                 labelKey="name"
                 hasAll={false}

@@ -39,7 +39,7 @@ const MemberManagement: React.FC = () => {
       onOk: () => {
         deleteMember(member.id)
           .then(() => {
-            message.success(t('member.deleteSuccess'));
+            message.success(t('common.deleteSuccess'));
             refreshTable();
           })
       }
@@ -93,7 +93,7 @@ const MemberManagement: React.FC = () => {
 
   return (
     <>
-      <div className="rb:flex rb:justify-end rb:mb-[12px]">
+      <div className="rb:flex rb:justify-end rb:mb-3">
         <Button type="primary" onClick={() => handleEdit()}>
           {t('member.createMember')}
         </Button>
