@@ -43,7 +43,7 @@ export const addModelApiKey = (model_id: string, data: MultiKeyForm) => {
   return request.post(`/models/${model_id}/apikeys`, data)
 }
 // Delete model API key
-export const delteModelApiKey = (api_key_id: string) => {
+export const deleteModelApiKey = (api_key_id: string) => {
   return request.delete(`/models/apikeys/${api_key_id}`)
 }
 // Update model status
