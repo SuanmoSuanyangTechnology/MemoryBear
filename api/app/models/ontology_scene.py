@@ -9,7 +9,7 @@ Classes:
 
 import datetime
 import uuid
-from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey
+from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db import Base
@@ -18,6 +18,9 @@ from app.db import Base
 class OntologyScene(Base):
     """本体场景表 - 用于存储本体场景下不同的类型信息"""
     __tablename__ = "ontology_scene"
+    __table_args__ = (
+        UniqueConstraint('workspace_id', 'scene_name', name='uq_workspace_scene_name'),
+    )
 
     # 主键
     scene_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True, comment="场景ID")
