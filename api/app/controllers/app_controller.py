@@ -872,3 +872,44 @@ async def update_workflow_config(
     workspace_id = current_user.current_workspace_id
     cfg = app_service.update_workflow_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
     return success(data=WorkflowConfigSchema.model_validate(cfg))
+
+
+@router.get("/{app_id}/statistics", summary="应用统计数据")
+@cur_workspace_access_guard()
+def get_app_statistics(
+        app_id: uuid.UUID,
+        start_date: int,
+        end_date: int,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """获取应用统计数据
+    
+    Args:
+        app_id: 应用ID
+        start_date: 开始时间戳（毫秒）
+        end_date: 结束时间戳（毫秒）
+    
+    Returns:
+        - daily_conversations: 每日会话数统计
+        - total_conversations: 总会话数
+        - daily_new_users: 每日新增用户数
+        - total_new_users: 总新增用户数
+        - daily_api_calls: 每日API调用次数
+        - total_api_calls: 总API调用次数
+        - daily_tokens: 每日token消耗
+        - total_tokens: 总token消耗
+    """
+    workspace_id = current_user.current_workspace_id
+    
+    from app.services.app_statistics_service import AppStatisticsService
+    stats_service = AppStatisticsService(db)
+    
+    result = stats_service.get_app_statistics(
+        app_id=app_id,
+        workspace_id=workspace_id,
+        start_date=start_date,
+        end_date=end_date
+    )
+    
+    return success(data=result)
