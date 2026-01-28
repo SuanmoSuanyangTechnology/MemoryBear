@@ -37,7 +37,6 @@ class ModelConfigRepository:
                 )
             
             model = query.first()
-            
             if model:
                 db_logger.debug(f"模型配置查询成功: {model.name} (ID: {model_id})")
             else:
