@@ -214,7 +214,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         ...data.knowledge_retrieval,
         ...knowledgeRest,
         knowledge_bases: knowledge_bases.map(item => ({
-          kb_id: item.id,
+          kb_id: item.kb_id || item.id,
           ...(item.config || {})
         }))
       } as KnowledgeConfig : null,
