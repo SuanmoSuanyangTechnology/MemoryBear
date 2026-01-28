@@ -186,7 +186,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             config_id_old = None
             if config.user_id:
                 try:
-                    config_id_old = int(config.user_id)
+                    config_id_old = int(config.config_id_old)
                 except (ValueError, TypeError):
                     config_id_old = None
 
