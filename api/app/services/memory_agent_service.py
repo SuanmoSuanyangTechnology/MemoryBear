@@ -334,7 +334,9 @@ class MemoryAgentService:
                             langchain_messages.append(HumanMessage(content=msg['content']))
                         elif msg['role'] == 'assistant':
                             langchain_messages.append(AIMessage(content=msg['content']))
-
+                    print(100*'-')
+                    print(langchain_messages)
+                    print(100*'-')
                     # 初始状态 - 包含所有必要字段
                     initial_state = {
                         "messages": langchain_messages,

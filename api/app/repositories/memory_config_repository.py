@@ -24,6 +24,8 @@ from app.schemas.memory_storage_schema import (
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.utils.config_utils import resolve_config_id
+
 # 获取数据库专用日志器
 db_logger = get_db_logger()
 # 获取配置专用日志器
@@ -410,7 +412,7 @@ class MemoryConfigRepository:
             raise
 
     @staticmethod
-    def get_extracted_config(db: Session, config_id: UUID) -> Optional[Dict]:
+    def get_extracted_config(db: Session, config_id: UUID |int) -> Optional[Dict]:
         """获取萃取配置，通过主键查询某条配置
 
         Args:
@@ -420,8 +422,8 @@ class MemoryConfigRepository:
         Returns:
             Optional[Dict]: 萃取配置字典，不存在则返回None
         """
+        config_id=resolve_config_id(config_id,db)
         db_logger.debug(f"查询萃取配置: config_id={config_id}")
-
         try:
             db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
             if not db_config:

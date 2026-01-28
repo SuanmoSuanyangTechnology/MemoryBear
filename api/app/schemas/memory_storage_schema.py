@@ -147,7 +147,7 @@ class ReflexionResultSchema(BaseModel):
 # Composite key identifying a config row
 class ConfigKey(BaseModel):  # 配置参数键模型
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
-    config_id: uuid.UUID = Field("config_id", description="配置唯一标识（UUID）")
+    config_id: Union[uuid.UUID, int] = Field(..., description="配置唯一标识（UUID或int)")
     user_id: str = Field("user_id", description="用户标识（字符串）")
     apply_id: str = Field("apply_id", description="应用或场景标识（字符串）")
 
@@ -423,8 +423,8 @@ class ForgettingConfigResponse(BaseModel):
 class ForgettingConfigUpdateRequest(BaseModel):
     """遗忘引擎配置更新请求模型"""
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
-    
-    config_id: uuid.UUID = Field(..., description="配置ID")
+
+    config_id: Union[uuid.UUID, int,str] = Field(..., description="配置唯一标识（UUID或int)")
     decay_constant: Optional[float] = Field(None, ge=0.0, le=1.0, description="衰减常数 d")
     lambda_time: Optional[float] = Field(None, ge=0.0, le=1.0, description="时间衰减参数")
     lambda_mem: Optional[float] = Field(None, ge=0.0, le=1.0, description="记忆衰减参数")
@@ -499,7 +499,7 @@ class ForgettingCurveRequest(BaseModel):
     
     importance_score: float = Field(0.5, ge=0.0, le=1.0, description="重要性分数（0-1）")
     days: int = Field(60, ge=1, le=365, description="模拟天数（默认60天）")
-    config_id: Optional[uuid.UUID] = Field(None, description="配置ID（可选，如果为None则使用默认配置）")
+    config_id: Union[uuid.UUID, int, str] = Field(..., description="配置唯一标识（UUID或int)")
 
 
 class ForgettingCurveResponse(BaseModel):
