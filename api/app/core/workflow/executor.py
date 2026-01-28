@@ -16,7 +16,6 @@ from app.core.workflow.graph_builder import GraphBuilder, StreamOutputConfig
 from app.core.workflow.nodes import WorkflowState
 from app.core.workflow.nodes.base_config import VariableType
 from app.core.workflow.nodes.enums import NodeType
-from app.core.workflow.template_renderer import render_template
 
 logger = logging.getLogger(__name__)
 
@@ -157,11 +156,136 @@ class WorkflowExecutor:
             "error": result.get("error"),
         }
 
-    def _update_end_activate(self, node_id):
+    def _update_scope_activate(self, scope, status=None):
+        """
+        Update the activation state of all End nodes based on a completed scope (node or variable).
+
+        Iterates over all End nodes in `self.end_outputs` and calls
+        `update_activate` on each, which may:
+          - Activate variable segments that depend on the completed node/scope.
+          - Activate the entire End node output if all control conditions are met.
+
+        If any End node becomes active and `self.activate_end` is not yet set,
+        this node will be marked as the currently active End node.
+
+        Args:
+            scope (str): The node ID or scope that has completed execution.
+            status (str | None): Optional status of the node (used for branch/control nodes).
+        """
         for node in self.end_outputs.keys():
-            self.end_outputs[node].update_activate(node_id)
+            self.end_outputs[node].update_activate(scope, status)
             if self.end_outputs[node].activate and self.activate_end is None:
                 self.activate_end = node
+
+    def _update_stream_output_status(self, activate, data):
+        """
+        Update the stream output state of End nodes based on workflow state updates.
+
+        This method checks which nodes/scopes are activated and propagates
+        activation to End nodes accordingly.
+
+        Args:
+            activate (dict): Mapping of node_id -> bool indicating which nodes/scopes are activated.
+            data (dict): Mapping of node_id -> node runtime data, including outputs.
+
+        Behavior:
+            For each node in `data`:
+            1. If the node is activated (`activate[node_id]` is True),
+               retrieve its output status from `runtime_vars`.
+            2. Call `_update_scope_activate` to propagate the activation
+               to all relevant End nodes and update `self.activate_end`.
+        """
+        for node_id in data.keys():
+            if activate.get(node_id):
+                node_output_status = (
+                    data[node_id]
+                    .get('runtime_vars', {})
+                    .get(node_id)
+                    .get("output")
+                )
+                self._update_scope_activate(node_id, status=node_output_status)
+
+    async def _emit_active_chunks(
+            self,
+            node_outputs: dict,
+            variables: dict,
+            force=False
+    ):
+        """
+        Process and yield all currently active output segments for the currently active End node.
+
+        This method handles stream-mode output for an End node by iterating through its output segments
+        (`OutputContent`). Only segments marked as active (`activate=True`) are processed, unless
+        `force=True`, which allows all segments to be processed regardless of their activation state.
+
+        Behavior:
+        1. Iterates from the current `cursor` position to the end of the outputs list.
+        2. For each segment:
+           - If the segment is literal text (`is_variable=False`), append it directly.
+           - If the segment is a variable (`is_variable=True`), evaluate it using
+             `evaluate_expression` with the given `node_outputs` and `variables`,
+             then transform the result with `_trans_output_string`.
+        3. Yield a stream event of type "message" containing the processed chunk.
+        4. Move the `cursor` forward after processing each segment.
+        5. When all segments have been processed, remove this End node from `end_outputs`
+           and reset `activate_end` to None.
+
+        Args:
+            node_outputs (dict): Current runtime node outputs, used for variable evaluation.
+            variables (dict): Current runtime variables, used for variable evaluation.
+            force (bool, default=False): If True, process segments even if `activate=False`.
+
+        Yields:
+            dict: A stream event of type "message" containing the processed chunk.
+
+        Notes:
+            - Segments that fail evaluation (ValueError) are skipped with a warning logged.
+            - This method only processes the currently active End node (`self.activate_end`).
+            - Use `force=True` for final emission regardless of activation state.
+        """
+
+        end_info = self.end_outputs[self.activate_end]
+
+        while end_info.cursor < len(end_info.outputs):
+            final_chunk = ''
+            current_segment = end_info.outputs[end_info.cursor]
+
+            if not current_segment.activate and not force:
+                # Stop processing until this segment becomes active
+                break
+
+            # Literal segment
+            if not current_segment.is_variable:
+                final_chunk += current_segment.literal
+            else:
+                # Variable segment: evaluate and transform
+                try:
+                    chunk = evaluate_expression(
+                        current_segment.literal,
+                        variables=variables,
+                        node_outputs=node_outputs
+                    )
+                    chunk = self._trans_output_string(chunk)
+                    final_chunk += chunk
+                except ValueError:
+                    # Log failed evaluation but continue streaming
+                    logger.warning(f"[STREAM] Failed to evaluate segment: {current_segment.literal}")
+
+            if final_chunk:
+                yield {
+                    "event": "message",
+                    "data": {
+                        "chunk": final_chunk
+                    }
+                }
+
+            # Advance cursor after processing
+            end_info.cursor += 1
+
+        # Remove End node from active tracking if all segments have been processed
+        if end_info.cursor >= len(end_info.outputs):
+            self.end_outputs.pop(self.activate_end)
+            self.activate_end = None
 
     @staticmethod
     def _trans_output_string(content):
@@ -218,14 +342,8 @@ class WorkflowExecutor:
 
             result = await graph.ainvoke(initial_state, config=self.checkpoint_config)
             full_content = ''
-            for end_info in self.end_outputs.values():
-                output_template = "".join([output.literal for output in end_info.outputs])
-                full_content += render_template(
-                    output_template,
-                    result.get("variables", {}),
-                    result.get("runtime_vars", {}),
-                    strict=False
-                )
+            for end_id in self.end_outputs.keys():
+                full_content += result.get('runtime_vars', {}).get(end_id, {}).get('output', '')
             result["messages"].extend(
                 [
                     {
@@ -306,7 +424,7 @@ class WorkflowExecutor:
         try:
             chunk_count = 0
             full_content = ''
-
+            self._update_scope_activate("sys")
             async for event in graph.astream(
                     initial_state,
                     stream_mode=["updates", "debug", "custom"],  # Use updates + debug + custom mode
@@ -333,9 +451,12 @@ class WorkflowExecutor:
                             if not end_info or end_info.cursor >= len(end_info.outputs):
                                 continue
                             current_output = end_info.outputs[end_info.cursor]
-                            if current_output.is_variable and current_output.depends_on_node(node_id):
+                            if current_output.is_variable and current_output.depends_on_scope(node_id):
                                 if data.get("done"):
                                     end_info.cursor += 1
+                                    if end_info.cursor >= len(end_info.outputs):
+                                        self.end_outputs.pop(self.activate_end)
+                                        self.activate_end = None
                                 else:
                                     full_content += data.get("chunk")
                                     yield {
@@ -415,91 +536,53 @@ class WorkflowExecutor:
 
                 elif mode == "updates":
                     # Handle state updates - store final state
-                    for node_id in data.keys():
-                        self._update_end_activate(node_id)
-                    wait = False
-                    state = graph.get_state(config=self.checkpoint_config)
-                    node_outputs = state.values.get("runtime_vars", {})
-                    for _ in data.keys():
-                        node_outputs = node_outputs | data.get(_).get("runtime_vars", {})
+                    state = graph.get_state(config=self.checkpoint_config).values
+                    node_outputs = state.get("runtime_vars", {})
+                    variables = state.get("variables", {})
+                    activate = state.get("activate", {})
+                    for _, node_data in data.items():
+                        node_outputs |= node_data.get("runtime_vars", {})
+                        variables |= node_data.get("variables", {})
 
+                    self._update_stream_output_status(activate, data)
+                    wait = False
                     while self.activate_end and not wait:
-                        message = ''
-                        logger.info(self.activate_end)
-                        end_info = self.end_outputs[self.activate_end]
-                        content = end_info.outputs[end_info.cursor]
-                        while content.activate:
-                            if not content.is_variable:
-                                full_content += content.literal
-                                message += content.literal
-                            else:
-                                try:
-                                    chunk = evaluate_expression(
-                                        content.literal,
-                                        variables={},
-                                        node_outputs=node_outputs
-                                    )
-                                    chunk = self._trans_output_string(chunk)
-                                    message += chunk
-                                    full_content += chunk
-                                except ValueError:
-                                    pass
-                            end_info.cursor += 1
-                            if end_info.cursor == len(end_info.outputs):
-                                break
-                            content = end_info.outputs[end_info.cursor]
-                        if end_info.cursor != len(end_info.outputs):
+                        async for msg_event in self._emit_active_chunks(
+                                node_outputs=node_outputs,
+                                variables=variables
+                        ):
+                            full_content += msg_event["data"]['chunk']
+                            yield msg_event
+
+                        if self.activate_end:
                             wait = True
                         else:
-                            self.end_outputs.pop(self.activate_end)
-                            self.activate_end = None
-                            for node_id in data.keys():
-                                self._update_end_activate(node_id)
-                        if message:
-                            yield {
-                                "event": "message",
-                                "data": {
-                                    "chunk": message
-                                }
-                            }
+                            self._update_stream_output_status(activate, data)
 
                     logger.debug(f"[UPDATES] 收到 state 更新 from {list(data.keys())} "
                                  f"- execution_id: {self.execution_id}")
 
             result = graph.get_state(self.checkpoint_config).values
-            while self.activate_end:
-                message = ''
-                end_info = self.end_outputs[self.activate_end]
-                content = end_info.outputs[end_info.cursor]
-                if not content.is_variable:
-                    message += content.literal
-                else:
-                    node_outputs = result.get("runtime_vars", {})
-                    variables = result.get("variables", {})
-                    try:
-                        chunk = evaluate_expression(
-                            content.literal,
+            node_outputs = result.get("runtime_vars", {})
+            variables = result.get("variables", {})
+            self.end_outputs = {
+                node_id: node_info
+                for node_id, node_info in self.end_outputs.items()
+                if node_info.activate
+            }
+
+            if self.end_outputs or self.activate_end:
+                while self.activate_end:
+                    async for msg_event in self._emit_active_chunks(
+                            node_outputs=node_outputs,
                             variables=variables,
-                            node_outputs=node_outputs
-                        )
-                        chunk = self._trans_output_string(chunk)
-                        message += chunk
-                        full_content += chunk
-                    except ValueError:
-                        pass
-                end_info.cursor += 1
-                if end_info.cursor == len(end_info.outputs):
-                    self.end_outputs.pop(self.activate_end)
-                    self.activate_end = None
-                    if self.end_outputs:
+                            force=True
+                    ):
+                        full_content += msg_event["data"]['chunk']
+                        yield msg_event
+
+                    if not self.activate_end and self.end_outputs:
                         self.activate_end = list(self.end_outputs.keys())[0]
-                if message:
-                    yield {
-                        "event": "message",
-                        "data": {
-                            "chunk": message
-                        }
-                    }
 
             # 计算耗时
             end_time = datetime.datetime.now()
