@@ -92,7 +92,6 @@ async def get_workspace_end_users(
         workspace_id=workspace_id,
         current_user=current_user
     )
-    
     if not end_users:
         api_logger.info("工作空间下没有宿主")
         # 缓存空结果，避免重复查询
