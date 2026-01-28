@@ -58,7 +58,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
         if (logo?.response?.data.file_id) {
           getFileLink(logo?.response?.data.file_id).then(res => {
             const logoRes = res as { url: string }
-            formData.logo = logoRes.url.replace('http://127.0.0.1:8000', 'https://devmemorybear.redbearai.com')
+            formData.logo = logoRes.url
             handleUpdate(formData)
           })
         } else {
@@ -108,7 +108,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
           name="logo" 
           label={t('modelNew.logo')}
           valuePropName="fileList"
-          // rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
           <UploadImages />
         </Form.Item>

@@ -51,7 +51,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         if (typeof logo === 'object') {
           getFileLink(logo?.response?.data.file_id).then(res => {
             const logoRes = res as { url: string }
-            values.logo = logoRes.url.replace('http://127.0.0.1:8000', 'https://devmemorybear.redbearai.com')
+            values.logo = logoRes.url
             addCustomModel(values).then(() => {
               if (refresh) {
                 refresh();
@@ -143,14 +143,12 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         <Form.Item
           name="description"
           label={t('modelNew.description')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.description') }) }]}
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </Form.Item>
         <Form.Item
           name="tags"
           label={t('modelNew.tags')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.tags') }) }]}
         >
           <Select mode="tags" placeholder={t('common.pleaseEnter')} />
         </Form.Item>
