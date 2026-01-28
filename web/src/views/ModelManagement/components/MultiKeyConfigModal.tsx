@@ -39,6 +39,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
     form
       .validateFields()
       .then((values) => {
+        setLoading(true)
         addModelApiKey(model.id, {
           ...values,
           model_config_id: model.id,

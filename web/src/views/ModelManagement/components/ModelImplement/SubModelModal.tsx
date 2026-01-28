@@ -24,14 +24,12 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
   const { message } = App.useApp()
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<SubModelModalForm>();
-  const [loading, setLoading] = useState(false)
   const [selecteds, setSelecteds] = useState<any[]>([])
   const [modelList, setModelList] = useState<Option[]>([])
 
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
     form.resetFields();
-    setLoading(false)
     setVisible(false);
     setSelecteds([])
   };
@@ -56,13 +54,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
   const handleSave = () => {
     form
       .validateFields()
-      .then((values) => {
-        console.log('SubModelModal values', values, selecteds, selecteds.map(vo => ({
-          ...vo[0],
-          model_name: vo[0].name,
-          model_config_ids: [vo[0].id],
-          id: vo[1].value
-        })))
+      .then(() => {
         refresh?.(selecteds.map(vo => ({
           ...vo[0],
           model_name: vo[0].name,
@@ -127,7 +119,6 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
       onCancel={handleClose}
       okText={t('common.save')}
       onOk={handleSave}
-      confirmLoading={loading}
     >
       <Form
         form={form}

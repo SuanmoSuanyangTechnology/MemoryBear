@@ -42,40 +42,43 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     }
     setVisible(true);
   };
+  const handleUpdate = (data: CustomModelForm) => {
+    setLoading(true)
+    const res = isEdit ? updateCustomModel(model.id, data) : addCustomModel(data)
+
+    res.then(() => {
+      refresh && refresh()
+      handleClose()
+      message.success(isEdit ? t('common.updateSuccess') : t('common.createSuccess'))
+    })
+      .catch(() => {
+        setLoading(false)
+      });
+  }
   const handleSave = () => {
     form
       .validateFields()
       .then((values) => {
         setLoading(true)
-        values.is_official = false;
-        const logo = values.logo as any;
+        const { logo, ...rest } = values;
+        let formData: CustomModelForm = {
+          ...rest
+        }
+        formData.is_official = false;
+
         if (typeof logo === 'object' && logo?.response?.data.file_id) {
-          getFileLink(logo?.response?.data.file_id).then(res => {
-            const logoRes = res as { url: string }
-            values.logo = logoRes.url
-            addCustomModel(values).then(() => {
-              if (refresh) {
-                refresh();
-              }
-              handleClose()
-              message.success(isEdit ? t('common.updateSuccess') : t('common.createSuccess'))
+          getFileLink(logo?.response?.data.file_id)
+            .then(res => {
+              const logoRes = res as { url: string }
+              formData.logo = logoRes.url
+              handleUpdate(formData)
             })
-              .catch(() => {
-                setLoading(false)
-              });
-          })
-        } else {
-          values.logo = typeof logo === 'string' ? logo : logo.url
-          updateCustomModel(model.id, values).then(() => {
-            if (refresh) {
-              refresh();
-            }
-            handleClose()
-            message.success(isEdit ? t('common.updateSuccess') : t('common.createSuccess'))
-          })
             .catch(() => {
-              setLoading(false)
-            });
+              handleUpdate(formData)
+            })
+        } else {
+          formData.logo = typeof logo === 'string' ? logo : logo.url
+          handleUpdate(formData)
         }
       })
       .catch((err) => {
@@ -102,18 +105,18 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         form={form}
         layout="vertical"
       >
-        {!isEdit && <Form.Item
+        <Form.Item
           name="logo"
           label={t('modelNew.logo')}
           valuePropName="fileList"
           rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
           <UploadImages />
-        </Form.Item>}
+        </Form.Item>
         <Form.Item
           name="name"
-          label={t('modelNew.model_name')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.model_name') }) }]}
+          label={t('modelNew.name')}
+          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.name') }) }]}
         >
           <Input placeholder={t('common.pleaseEnter')} />
         </Form.Item>

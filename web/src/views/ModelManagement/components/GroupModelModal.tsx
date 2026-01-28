@@ -60,6 +60,8 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
             const logoRes = res as { url: string }
             formData.logo = logoRes.url
             handleUpdate(formData)
+          }).catch(() => {
+            handleUpdate(formData)
           })
         } else {
           formData.logo = typeof logo === 'string' ? logo : logo.url
