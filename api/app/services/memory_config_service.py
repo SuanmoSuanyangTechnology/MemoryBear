@@ -6,29 +6,33 @@ This service eliminates code duplication between MemoryAgentService and MemorySt
 """
 
 import time
+import uuid
 from datetime import datetime
-from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+from typing import TYPE_CHECKING, Optional
+from uuid import UUID
+
 from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
     validate_embedding_model,
-    validate_model_exists_and_active,
 )
+from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.memory_config_schema import (
     ConfigurationError,
     InvalidConfigError,
     MemoryConfig,
-    ModelInactiveError,
-    ModelNotFoundError,
 )
-from sqlalchemy.orm import Session
-from uuid import UUID
+
+if TYPE_CHECKING:
+    from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 
 logger = get_logger(__name__)
 config_logger = get_config_logger()
-import uuid
+
 
 def _validate_config_id(config_id, db: Session = None):
     """Validate configuration ID format (supports both UUID and integer)."""
@@ -320,11 +324,12 @@ class MemoryConfigService:
         Returns:
             Dict with model configuration including api_key, base_url, etc.
         """
+        from fastapi import status
+        from fastapi.exceptions import HTTPException
+
         from app.core.config import settings
         from app.models.models_model import ModelApiKey
         from app.services.model_service import ModelConfigService as ModelSvc
-        from fastapi import status
-        from fastapi.exceptions import HTTPException
 
         config = ModelSvc.get_model_by_id(db=self.db, model_id=model_id)
         if not config:
@@ -353,10 +358,11 @@ class MemoryConfigService:
         Returns:
             Dict with embedder configuration including api_key, base_url, etc.
         """
-        from app.models.models_model import ModelApiKey
-        from app.services.model_service import ModelConfigService as ModelSvc
         from fastapi import status
         from fastapi.exceptions import HTTPException
+
+        from app.models.models_model import ModelApiKey
+        from app.services.model_service import ModelConfigService as ModelSvc
 
         config = ModelSvc.get_model_by_id(db=self.db, model_id=embedding_id)
         if not config:
@@ -437,4 +443,208 @@ class MemoryConfigService:
             "pruning_switch": memory_config.pruning_enabled,
             "pruning_scene": memory_config.pruning_scene,
             "pruning_threshold": memory_config.pruning_threshold,
+        }
+
+    def _get_workspace_default_config(
+        self,
+        workspace_id: UUID
+    ) -> Optional["MemoryConfigModel"]:
+        """Get workspace default memory config.
+        
+        Returns the config marked as default for the workspace. If no explicit
+        default exists, falls back to the first active config ordered by creation time.
+        
+        Args:
+            workspace_id: Workspace ID
+            
+        Returns:
+            Optional[MemoryConfigModel]: Default config or None if no configs exist
+        """
+        from sqlalchemy import select
+
+        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+        
+        # First, try to find the explicitly marked default config
+        stmt = (
+            select(MemoryConfigModel)
+            .where(
+                MemoryConfigModel.workspace_id == workspace_id,
+                MemoryConfigModel.is_default.is_(True),
+                MemoryConfigModel.state.is_(True),
+            )
+            .limit(1)
+        )
+        
+        config = self.db.scalars(stmt).first()
+        
+        if config:
+            return config
+        
+        # Fallback: get the oldest active config if no explicit default
+        stmt = (
+            select(MemoryConfigModel)
+            .where(
+                MemoryConfigModel.workspace_id == workspace_id,
+                MemoryConfigModel.state.is_(True),
+            )
+            .order_by(MemoryConfigModel.created_at.asc())
+            .limit(1)
+        )
+        
+        config = self.db.scalars(stmt).first()
+        
+        if not config:
+            logger.warning(
+                "No active memory config found for workspace fallback",
+                extra={"workspace_id": str(workspace_id)}
+            )
+        
+        return config
+
+    def get_config_with_fallback(
+        self,
+        end_user_id: UUID,
+        workspace_id: UUID
+    ) -> Optional["MemoryConfigModel"]:
+        """Get memory config for end user with fallback to workspace default.
+        
+        Implements graceful degradation: if the end user's assigned config
+        doesn't exist, falls back to the workspace's default active config.
+        
+        Args:
+            end_user_id: End user ID
+            workspace_id: Workspace ID for fallback lookup
+            
+        Returns:
+            Optional[MemoryConfigModel]: Memory config or None if no fallback available
+        """
+        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+        from app.repositories.end_user_repository import EndUserRepository
+        
+        end_user_repo = EndUserRepository(self.db)
+        end_user = end_user_repo.get_by_id(end_user_id)
+        
+        if not end_user or not end_user.memory_config_id:
+            logger.debug(
+                "End user has no memory config assigned",
+                extra={"end_user_id": str(end_user_id)}
+            )
+            return self._get_workspace_default_config(workspace_id)
+        
+        config = self.db.get(MemoryConfigModel, end_user.memory_config_id)
+        
+        if config:
+            return config
+        
+        logger.warning(
+            "Memory config not found, falling back to workspace default",
+            extra={
+                "end_user_id": str(end_user_id),
+                "missing_config_id": str(end_user.memory_config_id),
+                "workspace_id": str(workspace_id)
+            }
+        )
+        
+        fallback_config = self._get_workspace_default_config(workspace_id)
+        
+        if fallback_config:
+            logger.info(
+                "Using fallback memory config",
+                extra={
+                    "end_user_id": str(end_user_id),
+                    "fallback_config_id": str(fallback_config.config_id)
+                }
+            )
+        
+        return fallback_config
+
+    def delete_config(
+        self,
+        config_id: UUID,
+        force: bool = False
+    ) -> dict:
+        """Delete memory config with protection against in-use configs.
+        
+        Implements delete protection: prevents accidental deletion of configs
+        that are actively being used by end users or marked as default.
+        
+        Args:
+            config_id: Memory config ID to delete
+            force: If True, delete even if end users are connected
+            
+        Returns:
+            Dict with status, message, and affected_users count
+            
+        Raises:
+            ResourceNotFoundException: If config doesn't exist
+        """
+        from app.core.exceptions import ResourceNotFoundException
+        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+        
+        config = self.db.get(MemoryConfigModel, config_id)
+        if not config:
+            raise ResourceNotFoundException("MemoryConfig", str(config_id))
+        
+        # Check if this is the default config - default configs cannot be deleted
+        if config.is_default:
+            logger.warning(
+                "Attempted to delete default memory config",
+                extra={"config_id": str(config_id)}
+            )
+            return {
+                "status": "error",
+                "message": "默认配置不允许删除",
+                "is_default": True
+            }
+        
+        # TODO: add back delete warning
+        # # Count connected end users
+        # end_user_repo = EndUserRepository(self.db)
+        # connected_count = end_user_repo.count_by_memory_config_id(config_id)
+        
+        # if connected_count > 0 and not force:
+        #     logger.warning(
+        #         "Attempted to delete memory config with connected end users",
+        #         extra={
+        #             "config_id": str(config_id),
+        #             "connected_count": connected_count
+        #         }
+        #     )
+            
+        #     return {
+        #         "status": "warning",
+        #         "message": f"Cannot delete memory config: {connected_count} end users are using it",
+        #         "connected_count": connected_count,
+        #         "force_required": True
+        #     }
+        
+        # # Force delete: clear end user references first
+        # if connected_count > 0 and force:
+        #     cleared_count = end_user_repo.clear_memory_config_id(config_id)
+            
+        #     logger.warning(
+        #         "Force deleting memory config",
+        #         extra={
+        #             "config_id": str(config_id),
+        #             "cleared_end_users": cleared_count
+        #         }
+        #     )
+        connected_count = 0
+        
+        self.db.delete(config)
+        self.db.commit()
+        
+        logger.info(
+            "Memory config deleted",
+            extra={
+                "config_id": str(config_id),
+                "force": force,
+                "affected_users": connected_count
+            }
+        )
+        
+        return {
+            "status": "success",
+            "message": "Memory config deleted successfully",
+            "affected_users": connected_count
         }

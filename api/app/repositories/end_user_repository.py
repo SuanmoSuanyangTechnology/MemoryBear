@@ -1,13 +1,13 @@
-from sqlalchemy.orm import Session
-from typing import List, Optional
-import uuid
 import datetime
+import uuid
+from typing import List, Optional
 
-from app.models.end_user_model import EndUser
-from app.models.app_model import App
-from app.models.workspace_model import Workspace
+from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_db_logger
+from app.models.app_model import App
+from app.models.end_user_model import EndUser
+from app.models.workspace_model import Workspace
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
@@ -264,6 +264,179 @@ class EndUserRepository:
             db_logger.error(f"查询活动工作空间时出错: {str(e)}")
             raise
 
+    def update_memory_config_id(self, end_user_id: uuid.UUID, memory_config_id: uuid.UUID) -> bool:
+        """更新终端用户的 memory_config_id（懒更新）。
+        
+        Args:
+            end_user_id: 终端用户ID
+            memory_config_id: 记忆配置ID
+            
+        Returns:
+            bool: 更新成功返回True，否则返回False
+        """
+        try:
+            updated_count = (
+                self.db.query(EndUser)
+                .filter(EndUser.id == end_user_id)
+                .update(
+                    {EndUser.memory_config_id: memory_config_id},
+                    synchronize_session=False
+                )
+            )
+            self.db.commit()
+            
+            if updated_count > 0:
+                db_logger.debug(f"成功更新终端用户 {end_user_id} 的 memory_config_id: {memory_config_id}")
+                return True
+            else:
+                db_logger.warning(f"未找到终端用户 {end_user_id}，无法更新 memory_config_id")
+                return False
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"更新终端用户 {end_user_id} 的 memory_config_id 时出错: {str(e)}")
+            raise
+
+    def get_memory_config_id(self, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
+        """获取终端用户的 memory_config_id。
+        
+        Args:
+            end_user_id: 终端用户ID
+            
+        Returns:
+            Optional[uuid.UUID]: memory_config_id 或 None
+        """
+        try:
+            end_user = (
+                self.db.query(EndUser)
+                .filter(EndUser.id == end_user_id)
+                .first()
+            )
+            if end_user and end_user.memory_config_id:
+                db_logger.debug(f"获取终端用户 {end_user_id} 的 memory_config_id: {end_user.memory_config_id}")
+                return end_user.memory_config_id
+            return None
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"获取终端用户 {end_user_id} 的 memory_config_id 时出错: {str(e)}")
+            raise
+
+    def batch_update_memory_config_id(
+        self,
+        app_id: uuid.UUID,
+        memory_config_id: uuid.UUID
+    ) -> int:
+        """批量更新应用下所有终端用户的 memory_config_id
+        
+        Args:
+            app_id: 应用ID
+            memory_config_id: 新的记忆配置ID
+            
+        Returns:
+            int: 更新的行数
+        """
+        try:
+            from sqlalchemy import update
+            
+            stmt = (
+                update(EndUser)
+                .where(EndUser.app_id == app_id)
+                .values(memory_config_id=memory_config_id)
+            )
+            
+            result = self.db.execute(stmt)
+            self.db.commit()
+            
+            updated_count = result.rowcount
+            
+            db_logger.info(
+                f"批量更新终端用户记忆配置: app_id={app_id}, "
+                f"memory_config_id={memory_config_id}, updated_count={updated_count}"
+            )
+            
+            return updated_count
+            
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(
+                f"批量更新终端用户记忆配置时出错: app_id={app_id}, "
+                f"memory_config_id={memory_config_id}, error={str(e)}"
+            )
+            raise
+
+    def count_by_memory_config_id(
+        self,
+        memory_config_id: uuid.UUID
+    ) -> int:
+        """统计使用指定记忆配置的终端用户数量
+        
+        Args:
+            memory_config_id: 记忆配置ID
+            
+        Returns:
+            int: 使用该配置的终端用户数量
+        """
+        try:
+            from sqlalchemy import func, select
+            
+            stmt = (
+                select(func.count(EndUser.id))
+                .where(EndUser.memory_config_id == memory_config_id)
+            )
+            
+            count = self.db.execute(stmt).scalar() or 0
+            
+            db_logger.debug(f"统计记忆配置使用数: memory_config_id={memory_config_id}, count={count}")
+            
+            return count
+            
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"统计记忆配置使用数时出错: memory_config_id={memory_config_id}, error={str(e)}")
+            raise
+
+    def clear_memory_config_id(
+        self,
+        memory_config_id: uuid.UUID
+    ) -> int:
+        """清除所有使用指定记忆配置的终端用户的 memory_config_id
+        
+        将 memory_config_id 设置为 NULL
+        
+        Args:
+            memory_config_id: 要清除的记忆配置ID
+            
+        Returns:
+            int: 清除的行数
+        """
+        try:
+            from sqlalchemy import update
+            
+            stmt = (
+                update(EndUser)
+                .where(EndUser.memory_config_id == memory_config_id)
+                .values(memory_config_id=None)
+            )
+            
+            result = self.db.execute(stmt)
+            self.db.commit()
+            
+            cleared_count = result.rowcount
+            
+            db_logger.warning(
+                f"清除终端用户记忆配置引用: memory_config_id={memory_config_id}, "
+                f"cleared_count={cleared_count}"
+            )
+            
+            return cleared_count
+            
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(
+                f"清除终端用户记忆配置引用时出错: memory_config_id={memory_config_id}, "
+                f"error={str(e)}"
+            )
+            raise
+
 def get_end_users_by_app_id(db: Session, app_id: uuid.UUID) -> List[EndUser]:
     """根据应用ID查询宿主（返回 EndUser ORM 列表）"""
     repo = EndUserRepository(db)
@@ -315,3 +488,32 @@ def get_all_active_workspaces(db: Session) -> List[uuid.UUID]:
     """获取所有活动工作空间的ID"""
     repo = EndUserRepository(db)
     return repo.get_all_active_workspaces()
+
+
+def update_memory_config_id(db: Session, end_user_id: uuid.UUID, memory_config_id: uuid.UUID) -> bool:
+    """更新终端用户的 memory_config_id（懒更新）。
+    
+    Args:
+        db: 数据库会话
+        end_user_id: 终端用户ID
+        memory_config_id: 记忆配置ID
+        
+    Returns:
+        bool: 更新成功返回True，否则返回False
+    """
+    repo = EndUserRepository(db)
+    return repo.update_memory_config_id(end_user_id, memory_config_id)
+
+
+def get_memory_config_id(db: Session, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
+    """获取终端用户的 memory_config_id。
+    
+    Args:
+        db: 数据库会话
+        end_user_id: 终端用户ID
+        
+    Returns:
+        Optional[uuid.UUID]: memory_config_id 或 None
+    """
+    repo = EndUserRepository(db)
+    return repo.get_memory_config_id(end_user_id)

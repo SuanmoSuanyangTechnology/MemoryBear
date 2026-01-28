@@ -9,10 +9,15 @@ import os
 import re
 import time
 import uuid
-from uuid import UUID
 from typing import Any, AsyncGenerator, Dict, List, Optional
+from uuid import UUID
 
 import redis
+from langchain_core.messages import AIMessage, HumanMessage
+from pydantic import BaseModel, Field
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.agent.langgraph_graph.read_graph import make_read_graph
@@ -37,11 +42,6 @@ from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
 )
-from langchain_core.messages import AIMessage
-from langchain_core.messages import HumanMessage
-from pydantic import BaseModel, Field
-from sqlalchemy import func
-from sqlalchemy.orm import Session
 
 try:
     from app.core.memory.utils.log.audit_logger import audit_logger
@@ -732,8 +732,12 @@ class MemoryAgentService:
             )
             
             # 导入必要的模块
-            from app.core.memory.agent.langgraph_graph.nodes.summary_nodes import summary_llm
-            from app.core.memory.agent.models.summary_models import RetrieveSummaryResponse
+            from app.core.memory.agent.langgraph_graph.nodes.summary_nodes import (
+                summary_llm,
+            )
+            from app.core.memory.agent.models.summary_models import (
+                RetrieveSummaryResponse,
+            )
             
             # 构建状态对象
             state = {
@@ -1144,9 +1148,8 @@ class MemoryAgentService:
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
 
-def get_end_user_memory_config_id(end_user_id: str, db: Session) -> Optional[int]:
-    """
-    快速获取终端用户的 memory_config_id（直接从 end_user 表读取）
+def get_end_user_memory_config_id(end_user_id: str, db: Session) -> Optional[uuid.UUID]:
+    """快速获取终端用户的 memory_config_id（直接从 end_user 表读取）。
     
     如果 end_user 已有缓存的 memory_config_id，直接返回；
     否则返回 None，调用方应使用 get_end_user_connected_config 获取完整配置。
@@ -1156,14 +1159,16 @@ def get_end_user_memory_config_id(end_user_id: str, db: Session) -> Optional[int
         db: 数据库会话
         
     Returns:
-        memory_config_id 或 None
+        Optional[uuid.UUID]: memory_config_id 或 None
     """
-    from app.models.end_user_model import EndUser
+    from app.repositories.end_user_repository import get_memory_config_id
     
-    end_user = db.query(EndUser).filter(EndUser.id == end_user_id).first()
-    if end_user and end_user.memory_config_id:
-        return end_user.memory_config_id
-    return None
+    try:
+        end_user_uuid = uuid.UUID(end_user_id) if isinstance(end_user_id, str) else end_user_id
+        return get_memory_config_id(db, end_user_uuid)
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Invalid end_user_id format: {end_user_id}, error: {e}")
+        return None
 
 
 def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, Any]:
@@ -1185,9 +1190,9 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     Raises:
         ValueError: 当终端用户不存在或应用未发布时
     """
+    from app.models.app_model import App
     from app.models.app_release_model import AppRelease
     from app.models.end_user_model import EndUser
-    from sqlalchemy import select
 
     logger.info(f"Getting connected config for end_user: {end_user_id}")
 
@@ -1200,22 +1205,25 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     app_id = end_user.app_id
     logger.debug(f"Found end_user app_id: {app_id}")
 
-    # 2. 获取该应用的最新发布版本
-    stmt = (
-        select(AppRelease)
-        .where(AppRelease.app_id == app_id, AppRelease.is_active.is_(True))
-        .order_by(AppRelease.version.desc())
-    )
-    latest_release = db.scalars(stmt).first()
+    # 2. 获取应用的当前发布版本（通过 apps.current_release_id）
+    app = db.query(App).filter(App.id == app_id).first()
+    if not app:
+        logger.warning(f"App not found: {app_id}")
+        raise ValueError(f"应用不存在: {app_id}")
 
-    if not latest_release:
-        logger.warning(f"No active release found for app: {app_id}")
+    if not app.current_release_id:
+        logger.warning(f"No current release for app: {app_id}")
         raise ValueError(f"应用未发布: {app_id}")
 
-    logger.debug(f"Found latest release: version={latest_release.version}, id={latest_release.id}")
+    current_release = db.query(AppRelease).filter(AppRelease.id == app.current_release_id).first()
+    if not current_release:
+        logger.warning(f"Current release not found: {app.current_release_id}")
+        raise ValueError(f"应用发布版本不存在: {app.current_release_id}")
+
+    logger.debug(f"Found current release: version={current_release.version}, id={current_release.id}")
 
     # 3. 从 config 中提取 memory_config_id
-    config = latest_release.config or {}
+    config = current_release.config or {}
 
     # 如果 config 是字符串，解析为字典
     if isinstance(config, str):
@@ -1223,27 +1231,17 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
         try:
             config = json.loads(config)
         except json.JSONDecodeError:
-            logger.warning(f"Failed to parse config JSON for release {latest_release.id}")
+            logger.warning(f"Failed to parse config JSON for release {current_release.id}")
             config = {}
 
     memory_obj = config.get('memory', {})
     memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
 
-    # 4. 更新 end_user 的 memory_config_id（懒更新）
-    if memory_config_id is not None and end_user.memory_config_id != memory_config_id:
-        try:
-            end_user.memory_config_id = memory_config_id
-            db.commit()
-            logger.debug(f"Updated end_user memory_config_id: {end_user_id} -> {memory_config_id}")
-        except Exception as e:
-            db.rollback()
-            logger.warning(f"Failed to update end_user memory_config_id: {e}")
-
     result = {
         "end_user_id": str(end_user_id),
         "app_id": str(app_id),
-        "release_id": str(latest_release.id),
-        "release_version": latest_release.version,
+        "release_id": str(current_release.id),
+        "release_version": current_release.version,
         "memory_config_id": memory_config_id
     }
 
@@ -1272,10 +1270,11 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
             ...
         }
     """
+    from sqlalchemy import select
+
     from app.models.app_release_model import AppRelease
     from app.models.end_user_model import EndUser
     from app.models.memory_config_model import MemoryConfig
-    from sqlalchemy import select
 
     logger.info(f"Batch getting connected configs for {len(end_user_ids)} end_users")
 

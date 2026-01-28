@@ -1,10 +1,11 @@
 import datetime
 import uuid
 
-from app.db import Base
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+
+from app.db import Base
 
 
 class EndUser(Base):
@@ -21,7 +22,13 @@ class EndUser(Base):
     updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
     
     # Memory config association - updated lazily during conversation
-    memory_config_id = Column(Integer, ForeignKey("data_config.config_id"), nullable=True, index=True, comment="关联的记忆配置ID")
+    memory_config_id = Column(
+        UUID(as_uuid=True), 
+        ForeignKey("memory_config.config_id"), 
+        nullable=True, 
+        index=True, 
+        comment="关联的记忆配置ID"
+    )
     
     # 用户基本信息字段
     position = Column(String, nullable=True, comment="职位")

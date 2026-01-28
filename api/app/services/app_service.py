@@ -9,28 +9,35 @@
 """
 import datetime
 import uuid
-from typing import Optional, List, Dict, Any, Tuple, Annotated
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends
-from sqlalchemy import select, func, or_, and_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import (
-    ResourceNotFoundException,
     BusinessException,
+    ResourceNotFoundException,
 )
 from app.core.logging_config import get_business_logger
 from app.core.workflow.validator import WorkflowValidator
 from app.db import get_db
-from app.models import App, AgentConfig, AppRelease, MultiAgentConfig, WorkflowConfig
+from app.models import (
+    AgentConfig,
+    App,
+    AppRelease,
+    AppShare,
+    MultiAgentConfig,
+    WorkflowConfig,
+    Workspace,
+)
 from app.models.app_model import AppStatus, AppType
 from app.repositories.app_repository import get_apps_by_id
 from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
 from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services.agent_config_converter import AgentConfigConverter
-from app.models import AppShare, Workspace
 from app.services.model_service import ModelApiKeyService
 from app.services.workflow_service import WorkflowService
 from app.utils.app_config_utils import model_parameters_to_dict
@@ -136,9 +143,10 @@ class AppService:
         return app
 
     def _check_workflow_config(self, app_id: uuid.UUID):
-        from app.models import WorkflowConfig, ModelConfig
         from sqlalchemy import select
+
         from app.core.exceptions import BusinessException
+        from app.models import ModelConfig, WorkflowConfig
         # 2. 获取 Agent 配置
         stmt = select(WorkflowConfig).where(AgentConfig.app_id == app_id)
         agent_cfg = self.db.scalars(stmt).first()
@@ -154,9 +162,10 @@ class AppService:
             raise BusinessException("模型配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
 
     def _check_agent_config(self, app_id: uuid.UUID):
-        from app.models import AgentConfig, ModelConfig
         from sqlalchemy import select
+
         from app.core.exceptions import BusinessException
+        from app.models import AgentConfig, ModelConfig
         # 2. 获取 Agent 配置
         stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
         agent_cfg = self.db.scalars(stmt).first()
@@ -326,10 +335,10 @@ class AppService:
         """
         # 将 Dict 转换为 MultiAgentConfigCreate
         from app.schemas.multi_agent_schema import (
+            ExecutionConfig,
             MultiAgentConfigCreate,
-            SubAgentConfig,
             RoutingRule,
-            ExecutionConfig
+            SubAgentConfig,
         )
 
         # 转换 sub_agents
@@ -1167,6 +1176,138 @@ class AppService:
 
         return default_config
 
+    # ==================== 记忆配置提取方法 ====================
+
+    def _extract_memory_config_id(
+        self,
+        app_type: str,
+        config: Dict[str, Any]
+    ) -> Optional[uuid.UUID]:
+        """从发布配置中提取 memory_config_id（根据应用类型分发）
+        
+        Args:
+            app_type: 应用类型 (agent, workflow, multi_agent)
+            config: 发布配置字典
+            
+        Returns:
+            Optional[uuid.UUID]: 提取的 memory_config_id，如果不存在则返回 None
+        """
+        if app_type == AppType.AGENT:
+            return self._extract_memory_config_id_from_agent(config)
+        elif app_type == AppType.WORKFLOW:
+            return self._extract_memory_config_id_from_workflow(config)
+        elif app_type == AppType.MULTI_AGENT:
+            # Multi-agent 暂不支持记忆配置提取
+            logger.debug(f"多智能体应用暂不支持记忆配置提取: app_type={app_type}")
+            return None
+        else:
+            logger.warning(f"不支持的应用类型，无法提取记忆配置: app_type={app_type}")
+            return None
+
+    def _extract_memory_config_id_from_agent(
+        self,
+        config: Dict[str, Any]
+    ) -> Optional[uuid.UUID]:
+        """从 Agent 应用配置中提取 memory_config_id
+        
+        路径: config.memory.memory_content
+        
+        Args:
+            config: Agent 配置字典
+            
+        Returns:
+            Optional[uuid.UUID]: 记忆配置ID，如果不存在则返回 None
+        """
+        try:
+            memory_content = config.get("memory", {}).get("memory_content")
+            if memory_content:
+                # 处理字符串和 UUID 两种情况
+                if isinstance(memory_content, str):
+                    return uuid.UUID(memory_content)
+                elif isinstance(memory_content, uuid.UUID):
+                    return memory_content
+                else:
+                    logger.warning(
+                        f"Agent 配置中 memory_content 格式无效: type={type(memory_content)}, "
+                        f"value={memory_content}"
+                    )
+            return None
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                f"Agent 配置中 memory_content 格式无效: error={str(e)}, "
+                f"memory_content={memory_content}"
+            )
+            return None
+
+    def _extract_memory_config_id_from_workflow(
+        self,
+        config: Dict[str, Any]
+    ) -> Optional[uuid.UUID]:
+        """从 Workflow 应用配置中提取 memory_config_id
+        
+        扫描工作流节点，查找 MemoryRead 或 MemoryWrite 节点。
+        返回第一个找到的记忆节点的 config_id。
+        
+        Args:
+            config: Workflow 配置字典
+            
+        Returns:
+            Optional[uuid.UUID]: 记忆配置ID，如果不存在则返回 None
+        """
+        nodes = config.get("nodes", [])
+        
+        for node in nodes:
+            node_type = node.get("type", "")
+            
+            # 检查是否为记忆节点
+            if node_type in ["MemoryRead", "MemoryWrite"]:
+                config_id = node.get("config", {}).get("config_id")
+                
+                if config_id:
+                    try:
+                        # 处理字符串和 UUID 两种情况
+                        if isinstance(config_id, str):
+                            return uuid.UUID(config_id)
+                        elif isinstance(config_id, uuid.UUID):
+                            return config_id
+                        else:
+                            logger.warning(
+                                f"工作流记忆节点 config_id 格式无效: node_id={node.get('id')}, "
+                                f"node_type={node_type}, type={type(config_id)}"
+                            )
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"工作流记忆节点 config_id 格式无效: node_id={node.get('id')}, "
+                            f"node_type={node_type}, error={str(e)}"
+                        )
+        
+        logger.debug("工作流配置中未找到记忆节点")
+        return None
+
+    def _update_endusers_memory_config(
+        self,
+        app_id: uuid.UUID,
+        memory_config_id: uuid.UUID
+    ) -> int:
+        """批量更新应用下所有终端用户的 memory_config_id
+        
+        Args:
+            app_id: 应用ID
+            memory_config_id: 新的记忆配置ID
+            
+        Returns:
+            int: 更新的终端用户数量
+        """
+        from app.repositories.end_user_repository import EndUserRepository
+        
+        repo = EndUserRepository(self.db)
+        updated_count = repo.batch_update_memory_config_id(
+            app_id=app_id,
+            memory_config_id=memory_config_id
+        )
+        
+        return updated_count
+
     # ==================== 应用发布管理 ====================
 
     def publish(
@@ -1309,6 +1450,15 @@ class AppService:
         self.db.add(release)
         self.db.flush()  # 先 flush，确保 release 已插入数据库
 
+        # 提取记忆配置ID并更新终端用户
+        memory_config_id = self._extract_memory_config_id(app.type, config)
+        if memory_config_id:
+            updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
+            logger.info(
+                f"发布时更新终端用户记忆配置: app_id={app_id}, "
+                f"memory_config_id={memory_config_id}, updated_count={updated_count}"
+            )
+
         # 更新当前发布版本指针
         app.current_release_id = release.id
         app.status = AppStatus.ACTIVE
@@ -1423,6 +1573,15 @@ class AppService:
                 extra={"app_id": str(app_id), "version": version}
             )
             raise ResourceNotFoundException("发布版本", f"app_id={app_id}, version={version}")
+
+        # 提取记忆配置ID并更新终端用户
+        memory_config_id = self._extract_memory_config_id(release.type, release.config)
+        if memory_config_id:
+            updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
+            logger.info(
+                f"回滚时更新终端用户记忆配置: app_id={app_id}, version={version}, "
+                f"memory_config_id={memory_config_id}, updated_count={updated_count}"
+            )
 
         app.current_release_id = release.id
         app.updated_at = datetime.datetime.now()
@@ -1839,8 +1998,8 @@ class AppService:
         Returns:
             Dict: 对比结果
         """
-        from app.services.draft_run_service import DraftRunService
         from app.models import ModelConfig
+        from app.services.draft_run_service import DraftRunService
 
         logger.info(
             "多模型对比试运行",
@@ -1938,8 +2097,8 @@ class AppService:
         Yields:
             str: SSE 格式的事件数据
         """
-        from app.services.draft_run_service import DraftRunService
         from app.models import ModelConfig
+        from app.services.draft_run_service import DraftRunService
 
         logger.info(
             "多模型对比流式试运行",
