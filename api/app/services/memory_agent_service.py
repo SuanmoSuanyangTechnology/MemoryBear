@@ -1283,6 +1283,8 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
 
     # 3. 收集所有 memory_config_id 并批量查询配置名称
     memory_config_ids = []
+    old_config_ids = []  # 存储旧的整数ID
+    
     for end_user_id, app_id in user_to_app.items():
         release = app_to_release.get(app_id)
         if release:
@@ -1290,13 +1292,37 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
             memory_obj = config.get('memory', {})
             memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
             if memory_config_id:
-                memory_config_ids.append(memory_config_id)
-
+                # 判断是否为UUID格式
+                if len(str(memory_config_id))>=5:
+                    uuid.UUID(str(memory_config_id))
+                    memory_config_ids.append(memory_config_id)
+                else:
+                    old_config_ids.append(str(memory_config_id))
+    
     # 批量查询 memory_config_name
     config_id_to_name = {}
+    
+    # 记录分类结果
+    if memory_config_ids or old_config_ids:
+        logger.info(f"Collected {len(memory_config_ids)} UUID config_ids and {len(old_config_ids)} old integer config_ids")
+        if old_config_ids:
+            logger.debug(f"Old config IDs: {old_config_ids}")
+    
+    # 查询新的UUID格式的config_id
     if memory_config_ids:
         memory_configs = db.query(MemoryConfig).filter(MemoryConfig.config_id.in_(memory_config_ids)).all()
-        config_id_to_name = {str(mc.config_id): mc.config_name for mc in memory_configs}
+        config_id_to_name.update({str(mc.config_id): mc.config_name for mc in memory_configs})
+    
+    # 查询旧的整数ID（通过config_id_old字段）
+    if old_config_ids:
+        old_memory_configs = db.query(MemoryConfig).filter(MemoryConfig.config_id_old.in_(old_config_ids)).all()
+        # 使用config_id_old作为key，这样后面查找时能匹配上
+        config_id_to_name.update({str(mc.config_id_old): mc.config_name for mc in old_memory_configs})
+        # 同时也添加config_id作为key，方便后续使用
+        for mc in old_memory_configs:
+            if mc.config_id_old:
+                config_id_to_name[str(mc.config_id)] = mc.config_name
+        logger.info(f"Found {len(old_memory_configs)} configs for old IDs")
 
     # 4. 构建最终结果
     for end_user_id, app_id in user_to_app.items():
@@ -1312,8 +1338,8 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
         memory_obj = config.get('memory', {})
         memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
         
-        # 获取配置名称
-        memory_config_name = config_id_to_name.get(memory_config_id) if memory_config_id else None
+        # 获取配置名称（使用字符串形式的ID进行查找，兼容新旧格式）
+        memory_config_name = config_id_to_name.get(str(memory_config_id)) if memory_config_id else None
 
         result[end_user_id] = {
             "memory_config_id": memory_config_id,
