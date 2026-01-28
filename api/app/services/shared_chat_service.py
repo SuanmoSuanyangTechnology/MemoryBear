@@ -4,6 +4,8 @@ import time
 import asyncio
 from typing import Optional, Dict, Any, AsyncGenerator
 from sqlalchemy.orm import Session
+
+from app.repositories.model_repository import ModelApiKeyRepository
 from app.services.memory_konwledges_server import write_rag
 from app.models import ReleaseShare, AppRelease, Conversation
 from app.services.conversation_service import ConversationService
@@ -164,16 +166,20 @@ class SharedChatService:
             raise ResourceNotFoundException("模型配置", str(model_config_id))
         
         # 获取 API Key
-        stmt = (
-            select(ModelApiKey)
-            .where(
-                ModelApiKey.model_config_id == model_config_id,
-                ModelApiKey.is_active.is_(True)
-            )
-            .order_by(ModelApiKey.priority.desc())
-            .limit(1)
-        )
-        api_key_obj = self.db.scalars(stmt).first()
+        # stmt = (
+        #     select(ModelApiKey).join(
+        #         ModelConfig, ModelApiKey.model_configs
+        #     )
+        #     .where(
+        #         ModelConfig.id == model_config_id,
+        #         ModelApiKey.is_active.is_(True)
+        #     )
+        #     .order_by(ModelApiKey.priority.desc())
+        #     .limit(1)
+        # )
+        # api_key_obj = self.db.scalars(stmt).first()
+        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
+        api_key_obj = api_keys[0] if api_keys else None
         if not api_key_obj:
             raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
         
@@ -358,16 +364,20 @@ class SharedChatService:
                 raise ResourceNotFoundException("模型配置", str(model_config_id))
             
             # 获取 API Key
-            stmt = (
-                select(ModelApiKey)
-                .where(
-                    ModelApiKey.model_config_id == model_config_id,
-                    ModelApiKey.is_active.is_(True)
-                )
-                .order_by(ModelApiKey.priority.desc())
-                .limit(1)
-            )
-            api_key_obj = self.db.scalars(stmt).first()
+            # stmt = (
+            #     select(ModelApiKey).join(
+            #         ModelConfig, ModelApiKey.model_configs
+            #     )
+            #     .where(
+            #         ModelConfig.id == model_config_id,
+            #         ModelApiKey.is_active.is_(True)
+            #     )
+            #     .order_by(ModelApiKey.priority.desc())
+            #     .limit(1)
+            # )
+            # api_key_obj = self.db.scalars(stmt).first()
+            api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
+            api_key_obj = api_keys[0] if api_keys else None
             if not api_key_obj:
                 raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
             
