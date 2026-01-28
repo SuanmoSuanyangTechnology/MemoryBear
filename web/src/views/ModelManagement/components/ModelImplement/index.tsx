@@ -89,7 +89,7 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
                   ></div>
                 </Space>
               </Flex>
-              <Tag className="rb:mb-2">{provider}</Tag>
+              <Tag className="rb:mb-2">{t(`modelNew.${provider}`)}</Tag>
             </div>
           )
         })}

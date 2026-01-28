@@ -31,12 +31,7 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
       {
         key: 'type',
         label: t(`modelNew.type`),
-        children: data.type || '-',
-      },
-      {
-        key: 'provider',
-        label: t(`modelNew.provider`),
-        children: data.provider || '-',
+        children: data.type ? t(`modelNew.${data.type}`) : '-',
       },
       {
         key: 'is_active',

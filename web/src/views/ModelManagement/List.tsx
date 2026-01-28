@@ -46,11 +46,11 @@ const ModelList: FC<{ query: any }> = ({ query }) => {
             {list.map(item => (
               <RbCard
                 key={item.provider}
-                title={item.provider}
+                title={t(`modelNew.${item.provider}`)}
                 avatarUrl={getLogoUrl(item.logo)}
                 avatar={
                   <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
-                    {item.provider[0]}
+                    {item.provider[0].toUpperCase()}
                   </div>
                 }
                 bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
