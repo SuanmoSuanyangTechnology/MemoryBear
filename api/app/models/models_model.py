@@ -149,7 +149,7 @@ class ModelBase(Base):
     description = Column(Text, comment="模型描述")
     is_deprecated = Column(Boolean, default=False, nullable=False, comment="是否弃用")
     is_official = Column(Boolean, default=True, comment="是否供应商官方模型（区分自定义）")
-    tags = Column(ARRAY(String), default=[], nullable=False, comment="模型标签（如['聊天', '创作']）")
+    tags = Column(ARRAY(String), default=list, nullable=False, comment="模型标签（如['聊天', '创作']）")
     add_count = Column(Integer, default=0, nullable=False, comment="模型被用户添加的次数")
 
     # 关联关系

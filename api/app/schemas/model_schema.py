@@ -4,6 +4,10 @@ import datetime
 import uuid
 
 from app.models.models_model import ModelProvider, ModelType
+from app.core.logging_config import get_business_logger
+
+schema_logger = get_business_logger()
+
 
 
 
@@ -164,7 +168,7 @@ class ModelApiKey(ModelApiKeyBase):
                              and getattr(mc, 'name', None) == self.model_name))
                     ]
             except Exception as e:
-                print(f"提取 model_config_ids 失败：{e}")
+                schema_logger.warning(f"提取 model_config_ids 失败：{e}")
                 self.model_config_ids = []
 
     model_config = ConfigDict(
