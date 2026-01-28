@@ -78,28 +78,35 @@ class OntologyService:
     async def extract_ontology(
         self,
         scenario: str,
-        domain: Optional[str] = None
+        domain: Optional[str] = None,
+        scene_id: Optional[Any] = None,
+        workspace_id: Optional[Any] = None
     ) -> OntologyExtractionResponse:
         """执行本体提取
         
         使用默认配置参数调用OntologyExtractor执行提取,并将结果保存到数据库。
+        如果提供了scene_id,还会将提取的类保存到ontology_class表中。
         
         Args:
             scenario: 场景描述文本
             domain: 可选的领域提示
+            scene_id: 可选的场景ID,如果提供则将提取的类保存到该场景
+            workspace_id: 可选的工作空间ID,用于权限验证
             
         Returns:
             OntologyExtractionResponse: 提取结果
             
         Raises:
-            ValueError: 场景描述为空
+            ValueError: 场景描述为空、场景不存在或无权限
             RuntimeError: 提取过程失败
             
         Examples:
             >>> service = OntologyService(llm_client, db)
             >>> response = await service.extract_ontology(
             ...     scenario="医院管理患者记录...",
-            ...     domain="Healthcare"
+            ...     domain="Healthcare",
+            ...     scene_id=scene_uuid,
+            ...     workspace_id=workspace_uuid
             ... )
             >>> len(response.classes)
             7
@@ -112,10 +119,26 @@ class OntologyService:
             logger.error("Scenario description is empty")
             raise ValueError("Scenario description cannot be empty")
         
+        # 如果提供了scene_id,验证场景是否存在且有权限
+        if scene_id and workspace_id:
+            logger.info(f"Validating scene access - scene_id={scene_id}, workspace_id={workspace_id}")
+            scene = self.scene_repo.get_by_id(scene_id)
+            if not scene:
+                logger.warning(f"Scene not found: {scene_id}")
+                raise ValueError("场景不存在")
+            
+            if not self.scene_repo.check_ownership(scene_id, workspace_id):
+                logger.warning(
+                    f"Permission denied - scene_id={scene_id}, "
+                    f"workspace_id={workspace_id}"
+                )
+                raise ValueError("无权限在该场景下创建类型")
+        
         logger.info(
             f"Starting ontology extraction service - "
             f"scenario_length={len(scenario)}, "
-            f"domain={domain}"
+            f"domain={domain}, "
+            f"scene_id={scene_id}"
         )
         
         try:
@@ -142,9 +165,9 @@ class OntologyService:
                 logger.error("Ontology extraction failed: No classes extracted (structured output may have failed)")
                 raise RuntimeError("本体提取失败：结构化输出失败，未能提取到任何本体类")
             
-            # 保存提取结果到数据库
+            # 保存提取结果到 ontology_extraction_result 表
             try:
-                logger.debug("Saving extraction result to database")
+                logger.debug("Saving extraction result to ontology_extraction_result table")
                 classes_json = {
                     "classes": [cls.model_dump() for cls in response.classes]
                 }
@@ -157,10 +180,48 @@ class OntologyService:
                     extracted_count=len(response.classes)
                 )
                 self.db.commit()
-                logger.info("Extraction result saved to database")
+                logger.info("Extraction result saved to ontology_extraction_result table")
             except Exception as e:
                 logger.error(f"Failed to save extraction result: {str(e)}")
                 # 不影响提取结果的返回,继续执行
+            
+            # 如果提供了scene_id,将提取的类保存到 ontology_class 表
+            if scene_id:
+                try:
+                    logger.info(f"Saving extracted classes to ontology_class table - scene_id={scene_id}")
+                    saved_count = 0
+                    
+                    for ontology_class in response.classes:
+                        # 使用 name_chinese 作为 class_name，如果没有则使用 name
+                        class_name = ontology_class.name_chinese or ontology_class.name
+                        class_description = ontology_class.description
+                        
+                        # 检查该类型是否已存在（避免重复）
+                        existing_class = self.class_repo.get_by_name(class_name, scene_id)
+                        if existing_class:
+                            logger.debug(f"Class already exists, skipping: {class_name}")
+                            continue
+                        
+                        # 创建类型
+                        class_data = {
+                            "class_name": class_name,
+                            "class_description": class_description
+                        }
+                        
+                        self.class_repo.create(class_data, scene_id)
+                        saved_count += 1
+                        logger.debug(f"Saved class to ontology_class table: {class_name}")
+                    
+                    self.db.commit()
+                    logger.info(
+                        f"Successfully saved {saved_count} classes to ontology_class table "
+                        f"(skipped {len(response.classes) - saved_count} duplicates)"
+                    )
+                    
+                except Exception as e:
+                    self.db.rollback()
+                    logger.error(f"Failed to save classes to ontology_class table: {str(e)}", exc_info=True)
+                    # 不影响提取结果的返回,继续执行
             
             total_duration = time.time() - start_time
             
@@ -519,6 +580,83 @@ class OntologyService:
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
     
+    def get_scene_by_name(
+        self,
+        scene_name: str,
+        workspace_id: Any
+    ):
+        """根据场景名称获取场景（精确匹配）
+        
+        Args:
+            scene_name: 场景名称
+            workspace_id: 工作空间ID
+            
+        Returns:
+            Optional[OntologyScene]: 场景对象
+            
+        Raises:
+            ValueError: 场景不存在
+            
+        Examples:
+            >>> service = OntologyService(llm_client, db)
+            >>> scene = service.get_scene_by_name("医疗场景", workspace_id)
+        """
+        logger.debug(f"Getting scene by name: {scene_name}, workspace_id: {workspace_id}")
+        
+        try:
+            # 获取场景
+            scene = self.scene_repo.get_by_name(scene_name, workspace_id)
+            if not scene:
+                logger.warning(f"Scene not found: {scene_name} in workspace {workspace_id}")
+                raise ValueError("场景不存在")
+            
+            return scene
+            
+        except ValueError:
+            raise
+        except Exception as e:
+            error_msg = f"Failed to get scene by name: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg) from e
+    
+    def search_scenes_by_name(
+        self,
+        keyword: str,
+        workspace_id: Any
+    ) -> List:
+        """根据关键词模糊搜索场景
+        
+        Args:
+            keyword: 搜索关键词
+            workspace_id: 工作空间ID
+            
+        Returns:
+            List[OntologyScene]: 匹配的场景列表
+            
+        Raises:
+            RuntimeError: 搜索失败
+            
+        Examples:
+            >>> service = OntologyService(llm_client, db)
+            >>> scenes = service.search_scenes_by_name("医疗", workspace_id)
+        """
+        logger.debug(f"Searching scenes by keyword: {keyword}, workspace_id: {workspace_id}")
+        
+        try:
+            scenes = self.scene_repo.search_by_name(keyword, workspace_id)
+            
+            logger.info(
+                f"Found {len(scenes)} scenes matching keyword '{keyword}' "
+                f"in workspace {workspace_id}"
+            )
+            
+            return scenes
+            
+        except Exception as e:
+            error_msg = f"Failed to search scenes by keyword: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg) from e
+    
     def list_scenes(
         self,
         workspace_id: Any
@@ -817,7 +955,7 @@ class OntologyService:
         scene_id: Any,
         workspace_id: Any
     ):
-        """根据类型名称获取类型
+        """根据类型名称获取类型（精确匹配）
         
         Args:
             class_name: 类型名称
@@ -862,6 +1000,66 @@ class OntologyService:
             raise
         except Exception as e:
             error_msg = f"Failed to get class by name: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg) from e
+    
+    def search_classes_by_name(
+        self,
+        keyword: str,
+        scene_id: Any,
+        workspace_id: Any
+    ) -> List:
+        """根据关键词模糊搜索类型
+        
+        Args:
+            keyword: 搜索关键词
+            scene_id: 场景ID
+            workspace_id: 工作空间ID（用于权限验证）
+            
+        Returns:
+            List[OntologyClass]: 匹配的类型列表
+            
+        Raises:
+            ValueError: 场景不存在或无权限
+            RuntimeError: 搜索失败
+            
+        Examples:
+            >>> service = OntologyService(llm_client, db)
+            >>> classes = service.search_classes_by_name("患者", scene_id, workspace_id)
+        """
+        logger.debug(
+            f"Searching classes by keyword: {keyword}, "
+            f"scene_id: {scene_id}, workspace_id: {workspace_id}"
+        )
+        
+        try:
+            # 检查场景是否存在且属于当前工作空间
+            scene = self.scene_repo.get_by_id(scene_id)
+            if not scene:
+                logger.warning(f"Scene not found: {scene_id}")
+                raise ValueError("场景不存在")
+            
+            if not self.scene_repo.check_ownership(scene_id, workspace_id):
+                logger.warning(
+                    f"Permission denied - scene_id={scene_id}, "
+                    f"workspace_id={workspace_id}"
+                )
+                raise ValueError("无权限访问该场景")
+            
+            # 搜索类型
+            classes = self.class_repo.search_by_name(keyword, scene_id)
+            
+            logger.info(
+                f"Found {len(classes)} classes matching keyword '{keyword}' "
+                f"in scene {scene_id}"
+            )
+            
+            return classes
+            
+        except ValueError:
+            raise
+        except Exception as e:
+            error_msg = f"Failed to search classes by keyword: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
     
