@@ -1231,6 +1231,12 @@ export const en = {
       priority: 'Structured Integration',
       addTool: 'Add Tool',
       tool: 'Tool',
+
+      statistics: 'Data Statistics',
+      daily_conversations: 'Daily Conversations',
+      daily_new_users: 'Daily New Users',
+      daily_api_calls: 'Daily API Calls',
+      daily_tokens: 'Token Consumption',
     },
     userMemory: {
       userMemory: 'User Memory',
