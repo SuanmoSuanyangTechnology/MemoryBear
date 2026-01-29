@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Button, Row, Col, App } from 'antd';
 import clsx from 'clsx';
 import { DeleteOutlined } from '@ant-design/icons';
-import type { Application, ApplicationModalRef } from './types';
+import type { Application, ApplicationModalRef, Query } from './types';
 import ApplicationModal from './components/ApplicationModal';
 import SearchInput from '@/components/SearchInput'
 import RbCard from '@/components/RbCard/Card'
@@ -14,7 +14,7 @@ import { formatDateTime } from '@/utils/format';
 const ApplicationManagement: React.FC = () => {
   const { t } = useTranslation();
   const { modal } = App.useApp();
-  const [query, setQuery] = useState({});
+  const [query, setQuery] = useState<Query>({} as Query);
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const scrollListRef = useRef<PageScrollListRef>(null)
 
@@ -47,7 +47,7 @@ const ApplicationManagement: React.FC = () => {
   }
   return (
     <>
-      <Row gutter={16} className="rb:mb-[16px]">
+      <Row gutter={16} className="rb:mb-4">
         <Col span={12}>
           <SearchInput
             placeholder={t('application.searchPlaceholder')}
@@ -62,22 +62,22 @@ const ApplicationManagement: React.FC = () => {
         </Col>
       </Row>
 
-      <PageScrollList
+      <PageScrollList<Application, Query>
         ref={scrollListRef}
         url={getApplicationListUrl}
         query={query}
-        renderItem={(item: Application) => (
+        renderItem={(item) => (
           <RbCard 
             title={item.name}
             avatar={
-              <div className="rb:w-[48px] rb:h-[48px] rb:rounded-[8px] rb:mr-[13px] rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
+              <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
                 {item.name[0]}
               </div>
             }
           >
             {['type', 'source', 'created_at'].map((key, index) => (
-              <div key={key} className={clsx("rb:flex rb:justify-between rb:gap-[20px] rb:font-regular rb:text-[14px]", {
-                'rb:mt-[12px]': index !== 0
+              <div key={key} className={clsx("rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px]", {
+                'rb:mt-3': index !== 0
               })}>
                 <span className="rb:text-[#5B6167]">{t(`application.${key}`)}</span>
                 <span className={clsx({
@@ -89,14 +89,14 @@ const ApplicationManagement: React.FC = () => {
                     : key === 'source' && !item.is_shared
                     ? t('application.configuration')
                     : key === 'created_at'
-                    ? formatDateTime(item[key as keyof Application], 'YYYY-MM-DD HH:mm:ss')
+                    ? formatDateTime(item.created_at, 'YYYY-MM-DD HH:mm:ss')
                     : t(`application.${item[key as keyof Application]}`)
                   }
                 </span>
               </div>
             ))}
 
-            <div className="rb:mt-[20px] rb:flex rb:justify-between rb:gap-[10px]">
+            <div className="rb:mt-5 rb:flex rb:justify-between rb:gap-2.5">
               <Button type="primary" ghost className="rb:w-[calc(100%-46px)]" onClick={() => handleEdit(item)}>{t('application.configuration')}</Button>
               <Button icon={<DeleteOutlined />} onClick={() => handleDelete(item)}></Button>
             </div>
