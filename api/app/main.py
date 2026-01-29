@@ -16,6 +16,8 @@ from app.core.error_codes import BizCode, HTTP_MAPPING
 from app.core.exceptions import BusinessException
 from app.core.logging_config import LoggingConfig, get_logger
 from app.core.response_utils import fail
+from app.core.models.scripts.loader import load_models
+from app.db import get_db_context
 
 # Initialize logging system
 LoggingConfig.setup_logging()
@@ -46,6 +48,15 @@ async def lifespan(app: FastAPI):
             raise
     else:
         logger.info("自动数据库升级已禁用 (DB_AUTO_UPGRADE=false)")
+
+    # 加载预定义模型
+    logger.info("开始加载预定义模型...")
+    try:
+        with get_db_context() as db:
+            result = load_models(db, silent=True)
+            logger.info(f"预定义模型加载完成: 成功{result['success']}个, 跳过{result['skipped']}个, 失败{result['failed']}个")
+    except Exception as e:
+        logger.warning(f"加载预定义模型时出错: {str(e)}")
 
     logger.info("应用程序启动完成")
     yield
