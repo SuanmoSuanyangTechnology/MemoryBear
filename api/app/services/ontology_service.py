@@ -84,13 +84,14 @@ class OntologyService:
     ) -> OntologyExtractionResponse:
         """执行本体提取
         
-        使用默认配置参数调用OntologyExtractor执行提取,并将结果保存到数据库。
-        如果提供了scene_id,还会将提取的类保存到ontology_class表中。
+        使用默认配置参数调用OntologyExtractor执行提取,并将结果保存到ontology_extraction_result表。
+        提取结果仅返回给前端，不会自动保存到ontology_class表。
+        前端需要调用 /class 接口来保存选中的类型。
         
         Args:
             scenario: 场景描述文本
             domain: 可选的领域提示
-            scene_id: 可选的场景ID,如果提供则将提取的类保存到该场景
+            scene_id: 可选的场景ID,用于权限验证（不再用于自动保存）
             workspace_id: 可选的工作空间ID,用于权限验证
             
         Returns:
@@ -185,43 +186,12 @@ class OntologyService:
                 logger.error(f"Failed to save extraction result: {str(e)}")
                 # 不影响提取结果的返回,继续执行
             
-            # 如果提供了scene_id,将提取的类保存到 ontology_class 表
-            if scene_id:
-                try:
-                    logger.info(f"Saving extracted classes to ontology_class table - scene_id={scene_id}")
-                    saved_count = 0
-                    
-                    for ontology_class in response.classes:
-                        # 使用 name_chinese 作为 class_name，如果没有则使用 name
-                        class_name = ontology_class.name_chinese or ontology_class.name
-                        class_description = ontology_class.description
-                        
-                        # 检查该类型是否已存在（避免重复）
-                        existing_class = self.class_repo.get_by_name(class_name, scene_id)
-                        if existing_class:
-                            logger.debug(f"Class already exists, skipping: {class_name}")
-                            continue
-                        
-                        # 创建类型
-                        class_data = {
-                            "class_name": class_name,
-                            "class_description": class_description
-                        }
-                        
-                        self.class_repo.create(class_data, scene_id)
-                        saved_count += 1
-                        logger.debug(f"Saved class to ontology_class table: {class_name}")
-                    
-                    self.db.commit()
-                    logger.info(
-                        f"Successfully saved {saved_count} classes to ontology_class table "
-                        f"(skipped {len(response.classes) - saved_count} duplicates)"
-                    )
-                    
-                except Exception as e:
-                    self.db.rollback()
-                    logger.error(f"Failed to save classes to ontology_class table: {str(e)}", exc_info=True)
-                    # 不影响提取结果的返回,继续执行
+            # 注释：不再自动保存到 ontology_class 表
+            # 前端将从返回结果中选择需要的类型，然后调用 /class 接口创建
+            logger.info(
+                f"Extraction completed. Classes will be saved to ontology_class "
+                f"via /class endpoint based on user selection"
+            )
             
             total_duration = time.time() - start_time
             
@@ -772,6 +742,99 @@ class OntologyService:
             error_msg = f"Failed to create class: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
+    
+    def create_classes_batch(
+        self,
+        scene_id: Any,
+        classes: List[Dict[str, Optional[str]]],
+        workspace_id: Any
+    ):
+        """批量创建本体类型
+        
+        Args:
+            scene_id: 所属场景ID
+            classes: 类型列表，每个元素包含 class_name 和 class_description
+            workspace_id: 工作空间ID（用于权限验证）
+            
+        Returns:
+            Tuple[List, List[str]]: (成功创建的类型列表, 错误信息列表)
+            
+        Raises:
+            ValueError: 场景不存在或无权限
+            
+        Examples:
+            >>> service = OntologyService(llm_client, db)
+            >>> classes_data = [
+            ...     {"class_name": "患者", "class_description": "医院患者信息"},
+            ...     {"class_name": "医生", "class_description": "医院医生信息"}
+            ... ]
+            >>> created_classes, errors = service.create_classes_batch(
+            ...     scene_id,
+            ...     classes_data,
+            ...     workspace_id
+            ... )
+        """
+        logger.info(
+            f"Batch creating classes - "
+            f"count={len(classes)}, scene_id={scene_id}"
+        )
+        
+        # 检查场景是否存在且属于当前工作空间（只检查一次）
+        scene = self.scene_repo.get_by_id(scene_id)
+        if not scene:
+            logger.warning(f"Scene not found: {scene_id}")
+            raise ValueError("所属场景不存在")
+        
+        if not self.scene_repo.check_ownership(scene_id, workspace_id):
+            logger.warning(
+                f"Permission denied - scene_id={scene_id}, "
+                f"workspace_id={workspace_id}"
+            )
+            raise ValueError("无权限在该场景下创建类型")
+        
+        created_classes = []
+        errors = []
+        
+        for idx, class_data in enumerate(classes):
+            class_name = class_data.get("class_name", "").strip()
+            class_description = class_data.get("class_description")
+            
+            if not class_name:
+                error_msg = f"第 {idx + 1} 个类型名称为空，已跳过"
+                logger.warning(error_msg)
+                errors.append(error_msg)
+                continue
+            
+            try:
+                # 创建类型（不需要再次检查权限）
+                create_data = {
+                    "class_name": class_name,
+                    "class_description": class_description
+                }
+                
+                ontology_class = self.class_repo.create(create_data, scene_id)
+                created_classes.append(ontology_class)
+                logger.info(f"Class created successfully: {class_name}")
+                
+            except Exception as e:
+                error_msg = f"创建类型 '{class_name}' 失败: {str(e)}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+        
+        # 统一提交所有成功的创建
+        try:
+            self.db.commit()
+            logger.info(
+                f"Batch creation completed - "
+                f"success={len(created_classes)}, failed={len(errors)}"
+            )
+        except Exception as e:
+            self.db.rollback()
+            error_msg = f"批量创建提交失败: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg) from e
+        
+        return created_classes, errors
     
     def update_class(
         self,

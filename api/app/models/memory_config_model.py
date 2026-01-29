@@ -80,8 +80,8 @@ class MemoryConfig(Base):
     emotion_min_intensity = Column(Float, default=0.1, comment="最小情绪强度阈值")
     emotion_enable_subject = Column(Boolean, default=True, comment="是否启用主体分类")
     
-    # 在 MemoryConfig 类中添加
-    ontology_id = Column(UUID(as_uuid=True), nullable=True, comment="关联的本体提取结果ID")
+    # 场景配置
+    scene_id = Column(UUID(as_uuid=True), nullable=True, comment="关联的场景ID")
 
     # 时间戳
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")

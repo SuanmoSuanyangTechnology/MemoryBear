@@ -227,9 +227,24 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "lambda_time": config.lambda_time,
                 "lambda_mem": config.lambda_mem,
                 "offset": config.offset,
+                "scene_id": str(config.scene_id) if config.scene_id else None,
                 "created_at": config.created_at,
                 "updated_at": config.updated_at,
             }
+            
+            # 如果有 scene_id，查询对应的 scene_name
+            if config.scene_id:
+                try:
+                    from app.repositories.ontology_scene_repository import OntologySceneRepository
+                    scene_repo = OntologySceneRepository(self.db)
+                    scene = scene_repo.get_by_id(config.scene_id)
+                    config_dict["scene_name"] = scene.scene_name if scene else None
+                except Exception as e:
+                    # 如果查询失败，scene_name 设为 None
+                    config_dict["scene_name"] = None
+            else:
+                config_dict["scene_name"] = None
+            
             data_list.append(config_dict)
 
         # 将 created_at 和 updated_at 转换为 YYYYMMDDHHmmss 格式

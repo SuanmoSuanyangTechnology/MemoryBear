@@ -172,8 +172,8 @@ async def extract_ontology(
     """提取本体类
     
     从场景描述中提取符合OWL规范的本体类。
-    提取结果会保存到ontology_extraction_result表，
-    同时将每个类的name_chinese和description保存到ontology_class表。
+    提取结果会保存到ontology_extraction_result表，并返回给前端。
+    前端可以从返回结果中选择需要的类型，然后调用 /class 接口创建类型。
     
     Args:
         request: 提取请求,包含scenario、domain、llm_id和scene_id
@@ -667,14 +667,14 @@ async def get_scenes(
     workspace_id: Optional[str] = None,
     scene_name: Optional[str] = None,
     page: Optional[int] = None,
-    page_size: Optional[int] = None,
+    pagesize: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """获取场景列表（支持模糊搜索和全量查询，全量查询支持分页）
     
     根据是否提供 scene_name 参数，执行不同的查询：
-    - 提供 scene_name：进行模糊搜索，返回匹配的场景列表（不分页）
+    - 提供 scene_name：进行模糊搜索，返回匹配的场景列表（支持分页）
     - 不提供 scene_name：返回工作空间下的所有场景（支持分页）
     
     支持中文和英文的模糊匹配，不区分大小写。
@@ -682,29 +682,32 @@ async def get_scenes(
     Args:
         workspace_id: 工作空间ID（可选，默认当前用户工作空间）
         scene_name: 场景名称关键词（可选，支持模糊匹配）
-        page: 页码（可选，从1开始，仅在全量查询时有效）
-        page_size: 每页数量（可选，仅在全量查询时有效）
+        page: 页码（可选，从1开始）
+        pagesize: 每页数量（可选）
         db: 数据库会话
         current_user: 当前用户
         
     Returns:
-        ApiResponse: 包含场景列表
+        ApiResponse: 包含场景列表和分页信息
         
     Examples:
-        - 模糊搜索：GET /scenes?workspace_id=xxx&scene_name=医疗
+        - 模糊搜索（不分页）：GET /scenes?workspace_id=xxx&scene_name=医疗
           输入 "医疗" 可以匹配到 "医疗场景"、"智慧医疗"、"医疗管理系统" 等
+        - 模糊搜索（分页）：GET /scenes?workspace_id=xxx&scene_name=医疗&page=1&pagesize=10
+          返回匹配 "医疗" 的第1页，每页10条数据
         - 全量查询（不分页）：GET /scenes?workspace_id=xxx
           返回工作空间下的所有场景
-        - 全量查询（分页）：GET /scenes?workspace_id=xxx&page=1&page_size=10
+        - 全量查询（分页）：GET /scenes?workspace_id=xxx&page=1&pagesize=10
           返回第1页，每页10条数据
           
     Notes:
-        - 分页参数 page 和 page_size 必须同时提供
-        - 分页仅在全量查询时有效，模糊搜索不支持分页
-        - page 从1开始，page_size 必须大于0
+        - 分页参数 page 和 pagesize 必须同时提供
+        - page 从1开始，pagesize 必须大于0
+        - 返回格式：{"items": [...], "page": {"page": 1, "pagesize": 10, "total": 100, "hasnext": true}}
+        - 不分页时，page 字段为 null
     """
     from app.controllers.ontology_secondary_routes import scenes_handler
-    return await scenes_handler(workspace_id, scene_name, page, page_size, db, current_user)
+    return await scenes_handler(workspace_id, scene_name, page, pagesize, db, current_user)
 
 
 # ==================== 本体类型管理接口 ====================
@@ -791,6 +794,7 @@ async def get_classes(
     - 不提供 class_name：返回场景下的所有类型
     
     支持中文和英文的模糊匹配，不区分大小写。
+    返回结果包含场景的基本信息（scene_name 和 scene_description）。
     
     Args:
         scene_id: 场景ID（必填）
@@ -799,13 +803,22 @@ async def get_classes(
         current_user: 当前用户
         
     Returns:
-        ApiResponse: 包含类型列表
+        ApiResponse: 包含类型列表和场景信息
         
     Examples:
         - 模糊搜索：GET /classes?scene_id=xxx&class_name=患者
           输入 "患者" 可以匹配到 "患者"、"患者信息"、"门诊患者" 等
         - 全量查询：GET /classes?scene_id=xxx
           返回场景下的所有类型
+          
+    Response Format:
+        {
+            "total": 3,
+            "scene_id": "xxx",
+            "scene_name": "医疗场景",
+            "scene_description": "用于医疗领域的本体建模",
+            "items": [...]
+        }
     """
     from app.controllers.ontology_secondary_routes import classes_handler
     return await classes_handler(scene_id, class_name, db, current_user)

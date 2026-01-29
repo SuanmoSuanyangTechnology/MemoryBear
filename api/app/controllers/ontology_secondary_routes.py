@@ -19,10 +19,12 @@ from app.models.user_model import User
 from app.schemas.ontology_schemas import (
     SceneResponse,
     SceneListResponse,
+    PaginationInfo,
     ClassCreateRequest,
     ClassUpdateRequest,
     ClassResponse,
     ClassListResponse,
+    ClassBatchCreateResponse,
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.ontology_service import OntologyService
@@ -96,11 +98,31 @@ async def scenes_handler(
         
         # 根据是否提供 scene_name 决定查询方式
         if scene_name and scene_name.strip():
-            # 模糊搜索场景（不分页）
+            # 验证分页参数（模糊搜索也支持分页）
+            if page is not None and page < 1:
+                api_logger.warning(f"Invalid page number: {page}")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "页码必须大于0")
+            
+            if page_size is not None and page_size < 1:
+                api_logger.warning(f"Invalid page_size: {page_size}")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "每页数量必须大于0")
+            
+            # 如果只提供了page或page_size中的一个，返回错误
+            if (page is not None and page_size is None) or (page is None and page_size is not None):
+                api_logger.warning(f"Incomplete pagination params: page={page}, page_size={page_size}")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "分页参数page和page_size必须同时提供")
+            
+            # 模糊搜索场景（支持分页）
             scenes = service.search_scenes_by_name(scene_name.strip(), ws_uuid)
             total = len(scenes)
             
-            # 构建响应（不包含分页信息）
+            # 如果提供了分页参数，进行分页处理
+            if page is not None and page_size is not None:
+                start_idx = (page - 1) * page_size
+                end_idx = start_idx + page_size
+                scenes = scenes[start_idx:end_idx]
+            
+            # 构建响应
             items = []
             for scene in scenes:
                 # 获取前3个class_name作为entity_type
@@ -120,14 +142,24 @@ async def scenes_handler(
                     classes_count=type_num
                 ))
             
-            response = SceneListResponse(
-                total=total,
-                items=items
-            )
+            # 构建响应（包含分页信息）
+            if page is not None and page_size is not None:
+                # 计算是否有下一页
+                hasnext = (page * page_size) < total
+                
+                pagination_info = PaginationInfo(
+                    page=page,
+                    pagesize=page_size,
+                    total=total,
+                    hasnext=hasnext
+                )
+                response = SceneListResponse(items=items, page=pagination_info)
+            else:
+                response = SceneListResponse(items=items)
             
             api_logger.info(
                 f"Scene search completed: found {len(items)} scenes matching '{scene_name}' "
-                f"in workspace {ws_uuid}"
+                f"in workspace {ws_uuid}, total={total}"
             )
         else:
             # 获取所有场景（支持分页）
@@ -169,20 +201,18 @@ async def scenes_handler(
             
             # 构建响应（包含分页信息）
             if page is not None and page_size is not None:
-                import math
-                total_pages = math.ceil(total / page_size) if page_size > 0 else 0
-                response = SceneListResponse(
-                    total=total,
-                    items=items,
+                # 计算是否有下一页
+                hasnext = (page * page_size) < total
+                
+                pagination_info = PaginationInfo(
                     page=page,
-                    page_size=page_size,
-                    total_pages=total_pages
-                )
-            else:
-                response = SceneListResponse(
+                    pagesize=page_size,
                     total=total,
-                    items=items
+                    hasnext=hasnext
                 )
+                response = SceneListResponse(items=items, page=pagination_info)
+            else:
+                response = SceneListResponse(items=items)
             
             api_logger.info(f"Scene list retrieved successfully, count={len(items)}, total={total}")
         
@@ -208,10 +238,15 @@ async def create_class_handler(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建本体类型"""
+    """创建本体类型（统一使用列表形式，支持单个或批量）"""
+    
+    # 根据列表长度判断是单个还是批量
+    count = len(request.classes)
+    mode = "single" if count == 1 else "batch"
+    
     api_logger.info(
-        f"Class creation requested by user {current_user.id}, "
-        f"name={request.class_name}, scene_id={request.scene_id}"
+        f"Class creation ({mode}) requested by user {current_user.id}, "
+        f"scene_id={request.scene_id}, count={count}"
     )
     
     try:
@@ -224,27 +259,73 @@ async def create_class_handler(
         # 创建Service
         service = _get_dummy_ontology_service(db)
         
-        # 创建类型
-        ontology_class = service.create_class(
-            scene_id=request.scene_id,
-            class_name=request.class_name,
-            class_description=request.class_description,
-            workspace_id=workspace_id
-        )
+        # 准备类型数据
+        classes_data = [
+            {
+                "class_name": item.class_name,
+                "class_description": item.class_description
+            }
+            for item in request.classes
+        ]
         
-        # 构建响应
-        response = ClassResponse(
-            class_id=ontology_class.class_id,
-            class_name=ontology_class.class_name,
-            class_description=ontology_class.class_description,
-            scene_id=ontology_class.scene_id,
-            created_at=ontology_class.created_at,
-            updated_at=ontology_class.updated_at
-        )
-        
-        api_logger.info(f"Class created successfully: {ontology_class.class_id}")
-        
-        return success(data=response.model_dump(mode='json'), msg="类型创建成功")
+        if count == 1:
+            # 单个创建
+            class_data = classes_data[0]
+            ontology_class = service.create_class(
+                scene_id=request.scene_id,
+                class_name=class_data["class_name"],
+                class_description=class_data["class_description"],
+                workspace_id=workspace_id
+            )
+            
+            # 构建单个响应
+            response = ClassResponse(
+                class_id=ontology_class.class_id,
+                class_name=ontology_class.class_name,
+                class_description=ontology_class.class_description,
+                scene_id=ontology_class.scene_id,
+                created_at=ontology_class.created_at,
+                updated_at=ontology_class.updated_at
+            )
+            
+            api_logger.info(f"Class created successfully: {ontology_class.class_id}")
+            
+            return success(data=response.model_dump(mode='json'), msg="类型创建成功")
+            
+        else:
+            # 批量创建
+            created_classes, errors = service.create_classes_batch(
+                scene_id=request.scene_id,
+                classes=classes_data,
+                workspace_id=workspace_id
+            )
+            
+            # 构建批量响应
+            items = []
+            for ontology_class in created_classes:
+                items.append(ClassResponse(
+                    class_id=ontology_class.class_id,
+                    class_name=ontology_class.class_name,
+                    class_description=ontology_class.class_description,
+                    scene_id=ontology_class.scene_id,
+                    created_at=ontology_class.created_at,
+                    updated_at=ontology_class.updated_at
+                ))
+            
+            response = ClassBatchCreateResponse(
+                total=len(classes_data),
+                success_count=len(created_classes),
+                failed_count=len(errors),
+                items=items,
+                errors=errors if errors else None
+            )
+            
+            api_logger.info(
+                f"Batch class creation completed: "
+                f"success={len(created_classes)}, failed={len(errors)}"
+            )
+            
+            return success(data=response.model_dump(mode='json'), msg="批量创建完成")
         
     except ValueError as e:
         api_logger.warning(f"Validation error in class creation: {str(e)}")
@@ -414,6 +495,12 @@ async def classes_handler(
         # 创建Service
         service = _get_dummy_ontology_service(db)
         
+        # 获取场景信息
+        scene = service.get_scene_by_id(scene_uuid, workspace_id)
+        if not scene:
+            api_logger.warning(f"Scene not found: {scene_id}")
+            return fail(BizCode.NOT_FOUND, "场景不存在", f"未找到ID为 {scene_id} 的场景")
+        
         # 根据是否提供 class_name 决定查询方式
         if class_name and class_name.strip():
             # 模糊搜索类型
@@ -437,6 +524,8 @@ async def classes_handler(
         response = ClassListResponse(
             total=len(items),
             scene_id=scene_uuid,
+            scene_name=scene.scene_name,
+            scene_description=scene.scene_description,
             items=items
         )
         

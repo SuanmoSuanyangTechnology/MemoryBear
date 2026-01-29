@@ -221,7 +221,7 @@ class MemoryConfigRepository:
         Returns:
             MemoryConfig: 创建的配置对象
         """
-        db_logger.debug(f"创建记忆配置: config_name={params.config_name}, workspace_id={params.workspace_id}")
+        db_logger.debug(f"创建记忆配置: config_name={params.config_name}, workspace_id={params.workspace_id}, scene_id={params.scene_id}")
 
         try:
             db_config = MemoryConfig(
@@ -232,11 +232,12 @@ class MemoryConfigRepository:
                 llm_id=params.llm_id,
                 embedding_id=params.embedding_id,
                 rerank_id=params.rerank_id,
+                scene_id=params.scene_id,
             )
             db.add(db_config)
             db.flush()  # 获取自增ID但不提交事务
 
-            db_logger.info(f"记忆配置已添加到会话: {db_config.config_name} (ID: {db_config.config_id})")
+            db_logger.info(f"记忆配置已添加到会话: {db_config.config_name} (ID: {db_config.config_id}, scene_id: {db_config.scene_id})")
             return db_config
 
         except Exception as e:
@@ -273,6 +274,9 @@ class MemoryConfigRepository:
                 has_update = True
             if update.config_desc is not None:
                 db_config.config_desc = update.config_desc
+                has_update = True
+            if update.scene_id is not None:
+                db_config.scene_id = update.scene_id
                 has_update = True
 
             if not has_update:

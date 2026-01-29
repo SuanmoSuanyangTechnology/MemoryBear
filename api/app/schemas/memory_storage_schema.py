@@ -233,6 +233,9 @@ class ConfigParamsCreate(BaseModel):  # 创建配置参数模型（仅 body，�
     llm_id: Optional[str] = Field(None, description="LLM模型配置ID")
     embedding_id: Optional[str] = Field(None, description="嵌入模型配置ID")
     rerank_id: Optional[str] = Field(None, description="重排序模型配置ID")
+    
+    # 场景配置
+    scene_id: Optional[uuid.UUID] = Field(None, description="关联的场景ID（UUID）")
 
 
 class ConfigParamsDelete(BaseModel):  # 删除配置参数模型（请求体）
@@ -245,6 +248,7 @@ class ConfigUpdate(BaseModel):  # 更新记忆萃取引擎配置参数时使用�
     config_id: Union[uuid.UUID, int, str] = None
     config_name: str = Field("配置名称", description="配置名称（字符串）")
     config_desc: str = Field("配置描述", description="配置描述（字符串）")
+    scene_id: Optional[uuid.UUID] = Field(None, description="关联的场景ID（UUID）")
 
 
 class ConfigUpdateExtracted(BaseModel):  # 更新记忆萃取引擎配置参数时使用的模型
