@@ -84,10 +84,8 @@ async def trigger_forgetting_cycle(
         
         connected_config = get_end_user_connected_config(end_user_id, db)
         config_id = connected_config.get("memory_config_id")
-        config_id = resolve_config_id(int(config_id), db)
+        config_id = resolve_config_id((config_id), db)
 
-
-        
         if config_id is None:
             api_logger.warning(f"终端用户 {end_user_id} 未关联记忆配置")
             return fail(BizCode.INVALID_PARAMETER, f"终端用户 {end_user_id} 未关联记忆配置", "memory_config_id is None")
@@ -199,7 +197,7 @@ async def update_forgetting_config(
         ApiResponse: 包含更新结果的响应
     """
     workspace_id = current_user.current_workspace_id
-    payload.config_id=resolve_config_id(int(payload.config_id), db)
+    payload.config_id=resolve_config_id((payload.config_id), db)
 
     
     # 检查用户是否已选择工作空间
@@ -330,7 +328,7 @@ async def get_forgetting_curve(
         ApiResponse: 包含遗忘曲线数据的响应
     """
     workspace_id = current_user.current_workspace_id
-    request.config_id = resolve_config_id(int(request.config_id), db)
+    request.config_id = resolve_config_id((request.config_id), db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试获取遗忘曲线但未选择工作空间")
