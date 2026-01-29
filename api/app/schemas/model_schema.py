@@ -43,7 +43,7 @@ class ModelConfigCreate(ModelConfigBase):
 class CompositeModelCreate(BaseModel):
     """创建组合模型Schema"""
     name: str = Field(..., description="组合模型名称", max_length=255)
-    type: ModelType = Field(..., description="模型类型")
+    type: Optional[ModelType] = Field(None, description="模型类型")
     logo: Optional[str] = Field(None, description="模型logo图片URL", max_length=255)
     description: Optional[str] = Field(None, description="模型描述")
     config: Optional[Dict[str, Any]] = Field({}, description="模型配置参数")
