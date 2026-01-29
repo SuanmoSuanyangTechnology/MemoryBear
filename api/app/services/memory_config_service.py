@@ -16,7 +16,7 @@ from app.core.validators.memory_config_validators import (
     validate_model_exists_and_active,
 )
 from app.repositories.memory_config_repository import MemoryConfigRepository
-from app.repositories.model_repository import ModelApiKeyRepository, ModelConfigRepository
+from app.repositories.model_repository import ModelApiKeyRepository, ModelConfigRepository, ModelBaseRepository
 from app.schemas.memory_config_schema import (
     ConfigurationError,
     InvalidConfigError,
@@ -35,7 +35,7 @@ def _validate_config_id(config_id, db: Session = None):
     """Validate configuration ID format (supports both UUID and integer)."""
     if isinstance(config_id, uuid.UUID):
         return config_id
-    
+
     if config_id is None:
         raise InvalidConfigError(
             "Configuration ID cannot be None",
@@ -58,18 +58,18 @@ def _validate_config_id(config_id, db: Session = None):
             if result:
                 logger.info(f"Found config_id {result.config_id} for user_id {config_id}")
                 return result.config_id
-        
+
         return config_id
 
     if isinstance(config_id, str):
         config_id_stripped = config_id.strip()
-        
+
         # Try parsing as UUID first
         try:
             return uuid.UUID(config_id_stripped)
         except ValueError:
             pass
-        
+
         # Fall back to integer parsing
         try:
             parsed_id = int(config_id_stripped)
@@ -79,17 +79,17 @@ def _validate_config_id(config_id, db: Session = None):
                     field_name="config_id",
                     invalid_value=config_id,
                 )
-            
+
             # 如果提供了数据库会话，尝试通过 user_id 查询 config_id
             if db is not None:
                 # 查询 user_id 匹配的记录
                 stmt = select(MemoryConfigModel).where(MemoryConfigModel.user_id == str(parsed_id))
                 result = db.execute(stmt).scalars().first()
-                
+
                 if result:
                     logger.info(f"Found config_id {result.config_id} for user_id {parsed_id}")
                     return result.config_id
-            
+
             return parsed_id
         except ValueError:
             raise InvalidConfigError(
@@ -314,16 +314,17 @@ class MemoryConfigService:
 
     def get_model_config(self, model_id: str) -> dict:
         """Get LLM model configuration by ID.
-        
+
         Args:
             model_id: Model ID to look up
-            
+
         Returns:
             Dict with model configuration including api_key, base_url, etc.
         """
         from app.core.config import settings
         from app.models.models_model import ModelApiKey
         from app.services.model_service import ModelConfigService as ModelSvc
+        from app.repositories.model_repository import ModelApiKeyRepository, ModelConfigRepository
         from fastapi import status
         from fastapi.exceptions import HTTPException
 
@@ -331,30 +332,31 @@ class MemoryConfigService:
         if not config:
             logger.warning(f"Model ID {model_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
-        # api_config: ModelApiKey = config.api_keys
+
         api_keys = ModelApiKeyRepository.get_by_model_config(self.db, config.id)
-        # api_config: ModelApiKey = api_keys[0] if api_keys else None
-        model_config_id = api_keys
-        print(100*'LLM',model_config_id)
-        api_base= ModelApiKeyRepository.get_api_key_info_by_model_config(self.db, model_config_id)
-        type = ModelConfigRepository.get_type_by_id(self.db, model_config_id)
+        api_key_config = api_keys[0] if api_keys else None
+        model_id=api_key_config.id
+        api_base = ModelBaseRepository.get_api_key_info_by_model_config(self.db, model_id)
+        type = ModelBaseRepository.get_type_by_id(self.db, model_id)
+
+
         return {
-            "model_name": api_base.get("model_name",None),
-            "provider":api_base.get("provider",None),
-            "api_key":api_base.get("api_key",None),
+            "model_name": api_base.get("model_name", None),
+            "provider": api_base.get("provider", None),
+            "api_key": api_base.get("api_key", None),
             "base_url": api_base.get("api_base", None),
-            "model_config_id":model_config_id,
+            "model_config_id":  config.id,
             "type": type,
-            "timeout": settings.LLM_TIMEOUT,
-            "max_retries": settings.LLM_MAX_RETRIES,
+            "timeout": 120.0,
+            "max_retries": 5,
         }
 
     def get_embedder_config(self, embedding_id: str) -> dict:
         """Get embedding model configuration by ID.
-        
+
         Args:
             embedding_id: Embedding model ID to look up
-            
+
         Returns:
             Dict with embedder configuration including api_key, base_url, etc.
         """
@@ -363,10 +365,6 @@ class MemoryConfigService:
         from fastapi import status
         from fastapi.exceptions import HTTPException
 
-
-        print(100*'-')
-        print(embedding_id)
-        print(100*'-')
         config = ModelSvc.get_model_by_id(db=self.db, model_id=embedding_id)
         if not config:
             logger.warning(f"Embedding model ID {embedding_id} not found")
@@ -374,20 +372,23 @@ class MemoryConfigService:
 
         # api_config: ModelApiKey = config.api_keys[0]
         api_keys = ModelApiKeyRepository.get_by_model_config(self.db, config.id)
-        print(api_keys,30*'+')
-        model_config_id = api_keys
-        api_base = ModelApiKeyRepository.get_api_key_info_by_model_config(self.db, model_config_id)
-        type=ModelConfigRepository.get_type_by_id(self.db, model_config_id)
+        api_key_config = api_keys[0] if api_keys else None
+        model_id = api_key_config.id
+        api_base = ModelBaseRepository.get_api_key_info_by_model_config(self.db, model_id)
+        type = ModelBaseRepository.get_type_by_id(self.db, model_id)
+
         return {
             "model_name": api_base.get("model_name", None),
             "provider": api_base.get("provider", None),
             "api_key": api_base.get("api_key", None),
             "base_url": api_base.get("api_base", None),
-            "model_config_id": model_config_id,
-            "type":type,
+            "model_config_id": config.id,
+            "type": type,
             "timeout": 120.0,
             "max_retries": 5,
         }
+
+
     @staticmethod
     def get_pipeline_config(memory_config: MemoryConfig):
         """Build ExtractionPipelineConfig from MemoryConfig.
