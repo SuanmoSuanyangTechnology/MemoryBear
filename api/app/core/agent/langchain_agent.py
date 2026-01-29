@@ -246,7 +246,6 @@ class LangChainAgent:
                 logger.info(f'[WRITE] Task result - user={actual_end_user_id}, status={write_status}')
         finally:
             db.close()
-
     async def chat(
             self,
             message: str,
