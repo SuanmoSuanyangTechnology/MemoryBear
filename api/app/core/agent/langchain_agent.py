@@ -177,7 +177,6 @@ class LangChainAgent:
     #         messagss_list.append(f'用户:{query}。AI回复:{aimessages}')
     #         retrieved_content.append({query: aimessages})
     #     return messagss_list,retrieved_content
-
     async def write(self, storage_type, end_user_id, user_message, ai_message, user_rag_memory_id, actual_end_user_id, actual_config_id):
         """
         写入记忆（支持结构化消息）
@@ -202,6 +201,7 @@ class LangChainAgent:
         db = next(get_db())
         try:
             actual_config_id=resolve_config_id(actual_config_id, db)
+
             if storage_type == "rag":
                 # RAG 模式：组合消息为字符串格式（保持原有逻辑）
                 combined_message = f"user: {user_message}\nassistant: {ai_message}"
