@@ -328,7 +328,7 @@ async def get_forgetting_curve(
         ApiResponse: 包含遗忘曲线数据的响应
     """
     workspace_id = current_user.current_workspace_id
-    request.config_id = resolve_config_id(int(request.config_id), db)
+    request.config_id = resolve_config_id((request.config_id), db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试获取遗忘曲线但未选择工作空间")
