@@ -110,7 +110,7 @@ async def scenes_handler(
             # 如果只提供了page或page_size中的一个，返回错误
             if (page is not None and page_size is None) or (page is None and page_size is not None):
                 api_logger.warning(f"Incomplete pagination params: page={page}, page_size={page_size}")
-                return fail(BizCode.BAD_REQUEST, "请求参数无效", "分页参数page和page_size必须同时提供")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "分页参数page和pagesize必须同时提供")
             
             # 模糊搜索场景（支持分页）
             scenes = service.search_scenes_by_name(scene_name.strip(), ws_uuid)
@@ -175,7 +175,7 @@ async def scenes_handler(
             # 如果只提供了page或page_size中的一个，返回错误
             if (page is not None and page_size is None) or (page is None and page_size is not None):
                 api_logger.warning(f"Incomplete pagination params: page={page}, page_size={page_size}")
-                return fail(BizCode.BAD_REQUEST, "请求参数无效", "分页参数page和page_size必须同时提供")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "分页参数page和pagesize必须同时提供")
             
             scenes, total = service.list_scenes(ws_uuid, page, page_size)
             
@@ -453,6 +453,65 @@ async def delete_class_handler(
     except Exception as e:
         api_logger.error(f"Unexpected error in class deletion: {str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "类型删除失败", str(e))
+
+
+async def get_class_handler(
+    class_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取单个本体类型"""
+    api_logger.info(
+        f"Get class requested by user {current_user.id}, "
+        f"class_id={class_id}"
+    )
+    
+    try:
+        # 验证UUID格式
+        try:
+            class_uuid = UUID(class_id)
+        except ValueError:
+            api_logger.warning(f"Invalid class_id format: {class_id}")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的类型ID格式")
+        
+        # 获取当前工作空间ID
+        workspace_id = current_user.current_workspace_id
+        if not workspace_id:
+            api_logger.warning(f"User {current_user.id} has no current workspace")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        # 创建Service
+        service = _get_dummy_ontology_service(db)
+        
+        # 获取类型（会抛出ValueError如果不存在）
+        ontology_class = service.get_class_by_id(class_uuid, workspace_id)
+        
+        # 构建响应
+        response = ClassResponse(
+            class_id=ontology_class.class_id,
+            class_name=ontology_class.class_name,
+            class_description=ontology_class.class_description,
+            scene_id=ontology_class.scene_id,
+            created_at=ontology_class.created_at,
+            updated_at=ontology_class.updated_at
+        )
+        
+        api_logger.info(f"Class retrieved successfully: {class_id}")
+        
+        return success(data=response.model_dump(mode='json'), msg="查询成功")
+        
+    except ValueError as e:
+        # 类型不存在或无权限访问
+        api_logger.warning(f"Validation error in get class: {str(e)}")
+        return fail(BizCode.NOT_FOUND, "请求参数无效", str(e))
+        
+    except RuntimeError as e:
+        api_logger.error(f"Runtime error in get class: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
+        
+    except Exception as e:
+        api_logger.error(f"Unexpected error in get class: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
 
 
 async def classes_handler(

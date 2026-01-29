@@ -15,8 +15,8 @@ def success(data: Optional[Any] = None, msg: str = "OK") -> dict:
     }
 
 
-def fail(code: int, msg: str, error: str = "", data: Optional[Any] = None) -> dict:
-    """失败响应（返回字典格式）
+def fail(code: int, msg: str, error: str = "", data: Optional[Any] = None) -> JSONResponse:
+    """失败响应（返回JSONResponse，包含正确的HTTP状态码）
     
     Args:
         code: BizCode 业务错误码
@@ -25,12 +25,20 @@ def fail(code: int, msg: str, error: str = "", data: Optional[Any] = None) -> di
         data: 额外数据
         
     Returns:
-        dict: 包含错误信息的字典
+        JSONResponse: 包含错误信息和正确HTTP状态码的响应
     """
-    return {
+    # 根据业务错误码获取对应的HTTP状态码
+    http_status = HTTP_MAPPING.get(code, 500)  # 默认500
+    
+    response_body = {
         "code": code,
         "msg": msg,
         "data": data if data is not None else {},
         "error": error,
         "time": int(time.time() * 1000),
     }
+    
+    return JSONResponse(
+        status_code=http_status,
+        content=response_body
+    )
