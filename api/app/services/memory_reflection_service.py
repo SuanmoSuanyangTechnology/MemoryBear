@@ -50,7 +50,6 @@ class WorkspaceAppService:
         for app in apps:
             app_info = self._build_app_info(app)
             self._process_app_releases(app, app_info)
-            breakpoint()
             self._process_end_users(app, app_info)
             apps_detailed_info.append(app_info)
         
