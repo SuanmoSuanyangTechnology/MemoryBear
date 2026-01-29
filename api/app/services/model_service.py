@@ -382,7 +382,7 @@ class ModelConfigService:
             for model_config in api_key.model_configs:
                 compatible_types = {ModelType.LLM, ModelType.CHAT}
                 config_type = model_config.type
-                request_type = model_data.type
+                request_type = existing_model.type
                 
                 if not (config_type == request_type or 
                         (config_type in compatible_types and request_type in compatible_types)):
@@ -393,7 +393,7 @@ class ModelConfigService:
         
         # 更新基本信息
         existing_model.name = model_data.name
-        existing_model.type = model_data.type
+        # existing_model.type = model_data.type
         existing_model.logo = model_data.logo
         existing_model.description = model_data.description
         existing_model.config = model_data.config
