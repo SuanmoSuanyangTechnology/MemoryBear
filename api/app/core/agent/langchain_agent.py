@@ -28,6 +28,8 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
+from app.utils.config_utils import resolve_config_id
+
 logger = get_business_logger()
 
 
@@ -196,6 +198,9 @@ class LangChainAgent:
           2. 如果只有 user_message：创建单条用户消息 [user]（用于历史记忆场景）
           3. 每条消息会被转换为独立的 Chunk，保留 speaker 字段
         """
+
+        db = next(get_db())
+        actual_config_id=resolve_config_id(actual_config_id, db)
         if storage_type == "rag":
             # RAG 模式：组合消息为字符串格式（保持原有逻辑）
             combined_message = f"user: {user_message}\nassistant: {ai_message}"
