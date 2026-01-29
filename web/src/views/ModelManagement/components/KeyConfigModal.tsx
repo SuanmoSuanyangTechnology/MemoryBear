@@ -35,12 +35,12 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
         updateProviderApiKeys({
           ...values,
           provider: model.provider
-        }).then(() => {
+        }).then((res) => {
             if (refresh) {
               refresh();
             }
             handleClose()
-            message.success(t('common.updateSuccess'))
+            message.success(res as string)
           })
           .catch(() => {
             setLoading(false)

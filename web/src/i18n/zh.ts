@@ -1112,7 +1112,10 @@ export const zh = {
       tags: '标签',
       createCustomModel: '添加自定义模型',
       edit: '编辑',
-      selectOneTip: '模型未配置API KEY，请先在模型广场配置',
+      selectOneTip: '模型未配置API KEY，请先在模型列表配置',
+      load_balance_strategy: '并发策略',
+      round_robin: '顺序执行 - 按顺序依次调用每个模型',
+      none: '无',
 
       api_key: 'API KEY',
       api_base: 'API Base URL',
