@@ -271,7 +271,7 @@ async def chat(
             user_id=new_end_user.id,  # 转换为字符串
             variables=payload.variables,
             config=config,
-            web_search=payload.web_search,
+            web_search=web_search,
             memory=payload.memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
