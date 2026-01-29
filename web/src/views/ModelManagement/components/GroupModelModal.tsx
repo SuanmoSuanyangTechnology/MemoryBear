@@ -75,8 +75,9 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
 
   const handleUpdate = (data: CompositeModelForm) => {
     setLoading(true)
+    const { type, ...rest } = data
     const res = isEdit
-      ? updateCompositeModel(model.id, data)
+      ? updateCompositeModel(model.id, { ...rest })
       : addCompositeModel(data)
 
     res.then(() => {
