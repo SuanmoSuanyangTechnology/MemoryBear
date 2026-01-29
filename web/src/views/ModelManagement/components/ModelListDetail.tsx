@@ -1,4 +1,4 @@
-import { useState, useImperativeHandle, forwardRef, useRef } from 'react';
+import { useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Switch, Row, Col, Space, Tooltip } from 'antd'
 
@@ -8,8 +8,9 @@ import RbCard from '@/components/RbCard/Card'
 import Tag from '@/components/Tag';
 import PageEmpty from '@/components/Empty/PageEmpty';
 import MultiKeyConfigModal from './MultiKeyConfigModal'
-import { getModelNewList, updateModelStatus } from '@/api/models'
+import { getModelNewList, updateModelStatus, modelTypeUrl } from '@/api/models'
 import { getLogoUrl } from '../utils'
+import CustomSelect from '@/components/CustomSelect'
 
 interface ModelListDetailProps {
   refresh?: () => void;
@@ -22,8 +23,10 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
   const [list, setList] = useState<ModelListItem[]>([])
   const multiKeyConfigModalRef = useRef<MultiKeyConfigModalRef>(null)
   const [loading, setLoading] = useState(false)
+  const [type, setType] = useState<string | undefined | null>(null)
 
   const handleOpen = (vo: ProviderModelItem) => {
+    setType(null)
     setOpen(true)
     getData(vo)
   }
@@ -53,16 +56,25 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
   }
 
   const handleClose = () => {
+    setType(null)
     setOpen(false)
     refresh?.()
   }
   const handleRefresh = () => {
     getData(data)
   }
+  const handleTypeChange = (value: string) => {
+    setType(value)
+  }
 
   useImperativeHandle(ref, () => ({
       handleOpen,
   }));
+
+  const filterList = useMemo(() => {
+    if (!type) return list
+    return list.filter(vo => vo.type === type)
+  }, [type, list])
 
   return (
     <RbDrawer
@@ -70,10 +82,24 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
       open={open}
       onClose={handleClose}
     >
-      {list.length === 0 
+      <Row gutter={16}>
+        <Col span={12}>
+          <CustomSelect
+            value={type}
+            url={modelTypeUrl}
+            hasAll={false}
+            format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
+            onChange={handleTypeChange}
+            className="rb:w-full"
+            allowClear={true}
+            placeholder={t('modelNew.type')}
+          />
+        </Col>
+      </Row>
+      {filterList.length === 0 
         ? <PageEmpty />
-        : <div className="rb:grid rb:grid-cols-2 rb:gap-4">
-          {list.map(item => (
+        : <div className="rb:grid rb:grid-cols-2 rb:gap-4 rb:mt-3">
+          {filterList.map(item => (
             <RbCard
               key={item.id}
               title={item.name}
