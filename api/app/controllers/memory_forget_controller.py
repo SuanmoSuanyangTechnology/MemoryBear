@@ -197,7 +197,7 @@ async def update_forgetting_config(
         ApiResponse: 包含更新结果的响应
     """
     workspace_id = current_user.current_workspace_id
-    payload.config_id=resolve_config_id(int(payload.config_id), db)
+    payload.config_id=resolve_config_id((payload.config_id), db)
 
     
     # 检查用户是否已选择工作空间
