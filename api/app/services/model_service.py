@@ -457,9 +457,11 @@ class ModelApiKeyService:
         return ModelApiKeyRepository.get_by_model_config(db, model_config_id, is_active)
 
     @staticmethod
-    async def create_api_key_by_provider(db: Session, data: model_schema.ModelApiKeyCreateByProvider) -> List[ModelApiKey]:
+    async def create_api_key_by_provider(db: Session, data: model_schema.ModelApiKeyCreateByProvider) -> tuple[
+        list[Any], list[Any]]:
         """根据provider为多个ModelConfig创建API Key"""
         created_keys = []
+        failed_models = []  # 记录验证失败的模型
         
         for model_config_id in data.model_config_ids:
             model_config = ModelConfigRepository.get_by_id(db, model_config_id)
@@ -505,10 +507,12 @@ class ModelApiKeyService:
                 test_message="Hello"
             )
             if not validation_result["valid"]:
-                raise BusinessException(
-                    f"模型配置验证失败: {validation_result['error']}",
-                    BizCode.INVALID_PARAMETER
-                )
+                # 记录验证失败的模型，但不抛出异常
+                failed_models.append({
+                    "model_name": model_name,
+                    "error": validation_result["error"]
+                })
+                continue
             
             # 创建API Key
             api_key_data = ModelApiKeyCreate(
@@ -530,7 +534,7 @@ class ModelApiKeyService:
             for key in created_keys:
                 db.refresh(key)
         
-        return created_keys
+        return created_keys, failed_models
 
     @staticmethod
     async def create_api_key(db: Session, api_key_data: ModelApiKeyCreate) -> ModelApiKey:
