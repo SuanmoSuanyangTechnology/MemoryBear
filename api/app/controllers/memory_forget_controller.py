@@ -84,10 +84,8 @@ async def trigger_forgetting_cycle(
         
         connected_config = get_end_user_connected_config(end_user_id, db)
         config_id = connected_config.get("memory_config_id")
-        config_id = resolve_config_id(int(config_id), db)
+        config_id = resolve_config_id((config_id), db)
 
-
-        
         if config_id is None:
             api_logger.warning(f"终端用户 {end_user_id} 未关联记忆配置")
             return fail(BizCode.INVALID_PARAMETER, f"终端用户 {end_user_id} 未关联记忆配置", "memory_config_id is None")
