@@ -50,7 +50,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
             form.resetFields();
             getData(model)
           })
-          .catch(() => {
+          .finally(() => {
             setLoading(false)
           });
       })
