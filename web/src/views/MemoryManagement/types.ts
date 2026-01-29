@@ -3,6 +3,7 @@ export interface MemoryFormData {
   config_id?: number;
   config_name: string;
   config_desc?: string;
+  scene_id?: string;
 }
 
   // 内存数据类型
@@ -30,6 +31,8 @@ export interface Memory {
   updated_at: string;
   config_desc: string;
   workspace_id: string;
+  scene_id: string;
+  scene_name: string;
   [key: string]: string | number | boolean;
 }
 // 定义组件暴露的方法接口
