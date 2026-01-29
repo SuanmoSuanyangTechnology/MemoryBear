@@ -7,10 +7,11 @@ Routes:
     GET /memory/config/emotion - 获取情绪引擎配置
     POST /memory/config/emotion - 更新情绪引擎配置
 """
+import uuid
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Union
 from sqlalchemy.orm import Session
 from uuid import UUID
 
@@ -38,7 +39,7 @@ class EmotionConfigQuery(BaseModel):
 
 class EmotionConfigUpdate(BaseModel):
     """情绪配置更新请求模型"""
-    config_id: UUID = Field(..., description="配置ID")
+    config_id: Union[uuid.UUID, int, str]= Field(..., description="配置ID")
     emotion_enabled: bool = Field(..., description="是否启用情绪提取")
     emotion_model_id: Optional[str] = Field(None, description="情绪分析专用模型ID")
     emotion_extract_keywords: bool = Field(..., description="是否提取情绪关键词")
@@ -159,6 +160,7 @@ def update_emotion_config(
             }
         }
     """
+    config.config_id=resolve_config_id(config.config_id, db)
     try:
         api_logger.info(
             f"用户 {current_user.username} 请求更新情绪配置",
