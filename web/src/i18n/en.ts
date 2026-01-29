@@ -546,7 +546,10 @@ export const en = {
       tags: 'Tags',
       createCustomModel: 'Add Custom Model',
       edit: 'Edit',
-      selectOneTip: 'Model API KEY not configured, please configure in Model Plaza first',
+      selectOneTip: 'Model API KEY not configured, please configure it in the model list first',
+      load_balance_strategy: 'Concurrency Strategy',
+      round_robin: 'Sequential Execution - Call each model in order',
+      none: 'None',
 
       api_key: 'API KEY',
       api_base: 'API Base URL',

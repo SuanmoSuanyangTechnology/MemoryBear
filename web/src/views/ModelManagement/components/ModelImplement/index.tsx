@@ -24,9 +24,6 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
     }
     subModelModalRef.current?.handleOpen()
   }
-  const handleEdit = (list: ModelList[], provider: string ) => {
-    subModelModalRef.current?.handleOpen(list, provider)
-  }
   const handleDelete = (provider: string) => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: provider }),
@@ -78,16 +75,11 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
             <div key={provider} className="rb:mb-4 last:rb:mb-0">
               <Flex justify="space-between" align="center" className="rb:mb-2 last:rb:mb-0">
                 <div className="rb:font-medium">{[...new Set(items?.map((vo) => vo.model_name))].join(', ')}</div>
-                <Space>
-                  <div
-                    className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]"
-                    onClick={() => handleEdit(items, provider)}
-                  ></div>
-                  <div
-                    className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
-                    onClick={() => handleDelete(provider)}
-                  ></div>
-                </Space>
+
+                <div
+                  className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
+                  onClick={() => handleDelete(provider)}
+                ></div>
               </Flex>
               <Tag className="rb:mb-2">{t(`modelNew.${provider}`)}</Tag>
             </div>
@@ -98,6 +90,7 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
         ref={subModelModalRef}
         refresh={handleRefresh}
         type={type}
+        groupedByProvider={groupedByProvider}
       />
     </div>
   )
