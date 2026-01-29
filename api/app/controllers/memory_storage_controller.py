@@ -233,7 +233,7 @@ def update_config_extracted(
 
 @router.get("/read_config_extracted", response_model=ApiResponse) # 通过查询参数读取某条配置（固定路径） 没有意义的话就删除
 def read_config_extracted(
-    config_id: UUID,
+    config_id: UUID | int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     ) -> dict:
