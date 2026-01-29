@@ -28,6 +28,8 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
+from app.utils.config_utils import resolve_config_id
+
 logger = get_business_logger()
 
 
@@ -175,7 +177,6 @@ class LangChainAgent:
     #         messagss_list.append(f'用户:{query}。AI回复:{aimessages}')
     #         retrieved_content.append({query: aimessages})
     #     return messagss_list,retrieved_content
-
     async def write(self, storage_type, end_user_id, user_message, ai_message, user_rag_memory_id, actual_end_user_id, actual_config_id):
         """
         写入记忆（支持结构化消息）
@@ -196,48 +197,54 @@ class LangChainAgent:
           2. 如果只有 user_message：创建单条用户消息 [user]（用于历史记忆场景）
           3. 每条消息会被转换为独立的 Chunk，保留 speaker 字段
         """
-        if storage_type == "rag":
-            # RAG 模式：组合消息为字符串格式（保持原有逻辑）
-            combined_message = f"user: {user_message}\nassistant: {ai_message}"
-            await write_rag(end_user_id, combined_message, user_rag_memory_id)
-            logger.info(f'RAG_Agent:{end_user_id};{user_rag_memory_id}')
-        else:
-            # Neo4j 模式：使用结构化消息列表
-            structured_messages = []
 
-            # 始终添加用户消息（如果不为空）
-            if user_message:
-                structured_messages.append({"role": "user", "content": user_message})
+        db = next(get_db())
+        try:
+            actual_config_id=resolve_config_id(actual_config_id, db)
 
-            # 只有当 AI 回复不为空时才添加 assistant 消息
-            if ai_message:
-                structured_messages.append({"role": "assistant", "content": ai_message})
+            if storage_type == "rag":
+                # RAG 模式：组合消息为字符串格式（保持原有逻辑）
+                combined_message = f"user: {user_message}\nassistant: {ai_message}"
+                await write_rag(end_user_id, combined_message, user_rag_memory_id)
+                logger.info(f'RAG_Agent:{end_user_id};{user_rag_memory_id}')
+            else:
+                # Neo4j 模式：使用结构化消息列表
+                structured_messages = []
 
-            # 如果没有消息，直接返回
-            if not structured_messages:
-                logger.warning(f"No messages to write for user {actual_end_user_id}")
-                return
+                # 始终添加用户消息（如果不为空）
+                if user_message:
+                    structured_messages.append({"role": "user", "content": user_message})
 
-            # 调用 Celery 任务，传递结构化消息列表
-            # 数据流：
-            # 1. structured_messages 传递给 write_message_task
-            # 2. write_message_task 调用 memory_agent_service.write_memory
-            # 3. write_memory 调用 write_tools.write，传递 messages 参数
-            # 4. write_tools.write 调用 get_chunked_dialogs，传递 messages 参数
-            # 5. get_chunked_dialogs 为每条消息创建独立的 Chunk，设置 speaker 字段
-            # 6. 每个 Chunk 保存到 Neo4j，包含 speaker 字段
-            logger.info(f"[WRITE] Submitting Celery task - user={actual_end_user_id}, messages={len(structured_messages)}, config={actual_config_id}")
-            write_id = write_message_task.delay(
-                actual_end_user_id,  # end_user_id: 用户ID
-                structured_messages,  # message: 结构化消息列表 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
-                actual_config_id,    # config_id: 配置ID
-                storage_type,        # storage_type: "neo4j"
-                user_rag_memory_id   # user_rag_memory_id: RAG记忆ID（Neo4j模式下不使用）
-            )
-            logger.info(f"[WRITE] Celery task submitted - task_id={write_id}")
-            write_status = get_task_memory_write_result(str(write_id))
-            logger.info(f'[WRITE] Task result - user={actual_end_user_id}, status={write_status}')
+                # 只有当 AI 回复不为空时才添加 assistant 消息
+                if ai_message:
+                    structured_messages.append({"role": "assistant", "content": ai_message})
 
+                # 如果没有消息，直接返回
+                if not structured_messages:
+                    logger.warning(f"No messages to write for user {actual_end_user_id}")
+                    return
+
+                # 调用 Celery 任务，传递结构化消息列表
+                # 数据流：
+                # 1. structured_messages 传递给 write_message_task
+                # 2. write_message_task 调用 memory_agent_service.write_memory
+                # 3. write_memory 调用 write_tools.write，传递 messages 参数
+                # 4. write_tools.write 调用 get_chunked_dialogs，传递 messages 参数
+                # 5. get_chunked_dialogs 为每条消息创建独立的 Chunk，设置 speaker 字段
+                # 6. 每个 Chunk 保存到 Neo4j，包含 speaker 字段
+                logger.info(f"[WRITE] Submitting Celery task - user={actual_end_user_id}, messages={len(structured_messages)}, config={actual_config_id}")
+                write_id = write_message_task.delay(
+                    actual_end_user_id,  # end_user_id: 用户ID
+                    structured_messages,  # message: 结构化消息列表 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+                    actual_config_id,    # config_id: 配置ID
+                    storage_type,        # storage_type: "neo4j"
+                    user_rag_memory_id   # user_rag_memory_id: RAG记忆ID（Neo4j模式下不使用）
+                )
+                logger.info(f"[WRITE] Celery task submitted - task_id={write_id}")
+                write_status = get_task_memory_write_result(str(write_id))
+                logger.info(f'[WRITE] Task result - user={actual_end_user_id}, status={write_status}')
+        finally:
+            db.close()
     async def chat(
             self,
             message: str,

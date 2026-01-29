@@ -89,7 +89,7 @@ const ModelSquareDetail = forwardRef<ModelSquareDetailRef, ModelSquareDetailProp
                       {!item.is_official && <Button type="primary" disabled={item.is_deprecated} onClick={() => handleEdit(item)}>{t('modelNew.edit')}</Button>}
                       {item.is_added
                         ? <Button type="primary" disabled>{t('modelNew.added')}</Button>
-                        : <Button type="primary" ghost disabled={item.is_deprecated} onClick={() => handleAdd(item)}>+ {t('common.add')}</Button>
+                        : <Button type="primary" ghost disabled={item.is_deprecated} onClick={() => handleAdd(item)}>{item.is_deprecated ? t('modelNew.deprecated') : `+ ${t('common.add')}`}</Button>
                       }
                     </Space>
                   </Flex>

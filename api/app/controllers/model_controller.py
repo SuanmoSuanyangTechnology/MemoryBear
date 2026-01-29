@@ -31,7 +31,8 @@ def get_model_types():
 
 @router.get("/provider", response_model=ApiResponse)
 def get_model_providers():
-    return success(msg="获取模型提供商成功", data=list(ModelProvider))
+    providers = [p for p in ModelProvider if p != ModelProvider.COMPOSITE]
+    return success(msg="获取模型提供商成功", data=providers)
 
 @router.get("/strategy", response_model=ApiResponse)
 def get_model_strategies():
@@ -151,7 +152,7 @@ def get_model_plaza_list(
     type: Optional[ModelType] = Query(None, description="模型类型"),
     provider: Optional[ModelProvider] = Query(None, description="供应商"),
     is_official: Optional[bool] = Query(None, description="是否官方模型"),
-    is_deprecated: Optional[bool] = Query(False, description="是否弃用"),
+    is_deprecated: Optional[bool] = Query(None, description="是否弃用"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -467,11 +468,13 @@ async def create_model_api_key_by_provider(
             priority=api_key_data.priority,
             model_config_ids=model_config_ids
         )
-        created_keys = await ModelApiKeyService.create_api_key_by_provider(db=db, data=create_data)
+        created_keys, failed_models = await ModelApiKeyService.create_api_key_by_provider(db=db, data=create_data)
         
         api_logger.info(f"API Key创建成功: 关联{len(created_keys)}个模型")
         # result_list = [model_schema.ModelApiKey.model_validate(key) for key in created_keys]
-        return success(data=f"成功为 {len(created_keys)} 个模型创建API Key", msg=f"成功为 {len(created_keys)} 个模型创建API Key")
+        result = "API Key已存在" if len(created_keys) == 0 and len(failed_models) == 0 else \
+            f"成功为 {len(created_keys)} 个模型创建API Key, 失败模型列表{failed_models}"
+        return success(data=result, msg=f"成功为 {len(created_keys)} 个模型创建API Key")
     except Exception as e:
         api_logger.error(f"创建API Key失败: {str(e)}")
         raise
