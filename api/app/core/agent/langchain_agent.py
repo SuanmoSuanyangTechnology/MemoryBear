@@ -403,7 +403,6 @@ class LangChainAgent:
                     db.close()
             except Exception as e:
                 logger.warning(f"Failed to get db session: {e}")
-
         history_term_memory_result = await self.term_memory_redis_read(end_user_id)
         history_term_memory = history_term_memory_result[0]
         if memory_flag:
