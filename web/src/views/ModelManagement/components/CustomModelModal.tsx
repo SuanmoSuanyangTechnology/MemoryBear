@@ -44,7 +44,8 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   };
   const handleUpdate = (data: CustomModelForm) => {
     setLoading(true)
-    const res = isEdit ? updateCustomModel(model.id, data) : addCustomModel(data)
+    const { type, provider, ...rest} = data
+    const res = isEdit ? updateCustomModel(model.id, rest) : addCustomModel(data)
 
     res.then(() => {
       refresh && refresh()

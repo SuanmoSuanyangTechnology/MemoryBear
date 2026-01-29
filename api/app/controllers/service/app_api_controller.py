@@ -235,11 +235,11 @@ async def chat(
 
                     message=payload.message,
                     conversation_id=conversation.id,  # 使用已创建的会话 ID
-                    user_id=new_end_user.id,  # 转换为字符串
+                    user_id=end_user_id,  # 转换为字符串
                     variables=payload.variables,
                     config=config,
                     web_search=web_search,
-                    memory=payload.memory,
+                    memory=memory,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
                     app_id=app.id,
@@ -268,11 +268,11 @@ async def chat(
 
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
-            user_id=new_end_user.id,  # 转换为字符串
+            user_id=end_user_id,  # 转换为字符串
             variables=payload.variables,
             config=config,
             web_search=web_search,
-            memory=payload.memory,
+            memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
             app_id=app.id,
