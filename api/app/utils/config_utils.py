@@ -31,6 +31,7 @@ def resolve_config_id(config_id: UUID | int, db: Session) -> UUID:
 
         if not memory_config:
             raise ValueError(f"未找到 config_id_old={config_id} 对应的配置")
+        return memory_config.config_id
     if isinstance(config_id, int):
         memory_config = db.query(MemoryConfig).filter(
             MemoryConfig.config_id_old == config_id
