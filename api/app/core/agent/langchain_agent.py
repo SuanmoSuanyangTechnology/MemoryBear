@@ -177,7 +177,6 @@ class LangChainAgent:
     #         messagss_list.append(f'用户:{query}。AI回复:{aimessages}')
     #         retrieved_content.append({query: aimessages})
     #     return messagss_list,retrieved_content
-
     async def write(self, storage_type, end_user_id, user_message, ai_message, user_rag_memory_id, actual_end_user_id, actual_config_id):
         """
         写入记忆（支持结构化消息）
