@@ -1129,6 +1129,7 @@ export const zh = {
       add: '添加',
       item: '个',
       apiKeyNum: '个 API Key',
+      official: '官方',
 
       llm: 'LLM',
       chat: 'Chat',
