@@ -822,3 +822,39 @@ async def get_classes(
     """
     from app.controllers.ontology_secondary_routes import classes_handler
     return await classes_handler(scene_id, class_name, db, current_user)
+
+
+@router.get("/class/{class_id}", response_model=ApiResponse)
+async def get_class(
+    class_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取单个本体类型
+    
+    根据类型ID获取类型的详细信息，只能查询当前工作空间下场景的类型。
+    
+    Args:
+        class_id: 类型ID
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含类型详细信息
+        
+    Response Format:
+        {
+            "code": 0,
+            "msg": "查询成功",
+            "data": {
+                "class_id": "xxx",
+                "class_name": "患者",
+                "class_description": "在医疗机构中接受诊疗的个体",
+                "scene_id": "xxx",
+                "created_at": "2026-01-29T10:00:00",
+                "updated_at": "2026-01-29T10:00:00"
+            }
+        }
+    """
+    from app.controllers.ontology_secondary_routes import get_class_handler
+    return await get_class_handler(class_id, db, current_user)
