@@ -21,8 +21,17 @@ def resolve_config_id(config_id: UUID | int, db: Session) -> UUID:
     Raises:
         ValueError: 当找不到对应的配置时
     """
+    from app.models.memory_config_model import MemoryConfig
+    if  isinstance(config_id, UUID):
+        return config_id
+    if isinstance(config_id, str) and len(config_id)<=6:
+        memory_config = db.query(MemoryConfig).filter(
+            MemoryConfig.config_id_old == config_id
+        ).first()
+
+        if not memory_config:
+            raise ValueError(f"未找到 config_id_old={config_id} 对应的配置")
     if isinstance(config_id, int):
-        from app.models.memory_config_model import MemoryConfig
         memory_config = db.query(MemoryConfig).filter(
             MemoryConfig.config_id_old == config_id
         ).first()
