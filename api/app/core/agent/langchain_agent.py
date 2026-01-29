@@ -198,6 +198,7 @@ class LangChainAgent:
           2. 如果只有 user_message：创建单条用户消息 [user]（用于历史记忆场景）
           3. 每条消息会被转换为独立的 Chunk，保留 speaker 字段
         """
+
         db = next(get_db())
         actual_config_id=resolve_config_id(actual_config_id, db)
         if storage_type == "rag":
