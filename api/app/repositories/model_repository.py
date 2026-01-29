@@ -324,6 +324,34 @@ class ModelConfigRepository:
             db_logger.error(f"获取模型统计信息失败: {str(e)}")
             raise
 
+    @staticmethod
+    def get_type_by_id(db: Session, model_config_id: uuid.UUID) -> Optional[str]:
+        """根据模型配置ID获取模型类型
+        
+        Args:
+            db: 数据库会话
+            model_config_id: 模型配置ID (model_configs 表的 id 字段)
+            
+        Returns:
+            模型类型字符串 (例如: "llm", "embedding", "rerank")，如果未找到则返回 None
+        """
+        db_logger.debug(f"根据ID获取模型类型: model_config_id={model_config_id}")
+        
+        try:
+            model = db.query(ModelConfig.type).filter(ModelConfig.id == model_config_id).first()
+            
+            if model:
+                model_type = model[0]  # query 返回的是 tuple
+                db_logger.debug(f"模型类型获取成功: model_config_id={model_config_id}, type={model_type}")
+                return model_type
+            else:
+                db_logger.warning(f"模型配置不存在: model_config_id={model_config_id}")
+                return None
+                
+        except Exception as e:
+            db_logger.error(f"根据ID获取模型类型失败: model_config_id={model_config_id} - {str(e)}")
+            raise
+
 
 class ModelApiKeyRepository:
     """模型API Key Repository"""
@@ -342,21 +370,21 @@ class ModelApiKeyRepository:
             db_logger.error(f"根据ID查询API Key失败: api_key_id={api_key_id} - {str(e)}")
             raise
 
-    @staticmethod
+   # @staticmethod
     def get_by_model_config(db: Session, model_config_id: uuid.UUID, is_active: bool = True) -> List[ModelApiKey]:
         """根据模型配置ID获取API Key列表"""
         db_logger.debug(f"根据模型配置ID查询API Key: model_config_id={model_config_id}")
         
         try:
             query = db.query(ModelApiKey).filter(ModelApiKey.model_config_id == model_config_id)
-            
             if is_active:
                 query = query.filter(ModelApiKey.is_active)
             
             api_keys = query.order_by(ModelApiKey.priority, ModelApiKey.created_at).all()
-            db_logger.debug(f"API Key列表查询成功: 数量={len(api_keys)}")
-            return api_keys
-            
+            if api_keys!=[]:
+                for data in api_keys:
+                    return  data.model_config_id
+
         except Exception as e:
             db_logger.error(f"根据模型配置ID查询API Key失败: model_config_id={model_config_id} - {str(e)}")
             raise
@@ -450,4 +478,49 @@ class ModelApiKeyRepository:
         except Exception as e:
             db.rollback()
             db_logger.error(f"更新API Key使用统计失败: api_key_id={api_key_id} - {str(e)}")
+            raise
+
+    @staticmethod
+    def get_api_key_info_by_model_config(db: Session, model_config_id: uuid.UUID, is_active: bool = True) -> Optional[Dict[str, Any]]:
+        """根据模型配置ID获取API Key信息
+        
+        Args:
+            db: 数据库会话
+            model_config_id: 模型配置ID
+            is_active: 是否只获取激活的API Key
+            
+        Returns:
+            包含 model_name, provider, api_key, api_base 的字典，如果没有找到则返回 None
+        """
+        db_logger.debug(f"根据模型配置ID获取API Key信息: model_config_id={model_config_id}")
+        
+        try:
+            query = db.query(ModelApiKey).filter(ModelApiKey.model_config_id == model_config_id)
+            
+            if is_active:
+                query = query.filter(ModelApiKey.is_active)
+            
+            # 按优先级和创建时间排序，获取第一个
+            api_key = query.order_by(ModelApiKey.priority, ModelApiKey.created_at).first()
+            
+            if not api_key:
+                db_logger.warning(f"未找到模型配置ID {model_config_id} 的API Key")
+                return None
+            
+            result = {
+                "model_name": api_key.model_name,
+                "provider": api_key.provider,
+                "api_key": api_key.api_key,
+                "api_base": api_key.api_base
+            }
+            
+            db_logger.debug(
+                f"API Key信息获取成功: model_config_id={model_config_id}, "
+                f"model_name={api_key.model_name}, provider={api_key.provider}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            db_logger.error(f"根据模型配置ID获取API Key信息失败: model_config_id={model_config_id} - {str(e)}")
             raise

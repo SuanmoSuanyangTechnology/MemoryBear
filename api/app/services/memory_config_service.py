@@ -16,6 +16,7 @@ from app.core.validators.memory_config_validators import (
     validate_model_exists_and_active,
 )
 from app.repositories.memory_config_repository import MemoryConfigRepository
+from app.repositories.model_repository import ModelApiKeyRepository, ModelConfigRepository
 from app.schemas.memory_config_schema import (
     ConfigurationError,
     InvalidConfigError,
@@ -330,14 +331,20 @@ class MemoryConfigService:
         if not config:
             logger.warning(f"Model ID {model_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
-        api_config: ModelApiKey = config.api_keys
+        # api_config: ModelApiKey = config.api_keys
+        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, config.id)
+        # api_config: ModelApiKey = api_keys[0] if api_keys else None
+        model_config_id = api_keys
+        print(100*'LLM',model_config_id)
+        api_base= ModelApiKeyRepository.get_api_key_info_by_model_config(self.db, model_config_id)
+        type = ModelConfigRepository.get_type_by_id(self.db, model_config_id)
         return {
-            "model_name": api_config.model_name,
-            "provider": api_config.provider,
-            "api_key": api_config.api_key,
-            "base_url": api_config.api_base,
-            "model_config_id": api_config.model_config_id,
-            "type": config.type,
+            "model_name": api_base.get("model_name",None),
+            "provider":api_base.get("provider",None),
+            "api_key":api_base.get("api_key",None),
+            "base_url": api_base.get("api_base", None),
+            "model_config_id":model_config_id,
+            "type": type,
             "timeout": settings.LLM_TIMEOUT,
             "max_retries": settings.LLM_MAX_RETRIES,
         }
@@ -356,24 +363,33 @@ class MemoryConfigService:
         from fastapi import status
         from fastapi.exceptions import HTTPException
 
+
+        print(100*'-')
+        print(embedding_id)
+        print(100*'-')
         config = ModelSvc.get_model_by_id(db=self.db, model_id=embedding_id)
         if not config:
             logger.warning(f"Embedding model ID {embedding_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="嵌入模型ID不存在")
-        
-        api_config: ModelApiKey = config.api_keys[0]
+
+        # api_config: ModelApiKey = config.api_keys[0]
+
+        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, config.id)
+        print(api_keys,30*'+')
+        model_config_id = api_keys
+        api_base = ModelApiKeyRepository.get_api_key_info_by_model_config(self.db, model_config_id)
+        type=ModelConfigRepository.get_type_by_id(self.db, model_config_id)
 
         return {
-            "model_name": api_config.model_name,
-            "provider": api_config.provider,
-            "api_key": api_config.api_key,
-            "base_url": api_config.api_base,
-            "model_config_id": api_config.model_config_id,
-            "type": config.type,
+            "model_name": api_base.get("model_name", None),
+            "provider": api_base.get("provider", None),
+            "api_key": api_base.get("api_key", None),
+            "base_url": api_base.get("api_base", None),
+            "model_config_id": model_config_id,
+            "type":type,
             "timeout": 120.0,
             "max_retries": 5,
         }
-
     @staticmethod
     def get_pipeline_config(memory_config: MemoryConfig):
         """Build ExtractionPipelineConfig from MemoryConfig.
