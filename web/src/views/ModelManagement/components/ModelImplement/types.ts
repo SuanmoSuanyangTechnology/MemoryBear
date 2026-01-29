@@ -8,9 +8,10 @@ export interface SubModelModalForm {
   api_key_ids: string[][];
 }
 export interface SubModelModalRef {
-  handleOpen: (list?: ModelList[], provider?: string) => void;
+  handleOpen: () => void;
 }
 export interface SubModelModalProps {
   type?: string;
   refresh?: (vo: ModelList[]) => void;
+  groupedByProvider?: Record<string, ModelList[]>
 }

@@ -1,5 +1,7 @@
+import uuid
+
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Union
 from uuid import UUID
 from enum import Enum
 
@@ -10,7 +12,7 @@ class OptimizationStrategy(str, Enum):
     ACCURACY_FIRST = "accuracy_first"
     BALANCED = "balanced"
 class Memory_Reflection(BaseModel):
-    config_id: Optional[UUID] = None
+    config_id:  Union[uuid.UUID, int, str]  = None
     reflection_enabled: bool
     reflection_period_in_hours: str
     reflexion_range: Optional[str] = "partial"

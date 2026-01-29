@@ -44,7 +44,8 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   };
   const handleUpdate = (data: CustomModelForm) => {
     setLoading(true)
-    const res = isEdit ? updateCustomModel(model.id, data) : addCustomModel(data)
+    const { type, provider, ...rest} = data
+    const res = isEdit ? updateCustomModel(model.id, rest) : addCustomModel(data)
 
     res.then(() => {
       refresh && refresh()
@@ -129,6 +130,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           <CustomSelect
             url={modelTypeUrl}
             hasAll={false}
+            disabled={isEdit}
             format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
           />
         </Form.Item>
@@ -141,6 +143,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           <CustomSelect
             url={modelProviderUrl}
             hasAll={false}
+            disabled={isEdit}
             format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
           />
         </Form.Item>

@@ -5,6 +5,7 @@ from enum import StrEnum
 from sqlalchemy import Column, String, Boolean, DateTime, Text, ForeignKey, Enum as SQLEnum, UniqueConstraint, Integer, ARRAY, Table
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from app.db import Base
 
 
@@ -23,6 +24,8 @@ class ModelType(StrEnum):
     CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
+    # TTS = "tts"
+    # SPEECH2TEXT = "speech2text"
     # IMAGE = "image"
     # AUDIO = "audio"
     # VISION = "vision"
@@ -48,8 +51,7 @@ class ModelProvider(StrEnum):
 class LoadBalanceStrategy(StrEnum):
     """API Key负载均衡策略枚举"""
     ROUND_ROBIN = "round_robin"  # 轮询
-    WEIGHTED_ROUND_ROBIN = "weighted_round_robin"  # 加权轮询
-    RANDOM = "random"  # 随机
+    NONE = "none"  # 无
 
 
 # 多对多关联表
@@ -90,7 +92,8 @@ class ModelConfig(BaseModel):
     
     # 状态管理
     is_public = Column(Boolean, default=False, nullable=False, comment="是否公开")
-    load_balance_strategy = Column(String, nullable=True, comment="负载均衡策略")
+    load_balance_strategy = Column(String, nullable=True, comment="负载均衡策略", default=LoadBalanceStrategy.NONE,
+                                   server_default=LoadBalanceStrategy.NONE)
     
     # 关联关系
     model_base = relationship("ModelBase", back_populates="configs")
@@ -151,6 +154,7 @@ class ModelBase(Base):
     is_official = Column(Boolean, default=True, comment="是否供应商官方模型（区分自定义）")
     tags = Column(ARRAY(String), default=list, nullable=False, comment="模型标签（如['聊天', '创作']）")
     add_count = Column(Integer, default=0, nullable=False, comment="模型被用户添加的次数")
+    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间", server_default=func.now())
 
     # 关联关系
     configs = relationship("ModelConfig", back_populates="model_base", cascade="all, delete-orphan")

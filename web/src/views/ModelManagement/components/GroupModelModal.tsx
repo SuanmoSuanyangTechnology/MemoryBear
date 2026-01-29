@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App } from 'antd';
+import { Form, Input, App, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ModelListItem, CompositeModelForm, GroupModelModalRef, GroupModelModalProps, ModelApiKey } from '../types';
@@ -75,8 +75,9 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
 
   const handleUpdate = (data: CompositeModelForm) => {
     setLoading(true)
+    const { type, ...rest } = data
     const res = isEdit
-      ? updateCompositeModel(model.id, data)
+      ? updateCompositeModel(model.id, { ...rest })
       : addCompositeModel(data)
 
     res.then(() => {
@@ -106,6 +107,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
       <Form
         form={form}
         layout="vertical"
+        initialValues={{ balance_strategy: 'none' }}
       >
         <Form.Item 
           name="logo" 
@@ -145,6 +147,19 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
           label={t('modelNew.description')}
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
+        </Form.Item>
+
+        <Form.Item
+          name="load_balance_strategy"
+          label={t('modelNew.load_balance_strategy')}
+        >
+          <Select
+            options={['round_robin', 'none'].map(key => ({
+              label: t(`modelNew.${key}`),
+              value: key
+            }))}
+            placeholder={t('common.pleaseSelect')}
+          />
         </Form.Item>
 
         <Form.Item name="api_key_ids">

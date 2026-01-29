@@ -33,6 +33,7 @@ from app.services.memory_storage_service import (
     search_entity,
     search_statement,
 )
+from app.utils.config_utils import resolve_config_id
 
 # Get API logger
 api_logger = get_api_logger()
@@ -81,7 +82,6 @@ def create_config(
     db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试创建配置但未选择工作空间")
@@ -101,7 +101,7 @@ def create_config(
 
 @router.delete("/delete_config", response_model=ApiResponse)  # 删除数据库中的内容（按配置名称）
 def delete_config(
-    config_id: UUID,
+    config_id: UUID|int,
     force: bool = Query(False, description="是否强制删除（即使有终端用户正在使用）"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -117,7 +117,7 @@ def delete_config(
         force: 设置为 true 可强制删除（即使有终端用户正在使用）
     """
     workspace_id = current_user.current_workspace_id
-    
+    config_id=resolve_config_id(config_id, db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试删除配置但未选择工作空间")
@@ -180,7 +180,7 @@ def update_config(
     db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
+    payload.config_id = resolve_config_id(payload.config_id, db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新配置但未选择工作空间")
@@ -203,7 +203,7 @@ def update_config_extracted(
     db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
+    payload.config_id = resolve_config_id(payload.config_id, db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新提取配置但未选择工作空间")
@@ -230,7 +230,7 @@ def read_config_extracted(
     db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
+    config_id = resolve_config_id(config_id, db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试读取提取配置但未选择工作空间")
@@ -278,6 +278,7 @@ async def pilot_run(
         f"Pilot run requested: config_id={payload.config_id}, "
         f"dialogue_text_length={len(payload.dialogue_text)}"
     )
+    payload.config_id = resolve_config_id(payload.config_id, db)
     svc = DataConfigService(db)
     return StreamingResponse(
         svc.pilot_run_stream(payload),

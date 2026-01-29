@@ -7,7 +7,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.db import get_db
 from app.dependencies import get_current_user
-from app.models.models_model import ModelProvider, ModelType
+from app.models.models_model import ModelProvider, ModelType, LoadBalanceStrategy
 from app.models.user_model import User
 from app.repositories.model_repository import ModelConfigRepository
 from app.schemas import model_schema
@@ -32,6 +32,10 @@ def get_model_types():
 @router.get("/provider", response_model=ApiResponse)
 def get_model_providers():
     return success(msg="获取模型提供商成功", data=list(ModelProvider))
+
+@router.get("/strategy", response_model=ApiResponse)
+def get_model_strategies():
+    return success(msg="获取模型策略成功", data=list(LoadBalanceStrategy))
 
 
 @router.get("", response_model=ApiResponse)
@@ -91,7 +95,7 @@ def get_model_list(
 
 
 @router.get("/new", response_model=ApiResponse)
-def get_model_list(
+def get_model_list_new(
     type: Optional[list[str]] = Query(None, description="模型类型筛选（支持多个，如 ?type=LLM 或 ?type=LLM,EMBEDDING）"),
     provider: Optional[model_schema.ModelProvider] = Query(None, description="提供商筛选(基于ModelConfig)"),
     is_active: Optional[bool] = Query(None, description="激活状态筛选"),
@@ -197,6 +201,10 @@ def update_model_base(
     current_user: User = Depends(get_current_user)
 ):
     """更新基础模型"""
+    
+    # 不允许更改type类型
+    if data.type is not None or data.provider is not None:
+        raise BusinessException("不允许更改模型类型和供应商", BizCode.INVALID_PARAMETER)
     
     result = ModelBaseService.update_model_base(db=db, model_base_id=model_base_id, data=data)
     return success(data=model_schema.ModelBase.model_validate(result), msg="基础模型更新成功")
@@ -318,6 +326,8 @@ async def update_composite_model(
     api_logger.info(f"更新组合模型请求: model_id={model_id}, 用户: {current_user.username}")
     
     try:
+        if model_data.type is not None:
+            raise BusinessException("不允许更改模型类型和供应商", BizCode.INVALID_PARAMETER)
         result_orm = await ModelConfigService.update_composite_model(db=db, model_id=model_id, model_data=model_data, tenant_id=current_user.tenant_id)
         api_logger.info(f"组合模型更新成功: {result_orm.name} (ID: {model_id})")
         
@@ -460,8 +470,8 @@ async def create_model_api_key_by_provider(
         created_keys = await ModelApiKeyService.create_api_key_by_provider(db=db, data=create_data)
         
         api_logger.info(f"API Key创建成功: 关联{len(created_keys)}个模型")
-        result_list = [model_schema.ModelApiKey.model_validate(key) for key in created_keys]
-        return success(data=result_list, msg=f"成功为 {len(created_keys)} 个模型创建API Key")
+        # result_list = [model_schema.ModelApiKey.model_validate(key) for key in created_keys]
+        return success(data=f"成功为 {len(created_keys)} 个模型创建API Key", msg=f"成功为 {len(created_keys)} 个模型创建API Key")
     except Exception as e:
         api_logger.error(f"创建API Key失败: {str(e)}")
         raise

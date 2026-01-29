@@ -45,6 +45,7 @@ async def save_reflection_config(
     """Save reflection configuration to data_comfig table"""
     try:
         config_id = request.config_id
+        config_id = resolve_config_id(config_id, db)
         if not config_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -164,6 +165,7 @@ async def start_reflection_configs(
         db: Session = Depends(get_db),
 ) -> dict:
     """通过config_id查询memory_config表中的反思配置信息"""
+    config_id = resolve_config_id(config_id, db)
     try:
         config_id=resolve_config_id(config_id,db)
         api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")

@@ -347,7 +347,9 @@ class ModelConfigService:
             "is_public": model_data.is_public,
             "is_composite": True
         }
-        
+        if "load_balance_strategy" in model_data.model_fields_set:
+            model_config_data["load_balance_strategy"] = model_data.load_balance_strategy
+
         model = ModelConfigRepository.create(db, model_config_data)
         db.flush()
         
@@ -380,7 +382,7 @@ class ModelConfigService:
             for model_config in api_key.model_configs:
                 compatible_types = {ModelType.LLM, ModelType.CHAT}
                 config_type = model_config.type
-                request_type = model_data.type
+                request_type = existing_model.type
                 
                 if not (config_type == request_type or 
                         (config_type in compatible_types and request_type in compatible_types)):
@@ -391,12 +393,14 @@ class ModelConfigService:
         
         # 更新基本信息
         existing_model.name = model_data.name
-        existing_model.type = model_data.type
+        # existing_model.type = model_data.type
         existing_model.logo = model_data.logo
         existing_model.description = model_data.description
         existing_model.config = model_data.config
         existing_model.is_active = model_data.is_active
         existing_model.is_public = model_data.is_public
+        if "load_balance_strategy" in model_data.model_fields_set:
+            existing_model.load_balance_strategy = model_data.load_balance_strategy
         
         # 更新 API Keys 关联
         existing_model.api_keys.clear()
