@@ -16,6 +16,7 @@ from app.core.validators.memory_config_validators import (
     validate_model_exists_and_active,
 )
 from app.repositories.memory_config_repository import MemoryConfigRepository
+from app.repositories.model_repository import ModelApiKeyRepository, ModelBaseRepository
 from app.schemas.memory_config_schema import (
     ConfigurationError,
     InvalidConfigError,
@@ -331,17 +332,24 @@ class MemoryConfigService:
             logger.warning(f"Model ID {model_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
         
-        api_config: ModelApiKey = config.api_keys[0]
-        
+        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, config.id)
+        api_key_config = api_keys[0] if api_keys else None
+        model_id=api_key_config.id
+        api_base = ModelBaseRepository.get_api_key_info_by_model_config(self.db, model_id)
+        type = ModelBaseRepository.get_type_by_id(self.db, model_id)
+        print(20 * '*', api_base)
+        print(api_base.get("model_name", None))
+        print(100*'.',config.id)
+
         return {
-            "model_name": api_config.model_name,
-            "provider": api_config.provider,
-            "api_key": api_config.api_key,
-            "base_url": api_config.api_base,
-            "model_config_id": str(config.id),
-            "type": config.type,
-            "timeout": settings.LLM_TIMEOUT,
-            "max_retries": settings.LLM_MAX_RETRIES,
+            "model_name": api_base.get("model_name", None),
+            "provider": api_base.get("provider", None),
+            "api_key": api_base.get("api_key", None),
+            "base_url": api_base.get("api_base", None),
+            "model_config_id":  config.id,
+            "type": type,
+            "timeout": 120.0,
+            "max_retries": 5,
         }
 
     def get_embedder_config(self, embedding_id: str) -> dict:
@@ -362,16 +370,22 @@ class MemoryConfigService:
         if not config:
             logger.warning(f"Embedding model ID {embedding_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="嵌入模型ID不存在")
-        
-        api_config: ModelApiKey = config.api_keys[0]
-        
+
+        # api_config: ModelApiKey = config.api_keys[0]
+        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, config.id)
+        api_key_config = api_keys[0] if api_keys else None
+        model_id = api_key_config.id
+        api_base = ModelBaseRepository.get_api_key_info_by_model_config(self.db, model_id)
+        type = ModelBaseRepository.get_type_by_id(self.db, model_id)
+
+        print(20 * '-', api_base)
         return {
-            "model_name": api_config.model_name,
-            "provider": api_config.provider,
-            "api_key": api_config.api_key,
-            "base_url": api_config.api_base,
-            "model_config_id": str(config.id),
-            "type": config.type,
+            "model_name": api_base.get("model_name", None),
+            "provider": api_base.get("provider", None),
+            "api_key": api_base.get("api_key", None),
+            "base_url": api_base.get("api_base", None),
+            "model_config_id": config.id,
+            "type": type,
             "timeout": 120.0,
             "max_retries": 5,
         }
