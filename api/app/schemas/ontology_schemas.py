@@ -251,62 +251,96 @@ class SceneResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PaginationInfo(BaseModel):
+    """分页信息模型
+    
+    Attributes:
+        page: 当前页码
+        pagesize: 每页数量
+        total: 总数量
+        hasnext: 是否有下一页
+    """
+    page: int = Field(..., description="当前页码")
+    pagesize: int = Field(..., description="每页数量")
+    total: int = Field(..., description="总数量")
+    hasnext: bool = Field(..., description="是否有下一页")
+
+
 class SceneListResponse(BaseModel):
     """场景列表响应模型（支持分页）
     
     用于返回本体场景列表。
     
     Attributes:
-        total: 总数量
         items: 场景列表
-        page: 当前页码（可选，分页时返回）
-        page_size: 每页数量（可选，分页时返回）
-        total_pages: 总页数（可选，分页时返回）
+        page: 分页信息（可选，分页时返回）
     
     Examples:
         >>> # 不分页
         >>> response = SceneListResponse(
-        ...     total=2,
         ...     items=[scene1, scene2]
         ... )
         >>> # 分页
         >>> response = SceneListResponse(
-        ...     total=25,
         ...     items=[scene1, scene2, ...],
-        ...     page=1,
-        ...     page_size=10,
-        ...     total_pages=3
+        ...     page=PaginationInfo(page=1, pagesize=100, total=150, hasnext=True)
         ... )
     """
-    total: int = Field(..., description="总数量")
     items: List[SceneResponse] = Field(..., description="场景列表")
-    page: Optional[int] = Field(None, description="当前页码")
-    page_size: Optional[int] = Field(None, description="每页数量")
-    total_pages: Optional[int] = Field(None, description="总页数")
+    page: Optional[PaginationInfo] = Field(None, description="分页信息")
 
 
 # ==================== 本体类型相关 Schema ====================
 
-class ClassCreateRequest(BaseModel):
-    """类型创建请求模型
-    
-    用于在指定场景下创建新的本体类型。
+class ClassItem(BaseModel):
+    """单个类型信息模型
     
     Attributes:
-        scene_id: 所属场景ID，必填
         class_name: 类型名称，必填，1-200字符
         class_description: 类型描述，可选
     
     Examples:
-        >>> request = ClassCreateRequest(
-        ...     scene_id=uuid.uuid4(),
+        >>> item = ClassItem(
         ...     class_name="患者",
         ...     class_description="医院患者信息"
         ... )
     """
-    scene_id: UUID = Field(..., description="所属场景ID")
     class_name: str = Field(..., min_length=1, max_length=200, description="类型名称")
     class_description: Optional[str] = Field(None, description="类型描述")
+
+
+class ClassCreateRequest(BaseModel):
+    """类型创建请求模型（统一使用列表形式）
+    
+    通过列表中元素数量决定创建模式：
+    - 列表包含 1 个元素：单个创建
+    - 列表包含多个元素：批量创建
+    
+    Attributes:
+        scene_id: 所属场景ID，必填
+        classes: 类型列表，必填，至少包含 1 个元素
+    
+    Examples:
+        # 单个创建（列表中 1 个元素）
+        >>> request = ClassCreateRequest(
+        ...     scene_id=uuid.uuid4(),
+        ...     classes=[
+        ...         ClassItem(class_name="患者", class_description="医院患者信息")
+        ...     ]
+        ... )
+        
+        # 批量创建（列表中多个元素）
+        >>> request = ClassCreateRequest(
+        ...     scene_id=uuid.uuid4(),
+        ...     classes=[
+        ...         ClassItem(class_name="患者", class_description="医院患者信息"),
+        ...         ClassItem(class_name="医生", class_description="医院医生信息"),
+        ...         ClassItem(class_name="药品", class_description="医院药品信息")
+        ...     ]
+        ... )
+    """
+    scene_id: UUID = Field(..., description="所属场景ID")
+    classes: List[ClassItem] = Field(..., min_length=1, description="类型列表，至少包含 1 个元素")
 
 
 class ClassUpdateRequest(BaseModel):
@@ -371,6 +405,34 @@ class ClassResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ClassBatchCreateResponse(BaseModel):
+    """批量创建类型响应模型
+    
+    用于返回批量创建的结果统计和详情。
+    
+    Attributes:
+        total: 总共尝试创建的数量
+        success_count: 成功创建的数量
+        failed_count: 失败的数量
+        items: 成功创建的类型列表
+        errors: 失败的错误信息列表（可选）
+    
+    Examples:
+        >>> response = ClassBatchCreateResponse(
+        ...     total=3,
+        ...     success_count=2,
+        ...     failed_count=1,
+        ...     items=[class1, class2],
+        ...     errors=["创建类型 '药品' 失败: 类型名称已存在"]
+        ... )
+    """
+    total: int = Field(..., description="总共尝试创建的数量")
+    success_count: int = Field(..., description="成功创建的数量")
+    failed_count: int = Field(0, description="失败的数量")
+    items: List[ClassResponse] = Field(..., description="成功创建的类型列表")
+    errors: Optional[List[str]] = Field(None, description="失败的错误信息列表")
+
+
 class ClassListResponse(BaseModel):
     """类型列表响应模型
     
@@ -379,15 +441,21 @@ class ClassListResponse(BaseModel):
     Attributes:
         total: 总数量
         scene_id: 所属场景ID
+        scene_name: 场景名称
+        scene_description: 场景描述
         items: 类型列表
     
     Examples:
         >>> response = ClassListResponse(
         ...     total=3,
         ...     scene_id=uuid.uuid4(),
+        ...     scene_name="医疗场景",
+        ...     scene_description="用于医疗领域的本体建模",
         ...     items=[class1, class2, class3]
         ... )
     """
     total: int = Field(..., description="总数量")
     scene_id: UUID = Field(..., description="所属场景ID")
+    scene_name: str = Field(..., description="场景名称")
+    scene_description: Optional[str] = Field(None, description="场景描述")
     items: List[ClassResponse] = Field(..., description="类型列表")

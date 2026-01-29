@@ -28,6 +28,8 @@ from .tool_model import (
     ToolExecution, ToolType, ToolStatus, AuthType, ExecutionStatus
 )
 from .memory_perceptual_model import MemoryPerceptualModel
+from .ontology_scene import OntologyScene
+from .ontology_class import OntologyClass
 
 __all__ = [
     "Tenants",
@@ -79,4 +81,6 @@ __all__ = [
     "AuthType",
     "ExecutionStatus",
     "MemoryPerceptualModel",
+    "OntologyScene",
+    "OntologyClass",
 ]
