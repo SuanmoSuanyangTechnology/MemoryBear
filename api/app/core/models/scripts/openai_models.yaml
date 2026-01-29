@@ -265,33 +265,6 @@ models:
   - stream-tool-call
   - structured-output
   logo: openai
-- name: gpt-4o-mini-transcribe
-  type: speech2text
-  provider: openai
-  description: gpt-4o-mini-transcribe语音转文本模型，文件上传限制25MB，支持flac,mp3,mp4,mpeg,mpga,m4a,ogg,wav,webm格式
-  is_deprecated: false
-  is_official: true
-  tags:
-  - 语音转文本模型
-  logo: openai
-- name: gpt-4o-transcribe
-  type: speech2text
-  provider: openai
-  description: gpt-4o-transcribe语音转文本模型，文件上传限制25MB，支持flac,mp3,mp4,mpeg,mpga,m4a,ogg,wav,webm格式
-  is_deprecated: false
-  is_official: true
-  tags:
-  - 语音转文本模型
-  logo: openai
-- name: whisper-1
-  type: speech2text
-  provider: openai
-  description: whisper-1语音转文本模型，文件上传限制25MB，支持flac,mp3,mp4,mpeg,mpga,m4a,ogg,wav,webm格式
-  is_deprecated: false
-  is_official: true
-  tags:
-  - 语音转文本模型
-  logo: openai
 - name: text-embedding-3-large
   type: embedding
   provider: openai
@@ -318,31 +291,4 @@ models:
   is_official: true
   tags:
   - 文本向量模型
-  logo: openai
-- name: gpt-4o-mini-tts
-  type: tts
-  provider: openai
-  description: gpt-4o-mini-tts文本转语音模型，输出音频格式mp3，支持多语种语音，字数限制3500
-  is_deprecated: false
-  is_official: true
-  tags:
-  - 文本转语音模型
-  logo: openai
-- name: tts-1-hd
-  type: tts
-  provider: openai
-  description: tts-1-hd高清文本转语音模型，输出音频格式mp3，支持多语种语音，字数限制3500
-  is_deprecated: false
-  is_official: true
-  tags:
-  - 文本转语音模型
-  logo: openai
-- name: tts-1
-  type: tts
-  provider: openai
-  description: tts-1文本转语音模型，输出音频格式mp3，支持多语种语音，字数限制3500
-  is_deprecated: false
-  is_official: true
-  tags:
-  - 文本转语音模型
   logo: openai
