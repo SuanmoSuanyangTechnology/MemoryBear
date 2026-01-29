@@ -1,9 +1,9 @@
 import { useState, useRef, type FC } from 'react';
-import { Button, Flex, Space, type SegmentedProps } from 'antd'
+import { Button, Flex, Space, type SegmentedProps, Form } from 'antd'
 import { useTranslation } from 'react-i18next';
 
 import GroupModelModal from './components/GroupModelModal'
-import type { ModelListItem, GroupModelModalRef, CustomModelModalRef, ModelPlazaItem, BaseRef } from './types'
+import type { ModelListItem, GroupModelModalRef, CustomModelModalRef, ModelPlazaItem, BaseRef, Query } from './types'
 import SearchInput from '@/components/SearchInput'
 import PageTabs from '@/components/PageTabs'
 import GroupModel from './Group'
@@ -17,11 +17,12 @@ const tabKeys = ['group', 'list', 'square']
 const ModelManagement: FC = () => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('group');
-  const [query, setQuery] = useState({})
   const configModalRef = useRef<GroupModelModalRef>(null)
   const customModelModalRef = useRef<CustomModelModalRef>(null)
   const groupRef = useRef<BaseRef>(null)
   const squareRef = useRef<BaseRef>(null)
+  const [form] = Form.useForm<Query>()
+  const query = Form.useWatch([], form)
 
   const formatTabItems = () => {
     return tabKeys.map(value => ({
@@ -31,7 +32,7 @@ const ModelManagement: FC = () => {
   }
   const handleChangeTab = (value: SegmentedProps['value']) => {
     setActiveTab(value as string);
-    setQuery({})
+    form.resetFields()
   }
 
   const handleEdit = (vo?: ModelListItem | ModelPlazaItem) => {
@@ -54,15 +55,6 @@ const ModelManagement: FC = () => {
         break
     }
   }
-  const handleSearch = (value?: string) => {
-    setQuery({ search: value })
-  }
-  const handleTypeChange = (value: string) => {
-    setQuery(pre => ({ ...pre, type: value }))
-  }
-  const handleProviderChange = (value: string) => {
-    setQuery(pre => ({ ...pre, provider: value }))
-  }
 
   return (
     <>
@@ -73,35 +65,44 @@ const ModelManagement: FC = () => {
           onChange={handleChangeTab}
         />
 
-        <Space size={12}>
-          {activeTab === 'list' ? <>
-            <CustomSelect
-              url={modelTypeUrl}
-              hasAll={false}
-              format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
-              onChange={handleTypeChange}
-              className="rb:w-30"
-              allowClear={true}
-              placeholder={t('modelNew.type')}
-            />
-            <CustomSelect
-              url={modelProviderUrl}
-              hasAll={false}
-              format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
-              onChange={handleProviderChange}
-              className="rb:w-30"
-              allowClear={true}
-              placeholder={t('modelNew.provider')}
-            />
-          </>
-          : <SearchInput
-            placeholder={t(`modelNew.${activeTab}SearchPlaceholder`)}
-            onSearch={handleSearch}
-            className="rb:w-70!"
-          />}
-          {activeTab === 'group' && <Button type="primary" onClick={() => handleEdit()}>+ {t('modelNew.createGroupModel')}</Button>}
-          {activeTab === 'square' && <Button type="primary" onClick={() => handleEdit()}>+ {t('modelNew.createCustomModel')}</Button>}
-        </Space>
+        <Form form={form}>
+          <Space size={12}>
+            {activeTab === 'list' &&
+              <Form.Item name="type" noStyle>
+                <CustomSelect
+                  url={modelTypeUrl}
+                  hasAll={false}
+                  format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
+                  className="rb:w-30"
+                  allowClear={true}
+                  placeholder={t('modelNew.type')}
+                />
+              </Form.Item>
+            }
+            {(activeTab === 'list' || activeTab === 'square') &&
+              <Form.Item name="provider" noStyle>
+                <CustomSelect
+                  url={modelProviderUrl}
+                  hasAll={false}
+                  format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
+                  className="rb:w-30"
+                  allowClear={true}
+                  placeholder={t('modelNew.provider')}
+                />
+              </Form.Item>
+            }
+            {activeTab !== 'list' &&
+              <Form.Item name="search" noStyle>
+                <SearchInput
+                  placeholder={t(`modelNew.${activeTab}SearchPlaceholder`)}
+                  className="rb:w-70!"
+                />
+              </Form.Item>
+            }
+            {activeTab === 'group' && <Button type="primary" onClick={() => handleEdit()}>+ {t('modelNew.createGroupModel')}</Button>}
+            {activeTab === 'square' && <Button type="primary" onClick={() => handleEdit()}>+ {t('modelNew.createCustomModel')}</Button>}
+          </Space>
+        </Form>
       </Flex>
 
       <div className="rb:w-full rb:h-[calc(100%-48px)] rb:my-4">

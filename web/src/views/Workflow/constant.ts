@@ -105,7 +105,7 @@ export const nodeLibrary: NodeLibrary[] = [
           model_id: {
             type: 'customSelect',
             url: getModelListUrl,
-            params: { type: 'llm,chat', is_active: true }, // llm/chat
+            params: { type: 'llm,chat', pagesize: 100, is_active: true }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },
@@ -166,7 +166,7 @@ export const nodeLibrary: NodeLibrary[] = [
           model_id: {
             type: 'customSelect',
             url: getModelListUrl,
-            params: { type: 'llm,chat', is_active: true }, // llm/chat
+            params: { type: 'llm,chat', pagesize: 100, is_active: true }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },
@@ -259,7 +259,7 @@ export const nodeLibrary: NodeLibrary[] = [
           model_id: {
             type: 'customSelect',
             url: getModelListUrl,
-            params: { type: 'llm,chat', is_active: true }, // llm/chat
+            params: { type: 'llm,chat', pagesize: 100, is_active: true }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },

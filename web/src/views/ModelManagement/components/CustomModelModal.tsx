@@ -129,6 +129,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           <CustomSelect
             url={modelTypeUrl}
             hasAll={false}
+            disabled={isEdit}
             format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
           />
         </Form.Item>
@@ -141,6 +142,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           <CustomSelect
             url={modelProviderUrl}
             hasAll={false}
+            disabled={isEdit}
             format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
           />
         </Form.Item>
