@@ -347,7 +347,9 @@ class ModelConfigService:
             "is_public": model_data.is_public,
             "is_composite": True
         }
-        
+        if "load_balance_strategy" in model_data.model_fields_set:
+            model_config_data["load_balance_strategy"] = model_data.load_balance_strategy
+
         model = ModelConfigRepository.create(db, model_config_data)
         db.flush()
         
@@ -397,6 +399,8 @@ class ModelConfigService:
         existing_model.config = model_data.config
         existing_model.is_active = model_data.is_active
         existing_model.is_public = model_data.is_public
+        if "load_balance_strategy" in model_data.model_fields_set:
+            existing_model.load_balance_strategy = model_data.load_balance_strategy
         
         # 更新 API Keys 关联
         existing_model.api_keys.clear()
