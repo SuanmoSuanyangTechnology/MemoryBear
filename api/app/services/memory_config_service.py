@@ -445,7 +445,7 @@ class MemoryConfigService:
             "pruning_threshold": memory_config.pruning_threshold,
         }
 
-    def _get_workspace_default_config(
+    def get_workspace_default_config(
         self,
         workspace_id: UUID
     ) -> Optional["MemoryConfigModel"]:
@@ -529,7 +529,7 @@ class MemoryConfigService:
                 "End user has no memory config assigned",
                 extra={"end_user_id": str(end_user_id)}
             )
-            return self._get_workspace_default_config(workspace_id)
+            return self.get_workspace_default_config(workspace_id)
         
         config = self.db.get(MemoryConfigModel, end_user.memory_config_id)
         
@@ -545,7 +545,7 @@ class MemoryConfigService:
             }
         )
         
-        fallback_config = self._get_workspace_default_config(workspace_id)
+        fallback_config = self.get_workspace_default_config(workspace_id)
         
         if fallback_config:
             logger.info(
@@ -560,7 +560,7 @@ class MemoryConfigService:
 
     def delete_config(
         self,
-        config_id: UUID,
+        config_id: UUID | int,
         force: bool = False
     ) -> dict:
         """Delete memory config with protection against in-use configs.
@@ -569,7 +569,7 @@ class MemoryConfigService:
         that are actively being used by end users or marked as default.
         
         Args:
-            config_id: Memory config ID to delete
+            config_id: Memory config ID to delete (UUID or legacy int)
             force: If True, delete even if end users are connected
             
         Returns:
@@ -580,6 +580,18 @@ class MemoryConfigService:
         """
         from app.core.exceptions import ResourceNotFoundException
         from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+        
+        # 处理旧格式 int 类型的 config_id
+        if isinstance(config_id, int):
+            logger.warning(
+                "Attempted to delete legacy int config_id",
+                extra={"config_id": config_id}
+            )
+            return {
+                "status": "error",
+                "message": "旧格式配置ID不支持删除操作，请使用新版配置",
+                "legacy_int_id": config_id
+            }
         
         config = self.db.get(MemoryConfigModel, config_id)
         if not config:

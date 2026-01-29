@@ -1316,43 +1316,18 @@ class AppService:
         Returns:
             Optional[uuid.UUID]: 默认记忆配置ID，如果不存在则返回 None
         """
-        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+        from app.services.memory_config_service import MemoryConfigService
         
-        # 查找工作空间的默认记忆配置
-        stmt = (
-            select(MemoryConfigModel.id)
-            .where(
-                MemoryConfigModel.workspace_id == workspace_id,
-                MemoryConfigModel.is_default.is_(True),
-                MemoryConfigModel.state.is_(True),
-            )
-            .limit(1)
-        )
+        service = MemoryConfigService(self.db)
+        config = service.get_workspace_default_config(workspace_id)
         
-        config_id = self.db.scalars(stmt).first()
-        
-        if config_id:
-            return config_id
-        
-        # 回退：获取最早创建的活跃配置
-        stmt = (
-            select(MemoryConfigModel.id)
-            .where(
-                MemoryConfigModel.workspace_id == workspace_id,
-                MemoryConfigModel.state.is_(True),
-            )
-            .order_by(MemoryConfigModel.created_at.asc())
-            .limit(1)
-        )
-        
-        config_id = self.db.scalars(stmt).first()
-        
-        if not config_id:
+        if not config:
             logger.warning(
                 f"工作空间没有可用的记忆配置: workspace_id={workspace_id}"
             )
+            return None
         
-        return config_id
+        return config.id
 
     def _update_endusers_memory_config(
         self,
