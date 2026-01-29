@@ -558,6 +558,7 @@ export const en = {
       item: 'item',
       apiKeyNum: ' API Keys',
       official: 'Official',
+      deprecated: 'Deprecated',
 
       llm: 'LLM',
       chat: 'Chat',
