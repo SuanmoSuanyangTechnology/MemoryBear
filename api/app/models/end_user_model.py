@@ -21,7 +21,6 @@ class EndUser(Base):
     created_at = Column(DateTime, default=datetime.datetime.now)
     updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
     
-    # Memory config association - updated lazily during conversation
     memory_config_id = Column(
         UUID(as_uuid=True), 
         ForeignKey("memory_config.config_id"), 

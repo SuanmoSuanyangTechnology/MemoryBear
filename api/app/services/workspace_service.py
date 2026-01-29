@@ -87,9 +87,26 @@ def  delete_workspace_member(
 
 
 def get_user_workspaces(db: Session, user: User) -> List[Workspace]:
-    """获取当前用户参与的所有工作空间"""
+    """获取当前用户参与的所有工作空间
+    
+    For neo4j storage type workspaces, ensures each has a default memory config.
+    If a workspace is missing a default config, one will be created automatically.
+    
+    Args:
+        db: Database session
+        user: Current user
+        
+    Returns:
+        List[Workspace]: List of workspaces the user belongs to
+    """
     business_logger.debug(f"获取用户工作空间列表: {user.username} (ID: {user.id})")
     workspaces = workspace_repository.get_workspaces_by_user(db=db, user_id=user.id)
+    
+    # Ensure each neo4j workspace has a default memory config
+    for workspace in workspaces:
+        if workspace.storage_type == 'neo4j':
+            _ensure_default_memory_config(db, workspace)
+    
     business_logger.info(f"用户 {user.username} 的工作空间数量: {len(workspaces)}")
     return workspaces
 
@@ -877,6 +894,45 @@ def update_workspace_models_configs(
         business_logger.error(f"工作空间模型配置更新失败: workspace_id={workspace_id} - {str(e)}")
         db.rollback()
         raise BusinessException(f"更新模型配置失败: {str(e)}", BizCode.INTERNAL_ERROR)
+
+
+def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
+    """Ensure a workspace has a default memory config, creating one if missing.
+    
+    Args:
+        db: Database session
+        workspace: The workspace to check
+    """
+    from app.models.memory_config_model import MemoryConfig
+    
+    # Check if default config exists for this workspace
+    existing_default = db.query(MemoryConfig).filter(
+        MemoryConfig.workspace_id == workspace.id,
+        MemoryConfig.is_default == True
+    ).first()
+    
+    if existing_default:
+        return
+    
+    # No default config exists, create one
+    business_logger.info(
+        f"Workspace {workspace.id} missing default memory config, creating one"
+    )
+    
+    try:
+        _create_default_memory_config(
+            db=db,
+            workspace_id=workspace.id,
+            workspace_name=workspace.name,
+            llm_id=uuid.UUID(workspace.llm) if workspace.llm else None,
+            embedding_id=uuid.UUID(workspace.embedding) if workspace.embedding else None,
+            rerank_id=uuid.UUID(workspace.rerank) if workspace.rerank else None,
+        )
+    except Exception as e:
+        business_logger.error(
+            f"Failed to create default memory config for workspace {workspace.id}: {str(e)}"
+        )
+        # Don't fail the workspace list operation if config creation fails
 
 
 def _create_default_memory_config(
