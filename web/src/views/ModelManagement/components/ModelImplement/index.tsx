@@ -74,13 +74,13 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
           return (
             <div key={item.id} className="rb:mb-4 rb:last:rb:mb-0 rb:bg-[#FBFDFF]  rb:rounded-lg rb:p-3">
               <Flex gap={8} justify="space-between" align="center" className="rb:mb-2 rb:last:rb:mb-0">
-                <div className="rb:font-medium">{[item.model_name, item.api_key].join(' / ')}</div>
-
+                <div className="rb:font-medium">{item.model_name}</div>
                 <div
                   className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
                   onClick={() => handleDelete(item)}
                 ></div>
               </Flex>
+              <div className="rb:text-[#5B6167] rb:my-2">{item.api_key}</div>
               <Tag className="rb:mb-2">{t(`modelNew.${item.provider}`)}</Tag>
             </div>
           )
