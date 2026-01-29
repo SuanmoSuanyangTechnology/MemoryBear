@@ -288,7 +288,6 @@ async def pilot_run(
         f"dialogue_text_length={len(payload.dialogue_text)}"
     )
     payload.config_id = resolve_config_id(payload.config_id, db)
-    payload.config_id = resolve_config_id(payload.config_id, db)
     svc = DataConfigService(db)
     return StreamingResponse(
         svc.pilot_run_stream(payload),
