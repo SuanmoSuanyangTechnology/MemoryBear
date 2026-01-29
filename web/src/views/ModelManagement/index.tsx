@@ -1,99 +1,123 @@
 import { useState, useRef, type FC } from 'react';
-import { Row, Col, Button } from 'antd'
+import { Button, Flex, Space, type SegmentedProps } from 'antd'
 import { useTranslation } from 'react-i18next';
-import clsx from 'clsx';
 
-import ConfigModal from './components/ConfigModal'
-import type { Model, DescriptionItem, ConfigModalRef } from './types'
-import RbCard from '@/components/RbCard/Card'
+import GroupModelModal from './components/GroupModelModal'
+import type { ModelListItem, GroupModelModalRef, CustomModelModalRef, ModelPlazaItem, BaseRef } from './types'
 import SearchInput from '@/components/SearchInput'
-import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
-import { getModelListUrl } from '@/api/models'
-import { formatDateTime } from '@/utils/format';
+import PageTabs from '@/components/PageTabs'
+import GroupModel from './Group'
+import ModelList from './List'
+import ModelSquare from './Square'
+import CustomModelModal from './components/CustomModelModal'
+import CustomSelect from '@/components/CustomSelect'
+import { modelTypeUrl, modelProviderUrl } from '@/api/models'
 
+const tabKeys = ['group', 'list', 'square']
 const ModelManagement: FC = () => {
   const { t } = useTranslation();
+  const [activeTab, setActiveTab] = useState('group');
   const [query, setQuery] = useState({})
-  const configModalRef = useRef<ConfigModalRef>(null)
-  const scrollListRef = useRef<PageScrollListRef>(null)
+  const configModalRef = useRef<GroupModelModalRef>(null)
+  const customModelModalRef = useRef<CustomModelModalRef>(null)
+  const groupRef = useRef<BaseRef>(null)
+  const squareRef = useRef<BaseRef>(null)
 
-  const formatData = (data: Model) => {
-    return [
-      {
-        key: 'type',
-        label: t(`model.type`),
-        children: data.type || '-',
-      },
-      {
-        key: 'provider',
-        label: t(`model.provider`),
-        children: data.api_keys[0].provider || '-',
-      },
-      {
-        key: 'is_active',
-        label: t(`model.status`),
-        children: data.is_active ? t(`common.statusEnabled`) : t(`common.statusDisabled`),
-      },
-      {
-        key: 'created',
-        label: t(`model.created`),
-        children: data.created_at ? formatDateTime(data.created_at, 'YYYY-MM-DD HH:mm:ss') : '-',
-      },
-    ]
+  const formatTabItems = () => {
+    return tabKeys.map(value => ({
+      value,
+      label: t(`modelNew.${value}`),
+    }))
+  }
+  const handleChangeTab = (value: SegmentedProps['value']) => {
+    setActiveTab(value as string);
+    setQuery({})
   }
 
-  const handleEdit = (model?: Model) => {
-    configModalRef?.current?.handleOpen(model)
+  const handleEdit = (vo?: ModelListItem | ModelPlazaItem) => {
+    switch(activeTab) {
+      case 'group':
+        configModalRef?.current?.handleOpen(vo as ModelListItem)
+        break
+      case 'square':
+        customModelModalRef?.current?.handleOpen(vo as ModelPlazaItem)
+        break
+    }
+  }
+  const handleRefresh = () => {
+    switch (activeTab) {
+      case 'group':
+        groupRef.current?.getList()
+        break
+      case 'square':
+        squareRef.current?.getList()
+        break
+    }
   }
   const handleSearch = (value?: string) => {
     setQuery({ search: value })
   }
+  const handleTypeChange = (value: string) => {
+    setQuery(pre => ({ ...pre, type: value }))
+  }
+  const handleProviderChange = (value: string) => {
+    setQuery(pre => ({ ...pre, provider: value }))
+  }
 
   return (
-    <div className="rb:w-full">
-      <Row className='rb:mb-[16px] rb:w-full'>
-        <Col span={6}>
-          <SearchInput
-            placeholder={t('model.searchPlaceholder')}
+    <>
+      <Flex justify="space-between" align="center">
+        <PageTabs
+          value={activeTab}
+          options={formatTabItems()}
+          onChange={handleChangeTab}
+        />
+
+        <Space size={12}>
+          {activeTab === 'list' ? <>
+            <CustomSelect
+              url={modelTypeUrl}
+              hasAll={false}
+              format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
+              onChange={handleTypeChange}
+              className="rb:w-30"
+              allowClear={true}
+              placeholder={t('modelNew.type')}
+            />
+            <CustomSelect
+              url={modelProviderUrl}
+              hasAll={false}
+              format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
+              onChange={handleProviderChange}
+              className="rb:w-30"
+              allowClear={true}
+              placeholder={t('modelNew.provider')}
+            />
+          </>
+          : <SearchInput
+            placeholder={t(`modelNew.${activeTab}SearchPlaceholder`)}
             onSearch={handleSearch}
-            style={{width: '100%'}}
-          />
-        </Col>
-        <Col span={18} className="rb:text-right">
-          <Button type="primary" onClick={() => handleEdit()}>{t('model.createModel')}</Button>
-        </Col>
-      </Row>
+            className="rb:w-70!"
+          />}
+          {activeTab === 'group' && <Button type="primary" onClick={() => handleEdit()}>+ {t('modelNew.createGroupModel')}</Button>}
+          {activeTab === 'square' && <Button type="primary" onClick={() => handleEdit()}>+ {t('modelNew.createCustomModel')}</Button>}
+        </Space>
+      </Flex>
 
-      <PageScrollList
-        ref={scrollListRef}
-        url={getModelListUrl}
-        query={query}
-        renderItem={(item: Model) => (
-          <RbCard
-            title={item.name}
-          >
-            {formatData(item)?.map((description: DescriptionItem) => (
-              <div 
-                key={description.key}
-                className="rb:flex rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-[20px] rb:mb-[12px]"
-              >
-                  <span className="rb:whitespace-nowrap">{(description.label as string)}</span>
-                  <span className={clsx({
-                    "rb:text-[#212332]": description.key !== 'is_active',
-                    "rb:text-[#369F21] rb:font-medium": description.key === 'is_active' && item.is_active,
-                  })}>{(description.children as string)}</span>
-              </div>
-            ))}
-            <Button className="rb:mt-[8px]" type="primary" ghost block onClick={() => handleEdit(item)}>{t('model.configureBtn')}</Button>
-          </RbCard>
-        )}
-      />
-
-      <ConfigModal
+      <div className="rb:w-full rb:h-[calc(100%-48px)] rb:my-4">
+        {activeTab === 'group' && <GroupModel ref={groupRef} query={query} handleEdit={handleEdit} />}
+        {activeTab === 'list' && <ModelList query={query} />}
+        {activeTab === 'square' && <ModelSquare ref={squareRef} query={query} handleEdit={handleEdit} />}
+      </div>
+      <GroupModelModal
         ref={configModalRef}
-        refresh={() => scrollListRef?.current?.refresh()}
+        refresh={handleRefresh}
       />
-    </div>
+      <CustomModelModal
+        ref={customModelModalRef}
+        refresh={handleRefresh}
+      />
+    </>
   )
 }
 

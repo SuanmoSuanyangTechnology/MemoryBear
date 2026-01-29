@@ -21,6 +21,7 @@ from app.schemas.response_schema import ApiResponse
 from app.services.emotion_config_service import EmotionConfigService
 from app.core.logging_config import get_api_logger
 from app.db import get_db
+from app.utils.config_utils import resolve_config_id
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -46,7 +47,7 @@ class EmotionConfigUpdate(BaseModel):
 
 @router.get("/read_config", response_model=ApiResponse)
 def get_emotion_config(
-    config_id: UUID = Query(..., description="配置ID"),
+    config_id: UUID|int = Query(..., description="配置ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -79,7 +80,7 @@ def get_emotion_config(
             f"用户 {current_user.username} 请求获取情绪配置",
             extra={"config_id": config_id}
         )
-        
+        config_id=resolve_config_id(config_id, db)
         # 初始化服务
         config_service = EmotionConfigService(db)
         

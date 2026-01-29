@@ -22,7 +22,7 @@ export const lightTheme: ThemeConfig = {
     // colorBgContainer: '#FBFDFF',
     colorError: '#FF5D34',
     sizeSM: 12,
-    fontSizeSM: 12, 
+    fontSizeSM: 12,
   },
   components: {
     Layout: {
@@ -105,6 +105,9 @@ export const lightTheme: ThemeConfig = {
     },
     Select: {
       lineHeightSM: 26
+    },
+    Upload: {
+      pictureCardSize: 96,
     }
   }
 };

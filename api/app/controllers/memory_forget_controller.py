@@ -34,7 +34,7 @@ from app.schemas.memory_storage_schema import (
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_forget_service import MemoryForgetService
-
+from app.utils.config_utils import resolve_config_id
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -84,6 +84,9 @@ async def trigger_forgetting_cycle(
         
         connected_config = get_end_user_connected_config(end_user_id, db)
         config_id = connected_config.get("memory_config_id")
+        config_id = resolve_config_id(int(config_id), db)
+
+
         
         if config_id is None:
             api_logger.warning(f"终端用户 {end_user_id} 未关联记忆配置")
@@ -129,7 +132,7 @@ async def trigger_forgetting_cycle(
 
 @router.get("/read_config", response_model=ApiResponse)
 async def read_forgetting_config(
-    config_id: UUID,
+    config_id: UUID|int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -158,6 +161,7 @@ async def read_forgetting_config(
     )
     
     try:
+        config_id=resolve_config_id(config_id, db)
         # 调用服务层读取配置
         config = forget_service.read_forgetting_config(db=db, config_id=config_id)
         
@@ -195,6 +199,8 @@ async def update_forgetting_config(
         ApiResponse: 包含更新结果的响应
     """
     workspace_id = current_user.current_workspace_id
+    payload.config_id=resolve_config_id(int(payload.config_id), db)
+
     
     # 检查用户是否已选择工作空间
     if workspace_id is None:
@@ -255,12 +261,10 @@ async def get_forgetting_stats(
         ApiResponse: 包含统计信息的响应
     """
     workspace_id = current_user.current_workspace_id
-    
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试获取遗忘引擎统计但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
     # 如果提供了 end_user_id，通过它获取 config_id
     config_id = None
     if end_user_id:
@@ -269,6 +273,7 @@ async def get_forgetting_stats(
             
             connected_config = get_end_user_connected_config(end_user_id, db)
             config_id = connected_config.get("memory_config_id")
+            config_id = resolve_config_id(config_id, db)
             
             if config_id is None:
                 api_logger.warning(f"终端用户 {end_user_id} 未关联记忆配置")
@@ -325,7 +330,7 @@ async def get_forgetting_curve(
         ApiResponse: 包含遗忘曲线数据的响应
     """
     workspace_id = current_user.current_workspace_id
-    
+    request.config_id = resolve_config_id(int(request.config_id), db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试获取遗忘曲线但未选择工作空间")
