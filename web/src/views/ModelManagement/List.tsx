@@ -23,7 +23,6 @@ const ModelList: FC<{ query: any }> = ({ query }) => {
     getModelNewList({
       ...query,
       is_composite: false,
-      is_active: true,
     })
       .then(res => {
         setList((res || []) as ProviderModelItem[])
