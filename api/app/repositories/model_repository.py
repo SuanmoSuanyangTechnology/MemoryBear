@@ -73,8 +73,7 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def search_by_name(db: Session, name: str, tenant_id: uuid.UUID | None = None, limit: int = 10) -> List[
-        ModelConfig]:
+    def search_by_name(db: Session, name: str, tenant_id: uuid.UUID | None = None, limit: int = 10) -> List[ModelConfig]:
         """按名称模糊匹配获取模型配置列表
 
         Args:
@@ -105,8 +104,7 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def get_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> Tuple[
-        List[ModelConfig], int]:
+    def get_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> Tuple[List[ModelConfig], int]:
         """获取模型配置列表"""
         db_logger.debug(f"查询模型配置列表: {query.dict()}, tenant_id={tenant_id}")
 
@@ -179,8 +177,7 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def get_list_new(db: Session, query: ModelConfigQueryNew, tenant_id: uuid.UUID | None = None) -> tuple[
-        dict[str, list[ModelConfig]], Any]:
+    def get_list_new(db: Session, query: ModelConfigQueryNew, tenant_id: uuid.UUID | None = None) -> tuple[dict[str, list[ModelConfig]], Any]:
         """获取模型配置列表"""
         db_logger.debug(f"查询模型配置列表: {query.model_dump()}, tenant_id={tenant_id}")
 
@@ -257,8 +254,7 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def get_by_type(db: Session, model_type: ModelType, tenant_id: uuid.UUID | None = None, is_active: bool = True) -> \
-    List[ModelConfig]:
+    def get_by_type(db: Session, model_type: ModelType, tenant_id: uuid.UUID | None = None, is_active: bool = True) ->List[ModelConfig]:
         """根据类型获取模型配置"""
         db_logger.debug(f"根据类型查询模型配置: type={model_type}, tenant_id={tenant_id}, is_active={is_active}")
 
@@ -305,8 +301,7 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def update(db: Session, model_id: uuid.UUID, model_data: ModelConfigUpdate, tenant_id: uuid.UUID | None = None) -> \
-    Optional[ModelConfig]:
+    def update(db: Session, model_id: uuid.UUID, model_data: ModelConfigUpdate, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
         """更新模型配置"""
         db_logger.debug(f"更新模型配置: model_id={model_id}, tenant_id={tenant_id}")
 
@@ -666,8 +661,7 @@ class ModelBaseRepository:
         ).first() is not None
 
     @staticmethod
-    def get_api_key_info_by_model_config(db: Session, model_config_id: uuid.UUID, is_active: bool = True) -> Optional[
-        Dict[str, Any]]:
+    def get_api_key_info_by_model_config(db: Session, model_config_id: uuid.UUID, is_active: bool = True) -> Optional[Dict[str, Any]]:
         """根据模型配置ID获取API Key信息
 
         Args:
