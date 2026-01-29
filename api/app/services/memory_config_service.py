@@ -373,13 +373,11 @@ class MemoryConfigService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="嵌入模型ID不存在")
 
         # api_config: ModelApiKey = config.api_keys[0]
-
         api_keys = ModelApiKeyRepository.get_by_model_config(self.db, config.id)
         print(api_keys,30*'+')
         model_config_id = api_keys
         api_base = ModelApiKeyRepository.get_api_key_info_by_model_config(self.db, model_config_id)
         type=ModelConfigRepository.get_type_by_id(self.db, model_config_id)
-
         return {
             "model_name": api_base.get("model_name", None),
             "provider": api_base.get("provider", None),
