@@ -767,26 +767,6 @@ models:
   tags:
   - 重排序模型
   logo: dashscope
-- name: paraformer-realtime-v1
-  type: speech2text
-  provider: dashscope
-  description: paraformer-realtime-v1语音转文字模型，支持多格式音频/视频文件，文件上传限制100MB
-  is_deprecated: false
-  is_official: true
-  tags:
-  - 语音识别
-  - 语音转文字
-  logo: dashscope
-- name: paraformer-realtime-v2
-  type: speech2text
-  provider: dashscope
-  description: paraformer-realtime-v2语音转文字模型，支持多格式音频/视频文件，文件上传限制100MB
-  is_deprecated: false
-  is_official: true
-  tags:
-  - 语音识别
-  - 语音转文字
-  logo: dashscope
 - name: multimodal-embedding-v1
   type: embedding
   provider: dashscope
@@ -837,14 +817,4 @@ models:
   tags:
   - 嵌入模型
   - 文本嵌入
-  logo: dashscope
-- name: tts-1
-  type: tts
-  provider: dashscope
-  description: tts-1语音合成模型，默认音色知茹（新闻女声），支持多语言多音色，最大文本长度7000字，输出MP3格式
-  is_deprecated: false
-  is_official: true
-  tags:
-  - 语音合成
-  - 文字转语音
   logo: dashscope
