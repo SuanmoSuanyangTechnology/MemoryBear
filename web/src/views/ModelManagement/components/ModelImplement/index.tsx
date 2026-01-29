@@ -24,15 +24,15 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
     }
     subModelModalRef.current?.handleOpen()
   }
-  const handleDelete = (provider: string) => {
+  const handleDelete = (vo: any) => {
     modal.confirm({
-      title: t('common.confirmDeleteDesc', { name: provider }),
+      title: t('common.confirmDeleteDesc', { name: [vo.model_name, vo.api_key].join(' / ') }),
       content: t('application.apiKeyDeleteContent'),
       okText: t('common.delete'),
       cancelText: t('common.cancel'),
       okType: 'danger',
       onOk: () => {
-        onChange?.(value?.filter((item: any) => item.provider !== provider))
+        onChange?.(value?.filter((item: any) => item.id !== vo.id))
       }
     })
   }
@@ -70,18 +70,18 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
       <div className="rb:bg-[#F5F6F7] rb:rounded-lg rb:p-3 rb:mt-2">
         {!value || value.length === 0
         ? <Empty size={88} />
-          : Object.entries(groupedByProvider).map(([provider, items]: [string, ModelList[]]) => {
+          : value.map((item: any) => {
           return (
-            <div key={provider} className="rb:mb-4 last:rb:mb-0">
-              <Flex justify="space-between" align="center" className="rb:mb-2 last:rb:mb-0">
-                <div className="rb:font-medium">{[...new Set(items?.map((vo) => vo.model_name))].join(', ')}</div>
-
+            <div key={item.id} className="rb:mb-4 rb:last:rb:mb-0 rb:bg-[#FBFDFF]  rb:rounded-lg rb:p-3">
+              <Flex gap={8} justify="space-between" align="center" className="rb:mb-2 rb:last:rb:mb-0">
+                <div className="rb:font-medium">{item.model_name}</div>
                 <div
                   className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
-                  onClick={() => handleDelete(provider)}
+                  onClick={() => handleDelete(item)}
                 ></div>
               </Flex>
-              <Tag className="rb:mb-2">{t(`modelNew.${provider}`)}</Tag>
+              <div className="rb:text-[#5B6167] rb:my-2">{item.api_key}</div>
+              <Tag className="rb:mb-2">{t(`modelNew.${item.provider}`)}</Tag>
             </div>
           )
         })}

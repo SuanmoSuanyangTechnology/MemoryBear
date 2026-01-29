@@ -1,8 +1,8 @@
-import { forwardRef, useImperativeHandle, useState, useMemo, useEffect } from 'react';
+import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Form, Cascader, App, type CascaderProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { SubModelModalForm, SubModelModalRef, SubModelModalProps, ModelList } from './types';
+import type { SubModelModalForm, SubModelModalRef, SubModelModalProps } from './types';
 import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect'
 import { modelProviderUrl, getModelNewList } from '@/api/models'
@@ -59,7 +59,8 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
           ...vo[0],
           model_name: vo[0].name,
           model_config_ids: [vo[0].id],
-          id: vo[1].value
+          id: vo[1].value,
+          api_key: vo[1].label
         })))
         handleClose()
       })
