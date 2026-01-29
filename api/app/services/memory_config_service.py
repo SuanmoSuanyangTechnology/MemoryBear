@@ -338,7 +338,9 @@ class MemoryConfigService:
         model_id=api_key_config.id
         api_base = ModelBaseRepository.get_api_key_info_by_model_config(self.db, model_id)
         type = ModelBaseRepository.get_type_by_id(self.db, model_id)
-
+        print(20 * '*', api_base)
+        print(api_base.get("model_name", None))
+        print(100*'.',config.id)
 
         return {
             "model_name": api_base.get("model_name", None),
@@ -377,6 +379,7 @@ class MemoryConfigService:
         api_base = ModelBaseRepository.get_api_key_info_by_model_config(self.db, model_id)
         type = ModelBaseRepository.get_type_by_id(self.db, model_id)
 
+        print(20*'-',api_base)
         return {
             "model_name": api_base.get("model_name", None),
             "provider": api_base.get("provider", None),
