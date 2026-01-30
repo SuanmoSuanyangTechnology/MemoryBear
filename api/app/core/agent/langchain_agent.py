@@ -151,6 +151,7 @@ class LangChainAgent:
     async def term_memory_save(self,long_term_messages,actual_config_id,end_user_id,type):
         db = next(get_db())
         scope=6
+
         try:
             repo = LongTermMemoryRepository(db)
             await long_term_storage(long_term_type="chunk", langchain_messages=long_term_messages,
