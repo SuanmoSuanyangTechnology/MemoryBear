@@ -126,12 +126,16 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
       let allTools = Array.isArray(response.tools) ? response.tools : []
+      const memoryContent = response.memory?.memory_content
+      const parsedMemoryContent = memoryContent === null || memoryContent === '' 
+        ? undefined 
+        : !isNaN(Number(memoryContent)) ? Number(memoryContent) : memoryContent
       form.setFieldsValue({
         ...response,
         tools: allTools,
         memory: {
           ...response.memory,
-          memory_content: response.memory?.memory_content ? Number(response.memory?.memory_content) : undefined
+          memory_content: parsedMemoryContent
         }
       })
       setData({
