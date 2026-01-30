@@ -14,6 +14,34 @@ from pydantic import Field
 
 logger = get_memory_logger(__name__)
 
+# 支持的语言列表和默认回退值
+SUPPORTED_LANGUAGES = {"zh", "en"}
+FALLBACK_LANGUAGE = "en"
+
+
+def validate_language(language: Optional[str]) -> str:
+    """
+    校验语言参数，确保其为有效值。
+    
+    Args:
+        language: 待校验的语言代码
+        
+    Returns:
+        有效的语言代码（"zh" 或 "en"）
+    """
+    if language is None:
+        return FALLBACK_LANGUAGE
+    
+    lang = str(language).lower().strip()
+    if lang in SUPPORTED_LANGUAGES:
+        return lang
+    
+    logger.warning(
+        f"无效的语言参数 '{language}'，已回退到默认值 '{FALLBACK_LANGUAGE}'。"
+        f"支持的语言: {SUPPORTED_LANGUAGES}"
+    )
+    return FALLBACK_LANGUAGE
+
 
 class MemorySummaryResponse(RobustLLMResponse):
     """Structured response for summary generation per chunk.
@@ -50,9 +78,10 @@ async def generate_title_and_type_for_summary(
     from app.core.memory.utils.prompt.prompt_utils import render_episodic_title_and_type_prompt
     from app.core.config import settings
     
-    # 如果没有指定语言，从配置中读取
+    # 如果没有指定语言，从配置中读取，并校验有效性
     if language is None:
         language = settings.DEFAULT_LANGUAGE
+    language = validate_language(language)
     
     # 定义有效的类型集合
     VALID_TYPES = {
@@ -166,11 +195,11 @@ async def _process_chunk_summary(
         return None
 
     try:
-        # Render prompt via Jinja2 for a single chunk
-        # 从配置中获取语言设置
+        # 从配置中获取语言设置（只获取一次，复用），并校验有效性
         from app.core.config import settings
-        language = settings.DEFAULT_LANGUAGE
+        language = validate_language(settings.DEFAULT_LANGUAGE)
         
+        # Render prompt via Jinja2 for a single chunk
         prompt_content = await render_memory_summary_prompt(
             chunk_texts=chunk.content,
             json_schema=MemorySummaryResponse.model_json_schema(),
@@ -194,10 +223,6 @@ async def _process_chunk_summary(
         title = None
         episodic_type = None
         try:
-            # 从配置中获取语言设置
-            from app.core.config import settings
-            language = settings.DEFAULT_LANGUAGE
-            
             title, episodic_type = await generate_title_and_type_for_summary(
                 content=summary_text,
                 llm_client=llm_client,
