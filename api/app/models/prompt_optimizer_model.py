@@ -2,7 +2,7 @@ import datetime
 import uuid
 from enum import StrEnum
 
-from sqlalchemy import Column, ForeignKey, Text, DateTime, String, Index
+from sqlalchemy import Column, ForeignKey, Text, DateTime, String, Index, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db import Base
@@ -121,10 +121,33 @@ class PromptOptimizerSessionHistory(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, comment="Tenant ID")
     # app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=False, comment="Application ID")
-    session_id = Column(UUID(as_uuid=True), ForeignKey("prompt_opt_session_list.id"),nullable=False, comment="Session ID")
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("prompt_opt_session_list.id"),
+        nullable=False,
+        comment="Session ID"
+    )
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, comment="User ID")
     role = Column(String, nullable=False, comment="Message Role")
     content = Column(Text, nullable=False, comment="Message Content")
     # prompt = Column(Text, nullable=False, comment="Prompt")
 
     created_at = Column(DateTime, default=datetime.datetime.now, comment="Creation Time", index=True)
+
+
+class PromptHistory(Base):
+    __tablename__ = "prompt_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, comment="Tenant ID")
+
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("prompt_opt_session_list.id"),
+        nullable=False,
+        comment="Session ID"
+    )
+    title = Column(String, nullable=False, comment="Title")
+    prompt = Column(Text, nullable=False, comment="Prompt")
+    created_at = Column(DateTime, default=datetime.datetime.now, comment="Creation Time", index=True)
+    is_delete = Column(Boolean, default=False, comment="Delete")
