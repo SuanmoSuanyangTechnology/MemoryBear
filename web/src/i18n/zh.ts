@@ -112,6 +112,7 @@ export const zh = {
       orderPayment: '订单支付',
       orderHistory: '订单记录',
       spaceConfig: '空间配置',
+      ontology: '本体工程',
       prompt: '提示词工程',
     },
     knowledgeBase: {
@@ -1240,7 +1241,8 @@ export const zh = {
       inactive: '不活跃',
       configurationName: '配置名称',
       emotionEngine: '情感引擎',
-      reflectionEngine: '反思引擎'
+      reflectionEngine: '反思引擎',
+      scene_id: '本体场景',
     },
     member: {
       username: '用户名',
@@ -2526,6 +2528,34 @@ export const zh = {
       summary: '核心洞察',
       none: '无'
     },
+    ontology: {
+      searchPlaceholder: '搜索场景',
+      create: '新增工程',
+      edit: '编辑工程',
+      scene_name: '场景名称',
+      scene_description: '场景描述',
+      descriptionPlaceholder: '描述该场景的用途和提取的实体类型',
+      typeCount: '个类型',
+      created_at: '创建时间',
+      updated_at: '更新时间',
+      entityTypes: '实体类型',
+
+      addClass: '添加类型',
+      class_name: '类型名称',
+      class_description: '类型定义',
+      classDescriptionPlaceholder: '描述该类型的含义和用途',
+
+      llm_id: '选择模型',
+      scenario: '场景描述',
+      scenarioPlaceholder: '请描述您的业务需求',
+      run: '推理',
+      loadingConfirm: '推断中',
+      extractConfirm: '添加选中类型',
+      classType: '工程类型',
+      extract: '工程推理',
+      source: '未添加项',
+      target: '已添加项',
+    }
     prompt: {
       editor: '提示词生成器',
       history: '我的历史',

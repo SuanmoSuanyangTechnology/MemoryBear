@@ -3,6 +3,7 @@ import { createHashRouter, createRoutesFromElements, Route } from 'react-router-
 
 // 导入路由配置JSON
 import routesConfig from './routes.json';
+import Ontology from '@/views/Ontology';
 
 
 // 递归函数，用于生成路由元素
@@ -68,6 +69,8 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   Pricing: lazy(() => import('@/views/Pricing')),
   ToolManagement: lazy(() => import('@/views/ToolManagement')),
   SpaceConfig: lazy(() => import('@/views/SpaceConfig')),
+  Ontology: lazy(() => import('@/views/Ontology')),
+  OntologyDetail: lazy(() => import('@/views/Ontology/pages/Detail')),
   Prompt: lazy(() => import('@/views/Prompt')),
   Login: lazy(() => import('@/views/Login')),
   InviteRegister: lazy(() => import('@/views/InviteRegister')),

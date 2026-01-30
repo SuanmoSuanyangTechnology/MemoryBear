@@ -58,13 +58,12 @@ const ApiKeyManagement: React.FC = () => {
         </Button>
       </div>
 
-      <PageScrollList
+      <PageScrollList<ApiKey, { is_active: boolean; type: string }>
         ref={scrollListRef}
         url={getApiKeyListUrl}
         query={{ is_active: true, type: 'service' }}
         column={2}
-        renderItem={(item: Record<string, unknown>) => {
-          let apiKeyItem = item as unknown as ApiKey
+        renderItem={(apiKeyItem) => {
           return (
             <RbCard 
               title={apiKeyItem.name}

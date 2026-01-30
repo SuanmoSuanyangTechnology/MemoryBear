@@ -333,6 +333,21 @@
       ]
     },
     {
+      "id": 21,
+      "parent": 0,
+      "code": "ontology",
+      "label": "本体工程",
+      "i18nKey": "menu.ontology",
+      "path": "/ontology",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "icon": null,
+      "iconActive": null,
+      "subs": null
+    },
+    {
       "id": 10,
       "parent": 0,
       "code": "memoryConversation",

@@ -42,6 +42,8 @@ import pricingIcon from '@/assets/images/menu/pricing.svg'
 import pricingActiveIcon from '@/assets/images/menu/pricing_active.svg'
 import spaceConfigIcon from '@/assets/images/menu/spaceConfig.svg'
 import spaceConfigActiveIcon from '@/assets/images/menu/spaceConfig_active.svg'
+import ontologyIcon from '@/assets/images/menu/ontology.svg'
+import ontologyActiveIcon from '@/assets/images/menu/ontology_active.svg'
 import promptIcon from '@/assets/images/menu/prompt.svg'
 import promptActiveIcon from '@/assets/images/menu/prompt_active.svg'
 
@@ -75,6 +77,8 @@ const iconPathMap: Record<string, string> = {
   'pricingActive': pricingActiveIcon,
   'spaceConfig': spaceConfigIcon,
   'spaceConfigActive': spaceConfigActiveIcon,
+  'ontology': ontologyIcon,
+  'ontologyActive': ontologyActiveIcon,
   'prompt': promptIcon,
   'promptActive': promptActiveIcon,
 };
@@ -119,7 +123,7 @@ const Menu: FC<{
       // 叶子节点
       if (!subs || subs.length === 0) {
         if (!menu.path) return null;
-        
+
         return {
           key: menu.path,
           title: menu.i18nKey ? t(menu.i18nKey) : menu.label,
@@ -128,13 +132,13 @@ const Menu: FC<{
               {menu.i18nKey ? t(menu.i18nKey) : menu.label}
             </span>
           ),
-          icon: iconSrc ? <img 
-            src={iconSrc} 
-            className="rb:w-[16px] rb:h-[16px] rb:mr-[8px]" 
+          icon: iconSrc ? <img
+            src={iconSrc}
+            className="rb:w-[16px] rb:h-[16px] rb:mr-[8px]"
           /> : null,
         };
       }
-      
+
       // 有子菜单的节点
 
       const menuLabel = menu.i18nKey ? t(menu.i18nKey) : menu.label;
@@ -142,15 +146,15 @@ const Menu: FC<{
         key: `submenu-${menu.id}`,
         title: menuLabel,
         label: menuLabel,
-        icon: iconSrc ? <img 
-          src={iconSrc} 
-          className="rb:w-[16px] rb:h-[16px] rb:mr-[8px]" 
+        icon: iconSrc ? <img
+          src={iconSrc}
+          className="rb:w-[16px] rb:h-[16px] rb:mr-[8px]"
         /> : <UserOutlined/>,
         children: generateMenuItems(subs),
       };
     }).filter(Boolean);
   };
-  
+
   // 生成菜单项
   const menuItems = generateMenuItems(menus);
   // 初始加载菜单
@@ -168,17 +172,17 @@ const Menu: FC<{
       for (const menu of menuList) {
         if (menu.path) {
           const menuPath = menu.path[0] !== '/' ? '/' + menu.path : menu.path;
-          
+
           // 精确匹配或路径前缀匹配（确保是完整路径段匹配）
           const isExactMatch = menuPath === currentPath;
-          const isPrefixMatch = currentPath.startsWith(menuPath + '/') || 
-                               currentPath === menuPath;
-          
+          const isPrefixMatch = currentPath.startsWith(menuPath + '/') ||
+            currentPath === menuPath;
+
           if (isExactMatch || isPrefixMatch) {
             return { key: menu.path };
           }
         }
-        
+
         // 递归检查子菜单
         if (menu.subs && menu.subs.length > 0) {
           const newParentPaths = [...parentPaths, `submenu-${menu.id}`];
@@ -205,7 +209,7 @@ const Menu: FC<{
   }
 
   return (
-    <Sider 
+    <Sider
       width={240}
       collapsedWidth={64}
       collapsed={collapsed}
@@ -222,12 +226,12 @@ const Menu: FC<{
               {t(`space.${storageType}`)}
             </span>
           </div>
-          : !collapsed 
-          ? <div className="rb:flex">
+          : !collapsed
+            ? <div className="rb:flex">
               <img src={logo} className={styles.logo} />
               {t('title')}
             </div>
-          : null
+            : null
         }
         <img src={collapsed ? menuUnfold : menuFold} className={styles.menuIcon} onClick={toggleSider} />
       </div>
