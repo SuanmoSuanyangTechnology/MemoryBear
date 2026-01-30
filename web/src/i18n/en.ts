@@ -2466,6 +2466,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       extract: 'Project Inference',
       source: 'Not Added',
       target: 'Added',
+    },
     prompt: {
       editor: 'Prompt Generator',
       history: 'My History',
