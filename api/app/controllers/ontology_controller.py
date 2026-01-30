@@ -182,6 +182,14 @@ def _get_ontology_service(
                 detail=f"找不到指定的LLM模型: {llm_id}"
             )
         
+        # 检查是否为组合模型
+        if hasattr(model_config, 'is_composite') and model_config.is_composite:
+            logger.error(f"Model {llm_id} is a composite model, which is not supported for ontology extraction")
+            raise HTTPException(
+                status_code=400,
+                detail="本体提取不支持使用组合模型，请选择单个模型"
+            )
+        
         # 验证模型配置了API密钥
         if not model_config.api_keys:
             logger.error(f"Model {llm_id} has no API key configuration")
@@ -242,7 +250,7 @@ async def extract_ontology(
     """提取本体类
     
     从场景描述中提取符合OWL规范的本体类。
-    提取结果会保存到ontology_extraction_result表，并返回给前端。
+    提取结果仅返回给前端，不会自动保存到数据库。
     前端可以从返回结果中选择需要的类型，然后调用 /class 接口创建类型。
     支持中英文切换，通过 X-Language-Type Header 指定语言。
     

@@ -22,7 +22,6 @@ from app.core.memory.storage_services.extraction_engine.knowledge_extraction.ont
     OntologyExtractor,
 )
 from app.core.memory.utils.validation.owl_validator import OWLValidator
-from app.repositories.ontology_result_repository import OntologyResultRepository
 
 
 logger = logging.getLogger(__name__)
@@ -34,7 +33,6 @@ class OntologyService:
     封装本体提取的业务逻辑,协调各个组件:
     - OntologyExtractor: 执行LLM驱动的本体提取
     - OWLValidator: OWL语义验证
-    - OntologyResultRepository: 结果存储
     
     Attributes:
         extractor: 本体提取器实例
@@ -84,8 +82,8 @@ class OntologyService:
     ) -> OntologyExtractionResponse:
         """执行本体提取
         
-        使用默认配置参数调用OntologyExtractor执行提取,并将结果保存到ontology_extraction_result表。
-        提取结果仅返回给前端，不会自动保存到ontology_class表。
+        使用默认配置参数调用OntologyExtractor执行提取。
+        提取结果仅返回给前端，不会自动保存到数据库。
         前端需要调用 /class 接口来保存选中的类型。
         
         Args:
@@ -166,27 +164,7 @@ class OntologyService:
                 logger.error("Ontology extraction failed: No classes extracted (structured output may have failed)")
                 raise RuntimeError("本体提取失败：结构化输出失败，未能提取到任何本体类")
             
-            # 保存提取结果到 ontology_extraction_result 表
-            try:
-                logger.debug("Saving extraction result to ontology_extraction_result table")
-                classes_json = {
-                    "classes": [cls.model_dump() for cls in response.classes]
-                }
-                
-                OntologyResultRepository.create(
-                    db=self.db,
-                    scenario=scenario,
-                    domain=response.domain,
-                    classes_json=classes_json,
-                    extracted_count=len(response.classes)
-                )
-                self.db.commit()
-                logger.info("Extraction result saved to ontology_extraction_result table")
-            except Exception as e:
-                logger.error(f"Failed to save extraction result: {str(e)}")
-                # 不影响提取结果的返回,继续执行
-            
-            # 注释：不再自动保存到 ontology_class 表
+            # 注释：提取结果仅返回给前端，不保存到数据库
             # 前端将从返回结果中选择需要的类型，然后调用 /class 接口创建
             logger.info(
                 f"Extraction completed. Classes will be saved to ontology_class "

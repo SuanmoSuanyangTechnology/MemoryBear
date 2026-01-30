@@ -12,23 +12,15 @@ Classes:
 import logging
 from typing import List, Optional, Tuple
 
-try:
-    from owlready2 import (
-        World,
-        Thing,
-        get_ontology,
-        sync_reasoner_pellet,
-        OwlReadyInconsistentOntologyError,
-    )
-    OWLREADY2_AVAILABLE = True
-except ImportError:
-    OWLREADY2_AVAILABLE = False
-    World = None
-    Thing = None
+from owlready2 import (
+    World,
+    Thing,
+    get_ontology,
+    sync_reasoner_pellet,
+    OwlReadyInconsistentOntologyError,
+)
 
 from app.core.memory.models.ontology_models import OntologyClass
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -52,12 +44,6 @@ class OWLValidator:
         Args:
             base_namespace: Base URI for the ontology namespace (default: http://example.org/ontology#)
         """
-        if not OWLREADY2_AVAILABLE:
-            logger.warning(
-                "Owlready2 is not installed. OWL validation features will be disabled. "
-                "Install with: pip install owlready2>=0.46"
-            )
-        
         self.base_namespace = base_namespace
     
     def validate_ontology_classes(
@@ -91,9 +77,6 @@ class OWLValidator:
             >>> len(errors)
             0
         """
-        if not OWLREADY2_AVAILABLE:
-            return False, ["Owlready2 is not installed. Cannot perform OWL validation."], None
-        
         if not classes:
             return False, ["No classes provided for validation"], None
         
@@ -235,9 +218,6 @@ class OWLValidator:
         Returns:
             True if circular inheritance is detected, False otherwise
         """
-        if not OWLREADY2_AVAILABLE:
-            return False
-        
         visited = set()
         current = owl_class
         
@@ -299,9 +279,6 @@ class OWLValidator:
             >>> is_valid, errors, world = validator.validate_ontology_classes(classes)
             >>> owl_content = validator.export_to_owl(world, "ontology.owl", format="rdfxml")
         """
-        if not OWLREADY2_AVAILABLE:
-            raise RuntimeError("Owlready2 is not installed. Cannot export OWL file.")
-        
         # Validate format
         valid_formats = ["rdfxml", "turtle", "ntriples", "json"]
         if format not in valid_formats:
@@ -564,9 +541,6 @@ class OWLValidator:
             >>> is_compatible
             True
         """
-        if not OWLREADY2_AVAILABLE:
-            return False, ["Owlready2 is not installed. Cannot validate Protégé compatibility."]
-        
         warnings = []
         
         # Check namespace format
