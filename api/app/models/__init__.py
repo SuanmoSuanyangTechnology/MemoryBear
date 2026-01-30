@@ -30,6 +30,8 @@ from .tool_model import (
 from .memory_perceptual_model import MemoryPerceptualModel
 from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
+from .ontology_scene import OntologyScene
+from .ontology_class import OntologyClass
 
 __all__ = [
     "Tenants",
