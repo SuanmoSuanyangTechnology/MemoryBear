@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 
-def resolve_config_id(config_id: UUID | int, db: Session) -> UUID:
+def resolve_config_id(config_id: UUID | int|str, db: Session) -> UUID:
     """
     解析 config_id，如果是整数则通过 config_id_old 查找对应的 UUID
     
@@ -21,16 +21,17 @@ def resolve_config_id(config_id: UUID | int, db: Session) -> UUID:
     Raises:
         ValueError: 当找不到对应的配置时
     """
+
     from app.models.memory_config_model import MemoryConfig
     if  isinstance(config_id, UUID):
         return config_id
     if isinstance(config_id, str) and len(config_id)<=6:
         memory_config = db.query(MemoryConfig).filter(
-            MemoryConfig.config_id_old == config_id
+            MemoryConfig.config_id_old == int(config_id)
         ).first()
-
+        print(memory_config)
         if not memory_config:
-            raise ValueError(f"未找到 config_id_old={config_id} 对应的配置")
+            raise ValueError(f"STR 未找到 config_id_old={config_id} 对应的配置")
         return memory_config.config_id
     if isinstance(config_id, int):
         memory_config = db.query(MemoryConfig).filter(
@@ -38,7 +39,7 @@ def resolve_config_id(config_id: UUID | int, db: Session) -> UUID:
         ).first()
 
         if not memory_config:
-            raise ValueError(f"未找到 config_id_old={config_id} 对应的配置")
+            raise ValueError(f"INT 未找到 config_id_old={config_id} 对应的配置")
 
         return memory_config.config_id
 

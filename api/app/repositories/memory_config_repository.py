@@ -517,7 +517,7 @@ class MemoryConfigRepository:
             db_logger.error(f"根据ID查询记忆配置失败: config_id={config_id} - {str(e)}")
             raise
     @staticmethod
-    def get_config_with_workspace(db: Session, config_id: uuid.UUID) -> Optional[tuple]:
+    def get_config_with_workspace(db: Session, config_id: uuid.UUID|int|str) -> Optional[tuple]:
         """Get memory config and its associated workspace information
         
         Args:
@@ -535,6 +535,7 @@ class MemoryConfigRepository:
         from app.models.workspace_model import Workspace
         
         start_time = time.time()
+        config_id=resolve_config_id(config_id, db)
         
         # Log configuration loading start
         config_logger.info(

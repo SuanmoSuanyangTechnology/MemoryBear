@@ -17,6 +17,8 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.utils.config_utils import resolve_config_id
+
 logger = get_business_logger()
 
 
@@ -498,7 +500,7 @@ class EmotionAnalyticsService:
                 
                 connected_config = get_end_user_connected_config(end_user_id, db)
                 config_id = connected_config.get("memory_config_id")
-                
+                config_id=resolve_config_id(config_id, db)
                 if config_id is not None:
                     from app.services.memory_config_service import (
                         MemoryConfigService,
