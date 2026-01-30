@@ -21,7 +21,7 @@ import logging
 import tempfile
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -30,6 +30,9 @@ from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
+from app.services.memory_base_service import Translation_English
+from app.core.memory.models.ontology_models import OntologyClass
+from typing import List
 from app.schemas.ontology_schemas import (
     ExportRequest,
     ExportResponse,
@@ -58,6 +61,72 @@ router = APIRouter(
     prefix="/memory/ontology",
     tags=["Ontology"],
 )
+
+
+async def translate_ontology_classes(
+    classes: List[OntologyClass], 
+    model_id: str
+) -> List[OntologyClass]:
+    """翻译本体类列表
+    
+    将本体类的中文字段翻译为英文，包括：
+    - name_chinese: 中文名称
+    - description: 描述
+    - examples: 示例列表
+    
+    Args:
+        classes: 本体类列表
+        model_id: LLM模型ID，用于翻译
+        
+    Returns:
+        List[OntologyClass]: 翻译后的本体类列表
+    """
+    translated_classes = []
+    
+    for ontology_class in classes:
+        # 创建类的副本，避免修改原对象
+        translated_class = ontology_class.model_copy(deep=True)
+        
+        # 翻译 name_chinese 字段
+        if translated_class.name_chinese:
+            try:
+                translated_class.name_chinese = await Translation_English(
+                    model_id, 
+                    translated_class.name_chinese
+                )
+            except Exception as e:
+                logger.warning(f"Failed to translate name_chinese: {e}")
+                # 保留原文
+        
+        # 翻译 description 字段
+        if translated_class.description:
+            try:
+                translated_class.description = await Translation_English(
+                    model_id, 
+                    translated_class.description
+                )
+            except Exception as e:
+                logger.warning(f"Failed to translate description: {e}")
+                # 保留原文
+        
+        # 翻译 examples 列表
+        if translated_class.examples:
+            translated_examples = []
+            for example in translated_class.examples:
+                try:
+                    translated_example = await Translation_English(
+                        model_id, 
+                        example
+                    )
+                    translated_examples.append(translated_example)
+                except Exception as e:
+                    logger.warning(f"Failed to translate example: {e}")
+                    translated_examples.append(example)  # 保留原文
+            translated_class.examples = translated_examples
+        
+        translated_classes.append(translated_class)
+    
+    return translated_classes
 
 
 def _get_ontology_service(
@@ -166,6 +235,7 @@ def _get_ontology_service(
 @router.post("/extract", response_model=ApiResponse)
 async def extract_ontology(
     request: ExtractionRequest,
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -174,9 +244,11 @@ async def extract_ontology(
     从场景描述中提取符合OWL规范的本体类。
     提取结果会保存到ontology_extraction_result表，并返回给前端。
     前端可以从返回结果中选择需要的类型，然后调用 /class 接口创建类型。
+    支持中英文切换，通过 X-Language-Type Header 指定语言。
     
     Args:
         request: 提取请求,包含scenario、domain、llm_id和scene_id
+        language_type: 语言类型，'zh'（中文）或 'en'（英文），默认 'zh'
         db: 数据库会话
         current_user: 当前用户
         
@@ -211,7 +283,8 @@ async def extract_ontology(
         f"scenario_length={len(request.scenario)}, "
         f"domain={request.domain}, "
         f"llm_id={request.llm_id}, "
-        f"scene_id={request.scene_id}"
+        f"scene_id={request.scene_id}, "
+        f"language_type={language_type}"
     )
     
     try:
@@ -236,6 +309,29 @@ async def extract_ontology(
             workspace_id=workspace_id
         )
         
+        # ===== 新增：翻译逻辑 =====
+        # 如果需要英文，则翻译数据
+        if language_type != 'zh':
+            api_logger.info(f"Translating extraction result to English")
+            
+            # 翻译 classes 列表
+            result.classes = await translate_ontology_classes(
+                result.classes, 
+                request.llm_id
+            )
+            
+            # 翻译 domain 字段
+            if result.domain:
+                try:
+                    result.domain = await Translation_English(
+                        request.llm_id, 
+                        result.domain
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to translate domain: {e}")
+                    # 保留原文
+        # ===== 翻译逻辑结束 =====
+        
         # 构建响应
         response = ExtractionResponse(
             classes=result.classes,
@@ -245,7 +341,7 @@ async def extract_ontology(
         
         api_logger.info(
             f"Ontology extraction completed, extracted {len(result.classes)} classes, "
-            f"saved to scene {request.scene_id}"
+            f"saved to scene {request.scene_id}, language={language_type}"
         )
         
         return success(data=response.model_dump(), msg="本体提取成功")
