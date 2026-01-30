@@ -44,6 +44,8 @@ import spaceConfigIcon from '@/assets/images/menu/spaceConfig.svg'
 import spaceConfigActiveIcon from '@/assets/images/menu/spaceConfig_active.svg'
 import ontologyIcon from '@/assets/images/menu/ontology.svg'
 import ontologyActiveIcon from '@/assets/images/menu/ontology_active.svg'
+import promptIcon from '@/assets/images/menu/prompt.svg'
+import promptActiveIcon from '@/assets/images/menu/prompt_active.svg'
 
 // 图标路径映射表
 const iconPathMap: Record<string, string> = {
@@ -77,6 +79,8 @@ const iconPathMap: Record<string, string> = {
   'spaceConfigActive': spaceConfigActiveIcon,
   'ontology': ontologyIcon,
   'ontologyActive': ontologyActiveIcon,
+  'prompt': promptIcon,
+  'promptActive': promptActiveIcon,
 };
 
 const { Sider } = Layout;

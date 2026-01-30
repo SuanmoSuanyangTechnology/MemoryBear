@@ -1,0 +1,45 @@
+.completed {
+  background-color: rgba(54, 159, 33, 0.06);
+  border-color: rgba(54, 159, 33, 0.25);
+  border-radius: 8px;
+}
+.failed {
+  background-color: rgba(255, 138, 76, 0.08);
+  border-color: rgba(255, 138, 76, 0.20);
+  border-radius: 8px;
+}
+.default {
+  background-color: rgba(91, 97, 103, 0.08);
+  border-color: rgba(91, 97, 103, 0.30);
+  border-radius: 8px;
+}
+.collapse-item {
+  font-size: 12px;
+  line-height: 16px;
+}
+.collapse-item:global(.ant-collapse-item>.ant-collapse-header) {
+  padding: 8px 12px;
+}
+.collapse-item:global(.ant-collapse-item>.ant-collapse-header .ant-collapse-expand-icon) {
+  height: 16px;
+}
+.completed:global(.ant-collapse .ant-collapse-content),
+.failed:global(.ant-collapse .ant-collapse-content) {
+  background-color: transparent;
+  border-top: none;
+}
+:global(.ant-collapse .ant-collapse-content>.ant-collapse-content-box) {
+  padding-top: 0;
+}
+.collapse-item :global(.ant-collapse) {
+  /* background-color: #F0F3F8; */
+  background-color: #FBFDFF;
+  border-radius: 6px;
+}
+.collapse-item :global(.ant-collapse>.ant-collapse-item:last-child),
+.collapse-item :global(.ant-collapse>.ant-collapse-item:last-child>.ant-collapse-header) {
+  border-radius: 0 0 6px 6px;
+}
+.collapse-item :global(.ant-collapse .ant-collapse-content>.ant-collapse-content-box) {
+  padding: 0 4px 4px 4px;
+}

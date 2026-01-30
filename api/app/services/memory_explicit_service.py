@@ -60,7 +60,7 @@ class MemoryExplicitService(MemoryBaseService):
             # ========== 1. 查询情景记忆（MemorySummary节点） ==========
             episodic_query = """
             MATCH (s:MemorySummary)
-            WHERE s.group_id = $group_id
+            WHERE s.end_user_id = $end_user_id
             RETURN elementId(s) AS id, 
                    s.name AS title,
                    s.content AS content,
@@ -70,7 +70,7 @@ class MemoryExplicitService(MemoryBaseService):
             
             episodic_result = await self.neo4j_connector.execute_query(
                 episodic_query, 
-                group_id=end_user_id
+                end_user_id=end_user_id
             )
             
             # 处理情景记忆数据
@@ -96,7 +96,7 @@ class MemoryExplicitService(MemoryBaseService):
             # ========== 2. 查询语义记忆（ExtractedEntity节点） ==========
             semantic_query = """
             MATCH (e:ExtractedEntity)
-            WHERE e.group_id = $group_id 
+            WHERE e.end_user_id = $end_user_id 
               AND e.is_explicit_memory = true
             RETURN elementId(e) AS id, 
                    e.name AS name,
@@ -107,7 +107,7 @@ class MemoryExplicitService(MemoryBaseService):
             
             semantic_result = await self.neo4j_connector.execute_query(
                 semantic_query, 
-                group_id=end_user_id
+                end_user_id=end_user_id
             )
             
             # 处理语义记忆数据
@@ -189,7 +189,7 @@ class MemoryExplicitService(MemoryBaseService):
             # ========== 1. 先尝试查询情景记忆 ==========
             episodic_query = """
             MATCH (s:MemorySummary)
-            WHERE elementId(s) = $memory_id AND s.group_id = $group_id
+            WHERE elementId(s) = $memory_id AND s.end_user_id = $end_user_id
             RETURN s.name AS title,
                    s.content AS content,
                    s.created_at AS created_at
@@ -198,7 +198,7 @@ class MemoryExplicitService(MemoryBaseService):
             episodic_result = await self.neo4j_connector.execute_query(
                 episodic_query,
                 memory_id=memory_id,
-                group_id=end_user_id
+                end_user_id=end_user_id
             )
             
             if episodic_result and len(episodic_result) > 0:
@@ -229,7 +229,7 @@ class MemoryExplicitService(MemoryBaseService):
             semantic_query = """
             MATCH (e:ExtractedEntity)
             WHERE elementId(e) = $memory_id 
-              AND e.group_id = $group_id 
+              AND e.end_user_id = $end_user_id 
               AND e.is_explicit_memory = true
             RETURN e.name AS name,
                    e.description AS core_definition,
@@ -240,7 +240,7 @@ class MemoryExplicitService(MemoryBaseService):
             semantic_result = await self.neo4j_connector.execute_query(
                 semantic_query,
                 memory_id=memory_id,
-                group_id=end_user_id
+                end_user_id=end_user_id
             )
             
             if semantic_result and len(semantic_result) > 0:

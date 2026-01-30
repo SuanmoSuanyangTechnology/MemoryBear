@@ -16,7 +16,7 @@ class BaiduSearchTool(BuiltinTool):
     
     @property
     def description(self) -> str:
-        return "百度搜索 - 搜索引擎服务：网页搜索、新闻搜索、图片搜索、实时结果"
+        return "百度搜索 - 搜索引擎服务：网页搜索、新闻搜索、图片搜索、视频搜索"
     
     def get_required_config_parameters(self) -> List[str]:
         return ["api_key"]
@@ -33,7 +33,7 @@ class BaiduSearchTool(BuiltinTool):
             ToolParameter(
                 name="search_type",
                 type=ParameterType.STRING,
-                description="搜索类型",
+                description="搜索类型, web: 网页搜索；news：新闻搜索；image：图片搜索；video视频搜索",
                 required=False,
                 default="web",
                 enum=["web", "news", "image", "video"]

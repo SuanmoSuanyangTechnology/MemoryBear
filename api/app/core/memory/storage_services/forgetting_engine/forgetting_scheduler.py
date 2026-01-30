@@ -16,6 +16,7 @@ Classes:
 
 import logging
 from typing import Dict, Any, Optional
+from uuid import UUID
 from datetime import datetime
 
 from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
@@ -66,10 +67,10 @@ class ForgettingScheduler:
     
     async def run_forgetting_cycle(
         self,
-        group_id: Optional[str] = None,
+        end_user_id: Optional[str] = None,
         max_merge_batch_size: int = 100,
         min_days_since_access: int = 30,
-        config_id: Optional[int] = None,
+        config_id: Optional[UUID] = None,
         db = None
     ) -> Dict[str, Any]:
         """
@@ -77,7 +78,7 @@ class ForgettingScheduler:
         
         
         Args:
-            group_id: 组 ID（可选，用于过滤特定组的节点）
+            end_user_id: 组 ID（可选，用于过滤特定组的节点）
             max_merge_batch_size: 单次最大融合节点对数（默认 100）
             min_days_since_access: 最小未访问天数（默认 30 天）
             config_id: 配置ID（可选，用于获取 llm_id）
@@ -107,19 +108,19 @@ class ForgettingScheduler:
         start_time_iso = start_time.isoformat()
         
         logger.info(
-            f"开始遗忘周期: group_id={group_id}, "
+            f"开始遗忘周期: end_user_id={end_user_id}, "
             f"max_batch={max_merge_batch_size}, "
             f"min_days={min_days_since_access}"
         )
         
         try:
             # 步骤1：统计遗忘前的节点数量
-            nodes_before = await self._count_knowledge_nodes(group_id)
+            nodes_before = await self._count_knowledge_nodes(end_user_id)
             logger.info(f"遗忘前节点总数: {nodes_before}")
             
             # 步骤2：识别可遗忘的节点对
             forgettable_pairs = await self.forgetting_strategy.find_forgettable_nodes(
-                group_id=group_id,
+                end_user_id=end_user_id,
                 min_days_since_access=min_days_since_access
             )
             
@@ -213,7 +214,7 @@ class ForgettingScheduler:
                         'statement_text': pair['statement_text'],
                         'statement_activation': pair['statement_activation'],
                         'statement_importance': pair['statement_importance'],
-                        'group_id': group_id
+                        'end_user_id': end_user_id
                     }
                     
                     entity_node = {
@@ -222,7 +223,7 @@ class ForgettingScheduler:
                         'entity_type': pair['entity_type'],
                         'entity_activation': pair['entity_activation'],
                         'entity_importance': pair['entity_importance'],
-                        'group_id': group_id
+                        'end_user_id': end_user_id
                     }
                     
                     # 融合节点
@@ -262,7 +263,7 @@ class ForgettingScheduler:
                     continue
             
             # 步骤6：统计遗忘后的节点数量
-            nodes_after = await self._count_knowledge_nodes(group_id)
+            nodes_after = await self._count_knowledge_nodes(end_user_id)
             logger.info(f"遗忘后节点总数: {nodes_after}")
             
             # 步骤7：生成遗忘报告
@@ -315,7 +316,7 @@ class ForgettingScheduler:
     
     async def _count_knowledge_nodes(
         self,
-        group_id: Optional[str] = None
+        end_user_id: Optional[str] = None
     ) -> int:
         """
         统计知识层节点总数
@@ -323,7 +324,7 @@ class ForgettingScheduler:
         统计 Statement、ExtractedEntity 和 MemorySummary 节点的总数。
         
         Args:
-            group_id: 组 ID（可选，用于过滤特定组的节点）
+            end_user_id: 组 ID（可选，用于过滤特定组的节点）
         
         Returns:
             int: 知识层节点总数
@@ -333,16 +334,16 @@ class ForgettingScheduler:
         WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary)
         """
         
-        if group_id:
-            query += " AND n.group_id = $group_id"
+        if end_user_id:
+            query += " AND n.end_user_id = $end_user_id"
         
         query += """
         RETURN count(n) as total
         """
         
         params = {}
-        if group_id:
-            params['group_id'] = group_id
+        if end_user_id:
+            params['end_user_id'] = end_user_id
         
         results = await self.connector.execute_query(query, **params)
         

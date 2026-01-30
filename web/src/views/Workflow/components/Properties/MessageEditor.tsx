@@ -1,20 +1,20 @@
-import { type FC, useMemo } from 'react';
+import { type FC, type ReactNode, useMemo } from 'react';
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Input, Form, Space, Button, Row, Col, Select, type FormListOperation } from 'antd';
-import Editor from '../Editor'
+import Editor, { type LexicalEditorProps } from '../Editor'
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 
 interface MessageEditor {
-  options: Suggestion[];
-  title?: string;
+  options?: Suggestion[];
+  title?: string | ReactNode;
   titleVariant?: 'outlined' | 'borderless';
   isArray?: boolean;
   parentName?: string | string[];
   label?: string;
   placeholder?: string;
   value?: string;
-  enableJinja2?: boolean;
+  language?: LexicalEditorProps['language'];
   onChange?: (value?: string) => void;
   size?: 'small' | 'default'
 }
@@ -29,8 +29,8 @@ const MessageEditor: FC<MessageEditor> = ({
   isArray = true,
   parentName = 'messages',
   placeholder,
-  options,
-  enableJinja2 = false,
+  options = [],
+  language,
   size = 'default'
 }) => {
   const { t } = useTranslation()
@@ -81,13 +81,15 @@ const MessageEditor: FC<MessageEditor> = ({
       <Space size={8} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5" data-editor-type={parentName === 'template' ? 'template' : undefined}>
         <Row>
           <Col span={12}>
-            <div className={clsx("rb:text-[12px] rb:font-medium rb:py-1 rb:leading-2", {
+            {typeof title === 'string'
+            ? <div className={clsx("rb:text-[12px] rb:font-medium rb:py-1 rb:leading-2", {
               'rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-sm rb:px-2': titleVariant === 'outlined'
             })}>{title ?? t('workflow.answerDesc')}</div>
+            : title}
           </Col>
         </Row>
         <Form.Item name={parentName} noStyle>
-          <Editor size={size} enableJinja2={enableJinja2} placeholder={placeholder} options={processedOptions} />
+          <Editor size={size} language={language} placeholder={placeholder} options={processedOptions} />
         </Form.Item>
       </Space>
     );
@@ -132,7 +134,7 @@ const MessageEditor: FC<MessageEditor> = ({
                   )}
                 </Row>
                 <Form.Item {...restField} name={[name, 'content']} noStyle>
-                  <Editor size={size} enableJinja2={enableJinja2} placeholder={placeholder} options={processedOptions} />
+                  <Editor size={size} language={language} placeholder={placeholder} options={processedOptions} />
                 </Form.Item>
               </Space>
             );

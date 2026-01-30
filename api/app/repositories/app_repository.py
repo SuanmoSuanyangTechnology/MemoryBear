@@ -15,9 +15,13 @@ class AppRepository:
         self.db = db
 
     def get_apps_by_workspace_id(self, workspace_id: uuid.UUID) -> list[App]:
-        """根据工作空间ID查询应用"""
+        """根据工作空间ID查询应用（仅返回未删除的应用）"""
         try:
-            apps = self.db.query(App).filter(App.workspace_id == workspace_id).all()
+            apps = (
+                self.db.query(App)
+                .filter(App.workspace_id == workspace_id, App.is_active.is_(True))
+                .all()
+            )
             db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {len(apps)} 个应用")
             return apps
         except Exception as e:
@@ -26,7 +30,7 @@ class AppRepository:
 
     def get_apps_by_id(self, app_id: uuid.UUID) -> App:
         try:
-            app = self.db.query(App).filter(App.id == app_id, App.is_active == True).first()
+            app = self.db.query(App).filter(App.id == app_id, App.is_active.is_(True)).first()
             return app
         except Exception as e:
             raise

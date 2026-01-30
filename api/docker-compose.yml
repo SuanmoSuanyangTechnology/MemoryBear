@@ -15,6 +15,7 @@ services:
     networks:
       - default
       - celery
+      - sandbox
     depends_on:
       - worker-memory
       - worker-document
@@ -63,5 +64,16 @@ services:
     depends_on:
       - worker-memory
 
+  sandbox:
+    image: redbear_sandbox:latest
+    container_name: sandbox
+    ports:
+      - "8194"
+    command: /code/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8194 --log-level debug
+    restart: unless-stopped
+    networks:
+      - sandbox
+
 networks:
   celery:
+  sandbox:

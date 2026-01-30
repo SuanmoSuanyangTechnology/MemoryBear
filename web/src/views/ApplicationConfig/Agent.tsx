@@ -20,7 +20,7 @@ import type {
 } from './types'
 import type { Variable } from './components/VariableList/types'
 import type { KnowledgeConfig } from './components/Knowledge/types'
-import type { Model } from '@/views/ModelManagement/types'
+import type { ModelListItem } from '@/views/ModelManagement/types'
 import { getModelList } from '@/api/models';
 import { saveAgentConfig } from '@/api/application'
 import Knowledge from './components/Knowledge/Knowledge'
@@ -96,8 +96,8 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<Config | null>(null);
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
-  const [modelList, setModelList] = useState<Model[]>([])
-  const [defaultModel, setDefaultModel] = useState<Model | null>(null)
+  const [modelList, setModelList] = useState<ModelListItem[]>([])
+  const [defaultModel, setDefaultModel] = useState<ModelListItem | null>(null)
   const [chatList, setChatList] = useState<ChatData[]>([])
   const values = Form.useWatch<Config>([], form) 
   const [isSave, setIsSave] = useState(false)
@@ -212,7 +212,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         ...data.knowledge_retrieval,
         ...knowledgeRest,
         knowledge_bases: knowledge_bases.map(item => ({
-          kb_id: item.id,
+          kb_id: item.kb_id || item.id,
           ...(item.config || {})
         }))
       } as KnowledgeConfig : null,
@@ -237,9 +237,9 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     })
   }
   const getModels = () => {
-    getModelList({ type: 'llm,chat', pagesize: 100, page: 1 })
+    getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
       .then(res => {
-        const response = res as { items: Model[] }
+        const response = res as { items: ModelListItem[] }
         setModelList(response.items)
       })
   }
@@ -249,7 +249,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   useEffect(() => {
     if (values?.default_model_config_id && modelList.length > 0) {
       const filterValue = modelList.find(item => item.id === values.default_model_config_id)
-      setDefaultModel(filterValue as Model | null)
+      setDefaultModel(filterValue as ModelListItem | null)
       setChatList([{
         label: filterValue?.name || '',
         model_config_id: filterValue?.id || '',

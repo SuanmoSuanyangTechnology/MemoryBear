@@ -109,3 +109,7 @@ export const getShareToken = (share_token: string, user_id: string) => {
 export const copyApplication = (app_id: string, new_name: string) => {
   return request.post(`/apps/${app_id}/copy?new_name=${new_name}`)
 }
+// 数据统计
+export const getAppStatistics = (app_id: string, data: { start_date: number; end_date: number; }) => {
+  return request.get(`/apps/${app_id}/statistics`, data)
+}

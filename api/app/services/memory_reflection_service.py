@@ -13,11 +13,12 @@ from app.db import get_db
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.reflection_engine import ReflectionConfig, ReflectionEngine
 from app.core.memory.storage_services.reflection_engine.self_reflexion import ReflectionRange, ReflectionBaseline
-from app.repositories.data_config_repository import DataConfigRepository
+from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.models.app_model import App
 from app.models.app_release_model import AppRelease
 from app.models.end_user_model import EndUser
+from app.utils.config_utils import resolve_config_id
 
 api_logger = get_api_logger()
 
@@ -38,7 +39,10 @@ class WorkspaceAppService:
             Returns:
                 Dictionary containing detailed application information
         """
-        apps = self.db.query(App).filter(App.workspace_id == workspace_id).all()
+        apps = self.db.query(App).filter(
+            App.workspace_id == workspace_id,
+            App.is_active.is_(True)
+        ).all()
         app_ids = [str(app.id) for app in apps]
         
         apps_detailed_info = []
@@ -70,7 +74,7 @@ class WorkspaceAppService:
             "created_at": app.created_at.isoformat() if app.created_at else None,
             "updated_at": app.updated_at.isoformat() if app.updated_at else None,
             "releases": [],
-            "data_configs": [],
+            "memory_configs": [],
             "end_users": []
         }
     
@@ -85,76 +89,76 @@ class WorkspaceAppService:
         
         for release in app_releases:
             memory_content = self._extract_memory_content(release.config)
-            
-
+            memory_content=resolve_config_id(memory_content, self.db)
             if memory_content and memory_content in processed_configs:
                 continue
-            
+
             release_info = {
                 "app_id": str(release.app_id),
                 "config": memory_content
             }
-            
+
 
             if memory_content:
                 processed_configs.add(memory_content)
-                data_config_info = self._get_data_config(memory_content)
-                
-                if data_config_info:
-                    if not any(dc["config_id"] == data_config_info["config_id"] for dc in app_info["data_configs"]):
-                        app_info["data_configs"].append(data_config_info)
-            
+                memory_config_info = self._get_memory_config(memory_content)
+                if memory_config_info:
+                    if not any(dc["config_id"] == memory_config_info["config_id"] for dc in app_info["memory_configs"]):
+                        app_info["memory_configs"].append(memory_config_info)
+
             app_info["releases"].append(release_info)
-    
+
     def _extract_memory_content(self, config: Any) -> str:
         """Extract memory_comtent from config"""
         if not config or not isinstance(config, dict):
             return None
-        
+
         memory_obj = config.get('memory')
         if memory_obj and isinstance(memory_obj, dict):
             return memory_obj.get('memory_content')
-        
-        return None
-    
-    def _get_data_config(self, memory_content: str) -> Dict[str, Any]:
-        """Retrieve data_comfig information based on memory_comtent"""
-        try:
-            data_config_result = DataConfigRepository.query_reflection_config_by_id(self.db, int(memory_content))
 
-            # data_config_query, data_config_params = DataConfigRepository.build_select_reflection(memory_content)
-            # data_config_result = self.db.execute(text(data_config_query), data_config_params).fetchone()
-            # if data_config_result is None:
+        return None
+
+    def _get_memory_config(self, memory_content: str) -> Dict[str, Any]:
+        """Retrieve memory_config information based on memory_content"""
+        try:
+            memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, int(memory_content))
+
+            # memory_config_query, memory_config_params = MemoryConfigRepository.build_select_reflection(memory_content)
+            # memory_config_result = self.db.execute(text(memory_config_query), memory_config_params).fetchone()
+            # if memory_config_result is None:
             #     return None
-            
-            if data_config_result:
+
+            if memory_config_result:
                 return {
-                    "config_id": data_config_result.config_id,
-                    "enable_self_reflexion": data_config_result.enable_self_reflexion,
-                    "iteration_period": data_config_result.iteration_period,
-                    "reflexion_range": data_config_result.reflexion_range,
-                    "baseline": data_config_result.baseline,
-                    "reflection_model_id": data_config_result.reflection_model_id,
-                    "memory_verify": data_config_result.memory_verify,
-                    "quality_assessment": data_config_result.quality_assessment,
-                    "user_id": data_config_result.user_id
+                    "config_id": memory_config_result.config_id,
+                    "enable_self_reflexion": memory_config_result.enable_self_reflexion,
+                    "iteration_period": memory_config_result.iteration_period,
+                    "reflexion_range": memory_config_result.reflexion_range,
+                    "baseline": memory_config_result.baseline,
+                    "reflection_model_id": memory_config_result.reflection_model_id,
+                    "memory_verify": memory_config_result.memory_verify,
+                    "quality_assessment": memory_config_result.quality_assessment,
+                    "user_id": memory_config_result.user_id
                 }
         except Exception as e:
-            api_logger.warning(f"查询data_config失败，memory_content: {memory_content}, 错误: {str(e)}")
-        
+            api_logger.warning(f"查询memory_config失败，memory_content: {memory_content}, 错误: {str(e)}")
+
         return None
-    
+
     def _process_end_users(self, app: App, app_info: Dict[str, Any]) -> None:
         """Processing end-user information for applications"""
         end_users = self.db.query(EndUser).filter(EndUser.app_id == app.id).all()
-        
+
         for end_user in end_users:
             end_user_info = {
                 "id": str(end_user.id),
                 "app_id": str(end_user.app_id)
             }
             app_info["end_users"].append(end_user_info)
-    
+        print(100*'-')
+        print(app_info)
+
     def get_end_user_reflection_time(self, end_user_id: str) -> Optional[Any]:
         """
         Read the reflection time of end users
@@ -173,7 +177,7 @@ class WorkspaceAppService:
         except Exception as e:
             api_logger.error(f"读取用户反思时间失败，end_user_id: {end_user_id}, 错误: {str(e)}")
             return None
-    
+
     def update_end_user_reflection_time(self, end_user_id: str) -> bool:
         """
         Update the reflection time of end users to the current time
@@ -186,7 +190,7 @@ class WorkspaceAppService:
         """
         try:
             from datetime import datetime
-            
+
             end_user = self.db.query(EndUser).filter(EndUser.id == end_user_id).first()
             if end_user:
                 end_user.reflection_time = datetime.now()
@@ -204,7 +208,7 @@ class WorkspaceAppService:
 
 class MemoryReflectionService:
     """Memory reflection service category"""
-    
+
     def __init__(self,db: Session = Depends(get_db)):
         self.db=db
 
@@ -223,7 +227,7 @@ class MemoryReflectionService:
                 }
 
             config_data_id = config_data['config_id']
-            reflection_config = WorkspaceAppService(self.db)._get_data_config(config_data_id)
+            reflection_config = WorkspaceAppService(self.db)._get_memory_config(config_data_id)
             if reflection_config is not None and reflection_config['enable_self_reflexion']:
                 reflection_config = self._create_reflection_config_from_data(reflection_config)
                 # 3. 执行反思引擎
@@ -249,22 +253,22 @@ class MemoryReflectionService:
                 "end_user_id": end_user_id,
                 "config_data": config_data
             }
-    
+
     async def start_reflection_from_data(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
         """
         Starting Reflection from Configuration Data
-        
+
         Args:
             config_data: Configure data dictionary, including reflective configuration information
             end_user_id: end_user_id
-            
+
         Returns:
             Reflect on the execution results
         """
         try:
             config_id = config_data.get("config_id")
             api_logger.info(f"从配置数据启动反思，config_id: {config_id}, end_user_id: {end_user_id}")
-            
+
 
             if not config_data.get("enable_self_reflexion", False):
                 return {
@@ -274,10 +278,10 @@ class MemoryReflectionService:
                     "end_user_id": end_user_id,
                     "config_data": config_data
                 }
-            
+
 
             config_data_id=config_data['config_id']
-            reflection_config=WorkspaceAppService(self.db)._get_data_config(config_data_id)
+            reflection_config=WorkspaceAppService(self.db)._get_memory_config(config_data_id)
             if reflection_config is not None and reflection_config['enable_self_reflexion']:
                 reflection_config=  self._create_reflection_config_from_data(reflection_config)
                 iteration_period = int(reflection_config.iteration_period)

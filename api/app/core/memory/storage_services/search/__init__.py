@@ -37,7 +37,7 @@ __all__ = [
 async def run_hybrid_search(
     query_text: str,
     search_type: str = "hybrid",
-    group_id: str | None = None,
+    end_user_id: str | None = None,
     apply_id: str | None = None,
     user_id: str | None = None,
     limit: int = 50,
@@ -54,7 +54,7 @@ async def run_hybrid_search(
     Args:
         query_text: 查询文本
         search_type: 搜索类型（"hybrid", "keyword", "semantic"）
-        group_id: 组ID过滤
+        end_user_id: 组ID过滤
         apply_id: 应用ID过滤
         user_id: 用户ID过滤
         limit: 每个类别的最大结果数
@@ -104,7 +104,7 @@ async def run_hybrid_search(
         # 执行搜索
         result = await strategy.search(
             query_text=query_text,
-            group_id=group_id,
+            end_user_id=end_user_id,
             limit=limit,
             include=include,
             alpha=alpha,

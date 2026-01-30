@@ -68,7 +68,7 @@ class UserRepository:
         db_logger.debug("查询超级用户")
         
         try:
-            user = self.db.query(User).options(joinedload(User.tenant)).filter(User.is_active == True).filter(User.is_superuser == True).first()
+            user = self.db.query(User).options(joinedload(User.tenant)).filter(User.is_active.is_(True)).filter(User.is_superuser.is_(True)).first()
             if user:
                 db_logger.debug(f"超级用户查询成功: {user.username}")
             else:
@@ -82,7 +82,7 @@ class UserRepository:
         db_logger.debug("检查是否只有一个超级用户")
         
         try:
-            count = self.db.query(User).options(joinedload(User.tenant)).filter(User.is_active == True).filter(User.is_superuser == True).count()
+            count = self.db.query(User).options(joinedload(User.tenant)).filter(User.is_active.is_(True)).filter(User.is_superuser.is_(True)).count()
             return count == 1
         except Exception as e:
             db_logger.error(f"检查超级用户数量失败: {str(e)}")

@@ -71,6 +71,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   SpaceConfig: lazy(() => import('@/views/SpaceConfig')),
   Ontology: lazy(() => import('@/views/Ontology')),
   OntologyDetail: lazy(() => import('@/views/Ontology/pages/Detail')),
+  Prompt: lazy(() => import('@/views/Prompt')),
   Login: lazy(() => import('@/views/Login')),
   InviteRegister: lazy(() => import('@/views/InviteRegister')),
   NoPermission: lazy(() => import('@/views/NoPermission')),
