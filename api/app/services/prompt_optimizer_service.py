@@ -16,7 +16,7 @@ from app.models.prompt_optimizer_model import (
     PromptOptimizerSession,
     RoleType
 )
-from app.repositories.model_repository import ModelConfigRepository
+from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository
 from app.repositories.prompt_optimizer_repository import (
     PromptOptimizerSessionRepository
 )
@@ -168,7 +168,8 @@ class PromptOptimizerService:
         logger.info(f"Prompt optimization started, user_id={user_id}, session_id={session_id}")
 
         # Create LLM instance
-        api_config: ModelApiKey = model_config.api_keys[0]
+        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config.id)
+        api_config: ModelApiKey = api_keys[0] if api_keys else None
         llm = RedBearLLM(RedBearModelConfig(
             model_name=api_config.model_name,
             provider=api_config.provider,

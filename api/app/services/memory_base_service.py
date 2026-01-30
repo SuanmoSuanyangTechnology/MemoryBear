@@ -326,7 +326,7 @@ class MemoryBaseService:
         
         Args:
             summary_id: Summary节点的ID
-            end_user_id: 终端用户ID (group_id)
+            end_user_id: 终端用户ID (end_user_id)
             
         Returns:
             最大emotion_intensity对应的emotion_type，如果没有则返回None
@@ -334,7 +334,7 @@ class MemoryBaseService:
         try:
             query = """
             MATCH (s:MemorySummary)
-            WHERE elementId(s) = $summary_id AND s.group_id = $group_id
+            WHERE elementId(s) = $summary_id AND s.end_user_id = $end_user_id
             MATCH (s)-[:DERIVED_FROM_STATEMENT]->(stmt:Statement)
             WHERE stmt.emotion_type IS NOT NULL 
               AND stmt.emotion_intensity IS NOT NULL
@@ -347,7 +347,7 @@ class MemoryBaseService:
             result = await self.neo4j_connector.execute_query(
                 query,
                 summary_id=summary_id,
-                group_id=end_user_id
+                end_user_id=end_user_id
             )
             
             if result and len(result) > 0:
@@ -381,10 +381,10 @@ class MemoryBaseService:
             if end_user_id:
                 query = """
                 MATCH (n:MemorySummary)
-                WHERE n.group_id = $group_id
+                WHERE n.end_user_id = $end_user_id
                 RETURN count(n) as count
                 """
-                result = await self.neo4j_connector.execute_query(query, group_id=end_user_id)
+                result = await self.neo4j_connector.execute_query(query, end_user_id=end_user_id)
             else:
                 query = """
                 MATCH (n:MemorySummary)
@@ -423,12 +423,12 @@ class MemoryBaseService:
             if end_user_id:
                 semantic_query = """
                 MATCH (e:ExtractedEntity)
-                WHERE e.group_id = $group_id AND e.is_explicit_memory = true
+                WHERE e.end_user_id = $end_user_id AND e.is_explicit_memory = true
                 RETURN count(e) as count
                 """
                 semantic_result = await self.neo4j_connector.execute_query(
                     semantic_query, 
-                    group_id=end_user_id
+                    end_user_id=end_user_id
                 )
             else:
                 semantic_query = """
@@ -519,7 +519,7 @@ class MemoryBaseService:
             """
             
             if end_user_id:
-                query += " AND n.group_id = $group_id"
+                query += " AND n.end_user_id = $end_user_id"
             
             query += """
             RETURN sum(CASE WHEN n.activation_value IS NOT NULL AND n.activation_value < $threshold THEN 1 ELSE 0 END) as low_activation_nodes
@@ -528,7 +528,7 @@ class MemoryBaseService:
             # 设置查询参数
             params = {'threshold': forgetting_threshold}
             if end_user_id:
-                params['group_id'] = end_user_id
+                params['end_user_id'] = end_user_id
             
             # 执行查询
             result = await self.neo4j_connector.execute_query(query, **params)

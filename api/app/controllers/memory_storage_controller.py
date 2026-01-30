@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+from uuid import UUID
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
@@ -33,6 +34,8 @@ from app.services.memory_storage_service import (
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+
+from app.utils.config_utils import resolve_config_id
 
 # Get API logger
 api_logger = get_api_logger()
@@ -140,7 +143,6 @@ def create_config(
     db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试创建配置但未选择工作空间")
@@ -160,12 +162,12 @@ def create_config(
 
 @router.delete("/delete_config", response_model=ApiResponse)  # 删除数据库中的内容（按配置名称）
 def delete_config(
-    config_id: str,
+    config_id: UUID|int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
+    config_id=resolve_config_id(config_id, db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试删除配置但未选择工作空间")
@@ -187,7 +189,7 @@ def update_config(
     db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
+    payload.config_id = resolve_config_id(payload.config_id, db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新配置但未选择工作空间")
@@ -210,7 +212,7 @@ def update_config_extracted(
     db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
+    payload.config_id = resolve_config_id(payload.config_id, db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新提取配置但未选择工作空间")
@@ -232,12 +234,12 @@ def update_config_extracted(
 
 @router.get("/read_config_extracted", response_model=ApiResponse) # 通过查询参数读取某条配置（固定路径） 没有意义的话就删除
 def read_config_extracted(
-    config_id: str,
+    config_id: UUID | int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     ) -> dict:
     workspace_id = current_user.current_workspace_id
-    
+    config_id = resolve_config_id(config_id, db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试读取提取配置但未选择工作空间")
@@ -285,6 +287,7 @@ async def pilot_run(
         f"Pilot run requested: config_id={payload.config_id}, "
         f"dialogue_text_length={len(payload.dialogue_text)}"
     )
+    payload.config_id = resolve_config_id(payload.config_id, db)
     svc = DataConfigService(db)
     return StreamingResponse(
         svc.pilot_run_stream(payload),
@@ -420,13 +423,93 @@ async def get_hot_memory_tags_api(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     ) -> dict:
-    api_logger.info(f"Hot memory tags requested for current_user: {current_user.id}")
+    """
+    获取热门记忆标签（带Redis缓存）
+    
+    缓存策略：
+    - 缓存键：workspace_id + limit
+    - 过期时间：5分钟（300秒）
+    - 缓存命中：~50ms
+    - 缓存未命中：~600-800ms（取决于LLM速度）
+    """
+    workspace_id = current_user.current_workspace_id
+    
+    # 构建缓存键
+    cache_key = f"hot_memory_tags:{workspace_id}:{limit}"
+    
+    api_logger.info(f"Hot memory tags requested for workspace: {workspace_id}, limit: {limit}")
+    
     try:
+        # 尝试从Redis缓存获取
+        from app.aioRedis import aio_redis_get, aio_redis_set
+        import json
+        
+        cached_result = await aio_redis_get(cache_key)
+        if cached_result:
+            api_logger.info(f"Cache hit for key: {cache_key}")
+            try:
+                data = json.loads(cached_result)
+                return success(data=data, msg="查询成功（缓存）")
+            except json.JSONDecodeError:
+                api_logger.warning(f"Failed to parse cached data, will refresh")
+        
+        # 缓存未命中，执行查询
+        api_logger.info(f"Cache miss for key: {cache_key}, executing query")
         result = await analytics_hot_memory_tags(db, current_user, limit)
+        
+        # 写入缓存（过期时间：5分钟）
+        # 注意：result是列表，需要转换为JSON字符串
+        try:
+            cache_data = json.dumps(result, ensure_ascii=False)
+            await aio_redis_set(cache_key, cache_data, expire=300)
+            api_logger.info(f"Cached result for key: {cache_key}")
+        except Exception as cache_error:
+            # 缓存写入失败不影响主流程
+            api_logger.warning(f"Failed to cache result: {str(cache_error)}")
+        
         return success(data=result, msg="查询成功")
+        
     except Exception as e:
         api_logger.error(f"Hot memory tags failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "热门标签查询失败", str(e))
+
+
+@router.delete("/analytics/hot_memory_tags/cache", response_model=ApiResponse)
+async def clear_hot_memory_tags_cache(
+    current_user: User = Depends(get_current_user),
+    ) -> dict:
+    """
+    清除热门标签缓存
+    
+    用于：
+    - 手动刷新数据
+    - 调试和测试
+    - 数据更新后立即生效
+    """
+    workspace_id = current_user.current_workspace_id
+    
+    api_logger.info(f"Clear hot memory tags cache requested for workspace: {workspace_id}")
+    
+    try:
+        from app.aioRedis import aio_redis_delete
+        
+        # 清除所有limit的缓存（常见的limit值）
+        cleared_count = 0
+        for limit in [5, 10, 15, 20, 30, 50]:
+            cache_key = f"hot_memory_tags:{workspace_id}:{limit}"
+            result = await aio_redis_delete(cache_key)
+            if result:
+                cleared_count += 1
+                api_logger.info(f"Cleared cache for key: {cache_key}")
+        
+        return success(
+            data={"cleared_count": cleared_count}, 
+            msg=f"成功清除 {cleared_count} 个缓存"
+        )
+        
+    except Exception as e:
+        api_logger.error(f"Clear cache failed: {str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "清除缓存失败", str(e))
 
 
 @router.get("/analytics/recent_activity_stats", response_model=ApiResponse)

@@ -1,23 +1,23 @@
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Upload, Modal, Image, App } from 'antd';
+import { Upload, Image, App } from 'antd';
 import type { GetProp, UploadFile, UploadProps } from 'antd';
 // import { UploadOutlined, } from '@ant-design/icons';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
 import PlusIcon from '@/assets/images/plus.svg'
 import { cookieUtils } from '@/utils/request'
+import { fileUploadUrl } from '@/api/fileStorage'
+import styles from './index.module.less'
 
-const { confirm } = Modal;
-
-interface UploadImagesProps extends Omit<UploadProps, 'onChange'> {
+interface UploadImagesProps extends Omit<UploadProps, 'onChange' | 'fileList'> {
   /** 上传接口地址 */
   action?: string;
   /** 是否支持多选 */
   multiple?: boolean;
   /** 已上传的文件列表 */
-  fileList?: UploadFile[];
+  fileList?: UploadFile[] | UploadFile;
   /** 文件列表变化回调 */
-  onChange?: (fileList: UploadFile[]) => void;
+  onChange?: (fileList?: UploadFile[] | UploadFile) => void;
   /** 禁用上传 */
   disabled?: boolean;
   /** 文件大小限制（MB） */
@@ -28,6 +28,7 @@ interface UploadImagesProps extends Omit<UploadProps, 'onChange'> {
   isAutoUpload?: boolean;
   /** 最大上传文件数 */
   maxCount?: number;
+  className?: string;
 }
 const ALL_FILE_TYPE: {
   [key: string]: string;
@@ -59,7 +60,7 @@ const getBase64 = (file: FileType): Promise<string> => {
  * 支持单文件/多文件上传、拖拽上传、文件验证、预览等功能
  */
 const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
-  action = '/api/upload',
+  action = fileUploadUrl,
   multiple = false,
   fileList: propFileList = [],
   onChange,
@@ -68,27 +69,42 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
   fileType = ['png', 'jpg', 'gif'],
   isAutoUpload = true,
   maxCount = 1,
+  className = 'rb:size-24! rb:leading-1!',
   ...props
 }, ref) => {
   const { t } = useTranslation();
-  const { message } = App.useApp()
-  const [fileList, setFileList] = useState<UploadFile[]>(propFileList);
+  const { message, modal } = App.useApp()
+  const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [accept, setAccept] = useState<string | undefined>();
   // const [loading, setLoading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState('');
 
+  useEffect(() => {
+    if (!Array.isArray(propFileList) && typeof propFileList === 'object') {
+      setFileList([propFileList]);
+    }
+  }, [propFileList])
+
+  const updateValue = (list: UploadFile[]) => {
+    if (maxCount === 1) {
+      onChange?.(list[0])
+    } else {
+      onChange?.(list)
+    }
+  }
+
   // 处理文件移除
   const handleRemove = (file: UploadFile) => {
-    confirm({
-      title: '确定要删除此文件吗？',
-      okText: '确定',
+    modal.confirm({
+      title: t('common.confirmRemoveFile'),
+      okText: `${t('common.confirm')}`,
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: `${t('common.cancel')}`,
       onOk: () => {
         const newFileList = fileList.filter((item) => item.uid !== file.uid);
         setFileList(newFileList);
-        onChange?.(newFileList);
+        updateValue(newFileList)
       },
     });
     return false; // 阻止默认删除行为，由confirm控制
@@ -100,7 +116,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     if (fileSize && file.size) {
       const isLtMaxSize = (file.size / 1024 / 1024) < fileSize;
       if (!isLtMaxSize) {
-        message.error(`文件大小不能超过 ${fileSize}MB`);
+        message.error(t('common.fileSizeTip', { size: fileSize }));
         return Upload.LIST_IGNORE;
       }
     }
@@ -108,7 +124,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     if (accept && accept.length > 0 && file.type) {
       const isAccept = accept.includes(file.type);
       if (!isAccept) {
-        message.error(`不支持的文件类型: ${file.type}`);
+        message.error(`${t('common.fileAcceptTip')}${file.type}`);
         return Upload.LIST_IGNORE;
       }
     }
@@ -119,7 +135,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
       }
       const newFileList = [...fileList, file];
       setFileList(newFileList);
-      onChange?.(newFileList);
+      updateValue(newFileList);
       return Upload.LIST_IGNORE; // 阻止自动上传
     }
 
@@ -129,17 +145,13 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
   // 处理上传状态变化
   const handleChange: UploadProps['onChange'] = ({ fileList: newFileList }) => {
     setFileList(newFileList);
-    if (onChange) {
-      onChange(newFileList);
-    }
+    updateValue(newFileList);
   };
 
   // 清空已上传文件
   const clearFiles = () => {
     setFileList([]);
-    if (onChange) {
-      onChange([]);
-    }
+    updateValue([]);
   }
 
   const handlePreview = async (file: UploadFile) => {
@@ -167,7 +179,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     fileList,
     beforeUpload,
     headers: {
-      authorization:  cookieUtils.get('authToken') || '',
+      authorization: `Bearer ${cookieUtils.get('authToken') }`,
     },
     onPreview: handlePreview,
     onRemove: handleRemove,
@@ -180,6 +192,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
       showRemoveIcon: true,
       showDownloadIcon: false,
     },
+    className: `${styles.imageUpload} ${className}`,
     ...props,
   };
 
@@ -193,16 +206,9 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     <>
       <Upload
         {...uploadProps}
-        style={{ 
-          width: '136px', 
-          height: '136px',
-        }}
       >
         {fileList.length < maxCount && (
-          <div className="rb:flex rb:flex-wrap rb:items-center rb:justify-center">
-            <img src={PlusIcon} className="rb:w-[32px] rb:h-[32px]" />
-            <div className="rb:mt-[12px] rb:text-[12px] rb:text-[#5B6167] rb:leading-[16px]">{t('common.clickUploadIcon')}</div>
-          </div>
+          <img src={PlusIcon} className="rb:size-7" />
         )}  
       </Upload>
       {previewImage && (

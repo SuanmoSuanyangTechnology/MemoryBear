@@ -16,6 +16,10 @@ class Tenants(Base):
     updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
     is_active = Column(Boolean, default=True)
     
+    # SSO 外部关联字段
+    external_id = Column(String(100), nullable=True, index=True)  # 外部企业ID
+    external_source = Column(String(50), nullable=True)  # 来源系统
+    
     # Relationship to users - one tenant has many users
     users = relationship("User", back_populates="tenant")
     

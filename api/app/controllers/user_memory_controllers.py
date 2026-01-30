@@ -135,27 +135,27 @@ async def generate_cache_api(
         api_logger.warning(f"用户 {current_user.username} 尝试生成缓存但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
-    group_id = request.end_user_id
+    end_user_id = request.end_user_id
 
     api_logger.info(
         f"缓存生成请求: user={current_user.username}, workspace={workspace_id}, "
-        f"end_user_id={group_id if group_id else '全部用户'}"
+        f"end_user_id={end_user_id if end_user_id else '全部用户'}"
     )
 
     try:
-        if group_id:
+        if end_user_id:
             # 为单个用户生成
-            api_logger.info(f"开始为单个用户生成缓存: end_user_id={group_id}")
+            api_logger.info(f"开始为单个用户生成缓存: end_user_id={end_user_id}")
 
             # 生成记忆洞察
-            insight_result = await user_memory_service.generate_and_cache_insight(db, group_id, workspace_id)
+            insight_result = await user_memory_service.generate_and_cache_insight(db, end_user_id, workspace_id)
 
             # 生成用户摘要
-            summary_result = await user_memory_service.generate_and_cache_summary(db, group_id, workspace_id)
+            summary_result = await user_memory_service.generate_and_cache_summary(db, end_user_id, workspace_id)
 
             # 构建响应
             result = {
-                "end_user_id": group_id,
+                "end_user_id": end_user_id,
                 "insight_success": insight_result["success"],
                 "summary_success": summary_result["success"],
                 "errors": []
@@ -175,9 +175,9 @@ async def generate_cache_api(
 
             # 记录结果
             if result["insight_success"] and result["summary_success"]:
-                api_logger.info(f"成功为用户 {group_id} 生成缓存")
+                api_logger.info(f"成功为用户 {end_user_id} 生成缓存")
             else:
-                api_logger.warning(f"用户 {group_id} 的缓存生成部分失败: {result['errors']}")
+                api_logger.warning(f"用户 {end_user_id} 的缓存生成部分失败: {result['errors']}")
 
             return success(data=result, msg="生成完成")
 

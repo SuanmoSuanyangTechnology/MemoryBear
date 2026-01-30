@@ -7,17 +7,17 @@ LLM 节点实现
 import logging
 import re
 from typing import Any
-from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 
-from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
+from langchain_core.messages import AIMessage
+
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.models import RedBearLLM, RedBearModelConfig
+from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.llm.config import LLMNodeConfig
 from app.db import get_db_context
 from app.models import ModelType
 from app.services.model_service import ModelConfigService
-
-from app.core.exceptions import BusinessException
-from app.core.error_codes import BizCode
 
 logger = logging.getLogger(__name__)
 
@@ -231,42 +231,14 @@ class LLMNode(BaseNode):
             文本片段（chunk）或完成标记
         """
         self.typed_config = LLMNodeConfig(**self.config)
-        from langgraph.config import get_stream_writer
 
         llm, prompt_or_messages = self._prepare_llm(state, True)
 
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式）")
         logger.debug(f"LLM 配置: streaming={getattr(llm._model, 'streaming', 'unknown')}")
 
-        # 检查是否有注入的 End 节点前缀配置
-        writer = get_stream_writer()
-        end_prefix = getattr(self, '_end_node_prefix', None)
-
-        logger.info(f"[LLM前缀] 节点 {self.node_id} 检查前缀配置: {end_prefix is not None}")
-        if end_prefix:
-            logger.info(f"[LLM前缀] 前缀内容: '{end_prefix}'")
-
-        if end_prefix:
-            # 渲染前缀（可能包含其他变量）
-            try:
-                rendered_prefix = self._render_template(end_prefix, state)
-                logger.info(f"节点 {self.node_id} 提前发送 End 节点前缀: '{rendered_prefix[:50]}...'")
-
-                # 提前发送 End 节点的前缀（使用 "message" 类型）
-                writer({
-                    "type": "message",  # End 相关的内容都是 message 类型
-                    "node_id": "end",  # 标记为 end 节点的输出
-                    "chunk": rendered_prefix,
-                    "full_content": rendered_prefix,
-                    "chunk_index": 0,
-                    "is_prefix": True  # 标记这是前缀
-                })
-            except Exception as e:
-                logger.warning(f"渲染/发送 End 节点前缀失败: {e}")
-
         # 累积完整响应
         full_response = ""
-        last_chunk = None
         chunk_count = 0
 
         # 调用 LLM（流式，支持字符串或消息列表）
@@ -284,12 +256,19 @@ class LLMNode(BaseNode):
             # 只有当内容不为空时才处理
             if content:
                 full_response += content
-                last_chunk = chunk
                 chunk_count += 1
 
                 # 流式返回每个文本片段
-                yield content
+                yield {
+                    "__final__": False,
+                    "chunk": content
+                }
 
+        yield {
+            "__final__": False,
+            "chunk": "",
+            "done": True
+        }
         logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}, 总 chunks: {chunk_count}")
 
         # 构建完整的 AIMessage（包含元数据）

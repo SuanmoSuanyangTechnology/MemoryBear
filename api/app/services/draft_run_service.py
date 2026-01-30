@@ -16,6 +16,7 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.models import AgentConfig, ModelApiKey, ModelConfig
+from app.repositories.model_repository import ModelApiKeyRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services import task_service
@@ -56,7 +57,7 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
         长期记忆工具
     """
     # search_switch = memory_config.get("search_switch", "2")
-    config_id= memory_config.get("memory_content",None)
+    config_id= memory_config.get("memory_content") or memory_config.get("memory_config",None)
     logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
     @tool(args_schema=LongTermMemoryInput)
     def long_term_memory(question: str) -> str:
@@ -92,7 +93,7 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
             try:
                 memory_content = asyncio.run(
                     MemoryAgentService().read_memory(
-                        group_id=end_user_id,
+                        end_user_id=end_user_id,
                         message=question,
                         history=[],
                         search_switch="2",
@@ -106,9 +107,9 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                     "app.core.memory.agent.read_message",
                     args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
                 )
-                # result = task_service.get_task_memory_read_result(task.id)
-                # status = result.get("status")
-                # logger.info(f"读取任务状态：{status}")
+                result = task_service.get_task_memory_read_result(task.id)
+                status = result.get("status")
+                logger.info(f"读取任务状态：{status}")
 
             finally:
                 db.close()
@@ -418,7 +419,7 @@ class DraftRunService:
             )
 
             memory_config_= agent_config.memory
-            config_id = memory_config_.get("memory_content")
+            config_id = memory_config_.get("memory_content") or memory_config_.get("memory_config",None)
 
             # 7. 调用 Agent
             result = await agent.chat(
@@ -644,7 +645,7 @@ class DraftRunService:
             })
 
             memory_config_ = agent_config.memory
-            config_id = memory_config_.get("memory_content")
+            config_id = memory_config_.get("memory_content") or memory_config_.get("memory_config",None)
 
             # 9. 流式调用 Agent
             full_content = ""
@@ -724,17 +725,21 @@ class DraftRunService:
         Raises:
             BusinessException: 当没有可用的 API Key 时
         """
-        stmt = (
-            select(ModelApiKey)
-            .where(
-                ModelApiKey.model_config_id == model_config_id,
-                ModelApiKey.is_active == True
-            )
-            .order_by(ModelApiKey.priority.desc())
-            .limit(1)
-        )
-
-        api_key = self.db.scalars(stmt).first()
+        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
+        # stmt = (
+        #     select(ModelApiKey).join(
+        #         ModelConfig, ModelApiKey.model_configs
+        #     )
+        #     .where(
+        #         ModelConfig.id == model_config_id,
+        #         ModelApiKey.is_active.is_(True)
+        #     )
+        #     .order_by(ModelApiKey.priority.desc())
+        #     .limit(1)
+        # )
+        #
+        # api_key = self.db.scalars(stmt).first()
+        api_key = api_keys[0] if api_keys else None
 
         if not api_key:
             raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)

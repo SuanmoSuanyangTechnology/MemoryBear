@@ -1,23 +1,24 @@
-
-from app.core.memory.agent.utils.llm_tools import  WriteState
+from app.core.memory.agent.utils.llm_tools import WriteState
 from app.core.memory.agent.utils.write_tools import write
 from app.core.logging_config import get_agent_logger
 
 logger = get_agent_logger(__name__)
+
+
 async def write_node(state: WriteState) -> WriteState:
     """
         Write data to the database/file system.
 
         Args:
-            state: WriteState containing messages, group_id, and memory_config
+            state: WriteState containing messages, end_user_id, and memory_config
 
         Returns:
             dict: Contains 'write_result' with status and data fields
         """
     messages = state.get('messages', [])
-    group_id = state.get('group_id', '')
+    end_user_id = state.get('end_user_id', '')
     memory_config = state.get('memory_config', '')
-    
+
     # Convert LangChain messages to structured format expected by write()
     structured_messages = []
     for msg in messages:
@@ -28,13 +29,11 @@ async def write_node(state: WriteState) -> WriteState:
                 "role": role,
                 "content": msg.content  # content is now guaranteed to be a string
             })
-    
+
     try:
         result = await write(
             messages=structured_messages,
-            user_id=group_id,
-            apply_id=group_id,
-            group_id=group_id,
+            end_user_id=end_user_id,
             memory_config=memory_config,
         )
         logger.info(f"Write completed successfully! Config: {memory_config.config_name}")

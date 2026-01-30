@@ -187,11 +187,11 @@ class ChunkerClient:
     async def generate_chunks(self, dialogue: DialogData):
         """
         Generate chunks following 1 Message = 1 Chunk strategy.
-        
+
         Each message creates one chunk, directly inheriting role information.
         If a message is too long, it will be split into multiple sub-chunks,
         each maintaining the same speaker.
-        
+
         Raises:
             ValueError: If dialogue has no messages or chunking fails
         """
@@ -201,9 +201,9 @@ class ChunkerClient:
                 f"Dialogue {dialogue.ref_id} has no messages. "
                 f"Cannot generate chunks from empty dialogue."
             )
-        
+
         dialogue.chunks = []
-        
+
         # 按消息分块：每个消息创建一个或多个 chunk，直接继承角色
         for msg_idx, msg in enumerate(dialogue.context.msgs):
             # Validate message has required attributes
@@ -212,13 +212,13 @@ class ChunkerClient:
                     f"Message {msg_idx} in dialogue {dialogue.ref_id} "
                     f"missing 'role' or 'msg' attribute"
                 )
-            
+
             msg_content = msg.msg.strip()
-            
+
             # Skip empty messages
             if not msg_content:
                 continue
-            
+
             # 如果消息太长，可以进一步分块
             if len(msg_content) > self.chunk_size:
                 # 对单个消息的内容进行分块
@@ -228,14 +228,14 @@ class ChunkerClient:
                     raise ValueError(
                         f"Failed to chunk long message {msg_idx} in dialogue {dialogue.ref_id}: {e}"
                     )
-                
+
                 for idx, sub_chunk in enumerate(sub_chunks):
                     sub_chunk_text = sub_chunk.text if hasattr(sub_chunk, 'text') else str(sub_chunk)
                     sub_chunk_text = sub_chunk_text.strip()
-                    
+
                     if len(sub_chunk_text) < (self.min_characters_per_chunk or 50):
                         continue
-                    
+
                     chunk = Chunk(
                         content=f"{msg.role}: {sub_chunk_text}",
                         speaker=msg.role,  # 直接继承角色
@@ -260,7 +260,7 @@ class ChunkerClient:
                     },
                 )
                 dialogue.chunks.append(chunk)
-        
+
         # Validate we generated at least one chunk
         if not dialogue.chunks:
             raise ValueError(
@@ -268,7 +268,7 @@ class ChunkerClient:
                 f"All messages were either empty or too short. "
                 f"Messages count: {len(dialogue.context.msgs)}"
             )
-        
+
         return dialogue
 
     def evaluate_chunking(self, dialogue: DialogData) -> dict:

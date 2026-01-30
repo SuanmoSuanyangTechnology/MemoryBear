@@ -62,7 +62,7 @@ class ConfigAuditLogger:
         self,
         config_id: str,
         user_id: Optional[str] = None,
-        group_id: Optional[str] = None,
+        end_user_id: Optional[str] = None,
         success: bool = True,
         details: Optional[Dict[str, Any]] = None
     ):
@@ -72,14 +72,14 @@ class ConfigAuditLogger:
         Args:
             config_id: 配置 ID
             user_id: 用户 ID（可选）
-            group_id: 组 ID（可选）
+            end_user_id: 组 ID（可选）
             success: 是否成功
             details: 详细信息（可选）
         """
         result = "SUCCESS" if success else "FAILED"
         msg = (
             f"CONFIG_LOAD config_id={config_id} "
-            f"user={user_id or 'N/A'} group={group_id or 'N/A'} "
+            f"user={user_id or 'N/A'} group={end_user_id or 'N/A'} "
             f"result={result}"
         )
         if details:
@@ -121,7 +121,7 @@ class ConfigAuditLogger:
         self,
         operation: str,
         config_id: str,
-        group_id: str,
+        end_user_id: str,
         success: bool = True,
         duration: Optional[float] = None,
         error: Optional[str] = None,
@@ -133,7 +133,7 @@ class ConfigAuditLogger:
         Args:
             operation: 操作类型（WRITE, READ 等）
             config_id: 配置 ID
-            group_id: 组 ID
+            end_user_id: 组 ID
             success: 是否成功
             duration: 操作耗时（秒）
             error: 错误信息（可选）
@@ -142,7 +142,7 @@ class ConfigAuditLogger:
         result = "SUCCESS" if success else "FAILED"
         msg = (
             f"{operation.upper()} config_id={config_id} "
-            f"group={group_id} result={result}"
+            f"group={end_user_id} result={result}"
         )
         if duration is not None:
             msg += f" duration={duration:.2f}s"

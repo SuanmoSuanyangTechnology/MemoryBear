@@ -287,7 +287,7 @@ class ExtractionOrchestrator:
         for d_idx, dialog in enumerate(dialog_data_list):
             dialogue_content = dialog.content if self.config.statement_extraction.include_dialogue_context else None
             for c_idx, chunk in enumerate(dialog.chunks):
-                all_chunks.append((chunk, dialog.group_id, dialogue_content))
+                all_chunks.append((chunk, dialog.end_user_id, dialogue_content))
                 chunk_metadata.append((d_idx, c_idx))
 
         logger.info(f"收集到 {len(all_chunks)} 个分块，开始全局并行提取")
@@ -299,9 +299,9 @@ class ExtractionOrchestrator:
         # 全局并行处理所有分块
         async def extract_for_chunk(chunk_data, chunk_index):
             nonlocal completed_chunks
-            chunk, group_id, dialogue_content = chunk_data
+            chunk, end_user_id, dialogue_content = chunk_data
             try:
-                statements = await self.statement_extractor._extract_statements(chunk, group_id, dialogue_content)
+                statements = await self.statement_extractor._extract_statements(chunk, end_user_id, dialogue_content)
                 
                 #  流式输出：每提取完一个分块的陈述句，立即发送进度
                 # 注意：只在试运行模式下发送陈述句详情，正式模式不发送
@@ -569,32 +569,32 @@ class ExtractionOrchestrator:
         if dialog_data_list and hasattr(dialog_data_list[0], 'config_id'):
             config_id = dialog_data_list[0].config_id
         
-        # 加载DataConfig
-        data_config = None
+        # 加载MemoryConfig
+        memory_config = None
         if config_id:
             try:
                 from app.db import SessionLocal
-                from app.repositories.data_config_repository import DataConfigRepository
+                from app.repositories.memory_config_repository import MemoryConfigRepository
                 
                 db = SessionLocal()
                 try:
-                    data_config = DataConfigRepository.get_by_id(db, config_id)
+                    memory_config = MemoryConfigRepository.get_by_id(db, config_id)
                 finally:
                     db.close()
                     
-                if data_config and not data_config.emotion_enabled:
+                if memory_config and not memory_config.emotion_enabled:
                     logger.info("情绪提取已在配置中禁用，跳过情绪提取")
                     return [{} for _ in dialog_data_list]
                     
             except Exception as e:
-                logger.warning(f"加载DataConfig失败: {e}，将跳过情绪提取")
+                logger.warning(f"加载MemoryConfig失败: {e}，将跳过情绪提取")
                 return [{} for _ in dialog_data_list]
         else:
             logger.info("未找到config_id，跳过情绪提取")
             return [{} for _ in dialog_data_list]
         
         # 如果配置未启用情绪提取，直接返回空映射
-        if not data_config or not data_config.emotion_enabled:
+        if not memory_config or not memory_config.emotion_enabled:
             logger.info("情绪提取未启用，跳过")
             return [{} for _ in dialog_data_list]
 
@@ -608,7 +608,7 @@ class ExtractionOrchestrator:
                     total_statements += 1
                     # 只处理用户的陈述句 (role 为 "user")
                     if hasattr(statement, 'speaker') and statement.speaker == "user":
-                        all_statements.append((statement, data_config))
+                        all_statements.append((statement, memory_config))
                         statement_metadata.append((d_idx, statement.id))
                         filtered_statements += 1
 
@@ -617,7 +617,7 @@ class ExtractionOrchestrator:
         # 初始化情绪提取服务
         from app.services.emotion_extraction_service import EmotionExtractionService
         emotion_service = EmotionExtractionService(
-            llm_id=data_config.emotion_model_id if data_config.emotion_model_id else None
+            llm_id=memory_config.emotion_model_id if memory_config.emotion_model_id else None
         )
 
         # 全局并行处理所有陈述句
@@ -992,9 +992,7 @@ class ExtractionOrchestrator:
                 id=dialog_data.id,
                 name=f"Dialog_{dialog_data.id}",  # 添加必需的 name 字段
                 ref_id=dialog_data.ref_id,
-                group_id=dialog_data.group_id,
-                user_id=dialog_data.user_id,
-                apply_id=dialog_data.apply_id,
+                end_user_id=dialog_data.end_user_id,
                 run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                 content=dialog_data.context.content if dialog_data.context else "",
                 dialog_embedding=dialog_data.dialog_embedding if hasattr(dialog_data, 'dialog_embedding') else None,
@@ -1012,9 +1010,7 @@ class ExtractionOrchestrator:
                     id=chunk.id,
                     name=f"Chunk_{chunk.id}",  # 添加必需的 name 字段
                     dialog_id=dialog_data.id,
-                    group_id=dialog_data.group_id,
-                    user_id=dialog_data.user_id,
-                    apply_id=dialog_data.apply_id,
+                    end_user_id=dialog_data.end_user_id,
                     run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                     content=chunk.content,
                     chunk_embedding=chunk.chunk_embedding,
@@ -1035,9 +1031,7 @@ class ExtractionOrchestrator:
                         stmt_type=getattr(statement, 'stmt_type', 'general'),  # 添加必需的 stmt_type 字段
                         temporal_info=getattr(statement, 'temporal_info', TemporalInfo.ATEMPORAL),  # 添加必需的 temporal_info 字段
                         connect_strength=statement.connect_strength if statement.connect_strength is not None else 'Strong',  # 添加必需的 connect_strength 字段
-                        group_id=dialog_data.group_id,
-                        user_id=dialog_data.user_id,
-                        apply_id=dialog_data.apply_id,
+                        end_user_id=dialog_data.end_user_id,
                         run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                         statement=statement.statement,
                         speaker=getattr(statement, 'speaker', None),  # 添加 speaker 字段
@@ -1060,9 +1054,7 @@ class ExtractionOrchestrator:
                     statement_chunk_edge = StatementChunkEdge(
                         source=statement.id,
                         target=chunk.id,
-                        group_id=dialog_data.group_id,
-                        user_id=dialog_data.user_id,
-                        apply_id=dialog_data.apply_id,
+                        end_user_id=dialog_data.end_user_id,
                         run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                         created_at=dialog_data.created_at,
                     )
@@ -1072,13 +1064,16 @@ class ExtractionOrchestrator:
                     if statement.triplet_extraction_info:
                         triplet_info = statement.triplet_extraction_info
 
-                        # 创建实体索引到ID的映射
+                        # 创建实体索引到ID的映射（支持多种索引方式）
                         entity_idx_to_id = {}
                         
                         # 创建实体节点
                         for entity_idx, entity in enumerate(triplet_info.entities):
-                            # 映射实体索引到实体ID
+                            # 映射实体索引到实体ID（使用多个键以提高容错性）
+                            # 1. 使用实体自己的 entity_idx
                             entity_idx_to_id[entity.entity_idx] = entity.id
+                            # 2. 使用枚举索引（从0开始）
+                            entity_idx_to_id[entity_idx] = entity.id
                             
                             if entity.id not in entity_id_set:
                                 entity_connect_strength = getattr(entity, 'connect_strength', 'Strong')
@@ -1095,9 +1090,7 @@ class ExtractionOrchestrator:
                                     aliases=getattr(entity, 'aliases', []) or [],  # 传递从三元组提取阶段获取的aliases
                                     name_embedding=getattr(entity, 'name_embedding', None),
                                     is_explicit_memory=getattr(entity, 'is_explicit_memory', False),  # 新增：传递语义记忆标记
-                                    group_id=dialog_data.group_id,
-                                    user_id=dialog_data.user_id,
-                                    apply_id=dialog_data.apply_id,
+                                    end_user_id=dialog_data.end_user_id,
                                     run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                                     created_at=dialog_data.created_at,
                                     expired_at=dialog_data.expired_at,
@@ -1112,9 +1105,7 @@ class ExtractionOrchestrator:
                                 source=statement.id,
                                 target=entity.id,
                                 connect_strength=entity_connect_strength if entity_connect_strength is not None else 'Strong',
-                                group_id=dialog_data.group_id,
-                                user_id=dialog_data.user_id,
-                                apply_id=dialog_data.apply_id,
+                                end_user_id=dialog_data.end_user_id,
                                 run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                                 created_at=dialog_data.created_at,
                             )
@@ -1134,9 +1125,7 @@ class ExtractionOrchestrator:
                                     relation_type=triplet.predicate,
                                     statement=statement.statement,
                                     source_statement_id=statement.id,
-                                    group_id=dialog_data.group_id,
-                                    user_id=dialog_data.user_id,
-                                    apply_id=dialog_data.apply_id,
+                                    end_user_id=dialog_data.end_user_id,
                                     run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                                     created_at=dialog_data.created_at,
                                     expired_at=dialog_data.expired_at,
@@ -1163,9 +1152,18 @@ class ExtractionOrchestrator:
                                         relationship_result
                                     )
                             else:
-                                logger.warning(
-                                    f"跳过三元组 - 无法找到实体ID: subject_id={triplet.subject_id}, "
-                                    f"object_id={triplet.object_id}, statement_id={statement.id}"
+                                # 改进的警告信息，包含更多调试信息
+                                missing_subject = "subject" if not subject_entity_id else ""
+                                missing_object = "object" if not object_entity_id else ""
+                                missing_both = " and " if (not subject_entity_id and not object_entity_id) else ""
+                                
+                                logger.debug(
+                                    f"跳过三元组 - 无法找到{missing_subject}{missing_both}{missing_object}实体ID: "
+                                    f"subject_id={triplet.subject_id} ({triplet.subject_name}), "
+                                    f"object_id={triplet.object_id} ({triplet.object_name}), "
+                                    f"predicate={triplet.predicate}, "
+                                    f"statement_id={statement.id}, "
+                                    f"available_indices={sorted(entity_idx_to_id.keys())}"
                                 )
 
         logger.info(
@@ -1763,14 +1761,14 @@ class ExtractionOrchestrator:
 
 async def get_chunked_dialogs(
     chunker_strategy: str = "RecursiveChunker",
-    group_id: str = "group_1",
+    end_user_id: str = "group_1",
     indices: Optional[List[int]] = None,
 ) -> List[DialogData]:
     """从测试数据生成分块对话
     
     Args:
         chunker_strategy: 分块策略（默认: RecursiveChunker）
-        group_id: 组ID
+        end_user_id: 组ID
         indices: 要处理的数据索引列表（可选）
         
     Returns:
@@ -1834,7 +1832,7 @@ async def get_chunked_dialogs(
         dialog_data = DialogData(
             context=conversation_context,
             ref_id=data['id'],
-            group_id=group_id,
+            end_user_id=end_user_id,
             metadata=dialog_metadata,
         )
         
@@ -1936,7 +1934,7 @@ async def get_chunked_dialogs_from_preprocessed(
 
 async def get_chunked_dialogs_with_preprocessing(
     chunker_strategy: str = "RecursiveChunker",
-    group_id: str = "default",
+    end_user_id: str = "default",
     user_id: str = "default",
     apply_id: str = "default",
     indices: Optional[List[int]] = None,
@@ -1948,7 +1946,7 @@ async def get_chunked_dialogs_with_preprocessing(
     
     Args:
         chunker_strategy: 分块策略
-        group_id: 组ID
+        end_user_id: 组ID
         user_id: 用户ID
         apply_id: 应用ID
         indices: 要处理的数据索引列表
@@ -1976,11 +1974,9 @@ async def get_chunked_dialogs_with_preprocessing(
         indices=indices,
     )
             
-    # 设置 group_id, user_id, apply_id
+    # 设置 end_user_id
     for dd in preprocessed_data:
-        dd.group_id = group_id
-        dd.user_id = user_id
-        dd.apply_id = apply_id
+        dd.end_user_id = end_user_id
         
     # 步骤2: 语义剪枝
     try:

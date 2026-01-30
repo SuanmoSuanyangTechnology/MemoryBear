@@ -419,6 +419,9 @@ export const en = {
       statusEnabled: 'Available',
       statusDisabled: 'Unavailable',
       remove: 'Remove',
+
+      fileSizeTip: 'File size cannot exceed {{size}}MB',
+      fileAcceptTip: 'Unsupported file type:'
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -498,6 +501,64 @@ export const en = {
 
       saveConfig: 'Save Config',
       apiKeyName: 'API Key Name',
+
+      llm: 'LLM',
+      chat: 'Chat',
+      embedding: 'Embedding',
+      rerank: 'Rerank',
+      openai: "Openai",
+      dashscope: "Dashscope",
+      ollama: "Ollama",
+      xinference: "Xinference",
+      gpustack: "Gpustack",
+      bedrock: "Bedrock"
+    },
+    modelNew: {
+      group: 'Model Group',
+      list: 'Model List',
+      square: 'Model Plaza',
+      createGroupModel: 'Create Model Group',
+      groupSearchPlaceholder: 'Search model groups',
+      listSearchPlaceholder: 'Search available models',
+      squareSearchPlaceholder: 'Search platform models',
+      status: 'Model Status',
+      created_at: 'Created At',
+      configureBtn: 'Click to Configure',
+      showModel: 'Show Model',
+      keyConfig: 'Configure KEY',
+
+      modelConfiguration: 'Model Configuration',
+      logo: 'Model LOGO',
+      name: 'Model Name',
+      type: 'Model Type',
+      modelImplement: 'Model Implementation',
+      addImplement: 'Add Implementation',
+      noAuth: 'Unauthorized (Limited to 1 implementation)',
+      implementConfig: 'Configure Model Implementation',
+      provider: 'Model Provider',
+      api_key_ids: 'Select Model',
+      viewAll: 'More',
+      modelCount: 'Total {{count}} models',
+      modelList: 'Model List',
+      added: ' Added',
+      addSuccess: 'Added successfully',
+      model_name: 'Model Name',
+      tags: 'Tags',
+      createCustomModel: 'Add Custom Model',
+      edit: 'Edit',
+      selectOneTip: 'Model API KEY not configured, please configure it in the model list first',
+      load_balance_strategy: 'Concurrency Strategy',
+      round_robin: 'Sequential Execution - Call each model in order',
+      none: 'None',
+
+      api_key: 'API KEY',
+      api_base: 'API Base URL',
+      description: 'Description',
+      add: 'Add',
+      item: 'item',
+      apiKeyNum: ' API Keys',
+      official: 'Official',
+      deprecated: 'Deprecated',
 
       llm: 'LLM',
       chat: 'Chat',
@@ -866,7 +927,7 @@ export const en = {
 
       minimumRetention: 'Minimum retention (λ_time)',
       minimumRetentionDesc: 'Controls the minimum retention threshold of memory retention',
-      forgettingRate: 'Forgetting rate (λ_mem)',      
+      forgettingRate: 'Forgetting rate (λ_mem)',
       forgettingRateDesc: 'Control the speed of memory forgetting, the higher the value, the faster the forgetting',
       offset: 'Offset (offset)',
       offsetDesc: 'The offset of the minimum preservation degree',
@@ -934,7 +995,7 @@ export const en = {
       number: 'Number',
       checkbox: 'Checkbox',
       apiVariable: 'API Variable',
-      
+
       displayName: 'Display Name',
       maxLength: 'Max Length',
       required: 'Required',
@@ -1175,6 +1236,12 @@ export const en = {
       priority: 'Structured Integration',
       addTool: 'Add Tool',
       tool: 'Tool',
+
+      statistics: 'Data Statistics',
+      daily_conversations: 'Daily Conversations',
+      daily_new_users: 'Daily New Users',
+      daily_api_calls: 'Daily API Calls',
+      daily_tokens: 'Token Consumption',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -1534,7 +1601,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       noPermissionDesc: ' Please contact the administrator to grant permission',
       tableEmpty: 'No data available.',
       loadingEmpty: 'The content is loading…',
-      loadingEmptyDesc: 'Your content is on its way by rocket! It will soon land on your screen'
+      loadingEmptyDesc: 'Your content is on its way by rocket! It will soon land on your screen',
+      pageEmpty: 'Oops！ No search results available at the moment',
+      pageEmptyDesc: "Red Bear tilts its head and waits for you to change a new keyword, let's explore together.",
     },
     apiKey: {
       name: 'Project Name',
@@ -1765,7 +1834,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       externalInteraction: 'External Interaction',
       "http-request": 'HTTP Request',
       tool: 'Tools',
-      code_execution: 'Code Execution',
+      code: 'Code Execution',
       "jinja-render": 'Template Rendering',
       cognitiveUpgrading: 'Cognitive Upgrading (Innovation)',
       'memory-read': 'Memory Retrieval',
@@ -1858,6 +1927,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           'array[number]': 'Array[Number]',
           'array[boolean]': 'Array[Boolean]',
           'array[object]': 'Array[Object]',
+          'object': 'Object',
           addParams: 'Add Extract Variable',
           promptPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
         },
@@ -1962,6 +2032,12 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           config_id: 'Memory Configuration',
           search_switch: 'Search Mode',
         },
+
+        'code': {
+          input_variables: 'Input Variables',
+          output_variables: 'Output Variables',
+          refreshTip: '同步函数签名至代码',
+        },
         name: 'Key',
         type: 'Type',
         value: 'Value',
@@ -1982,6 +2058,10 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       arrange: 'Arrange',
       redo: 'Redo',
       undo: 'Undo',
+
+      input: 'Input',
+      output: 'Output',
+      error: 'Error Message',
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',

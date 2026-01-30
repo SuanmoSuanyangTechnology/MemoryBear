@@ -19,7 +19,9 @@ export interface ChatItem {
   /** 消息内容 */
   content?: string | null;
   /** 创建时间 */
-  created_at?: number | string
+  created_at?: number | string;
+  status?: string;
+  subContent?: Record<string, any>[]
 }
 
 /**
@@ -81,4 +83,5 @@ export interface ChatContentProps {
   /** 标签格式化函数 */
   labelFormat: (item: ChatItem) => any;
   errorDesc?: string;
+  renderRuntime?: (item: ChatItem, index: number) => ReactNode;
 }

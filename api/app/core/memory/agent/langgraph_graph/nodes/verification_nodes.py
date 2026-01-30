@@ -12,7 +12,7 @@ from app.core.memory.agent.utils.session_tools import SessionService
 from app.core.memory.agent.utils.template_tools import TemplateService
 from app.core.memory.agent.services.optimized_llm_service import LLMServiceMixin
 
-template_root = os.path.join(PROJECT_ROOT_, 'agent', 'utils', 'prompt')
+template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
 db_session = next(get_db())
 logger = get_agent_logger(__name__)
 
@@ -62,12 +62,12 @@ async def Verify(state: ReadState):
     logger.info("=== Verify 节点开始执行 ===")
     try:
         content = state.get('data', '')
-        group_id = state.get('group_id', '')
+        end_user_id = state.get('end_user_id', '')
         memory_config = state.get('memory_config', None)
         
-        logger.info(f"Verify: content={content[:50] if content else 'empty'}..., group_id={group_id}")
+        logger.info(f"Verify: content={content[:50] if content else 'empty'}..., end_user_id={end_user_id}")
 
-        history = await SessionService(store).get_history(group_id, group_id, group_id)
+        history = await SessionService(store).get_history(end_user_id, end_user_id, end_user_id)
         logger.info(f"Verify: 获取历史记录完成，history length={len(history)}")
 
         retrieve = state.get("retrieve", {})

@@ -70,11 +70,7 @@ class Neo4jConnector:
             List[Dict[str, Any]]: 查询结果列表，每个元素是一个字典
             
         Example:
-            >>> connector = Neo4jConnector()
-            >>> results = await connector.execute_query(
-            ...     "MATCH (n:Person {name: $name}) RETURN n",
-            ...     name="Alice"
-            ... )
+
         """
         result = await self.driver.execute_query(
             query,
@@ -98,17 +94,7 @@ class Neo4jConnector:
             Any: 事务函数的返回值
             
         Example:
-            >>> async def create_node(tx, name):
-            ...     result = await tx.run(
-            ...         "CREATE (n:Person {name: $name}) RETURN n",
-            ...         name=name
-            ...     )
-            ...     return await result.single()
-            >>> 
-            >>> connector = Neo4jConnector()
-            >>> result = await connector.execute_write_transaction(
-            ...     create_node, name="Alice"
-            ... )
+
         """
         async with self.driver.session(database="neo4j") as session:
             return await session.execute_write(transaction_func, **kwargs)
@@ -126,45 +112,33 @@ class Neo4jConnector:
             Any: 事务函数的返回值
             
         Example:
-            >>> async def get_node(tx, name):
-            ...     result = await tx.run(
-            ...         "MATCH (n:Person {name: $name}) RETURN n",
-            ...         name=name
-            ...     )
-            ...     return await result.single()
-            >>> 
-            >>> connector = Neo4jConnector()
-            >>> result = await connector.execute_read_transaction(
-            ...     get_node, name="Alice"
-            ... )
+
         """
         async with self.driver.session(database="neo4j") as session:
             return await session.execute_read(transaction_func, **kwargs)
     
-    async def delete_group(self, group_id: str):
+    async def delete_group(self, end_user_id: str):
         """删除指定组的所有数据
         
-        删除所有属于指定group_id的节点和边。
+        删除所有属于指定end_user_id的节点和边。
         这是一个危险操作，会永久删除数据。
         
         Args:
-            group_id: 要删除的组ID
+            end_user_id: 要删除的组ID
             
         Example:
-            >>> connector = Neo4jConnector()
-            >>> await connector.delete_group("group_123")
             Group group_123 deleted.
         """
         # 删除节点（DETACH DELETE会同时删除相关的边）
         await self.driver.execute_query(
-            "MATCH (n) WHERE n.group_id = $group_id DETACH DELETE n",
+            "MATCH (n) WHERE n.end_user_id = $end_user_id DETACH DELETE n",
             database="neo4j",
-            group_id=group_id
+            end_user_id=end_user_id
         )
         # 删除独立的边（如果有的话）
         await self.driver.execute_query(
-            "MATCH ()-[r]->() WHERE r.group_id = $group_id DELETE r",
+            "MATCH ()-[r]->() WHERE r.end_user_id = $end_user_id DELETE r",
             database="neo4j",
-            group_id=group_id
+            end_user_id=end_user_id
         )
-        print(f"Group {group_id} deleted.")
+        print(f"Group {end_user_id} deleted.")

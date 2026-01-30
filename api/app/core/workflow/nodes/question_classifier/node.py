@@ -18,30 +18,30 @@ DEFAULT_EMPTY_QUESTION_CASE = f"{DEFAULT_CASE_PREFIX}1"
 
 class QuestionClassifierNode(BaseNode):
     """问题分类器节点"""
-    
+
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
         self.typed_config: QuestionClassifierNodeConfig | None = None
         self.category_to_case_map = {}
-    
+
     def _get_llm_instance(self) -> RedBearLLM:
         """获取LLM实例"""
         with get_db_read() as db:
             config = ModelConfigService.get_model_by_id(db=db, model_id=self.typed_config.model_id)
-            
+
             if not config:
                 raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
-            
+
             if not config.api_keys or len(config.api_keys) == 0:
                 raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-            
+
             api_config = config.api_keys[0]
             model_name = api_config.model_name
             provider = api_config.provider
             api_key = api_config.api_key
             base_url = api_config.api_base
             model_type = config.type
-        
+
         return RedBearLLM(
             RedBearModelConfig(
                 model_name=model_name,
@@ -64,7 +64,7 @@ class QuestionClassifierNode(BaseNode):
             case_tag = f"{DEFAULT_CASE_PREFIX}{idx}"
             category_map[category_name] = case_tag
         return category_map
-    
+
     async def execute(self, state: WorkflowState) -> dict:
         """执行问题分类"""
         self.typed_config = QuestionClassifierNodeConfig(**self.config)
@@ -74,11 +74,12 @@ class QuestionClassifierNode(BaseNode):
         categories = self.typed_config.categories or []
         category_names = [class_item.class_name.strip() for class_item in categories]
         category_count = len(category_names)
-        
+
         if not question:
             logger.warning(
                 f"节点 {self.node_id} 未获取到输入问题，使用默认分支"
-                f"（默认分支：{DEFAULT_EMPTY_QUESTION_CASE}，分类总数：{category_count}）"
+                f"(默认分支:{DEFAULT_EMPTY_QUESTION_CASE}"
+                f"分类总数: {category_count})"
             )
             # 若分类列表为空，返回默认unknown分支，否则返回CASE1
             if category_count > 0:

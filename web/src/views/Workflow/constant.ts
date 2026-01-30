@@ -105,7 +105,7 @@ export const nodeLibrary: NodeLibrary[] = [
           model_id: {
             type: 'customSelect',
             url: getModelListUrl,
-            params: { type: 'llm,chat' }, // llm/chat
+            params: { type: 'llm,chat', pagesize: 100, is_active: true }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },
@@ -166,7 +166,7 @@ export const nodeLibrary: NodeLibrary[] = [
           model_id: {
             type: 'customSelect',
             url: getModelListUrl,
-            params: { type: 'llm,chat' }, // llm/chat
+            params: { type: 'llm,chat', pagesize: 100, is_active: true }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },
@@ -259,7 +259,7 @@ export const nodeLibrary: NodeLibrary[] = [
           model_id: {
             type: 'customSelect',
             url: getModelListUrl,
-            params: { type: 'llm,chat' }, // llm/chat
+            params: { type: 'llm,chat', pagesize: 100, is_active: true }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },
@@ -284,7 +284,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           input: {
             type: 'variableList',
-            filterNodeTypes: ['knowledge-retrieval', 'iteration', 'loop'],
+            filterNodeTypes: ['knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor', 'code'],
             filterVariableNames: ['message']
           },
           parallel: {
@@ -431,7 +431,32 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      // { type: "code_execution", icon: codeExecutionIcon },
+    //   { type: "code", icon: codeExecutionIcon,
+    //     config: {
+    //       input_variables: {
+    //         type: 'inputList',
+    //         defaultValue: [{ name: 'arg1' }, { name: 'arg2' }]
+    //       },
+    //       language: {
+    //         type: 'select',
+    //         defaultValue: 'python3'
+    //       },
+    //       code: {
+    //         type: 'messageEditor',
+    //         isArray: false,
+    //         language: ['python3', 'javascript'],
+    //         titleVariant: 'borderless',
+    //         defaultValue: `def main(arg1: str, arg2: str):
+    // return {
+    //     "result": arg1 + arg2,
+    // }`
+    //       },
+    //       output_variables: {
+    //         type: 'outputList',
+    //         defaultValue: [{name: 'result', type: 'string'}]
+    //       },
+    //     }
+    //   },
       { type: "jinja-render", icon: templateRenderingIcon,
         config: {
           mapping: {
@@ -441,12 +466,12 @@ export const nodeLibrary: NodeLibrary[] = [
           template: {
             type: 'messageEditor',
             isArray: false,
-            enableJinja2: true,
+            language: 'jinja2',
             titleVariant: 'borderless',
             defaultValue: "{{arg1}}"
           },
         }
-      }
+      },
     ]
   },
   // {

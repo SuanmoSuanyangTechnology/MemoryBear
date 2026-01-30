@@ -7,11 +7,13 @@ Routes:
     GET /memory/config/emotion - 获取情绪引擎配置
     POST /memory/config/emotion - 更新情绪引擎配置
 """
+import uuid
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Union
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from app.core.response_utils import success
 from app.dependencies import get_current_user
@@ -20,6 +22,7 @@ from app.schemas.response_schema import ApiResponse
 from app.services.emotion_config_service import EmotionConfigService
 from app.core.logging_config import get_api_logger
 from app.db import get_db
+from app.utils.config_utils import resolve_config_id
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -32,11 +35,11 @@ router = APIRouter(
 
 class EmotionConfigQuery(BaseModel):
     """情绪配置查询请求模型"""
-    config_id: int = Field(..., description="配置ID")
+    config_id: UUID = Field(..., description="配置ID")
 
 class EmotionConfigUpdate(BaseModel):
     """情绪配置更新请求模型"""
-    config_id: int = Field(..., description="配置ID")
+    config_id: Union[uuid.UUID, int, str]= Field(..., description="配置ID")
     emotion_enabled: bool = Field(..., description="是否启用情绪提取")
     emotion_model_id: Optional[str] = Field(None, description="情绪分析专用模型ID")
     emotion_extract_keywords: bool = Field(..., description="是否提取情绪关键词")
@@ -45,7 +48,7 @@ class EmotionConfigUpdate(BaseModel):
 
 @router.get("/read_config", response_model=ApiResponse)
 def get_emotion_config(
-    config_id: int = Query(..., description="配置ID"),
+    config_id: UUID|int = Query(..., description="配置ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -78,7 +81,7 @@ def get_emotion_config(
             f"用户 {current_user.username} 请求获取情绪配置",
             extra={"config_id": config_id}
         )
-        
+        config_id=resolve_config_id(config_id, db)
         # 初始化服务
         config_service = EmotionConfigService(db)
         
@@ -157,6 +160,7 @@ def update_emotion_config(
             }
         }
     """
+    config.config_id=resolve_config_id(config.config_id, db)
     try:
         api_logger.info(
             f"用户 {current_user.username} 请求更新情绪配置",

@@ -758,7 +758,7 @@ class AppService:
         )
 
         # 构建查询条件
-        filters = [App.is_active == True]
+        filters = [App.is_active.is_(True)]
         if type:
             filters.append(App.type == type)
         if visibility:
@@ -873,7 +873,7 @@ class AppService:
 
         self._validate_workspace_access(app, workspace_id)
 
-        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active == True).order_by(
+        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active.is_(True)).order_by(
             AgentConfig.updated_at.desc())
         agent_cfg: Optional[AgentConfig] = self.db.scalars(stmt).first()
         now = datetime.datetime.now()
@@ -1204,7 +1204,7 @@ class AppService:
         default_model_config_id = None
 
         if app.type == AppType.AGENT:
-            stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active == True).order_by(
+            stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active.is_(True)).order_by(
                 AgentConfig.updated_at.desc())
             agent_cfg = self.db.scalars(stmt).first()
             if not agent_cfg:
@@ -1226,7 +1226,7 @@ class AppService:
                 select(MultiAgentConfig)
                 .where(
                     MultiAgentConfig.app_id == app_id,
-                    MultiAgentConfig.is_active == True
+                    MultiAgentConfig.is_active.is_(True)
                 )
                 .order_by(MultiAgentConfig.updated_at.desc())
             )
@@ -1380,7 +1380,7 @@ class AppService:
 
         stmt = (
             select(AppRelease)
-            .where(AppRelease.app_id == app_id, AppRelease.is_active == True)
+            .where(AppRelease.app_id == app_id, AppRelease.is_active.is_(True))
             .order_by(AppRelease.version.desc())
         )
         return list(self.db.scalars(stmt).all())
