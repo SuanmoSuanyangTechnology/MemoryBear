@@ -69,7 +69,7 @@ services:
     container_name: sandbox
     ports:
       - "8194"
-    command: /code/.venv/bin/python main.py
+    command: /code/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8194 --log-level debug
     restart: unless-stopped
     networks:
       - sandbox
