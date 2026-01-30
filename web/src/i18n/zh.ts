@@ -2555,7 +2555,7 @@ export const zh = {
       extract: '工程推理',
       source: '未添加项',
       target: '已添加项',
-    }
+    },
     prompt: {
       editor: '提示词生成器',
       history: '我的历史',
