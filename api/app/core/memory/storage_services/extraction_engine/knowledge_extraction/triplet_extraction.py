@@ -25,6 +25,15 @@ class TripletExtractor:
         """
         self.llm_client = llm_client
 
+    def _get_language(self) -> str:
+        """Get the configured language for entity descriptions
+        
+        Returns:
+            Language code ("zh" or "en")
+        """
+        from app.core.config import settings
+        return settings.DEFAULT_LANGUAGE
+
     async def _extract_triplets(self, statement: Statement, chunk_content: str) -> TripletExtractionResponse:
         """Process a single statement and return extracted triplets and entities"""
         # Render the prompt using helper function
@@ -40,7 +49,8 @@ class TripletExtractor:
             statement=statement.statement,
             chunk_content=chunk_content,
             json_schema=TripletExtractionResponse.model_json_schema(),
-            predicate_instructions=PREDICATE_DEFINITIONS
+            predicate_instructions=PREDICATE_DEFINITIONS,
+            language=self._get_language()
         )
 
         # Create messages for LLM
