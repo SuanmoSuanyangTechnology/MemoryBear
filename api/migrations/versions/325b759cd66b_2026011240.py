@@ -28,7 +28,15 @@ def upgrade() -> None:
     op.drop_constraint('data_config_pkey', 'memory_config', type_='primary')
     op.alter_column('memory_config', 'config_id', new_column_name='config_id_old', nullable=True)
     op.add_column('memory_config', sa.Column('config_id', sa.UUID(), nullable=True))
-    op.execute("UPDATE memory_config SET config_id = apply_id::uuid")
+    # Handle rows where apply_id might be NULL or invalid - generate new UUIDs for those
+    op.execute("""
+        UPDATE memory_config 
+        SET config_id = CASE 
+            WHEN apply_id IS NOT NULL AND apply_id ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+            THEN apply_id::uuid 
+            ELSE gen_random_uuid() 
+        END
+    """)
     op.alter_column('memory_config', 'config_id', nullable=False)
     op.create_primary_key('memory_config_pkey', 'memory_config', ['config_id'])
     op.execute("ALTER TABLE memory_config ALTER COLUMN config_id_old DROP DEFAULT")

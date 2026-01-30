@@ -5,10 +5,10 @@ import os
 import uuid
 from typing import Optional
 
-from app.config import SANDBOX_USER_ID, SANDBOX_GROUP_ID, get_config
+from app.config import get_config
 from app.core.encryption import generate_key, encrypt_code
 from app.core.executor import CodeExecutor, ExecutionResult
-from app.core.runners.python.settings import check_lib_avaiable, release_lib_binary, LIB_PATH
+from app.core.runners.python.env import check_lib_avaiable, release_lib_binary, LIB_PATH
 from app.logger import get_logger
 from app.models import RunnerOptions
 
@@ -32,8 +32,8 @@ class PythonRunner(CodeExecutor):
         config = get_config()
         code_file_name = uuid.uuid4().hex.replace("-", "_")
 
-        script = PYTHON_PRESCRIPT.replace("{{uid}}", str(SANDBOX_USER_ID), 1)
-        script = script.replace("{{gid}}", str(SANDBOX_GROUP_ID), 1)
+        script = PYTHON_PRESCRIPT.replace("{{uid}}", str(config.sandbox_uid), 1)
+        script = script.replace("{{gid}}", str(config.sandbox_gid), 1)
         script = script.replace(
             "{{enable_network}}",
             str(int(options.enable_network and config.enable_network)

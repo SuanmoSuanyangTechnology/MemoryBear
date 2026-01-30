@@ -631,6 +631,13 @@ class ModelBaseRepository:
         return model_base
 
     @staticmethod
+    def get_by_name_and_provider(db: Session, name: str, provider: str) -> Optional['ModelBase']:
+        return db.query(ModelBase).filter(
+            ModelBase.name == name,
+            ModelBase.provider == provider
+        ).first()
+
+    @staticmethod
     def update(db: Session, model_base_id: uuid.UUID, data: dict) -> Optional['ModelBase']:
         model_base = db.query(ModelBase).filter(ModelBase.id == model_base_id).first()
         if not model_base:

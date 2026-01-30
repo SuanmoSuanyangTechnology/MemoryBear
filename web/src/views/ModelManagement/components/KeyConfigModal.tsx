@@ -72,7 +72,7 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
         <Form.Item
           name="api_key"
           label={t('modelNew.api_key')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.apiKey') }) }]}
+          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_key') }) }]}
         >
           <Input.Password placeholder={t('common.pleaseEnter')} />
         </Form.Item>
