@@ -363,6 +363,21 @@
       "subs": null
     },
     {
+      "id": 20,
+      "parent": 0,
+      "code": "prompt",
+      "label": "提示词",
+      "i18nKey": "menu.prompt",
+      "path": "/prompt",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "icon": null,
+      "iconActive": null,
+      "subs": null
+    },
+    {
       "id": 19,
       "parent": 0,
       "code": "member",
