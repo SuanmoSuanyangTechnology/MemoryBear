@@ -1,12 +1,24 @@
-mod syscalls;
+#[cfg(all(feature = "python3", feature = "nodejs"))]
+compile_error!("Only one feature can be enabled: either python3 or nodejs, not both!");
 
-use crate::syscalls::*;
-use libc::{chdir, chroot, gid_t, uid_t, c_int};
+#[cfg(not(any(feature = "python3", feature = "nodejs")))]
+compile_error!("You must enable one feature: either python3 or nodejs");
+
+#[cfg(feature = "python3")]
+mod python_syscalls;
+#[cfg(feature = "python3")]
+use crate::python_syscalls::*;
+
+#[cfg(feature = "nodejs")]
+mod nodejs_syscalls;
+#[cfg(feature = "nodejs")]
+use crate::nodejs_syscalls::*;
+
+use libc::{c_char, c_int, chdir, chroot, gid_t, uid_t};
 use libseccomp_sys::*;
 use std::env;
 use std::ffi::CString;
 use std::str::FromStr;
-
 
 /*
  * get_allowed_syscalls - retrieve allowed syscalls for the sandbox
@@ -192,4 +204,21 @@ pub unsafe extern "C" fn init_seccomp(uid: uid_t, gid: gid_t, enable_network: i3
         Ok(_) => 0,
         Err(code) => code,
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn get_lib_version_static() -> *const c_char {
+    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const c_char
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn get_lib_feature_static() -> *const c_char {
+    #[cfg(feature = "python3")]
+    let s = b"python3\0";
+    #[cfg(feature = "nodejs")]
+    let s = b"nodejs\0";
+    #[cfg(not(any(feature = "python3", feature = "nodejs")))]
+    let s = b"none\0";
+
+    s.as_ptr() as *const c_char
 }

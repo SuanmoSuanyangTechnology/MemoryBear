@@ -508,10 +508,7 @@ class ModelApiKeyService:
             )
             if not validation_result["valid"]:
                 # 记录验证失败的模型，但不抛出异常
-                failed_models.append({
-                    "model_name": model_name,
-                    "error": validation_result["error"]
-                })
+                failed_models.append(model_name)
                 continue
             
             # 创建API Key
@@ -692,6 +689,9 @@ class ModelBaseService:
 
     @staticmethod
     def create_model_base(db: Session, data: model_schema.ModelBaseCreate):
+        existing = ModelBaseRepository.get_by_name_and_provider(db, data.name, data.provider)
+        if existing:
+            raise BusinessException("模型已存在", BizCode.DUPLICATE_NAME)
         model_base = ModelBaseRepository.create(db, data.model_dump())
         db.commit()
         db.refresh(model_base)

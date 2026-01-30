@@ -15,8 +15,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60276e2d41bbb68b323e566047a1bfbf952050b157d8b5cdc74c07c1bf4ca3b6"
 
 [[package]]
-name = "seccomp_python"
-version = "0.1.0"
+name = "seccomp_redbear"
+version = "0.1.1"
 dependencies = [
  "libc",
  "libseccomp-sys",
