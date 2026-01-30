@@ -154,7 +154,7 @@ class MemoryConfigRepository:
         return memory_config_obj
 
     @staticmethod
-    def query_reflection_config_by_id(db: Session, config_id: uuid.UUID) -> MemoryConfig:
+    def query_reflection_config_by_id(db: Session, config_id: uuid.UUID|int|str) -> MemoryConfig:
         """构建反思配置查询语句，通过config_id查询反思配置（SQLAlchemy text() 命名参数）
 
         Args:
