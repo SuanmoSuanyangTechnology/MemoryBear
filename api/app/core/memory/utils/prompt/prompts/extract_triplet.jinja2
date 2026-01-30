@@ -5,6 +5,12 @@
 ===Task===
 Extract entities and knowledge triplets from the given statement.
 
+{% if language == "zh" %}
+**重要：请使用中文生成实体描述（description）和示例（example）。**
+{% else %}
+**Important: Please generate entity descriptions and examples in English.**
+{% endif %}
+
 ===Inputs===
 **Chunk Content:** "{{ chunk_content }}"
 **Statement:** "{{ statement }}"
@@ -13,6 +19,13 @@ Extract entities and knowledge triplets from the given statement.
 
 **Entity Extraction:**
 - Extract entities with their types, context-independent descriptions, **concise examples**, aliases, and semantic memory classification
+{% if language == "zh" %}
+- **实体描述（description）必须使用中文**
+- **示例（example）必须使用中文**
+{% else %}
+- **Entity descriptions must be in English**
+- **Examples must be in English**
+{% endif %}
 - **Semantic Memory Classification (is_explicit_memory):**
   * Set to `true` if the entity represents **explicit/semantic memory**:
     - **Concepts:** "Machine Learning", "Photosynthesis", "Democracy", "人工智能", "光合作用", "民主"
@@ -334,9 +347,11 @@ Output:
 - Escape quotation marks in text with backslashes (\")
 - Ensure proper string closure and comma separation
 - No line breaks within JSON string values
-- The output language should ALWAYS match the input language
-- If input is in English, extract statements in English
-- If input is in Chinese, extract statements in Chinese
+{% if language == "zh" %}
+- **语言要求：实体描述（description）和示例（example）必须使用中文**
+{% else %}
+- **Language Requirement: Entity descriptions and examples must be in English**
+{% endif %}
 - Preserve the original language and do not translate
 
 {{ json_schema }}

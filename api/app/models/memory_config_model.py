@@ -20,6 +20,9 @@ class MemoryConfig(Base):
     end_user_id = Column(String, nullable=True, comment="组ID")
     user_id = Column(String, nullable=True, comment="用户ID")
     apply_id = Column(String, nullable=True, comment="应用ID")
+    
+    # 本体场景关联
+    scene_id = Column(UUID(as_uuid=True), nullable=True, comment="本体场景ID，关联ontology_scene表")
 
     # 模型选择（从workspace继承）
     llm_id = Column(String, nullable=True, comment="LLM模型配置ID")

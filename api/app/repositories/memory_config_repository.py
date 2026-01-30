@@ -229,6 +229,7 @@ class MemoryConfigRepository:
                 config_name=params.config_name,
                 config_desc=params.config_desc,
                 workspace_id=params.workspace_id,
+                scene_id=params.scene_id,
                 llm_id=params.llm_id,
                 embedding_id=params.embedding_id,
                 rerank_id=params.rerank_id,

@@ -157,6 +157,11 @@ class Settings:
         if origin.strip()
     ]
 
+    # Language Configuration
+    # Supported values: "zh" (Chinese), "en" (English)
+    # This controls the language used for memory summary titles and other generated content
+    DEFAULT_LANGUAGE: str = os.getenv("DEFAULT_LANGUAGE", "zh")
+
     # Logging settings
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FORMAT: str = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")

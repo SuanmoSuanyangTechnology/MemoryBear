@@ -229,6 +229,9 @@ class ConfigParamsCreate(BaseModel):  # 创建配置参数模型（仅 body，�
     config_desc: str = Field("配置描述", description="配置描述（字符串）")
     workspace_id: Optional[uuid.UUID] = Field(None, description="工作空间ID（UUID）")
     
+    # 本体场景关联（可选）
+    scene_id: Optional[uuid.UUID] = Field(None, description="本体场景ID（UUID），关联ontology_scene表")
+    
     # 模型配置字段（可选，用于手动指定或自动填充）
     llm_id: Optional[str] = Field(None, description="LLM模型配置ID")
     embedding_id: Optional[str] = Field(None, description="嵌入模型配置ID")
