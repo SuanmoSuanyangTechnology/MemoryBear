@@ -1,13 +1,11 @@
 app:
-  port: 8194
-  debug: true
   key: redbear-sandbox
 
-max_workers: 4
-max_requests: 50
-worker_timeout: 30
+max_workers: 10
+max_requests: 300
+worker_timeout: 15
 python_path: /usr/local/bin/python
-nodejs_path: /usr/local/bin/node
+nodejs_path: /usr/bin/node
 enable_network: true
 enable_preload: false
 python_deps_update_interval: 30m

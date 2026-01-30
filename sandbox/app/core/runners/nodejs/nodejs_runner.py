@@ -1,55 +1,39 @@
-"""Python code runner"""
+"""Nodejs code runner"""
 import asyncio
-import base64
 import os
 import uuid
 from typing import Optional
 
-from app.config import get_config
-from app.core.encryption import generate_key, encrypt_code
 from app.core.executor import CodeExecutor, ExecutionResult
-from app.core.runners.python.env import check_lib_avaiable, release_lib_binary, LIB_PATH
+from app.core.runners.nodejs.env import check_lib_avaiable, release_lib_binary, LIB_PATH
 from app.logger import get_logger
 from app.models import RunnerOptions
 
-# Python sandbox prescript template
-with open("app/core/runners/python/prescript.py") as f:
-    PYTHON_PRESCRIPT = f.read()
+# Nodejs sandbox prescript template
+with open("app/core/runners/nodejs/prescript.js") as f:
+    NODEJS_PRESCRIPT = f.read()
 
 logger = get_logger()
 
 
-class PythonRunner(CodeExecutor):
-    """Python code runner with security isolation"""
+class NodejsRunner(CodeExecutor):
+    """Node.js code runner with security isolation"""
 
     def __init__(self):
         super().__init__()
 
     @staticmethod
-    def init_enviroment(code: bytes, preload, options: RunnerOptions) -> tuple[str, str]:
+    def init_environment(code: str, preload: str) -> str:
         if not check_lib_avaiable():
             release_lib_binary(False)
-        config = get_config()
         code_file_name = uuid.uuid4().hex.replace("-", "_")
 
-        script = PYTHON_PRESCRIPT.replace("{{uid}}", str(config.sandbox_uid), 1)
-        script = script.replace("{{gid}}", str(config.sandbox_gid), 1)
-        script = script.replace(
-            "{{enable_network}}",
-            str(int(options.enable_network and config.enable_network)
-                ),
-            1
-        )
-        script = script.replace("{{preload}}", f"{preload}\n", 1)
+        script = NODEJS_PRESCRIPT.replace("{{preload}}", preload, 1)
 
-        key = generate_key(64)
+        eval_code = f"eval(Buffer.from('{code}', 'base64').toString('utf-8'))"
+        script = script.replace("{{code}}", eval_code, 1)
 
-        encoded_code = encrypt_code(code, key)
-        encoded_key = base64.b64encode(key).decode("utf-8")
-
-        script = script.replace("{{code}}", encoded_code, 1)
-
-        code_path = f"{LIB_PATH}/tmp/{code_file_name}.py"
+        code_path = f"{LIB_PATH}/node_temp/tmp/{code_file_name}.js"
         try:
             os.makedirs(os.path.dirname(code_path), mode=0o755, exist_ok=True)
             with open(code_path, "w", encoding="utf-8") as f:
@@ -59,7 +43,7 @@ class PythonRunner(CodeExecutor):
         except OSError as e:
             raise RuntimeError(f"Failed to write {code_path}") from e
 
-        return code_path, encoded_key
+        return code_path
 
     async def run(
             self,
@@ -85,14 +69,15 @@ class PythonRunner(CodeExecutor):
             timeout = config.worker_timeout
 
         # Check if preload is allowed
-        if not config.enable_preload:
+        if not preload or not config.enable_preload:
             preload = ""
-        code = base64.b64decode(code)
-        script_path, encoded_key = self.init_enviroment(code, preload, options=options)
+        script_path = self.init_environment(code, preload)
 
         try:
             # Setup environment
-            env = {}
+            env = {
+                "UV_USE_IO_URING": "0"
+            }
 
             # Add proxy settings if configured
             if config.proxy.socks5:
@@ -108,14 +93,13 @@ class PythonRunner(CodeExecutor):
             if config.allowed_syscalls:
                 env["ALLOWED_SYSCALLS"] = ",".join(map(str, config.allowed_syscalls))
 
-            # Execute with Python interpreter
-            logger.info(encoded_key)
-
             process = await asyncio.create_subprocess_exec(
-                config.python_path,
+                config.nodejs_path,
                 script_path,
                 LIB_PATH,
-                encoded_key,
+                str(config.sandbox_uid),
+                str(config.sandbox_gid),
+                options.model_dump_json(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
