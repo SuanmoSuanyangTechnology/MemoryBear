@@ -32,6 +32,8 @@ db_logger = get_db_logger()
 config_logger = get_config_logger()
 
 TABLE_NAME = "memory_config"
+
+
 class MemoryConfigRepository:
     """记忆配置Repository
 
@@ -170,6 +172,7 @@ class MemoryConfigRepository:
         if not memory_config:
             raise RuntimeError("reflection config not found")
         return memory_config
+
     @staticmethod
     def query_reflection_config_by_workspace_id(db: Session, workspace_id: uuid.UUID) -> MemoryConfig:
         """构建查询所有配置的语句（SQLAlchemy text() 命名参数）
@@ -188,7 +191,6 @@ class MemoryConfigRepository:
         if not memory_config:
             raise RuntimeError("reflection config not found")
         return memory_config
-
 
     @staticmethod
     def build_select_all(workspace_id: uuid.UUID) -> Tuple[str, Dict]:
@@ -289,7 +291,6 @@ class MemoryConfigRepository:
             db.rollback()
             db_logger.error(f"更新记忆配置失败: config_id={update.config_id} - {str(e)}")
             raise
-
 
     @staticmethod
     def update_extracted(db: Session, update: ConfigUpdateExtracted) -> Optional[MemoryConfig]:
@@ -413,7 +414,7 @@ class MemoryConfigRepository:
             raise
 
     @staticmethod
-    def get_extracted_config(db: Session, config_id: UUID |int) -> Optional[Dict]:
+    def get_extracted_config(db: Session, config_id: UUID | int) -> Optional[Dict]:
         """获取萃取配置，通过主键查询某条配置
 
         Args:
@@ -423,7 +424,7 @@ class MemoryConfigRepository:
         Returns:
             Optional[Dict]: 萃取配置字典，不存在则返回None
         """
-        config_id=resolve_config_id(config_id,db)
+        config_id = resolve_config_id(config_id, db)
         db_logger.debug(f"查询萃取配置: config_id={config_id}")
         try:
             db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
@@ -517,26 +518,28 @@ class MemoryConfigRepository:
         except Exception as e:
             db_logger.error(f"根据ID查询记忆配置失败: config_id={config_id} - {str(e)}")
             raise
+
     @staticmethod
-    def get_config_with_workspace(db: Session, config_id: uuid.UUID) -> Optional[tuple]:
+    def get_config_with_workspace(db: Session, config_id: uuid.UUID | int | str) -> Optional[tuple]:
         """Get memory config and its associated workspace information
-        
+
         Args:
             db: Database session
             config_id: Configuration ID
-            
+
         Returns:
             Optional[tuple]: (MemoryConfig, Workspace) tuple, None if not found
-            
+
         Raises:
             ValueError: Raised when config exists but workspace doesn't
         """
         import time
 
         from app.models.workspace_model import Workspace
-        
+
         start_time = time.time()
-        
+        config_id = resolve_config_id(config_id, db)
+
         # Log configuration loading start
         config_logger.info(
             "Loading configuration with workspace",
@@ -545,17 +548,17 @@ class MemoryConfigRepository:
                 "config_id": config_id
             }
         )
-        
+
         db_logger.debug(f"Querying memory config and workspace: config_id={config_id}")
-        
+
         try:
             # Use join query to get both config and workspace
             result = db.query(MemoryConfig, Workspace).join(
                 Workspace, MemoryConfig.workspace_id == Workspace.id
             ).filter(MemoryConfig.config_id == config_id).first()
-            
+
             elapsed_ms = (time.time() - start_time) * 1000
-            
+
             if not result:
                 # Check if config exists but workspace is missing
                 config_only = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
@@ -584,9 +587,11 @@ class MemoryConfigRepository:
                                 "elapsed_ms": elapsed_ms
                             }
                         )
-                        db_logger.error(f"Memory config {config_id} references non-existent workspace {config_only.workspace_id}")
-                        raise ValueError(f"Workspace {config_only.workspace_id} not found for configuration {config_id}")
-                
+                        db_logger.error(
+                            f"Memory config {config_id} references non-existent workspace {config_only.workspace_id}")
+                        raise ValueError(
+                            f"Workspace {config_only.workspace_id} not found for configuration {config_id}")
+
                 config_logger.debug(
                     "Configuration not found",
                     extra={
@@ -598,9 +603,9 @@ class MemoryConfigRepository:
                 )
                 db_logger.debug(f"Memory config not found: config_id={config_id}")
                 return None
-            
+
             config, workspace = result
-            
+
             # Log successful configuration loading
             config_logger.info(
                 "Configuration with workspace loaded successfully",
@@ -615,16 +620,17 @@ class MemoryConfigRepository:
                     "elapsed_ms": elapsed_ms
                 }
             )
-            
-            db_logger.debug(f"Memory config and workspace query successful: config={config.config_name}, workspace={workspace.name}")
+
+            db_logger.debug(
+                f"Memory config and workspace query successful: config={config.config_name}, workspace={workspace.name}")
             return (config, workspace)
-            
+
         except ValueError:
             # Re-raise known business exceptions
             raise
         except Exception as e:
             elapsed_ms = (time.time() - start_time) * 1000
-            
+
             config_logger.error(
                 "Failed to load configuration with workspace",
                 extra={
@@ -637,9 +643,10 @@ class MemoryConfigRepository:
                 },
                 exc_info=True
             )
-            
+
             db_logger.error(f"Failed to query memory config and workspace: config_id={config_id} - {str(e)}")
             raise
+
     @staticmethod
     def get_all(db: Session, workspace_id: Optional[uuid.UUID] = None) -> List[MemoryConfig]:
         """获取所有配置参数
