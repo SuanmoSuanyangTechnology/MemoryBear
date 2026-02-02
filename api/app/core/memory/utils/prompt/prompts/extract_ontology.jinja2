@@ -12,6 +12,23 @@ You are a professional ontology engineer with expertise in knowledge representat
 This scenario belongs to the **{{ domain }}** domain. Consider domain-specific concepts and terminology when extracting classes.
 {%- endif %}
 
+===Output Language===
+{% if language == "en" -%}
+**IMPORTANT: All output content MUST be in English.**
+- Class names (name field): English in PascalCase format
+- Chinese name (name_chinese field): Provide Chinese translation
+- Descriptions: MUST be in English
+- Examples: MUST be in English
+- Domain: MUST be in English
+{%- else -%}
+**IMPORTANT: Output content language requirements:**
+- Class names (name field): English in PascalCase format
+- Chinese name (name_chinese field): Chinese translation
+- Descriptions: MUST be in Chinese (中文)
+- Examples: MUST be in Chinese (中文)
+- Domain: Can be in Chinese or English
+{%- endif %}
+
 ===Extraction Rules===
 
 **1. Abstract Classes, Not Instances:**
@@ -25,7 +42,7 @@ This scenario belongs to the **{{ domain }}** domain. Consider domain-specific c
 - Avoid: "medical procedure", "healthcare_provider", "diagnostic-test"
 - Use clear, descriptive names in English
 - Avoid abbreviations unless they are standard in the domain (e.g., "API", "DNA")
-- Provide Chinese translation in the "name_chinese" field (e.g., "医疗程序", "医疗服务提供者", "诊断测试")
+- Provide Chinese translation in the "name_chinese" field
 
 **3. Domain Relevance:**
 - Focus on classes that are central to the scenario's domain
@@ -37,17 +54,32 @@ This scenario belongs to the **{{ domain }}** domain. Consider domain-specific c
 - Aim for a balanced set covering the main concepts in the scenario
 - Quality over quantity: prefer well-defined classes over exhaustive lists
 
+
 **5. Clear Descriptions:**
+{% if language == "en" -%}
+- Provide concise, informative descriptions in English (max 500 characters)
+- Describe what the class represents, not specific instances
+- Use clear, natural English language that explains the class's role in the domain
+{%- else -%}
 - Provide concise, informative descriptions in Chinese (max 500 characters)
 - Describe what the class represents, not specific instances
 - Use clear, natural Chinese language that explains the class's role in the domain
+{%- endif %}
 
 **6. Concrete Examples:**
+{% if language == "en" -%}
+- Provide 2-5 concrete instance examples in English for each class
+- Examples should be specific, realistic instances of the class
+- Examples help clarify the class's scope and meaning
+- Use natural English language for examples
+- Example format: ["Example1", "Example2", "Example3"]
+{%- else -%}
 - Provide 2-5 concrete instance examples in Chinese for each class
 - Examples should be specific, realistic instances of the class
 - Examples help clarify the class's scope and meaning
 - Use natural Chinese language for examples
 - Example format: ["示例1", "示例2", "示例3"]
+{%- endif %}
 
 **7. Class Hierarchy:**
 - Identify parent-child relationships where applicable
@@ -65,15 +97,66 @@ This scenario belongs to the **{{ domain }}** domain. Consider domain-specific c
 - Reserved words include: "Thing", "Nothing", "Class", "Property", "ObjectProperty", "DatatypeProperty", "AnnotationProperty", "Ontology", "Individual", "Literal"
 - If a reserved word is needed, add a domain-specific prefix (e.g., "MedicalClass" instead of "Class")
 
-**10. Language Consistency:**
-- Extract all class names in English (PascalCase format) for the "name" field
-- Provide Chinese translation for class names in the "name_chinese" field
-- Descriptions MUST be in Chinese (中文)
-- Examples MUST be in Chinese (中文)
-- Use clear, natural Chinese language for descriptions and examples
-
 ===Examples===
 
+
+{% if language == "en" -%}
+**Example 1 (Healthcare Domain):**
+Scenario: "A hospital manages patient records, schedules appointments, and coordinates medical procedures. Doctors diagnose conditions and prescribe treatments."
+
+Output:
+{
+  "classes": [
+    {
+      "name": "Patient",
+      "name_chinese": "患者",
+      "description": "A person who receives medical care or treatment at a healthcare facility",
+      "examples": ["Outpatient", "Inpatient", "Emergency patient", "Chronic disease patient"],
+      "parent_class": null,
+      "entity_type": "Person",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "MedicalProcedure",
+      "name_chinese": "医疗程序",
+      "description": "A systematic operation or process performed for medical diagnosis or treatment",
+      "examples": ["Surgery", "Blood test", "X-ray examination", "Vaccination"],
+      "parent_class": null,
+      "entity_type": "Process",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "Diagnosis",
+      "name_chinese": "诊断",
+      "description": "The identification of a disease or condition based on symptoms and examination results",
+      "examples": ["Diabetes diagnosis", "Cancer diagnosis", "Flu diagnosis"],
+      "parent_class": null,
+      "entity_type": "Concept",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "Doctor",
+      "name_chinese": "医生",
+      "description": "A licensed medical professional who diagnoses and treats patients",
+      "examples": ["General practitioner", "Surgeon", "Cardiologist"],
+      "parent_class": null,
+      "entity_type": "Role",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "Treatment",
+      "name_chinese": "治疗",
+      "description": "Medical care or therapy provided to cure or manage a disease condition",
+      "examples": ["Medication therapy", "Physical therapy", "Chemotherapy", "Surgical treatment"],
+      "parent_class": null,
+      "entity_type": "Process",
+      "domain": "Healthcare"
+    }
+  ],
+  "domain": "Healthcare",
+  "namespace": "http://example.org/healthcare#"
+}
+{%- else -%}
 **Example 1 (Healthcare Domain):**
 Scenario: "A hospital manages patient records, schedules appointments, and coordinates medical procedures. Doctors diagnose conditions and prescribe treatments."
 
@@ -129,71 +212,7 @@ Output:
   "domain": "Healthcare",
   "namespace": "http://example.org/healthcare#"
 }
-
-**Example 2 (Education Domain):**
-Scenario: "A university offers courses taught by professors. Students enroll in programs, attend lectures, and complete assignments to earn degrees."
-
-Output:
-{
-  "classes": [
-    {
-      "name": "Student",
-      "name_chinese": "学生",
-      "description": "在教育机构注册学习的人",
-      "examples": ["本科生", "研究生", "在职学生"],
-      "parent_class": null,
-      "entity_type": "Role",
-      "domain": "Education"
-    },
-    {
-      "name": "Course",
-      "name_chinese": "课程",
-      "description": "涵盖特定学科或主题的结构化教育课程",
-      "examples": ["计算机科学导论", "微积分I", "世界历史"],
-      "parent_class": null,
-      "entity_type": "Concept",
-      "domain": "Education"
-    },
-    {
-      "name": "Professor",
-      "name_chinese": "教授",
-      "description": "教授课程并进行研究的学术教师",
-      "examples": ["助理教授", "副教授", "正教授"],
-      "parent_class": null,
-      "entity_type": "Role",
-      "domain": "Education"
-    },
-    {
-      "name": "AcademicProgram",
-      "name_chinese": "学术项目",
-      "description": "通向学位或证书的结构化课程体系",
-      "examples": ["理学学士", "文学硕士", "博士项目"],
-      "parent_class": null,
-      "entity_type": "Concept",
-      "domain": "Education"
-    },
-    {
-      "name": "Assignment",
-      "name_chinese": "作业",
-      "description": "分配给学生以评估学习成果的任务或项目",
-      "examples": ["论文", "习题集", "研究报告", "实验报告"],
-      "parent_class": null,
-      "entity_type": "Object",
-      "domain": "Education"
-    },
-    {
-      "name": "Lecture",
-      "name_chinese": "讲座",
-      "description": "由教师进行的教育性演讲或讲座",
-      "examples": ["入门讲座", "客座讲座", "在线讲座"],
-      "parent_class": null,
-      "entity_type": "Event",
-      "domain": "Education"
-    }
-  ],
-  "domain": "Education",
-  "namespace": "http://example.org/education#"
-}
+{%- endif %}
 
 ===Output Format===
 

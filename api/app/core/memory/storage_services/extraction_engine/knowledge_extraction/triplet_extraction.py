@@ -1,6 +1,6 @@
 import os
 import asyncio
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from app.core.logging_config import get_memory_logger
 from app.core.memory.llm_tools.openai_client import OpenAIClient
@@ -8,6 +8,7 @@ from app.core.memory.utils.prompt.prompt_utils import render_triplet_extraction_
 from app.core.memory.utils.data.ontology import PREDICATE_DEFINITIONS, Predicate # 引入枚举 Predicate 白名单过滤
 from app.core.memory.models.triplet_models import TripletExtractionResponse
 from app.core.memory.models.message_models import DialogData, Statement
+from app.core.memory.models.ontology_types import OntologyTypeList
 from app.core.memory.utils.log.logging_utils import prompt_logger
 
 logger = get_memory_logger(__name__)
@@ -17,13 +18,20 @@ logger = get_memory_logger(__name__)
 class TripletExtractor:
     """Extracts knowledge triplets and entities from statements using LLM"""
 
-    def __init__(self, llm_client: OpenAIClient):
+    def __init__(
+        self,
+        llm_client: OpenAIClient,
+        ontology_types: Optional[OntologyTypeList] = None,
+    ):
         """Initialize the TripletExtractor with an LLM client
 
         Args:
             llm_client: OpenAIClient instance for processing
+            ontology_types: Optional OntologyTypeList containing predefined ontology types
+                for entity classification guidance
         """
         self.llm_client = llm_client
+        self.ontology_types = ontology_types
 
     def _get_language(self) -> str:
         """Get the configured language for entity descriptions
@@ -50,7 +58,8 @@ class TripletExtractor:
             chunk_content=chunk_content,
             json_schema=TripletExtractionResponse.model_json_schema(),
             predicate_instructions=PREDICATE_DEFINITIONS,
-            language=self._get_language()
+            language=self._get_language(),
+            ontology_types=self.ontology_types,
         )
 
         # Create messages for LLM
