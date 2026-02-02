@@ -49,6 +49,10 @@ class OntologyService:
     DEFAULT_LLM_TIMEOUT = 30.0
     DEFAULT_ENABLE_OWL_VALIDATION = True
     
+    # 从环境变量获取默认语言
+    from app.core.config import settings
+    DEFAULT_LANGUAGE = settings.DEFAULT_LANGUAGE
+    
     def __init__(
         self,
         llm_client: OpenAIClient,

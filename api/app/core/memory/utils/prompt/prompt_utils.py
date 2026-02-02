@@ -177,7 +177,14 @@ def render_entity_dedup_prompt(
 
 #     Args:
 #         entity_a: Dict of entity A attributes
-async def render_triplet_extraction_prompt(statement: str, chunk_content: str, json_schema: dict, predicate_instructions: dict = None, language: str = "zh") -> str:
+async def render_triplet_extraction_prompt(
+    statement: str,
+    chunk_content: str,
+    json_schema: dict,
+    predicate_instructions: dict = None,
+    language: str = "zh",
+    ontology_types: "OntologyTypeList | None" = None,
+) -> str:
     """
     Renders the triplet extraction prompt using the extract_triplet.jinja2 template.
 
@@ -187,17 +194,28 @@ async def render_triplet_extraction_prompt(statement: str, chunk_content: str, j
         json_schema: JSON schema for the expected output format
         predicate_instructions: Optional predicate instructions
         language: The language to use for entity descriptions ("zh" for Chinese, "en" for English)
+        ontology_types: Optional OntologyTypeList containing predefined ontology types for entity classification
 
     Returns:
         Rendered prompt content as string
     """
     template = prompt_env.get_template("extract_triplet.jinja2")
+    
+    # 准备本体类型数据
+    ontology_type_section = ""
+    ontology_type_names = []
+    if ontology_types and ontology_types.types:
+        ontology_type_section = ontology_types.to_prompt_section()
+        ontology_type_names = ontology_types.get_type_names()
+    
     rendered_prompt = template.render(
         statement=statement,
         chunk_content=chunk_content,
         json_schema=json_schema,
         predicate_instructions=predicate_instructions,
-        language=language
+        language=language,
+        ontology_types=ontology_type_section,
+        ontology_type_names=ontology_type_names,
     )
     # 记录渲染结果到提示日志（与示例日志结构一致）
     log_prompt_rendering('triplet extraction', rendered_prompt)
@@ -207,7 +225,9 @@ async def render_triplet_extraction_prompt(statement: str, chunk_content: str, j
         'chunk_content': 'str',
         'json_schema': 'TripletExtractionResponse.schema',
         'predicate_instructions': 'PREDICATE_DEFINITIONS',
-        'language': language
+        'language': language,
+        'ontology_types': bool(ontology_type_section),
+        'ontology_type_count': len(ontology_type_names),
     })
 
     return rendered_prompt
@@ -467,7 +487,8 @@ async def render_ontology_extraction_prompt(
         'scenario_len': len(scenario) if scenario else 0,
         'domain': domain,
         'max_classes': max_classes,
-        'json_schema': 'OntologyExtractionResponse.schema'
+        'json_schema': 'OntologyExtractionResponse.schema',
+        'language': language
     })
     
     return rendered_prompt

@@ -21,7 +21,7 @@ import logging
 import tempfile
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -187,11 +187,10 @@ async def extract_ontology(
     从场景描述中提取符合OWL规范的本体类。
     提取结果仅返回给前端，不会自动保存到数据库。
     前端可以从返回结果中选择需要的类型，然后调用 /class 接口创建类型。
-    支持中英文切换，通过 X-Language-Type Header 指定语言。
+    输出语言由环境变量 DEFAULT_LANGUAGE 控制（"zh" 或 "en"）。
     
     Args:
         request: 提取请求,包含scenario、domain、llm_id和scene_id
-        language_type: 语言类型，'zh'（中文）或 'en'（英文），默认 'zh'
         db: 数据库会话
         current_user: 当前用户
         
@@ -202,7 +201,7 @@ async def extract_ontology(
         f"domain={request.domain}, "
         f"llm_id={request.llm_id}, "
         f"scene_id={request.scene_id}, "
-        f"language_type={language_type}"
+        f"language={settings.DEFAULT_LANGUAGE}"
     )
     
     try:
@@ -223,6 +222,7 @@ async def extract_ontology(
         )
         
         # 调用服务层执行提取，传入scene_id和workspace_id
+        # 语言由环境变量 DEFAULT_LANGUAGE 控制，在 OntologyService 中读取
         result = await service.extract_ontology(
             scenario=request.scenario,
             domain=request.domain,
@@ -240,7 +240,7 @@ async def extract_ontology(
         
         api_logger.info(
             f"Ontology extraction completed, extracted {len(result.classes)} classes, "
-            f"saved to scene {request.scene_id}, language={language_type}"
+            f"scene_id={request.scene_id}, language={settings.DEFAULT_LANGUAGE}"
         )
         
         return success(data=response.model_dump(), msg="本体提取成功")

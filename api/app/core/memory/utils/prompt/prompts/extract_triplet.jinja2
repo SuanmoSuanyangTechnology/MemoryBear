@@ -15,6 +15,26 @@ Extract entities and knowledge triplets from the given statement.
 **Chunk Content:** "{{ chunk_content }}"
 **Statement:** "{{ statement }}"
 
+{% if ontology_types %}
+===Ontology Type Guidance===
+
+**IMPORTANT: Prioritize the following predefined ontology types for entity classification.**
+
+When classifying entity types, you MUST:
+1. First check if the entity matches any of the predefined ontology types below
+2. If a match is found, use the EXACT type name from the list (do not modify or translate)
+3. Only use default types (Person, Organization, Location, Concept, Equipment, Numeric, etc.) if no ontology type matches
+
+**Predefined Ontology Types:**
+{{ ontology_types }}
+
+**Type Matching Rules:**
+- Entity type MUST exactly match one of: {{ ontology_type_names | join(', ') }}
+- Do NOT use variations, translations, or similar names
+- If uncertain, prefer ontology types over default types
+- The entity's `type` field must be the EXACT `class_name` from the ontology type list
+
+{% endif %}
 ===Guidelines===
 
 **Entity Extraction:**

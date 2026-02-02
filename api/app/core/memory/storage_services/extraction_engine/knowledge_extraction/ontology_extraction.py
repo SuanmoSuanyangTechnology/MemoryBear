@@ -118,7 +118,7 @@ class OntologyExtractor:
         logger.info(
             f"Starting ontology extraction - scenario_length={len(scenario)}, "
             f"domain={domain}, max_classes={max_classes}, min_classes={min_classes}, "
-            f"timeout={timeout}"
+            f"timeout={timeout}, language={language}"
         )
         
         try:

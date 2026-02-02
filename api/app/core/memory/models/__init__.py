@@ -64,6 +64,12 @@ from app.core.memory.models.ontology_models import (
     OntologyExtractionResponse,
 )
 
+# Ontology type models for extraction flow
+from app.core.memory.models.ontology_types import (
+    OntologyTypeInfo,
+    OntologyTypeList,
+)
+
 # Variable configuration models
 from app.core.memory.models.variate_config import (
     StatementExtractionConfig,
@@ -114,6 +120,9 @@ __all__ = [
     # Ontology models
     "OntologyClass",
     "OntologyExtractionResponse",
+    # Ontology type models for extraction flow
+    "OntologyTypeInfo",
+    "OntologyTypeList",
     # Variable configuration
     "StatementExtractionConfig",
     "ForgettingEngineConfig",
