@@ -132,6 +132,7 @@ class WorkspaceAppService:
                     "reflexion_range": memory_config_result.reflexion_range,
                     "baseline": memory_config_result.baseline,
                     "reflection_model_id": memory_config_result.reflection_model_id,
+                    "llm_id": memory_config_result.llm_id,  # 添加 llm_id 字段
                     "memory_verify": memory_config_result.memory_verify,
                     "quality_assessment": memory_config_result.quality_assessment,
                     "user_id": memory_config_result.user_id
@@ -378,6 +379,12 @@ class MemoryReflectionService:
             except (ValueError, TypeError):
                 iteration_period = 24  # 默认24小时
         
+        # 获取 reflection_model_id，如果为空则使用当前空间的 llm_id
+        reflection_model_id = config_data.get("reflection_model_id")
+        if not reflection_model_id or reflection_model_id.strip() == "":
+            reflection_model_id = config_data.get("llm_id", "")
+            api_logger.info(f"reflection_model_id 为空，使用当前空间的 llm_id: {reflection_model_id}")
+        
         return ReflectionConfig(
             enabled=config_data.get("enable_self_reflexion", False),
             iteration_period=str(iteration_period),  # ReflectionConfig期望字符串
@@ -385,7 +392,7 @@ class MemoryReflectionService:
             baseline=baseline,
             memory_verify=config_data.get("memory_verify", False),
             quality_assessment=config_data.get("quality_assessment", False),
-            model_id=config_data.get("reflection_model_id", "")
+            model_id=reflection_model_id
         )
     
     async def _execute_reflection_engine(
