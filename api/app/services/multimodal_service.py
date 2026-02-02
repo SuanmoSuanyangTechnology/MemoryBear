@@ -85,10 +85,11 @@ class MultimodalService:
             file: 图片文件输入
             
         Returns:
-            Dict: 通义千问格式
+            Dict: 通义千问格式 {"type": "image", "image": "url"}
         """
         if file.transfer_method == TransferMethod.REMOTE_URL:
             # 远程 URL，使用通义千问格式
+            logger.debug(f"处理远程图片: {file.url}")
             return {
                 "type": "image",
                 "image": file.url
@@ -96,6 +97,7 @@ class MultimodalService:
         else:
             # 本地文件，获取访问 URL
             url = await self._get_file_url(file.upload_file_id)
+            logger.debug(f"处理本地图片: {url}")
             return {
                 "type": "image",
                 "image": url

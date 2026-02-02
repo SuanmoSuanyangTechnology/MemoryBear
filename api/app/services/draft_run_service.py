@@ -64,26 +64,23 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
     @tool(args_schema=LongTermMemoryInput)
     def long_term_memory(question: str) -> str:
         """
-        从用户的历史记忆中检索相关信息。这是一个强大的工具，可以帮助你了解用户的背景、偏好和历史对话内容。
+        从用户的历史记忆中检索相关信息。用于了解用户的背景、偏好和历史对话内容。
 
-         以下场景不需要使用此工具：
-        1. 情绪/社交问候场景（如"你好"、"谢谢"、"再见"等简单寒暄）
-        2. 纯任务性场景（如"帮我写代码"、"翻译这段文字"等不需要历史上下文的任务）
-        3. 处理外部内容时（如用户提供的文本、代码、RAG数据等，这些内容本身已经包含所需信息）
+        **何时使用此工具：**
+        - 用户明确询问历史信息（如"我之前说过什么"、"上次我们聊了什么"）
+        - 用户询问个人信息或偏好（如"我喜欢什么"、"我的习惯是什么"）
+        - 需要基于历史上下文提供个性化建议
 
-        除上述场景外的所有其他情况都应该使用此工具，特别是：
-        - 用户询问个人信息或历史对话内容
-        - 需要了解用户偏好、习惯或背景
-        - 用户提到"之前"、"上次"、"记得"等涉及历史的词汇
-        - 需要个性化回复或基于历史上下文的建议
-        - 用户询问关于自己的任何信息
+        **何时不使用此工具：**
+        - 简单问候（如"你好"、"谢谢"、"再见"）
+        - 纯任务性请求（如"写代码"、"翻译文字"、"分析图片"）
+        - 用户已提供完整信息（如提供了文本、图片、文档等内容）
+        - 创作性任务（如"写诗"、"编故事"、"创作谜语"）
 
-         需要对question改写/优化：
-            需要重点关注一以下几点
-            - 相关的关键词，保持原问题的核心语义不变， 根据上下文，使问题更具体、更清晰，将模糊的表达转换为明确的搜索词
-            - 使用同义词或相关术语扩展查询
+        **重要：如果用户的问题可以直接回答，不要调用此工具。只在确实需要历史信息时才使用。**
+
         Args:
-            question: question改写之后的内容
+            question: 需要检索的问题（保持原问题的核心语义，使用清晰的关键词）
 
         Returns:
             检索到的历史记忆内容
@@ -126,6 +123,10 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                 }
             )
 
+            # 检查是否有有效内容
+            if not memory_content or str(memory_content).strip() == "" or "answer" in str(memory_content) and str(memory_content).count("''") > 0:
+                return "未找到相关的历史记忆。请直接回答用户的问题，不要再次调用此工具。"
+            
             return f"检索到以下历史记忆：\n\n{memory_content}"
         except Exception as e:
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})
