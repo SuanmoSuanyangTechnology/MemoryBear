@@ -82,7 +82,7 @@ async def get_memory_insight_report_api(
 @router.get("/analytics/user_summary", response_model=ApiResponse)
 async def get_user_summary_api(
     end_user_id: str,
-    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -91,7 +91,18 @@ async def get_user_summary_api(
 
     此接口仅查询数据库中已缓存的用户摘要数据，不执行生成操作。
     如需生成新的用户摘要，请使用专门的生成接口。
+    
+    语言控制：
+    - 优先使用 X-Language-Type Header
+    - 如果未传 Header，则使用环境变量 DEFAULT_LANGUAGE 配置
     """
+    from app.core.config import settings
+    from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import validate_language
+    
+    # 如果未传 language_type，使用环境变量配置
+    if language_type is None:
+        language_type = validate_language(settings.DEFAULT_LANGUAGE)
+    
     workspace_id = current_user.current_workspace_id
     workspace_repo = WorkspaceRepository(db)
     workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
