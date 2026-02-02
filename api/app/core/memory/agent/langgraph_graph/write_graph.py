@@ -49,7 +49,7 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
     db_session = next(get_db())
     config_service = MemoryConfigService(db_session)
     memory_config = config_service.load_memory_config(
-        config_id="08ed205c-0f05-49c3-8e0c-a580d28f5fd4",  # 改为整数
+        config_id=memory_config,  # 改为整数
         service_name="MemoryAgentService"
     )
     if long_term_type=='chunk':
@@ -59,7 +59,6 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
         """时间"""
         await memory_long_term_storage(end_user_id, memory_config,5)
     if  long_term_type=='aggregate':
-
         """方案三：聚合判断"""
         await aggregate_judgment(end_user_id, langchain_messages, memory_config)
 
