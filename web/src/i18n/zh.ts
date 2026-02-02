@@ -977,7 +977,9 @@ export const zh = {
       remove: '删除',
 
       fileSizeTip: '文件大小不能超过 {{size}}MB',
-      fileAcceptTip: '不支持的文件类型:'
+      fileAcceptTip: '不支持的文件类型:',
+      nextStep: '下一步',
+      prevStep: '上一步',
     },
     product: {
       applicationManagement: '应用管理',
@@ -1449,6 +1451,9 @@ export const zh = {
       embeddingModel: 'Embedding 模型',
       rerankModel: 'Rerank 模型',
       configAlert: '空间模型配置为空间的模型模型，保障空间运行时能正确的调用到相应的模型来处理业务数据。',
+
+      basic: '基础配置',
+      models: '模型选择',
     },
     memoryExtractionEngine: {
       title: '记忆引擎模块配置中心',

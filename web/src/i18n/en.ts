@@ -423,7 +423,9 @@ export const en = {
       remove: 'Remove',
 
       fileSizeTip: 'File size cannot exceed {{size}}MB',
-      fileAcceptTip: 'Unsupported file type:'
+      fileAcceptTip: 'Unsupported file type:',
+      nextStep: 'Next Step',
+      prevStep: 'Previous Step',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -1373,6 +1375,9 @@ export const en = {
       embeddingModel: 'Embedding Model',
       rerankModel: 'Rerank Model',
       configAlert: 'Space model configuration ensures that the space can correctly call the corresponding models to process business data during runtime.',
+
+      basic: 'Basic Config',
+      models: 'Model Selection',
     },
     memoryExtractionEngine: {
       title: 'Memory Engine Module Configuration Center',
@@ -2039,7 +2044,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'code': {
           input_variables: 'Input Variables',
           output_variables: 'Output Variables',
-          refreshTip: '同步函数签名至代码',
+          refreshTip: 'Sync function signature to code',
         },
         name: 'Key',
         type: 'Type',

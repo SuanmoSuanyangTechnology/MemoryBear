@@ -3,14 +3,14 @@ import { Form, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ModelConfig, ModelConfigModalRef, Config, Source } from '../types'
-import type { Model } from '@/views/ModelManagement/types'
+import type { ModelListItem } from '@/views/ModelManagement/types'
 import RbModal from '@/components/RbModal'
 import RbSlider from '@/components/RbSlider'
 
 const FormItem = Form.Item;
 
 interface ModelConfigModalProps {
-  modelList?: Model[];
+  modelList?: ModelListItem[];
   refresh: (values: ModelConfig, type: Source) => void;
   data: Config;
 }
@@ -76,9 +76,9 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         console.log('err', err)
       });
   }
-  const handleChange = (_value: string, option: Model | Model[] | undefined) => {
+  const handleChange = (_value: string, option: ModelListItem | ModelListItem[] | undefined) => {
     if (source === 'chat') {
-      form.setFieldValue('label', (option as Model).name)
+      form.setFieldValue('label', (option as ModelListItem).name)
     }
   }
 

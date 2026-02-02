@@ -1,4 +1,32 @@
 {
+  "v0.2.2": {
+    "introduction": {
+      "codeName": "淬锋（Temper）",
+      "releaseDate": "2026-1-31",
+      "upgradePosition": "本次发布聚焦平台稳定性和性能优化。正如\"淬锋\"之名——千锤百炼，淬火成锋，我们通过严格测试和修复打磨系统品质。引入 Agent 工作流的代码执行能力、改进模型并发管理，并修复了记忆系统的多个关键问题。",
+      "coreUpgrades": [
+        "1. Agent平台增强<br>* 模型并发管理：优化模型广场的并发请求处理和资源分配能力。",
+        "2. 记忆系统优化<br>* Celery 队列修复：解决任务队列问题，提升异步记忆处理的可靠性<br>* 记忆 Agent 优化：提升记忆 Agent 的性能和效率<br>* 接口响应速度优化：优化记忆接口响应时间，加快操作速度。",
+        "3. 情绪记忆与识别升级<br>* 情绪记忆角色识别修复：解决情绪记忆上下文中的角色/人物识别问题<br>* 角色识别增强：提升对话记忆中的角色/人物识别准确性。",
+        "<br>",
+        "MemoryBear 持续致力于为 AI 应用提供类人记忆能力。本次以稳定性为核心的发布，进一步夯实了「感知→精炼→关联→遗忘」范式的基础。",
+        "未来版本将在此坚实基础上，扩展 Agent 能力并深化记忆智能特性。"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "Temper (淬锋)",
+      "releaseDate": "2026-1-31",
+      "upgradePosition": "This release focuses on platform stability and performance optimization — true to its codename \"淬锋\" (tempered blade), we've refined the system through rigorous testing and fixes. Introducing Python code execution for Agent workflows, improved model concurrency management, and critical fixes across the memory system.",
+      "coreUpgrades": [
+        "1. Agent Platform Enhancements<br>* Model Concurrency Management: Enhanced Model Plaza with improved concurrent model request handling and resource allocation.",
+        "2. Memory System Improvements<br>* Celery Queue Fix: Resolved task queue issues for more reliable asynchronous memory processing<br>* Memory Agent Optimization: Improved memory Agent performance and efficiency<br>* API Response Speed: Optimized memory interface response times for faster operations.",
+        "3. Emotional Memory & Recognition Upgrades<br>* Emotion Memory Role Recognition Fix: Resolved issues with role/character identification in emotional memory contexts<br>* Role Recognition Enhancement: Improved character/role identification accuracy in conversation memory.",
+        "<br>",
+        "MemoryBear continues advancing toward human-like memory capabilities for AI applications. This stability-focused release strengthens the foundation for our Perception → Refinement → Association → Forgetting paradigm.",
+        "Future releases will build on this solid base with expanded Agent capabilities and deeper memory intelligence features."
+      ]
+    }
+  },
   "v0.2.1": {
     "introduction": {
       "codeName": "启知",

@@ -89,7 +89,6 @@ class WorkspaceAppService:
         
         for release in app_releases:
             memory_content = self._extract_memory_content(release.config)
-            memory_content=resolve_config_id(memory_content, self.db)
             if memory_content and memory_content in processed_configs:
                 continue
 
@@ -122,16 +121,12 @@ class WorkspaceAppService:
     def _get_memory_config(self, memory_content: str) -> Dict[str, Any]:
         """Retrieve memory_config information based on memory_content"""
         try:
-            memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, int(memory_content))
-
-            # memory_config_query, memory_config_params = MemoryConfigRepository.build_select_reflection(memory_content)
-            # memory_config_result = self.db.execute(text(memory_config_query), memory_config_params).fetchone()
-            # if memory_config_result is None:
-            #     return None
+            memory_content = resolve_config_id(memory_content, self.db)
+            memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, (memory_content))
 
             if memory_config_result:
                 return {
-                    "config_id": memory_config_result.config_id,
+                    "config_id": memory_content,
                     "enable_self_reflexion": memory_config_result.enable_self_reflexion,
                     "iteration_period": memory_config_result.iteration_period,
                     "reflexion_range": memory_config_result.reflexion_range,
