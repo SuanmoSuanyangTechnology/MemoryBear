@@ -377,7 +377,6 @@ class MemoryReflectionService:
                 iteration_period = int(iteration_period)
             except (ValueError, TypeError):
                 iteration_period = 24  # 默认24小时
-        
         return ReflectionConfig(
             enabled=config_data.get("enable_self_reflexion", False),
             iteration_period=str(iteration_period),  # ReflectionConfig期望字符串
