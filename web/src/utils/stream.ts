@@ -1,3 +1,21 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 16:35:43 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 16:35:43 
+ */
+/**
+ * Server-Sent Events (SSE) Stream Utility Module
+ * 
+ * Provides SSE handling with:
+ * - Automatic token refresh on 401 errors
+ * - SSE message parsing and JSON decoding
+ * - HTML entity decoding
+ * - Stream buffering for incomplete messages
+ * 
+ * @module stream
+ */
+
 import { message } from 'antd';
 import i18n from '@/i18n'
 import { cookieUtils } from './request'
@@ -9,7 +27,10 @@ const API_PREFIX = '/api'
 let isRefreshing = false;
 let refreshPromise: Promise<string> | null = null;
 
-// Refresh token function for SSE
+/**
+ * Refresh authentication token for SSE requests
+ * @returns New access token
+ */
 const refreshTokenForSSE = async (): Promise<string> => {
   if (isRefreshing && refreshPromise) {
     return refreshPromise;
@@ -42,10 +63,19 @@ const refreshTokenForSSE = async (): Promise<string> => {
   return refreshPromise;
 };
 
+/**
+ * SSE message structure
+ */
 export interface SSEMessage {
   event?: string
   data?: string | object
 }
+
+/**
+ * Parse SSE string format to JSON objects
+ * @param sseString - Raw SSE string data
+ * @returns Array of parsed SSE messages
+ */
 export function parseSSEToJSON(sseString: string) {
   const events: SSEMessage[] = []
   const lines = sseString.trim().split('\n')
@@ -77,9 +107,14 @@ export function parseSSEToJSON(sseString: string) {
   return events
 }
 
+/**
+ * Parse SSE data content with HTML entity decoding
+ * @param dataContent - Raw data content string
+ * @returns Parsed object or original string
+ */
 function parseDataContent(dataContent: string): string | object {
   try {
-    // 第一层解码：HTML实体
+    // First layer: HTML entity decoding
     let unescaped = dataContent
       .replace(/&quot;/g, '"')
       .replace(/&amp;/g, '&')
@@ -87,15 +122,15 @@ function parseDataContent(dataContent: string): string | object {
       .replace(/&gt;/g, '>')
       .replace(/&#39;/g, "'")
     
-    // 解析第一层JSON
+    // Parse first layer JSON
     const firstParse = JSON.parse(unescaped)
     
-    // 如果data字段是字符串且包含JSON，解析data层但保持chunk为字符串
+    // If data field is a string containing JSON, parse data layer but keep chunk as string
     if (firstParse.data && typeof firstParse.data === 'string' && firstParse.data.includes("{")) {
       try {
         firstParse.data = JSON.parse(firstParse.data)
       } catch {
-        // 保持原字符串
+        // Keep original string
       }
     }
     
@@ -105,6 +140,14 @@ function parseDataContent(dataContent: string): string | object {
   }
 }
 
+/**
+ * Make SSE request with authentication
+ * @param url - API endpoint
+ * @param data - Request payload
+ * @param token - Authentication token
+ * @param config - Additional request configuration
+ * @returns Fetch response
+ */
 const makeSSERequest = async (url: string, data: any, token: string, config = { headers: {} }) => {
   return fetch(`${API_PREFIX}${url}`, {
     method: 'POST',
@@ -117,6 +160,13 @@ const makeSSERequest = async (url: string, data: any, token: string, config = { 
   });
 };
 
+/**
+ * Handle SSE stream with automatic token refresh and message parsing
+ * @param url - API endpoint
+ * @param data - Request payload
+ * @param onMessage - Callback for each parsed message
+ * @param config - Additional request configuration
+ */
 export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMessage[]) => void, config = { headers: {} }) => {
   try {
     let token = cookieUtils.get('authToken');
@@ -153,7 +203,7 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = ''; // 添加缓冲区来处理不完整的消息
+    let buffer = ''; // Buffer for handling incomplete messages
 
     while (true) {
       const { done, value } = await reader.read();
@@ -162,9 +212,9 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
       const chunk = decoder.decode(value, { stream: true });
       buffer += chunk;
 
-      // 处理完整的事件
+      // Process complete events
       const events = buffer.split('\n\n');
-      buffer = events.pop() || ''; // 保留最后一个可能不完整的事件
+      buffer = events.pop() || ''; // Keep last potentially incomplete event
 
       for (const event of events) {
         if (event.trim() && onMessage) {
@@ -173,7 +223,7 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
       }
     }
 
-    // 处理剩余的缓冲区内容
+    // Process remaining buffer content
     if (buffer.trim() && onMessage) {
       onMessage(parseSSEToJSON(buffer) ?? {});
     }
