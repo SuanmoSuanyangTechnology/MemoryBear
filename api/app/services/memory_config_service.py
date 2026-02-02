@@ -503,35 +503,31 @@ class MemoryConfigService:
 
     def get_config_with_fallback(
         self,
-        end_user_id: UUID,
+        memory_config_id: Optional[UUID],
         workspace_id: UUID
     ) -> Optional["MemoryConfigModel"]:
-        """Get memory config for end user with fallback to workspace default.
+        """Get memory config with fallback to workspace default.
         
-        Implements graceful degradation: if the end user's assigned config
-        doesn't exist, falls back to the workspace's default active config.
+        Implements graceful degradation: if the provided config_id is None or
+        the config doesn't exist, falls back to the workspace's default config.
         
         Args:
-            end_user_id: End user ID
+            memory_config_id: Memory config ID (can be None)
             workspace_id: Workspace ID for fallback lookup
             
         Returns:
             Optional[MemoryConfigModel]: Memory config or None if no fallback available
         """
         from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
-        from app.repositories.end_user_repository import EndUserRepository
         
-        end_user_repo = EndUserRepository(self.db)
-        end_user = end_user_repo.get_by_id(end_user_id)
-        
-        if not end_user or not end_user.memory_config_id:
+        if not memory_config_id:
             logger.debug(
-                "End user has no memory config assigned",
-                extra={"end_user_id": str(end_user_id)}
+                "No memory config ID provided, using workspace default",
+                extra={"workspace_id": str(workspace_id)}
             )
-            return self.get_workspace_default_config(workspace_id)
+            return self._get_workspace_default_config(workspace_id)
         
-        config = self.db.get(MemoryConfigModel, end_user.memory_config_id)
+        config = self.db.get(MemoryConfigModel, memory_config_id)
         
         if config:
             return config
@@ -539,24 +535,12 @@ class MemoryConfigService:
         logger.warning(
             "Memory config not found, falling back to workspace default",
             extra={
-                "end_user_id": str(end_user_id),
-                "missing_config_id": str(end_user.memory_config_id),
+                "missing_config_id": str(memory_config_id),
                 "workspace_id": str(workspace_id)
             }
         )
         
-        fallback_config = self.get_workspace_default_config(workspace_id)
-        
-        if fallback_config:
-            logger.info(
-                "Using fallback memory config",
-                extra={
-                    "end_user_id": str(end_user_id),
-                    "fallback_config_id": str(fallback_config.config_id)
-                }
-            )
-        
-        return fallback_config
+        return self._get_workspace_default_config(workspace_id)
 
     def delete_config(
         self,

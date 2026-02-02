@@ -503,17 +503,3 @@ def update_memory_config_id(db: Session, end_user_id: uuid.UUID, memory_config_i
     """
     repo = EndUserRepository(db)
     return repo.update_memory_config_id(end_user_id, memory_config_id)
-
-
-def get_memory_config_id(db: Session, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
-    """获取终端用户的 memory_config_id。
-    
-    Args:
-        db: 数据库会话
-        end_user_id: 终端用户ID
-        
-    Returns:
-        Optional[uuid.UUID]: memory_config_id 或 None
-    """
-    repo = EndUserRepository(db)
-    return repo.get_memory_config_id(end_user_id)

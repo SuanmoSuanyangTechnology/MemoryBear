@@ -1148,37 +1148,13 @@ class MemoryAgentService:
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
 
-def get_end_user_memory_config_id(end_user_id: str, db: Session) -> Optional[uuid.UUID]:
-    """快速获取终端用户的 memory_config_id（直接从 end_user 表读取）。
-    
-    如果 end_user 已有缓存的 memory_config_id，直接返回；
-    否则返回 None，调用方应使用 get_end_user_connected_config 获取完整配置。
-    
-    Args:
-        end_user_id: 终端用户ID
-        db: 数据库会话
-        
-    Returns:
-        Optional[uuid.UUID]: memory_config_id 或 None
-    """
-    from app.repositories.end_user_repository import get_memory_config_id
-    
-    try:
-        end_user_uuid = uuid.UUID(end_user_id) if isinstance(end_user_id, str) else end_user_id
-        return get_memory_config_id(db, end_user_uuid)
-    except (ValueError, TypeError) as e:
-        logger.warning(f"Invalid end_user_id format: {end_user_id}, error: {e}")
-        return None
-
-
+# TODO: move to memory_config_service.py
 def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, Any]:
     """
     获取终端用户关联的记忆配置
 
-    通过以下流程获取配置：
-    1. 根据 end_user_id 获取用户的 app_id
-    2. 获取该应用的最新发布版本
-    3. 从发布版本的 config 字段中提取 memory_config_id
+    使用 MemoryConfigService.get_config_with_fallback 获取配置，
+    支持终端用户已分配配置和工作空间默认配置的回退机制。
 
     Args:
         end_user_id: 终端用户ID
@@ -1191,8 +1167,8 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
         ValueError: 当终端用户不存在或应用未发布时
     """
     from app.models.app_model import App
-    from app.models.app_release_model import AppRelease
     from app.models.end_user_model import EndUser
+    from app.services.memory_config_service import MemoryConfigService
 
     logger.info(f"Getting connected config for end_user: {end_user_id}")
 
@@ -1203,9 +1179,8 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
         raise ValueError(f"终端用户不存在: {end_user_id}")
 
     app_id = end_user.app_id
-    logger.debug(f"Found end_user app_id: {app_id}")
 
-    # 2. 获取应用的当前发布版本（通过 apps.current_release_id）
+    # 2. 获取应用以确定 workspace_id
     app = db.query(App).filter(App.id == app_id).first()
     if not app:
         logger.warning(f"App not found: {app_id}")
@@ -1215,33 +1190,19 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
         logger.warning(f"No current release for app: {app_id}")
         raise ValueError(f"应用未发布: {app_id}")
 
-    current_release = db.query(AppRelease).filter(AppRelease.id == app.current_release_id).first()
-    if not current_release:
-        logger.warning(f"Current release not found: {app.current_release_id}")
-        raise ValueError(f"应用发布版本不存在: {app.current_release_id}")
+    # 3. 使用 get_config_with_fallback 获取记忆配置
+    memory_config_service = MemoryConfigService(db)
+    memory_config = memory_config_service.get_config_with_fallback(
+        memory_config_id=end_user.memory_config_id,
+        workspace_id=app.workspace_id
+    )
 
-    logger.debug(f"Found current release: version={current_release.version}, id={current_release.id}")
-
-    # 3. 从 config 中提取 memory_config_id
-    config = current_release.config or {}
-
-    # 如果 config 是字符串，解析为字典
-    if isinstance(config, str):
-        import json
-        try:
-            config = json.loads(config)
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse config JSON for release {current_release.id}")
-            config = {}
-
-    memory_obj = config.get('memory', {})
-    memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
+    memory_config_id = str(memory_config.id) if memory_config else None
 
     result = {
         "end_user_id": str(end_user_id),
         "app_id": str(app_id),
-        "release_id": str(current_release.id),
-        "release_version": current_release.version,
+        "release_id": str(app.current_release_id),
         "memory_config_id": memory_config_id
     }
 
