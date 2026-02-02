@@ -11,7 +11,8 @@ import os
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
-
+from app.core.memory.agent.langgraph_graph.tools.write_tool import agent_chat_messages, format_parsing, messages_parse
+from app.core.memory.agent.langgraph_graph.write_graph import long_term_storage
 from app.db import get_db
 from app.core.logging_config import get_business_logger
 from app.core.memory.agent.utils.redis_tool import store
@@ -145,38 +146,33 @@ class LangChainAgent:
             user_content = f"参考信息：\n{context}\n\n用户问题：\n{user_content}"
 
         messages.append(HumanMessage(content=user_content))
-
         return messages
-# TODO 乐力齐 - 累积多组对话批量写入功能已禁用
-    # async def term_memory_save(self,messages,end_user_end,aimessages):
-    #     '''短长期存储redis，为不影响正常使用6句一段话，存储用户名加一个前缀，当数据存够6条返回给neo4j'''
-    #     end_user_end=f"Term_{end_user_end}"
-    #     print(messages)
-    #     print(aimessages)
-    #     session_id = store.save_session(
-    #                     userid=end_user_end,
-    #                     messages=messages,
-    #                     apply_id=end_user_end,
-    #                     end_user_id=end_user_end,
-    #                     aimessages=aimessages
-    #                 )
-    #     store.delete_duplicate_sessions()
-    #     # logger.info(f'Redis_Agent:{end_user_end};{session_id}')
-    #     return session_id
 
-# TODO 乐力齐 - 累积多组对话批量写入功能已禁用
-    # async def term_memory_redis_read(self,end_user_end):
-    #     end_user_end = f"Term_{end_user_end}"
-    #     history = store.find_user_apply_group(end_user_end, end_user_end, end_user_end)
-    #     # logger.info(f'Redis_Agent:{end_user_end};{history}')
-    #     messagss_list=[]
-    #     retrieved_content=[]
-    #     for messages in history:
-    #         query = messages.get("Query")
-    #         aimessages = messages.get("Answer")
-    #         messagss_list.append(f'用户:{query}。AI回复:{aimessages}')
-    #         retrieved_content.append({query: aimessages})
-    #     return messagss_list,retrieved_content
+    async def term_memory_save(self,long_term_messages,actual_config_id,end_user_id,type):
+        db = next(get_db())
+        scope=6
+
+        try:
+            repo = LongTermMemoryRepository(db)
+            await long_term_storage(long_term_type="chunk", langchain_messages=long_term_messages,
+                                    memory_config=actual_config_id, end_user_id=end_user_id, scope=scope)
+
+            from app.core.memory.agent.utils.redis_tool import write_store
+            result = write_store.get_session_by_userid(end_user_id)
+            if type=="chunk" or type=="aggregate":
+                data = await format_parsing(result, "dict")
+                chunk_data = data[:scope]
+                if len(chunk_data)==scope:
+                    repo.upsert(end_user_id, chunk_data)
+                    logger.info(f'写入短长期：')
+            else:
+                long_time_data = write_store.find_user_recent_sessions(end_user_id, 5)
+                long_messages = await messages_parse(long_time_data)
+                repo.upsert(end_user_id, long_messages)
+                logger.info(f'写入短长期：')
+        finally:
+            db.close()
+
     async def write(self, storage_type, end_user_id, user_message, ai_message, user_rag_memory_id, actual_end_user_id, actual_config_id):
         """
         写入记忆（支持结构化消息）
@@ -224,14 +220,6 @@ class LangChainAgent:
                     logger.warning(f"No messages to write for user {actual_end_user_id}")
                     return
 
-                # 调用 Celery 任务，传递结构化消息列表
-                # 数据流：
-                # 1. structured_messages 传递给 write_message_task
-                # 2. write_message_task 调用 memory_agent_service.write_memory
-                # 3. write_memory 调用 write_tools.write，传递 messages 参数
-                # 4. write_tools.write 调用 get_chunked_dialogs，传递 messages 参数
-                # 5. get_chunked_dialogs 为每条消息创建独立的 Chunk，设置 speaker 字段
-                # 6. 每个 Chunk 保存到 Neo4j，包含 speaker 字段
                 logger.info(f"[WRITE] Submitting Celery task - user={actual_end_user_id}, messages={len(structured_messages)}, config={actual_config_id}")
                 write_id = write_message_task.delay(
                     actual_end_user_id,  # end_user_id: 用户ID
@@ -288,30 +276,6 @@ class LangChainAgent:
         actual_end_user_id = end_user_id if end_user_id is not None else "unknown"
         logger.info(f'写入类型{storage_type,str(end_user_id), message, str(user_rag_memory_id)}')
         print(f'写入类型{storage_type,str(end_user_id), message, str(user_rag_memory_id)}')
-# # TODO 乐力齐，在长短期记忆存储的时候再使用此代码
-#         history_term_memory_result = await self.term_memory_redis_read(end_user_id)
-#         history_term_memory = history_term_memory_result[0]
-#         db_for_memory = next(get_db())
-#         if memory_flag:
-#             if len(history_term_memory)>=4 and storage_type != "rag":
-#                 history_term_memory = ';'.join(history_term_memory)
-#                 retrieved_content = history_term_memory_result[1]
-#                 print(retrieved_content)
-#                 # 为长期记忆操作获取新的数据库连接
-#                 try:
-#                     repo = LongTermMemoryRepository(db_for_memory)
-#                     repo.upsert(end_user_id, retrieved_content)
-#                     logger.info(
-#                         f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
-#                 except Exception as e:
-#                     logger.error(f"Failed to write to LongTermMemory: {e}")
-#                     raise
-#                 finally:
-#                     db_for_memory.close()
-
-#                 # 长期记忆写入（
-#                 await self.write(storage_type, actual_end_user_id, history_term_memory, "", user_rag_memory_id, actual_end_user_id, actual_config_id)
-#             # 注意：不在这里写入用户消息，等 AI 回复后一起写入
         try:
             # 准备消息列表
             messages = self._prepare_messages(message, history, context)
@@ -339,10 +303,11 @@ class LangChainAgent:
 
             elapsed_time = time.time() - start_time
             if memory_flag:
+                long_term_messages=await agent_chat_messages(message_chat,content)
                 # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
                 await self.write(storage_type, actual_end_user_id, message_chat, content, user_rag_memory_id, actual_end_user_id, actual_config_id)
-                # TODO 乐力齐 - 累积多组对话批量写入功能已禁用
-                # await self.term_memory_save(message_chat, end_user_id, content)
+                '''长期'''
+                await self.term_memory_save(long_term_messages,actual_config_id,end_user_id,"chunk")
             response = {
                 "content": content,
                 "model": self.model_name,
@@ -410,25 +375,7 @@ class LangChainAgent:
                     db.close()
             except Exception as e:
                 logger.warning(f"Failed to get db session: {e}")
-# # TODO 乐力齐
-#         history_term_memory_result = await self.term_memory_redis_read(end_user_id)
-#         history_term_memory = history_term_memory_result[0]
-#         if memory_flag:
-#             if len(history_term_memory) >= 4 and storage_type != "rag":
-#                 history_term_memory = ';'.join(history_term_memory)
-#                 retrieved_content = history_term_memory_result[1]
-#                 db_for_memory = next(get_db())
-#                 try:
-#                     repo = LongTermMemoryRepository(db_for_memory)
-#                     repo.upsert(end_user_id, retrieved_content)
-#                     logger.info(
-#                         f'写入短长期：{storage_type, str(end_user_id), history_term_memory, str(user_rag_memory_id)}')
-#                     # 长期记忆写入
-#                     await self.write(storage_type, end_user_id, history_term_memory, "", user_rag_memory_id, end_user_id, actual_config_id)
-#                 except Exception as e:
-#                     logger.error(f"Failed to write to long term memory: {e}")
-#                 finally:
-#                     db_for_memory.close()
+
 
             # 注意：不在这里写入用户消息，等 AI 回复后一起写入
         try:
@@ -483,9 +430,9 @@ class LangChainAgent:
                 logger.debug(f"Agent 流式完成，共 {chunk_count} 个事件")
                 if memory_flag:
                     # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
+                    long_term_messages = await agent_chat_messages(message_chat, full_content)
                     await self.write(storage_type, end_user_id, message_chat, full_content, user_rag_memory_id, end_user_id, actual_config_id)
-                    # TODO 乐力齐 - 累积多组对话批量写入功能已禁用
-                    # await self.term_memory_save(message_chat, end_user_id, full_content)
+                    await self.term_memory_save(long_term_messages, actual_config_id, end_user_id, "chunk")
                 
             except Exception as e:
                 logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)
