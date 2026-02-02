@@ -678,6 +678,11 @@ class DraftRunService:
 
             elapsed_time = time.time() - start_time
 
+            if sub_agent:
+                yield self._format_sse_event("sub_usage", {
+                        "total_tokens": total_tokens
+                    })
+
             # 10. 保存会话消息
             if not sub_agent and agent_config.memory and agent_config.memory.get("enabled"):
                 await self._save_conversation_message(

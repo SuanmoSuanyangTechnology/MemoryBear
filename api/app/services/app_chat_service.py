@@ -427,7 +427,11 @@ class AppChatService:
             meta_data={
                 "mode": result.get("mode"),
                 "elapsed_time": result.get("elapsed_time"),
-                "sub_results": result.get("sub_results")
+                "usage": result.get("usage", {
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": 0
+                        })
             }
         )
 
@@ -469,6 +473,7 @@ class AppChatService:
             yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
 
             full_content = ""
+            total_tokens = 0
 
             # 2. 创建编排器
             orchestrator = MultiAgentOrchestrator(self.db, config)
@@ -485,16 +490,26 @@ class AppChatService:
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
             ):
-                yield event
-                # 尝试提取内容（用于保存）
-                if "data:" in event:
-                    try:
-                        data_line = event.split("data: ", 1)[1].strip()
-                        data = json.loads(data_line)
-                        if "content" in data:
-                            full_content += data["content"]
-                    except:
-                        pass
+                if "sub_usage" in event:
+                    if "data:" in event:
+                        try:
+                            data_line = event.split("data: ", 1)[1].strip()
+                            data = json.loads(data_line)
+                            if "total_tokens" in data:
+                                total_tokens += data["total_tokens"]
+                        except:
+                            pass
+                else:
+                    yield event
+                    # 尝试提取内容（用于保存）
+                    if "data:" in event:
+                        try:
+                            data_line = event.split("data: ", 1)[1].strip()
+                            data = json.loads(data_line)
+                            if "content" in data:
+                                full_content += data["content"]
+                        except:
+                            pass
 
             elapsed_time = time.time() - start_time
 
@@ -510,7 +525,12 @@ class AppChatService:
                 role="assistant",
                 content=full_content,
                 meta_data={
-                    "elapsed_time": elapsed_time
+                    "elapsed_time": elapsed_time,
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": total_tokens
+                    }
                 }
             )
 
