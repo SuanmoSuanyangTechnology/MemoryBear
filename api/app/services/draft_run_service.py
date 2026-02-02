@@ -19,11 +19,13 @@ from app.models import AgentConfig, ModelApiKey, ModelConfig
 from app.repositories.model_repository import ModelApiKeyRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
+from app.schemas.app_schema import FileInput
 from app.services import task_service
 from app.services.langchain_tool_server import Search
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.tool_service import ToolService
+from app.services.multimodal_service import MultimodalService
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -246,7 +248,8 @@ class DraftRunService:
         user_rag_memory_id: Optional[str] = None,
         web_search: bool = True,
         memory: bool = True,
-        sub_agent: bool = False
+        sub_agent: bool = False,
+        files: Optional[List[FileInput]] = None  # 新增：多模态文件
     ) -> Dict[str, Any]:
         """执行试运行（使用 LangChain Agent）
 
@@ -406,7 +409,14 @@ class DraftRunService:
                     max_history=agent_config.memory.get("max_history", 10)
                 )
 
-            # 6. 知识库检索
+            # 6. 处理多模态文件
+            processed_files = None
+            if files:
+                multimodal_service = MultimodalService(self.db)
+                processed_files = await multimodal_service.process_files(files)
+                logger.info(f"处理了 {len(processed_files)} 个文件")
+
+            # 7. 知识库检索
             context = None
 
             logger.debug(
@@ -414,14 +424,15 @@ class DraftRunService:
                 extra={
                     "model": api_key_config["model_name"],
                     "has_history": bool(history),
-                    "has_context": bool(context)
+                    "has_context": bool(context),
+                    "has_files": bool(processed_files)
                 }
             )
 
             memory_config_= agent_config.memory
             config_id = memory_config_.get("memory_content") or memory_config_.get("memory_config",None)
 
-            # 7. 调用 Agent
+            # 8. 调用 Agent（支持多模态）
             result = await agent.chat(
                 message=message,
                 history=history,
@@ -430,12 +441,13 @@ class DraftRunService:
                 config_id=config_id,
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
-                memory_flag=memory_flag
+                memory_flag=memory_flag,
+                files=processed_files  # 传递处理后的文件
             )
 
             elapsed_time = time.time() - start_time
 
-            # 8. 保存会话消息
+            # 9. 保存会话消息
             if not sub_agent and agent_config.memory and agent_config.memory.get("enabled"):
                 await self._save_conversation_message(
                     conversation_id=conversation_id,
@@ -486,7 +498,8 @@ class DraftRunService:
         user_rag_memory_id: Optional[str] = None,
         web_search: bool = True,  # 布尔类型默认值
         memory: bool = True,  # 布尔类型默认值
-        sub_agent: bool = False # 是否是作为子Agent运行
+        sub_agent: bool = False, # 是否是作为子Agent运行
+        files: Optional[List[FileInput]] = None  # 新增：多模态文件
 
     ) -> AsyncGenerator[str, None]:
         """执行试运行（流式返回，使用 LangChain Agent）
@@ -635,6 +648,13 @@ class DraftRunService:
                     max_history=agent_config.memory.get("max_history", 10)
                 )
 
+            # 6. 处理多模态文件
+            processed_files = None
+            if files:
+                multimodal_service = MultimodalService(self.db)
+                processed_files = await multimodal_service.process_files(files)
+                logger.info(f"处理了 {len(processed_files)} 个文件")
+
             # 7. 知识库检索
             context = None
 
@@ -647,7 +667,7 @@ class DraftRunService:
             memory_config_ = agent_config.memory
             config_id = memory_config_.get("memory_content") or memory_config_.get("memory_config",None)
 
-            # 9. 流式调用 Agent
+            # 9. 流式调用 Agent（支持多模态）
             full_content = ""
             async for chunk in agent.chat_stream(
                 message=message,
@@ -657,7 +677,8 @@ class DraftRunService:
                 config_id=config_id,
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
-                memory_flag=memory_flag
+                memory_flag=memory_flag,
+                files=processed_files  # 传递处理后的文件
             ):
                 full_content += chunk
                 # 发送消息块事件

@@ -45,7 +45,8 @@ class LangChainAgent:
         max_tokens: int = 2000,
         system_prompt: Optional[str] = None,
         tools: Optional[Sequence[BaseTool]] = None,
-        streaming: bool = False
+        streaming: bool = False,
+        max_iterations: int = 3  # 新增：最大迭代次数
     ):
         """初始化 LangChain Agent
 
@@ -59,12 +60,14 @@ class LangChainAgent:
             system_prompt: 系统提示词
             tools: 工具列表（可选，框架自动走 ReAct 循环）
             streaming: 是否启用流式输出（默认 True）
+            max_iterations: 最大迭代次数（默认 3 次，防止工具调用死循环）
         """
         self.model_name = model_name
         self.provider = provider
         self.system_prompt = system_prompt or "你是一个专业的AI助手"
         self.tools = tools or []
         self.streaming = streaming
+        self.max_iterations = max_iterations
 
         # 创建 RedBearLLM（支持多提供商）
         model_config = RedBearModelConfig(
@@ -104,9 +107,9 @@ class LangChainAgent:
                 "has_api_base": bool(api_base),
                 "temperature": temperature,
                 "streaming": streaming,
+                "max_iterations": max_iterations,
                 "tool_count": len(self.tools),
-                "tool_names": [tool.name for tool in self.tools] if self.tools else [],
-                "tool_count": len(self.tools)
+                "tool_names": [tool.name for tool in self.tools] if self.tools else []
             }
         )
 
@@ -114,7 +117,8 @@ class LangChainAgent:
         self,
         message: str,
         history: Optional[List[Dict[str, str]]] = None,
-        context: Optional[str] = None
+        context: Optional[str] = None,
+        files: Optional[List[Dict[str, Any]]] = None
     ) -> List[BaseMessage]:
         """准备消息列表
 
@@ -122,6 +126,7 @@ class LangChainAgent:
             message: 用户消息
             history: 历史消息列表
             context: 上下文信息
+            files: 多模态文件内容列表（已处理）
 
         Returns:
             List[BaseMessage]: 消息列表
@@ -144,7 +149,15 @@ class LangChainAgent:
         if context:
             user_content = f"参考信息：\n{context}\n\n用户问题：\n{user_content}"
 
-        messages.append(HumanMessage(content=user_content))
+        # 如果有文件，构建多模态消息
+        if files and len(files) > 0:
+            # 多模态消息格式: [{"type": "text", "text": "..."}, {"type": "image_url", ...}]
+            content_parts = [{"type": "text", "text": user_content}]
+            content_parts.extend(files)
+            messages.append(HumanMessage(content=content_parts))
+        else:
+            # 纯文本消息（向后兼容）
+            messages.append(HumanMessage(content=user_content))
 
         return messages
 # TODO 乐力齐 - 累积多组对话批量写入功能已禁用
@@ -254,7 +267,8 @@ class LangChainAgent:
             config_id: Optional[str] = None,  # 添加这个参数
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            memory_flag: Optional[bool] = True
+            memory_flag: Optional[bool] = True,
+            files: Optional[List[Dict[str, Any]]] = None  # 新增：多模态文件
     ) -> Dict[str, Any]:
         """执行对话
 
@@ -313,8 +327,8 @@ class LangChainAgent:
 #                 await self.write(storage_type, actual_end_user_id, history_term_memory, "", user_rag_memory_id, actual_end_user_id, actual_config_id)
 #             # 注意：不在这里写入用户消息，等 AI 回复后一起写入
         try:
-            # 准备消息列表
-            messages = self._prepare_messages(message, history, context)
+            # 准备消息列表（支持多模态）
+            messages = self._prepare_messages(message, history, context, files)
 
             logger.debug(
                 "准备调用 LangChain Agent",
@@ -322,20 +336,79 @@ class LangChainAgent:
                     "has_context": bool(context),
                     "has_history": bool(history),
                     "has_tools": bool(self.tools),
-                    "message_count": len(messages)
+                    "has_files": bool(files),
+                    "message_count": len(messages),
+                    "max_iterations": self.max_iterations
                 }
             )
 
             # 统一使用 agent.invoke 调用
-            result = await self.agent.ainvoke({"messages": messages})
+            # 通过 recursion_limit 限制最大迭代次数，防止工具调用死循环
+            try:
+                result = await self.agent.ainvoke(
+                    {"messages": messages},
+                    config={"recursion_limit": self.max_iterations}
+                )
+            except RecursionError as e:
+                logger.warning(
+                    f"Agent 达到最大迭代次数限制 ({self.max_iterations})，可能存在工具调用循环",
+                    extra={"error": str(e)}
+                )
+                # 返回一个友好的错误提示
+                return {
+                    "content": f"抱歉，我在处理您的请求时遇到了问题。已达到最大处理步骤限制（{self.max_iterations}次）。请尝试简化您的问题或稍后再试。",
+                    "model": self.model_name,
+                    "elapsed_time": time.time() - start_time,
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0
+                    }
+                }
 
             # 获取最后的 AI 消息
             output_messages = result.get("messages", [])
             content = ""
+            
+            logger.debug(f"输出消息数量: {len(output_messages)}")
+            
             for msg in reversed(output_messages):
                 if isinstance(msg, AIMessage):
-                    content = msg.content
+                    logger.debug(f"找到 AI 消息，content 类型: {type(msg.content)}")
+                    logger.debug(f"AI 消息内容: {msg.content}")
+                    
+                    # 处理多模态响应：content 可能是字符串或列表
+                    if isinstance(msg.content, str):
+                        content = msg.content
+                        logger.debug(f"提取字符串内容，长度: {len(content)}")
+                    elif isinstance(msg.content, list):
+                        # 多模态响应：提取文本部分
+                        logger.debug(f"多模态响应，列表长度: {len(msg.content)}")
+                        text_parts = []
+                        for item in msg.content:
+                            logger.debug(f"处理项: {item}")
+                            if isinstance(item, dict):
+                                # 通义千问格式: {"text": "..."}
+                                if "text" in item:
+                                    text = item.get("text", "")
+                                    text_parts.append(text)
+                                    logger.debug(f"提取文本: {text[:100]}...")
+                                # OpenAI 格式: {"type": "text", "text": "..."}
+                                elif item.get("type") == "text":
+                                    text = item.get("text", "")
+                                    text_parts.append(text)
+                                    logger.debug(f"提取文本: {text[:100]}...")
+                            elif isinstance(item, str):
+                                text_parts.append(item)
+                                logger.debug(f"提取字符串: {item[:100]}...")
+                        content = "".join(text_parts)
+                        logger.debug(f"合并后内容长度: {len(content)}")
+                    else:
+                        content = str(msg.content)
+                        logger.debug(f"转换为字符串: {content[:100]}...")
                     break
+            
+            logger.info(f"最终提取的内容长度: {len(content)}")
 
             elapsed_time = time.time() - start_time
             if memory_flag:
@@ -377,7 +450,8 @@ class LangChainAgent:
         config_id: Optional[str] = None,
         storage_type:Optional[str] = None,
         user_rag_memory_id:Optional[str] = None,
-        memory_flag: Optional[bool] = True
+        memory_flag: Optional[bool] = True,
+        files: Optional[List[Dict[str, Any]]] = None  # 新增：多模态文件
     ) -> AsyncGenerator[str, None]:
         """执行流式对话
 
@@ -432,11 +506,11 @@ class LangChainAgent:
 
             # 注意：不在这里写入用户消息，等 AI 回复后一起写入
         try:
-            # 准备消息列表
-            messages = self._prepare_messages(message, history, context)
+            # 准备消息列表（支持多模态）
+            messages = self._prepare_messages(message, history, context, files)
 
             logger.debug(
-                f"准备流式调用，has_tools={bool(self.tools)}, message_count={len(messages)}"
+                f"准备流式调用，has_tools={bool(self.tools)}, has_files={bool(files)}, message_count={len(messages)}"
             )
 
             chunk_count = 0
@@ -448,7 +522,8 @@ class LangChainAgent:
             try:
                 async for event in self.agent.astream_events(
                     {"messages": messages},
-                    version="v2"
+                    version="v2",
+                    config={"recursion_limit": self.max_iterations}
                 ):
                     chunk_count += 1
                     kind = event.get("event")
@@ -457,20 +532,70 @@ class LangChainAgent:
                     if kind == "on_chat_model_stream":
                         # LLM 流式输出
                         chunk = event.get("data", {}).get("chunk")
-                        full_content+=chunk.content
-                        if chunk and hasattr(chunk, "content") and chunk.content:
-                            yield chunk.content
-                            yielded_content = True
+                        if chunk and hasattr(chunk, "content"):
+                            # 处理多模态响应：content 可能是字符串或列表
+                            chunk_content = chunk.content
+                            if isinstance(chunk_content, str) and chunk_content:
+                                full_content += chunk_content
+                                yield chunk_content
+                                yielded_content = True
+                            elif isinstance(chunk_content, list):
+                                # 多模态响应：提取文本部分
+                                for item in chunk_content:
+                                    if isinstance(item, dict):
+                                        # 通义千问格式: {"text": "..."}
+                                        if "text" in item:
+                                            text = item.get("text", "")
+                                            if text:
+                                                full_content += text
+                                                yield text
+                                                yielded_content = True
+                                        # OpenAI 格式: {"type": "text", "text": "..."}
+                                        elif item.get("type") == "text":
+                                            text = item.get("text", "")
+                                            if text:
+                                                full_content += text
+                                                yield text
+                                                yielded_content = True
+                                    elif isinstance(item, str):
+                                        full_content += item
+                                        yield item
+                                        yielded_content = True
                     
                     elif kind == "on_llm_stream":
                         # 另一种 LLM 流式事件
                         chunk = event.get("data", {}).get("chunk")
                         if chunk:
-                            if hasattr(chunk, "content") and chunk.content:
-                                full_content+=chunk.content
-                                yield chunk.content
-                                yielded_content = True
+                            if hasattr(chunk, "content"):
+                                chunk_content = chunk.content
+                                if isinstance(chunk_content, str) and chunk_content:
+                                    full_content += chunk_content
+                                    yield chunk_content
+                                    yielded_content = True
+                                elif isinstance(chunk_content, list):
+                                    # 多模态响应：提取文本部分
+                                    for item in chunk_content:
+                                        if isinstance(item, dict):
+                                            # 通义千问格式: {"text": "..."}
+                                            if "text" in item:
+                                                text = item.get("text", "")
+                                                if text:
+                                                    full_content += text
+                                                    yield text
+                                                    yielded_content = True
+                                            # OpenAI 格式: {"type": "text", "text": "..."}
+                                            elif item.get("type") == "text":
+                                                text = item.get("text", "")
+                                                if text:
+                                                    full_content += text
+                                                    yield text
+                                                    yielded_content = True
+                                        elif isinstance(item, str):
+                                            full_content += item
+                                            yield item
+                                            yielded_content = True
                             elif isinstance(chunk, str):
+                                full_content += chunk
                                 yield chunk
                                 yielded_content = True
                     
