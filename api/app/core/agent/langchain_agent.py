@@ -107,7 +107,7 @@ class LangChainAgent:
                 "streaming": streaming,
                 "tool_count": len(self.tools),
                 "tool_names": [tool.name for tool in self.tools] if self.tools else [],
-                "tool_count": len(self.tools)
+                # "tool_count": len(self.tools)
             }
         )
 
@@ -296,9 +296,12 @@ class LangChainAgent:
             # 获取最后的 AI 消息
             output_messages = result.get("messages", [])
             content = ""
+            total_tokens = 0
             for msg in reversed(output_messages):
                 if isinstance(msg, AIMessage):
                     content = msg.content
+                    response_meta = msg.response_metadata if hasattr(msg, 'response_metadata') else None
+                    total_tokens = response_meta.get("token_usage", {}).get("total_tokens", 0) if response_meta else 0
                     break
 
             elapsed_time = time.time() - start_time
@@ -315,7 +318,7 @@ class LangChainAgent:
                 "usage": {
                     "prompt_tokens": 0,
                     "completion_tokens": 0,
-                    "total_tokens": 0
+                    "total_tokens": total_tokens
                 }
             }
 
@@ -391,7 +394,7 @@ class LangChainAgent:
 
             # 统一使用 agent 的 astream_events 实现流式输出
             logger.debug("使用 Agent astream_events 实现流式输出")
-            full_content=''
+            full_content = ''
             try:
                 async for event in self.agent.astream_events(
                     {"messages": messages},
@@ -428,6 +431,15 @@ class LangChainAgent:
                         logger.debug(f"工具调用结束: {event.get('name')}")
                 
                 logger.debug(f"Agent 流式完成，共 {chunk_count} 个事件")
+                # 统计token消耗
+                output_messages = event.get("data", {}).get("output", {}).get("messages", [])
+                for msg in reversed(output_messages):
+                    if isinstance(msg, AIMessage):
+                        response_meta = msg.response_metadata if hasattr(msg, 'response_metadata') else None
+                        total_tokens = response_meta.get("token_usage", {}).get("total_tokens",
+                                                                                0) if response_meta else 0
+                        yield total_tokens
+                        break
                 if memory_flag:
                     # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
                     long_term_messages = await agent_chat_messages(message_chat, full_content)

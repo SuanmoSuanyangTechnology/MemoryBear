@@ -171,7 +171,14 @@ class AppChatService:
         self.conversation_service.save_conversation_messages(
             conversation_id=conversation_id,
             user_message=message,
-            assistant_message=result["content"]
+            assistant_message=result["content"],
+            meta_data={
+                "usage": result.get("usage", {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                })
+            }
         )
 
         elapsed_time = time.time() - start_time
@@ -310,6 +317,7 @@ class AppChatService:
 
             # 流式调用 Agent
             full_content = ""
+            total_tokens = 0
             async for chunk in agent.chat_stream(
                     message=message,
                     history=history,
@@ -320,9 +328,12 @@ class AppChatService:
                     config_id=config_id,
                     memory_flag=memory_flag
             ):
-                full_content += chunk
-                # 发送消息块事件
-                yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                if isinstance(chunk, int):
+                    total_tokens = chunk
+                else:
+                    full_content += chunk
+                    # 发送消息块事件
+                    yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
 
             elapsed_time = time.time() - start_time
 
@@ -339,7 +350,7 @@ class AppChatService:
                 content=full_content,
                 meta_data={
                     "model": api_key_obj.model_name,
-                    "usage": {}
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
                 }
             )
 
