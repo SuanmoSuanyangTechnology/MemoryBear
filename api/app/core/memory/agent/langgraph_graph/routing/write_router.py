@@ -109,6 +109,10 @@ async def aggregate_judgment(end_user_id: str, ori_messages: list, memory_config
         # 1. 获取历史会话数据（使用新方法）
         result = write_store.get_all_sessions_by_end_user_id(end_user_id)
         history = await format_parsing(result)
+        if not result:
+            history = []
+        else:
+            history = await format_parsing(result)
         json_schema = WriteAggregateModel.model_json_schema()
         template_service = TemplateService(template_root)
         system_prompt = await template_service.render_template(
