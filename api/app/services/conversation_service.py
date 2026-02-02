@@ -298,7 +298,8 @@ class ConversationService:
             self,
             conversation_id: uuid.UUID,
             user_message: str,
-            assistant_message: str
+            assistant_message: str,
+            meta_data: Optional[dict] = None
     ):
         """
         Save a pair of user and assistant messages to the conversation.
@@ -307,6 +308,7 @@ class ConversationService:
             conversation_id (uuid.UUID): Conversation UUID.
             user_message (str): User's message content.
             assistant_message (str): Assistant's response content.
+            meta_data (Optional[dict]): Optional metadata for the messages.
         """
         self.add_message(
             conversation_id=conversation_id,
@@ -317,7 +319,8 @@ class ConversationService:
         self.add_message(
             conversation_id=conversation_id,
             role="assistant",
-            content=assistant_message
+            content=assistant_message,
+            meta_data=meta_data
         )
 
         logger.debug(
