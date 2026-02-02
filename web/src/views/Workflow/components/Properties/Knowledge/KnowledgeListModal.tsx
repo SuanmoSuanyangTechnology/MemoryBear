@@ -64,7 +64,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
       ...item,
       config: {
         similarity_threshold: 0.7,
-        strategy: "hybrid",
+        retrieve_type: "hybrid",
         top_k: 3,
         weight: 1,
       }
