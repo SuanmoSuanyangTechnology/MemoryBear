@@ -869,7 +869,7 @@ RETURN
 """
 Memory_Timeline_MemorySummary=""" 
 MATCH (n)-[r1]-(e)-[r2]-(ms)
-WHERE elementId(n) =$id
+WHERE elementId(n) = $id
   AND (ms:MemorySummary OR ms:ExtractedEntity)
 RETURN
   collect(
@@ -877,7 +877,8 @@ RETURN
     CASE
       WHEN ms:ExtractedEntity THEN {
         text: ms.name,
-        created_at: ms.created_at
+        created_at: ms.created_at,
+        type: "情景记忆" 
       }
     END
   ) AS ExtractedEntity,
@@ -887,7 +888,8 @@ RETURN
     CASE
       WHEN n:MemorySummary THEN {
         text: n.content,
-        created_at: n.created_at
+        created_at: n.created_at,
+        type: "长期沉淀" 
       }
     END
   ) AS MemorySummary,
@@ -895,7 +897,8 @@ RETURN
   collect(
     DISTINCT {
       text: e.statement,
-      created_at: e.created_at
+      created_at: e.created_at,
+       type: "情绪记忆" 
     }
   ) AS statement;
 """
