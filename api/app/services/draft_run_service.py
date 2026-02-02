@@ -455,7 +455,14 @@ class DraftRunService:
                     user_message=message,
                     assistant_message=result["content"],
                     app_id=agent_config.app_id,
-                    user_id=user_id
+                    user_id=user_id,
+                    meta_data={
+                        "usage": result.get("usage", {
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": 0
+                        })
+                    }
                 )
 
             response = {
@@ -670,6 +677,7 @@ class DraftRunService:
 
             # 9. 流式调用 Agent（支持多模态）
             full_content = ""
+            total_tokens = 0
             async for chunk in agent.chat_stream(
                 message=message,
                 history=history,
@@ -681,11 +689,14 @@ class DraftRunService:
                 memory_flag=memory_flag,
                 files=processed_files  # 传递处理后的文件
             ):
-                full_content += chunk
-                # 发送消息块事件
-                yield self._format_sse_event("message", {
-                    "content": chunk
-                })
+                if isinstance(chunk, int):
+                    total_tokens = chunk
+                else:
+                    full_content += chunk
+                    # 发送消息块事件
+                    yield self._format_sse_event("message", {
+                        "content": chunk
+                    })
 
             elapsed_time = time.time() - start_time
 
@@ -696,7 +707,10 @@ class DraftRunService:
                     user_message=message,
                     assistant_message=full_content,
                     app_id=agent_config.app_id,
-                    user_id=user_id
+                    user_id=user_id,
+                    meta_data={
+                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
+                    }
                 )
 
             # 11. 发送结束事件
@@ -920,6 +934,7 @@ class DraftRunService:
         conversation_id: str,
         user_message: str,
         assistant_message: str,
+        meta_data: dict,
         app_id: Optional[uuid.UUID] = None,
         user_id: Optional[str] = None
     ) -> None:
@@ -931,6 +946,7 @@ class DraftRunService:
             assistant_message: AI 回复消息
             app_id: 应用ID（未使用，保留用于兼容性）
             user_id: 用户ID（未使用，保留用于兼容性）
+            meta_data: token消耗
         """
         try:
             from app.services.conversation_service import ConversationService
@@ -949,7 +965,8 @@ class DraftRunService:
             conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="assistant",
-                content=assistant_message
+                content=assistant_message,
+                meta_data=meta_data
             )
 
             logger.debug(
