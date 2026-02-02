@@ -1,4 +1,7 @@
 // 应用数据类型
+export interface Query {
+  search: string;
+}
 export interface Application {
   id: string;
   workspace_id: string;

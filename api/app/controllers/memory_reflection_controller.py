@@ -45,12 +45,12 @@ async def save_reflection_config(
     """Save reflection configuration to data_comfig table"""
     try:
         config_id = request.config_id
+        config_id = resolve_config_id(config_id, db)
         if not config_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="缺少必需参数: config_id"
             )
-
         api_logger.info(f"用户 {current_user.username} 保存反思配置，config_id: {config_id}")
 
         memory_config = MemoryConfigRepository.update_reflection_config(
@@ -101,7 +101,7 @@ async def start_workspace_reflection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Activate the reflection function for all matching applications in the workspace"""
+    """启动工作空间中所有匹配应用的反思功能"""
     workspace_id = current_user.current_workspace_id
     reflection_service = MemoryReflectionService(db)
 
@@ -110,42 +110,55 @@ async def start_workspace_reflection(
 
         service = WorkspaceAppService(db)
         result = service.get_workspace_apps_detailed(workspace_id)
-        
         reflection_results = []
-        
         for data in result['apps_detailed_info']:
-            if data['memory_configs'] == []: 
+            # 跳过没有配置的应用
+            if not data['memory_configs']:
+                api_logger.debug(f"应用 {data['id']} 没有memory_configs，跳过")
                 continue
-                
+
             releases = data['releases']
             memory_configs = data['memory_configs']
             end_users = data['end_users']
-            
-            for base, config, user in zip(releases, memory_configs, end_users):
-                # 安全地转换为整数，处理空字符串和None的情况
-                print(base['config'])
-                try:
-                    base_config = int(base['config']) if base['config'] else 0
-                    config_id = int(config['config_id']) if config['config_id'] else 0
-                except (ValueError, TypeError):
-                    api_logger.warning(f"无效的配置ID: base['config']={base.get('config')}, config['config_id']={config.get('config_id')}")
+
+            # 为每个配置和用户组合执行反思
+            for config in memory_configs:
+                config_id_str = str(config['config_id'])
+
+                # 找到匹配此配置的所有release
+                matching_releases = [r for r in releases if str(r['config']) == config_id_str]
+
+                if not matching_releases:
+                    api_logger.debug(f"配置 {config_id_str} 没有匹配的release")
                     continue
-                
-                if base_config == config_id and base['app_id'] == user['app_id']:
-                    # 调用反思服务
-                    api_logger.info(f"为用户 {user['id']} 启动反思，config_id: {config['config_id']}")
-                    
-                    reflection_result = await reflection_service.start_text_reflection(
-                        config_data=config,
-                        end_user_id=user['id']
-                    )
-                    
-                    reflection_results.append({
-                        "app_id": base['app_id'],
-                        "config_id": config['config_id'],
-                        "end_user_id": user['id'],
-                        "reflection_result": reflection_result
-                    })
+
+                # 为每个用户执行反思
+                for user in end_users:
+                    api_logger.info(f"为用户 {user['id']} 启动反思，config_id: {config_id_str}")
+
+                    try:
+                        reflection_result = await reflection_service.start_text_reflection(
+                            config_data=config,
+                            end_user_id=user['id']
+                        )
+
+                        reflection_results.append({
+                            "app_id": data['id'],
+                            "config_id": config_id_str,
+                            "end_user_id": user['id'],
+                            "reflection_result": reflection_result
+                        })
+                    except Exception as e:
+                        api_logger.error(f"用户 {user['id']} 反思失败: {str(e)}")
+                        reflection_results.append({
+                            "app_id": data['id'],
+                            "config_id": config_id_str,
+                            "end_user_id": user['id'],
+                            "reflection_result": {
+                                "status": "错误",
+                                "message": f"反思失败: {str(e)}"
+                            }
+                        })
 
         return success(data=reflection_results, msg="反思配置成功")
 
@@ -164,6 +177,7 @@ async def start_reflection_configs(
         db: Session = Depends(get_db),
 ) -> dict:
     """通过config_id查询memory_config表中的反思配置信息"""
+    config_id = resolve_config_id(config_id, db)
     try:
         config_id=resolve_config_id(config_id,db)
         api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")

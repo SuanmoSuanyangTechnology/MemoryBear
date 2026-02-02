@@ -178,6 +178,7 @@ const Conversation: FC = () => {
       data.forEach((item) => {
         switch(item.event) {
           case 'start':
+          case 'node_start':
             const { conversation_id: newId } = item.data as { conversation_id: string  }
             currentConversationId = newId
             break

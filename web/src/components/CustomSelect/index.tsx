@@ -1,4 +1,4 @@
-import { useEffect, useState, type FC, type Key } from 'react';
+import { useEffect, useState, useMemo, type FC, type Key } from 'react';
 import { Select } from 'antd';
 import type { SelectProps, DefaultOptionType } from 'antd/es/select';
 import { useTranslation } from 'react-i18next';
@@ -47,13 +47,14 @@ const CustomSelect: FC<CustomSelectProps> = ({
 }) => {
   const { t } = useTranslation();
   const [options, setOptions] = useState<OptionType[]>([]);
+  const memoizedParams = useMemo(() => params, [JSON.stringify(params)]);
 
   useEffect(() => {
-    request.get<ApiResponse<OptionType>>(url, params).then((res) => {
+    request.get<ApiResponse<OptionType>>(url, memoizedParams).then((res) => {
       const data = Array.isArray(res) ? res : res?.items || [];
       setOptions(data);
     });
-  }, [url, params]);
+  }, [url, memoizedParams]);
 
   const displayOptions = format ? format(options) : options;
 

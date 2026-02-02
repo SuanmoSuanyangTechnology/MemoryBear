@@ -18,6 +18,7 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.models.app_model import App
 from app.models.app_release_model import AppRelease
 from app.models.end_user_model import EndUser
+from app.utils.config_utils import resolve_config_id
 
 api_logger = get_api_logger()
 
@@ -88,51 +89,44 @@ class WorkspaceAppService:
         
         for release in app_releases:
             memory_content = self._extract_memory_content(release.config)
-            
-
             if memory_content and memory_content in processed_configs:
                 continue
-            
+
             release_info = {
                 "app_id": str(release.app_id),
                 "config": memory_content
             }
-            
+
 
             if memory_content:
                 processed_configs.add(memory_content)
                 memory_config_info = self._get_memory_config(memory_content)
-                
                 if memory_config_info:
                     if not any(dc["config_id"] == memory_config_info["config_id"] for dc in app_info["memory_configs"]):
                         app_info["memory_configs"].append(memory_config_info)
-            
+
             app_info["releases"].append(release_info)
-    
+
     def _extract_memory_content(self, config: Any) -> str:
         """Extract memory_comtent from config"""
         if not config or not isinstance(config, dict):
             return None
-        
+
         memory_obj = config.get('memory')
         if memory_obj and isinstance(memory_obj, dict):
             return memory_obj.get('memory_content')
-        
+
         return None
-    
+
     def _get_memory_config(self, memory_content: str) -> Dict[str, Any]:
         """Retrieve memory_config information based on memory_content"""
         try:
-            memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, int(memory_content))
+            memory_content = resolve_config_id(memory_content, self.db)
+            memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, (memory_content))
 
-            # memory_config_query, memory_config_params = MemoryConfigRepository.build_select_reflection(memory_content)
-            # memory_config_result = self.db.execute(text(memory_config_query), memory_config_params).fetchone()
-            # if memory_config_result is None:
-            #     return None
-            
             if memory_config_result:
                 return {
-                    "config_id": memory_config_result.config_id,
+                    "config_id": memory_content,
                     "enable_self_reflexion": memory_config_result.enable_self_reflexion,
                     "iteration_period": memory_config_result.iteration_period,
                     "reflexion_range": memory_config_result.reflexion_range,
@@ -144,20 +138,22 @@ class WorkspaceAppService:
                 }
         except Exception as e:
             api_logger.warning(f"查询memory_config失败，memory_content: {memory_content}, 错误: {str(e)}")
-        
+
         return None
-    
+
     def _process_end_users(self, app: App, app_info: Dict[str, Any]) -> None:
         """Processing end-user information for applications"""
         end_users = self.db.query(EndUser).filter(EndUser.app_id == app.id).all()
-        
+
         for end_user in end_users:
             end_user_info = {
                 "id": str(end_user.id),
                 "app_id": str(end_user.app_id)
             }
             app_info["end_users"].append(end_user_info)
-    
+        print(100*'-')
+        print(app_info)
+
     def get_end_user_reflection_time(self, end_user_id: str) -> Optional[Any]:
         """
         Read the reflection time of end users
@@ -176,7 +172,7 @@ class WorkspaceAppService:
         except Exception as e:
             api_logger.error(f"读取用户反思时间失败，end_user_id: {end_user_id}, 错误: {str(e)}")
             return None
-    
+
     def update_end_user_reflection_time(self, end_user_id: str) -> bool:
         """
         Update the reflection time of end users to the current time
@@ -189,7 +185,7 @@ class WorkspaceAppService:
         """
         try:
             from datetime import datetime
-            
+
             end_user = self.db.query(EndUser).filter(EndUser.id == end_user_id).first()
             if end_user:
                 end_user.reflection_time = datetime.now()
@@ -207,7 +203,7 @@ class WorkspaceAppService:
 
 class MemoryReflectionService:
     """Memory reflection service category"""
-    
+
     def __init__(self,db: Session = Depends(get_db)):
         self.db=db
 
@@ -252,22 +248,22 @@ class MemoryReflectionService:
                 "end_user_id": end_user_id,
                 "config_data": config_data
             }
-    
+
     async def start_reflection_from_data(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
         """
         Starting Reflection from Configuration Data
-        
+
         Args:
             config_data: Configure data dictionary, including reflective configuration information
             end_user_id: end_user_id
-            
+
         Returns:
             Reflect on the execution results
         """
         try:
             config_id = config_data.get("config_id")
             api_logger.info(f"从配置数据启动反思，config_id: {config_id}, end_user_id: {end_user_id}")
-            
+
 
             if not config_data.get("enable_self_reflexion", False):
                 return {
@@ -277,7 +273,7 @@ class MemoryReflectionService:
                     "end_user_id": end_user_id,
                     "config_data": config_data
                 }
-            
+
 
             config_data_id=config_data['config_id']
             reflection_config=WorkspaceAppService(self.db)._get_memory_config(config_data_id)

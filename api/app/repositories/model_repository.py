@@ -165,7 +165,7 @@ class ModelConfigRepository:
             total = base_query.count()
 
             # 分页查询
-            models = base_query.order_by(desc(ModelConfig.updated_at)).offset(
+            models = base_query.order_by(desc(ModelConfig.created_at)).offset(
                 (query.page - 1) * query.pagesize
             ).limit(query.pagesize).all()
 
@@ -234,7 +234,7 @@ class ModelConfigRepository:
             # 获取总数
             total = base_query.count()
 
-            query_results = base_query.order_by(desc(ModelConfig.updated_at)).all()
+            query_results = base_query.order_by(desc(ModelConfig.created_at)).all()
 
             provider_groups: Dict[str, List[ModelConfig]] = {}
             for model_config in query_results:
@@ -433,6 +433,7 @@ class ModelConfigRepository:
                         ModelConfig.is_public
                     ),
                     ModelBase.provider == provider,
+                    ModelConfig.is_active,
                     ~ModelConfig.is_composite
                 )
             ).distinct().all()
@@ -621,7 +622,7 @@ class ModelBaseRepository:
         if filters:
             q = q.filter(and_(*filters))
         
-        return q.order_by(ModelBase.add_count.desc()).all()
+        return q.order_by(ModelBase.add_count.desc(), ModelBase.created_at.desc()).all()
 
     @staticmethod
     def create(db: Session, data: dict) -> 'ModelBase':
@@ -630,12 +631,30 @@ class ModelBaseRepository:
         return model_base
 
     @staticmethod
+    def get_by_name_and_provider(db: Session, name: str, provider: str) -> Optional['ModelBase']:
+        return db.query(ModelBase).filter(
+            ModelBase.name == name,
+            ModelBase.provider == provider
+        ).first()
+
+    @staticmethod
     def update(db: Session, model_base_id: uuid.UUID, data: dict) -> Optional['ModelBase']:
         model_base = db.query(ModelBase).filter(ModelBase.id == model_base_id).first()
         if not model_base:
             return None
         for key, value in data.items():
             setattr(model_base, key, value)
+        
+        # 同步更新绑定的非组合模型配置
+        if any(k in data for k in ['name', 'description', 'logo']):
+            db.query(ModelConfig).filter(
+                ModelConfig.model_id == model_base_id,
+                ModelConfig.is_composite == False
+            ).update({
+                k: v for k, v in data.items() 
+                if k in ['name', 'description', 'logo']
+            }, synchronize_session=False)
+        
         return model_base
 
     @staticmethod

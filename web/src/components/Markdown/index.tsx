@@ -19,6 +19,7 @@ interface RbMarkdownProps {
   showHtmlComments?: boolean; // 是否显示 HTML 注释，默认为 false（隐藏）
   editable?: boolean; // 是否可编辑，默认为 false
   onContentChange?: (content: string) => void; // 内容变化回调
+  className?: string;
 }
 
 const components = {
@@ -98,6 +99,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
   showHtmlComments = false,
   editable = false,
   onContentChange,
+  className
 }) => {
   const [editContent, setEditContent] = useState(content)
   const textareaRef = useRef<any>(null)
@@ -162,7 +164,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
 
   // 预览模式
   return (
-    <div className="rb:relative" onKeyDown={handleKeyDown} tabIndex={0}>
+    <div className={`rb:relative ${className || ''}`} onKeyDown={handleKeyDown} tabIndex={0}>
       <style>{`
         .html-comment {
           color: #999;

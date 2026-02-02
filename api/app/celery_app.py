@@ -67,11 +67,11 @@ celery_app.conf.update(
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'document_tasks'},
         
-        # Beat/periodic tasks → document_tasks queue (prefork worker)
-        'app.tasks.workspace_reflection_task': {'queue': 'document_tasks'},
-        'app.tasks.regenerate_memory_cache': {'queue': 'document_tasks'},
-        'app.tasks.run_forgetting_cycle_task': {'queue': 'document_tasks'},
-        'app.controllers.memory_storage_controller.search_all': {'queue': 'document_tasks'},
+        # Beat/periodic tasks → periodic_tasks queue (dedicated periodic worker)
+        'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},
+        'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
+        'app.tasks.run_forgetting_cycle_task': {'queue': 'periodic_tasks'},
+        'app.controllers.memory_storage_controller.search_all': {'queue': 'periodic_tasks'},
     },
 )
 

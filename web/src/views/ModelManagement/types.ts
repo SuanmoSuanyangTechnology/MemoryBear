@@ -17,7 +17,7 @@ export interface DescriptionItem {
 export interface CompositeModelForm {
   logo?: any;
   name: string;
-  type: string;
+  type?: string;
   description: string;
   api_key_ids: ModelApiKey[] | string[];
 }
@@ -119,8 +119,8 @@ export interface ModelSquareDetailRef {
 }
 export interface CustomModelForm {
   name: string;
-  type: string;
-  provider: string;
+  type?: string;
+  provider?: string;
   logo?: any;
   description: string;
   is_official: boolean;

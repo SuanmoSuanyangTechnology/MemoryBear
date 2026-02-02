@@ -1,0 +1,17 @@
+[package]
+name = "seccomp_redbear"
+version = "0.1.1"
+edition = "2024"
+
+[lib]
+name = "sandbox"
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "0.2.180"
+libseccomp-sys = "0.3.0"
+
+[features]
+default = []
+python3 = []
+nodejs = []

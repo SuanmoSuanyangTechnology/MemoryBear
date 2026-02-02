@@ -1,6 +1,6 @@
 import type { FC, ReactNode } from 'react'
-import { Skeleton } from 'antd'
-import Empty from './index'
+import PageEmpty from './PageEmpty'
+import PageLoading from './PageLoading'
 
 interface BodyWrapperProps {
   children: ReactNode
@@ -9,10 +9,10 @@ interface BodyWrapperProps {
 }
 const BodyWrapper: FC<BodyWrapperProps> = ({ children, loading = false, empty }) => {
   if (loading) {
-    return <Skeleton active />
+    return <PageLoading />
   }
   if (!loading && empty) {
-    return <Empty />
+    return <PageEmpty />
   }
   return children
 }

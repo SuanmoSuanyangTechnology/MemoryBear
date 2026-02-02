@@ -56,7 +56,10 @@ const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPl
                 <RbCard
                   key={item.id}
                   title={item.name}
-                  subTitle={<Tag className="rb:mt-1">{t(`modelNew.${item.type}`)}</Tag>}
+                  subTitle={<Space size={8}>
+                    <Tag className="rb:mt-1">{t(`modelNew.${item.type}`)}</Tag>
+                    {item.is_official && <Tag color="success" className="rb:mt-1">{t(`modelNew.official`)}</Tag>}
+                  </Space>}
                   avatarUrl={getLogoUrl(item.logo)}
                   avatar={
                     <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
@@ -77,7 +80,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPl
                         {!item.is_official && <Button type="primary" disabled={item.is_deprecated} onClick={() => handleEdit(item)}>{t('modelNew.edit')}</Button>}
                         {item.is_added
                           ? <Button type="primary" disabled>{t('modelNew.added')}</Button>
-                          : <Button type="primary" ghost disabled={item.is_deprecated} onClick={() => handleAdd(item)}>+ {t('common.add')}</Button>
+                          : <Button type="primary" ghost disabled={item.is_deprecated} onClick={() => handleAdd(item)}>{item.is_deprecated ? t('modelNew.deprecated') : `+ ${t('common.add')}`}</Button>
                         }
                       </Space>
                     </Flex>

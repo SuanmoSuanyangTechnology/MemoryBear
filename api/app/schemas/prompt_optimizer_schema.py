@@ -22,6 +22,23 @@ class PromptOptMessage(BaseModel):
     )
 
 
+class PromptSaveRequest(BaseModel):
+    session_id: UUID = Field(
+        ...,
+        description="Session ID"
+    )
+
+    title: str = Field(
+        ...,
+        description="Prompt Title"
+    )
+
+    prompt: str = Field(
+        ...,
+        description="Optimized prompt content"
+    )
+
+
 class PromptOptModelSet(BaseModel):
     id: UUID | None = Field(
         default=None,
