@@ -39,7 +39,6 @@ async def make_write_graph():
     graph = workflow.compile()
 
     yield graph
-
 async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[],memory_config:str='',end_user_id:str='',scope:int=6):
     from app.core.memory.agent.langgraph_graph.routing.write_router import memory_long_term_storage, window_dialogue,aggregate_judgment
     from app.core.memory.agent.langgraph_graph.tools.write_tool import chat_data_format
