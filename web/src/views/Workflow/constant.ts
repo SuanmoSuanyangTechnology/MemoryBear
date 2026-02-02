@@ -431,32 +431,32 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-    //   { type: "code", icon: codeExecutionIcon,
-    //     config: {
-    //       input_variables: {
-    //         type: 'inputList',
-    //         defaultValue: [{ name: 'arg1' }, { name: 'arg2' }]
-    //       },
-    //       language: {
-    //         type: 'select',
-    //         defaultValue: 'python3'
-    //       },
-    //       code: {
-    //         type: 'messageEditor',
-    //         isArray: false,
-    //         language: ['python3', 'javascript'],
-    //         titleVariant: 'borderless',
-    //         defaultValue: `def main(arg1: str, arg2: str):
-    // return {
-    //     "result": arg1 + arg2,
-    // }`
-    //       },
-    //       output_variables: {
-    //         type: 'outputList',
-    //         defaultValue: [{name: 'result', type: 'string'}]
-    //       },
-    //     }
-    //   },
+      { type: "code", icon: codeExecutionIcon,
+        config: {
+          input_variables: {
+            type: 'inputList',
+            defaultValue: [{ name: 'arg1' }, { name: 'arg2' }]
+          },
+          language: {
+            type: 'select',
+            defaultValue: 'python3'
+          },
+          code: {
+            type: 'messageEditor',
+            isArray: false,
+            language: ['python3', 'javascript'],
+            titleVariant: 'borderless',
+            defaultValue: `def main(arg1: str, arg2: str):
+    return {
+        "result": arg1 + arg2,
+    }`
+          },
+          output_variables: {
+            type: 'outputList',
+            defaultValue: [{name: 'result', type: 'string'}]
+          },
+        }
+      },
       { type: "jinja-render", icon: templateRenderingIcon,
         config: {
           mapping: {
