@@ -49,7 +49,7 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
     db_session = next(get_db())
     config_service = MemoryConfigService(db_session)
     memory_config = config_service.load_memory_config(
-        config_id="08ed205c-0f05-49c3-8e0c-a580d28f5fd4",  # 改为整数
+        config_id=memory_config,  # 改为整数
         service_name="MemoryAgentService"
     )
     if long_term_type=='chunk':
@@ -63,7 +63,7 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
         """方案三：聚合判断"""
         await aggregate_judgment(end_user_id, langchain_messages, memory_config)
 
-#
+
 # async def main():
 #     """主函数 - 运行工作流"""
 #     langchain_messages = [
@@ -80,14 +80,7 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
 #     end_user_id = '837fee1b-04a2-48ee-94d7-211488908940'  # 组ID
 #     memory_config="08ed205c-0f05-49c3-8e0c-a580d28f5fd4"
 #     # await long_term_storage(long_term_type="chunk",langchain_messages=langchain_messages,memory_config=memory_config,end_user_id=end_user_id,scope=2)
-#     from app.core.memory.agent.utils.redis_tool import write_store
-#     result=write_store.get_session_by_userid(end_user_id)
-#     data=await format_parsing(result,"dict")
-#     chunk_data=data[:6]
-#
-#     long_time_data = write_store.find_user_recent_sessions(end_user_id, 240)
-#     long_=await messages_parse(long_time_data)
-#     print(long_)
+#     result=await long_term_storage(long_term_type="chunk",langchain_messages=langchain_messages,memory_config=memory_config,end_user_id=end_user_id,scope=2)
 #
 #
 # if __name__ == "__main__":
