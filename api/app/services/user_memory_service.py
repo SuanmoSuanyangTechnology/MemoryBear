@@ -571,6 +571,8 @@ class UserMemoryService:
         Args:
             db: 数据库会话
             end_user_id: 终端用户ID (UUID)
+            model_id: 模型ID（用于翻译）
+            language_type: 语言类型 ("zh" 中文, "en" 英文)
             
         Returns:
             {
@@ -604,11 +606,14 @@ class UserMemoryService:
             personality_traits=end_user.personality_traits
             core_values=end_user.core_values
             one_sentence_summary=end_user.one_sentence_summary
-            if language_type!='zh':
+            
+            # 只有当明确要求英文且当前是中文时才翻译
+            if language_type == 'en':
                 user_summary=await Translation_English(model_id, user_summary)
                 personality_traits = await Translation_English(model_id, personality_traits)
                 core_values = await Translation_English(model_id, core_values)
                 one_sentence_summary = await Translation_English(model_id, one_sentence_summary)
+            
             has_cache = any([
                 user_summary,
                 personality_traits,
@@ -1149,7 +1154,12 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         }
     """
     from app.core.memory.utils.prompt.prompt_utils import render_user_summary_prompt
+    from app.core.config import settings
+    from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import validate_language
     import re
+    
+    # 获取语言配置
+    language = validate_language(settings.DEFAULT_LANGUAGE)
     
     # 创建 UserSummaryHelper 实例
     user_summary_tool = UserSummaryHelper(end_user_id or os.getenv("SELECTED_end_user_id", "group_123"))
@@ -1165,8 +1175,9 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         # 2) 使用 prompt_utils 渲染提示词
         user_prompt = await render_user_summary_prompt(
             user_id=user_summary_tool.user_id,
-            entities=", ".join(entity_lines) if entity_lines else "(空)",
-            statements=" | ".join(statement_samples) if statement_samples else "(空)"
+            entities=", ".join(entity_lines) if entity_lines else "(空)" if language == "zh" else "(empty)",
+            statements=" | ".join(statement_samples) if statement_samples else "(空)" if language == "zh" else "(empty)",
+            language=language
         )
 
         messages = [
@@ -1193,11 +1204,11 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
             full_response = str(content) if content is not None else ""
         
         # 5) 解析四个部分
-        # 使用正则表达式提取四个部分
-        user_summary_match = re.search(r'【基本介绍】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
-        personality_match = re.search(r'【性格特点】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
-        core_values_match = re.search(r'【核心价值观】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
-        one_sentence_match = re.search(r'【一句话总结】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        # 使用正则表达式提取四个部分（支持中英文标题）
+        user_summary_match = re.search(r'【(?:基本介绍|Basic Introduction)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        personality_match = re.search(r'【(?:性格特点|Personality Traits)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        core_values_match = re.search(r'【(?:核心价值观|Core Values)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        one_sentence_match = re.search(r'【(?:一句话总结|One-Sentence Summary)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
         
         user_summary = user_summary_match.group(1).strip() if user_summary_match else ""
         personality = personality_match.group(1).strip() if personality_match else ""
