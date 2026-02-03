@@ -64,6 +64,11 @@ celery_app.conf.update(
         'app.core.memory.agent.read_message': {'queue': 'memory_tasks'},
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
         
+        # Long-term storage tasks → memory_tasks queue (batched write strategies)
+        'app.core.memory.agent.long_term_storage.window': {'queue': 'memory_tasks'},
+        'app.core.memory.agent.long_term_storage.time': {'queue': 'memory_tasks'},
+        'app.core.memory.agent.long_term_storage.aggregate': {'queue': 'memory_tasks'},
+        
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'document_tasks'},

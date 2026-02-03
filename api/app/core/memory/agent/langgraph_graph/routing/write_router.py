@@ -43,6 +43,7 @@ async def write_messages(end_user_id,langchain_messages,memory_config):
                 for node_name, node_data in update_event.items():
                     if 'save_neo4j' == node_name:
                         massages = node_data
+            # TODO：删除
             massagesstatus = massages.get('write_result')['status']
             contents = massages.get('write_result')
             print(contents)

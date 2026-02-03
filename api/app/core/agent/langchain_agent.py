@@ -148,6 +148,7 @@ class LangChainAgent:
         messages.append(HumanMessage(content=user_content))
         return messages
 
+    # TODO: 移到memory module
     async def term_memory_save(self,long_term_messages,actual_config_id,end_user_id,type):
         db = next(get_db())
         scope=6
@@ -307,9 +308,12 @@ class LangChainAgent:
             elapsed_time = time.time() - start_time
             if memory_flag:
                 long_term_messages=await agent_chat_messages(message_chat,content)
-                # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
+                # TODO: DUPLICATE WRITE - Remove this immediate write once batched write (term_memory_save) is verified stable.
+                # This writes to Neo4j immediately via Celery task, but term_memory_save also writes to Neo4j
+                # when the window buffer reaches scope (6 messages). This causes duplicate entities in the graph.
+                # Recommended: Keep only term_memory_save for batched efficiency, or only self.write for real-time.
                 await self.write(storage_type, actual_end_user_id, message_chat, content, user_rag_memory_id, actual_end_user_id, actual_config_id)
-                '''长期'''
+                # Batched long-term memory storage (Redis buffer + Neo4j when window full)
                 await self.term_memory_save(long_term_messages,actual_config_id,end_user_id,"chunk")
             response = {
                 "content": content,
@@ -441,9 +445,13 @@ class LangChainAgent:
                         yield total_tokens
                         break
                 if memory_flag:
-                    # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
+                    # TODO: DUPLICATE WRITE - Remove this immediate write once batched write (term_memory_save) is verified stable.
+                    # This writes to Neo4j immediately via Celery task, but term_memory_save also writes to Neo4j
+                    # when the window buffer reaches scope (6 messages). This causes duplicate entities in the graph.
+                    # Recommended: Keep only term_memory_save for batched efficiency, or only self.write for real-time.
                     long_term_messages = await agent_chat_messages(message_chat, full_content)
                     await self.write(storage_type, end_user_id, message_chat, full_content, user_rag_memory_id, end_user_id, actual_config_id)
+                    # Batched long-term memory storage (Redis buffer + Neo4j when window full)
                     await self.term_memory_save(long_term_messages, actual_config_id, end_user_id, "chunk")
                 
             except Exception as e:
