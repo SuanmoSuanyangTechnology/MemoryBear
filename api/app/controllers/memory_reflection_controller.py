@@ -211,11 +211,14 @@ async def start_reflection_configs(
 @router.get("/reflection/run")
 async def reflection_run(
     config_id: UUID|int,
-    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """Activate the reflection function for all matching applications in the workspace"""
+    # 如果未传 X-Language-Type Header，默认使用中文
+    if not language_type:
+        language_type = "zh"
 
     api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
     config_id = resolve_config_id(config_id, db)

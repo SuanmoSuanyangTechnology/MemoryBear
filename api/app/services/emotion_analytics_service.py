@@ -475,6 +475,7 @@ class EmotionAnalyticsService:
             self,
             end_user_id: str,
             db: Session,
+            language: str = "zh",
     ) -> Dict[str, Any]:
         """生成个性化情绪建议
 
@@ -483,6 +484,7 @@ class EmotionAnalyticsService:
         Args:
             end_user_id: 宿主ID（用户组ID）
             db: 数据库会话
+            language: 输出语言 ("zh" 中文, "en" 英文)
 
         Returns:
             Dict: 包含个性化建议的响应：
@@ -533,7 +535,7 @@ class EmotionAnalyticsService:
             user_profile = await self._get_simple_user_profile(end_user_id)
 
             # 6. 构建LLM prompt
-            prompt = await self._build_suggestion_prompt(health_data, patterns, user_profile)
+            prompt = await self._build_suggestion_prompt(health_data, patterns, user_profile, language)
 
             # 7. 调用LLM生成建议（使用配置中的LLM）
             if llm_client is None:
@@ -624,7 +626,8 @@ class EmotionAnalyticsService:
             self,
             health_data: Dict[str, Any],
             patterns: Dict[str, Any],
-            user_profile: Dict[str, Any]
+            user_profile: Dict[str, Any],
+            language: str = "zh"
     ) -> str:
         """构建情绪建议生成的prompt
 
@@ -632,6 +635,7 @@ class EmotionAnalyticsService:
             health_data: 情绪健康数据
             patterns: 情绪模式分析结果
             user_profile: 用户画像数据
+            language: 输出语言 ("zh" 中文, "en" 英文)
 
         Returns:
             str: LLM prompt
@@ -643,7 +647,8 @@ class EmotionAnalyticsService:
         prompt = await render_emotion_suggestions_prompt(
             health_data=health_data,
             patterns=patterns,
-            user_profile=user_profile
+            user_profile=user_profile,
+            language=language
         )
 
         return prompt

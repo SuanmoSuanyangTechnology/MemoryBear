@@ -78,7 +78,8 @@ class OntologyService:
         scenario: str,
         domain: Optional[str] = None,
         scene_id: Optional[Any] = None,
-        workspace_id: Optional[Any] = None
+        workspace_id: Optional[Any] = None,
+        language: str = "zh"
     ) -> OntologyExtractionResponse:
         """执行本体提取
         
@@ -91,6 +92,7 @@ class OntologyService:
             domain: 可选的领域提示
             scene_id: 可选的场景ID,用于权限验证（不再用于自动保存）
             workspace_id: 可选的工作空间ID,用于权限验证
+            language: 输出语言 ("zh" 中文, "en" 英文)
             
         Returns:
             OntologyExtractionResponse: 提取结果
@@ -155,6 +157,7 @@ class OntologyService:
                 llm_max_tokens=self.DEFAULT_LLM_MAX_TOKENS,
                 max_description_length=self.DEFAULT_MAX_DESCRIPTION_LENGTH,
                 timeout=self.DEFAULT_LLM_TIMEOUT,
+                language=language,
             )
             
             extraction_duration = time.time() - extraction_start_time

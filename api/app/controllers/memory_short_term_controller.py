@@ -20,10 +20,14 @@ router = APIRouter(
 @router.get("/short_term")
 async def short_term_configs(
         end_user_id: str,
-        language_type:str = Header(default="zh", alias="X-Language-Type"),
+        language_type:str = Header(default=None, alias="X-Language-Type"),
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ):
+    # 如果未传 X-Language-Type Header，默认使用中文
+    if not language_type:
+        language_type = "zh"
+    
     # 获取短期记忆数据
     short_term=ShortService(end_user_id)
     short_result=short_term.get_short_databasets()

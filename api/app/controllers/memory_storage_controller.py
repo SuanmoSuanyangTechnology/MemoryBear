@@ -31,7 +31,7 @@ from app.services.memory_storage_service import (
     search_entity,
     search_statement,
 )
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -280,17 +280,22 @@ def read_all_config(
 @router.post("/pilot_run", response_model=None)
 async def pilot_run(
     payload: ConfigPilotRun,
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
+    # 如果未传 X-Language-Type Header，默认使用中文
+    if not language_type:
+        language_type = "zh"
+    
     api_logger.info(
         f"Pilot run requested: config_id={payload.config_id}, "
-        f"dialogue_text_length={len(payload.dialogue_text)}"
+        f"dialogue_text_length={len(payload.dialogue_text)}, language={language_type}"
     )
     payload.config_id = resolve_config_id(payload.config_id, db)
     svc = DataConfigService(db)
     return StreamingResponse(
-        svc.pilot_run_stream(payload),
+        svc.pilot_run_stream(payload, language=language_type),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
