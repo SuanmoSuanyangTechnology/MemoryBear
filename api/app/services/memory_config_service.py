@@ -7,14 +7,15 @@ This service eliminates code duplication between MemoryAgentService and MemorySt
 
 import time
 from datetime import datetime
-
+from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+from sqlalchemy import select
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
     validate_embedding_model,
     validate_model_exists_and_active,
 )
-from app.repositories.data_config_repository import DataConfigRepository
+from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.memory_config_schema import (
     ConfigurationError,
     InvalidConfigError,
@@ -23,20 +24,24 @@ from app.schemas.memory_config_schema import (
     ModelNotFoundError,
 )
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 logger = get_logger(__name__)
 config_logger = get_config_logger()
+import uuid
 
-
-def _validate_config_id(config_id):
-    """Validate configuration ID format."""
+def _validate_config_id(config_id, db: Session = None):
+    """Validate configuration ID format (supports both UUID and integer)."""
+    if isinstance(config_id, uuid.UUID):
+        return config_id
+    
     if config_id is None:
         raise InvalidConfigError(
             "Configuration ID cannot be None",
             field_name="config_id",
             invalid_value=config_id,
         )
-    
+
     if isinstance(config_id, int):
         if config_id <= 0:
             raise InvalidConfigError(
@@ -44,27 +49,56 @@ def _validate_config_id(config_id):
                 field_name="config_id",
                 invalid_value=config_id,
             )
+        # 如果提供了数据库会话，尝试通过 user_id 查询 config_id
+        if db is not None:
+            # 查询 user_id 匹配的记录
+            stmt = select(MemoryConfigModel).where(MemoryConfigModel.config_id_old == str(config_id))
+            result = db.execute(stmt).scalars().first()
+            if result:
+                logger.info(f"Found config_id {result.config_id} for user_id {config_id}")
+                return result.config_id
+        
         return config_id
-    
+
     if isinstance(config_id, str):
+        config_id_stripped = config_id.strip()
+        
+        # Try parsing as UUID first
         try:
-            parsed_id = int(config_id.strip())
+            return uuid.UUID(config_id_stripped)
+        except ValueError:
+            pass
+        
+        # Fall back to integer parsing
+        try:
+            parsed_id = int(config_id_stripped)
             if parsed_id <= 0:
                 raise InvalidConfigError(
                     f"Configuration ID must be positive: {parsed_id}",
                     field_name="config_id",
                     invalid_value=config_id,
                 )
+            
+            # 如果提供了数据库会话，尝试通过 user_id 查询 config_id
+            if db is not None:
+                # 查询 user_id 匹配的记录
+                stmt = select(MemoryConfigModel).where(MemoryConfigModel.user_id == str(parsed_id))
+                result = db.execute(stmt).scalars().first()
+                
+                if result:
+                    logger.info(f"Found config_id {result.config_id} for user_id {parsed_id}")
+                    return result.config_id
+            
             return parsed_id
         except ValueError:
             raise InvalidConfigError(
-                f"Invalid configuration ID format: '{config_id}'",
+                f"Invalid configuration ID format: '{config_id}' (must be UUID or positive integer)",
                 field_name="config_id",
                 invalid_value=config_id,
             )
-    
+
     raise InvalidConfigError(
-        f"Invalid type for configuration ID: expected int or str, got {type(config_id).__name__}",
+        f"Invalid type for configuration ID: expected UUID, int or str, got {type(config_id).__name__}",
         field_name="config_id",
         invalid_value=config_id,
     )
@@ -73,61 +107,61 @@ def _validate_config_id(config_id):
 class MemoryConfigService:
     """
     Centralized service for memory configuration loading and validation.
-    
+
     This class provides a single implementation of configuration loading logic
     that can be shared across multiple services, eliminating code duplication.
-    
+
     Usage:
         config_service = MemoryConfigService(db)
         memory_config = config_service.load_memory_config(config_id)
         model_config = config_service.get_model_config(model_id)
     """
-    
+
     def __init__(self, db: Session):
         """Initialize the service with a database session.
-        
+
         Args:
             db: SQLAlchemy database session
         """
         self.db = db
-    
+
     def load_memory_config(
         self,
-        config_id: int,
+        config_id: UUID,
         service_name: str = "MemoryConfigService",
     ) -> MemoryConfig:
         """
         Load memory configuration from database by config_id.
-        
+
         Args:
-            config_id: Configuration ID from database
+            config_id: Configuration ID (UUID) from database
             service_name: Name of the calling service (for logging purposes)
-            
+
         Returns:
             MemoryConfig: Immutable configuration object
-            
+
         Raises:
             ConfigurationError: If validation fails
         """
         start_time = time.time()
-        
+
         config_logger.info(
             "Starting memory configuration loading",
             extra={
                 "operation": "load_memory_config",
                 "service": service_name,
-                "config_id": config_id,
+                "config_id": str(config_id),
             },
         )
-        
+
         logger.info(f"Loading memory configuration from database: config_id={config_id}")
-        
+
         try:
-            validated_config_id = _validate_config_id(config_id)
-            
+            validated_config_id = _validate_config_id(config_id, self.db)
+
             # Step 1: Get config and workspace
             db_query_start = time.time()
-            result = DataConfigRepository.get_config_with_workspace(self.db, validated_config_id)
+            result = MemoryConfigRepository.get_config_with_workspace(self.db, validated_config_id)
             db_query_time = time.time() - db_query_start
             logger.info(f"[PERF] Config+Workspace query: {db_query_time:.4f}s")
             if not result:
@@ -136,18 +170,18 @@ class MemoryConfigService:
                     "Configuration not found in database",
                     extra={
                         "operation": "load_memory_config",
-                        "config_id": validated_config_id,
+                        "config_id": str(config_id),
                         "load_result": "not_found",
                         "elapsed_ms": elapsed_ms,
                         "service": service_name,
                     },
                 )
                 raise ConfigurationError(
-                    f"Configuration {validated_config_id} not found in database"
+                    f"Configuration {config_id} not found in database"
                 )
-            
+
             memory_config, workspace = result
-            
+
             # Step 2: Validate embedding model (returns both UUID and name)
             embed_start = time.time()
             embedding_uuid, embedding_name = validate_embedding_model(
@@ -159,7 +193,7 @@ class MemoryConfigService:
             )
             embed_time = time.time() - embed_start
             logger.info(f"[PERF] Embedding validation: {embed_time:.4f}s")
-            
+
             # Step 3: Resolve LLM model
             llm_start = time.time()
             llm_uuid, llm_name = validate_and_resolve_model_id(
@@ -173,7 +207,7 @@ class MemoryConfigService:
             )
             llm_time = time.time() - llm_start
             logger.info(f"[PERF] LLM validation: {llm_time:.4f}s")
-            
+
             # Step 4: Resolve optional rerank model
             rerank_start = time.time()
             rerank_uuid = None
@@ -191,10 +225,10 @@ class MemoryConfigService:
             rerank_time = time.time() - rerank_start
             if memory_config.rerank_id:
                 logger.info(f"[PERF] Rerank validation: {rerank_time:.4f}s")
-            
+
             # Note: embedding_name is now returned from validate_embedding_model above
             # No need for redundant query!
-            
+
             # Create immutable MemoryConfig object
             config = MemoryConfig(
                 config_id=memory_config.config_id,
@@ -235,9 +269,9 @@ class MemoryConfigService:
                 pruning_scene=memory_config.pruning_scene or "education",
                 pruning_threshold=float(memory_config.pruning_threshold) if memory_config.pruning_threshold is not None else 0.5,
             )
-            
+
             elapsed_ms = (time.time() - start_time) * 1000
-            
+
             config_logger.info(
                 "Memory configuration loaded successfully",
                 extra={
@@ -250,13 +284,13 @@ class MemoryConfigService:
                     "elapsed_ms": elapsed_ms,
                 },
             )
-            
+
             logger.info(f"Memory configuration loaded successfully: {config.config_name}")
             return config
-            
+
         except Exception as e:
             elapsed_ms = (time.time() - start_time) * 1000
-            
+
             config_logger.error(
                 "Failed to load memory configuration",
                 extra={
@@ -270,7 +304,7 @@ class MemoryConfigService:
                 },
                 exc_info=True,
             )
-            
+
             logger.error(f"Failed to load memory configuration {config_id}: {e}")
             if isinstance(e, (ConfigurationError, ValueError)):
                 raise
@@ -304,7 +338,7 @@ class MemoryConfigService:
             "provider": api_config.provider,
             "api_key": api_config.api_key,
             "base_url": api_config.api_base,
-            "model_config_id": api_config.model_config_id,
+            "model_config_id": str(config.id),
             "type": config.type,
             "timeout": settings.LLM_TIMEOUT,
             "max_retries": settings.LLM_MAX_RETRIES,
@@ -336,7 +370,7 @@ class MemoryConfigService:
             "provider": api_config.provider,
             "api_key": api_config.api_key,
             "base_url": api_config.api_base,
-            "model_config_id": api_config.model_config_id,
+            "model_config_id": str(config.id),
             "type": config.type,
             "timeout": 120.0,
             "max_retries": 5,

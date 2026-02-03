@@ -25,6 +25,15 @@ class TripletExtractor:
         """
         self.llm_client = llm_client
 
+    def _get_language(self) -> str:
+        """Get the configured language for entity descriptions
+        
+        Returns:
+            Language code ("zh" or "en")
+        """
+        from app.core.config import settings
+        return settings.DEFAULT_LANGUAGE
+
     async def _extract_triplets(self, statement: Statement, chunk_content: str) -> TripletExtractionResponse:
         """Process a single statement and return extracted triplets and entities"""
         # Render the prompt using helper function
@@ -40,7 +49,8 @@ class TripletExtractor:
             statement=statement.statement,
             chunk_content=chunk_content,
             json_schema=TripletExtractionResponse.model_json_schema(),
-            predicate_instructions=PREDICATE_DEFINITIONS
+            predicate_instructions=PREDICATE_DEFINITIONS,
+            language=self._get_language()
         )
 
         # Create messages for LLM
@@ -116,7 +126,7 @@ class TripletExtractor:
         logger.info(f"Processing {len(all_statements)} statements for triplet extraction...")
         try:
             prompt_logger.info(
-                f"[Triplet] Dialog ref_id={getattr(dialog_data, 'ref_id', None)}, group_id={getattr(dialog_data, 'group_id', None)}, statements_to_process={len(all_statements)}"
+                f"[Triplet] Dialog ref_id={getattr(dialog_data, 'ref_id', None)}, end_user_id={getattr(dialog_data, 'end_user_id', None)}, statements_to_process={len(all_statements)}"
             )
         except Exception:
             pass

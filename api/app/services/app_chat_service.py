@@ -3,7 +3,7 @@ import asyncio
 import json
 import time
 import uuid
-from typing import Optional, Dict, Any, AsyncGenerator, Annotated
+from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List
 
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -15,6 +15,7 @@ from app.core.logging_config import get_business_logger
 from app.db import get_db, get_db_context
 from app.models import MultiAgentConfig, AgentConfig, WorkflowConfig
 from app.schemas import DraftRunRequest
+from app.schemas.app_schema import FileInput
 from app.services.tool_service import ToolService
 from app.repositories.tool_repository import ToolRepository
 from app.db import get_db
@@ -26,6 +27,7 @@ from app.services.draft_run_service import create_web_search_tool
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.workflow_service import WorkflowService
+from app.services.multimodal_service import MultimodalService
 
 logger = get_business_logger()
 
@@ -48,7 +50,8 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            workspace_id: Optional[str] = None
+            workspace_id: Optional[str] = None,
+            files: Optional[List[FileInput]] = None  # 新增：多模态文件
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
 
@@ -155,7 +158,14 @@ class AppChatService:
                 for msg in messages
             ]
 
-        # 调用 Agent
+        # 处理多模态文件
+        processed_files = None
+        if files:
+            multimodal_service = MultimodalService(self.db)
+            processed_files = await multimodal_service.process_files(files)
+            logger.info(f"处理了 {len(processed_files)} 个文件")
+
+        # 调用 Agent（支持多模态）
         result = await agent.chat(
             message=message,
             history=history,
@@ -164,14 +174,22 @@ class AppChatService:
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
             config_id=config_id,
-            memory_flag=memory_flag
+            memory_flag=memory_flag,
+            files=processed_files  # 传递处理后的文件
         )
 
         # 保存消息
         self.conversation_service.save_conversation_messages(
             conversation_id=conversation_id,
             user_message=message,
-            assistant_message=result["content"]
+            assistant_message=result["content"],
+            meta_data={
+                "usage": result.get("usage", {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                })
+            }
         )
 
         elapsed_time = time.time() - start_time
@@ -199,6 +217,7 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
             workspace_id: Optional[str] = None,
+            files: Optional[List[FileInput]] = None  # 新增：多模态文件
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
 
@@ -305,11 +324,19 @@ class AppChatService:
                     for msg in messages
                 ]
 
+            # 处理多模态文件
+            processed_files = None
+            if files:
+                multimodal_service = MultimodalService(self.db)
+                processed_files = await multimodal_service.process_files(files)
+                logger.info(f"处理了 {len(processed_files)} 个文件")
+
             # 发送开始事件
             yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
 
-            # 流式调用 Agent
+            # 流式调用 Agent（支持多模态）
             full_content = ""
+            total_tokens = 0
             async for chunk in agent.chat_stream(
                     message=message,
                     history=history,
@@ -318,11 +345,15 @@ class AppChatService:
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
                     config_id=config_id,
-                    memory_flag=memory_flag
+                    memory_flag=memory_flag,
+                    files=processed_files  # 传递处理后的文件
             ):
-                full_content += chunk
-                # 发送消息块事件
-                yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                if isinstance(chunk, int):
+                    total_tokens = chunk
+                else:
+                    full_content += chunk
+                    # 发送消息块事件
+                    yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
 
             elapsed_time = time.time() - start_time
 
@@ -339,7 +370,7 @@ class AppChatService:
                 content=full_content,
                 meta_data={
                     "model": api_key_obj.model_name,
-                    "usage": {}
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
                 }
             )
 
@@ -416,7 +447,11 @@ class AppChatService:
             meta_data={
                 "mode": result.get("mode"),
                 "elapsed_time": result.get("elapsed_time"),
-                "sub_results": result.get("sub_results")
+                "usage": result.get("usage", {
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": 0
+                        })
             }
         )
 
@@ -458,6 +493,7 @@ class AppChatService:
             yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
 
             full_content = ""
+            total_tokens = 0
 
             # 2. 创建编排器
             orchestrator = MultiAgentOrchestrator(self.db, config)
@@ -474,16 +510,26 @@ class AppChatService:
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
             ):
-                yield event
-                # 尝试提取内容（用于保存）
-                if "data:" in event:
-                    try:
-                        data_line = event.split("data: ", 1)[1].strip()
-                        data = json.loads(data_line)
-                        if "content" in data:
-                            full_content += data["content"]
-                    except:
-                        pass
+                if "sub_usage" in event:
+                    if "data:" in event:
+                        try:
+                            data_line = event.split("data: ", 1)[1].strip()
+                            data = json.loads(data_line)
+                            if "total_tokens" in data:
+                                total_tokens += data["total_tokens"]
+                        except:
+                            pass
+                else:
+                    yield event
+                    # 尝试提取内容（用于保存）
+                    if "data:" in event:
+                        try:
+                            data_line = event.split("data: ", 1)[1].strip()
+                            data = json.loads(data_line)
+                            if "content" in data:
+                                full_content += data["content"]
+                        except:
+                            pass
 
             elapsed_time = time.time() - start_time
 
@@ -499,7 +545,12 @@ class AppChatService:
                 role="assistant",
                 content=full_content,
                 meta_data={
-                    "elapsed_time": elapsed_time
+                    "elapsed_time": elapsed_time,
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": total_tokens
+                    }
                 }
             )
 

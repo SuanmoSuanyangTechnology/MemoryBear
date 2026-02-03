@@ -103,9 +103,7 @@ class Edge(BaseModel):
         id: Unique identifier for the edge
         source: ID of the source node
         target: ID of the target node
-        group_id: Group ID for multi-tenancy
-        user_id: User ID for user-specific data
-        apply_id: Application ID for application-specific data
+        end_user_id: End user ID for multi-tenancy
         run_id: Unique identifier for the pipeline run that created this edge
         created_at: Timestamp when the edge was created (system perspective)
         expired_at: Optional timestamp when the edge expires (system perspective)
@@ -113,9 +111,7 @@ class Edge(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex, description="A unique identifier for the edge.")
     source: str = Field(..., description="The ID of the source node.")
     target: str = Field(..., description="The ID of the target node.")
-    group_id: str = Field(..., description="The group ID of the edge.")
-    user_id: str = Field(..., description="The user ID of the edge.")
-    apply_id: str = Field(..., description="The apply ID of the edge.")
+    end_user_id: str = Field(..., description="The end user ID of the edge.")
     run_id: str = Field(default_factory=lambda: uuid4().hex, description="Unique identifier for this pipeline run.")
     created_at: datetime = Field(..., description="The valid time of the edge from system perspective.")
     expired_at: Optional[datetime] = Field(None, description="The expired time of the edge from system perspective.")
@@ -185,18 +181,14 @@ class Node(BaseModel):
     Attributes:
         id: Unique identifier for the node
         name: Name of the node
-        group_id: Group ID for multi-tenancy
-        user_id: User ID for user-specific data
-        apply_id: Application ID for application-specific data
+        end_user_id: End user ID for multi-tenancy
         run_id: Unique identifier for the pipeline run that created this node
         created_at: Timestamp when the node was created (system perspective)
         expired_at: Optional timestamp when the node expires (system perspective)
     """
     id: str = Field(..., description="The unique identifier for the node.")
     name: str = Field(..., description="The name of the node.")
-    group_id: str = Field(..., description="The group ID of the node.")
-    user_id: str = Field(..., description="The user ID of the edge.")
-    apply_id: str = Field(..., description="The apply ID of the edge.")
+    end_user_id: str = Field(..., description="The end user ID of the node.")
     run_id: str = Field(default_factory=lambda: uuid4().hex, description="Unique identifier for this pipeline run.")
     created_at: datetime = Field(..., description="The valid time of the node from system perspective.")
     expired_at: Optional[datetime] = Field(None, description="The expired time of the node from system perspective.")

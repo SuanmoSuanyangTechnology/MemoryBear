@@ -1,3 +1,4 @@
+from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 import uuid
@@ -6,11 +7,11 @@ import time
 import asyncio
 
 from app.models.models_model import ModelConfig, ModelApiKey, ModelType
-from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository
+from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository, ModelBaseRepository
 from app.schemas import model_schema
 from app.schemas.model_schema import (
     ModelConfigCreate, ModelConfigUpdate, ModelApiKeyCreate, ModelApiKeyUpdate,
-    ModelConfigQuery, ModelStats
+    ModelConfigQuery, ModelStats, ModelConfigQueryNew
 )
 from app.core.logging_config import get_business_logger
 from app.schemas.response_schema import PageData, PageMeta
@@ -46,6 +47,26 @@ class ModelConfigService:
             ),
             items=[model_schema.ModelConfig.model_validate(model) for model in models]
         )
+
+    @staticmethod
+    def get_model_list_new(db: Session, query: ModelConfigQueryNew, tenant_id: uuid.UUID | None = None) -> List[dict]:
+        """获取模型配置列表"""
+        provider_groups, total = ModelConfigRepository.get_list_new(db, query, tenant_id=tenant_id)
+
+        items = []
+        for provider, models in provider_groups.items():
+            # 验证每个模型并封装分组信息
+            validated_models = [model_schema.ModelConfig.model_validate(model) for model in models]
+            tags = list({model.type for model in validated_models})
+            group_item = {
+                "provider": provider,  # 服务商名称
+                "logo": validated_models[0].logo,
+                "tags": tags,
+                "models": validated_models  # 该服务商下的所有模型
+            }
+            items.append(group_item)
+
+        return items
 
     @staticmethod
     def get_model_by_name(db: Session, name: str, tenant_id: uuid.UUID | None = None) -> ModelConfig:
@@ -228,37 +249,39 @@ class ModelConfigService:
 
         # 验证配置
         if not model_data.skip_validation and model_data.api_keys:
-            api_key_data = model_data.api_keys
-            validation_result = await ModelConfigService.validate_model_config(
-                db=db,
-                model_name=api_key_data.model_name,
-                provider=api_key_data.provider,
-                api_key=api_key_data.api_key,
-                api_base=api_key_data.api_base,
-                model_type=model_data.type,  # 传递模型类型
-                test_message="Hello"
-            )
-            if not validation_result["valid"]:
-                raise BusinessException(
-                    f"模型配置验证失败: {validation_result['error']}",
-                    BizCode.INVALID_PARAMETER
+            api_key_data_list = model_data.api_keys
+            for api_key_data in api_key_data_list:
+                validation_result = await ModelConfigService.validate_model_config(
+                    db=db,
+                    model_name=api_key_data.model_name,
+                    provider=api_key_data.provider,
+                    api_key=api_key_data.api_key,
+                    api_base=api_key_data.api_base,
+                    model_type=model_data.type,  # 传递模型类型
+                    test_message="Hello"
                 )
+                if not validation_result["valid"]:
+                    raise BusinessException(
+                        f"模型配置验证失败: {validation_result['error']}",
+                        BizCode.INVALID_PARAMETER
+                    )
 
         # 事务处理
-        api_key_data = model_data.api_keys
-        model_config_data = model_data.dict(exclude={"api_keys", "skip_validation"})
+        api_key_datas = model_data.api_keys
+        model_config_data = model_data.model_dump(exclude={"api_keys", "skip_validation"})
         # 添加租户ID
         model_config_data["tenant_id"] = tenant_id
 
         model = ModelConfigRepository.create(db, model_config_data)
         db.flush()  # 获取生成的 ID
 
-        if api_key_data:
-            api_key_create_schema = ModelApiKeyCreate(
-                model_config_id=model.id,
-                **api_key_data.dict()
-            )
-            ModelApiKeyRepository.create(db, api_key_create_schema)
+        if api_key_datas:
+            for api_key_data in api_key_datas:
+                api_key_create_schema = ModelApiKeyCreate(
+                    model_config_ids=[model.id],
+                    **api_key_data.model_dump()
+                )
+                ModelApiKeyRepository.create(db, api_key_create_schema)
 
         db.commit()
         db.refresh(model)
@@ -279,6 +302,116 @@ class ModelConfigService:
         db.commit()
         db.refresh(model)
         return model
+
+    @staticmethod
+    async def create_composite_model(db: Session, model_data: model_schema.CompositeModelCreate, tenant_id: uuid.UUID) -> ModelConfig:
+        """创建组合模型"""
+        if ModelConfigRepository.get_by_name(db, model_data.name, tenant_id=tenant_id):
+            raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+        
+        # 验证所有 API Key 存在且类型匹配
+        for api_key_id in model_data.api_key_ids:
+            api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
+            if not api_key:
+                raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.NOT_FOUND)
+            
+            # 检查 API Key 关联的模型配置类型
+            for model_config in api_key.model_configs:
+                # chat 和 llm 类型可以兼容
+                compatible_types = {ModelType.LLM, ModelType.CHAT}
+                config_type = model_config.type
+                request_type = model_data.type
+                
+                if not (config_type == request_type or 
+                        (config_type in compatible_types and request_type in compatible_types)):
+                    raise BusinessException(
+                        f"API Key {api_key_id} 关联的模型类型 ({model_config.type}) 与组合模型类型 ({model_data.type}) 不匹配",
+                        BizCode.INVALID_PARAMETER
+                    )
+                # if model_config.is_composite:
+                #     raise BusinessException(
+                #         f"API Key {api_key_id} 关联的模型是组合模型，不能用于创建新的组合模型",
+                #         BizCode.INVALID_PARAMETER
+                #     )
+        
+        # 创建组合模型
+        model_config_data = {
+            "tenant_id": tenant_id,
+            "name": model_data.name,
+            "type": model_data.type,
+            "logo": model_data.logo,
+            "description": model_data.description,
+            "provider": "composite",
+            "config": model_data.config,
+            "is_active": model_data.is_active,
+            "is_public": model_data.is_public,
+            "is_composite": True
+        }
+        if "load_balance_strategy" in model_data.model_fields_set:
+            model_config_data["load_balance_strategy"] = model_data.load_balance_strategy
+
+        model = ModelConfigRepository.create(db, model_config_data)
+        db.flush()
+        
+        # 关联 API Keys
+        for api_key_id in model_data.api_key_ids:
+            api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
+            if api_key:
+                model.api_keys.append(api_key)
+        
+        db.commit()
+        db.refresh(model)
+        return model
+
+    @staticmethod
+    async def update_composite_model(db: Session, model_id: uuid.UUID, model_data: model_schema.CompositeModelCreate, tenant_id: uuid.UUID) -> ModelConfig:
+        """更新组合模型"""
+        existing_model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
+        if not existing_model:
+            raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+        
+        if not existing_model.is_composite:
+            raise BusinessException("该模型不是组合模型", BizCode.INVALID_PARAMETER)
+        
+        # 验证所有 API Key 存在且类型匹配
+        for api_key_id in model_data.api_key_ids:
+            api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
+            if not api_key:
+                raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.NOT_FOUND)
+            
+            for model_config in api_key.model_configs:
+                compatible_types = {ModelType.LLM, ModelType.CHAT}
+                config_type = model_config.type
+                request_type = existing_model.type
+                
+                if not (config_type == request_type or 
+                        (config_type in compatible_types and request_type in compatible_types)):
+                    raise BusinessException(
+                        f"API Key {api_key_id} 关联的模型类型 ({model_config.type}) 与组合模型类型 ({model_data.type}) 不匹配",
+                        BizCode.INVALID_PARAMETER
+                    )
+        
+        # 更新基本信息
+        existing_model.name = model_data.name
+        # existing_model.type = model_data.type
+        existing_model.logo = model_data.logo
+        existing_model.description = model_data.description
+        existing_model.config = model_data.config
+        existing_model.is_active = model_data.is_active
+        existing_model.is_public = model_data.is_public
+        if "load_balance_strategy" in model_data.model_fields_set:
+            existing_model.load_balance_strategy = model_data.load_balance_strategy
+        
+        # 更新 API Keys 关联
+        existing_model.api_keys.clear()
+        for api_key_id in model_data.api_key_ids:
+            api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
+            if api_key:
+                existing_model.api_keys.append(api_key)
+        
+        db.commit()
+        db.refresh(existing_model)
+        return existing_model
 
     @staticmethod
     def delete_model(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> bool:
@@ -324,27 +457,133 @@ class ModelApiKeyService:
         return ModelApiKeyRepository.get_by_model_config(db, model_config_id, is_active)
 
     @staticmethod
-    async def create_api_key(db: Session, api_key_data: ModelApiKeyCreate) -> ModelApiKey:
-        """创建API Key"""
-        model_config = ModelConfigRepository.get_by_id(db, api_key_data.model_config_id)
-        if not model_config:
-            raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-
-        validation_result = await ModelConfigService.validate_model_config(
+    async def create_api_key_by_provider(db: Session, data: model_schema.ModelApiKeyCreateByProvider) -> tuple[
+        list[Any], list[Any]]:
+        """根据provider为多个ModelConfig创建API Key"""
+        created_keys = []
+        failed_models = []  # 记录验证失败的模型
+        
+        for model_config_id in data.model_config_ids:
+            model_config = ModelConfigRepository.get_by_id(db, model_config_id)
+            if not model_config:
+                continue
+            
+            # 从ModelBase获取model_name
+            model_name = model_config.model_base.name if model_config.model_base else model_config.name
+            
+            # 检查是否存在API Key（包括软删除）
+            existing_key = db.query(ModelApiKey).filter(
+                ModelApiKey.api_key == data.api_key,
+                ModelApiKey.provider == data.provider,
+                ModelApiKey.model_name == model_name
+            ).first()
+            
+            if existing_key:
+                # 如果已存在，重新激活并更新
+                if existing_key.is_active:
+                    continue
+                existing_key.is_active = True
+                existing_key.api_base = data.api_base
+                existing_key.description = data.description
+                existing_key.config = data.config
+                existing_key.priority = data.priority
+                existing_key.model_name = model_name
+                
+                # 检查是否已关联该模型配置
+                if model_config not in existing_key.model_configs:
+                    existing_key.model_configs.append(model_config)
+                
+                created_keys.append(existing_key)
+                continue
+            
+            # 验证配置
+            validation_result = await ModelConfigService.validate_model_config(
                 db=db,
-                model_name=api_key_data.model_name,
-                provider=api_key_data.provider,
-                api_key=api_key_data.api_key,
-                api_base=api_key_data.api_base,
-                model_type=model_config.type,  # 传递模型类型
+                model_name=model_name,
+                provider=data.provider,
+                api_key=data.api_key,
+                api_base=data.api_base,
+                model_type=model_config.type,
                 test_message="Hello"
             )
-        print(validation_result)
-        if not validation_result["valid"]:
-                raise BusinessException(
-                    f"模型配置验证失败: {validation_result['error']}",
-                    BizCode.INVALID_PARAMETER
+            if not validation_result["valid"]:
+                # 记录验证失败的模型，但不抛出异常
+                failed_models.append(model_name)
+                continue
+            
+            # 创建API Key
+            api_key_data = ModelApiKeyCreate(
+                model_config_ids=[model_config_id],
+                model_name=model_name,
+                description=data.description,
+                provider=data.provider,
+                api_key=data.api_key,
+                api_base=data.api_base,
+                config=data.config,
+                is_active=data.is_active,
+                priority=data.priority
+            )
+            api_key_obj = ModelApiKeyRepository.create(db, api_key_data)
+            created_keys.append(api_key_obj)
+        
+        if created_keys:
+            db.commit()
+            for key in created_keys:
+                db.refresh(key)
+        
+        return created_keys, failed_models
+
+    @staticmethod
+    async def create_api_key(db: Session, api_key_data: ModelApiKeyCreate) -> ModelApiKey:
+        # 验证所有关联的模型配置是否存在
+        if api_key_data.model_config_ids:
+            for model_config_id in api_key_data.model_config_ids:
+                model_config = ModelConfigRepository.get_by_id(db, model_config_id)
+                if not model_config:
+                    raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+                
+                # 检查API Key是否已存在(包括软删除)
+                existing_key = db.query(ModelApiKey).filter(
+                    ModelApiKey.api_key == api_key_data.api_key,
+                    ModelApiKey.provider == api_key_data.provider,
+                    ModelApiKey.model_name == api_key_data.model_name
+                ).first()
+
+                if existing_key:
+                    if existing_key.is_active:
+                        # 如果已激活，跳过
+                        raise BusinessException("该API Key已存在", BizCode.DUPLICATE_NAME)
+                    # 如果已存在，重新激活并更新
+                    existing_key.is_active = True
+                    existing_key.api_base = api_key_data.api_base
+                    existing_key.description = api_key_data.description
+                    existing_key.config = api_key_data.config
+                    existing_key.priority = api_key_data.priority
+                    existing_key.model_name = api_key_data.model_name
+                    
+                    # 检查是否已关联该模型配置
+                    if model_config not in existing_key.model_configs:
+                        existing_key.model_configs.append(model_config)
+                    
+                    db.commit()
+                    db.refresh(existing_key)
+                    return existing_key
+                
+                # 验证配置
+                validation_result = await ModelConfigService.validate_model_config(
+                    db=db,
+                    model_name=api_key_data.model_name,
+                    provider=api_key_data.provider,
+                    api_key=api_key_data.api_key,
+                    api_base=api_key_data.api_base,
+                    model_type=model_config.type,
+                    test_message="Hello"
                 )
+                if not validation_result["valid"]:
+                    raise BusinessException(
+                        f"模型配置验证失败: {validation_result['error']}",
+                        BizCode.INVALID_PARAMETER
+                    )
 
         api_key = ModelApiKeyRepository.create(db, api_key_data)
         db.commit()
@@ -359,21 +598,19 @@ class ModelApiKeyService:
             raise BusinessException("API Key不存在", BizCode.NOT_FOUND)
 
         # 获取关联的模型配置以获取模型类型
-        model_config = ModelConfigRepository.get_by_id(db, existing_api_key.model_config_id)
-        if not model_config:
-            raise BusinessException("关联的模型配置不存在", BizCode.MODEL_NOT_FOUND)
-
-        validation_result = await ModelConfigService.validate_model_config(
+        if existing_api_key.model_configs:
+            model_config = existing_api_key.model_configs[0]
+            
+            validation_result = await ModelConfigService.validate_model_config(
                 db=db,
-                model_name=api_key_data.model_name,
-                provider=api_key_data.provider,
-                api_key=api_key_data.api_key,
-                api_base=api_key_data.api_base,
-                model_type=model_config.type,  # 传递模型类型
+                model_name=api_key_data.model_name or existing_api_key.model_name,
+                provider=api_key_data.provider or existing_api_key.provider,
+                api_key=api_key_data.api_key or existing_api_key.api_key,
+                api_base=api_key_data.api_base or existing_api_key.api_base,
+                model_type=model_config.type,
                 test_message="Hello"
             )
-        print(validation_result)
-        if not validation_result["valid"]:
+            if not validation_result["valid"]:
                 raise BusinessException(
                     f"模型配置验证失败: {validation_result['error']}",
                     BizCode.INVALID_PARAMETER
@@ -417,3 +654,87 @@ class ModelApiKeyService:
         if api_kes and len(api_kes) > 0:
             return api_kes[0]
         raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
+
+
+
+class ModelBaseService:
+    """基础模型服务"""
+
+    @staticmethod
+    def get_model_base_list(db: Session, query: model_schema.ModelBaseQuery, tenant_id: uuid.UUID = None) -> List:
+        models = ModelBaseRepository.get_list(db, query)
+        
+        provider_groups = {}
+        for m in models:
+            model_dict = model_schema.ModelBase.model_validate(m).model_dump()
+            if tenant_id:
+                model_dict['is_added'] = ModelBaseRepository.check_added_by_tenant(db, m.id, tenant_id)
+            
+            provider = m.provider
+            if provider not in provider_groups:
+                provider_groups[provider] = {
+                    "provider": provider,
+                    "models": []
+                }
+            provider_groups[provider]["models"].append(model_dict)
+        
+        return list(provider_groups.values())
+
+    @staticmethod
+    def get_model_base_by_id(db: Session, model_base_id: uuid.UUID):
+        model = ModelBaseRepository.get_by_id(db, model_base_id)
+        if not model:
+            raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
+        return model
+
+    @staticmethod
+    def create_model_base(db: Session, data: model_schema.ModelBaseCreate):
+        existing = ModelBaseRepository.get_by_name_and_provider(db, data.name, data.provider)
+        if existing:
+            raise BusinessException("模型已存在", BizCode.DUPLICATE_NAME)
+        model_base = ModelBaseRepository.create(db, data.model_dump())
+        db.commit()
+        db.refresh(model_base)
+        return model_base
+
+    @staticmethod
+    def update_model_base(db: Session, model_base_id: uuid.UUID, data: model_schema.ModelBaseUpdate):
+        model_base = ModelBaseRepository.update(db, model_base_id, data.model_dump(exclude_unset=True))
+        if not model_base:
+            raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
+        db.commit()
+        db.refresh(model_base)
+        return model_base
+
+    @staticmethod
+    def delete_model_base(db: Session, model_base_id: uuid.UUID) -> bool:
+        success = ModelBaseRepository.delete(db, model_base_id)
+        if not success:
+            raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
+        db.commit()
+        return success
+
+    @staticmethod
+    def add_model_from_plaza(db: Session, model_base_id: uuid.UUID, tenant_id: uuid.UUID) -> ModelConfig:
+        model_base = ModelBaseRepository.get_by_id(db, model_base_id)
+        if not model_base:
+            raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
+        
+        if ModelBaseRepository.check_added_by_tenant(db, model_base_id, tenant_id):
+            raise BusinessException("模型已添加", BizCode.DUPLICATE_NAME)
+        
+        model_config_data = {
+            "model_id": model_base_id,
+            "tenant_id": tenant_id,
+            "name": model_base.name,
+            "provider": model_base.provider,
+            "type": model_base.type,
+            "logo": model_base.logo,
+            "description": model_base.description,
+            "is_composite": False
+        }
+        model_config = ModelConfigRepository.create(db, model_config_data)
+        ModelBaseRepository.increment_add_count(db, model_base_id)
+        db.commit()
+        db.refresh(model_config)
+        return model_config

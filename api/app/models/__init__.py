@@ -6,7 +6,7 @@ from .document_model import Document
 from .file_model import File
 from .file_metadata_model import FileMetadata
 from .generic_file_model import GenericFile
-from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey
+from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey, ModelBase, LoadBalanceStrategy
 from .memory_short_model import ShortTermMemory, LongTermMemory
 from .knowledgeshare_model import KnowledgeShare
 from .app_model import App
@@ -18,7 +18,7 @@ from .appshare_model import AppShare
 from .release_share_model import ReleaseShare
 from .conversation_model import Conversation, Message
 from .api_key_model import ApiKey, ApiKeyLog, ApiKeyType
-from .data_config_model import DataConfig
+from .memory_config_model import MemoryConfig
 from .multi_agent_model import MultiAgentConfig, AgentInvocation
 from .workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
 from .retrieval_info import RetrievalInfo
@@ -28,6 +28,10 @@ from .tool_model import (
     ToolExecution, ToolType, ToolStatus, AuthType, ExecutionStatus
 )
 from .memory_perceptual_model import MemoryPerceptualModel
+from .ontology_scene import OntologyScene
+from .ontology_class import OntologyClass
+from .ontology_scene import OntologyScene
+from .ontology_class import OntologyClass
 
 __all__ = [
     "Tenants",
@@ -57,7 +61,7 @@ __all__ = [
     "ApiKey",
     "ApiKeyLog",
     "ApiKeyType",
-    "DataConfig",
+    "MemoryConfig",
     "MultiAgentConfig",
     "AgentInvocation",
     "WorkflowConfig",
@@ -79,4 +83,6 @@ __all__ = [
     "AuthType",
     "ExecutionStatus",
     "MemoryPerceptualModel",
+    "ModelBase",
+    "LoadBalanceStrategy"
 ]

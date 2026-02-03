@@ -23,9 +23,10 @@ interface data {
 }
 
 
+export const API_PREFIX = '/api'
 // 创建axios实例
 const service = axios.create({
-  baseURL: '/api', // 与vite.config.ts中的代理配置对应
+  baseURL: API_PREFIX, // 与vite.config.ts中的代理配置对应
   // timeout: 10000, // 请求超时时间
   withCredentials: false,
   headers: {
@@ -126,7 +127,7 @@ service.interceptors.response.use(
     if (axios.isCancel(error) || error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
       return Promise.reject(error);
     }
-    
+
     // 处理网络错误、超时等
     let msg = error.response?.data?.error || error.response?.error;
     const status = error?.response ? error.response.status : error;
@@ -287,19 +288,20 @@ export const request = {
       ...config
     });
   },
-  downloadFile(url: string, fileName: string, data?: unknown) {
+  downloadFile(url: string, fileName: string, data?: unknown, callback?: () => void) {
     service.post(url, data, {
       responseType: "blob",
     })
     .then(res =>{
       const link = document.createElement("a");
-      const blob = new Blob([res.data], { type: "application/vnd.ms-excel" });
+      const blob = new Blob([res as unknown as BlobPart]);
       link.style.display = "none";
       link.href = URL.createObjectURL(blob);
-      link.setAttribute("download", decodeURI(res.headers['filename'] || fileName));
+      link.setAttribute("download", decodeURI(fileName || fileName));
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      callback?.()
     });
   }
 };

@@ -1,0 +1,18 @@
+app:
+  key: redbear-sandbox
+
+max_workers: 10
+max_requests: 300
+worker_timeout: 15
+python_path: /usr/local/bin/python
+nodejs_path: /usr/bin/node
+enable_network: true
+enable_preload: false
+python_deps_update_interval: 30m
+
+allowed_syscalls: []
+
+proxy:
+  socks5: ''
+  http: ''
+  https: ''

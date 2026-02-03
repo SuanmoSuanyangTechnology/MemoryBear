@@ -1,3 +1,4 @@
+import os
 import re
 import uuid
 from typing import Any, AsyncGenerator
@@ -16,9 +17,10 @@ from app.models.prompt_optimizer_model import (
     PromptOptimizerSession,
     RoleType
 )
-from app.repositories.model_repository import ModelConfigRepository
+from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository
 from app.repositories.prompt_optimizer_repository import (
-    PromptOptimizerSessionRepository
+    PromptOptimizerSessionRepository,
+    PromptReleaseRepository
 )
 from app.schemas.prompt_optimizer_schema import OptimizePromptResult
 
@@ -28,6 +30,8 @@ logger = get_business_logger()
 class PromptOptimizerService:
     def __init__(self, db: Session):
         self.db = db
+        self.optim_repo = PromptOptimizerSessionRepository(self.db)
+        self.release_repo = PromptReleaseRepository(self.db)
 
     def get_model_config(
             self,
@@ -78,10 +82,12 @@ class PromptOptimizerService:
         Returns:
             PromptOptimzerSession: The newly created prompt optimization session.
         """
-        session = PromptOptimizerSessionRepository(self.db).create_session(
+        session = self.optim_repo.create_session(
             tenant_id=tenant_id,
             user_id=user_id
         )
+        self.db.commit()
+        self.db.refresh(session)
         return session
 
     def get_session_message_history(
@@ -106,7 +112,7 @@ class PromptOptimizerService:
                 - role (str): The role of the message sender, e.g., 'system', 'user', or 'assistant'.
                 - content (str): The content of the message.
         """
-        history = PromptOptimizerSessionRepository(self.db).get_session_history(
+        history = self.optim_repo.get_session_history(
             session_id=session_id,
             user_id=user_id
         )
@@ -168,7 +174,8 @@ class PromptOptimizerService:
         logger.info(f"Prompt optimization started, user_id={user_id}, session_id={session_id}")
 
         # Create LLM instance
-        api_config: ModelApiKey = model_config.api_keys[0]
+        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config.id)
+        api_config: ModelApiKey = api_keys[0] if api_keys else None
         llm = RedBearLLM(RedBearModelConfig(
             model_name=api_config.model_name,
             provider=api_config.provider,
@@ -176,11 +183,12 @@ class PromptOptimizerService:
             base_url=api_config.api_base
         ), type=ModelType(model_config.type))
         try:
-            with open('app/services/prompt/prompt_optimizer_system.jinja2', 'r', encoding='utf-8') as f:
+            prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
+            with open(os.path.join(prompt_path, 'prompt_optimizer_system.jinja2'), 'r', encoding='utf-8') as f:
                 opt_system_prompt = f.read()
             rendered_system_message = Template(opt_system_prompt).render()
 
-            with open('app/services/prompt/prompt_optimizer_user.jinja2', 'r', encoding='utf-8') as f:
+            with open(os.path.join(prompt_path, 'prompt_optimizer_user.jinja2'), 'r', encoding='utf-8') as f:
                 opt_user_prompt = f.read()
         except FileNotFoundError:
             raise BusinessException(message="System prompt template not found", code=BizCode.NOT_FOUND)
@@ -295,4 +303,165 @@ class PromptOptimizerService:
             role=role,
             content=content
         )
+        self.db.commit()
+        self.db.refresh(message)
         return message
+
+    def save_prompt(
+            self,
+            tenant_id: uuid.UUID,
+            session_id: uuid.UUID,
+            title: str,
+            prompt: str
+    ) -> dict:
+        """
+        Create and save a new prompt release for a given session.
+
+        Args:
+            tenant_id (uuid.UUID): The ID of the tenant owning the prompt.
+            session_id (uuid.UUID): The ID of the session to associate with this prompt.
+            title (str): The title of the prompt release.
+            prompt (str): The content of the prompt.
+
+        Returns:
+            dict: A dictionary containing:
+                - id (UUID): The unique ID of the created prompt release.
+                - session_id (UUID): The session ID linked to the release.
+                - title (str): The title of the prompt.
+                - prompt (str): The prompt content.
+                - created_at (int): Timestamp (in milliseconds) of when the prompt was created.
+
+        Raises:
+            BusinessException: If a prompt release already exists for the given session.
+        """
+        session = self.optim_repo.get_session_by_id(session_id)
+        if session is None or session.tenant_id != tenant_id:
+            raise BusinessException(
+                "Session does not exist or the current user has no access",
+                BizCode.BAD_REQUEST
+            )
+
+        if self.release_repo.get_prompt_by_session_id(session_id):
+            raise BusinessException(
+                "A release already exists for the current session",
+                BizCode.BAD_REQUEST
+            )
+
+        prompt_obj = self.release_repo.create_prompt_release(
+            tenant_id=tenant_id,
+            title=title,
+            session_id=session_id,
+            prompt=prompt
+        )
+        self.db.commit()
+        self.db.refresh(prompt_obj)
+        return {
+            "id": prompt_obj.id,
+            "session_id": prompt_obj.session_id,
+            "title": prompt_obj.title,
+            "prompt": prompt_obj.prompt,
+            "created_at": int(prompt_obj.created_at.timestamp() * 1000)
+        }
+
+    def delete_prompt(
+            self,
+            tenant_id: uuid.UUID,
+            prompt_id: uuid.UUID
+    ) -> None:
+        """
+        Soft delete a prompt release by prompt_id.
+
+        Args:
+            tenant_id (uuid.UUID): Tenant identifier.
+            prompt_id (uuid.UUID): Prompt identifier.
+
+        Raises:
+            BusinessException: If the prompt does not exist or already deleted.
+        """
+        prompt_obj = self.release_repo.get_prompt_by_id(prompt_id)
+        if not prompt_obj or prompt_obj.is_delete:
+            raise BusinessException(
+                "Prompt does not exist or has already been deleted",
+                BizCode.NOT_FOUND
+            )
+
+        if prompt_obj.tenant_id != tenant_id:
+            raise BusinessException(
+                "No permission to delete this prompt",
+                BizCode.FORBIDDEN
+            )
+
+        self.release_repo.soft_delete_prompt(prompt_obj)
+        self.db.commit()
+        logger.info(f"Prompt soft deleted, prompt_id={prompt_id}, tenant_id={tenant_id}")
+
+    def get_release_list(
+            self,
+            tenant_id: uuid.UUID,
+            page: int,
+            page_size: int,
+            filter_keyword: str | None = None
+    ) -> dict[str, int | list[Any]]:
+        """
+        Get paginated list of prompt releases with optional filter.
+
+        Args:
+            tenant_id (uuid.UUID): Tenant identifier.
+            page (int): Page number (starting from 1).
+            page_size (int): Number of items per page.
+            filter_keyword (str | None): Optional keyword to filter by title.
+
+        Returns:
+            dict: Contains total count, pagination info, and list of releases.
+        """
+        offset = (page - 1) * page_size
+
+        # Get total count and releases based on filter
+        if filter_keyword:
+            total = self.release_repo.count_prompts_by_keyword(tenant_id, filter_keyword)
+            releases = self.release_repo.search_prompts_paginated(
+                tenant_id=tenant_id,
+                keyword=filter_keyword,
+                offset=offset,
+                limit=page_size
+            )
+        else:
+            total = self.release_repo.count_prompts(tenant_id)
+            releases = self.release_repo.get_prompts_paginated(
+                tenant_id=tenant_id,
+                offset=offset,
+                limit=page_size
+            )
+
+        items = []
+        for release in releases:
+            # Get first user message from session
+            first_message = self.optim_repo.get_first_user_message(
+                session_id=release.session_id
+            )
+
+            items.append({
+                "id": release.id,
+                "title": release.title,
+                "prompt": release.prompt,
+                "created_at": int(release.created_at.timestamp() * 1000),
+                "first_message": first_message
+            })
+
+        log_msg = f"Retrieved {len(items)} prompt releases, page={page}, tenant_id={tenant_id}"
+        if filter_keyword:
+            log_msg += f", filter='{filter_keyword}'"
+        logger.info(log_msg)
+
+        result = {
+            "page": {
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "hasnext": page * page_size < total
+            },
+            "keyword": filter_keyword,
+            "items": items
+        }
+
+        return result

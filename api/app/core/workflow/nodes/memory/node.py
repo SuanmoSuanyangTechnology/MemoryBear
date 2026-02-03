@@ -22,9 +22,9 @@ class MemoryReadNode(BaseNode):
                 raise RuntimeError("End user id is required")
 
             return await MemoryAgentService().read_memory(
-                group_id=end_user_id,
+                end_user_id=end_user_id,
                 message=self._render_template(self.typed_config.message, state),
-                config_id=str(self.typed_config.config_id),
+                config_id=self.typed_config.config_id,
                 search_switch=self.typed_config.search_switch,
                 history=[],
                 db=db,
@@ -36,9 +36,10 @@ class MemoryReadNode(BaseNode):
 class MemoryWriteNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
-        self.typed_config = MemoryWriteNodeConfig(**self.config)
+        self.typed_config: MemoryWriteNodeConfig | None = None
 
     async def execute(self, state: WorkflowState) -> Any:
+        self.typed_config = MemoryWriteNodeConfig(**self.config)
         end_user_id = self.get_variable("sys.user_id", state)
 
         if not end_user_id:

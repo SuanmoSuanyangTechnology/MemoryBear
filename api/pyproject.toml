@@ -88,7 +88,6 @@ dependencies = [
     "cachetools==6.2.1",
     "ruamel.yaml==0.18.10",
     "strenum==0.4.15",
-    "aspose-slides==24.12.0",
     "opencv-python==4.10.0.84",
     "numpy>=1.26.0,<2.0.0",
     "huggingface-hub==0.25.2",
@@ -141,6 +140,7 @@ dependencies = [
     "oss2>=2.19.1",
     "flower>=2.0.1",
     "aiofiles>=23.0.0",
+    "owlready2>=0.46",
 ]
 
 [tool.pytest.ini_options]

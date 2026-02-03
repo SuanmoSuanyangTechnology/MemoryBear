@@ -1,0 +1,13 @@
+.page-tabs:global(.ant-segmented) {
+  background-color: rgba(91, 97, 103, 0.08);
+  padding: 4px;
+}
+.page-tabs:global(.ant-segmented .ant-segmented-item-label) {
+  line-height: 24px;
+  min-height: 24px;
+  padding: 0 12px;
+}
+
+.page-tabs:global(.ant-segmented .ant-segmented-item-selected) {
+  box-shadow: 0px 2px 4px 0px rgba(33, 35, 50, 0.16);
+}

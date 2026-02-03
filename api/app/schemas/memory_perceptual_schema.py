@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from app.models.memory_perceptual_model import PerceptualType, FileStorageType
+from app.models.memory_perceptual_model import PerceptualType, FileStorageService
 
 
 class PerceptualFilter(BaseModel):
@@ -38,12 +38,14 @@ class PerceptualMemoryItem(BaseModel):
     """感知记忆项"""
     id: uuid.UUID = Field(..., description="Unique memory ID")
     perceptual_type: PerceptualType = Field(..., description="Type of perception, e.g., text, audio, or video")
+    storage_service: FileStorageService = Field(..., description="Storage service for file")
     file_path: str = Field(..., description="File path in the storage service")
-    file_ext: str = Field(..., description="File extension")
     file_name: str = Field(..., description="File name")
+    file_ext: str = Field(..., description="File extension")
     summary: Optional[str] = Field(None, description="summary")
-    storage_type: FileStorageType = Field(..., description="Storage type for file")
+    meta_data: Optional[dict] = Field(None, description="Metadata information")
     created_time: int = Field(..., description="create time")
+
     topic: str = Field(..., description="topic")
     domain: str = Field(..., description="domain")
     keywords: list[str] = Field(..., description="keywords")

@@ -14,6 +14,34 @@ from pydantic import Field
 
 logger = get_memory_logger(__name__)
 
+# 支持的语言列表和默认回退值
+SUPPORTED_LANGUAGES = {"zh", "en"}
+FALLBACK_LANGUAGE = "en"
+
+
+def validate_language(language: Optional[str]) -> str:
+    """
+    校验语言参数，确保其为有效值。
+    
+    Args:
+        language: 待校验的语言代码
+        
+    Returns:
+        有效的语言代码（"zh" 或 "en"）
+    """
+    if language is None:
+        return FALLBACK_LANGUAGE
+    
+    lang = str(language).lower().strip()
+    if lang in SUPPORTED_LANGUAGES:
+        return lang
+    
+    logger.warning(
+        f"无效的语言参数 '{language}'，已回退到默认值 '{FALLBACK_LANGUAGE}'。"
+        f"支持的语言: {SUPPORTED_LANGUAGES}"
+    )
+    return FALLBACK_LANGUAGE
+
 
 class MemorySummaryResponse(RobustLLMResponse):
     """Structured response for summary generation per chunk.
@@ -31,7 +59,8 @@ class MemorySummaryResponse(RobustLLMResponse):
 
 async def generate_title_and_type_for_summary(
     content: str,
-    llm_client
+    llm_client,
+    language: str = None
 ) -> Tuple[str, str]:
     """
     为MemorySummary生成标题和类型
@@ -41,11 +70,18 @@ async def generate_title_and_type_for_summary(
     Args:
         content: Summary的内容文本
         llm_client: LLM客户端实例
+        language: 生成标题使用的语言 ("zh" 中文, "en" 英文)，如果为None则从配置读取
         
     Returns:
         (标题, 类型)元组
     """
     from app.core.memory.utils.prompt.prompt_utils import render_episodic_title_and_type_prompt
+    from app.core.config import settings
+    
+    # 如果没有指定语言，从配置中读取，并校验有效性
+    if language is None:
+        language = settings.DEFAULT_LANGUAGE
+    language = validate_language(language)
     
     # 定义有效的类型集合
     VALID_TYPES = {
@@ -57,13 +93,19 @@ async def generate_title_and_type_for_summary(
     }
     DEFAULT_TYPE = "conversation"  # 默认类型
     
+    # 根据语言设置默认标题
+    DEFAULT_TITLE = "空内容" if language == "zh" else "Empty Content"
+    PARSE_ERROR_TITLE = "解析失败" if language == "zh" else "Parse Failed"
+    ERROR_TITLE = "错误" if language == "zh" else "Error"
+    UNKNOWN_TITLE = "未知标题" if language == "zh" else "Unknown Title"
+    
     try:
         if not content:
-            logger.warning("content为空，无法生成标题和类型")
-            return ("空内容", DEFAULT_TYPE)
+            logger.warning(f"content为空，无法生成标题和类型 (language={language})")
+            return (DEFAULT_TITLE, DEFAULT_TYPE)
         
-        # 1. 渲染Jinja2提示词模板
-        prompt = await render_episodic_title_and_type_prompt(content)
+        # 1. 渲染Jinja2提示词模板，传递语言参数
+        prompt = await render_episodic_title_and_type_prompt(content, language=language)
         
         # 2. 调用LLM生成标题和类型
         messages = [
@@ -102,7 +144,7 @@ async def generate_title_and_type_for_summary(
             json_str = json_str.strip()
             
             result_data = json.loads(json_str)
-            title = result_data.get("title", "未知标题")
+            title = result_data.get("title", UNKNOWN_TITLE)
             episodic_type_raw = result_data.get("type", DEFAULT_TYPE)
             
             # 5. 校验和归一化类型
@@ -130,16 +172,16 @@ async def generate_title_and_type_for_summary(
                     f"已归一化为 '{episodic_type}'"
                 )
             
-            logger.info(f"成功生成标题和类型: title={title}, type={episodic_type}")
+            logger.info(f"成功生成标题和类型 (language={language}): title={title}, type={episodic_type}")
             return (title, episodic_type)
             
         except json.JSONDecodeError:
-            logger.error(f"无法解析LLM响应为JSON: {full_response}")
-            return ("解析失败", DEFAULT_TYPE)
+            logger.error(f"无法解析LLM响应为JSON (language={language}): {full_response}")
+            return (PARSE_ERROR_TITLE, DEFAULT_TYPE)
         
     except Exception as e:
-        logger.error(f"生成标题和类型时出错: {str(e)}", exc_info=True)
-        return ("错误", DEFAULT_TYPE)
+        logger.error(f"生成标题和类型时出错 (language={language}): {str(e)}", exc_info=True)
+        return (ERROR_TITLE, DEFAULT_TYPE)
 
 async def _process_chunk_summary(
     dialog: DialogData,
@@ -153,11 +195,16 @@ async def _process_chunk_summary(
         return None
 
     try:
+        # 从配置中获取语言设置（只获取一次，复用），并校验有效性
+        from app.core.config import settings
+        language = validate_language(settings.DEFAULT_LANGUAGE)
+        
         # Render prompt via Jinja2 for a single chunk
         prompt_content = await render_memory_summary_prompt(
             chunk_texts=chunk.content,
             json_schema=MemorySummaryResponse.model_json_schema(),
             max_words=200,
+            language=language,
         )
 
         messages = [
@@ -178,9 +225,10 @@ async def _process_chunk_summary(
         try:
             title, episodic_type = await generate_title_and_type_for_summary(
                 content=summary_text,
-                llm_client=llm_client
+                llm_client=llm_client,
+                language=language
             )
-            logger.info(f"Generated title and type for MemorySummary: title={title}, type={episodic_type}")
+            logger.info(f"Generated title and type for MemorySummary (language={language}): title={title}, type={episodic_type}")
         except Exception as e:
             logger.warning(f"Failed to generate title and type for chunk {chunk.id}: {e}")
             # Continue without title and type
@@ -193,9 +241,9 @@ async def _process_chunk_summary(
         node = MemorySummaryNode(
             id=uuid4().hex,
             name=title if title else f"MemorySummaryChunk_{chunk.id}",
-            group_id=dialog.group_id,
-            user_id=dialog.user_id,
-            apply_id=dialog.apply_id,
+            end_user_id=dialog.end_user_id,
+            user_id=dialog.end_user_id,
+            apply_id=dialog.end_user_id,
             run_id=dialog.run_id,  # 使用 dialog 的 run_id
             created_at=datetime.now(),
             expired_at=datetime(9999, 12, 31),

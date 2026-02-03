@@ -3,6 +3,7 @@ export interface MemoryFormData {
   config_id?: number;
   config_name: string;
   config_desc?: string;
+  scene_id?: string;
 }
 
   // 内存数据类型
@@ -23,13 +24,14 @@ export interface Memory {
   include_dialogue_context: boolean;
   max_context: string;
   lambda_mem: string;
-  lambda_mem: string;
   offset: string;
   state: boolean;
   created_at: string;
   updated_at: string;
   config_desc: string;
   workspace_id: string;
+  scene_id: string;
+  scene_name: string;
   [key: string]: string | number | boolean;
 }
 // 定义组件暴露的方法接口

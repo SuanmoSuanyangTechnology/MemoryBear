@@ -19,11 +19,15 @@ from app.core.workflow.variable_pool import VariablePool
 logger = logging.getLogger(__name__)
 
 
-def merget_activate_state(x, y):
+def merge_activate_state(x, y):
     return {
         k: x.get(k, False) or y.get(k, False)
         for k in set(x) | set(y)
     }
+
+
+def merge_looping_state(x, y):
+    return y if y > x else x
 
 
 class WorkflowState(TypedDict):
@@ -36,7 +40,7 @@ class WorkflowState(TypedDict):
 
     # Set of loop node IDs, used for assigning values in loop nodes
     cycle_nodes: list
-    looping: Annotated[bool, lambda x, y: x and y]
+    looping: Annotated[int, merge_looping_state]
 
     # Input variables (passed from configured variables)
     # Uses a deep merge function, supporting nested dict updates (e.g., conv.xxx)
@@ -63,12 +67,8 @@ class WorkflowState(TypedDict):
     error: str | None
     error_node: str | None
 
-    # Streaming buffer (stores real-time streaming output of nodes)
-    # Format: {node_id: {"chunks": [...], "full_content": "..."}}
-    streaming_buffer: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
-
     # node activate status
-    activate: Annotated[dict[str, bool], merget_activate_state]
+    activate: Annotated[dict[str, bool], merge_activate_state]
 
 
 class BaseNode(ABC):
@@ -296,7 +296,7 @@ class BaseNode(ABC):
         """
         if not self.check_activate(state):
             yield self.trans_activate(state)
-            logger.info(f"跳过节点{self.node_id}")
+            logger.info(f"jump node: {self.node_id}")
             return
 
         import time
@@ -308,19 +308,6 @@ class BaseNode(ABC):
         try:
             # Get LangGraph's stream writer for sending custom data
             writer = get_stream_writer()
-
-            # Check if this is an End node
-            # End nodes CAN send chunks (for suffix), but only after LLM content
-            is_end_node = self.node_type == "end"
-
-            # Check if this node is adjacent to End node (for message type)
-            is_adjacent_to_end = getattr(self, '_is_adjacent_to_end', False)
-
-            # Determine chunk type: "message" for End and adjacent nodes, "node_chunk" for others
-            chunk_type = "message" if (is_end_node or is_adjacent_to_end) else "node_chunk"
-
-            logger.debug(
-                f"节点 {self.node_id} chunk 类型: {chunk_type} (is_end={is_end_node}, adjacent={is_adjacent_to_end})")
 
             # Accumulate complete result (for final wrapping)
             chunks = []
@@ -336,65 +323,24 @@ class BaseNode(ABC):
                     raise TimeoutError()
 
                 # Check if it's a completion marker
-                if isinstance(item, dict) and item.get("__final__"):
+                if item.get("__final__"):
                     final_result = item["result"]
-                elif isinstance(item, str):
-                    # String is a chunk
+                else:
                     chunk_count += 1
-                    chunks.append(item)
-                    full_content = "".join(chunks)
+                    content = str(item.get("chunk"))
+                    done = item.get("done", False)
+                    chunks.append(content)
 
                     # Send chunks for all nodes (including End nodes for suffix)
-                    logger.debug(f"节点 {self.node_id} 发送 chunk #{chunk_count}: {item[:50]}...")
+                    logger.debug(f"节点 {self.node_id} 发送 chunk #{chunk_count}: {content[:50]}...")
 
                     # 1. Send via stream writer (for real-time client updates)
                     writer({
-                        "type": chunk_type,  # "message" or "node_chunk"
+                        "type": "node_chunk",
                         "node_id": self.node_id,
-                        "chunk": item,
-                        "full_content": full_content,
-                        "chunk_index": chunk_count
+                        "chunk": content,
+                        "done": done
                     })
-
-                    # 2. Update streaming buffer in state (for downstream nodes)
-                    # Only non-End nodes need streaming buffer
-                    if not is_end_node:
-                        yield {
-                            "streaming_buffer": {
-                                self.node_id: {
-                                    "full_content": full_content,
-                                    "chunk_count": chunk_count,
-                                    "is_complete": False
-                                }
-                            }
-                        }
-                else:
-                    # Other types are also treated as chunks
-                    chunk_count += 1
-                    chunk_str = str(item)
-                    chunks.append(chunk_str)
-                    full_content = "".join(chunks)
-
-                    # Send chunks for all nodes
-                    writer({
-                        "type": chunk_type,  # "message" or "node_chunk"
-                        "node_id": self.node_id,
-                        "chunk": chunk_str,
-                        "full_content": full_content,
-                        "chunk_index": chunk_count
-                    })
-
-                    # Only non-End nodes need streaming buffer
-                    if not is_end_node:
-                        yield {
-                            "streaming_buffer": {
-                                self.node_id: {
-                                    "full_content": full_content,
-                                    "chunk_count": chunk_count,
-                                    "is_complete": False
-                                }
-                            }
-                        }
 
             elapsed_time = time.time() - start_time
 
@@ -421,16 +367,6 @@ class BaseNode(ABC):
                 },
                 "looping": state["looping"]
             }
-
-            # Add streaming buffer for non-End nodes
-            if not is_end_node:
-                state_update["streaming_buffer"] = {
-                    self.node_id: {
-                        "full_content": "".join(chunks),
-                        "chunk_count": chunk_count,
-                        "is_complete": True  # Mark as complete
-                    }
-                }
 
             # Finally yield state update
             # LangGraph will merge this into state
@@ -540,6 +476,11 @@ class BaseNode(ABC):
                 "error_node": self.node_id
             }
         else:
+            writer = get_stream_writer()
+            writer({
+                "type": "node_error",
+                **node_output
+            })
             # 无错误边：抛出异常停止工作流
             logger.error(f"节点 {self.node_id} 执行失败，停止工作流: {error_message}")
             raise Exception(f"节点 {self.node_id} 执行失败: {error_message}")

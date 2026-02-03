@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 14:00:06 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 14:00:06 
+ */
 import { request } from '@/utils/request'
 import type {
   MemoryFormData,
@@ -116,20 +122,20 @@ export const getRagContent = (end_user_id: string) => {
   return request.get(`/dashboard/rag_content`, { end_user_id, limit: 20 })
 }
 // Emotion distribution analysis
-export const getWordCloud = (group_id: string) => {
-  return request.post(`/memory/emotion-memory/wordcloud`, { group_id, limit: 20 })
+export const getWordCloud = (end_user_id: string) => {
+  return request.post(`/memory/emotion-memory/wordcloud`, { end_user_id, limit: 20 })
 }
 // High-frequency emotion keywords
-export const getEmotionTags = (group_id: string) => {
-  return request.post(`/memory/emotion-memory/tags`, { group_id, limit: 20 })
+export const getEmotionTags = (end_user_id: string) => {
+  return request.post(`/memory/emotion-memory/tags`, { end_user_id, limit: 20 })
 }
 // Emotion health index
-export const getEmotionHealth = (group_id: string) => {
-  return request.post(`/memory/emotion-memory/health`, { group_id, limit: 20 })
+export const getEmotionHealth = (end_user_id: string) => {
+  return request.post(`/memory/emotion-memory/health`, { end_user_id })
 }
 // Personalized suggestions
-export const getEmotionSuggestions = (group_id: string) => {
-  return request.post(`/memory/emotion-memory/suggestions`, { group_id, limit: 20 })
+export const getEmotionSuggestions = (end_user_id: string) => {
+  return request.post(`/memory/emotion-memory/suggestions`, { end_user_id })
 }
 export const generateSuggestions = (end_user_id: string) => {
   return request.post(`/memory/emotion-memory/generate_suggestions`, { end_user_id })
@@ -138,8 +144,8 @@ export const analyticsRefresh = (end_user_id: string) => {
   return request.post('/memory-storage/analytics/generate_cache', { end_user_id })
 }
 // Forgetting stats
-export const getForgetStats = (group_id: string) => {
-  return request.get(`/memory/forget-memory/stats`, { group_id })
+export const getForgetStats = (end_user_id: string) => {
+  return request.get(`/memory/forget-memory/stats`, { end_user_id })
 }
 // Implicit Memory - Preferences
 export const getImplicitPreferences = (end_user_id: string) => {
@@ -165,20 +171,20 @@ export const getShortTerm = (end_user_id: string) => {
   return request.get(`/memory/short/short_term`, { end_user_id })
 }
 // Perceptual Memory - Visual memory
-export const getPerceptualLastVisual = (end_user: string) => {
-  return request.get(`/memory/perceptual/${end_user}/last_visual`)
+export const getPerceptualLastVisual = (end_user_id: string) => {
+  return request.get(`/memory/perceptual/${end_user_id}/last_visual`)
 }
 // Perceptual Memory - Audio memory
-export const getPerceptualLastListen = (end_user: string) => {
-  return request.get(`/memory/perceptual/${end_user}/last_listen`)
+export const getPerceptualLastListen = (end_user_id: string) => {
+  return request.get(`/memory/perceptual/${end_user_id}/last_listen`)
 }
 // Perceptual Memory - Text memory
-export const getPerceptualLastText = (end_user: string) => {
-  return request.get(`/memory/perceptual/${end_user}/last_text`)
+export const getPerceptualLastText = (end_user_id: string) => {
+  return request.get(`/memory/perceptual/${end_user_id}/last_text`)
 }
 // Perceptual Memory - Perceptual memory timeline
-export const getPerceptualTimeline = (end_user: string) => {
-  return request.get(`/memory/perceptual/${end_user}/timeline`)
+export const getPerceptualTimeline = (end_user_id: string) => {
+  return request.get(`/memory/perceptual/${end_user_id}/timeline`)
 }
 // Episodic Memory - Overview
 export const getEpisodicOverview = (data: { end_user_id: string; time_range: string; episodic_type: string; } ) => {
@@ -201,14 +207,14 @@ export const getExplicitMemory = (end_user_id: string) => {
 export const getExplicitMemoryDetails = (data: { end_user_id: string, memory_id: string; }) => {
   return request.post(`/memory/explicit-memory/details`, data)
 }
-export const getConversations = (end_user: string) => {
-  return request.get(`/memory/work/${end_user}/conversations`)
+export const getConversations = (end_user_id: string) => {
+  return request.get(`/memory/work/${end_user_id}/conversations`)
 }
-export const getConversationMessages = (end_user: string, conversation_id: string) => {
-  return request.get(`/memory/work/${end_user}/messages`, { conversation_id })
+export const getConversationMessages = (end_user_id: string, conversation_id: string) => {
+  return request.get(`/memory/work/${end_user_id}/messages`, { conversation_id })
 }
-export const getConversationDetail = (end_user: string, conversation_id: string) => {
-  return request.get(`/memory/work/${end_user}/detail`, { conversation_id })
+export const getConversationDetail = (end_user_id: string, conversation_id: string) => {
+  return request.get(`/memory/work/${end_user_id}/detail`, { conversation_id })
 }
 export const forgetTrigger = (data: { max_merge_batch_size: number; min_days_since_access: number; end_user_id: string;}) => {
   return request.post(`/memory/forget-memory/trigger`, data)

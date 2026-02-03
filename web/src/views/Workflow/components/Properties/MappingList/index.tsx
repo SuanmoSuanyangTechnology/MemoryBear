@@ -1,14 +1,17 @@
-import React from 'react';
+import { type FC, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next'
-import { Button, Form, Input, Divider } from 'antd';
+import { Button, Form, Input, Divider, Space } from 'antd';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
 
 interface MappingListProps {
+  label: string;
   name: string;
   options: Suggestion[];
+  extra?: ReactNode;
+  valueKey?: string;
 }
-const MappingList: React.FC<MappingListProps> = ({ name, options }) => {
+const MappingList: FC<MappingListProps> = ({ label, name, options, extra, valueKey = 'value' }) => {
   const { t } = useTranslation()
   return (
     <>
@@ -17,16 +20,19 @@ const MappingList: React.FC<MappingListProps> = ({ name, options }) => {
           <>
             <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
               <div className="rb:text-[12px] rb:font-medium rb:leading-4.5">
-                {t('workflow.config.jinja-render.mapping')}
+                {label}
               </div>
 
-              <Button
-                onClick={() => add()}
-                className="rb:py-0! rb:px-1! rb:text-[12px]!"
-                size="small"
-              >
-                + {t('workflow.config.addVariable')}
-              </Button>
+              <Space size={8}>
+                {extra}
+                <Button
+                  onClick={() => add()}
+                  className="rb:py-0! rb:px-1! rb:text-[12px]!"
+                  size="small"
+                >
+                  + {t('workflow.config.addVariable')}
+                </Button>
+              </Space>
             </div>
             {fields.map(({ key, name, ...restField }) => (
               <div key={key} className="rb:flex rb:items-center rb:gap-1 rb:mb-2">
@@ -43,7 +49,7 @@ const MappingList: React.FC<MappingListProps> = ({ name, options }) => {
                 </Form.Item>
                 <Form.Item
                   {...restField}
-                  name={[name, 'value']}
+                  name={[name, valueKey]}
                   noStyle
                 >
                   <VariableSelect

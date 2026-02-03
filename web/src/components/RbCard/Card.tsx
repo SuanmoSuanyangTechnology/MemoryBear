@@ -1,5 +1,5 @@
 import { type FC, type ReactNode } from 'react'
-import { Card } from 'antd';
+import { Card, Tooltip } from 'antd';
 import clsx from 'clsx';
 
 interface RbCardProps {
@@ -9,7 +9,7 @@ interface RbCardProps {
   extra?: ReactNode;
   children?: ReactNode;
   avatar?: ReactNode;
-  avatarUrl?: string;
+  avatarUrl?: string | null;
   bodyPadding?: string;
   bodyClassName?: string;
   headerType?: 'border' | 'borderless' | 'borderBL' | 'borderL';
@@ -50,7 +50,7 @@ const RbCard: FC<RbCardProps> = ({
     <Card
       {...props}
       title={typeof title === 'function' ? title() : title ?
-        <div className="rb:flex rb:items-center">
+        <div className="rb:flex rb:items-center rb:gap-2">
           {avatarUrl 
             ? <img src={avatarUrl} className="rb:mr-3.25 rb:w-12 rb:h-12 rb:rounded-lg" />
             : avatar ? avatar : null
@@ -59,11 +59,11 @@ const RbCard: FC<RbCardProps> = ({
             clsx(
               {
                 'rb:max-w-full': !avatarUrl && !avatar,
-                'rb:max-w-[calc(100%-60px)]': avatarUrl || avatar,
+                'rb:max-w-[calc(100%-80px)]': avatarUrl || avatar,
               }
             )
           }>
-            <div className="rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{title}</div>
+            <Tooltip title={title}><div className="rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{title}</div></Tooltip>
             {subTitle && <div className="rb:text-[#5B6167] rb:text-[12px]">{subTitle}</div>}
           </div>
         </div> : null

@@ -8,7 +8,7 @@ import { updatePromptMessages, createPromptSessions } from '@/api/prompt'
 import { getModelListUrl } from '@/api/models'
 import type { AiPromptModalRef, AiPromptVariableModalRef, AiPromptForm } from '../types'
 import RbModal from '@/components/RbModal'
-import type { Model } from '@/views/ModelManagement/types'
+import type { ModelListItem } from '@/views/ModelManagement/types'
 import ChatContent from '@/components/Chat/ChatContent'
 import Empty from '@/components/Empty'
 import ChatSendIcon from '@/assets/images/application/chatSend.svg'
@@ -21,7 +21,7 @@ import Editor from './Editor'
 
 interface AiPromptModalProps {
   refresh: (value: string) => void;
-  defaultModel: Model | null;
+  defaultModel: ModelListItem | null;
 }
 
 const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
@@ -181,7 +181,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
             >
               <CustomSelect
                 url={getModelListUrl}
-                params={{ type: 'llm,chat', pagesize: 100 }}
+                params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
                 valueKey="id"
                 labelKey="name"
                 hasAll={false}

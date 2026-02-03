@@ -1,24 +1,31 @@
-import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Form, Input, App, Select } from 'antd';
+import { forwardRef, useImperativeHandle, useState } from 'react';
+import { Form, Input, App, Steps, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { SpaceModalData, SpaceModalRef, Space } from '../types'
+import type { SpaceModalData, SpaceModalRef, Space, StorageType } from '../types'
 import RbModal from '@/components/RbModal'
 import { createWorkspace } from '@/api/workspaces'
 import RadioGroupCard from '@/components/RadioGroupCard'
-import { getModelListUrl, getModelList } from '@/api/models'
+import { getModelListUrl } from '@/api/models'
 import CustomSelect from '@/components/CustomSelect'
-import type { Model } from '@/views/ModelManagement/types'
+import UploadImages from '@/components/Upload/UploadImages'
+import { getFileLink } from '@/api/fileStorage'
+import ragIcon from '@/assets/images/space/rag.png'
+import neo4jIcon from '@/assets/images/space/neo4j.png'
 
 const FormItem = Form.Item;
 
 interface SpaceModalProps {
   refresh: () => void;
 }
-const types = [
+const types: StorageType[] = [
   'rag',
   'neo4j',
 ]
+const typeIcons: Record<StorageType, string> = {
+  rag: ragIcon,
+  neo4j: neo4jIcon
+}
 
 const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   refresh
@@ -29,7 +36,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   const [form] = Form.useForm<SpaceModalData>();
   const [loading, setLoading] = useState(false)
   const [editVo, setEditVo] = useState<Space | null>(null)
-  const [modelList, setModelList] = useState<Model[]>([])
+  const [currentStep, setCurrentStep] = useState(0)
 
   const values = Form.useWatch([], form);
 
@@ -39,7 +46,11 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
     form.resetFields();
     setLoading(false)
     setEditVo(null)
+    setCurrentStep(0)
   };
+  const handlePrevStep = () => {
+    setCurrentStep(prev => prev - 1)
+  }
 
   const handleOpen = (space?: Space) => {
     if (space) {
@@ -58,33 +69,41 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
     form
       .validateFields()
       .then(() => {
-        setLoading(true)
-        createWorkspace(values as SpaceModalData)
-          .then(() => {
-            setLoading(false)
-            refresh()
-            handleClose()
-            message.success(t('common.createSuccess'))
-          })
-          .catch(() => {
-            setLoading(false)
-          });
+        if (currentStep === 0) {
+          setCurrentStep(1)
+        } else {
+          const { icon, ...rest } = values
+          let formData: SpaceModalData = {
+            ...rest
+          }
+          if (icon?.response?.data.file_id) {
+            getFileLink(icon?.response?.data.file_id).then(res => {
+              const logoRes = res as { url: string }
+              formData.icon = logoRes.url
+              formData.iconType = 'remote'
+              handleUpdate(formData)
+            }).catch(() => {
+              handleUpdate(formData)
+            })
+          }
+        }
       })
       .catch((err) => {
         console.log('err', err)
       });
   }
-
-  useEffect(() => {
-    getModels()
-  }, [])
-  
-  const getModels = () => {
-    getModelList({ type: 'llm,chat', pagesize: 100, page: 1 })
-      .then(res => {
-        const response = res as { items: Model[] }
-        setModelList(response.items)
+  const handleUpdate = (formData: SpaceModalData) => {
+    setLoading(true)
+    createWorkspace(formData)
+      .then(() => {
+        setLoading(false)
+        refresh()
+        handleClose()
+        message.success(t('common.createSuccess'))
       })
+      .catch(() => {
+        setLoading(false)
+      });
   }
 
   // 暴露给父组件的方法
@@ -98,78 +117,104 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
       title={t(`space.${editVo?.id ? 'editSpace' : 'createSpace'}`)}
       open={visible}
       onCancel={handleClose}
-      okText={t('common.save')}
       onOk={handleSave}
+      footer={[
+        <Button key="close" onClick={currentStep === 0 ? handleClose : handlePrevStep}>{t(currentStep === 0 ? 'common.cancel' : 'common.prevStep')}</Button>,
+        <Button key="submit" type="primary" onClick={handleSave}>{t(currentStep === 0 ? 'common.nextStep' : 'common.save')}</Button>,
+      ]}
       confirmLoading={loading}
     >
+      <Steps
+        size="small"
+        current={currentStep}
+        items={['basic', 'models'].map(key => ({ title: t(`space.${key}`) } ))}
+        className="rb:mb-6!"
+      />
       <Form
         form={form}
         layout="vertical"
       >
+        <Form.Item
+          name="icon"
+          label={t('space.spaceIcon')}
+          valuePropName="fileList"
+          hidden={currentStep === 1}
+        >
+          <UploadImages />
+        </Form.Item>
         <FormItem
           name="name"
           label={t('space.spaceName')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          hidden={currentStep === 1}
+          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('space.spaceName') }) }]}
         >
-          <Input placeholder={t('common.enter')} />
+          <Input placeholder={t('common.inputPlaceholder', { title: t('space.spaceName') })} />
         </FormItem>
-        <Form.Item 
-          label={t('space.llmModel')} 
-          name="llm"
-          rules={[{ required: true, message: t('common.pleaseSelect') }]}
-        >
-          <Select
-            placeholder={t('common.pleaseSelect')}
-            fieldNames={{
-              label: 'name',
-              value: 'id',
-            }}
-            options={modelList}
-          />
-        </Form.Item>
-        <Form.Item 
-          label={t('space.embeddingModel')} 
-          name="embedding"
-          rules={[{ required: true, message: t('common.pleaseSelect') }]}
-        >
-          <CustomSelect
-            url={getModelListUrl}
-            params={{ type: 'embedding', pagesize: 100 }}
-            valueKey="id"
-            labelKey="name"
-            hasAll={false}
-            style={{width: '100%'}}
-          />
-        </Form.Item>
-        <Form.Item 
-          label={t('space.rerankModel')} 
-          name="rerank"
-          rules={[{ required: true, message: t('common.pleaseSelect') }]}
-        >
-          <CustomSelect
-            url={getModelListUrl}
-            params={{ type: 'rerank', pagesize: 100 }}
-            valueKey="id"
-            labelKey="name"
-            hasAll={false}
-            style={{width: '100%'}}
-          />
-        </Form.Item>
-        
         <FormItem
           name="storage_type"
           label={t('space.storageType')}
-          rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          hidden={currentStep === 1}
+          rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.storageType') }) }]}
         >
           <RadioGroupCard
             options={types.map((type) => ({
               value: type,
               label: t(`space.${type}`),
               labelDesc: t(`space.${type}Desc`),
-              // icon: typeIcons[type]
+              icon: typeIcons[type]
             }))}
+            block={true}
           />
         </FormItem>
+
+
+        {currentStep === 1 && <>
+          <Form.Item
+            label={t('space.llmModel')}
+            name="llm"
+            rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.llmModel') }) }]}
+          >
+            <CustomSelect
+              url={getModelListUrl}
+              params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
+              valueKey="id"
+              labelKey="name"
+              hasAll={false}
+              placeholder={t('common.selectPlaceholder', { title: t('space.llmModel') })}
+              className="rb:w-full!"
+            />
+          </Form.Item>
+          <Form.Item
+            label={t('space.embeddingModel')}
+            name="embedding"
+            rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.embeddingModel') }) }]}
+          >
+            <CustomSelect
+              url={getModelListUrl}
+              params={{ type: 'embedding', pagesize: 100, is_active: true }}
+              valueKey="id"
+              labelKey="name"
+              hasAll={false}
+              placeholder={t('common.selectPlaceholder', { title: t('space.embeddingModel') })}
+              className="rb:w-full!"
+            />
+          </Form.Item>
+          <Form.Item
+            label={t('space.rerankModel')}
+            name="rerank"
+            rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.rerankModel') }) }]}
+          >
+            <CustomSelect
+              url={getModelListUrl}
+              params={{ type: 'rerank', pagesize: 100, is_active: true }}
+              valueKey="id"
+              labelKey="name"
+              hasAll={false}
+              placeholder={t('common.selectPlaceholder', { title: t('space.rerankModel') })}
+              className="rb:w-full!"
+            />
+          </Form.Item>
+        </>}
       </Form>
     </RbModal>
   );

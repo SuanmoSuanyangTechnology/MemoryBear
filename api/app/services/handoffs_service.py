@@ -4,7 +4,7 @@ import uuid
 from typing import List, Dict, Any, Optional, AsyncGenerator, Annotated
 from typing_extensions import TypedDict
 
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, AIMessageChunk
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command
 from langgraph.checkpoint.memory import MemorySaver
@@ -727,9 +727,12 @@ class HandoffsService:
         
         # 提取响应
         response_content = ""
+        total_tokens = 0
         for msg in result.get("messages", []):
             if isinstance(msg, AIMessage):
                 response_content = msg.content
+                response_meta = msg.response_metadata if hasattr(msg, 'response_metadata') else None
+                total_tokens = response_meta.get("token_usage", {}).get("total_tokens", 0) if response_meta else 0
                 break
         
         return {
@@ -737,7 +740,12 @@ class HandoffsService:
             "active_agent": result.get("active_agent"),
             "response": response_content,
             "message_count": len(result.get("messages", [])),
-            "handoff_count": result.get("handoff_count", 0)
+            "handoff_count": result.get("handoff_count", 0),
+            "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": total_tokens
+                }
         }
     
     async def chat_stream(
@@ -830,6 +838,12 @@ class HandoffsService:
                 
                 # 捕获 LLM 结束事件，输出收集到的工具调用
                 elif kind == "on_chat_model_end":
+                    output_message = event.get("data", {}).get("output", {})
+                    if isinstance(output_message, AIMessageChunk):
+                        response_meta = output_message.response_metadata if hasattr(output_message, 'response_metadata') else None
+                        total_tokens = response_meta.get("token_usage", {}).get("total_tokens",
+                                                                                0) if response_meta else 0
+                        yield f"event: sub_usage\ndata: {json.dumps({"total_tokens": total_tokens}, ensure_ascii=False)}\n\n"
                     if collected_tool_calls:
                         # 找到参数最完整的 transfer 工具调用
                         best_tc = None

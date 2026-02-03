@@ -10,7 +10,7 @@ from sqlalchemy.orm import relationship
 
 from app.base.type import PydanticType
 from app.db import Base
-from app.schemas import ModelParameters
+from app.schemas.app_schema import ModelParameters
 
 
 class OrchestrationMode(StrEnum):

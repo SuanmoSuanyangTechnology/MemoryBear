@@ -1,5 +1,6 @@
 """多 Agent 配置管理服务"""
 import uuid
+import json
 from typing import Optional, List, Tuple, Any, Annotated
 
 from fastapi import Depends
@@ -74,7 +75,7 @@ class MultiAgentService:
             select(MultiAgentConfig)
             .where(
                 MultiAgentConfig.app_id == app_id,
-                MultiAgentConfig.is_active == True
+                MultiAgentConfig.is_active.is_(True)
             )
             .order_by(MultiAgentConfig.updated_at.desc())
         ).first()
@@ -144,7 +145,7 @@ class MultiAgentService:
             select(MultiAgentConfig)
             .where(
                 MultiAgentConfig.app_id == app_id,
-                MultiAgentConfig.is_active == True
+                MultiAgentConfig.is_active.is_(True)
             )
             .order_by(MultiAgentConfig.updated_at.desc())
         ).first()
@@ -427,6 +428,23 @@ class MultiAgentService:
             memory=getattr(request, 'memory', True)  # 记忆功能参数
         )
 
+        await self._save_conversation_message(
+            conversation_id=request.conversation_id,
+            user_message=request.message,
+            assistant_message=result.get("message", ""),
+            app_id=app_id,
+            user_id=request.user_id,
+            meta_data={
+                "mode": result.get("mode"),
+                "elapsed_time": result.get("elapsed_time"),
+                "usage": result.get("usage", {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                })
+            }
+        )
+
         return result
 
     async def run_stream(
@@ -451,10 +469,13 @@ class MultiAgentService:
             raise ResourceNotFoundException("多 Agent 配置", str(app_id))
 
         if not config.is_active:
-            raise BusinessException("多 Agent 配置已禁用", BizCode.RESOURCE_DISABLED)
+            raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
 
         # 2. 创建编排器
         orchestrator = MultiAgentOrchestrator(self.db, config)
+
+        full_content = ""
+        total_tokens = 0
 
         # 3. 流式执行任务
         async for event in orchestrator.execute_stream(
@@ -468,7 +489,88 @@ class MultiAgentService:
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id
         ):
-            yield event
+            if "sub_usage" in event:
+                if "data:" in event:
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        data = json.loads(data_line)
+                        if "total_tokens" in data:
+                            total_tokens += data["total_tokens"]
+                    except:
+                        pass
+            else:
+                yield event
+                if "data:" in event:
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        data = json.loads(data_line)
+                        if "content" in data:
+                            full_content += data["content"]
+                    except:
+                        pass
+
+        await self._save_conversation_message(
+            conversation_id=request.conversation_id,
+            user_message=request.message,
+            assistant_message=full_content,
+            app_id=app_id,
+            user_id=request.user_id,
+            meta_data={
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": total_tokens
+                }
+            }
+        )
+
+    async def _save_conversation_message(
+        self,
+        conversation_id: uuid.UUID,
+        user_message: str,
+        assistant_message: str,
+        meta_data: dict,
+        app_id: Optional[uuid.UUID] = None,
+        user_id: Optional[str] = None
+    ) -> None:
+        """保存会话消息
+
+        Args:
+            conversation_id: 会话ID
+            user_message: 用户消息
+            assistant_message: AI 回复消息
+            meta_data: 元数据（包括 token 消耗）
+            app_id: 应用ID
+            user_id: 用户ID
+        """
+        try:
+            from app.services.conversation_service import ConversationService
+
+            conversation_service = ConversationService(self.db)
+
+            conversation_service.add_message(
+                conversation_id=conversation_id,
+                role="user",
+                content=user_message
+            )
+            conversation_service.add_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=assistant_message,
+                meta_data=meta_data
+            )
+
+            logger.debug(
+                "保存多 Agent 会话消息",
+                extra={
+                    "conversation_id": conversation_id,
+                    "user_message_length": len(user_message),
+                    "assistant_message_length": len(assistant_message)
+                }
+            )
+
+        except Exception as e:
+            logger.warning("保存会话消息失败", extra={"error": str(e)})
 
     # def add_sub_agent(
     #     self,

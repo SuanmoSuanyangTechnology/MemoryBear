@@ -174,7 +174,7 @@ async def _judge_pair(
         pass
 # 3. 构建LLM判断的“上下文信息”（规则层计算的所有特征）  判断上下文特征有助于实体消歧首先判断的类型关系
     ctx = {
-        "same_group": getattr(a, "group_id", None) == getattr(b, "group_id", None),
+        "same_group": getattr(a, "end_user_id", None) == getattr(b, "end_user_id", None),
         "type_ok": _simple_type_ok(getattr(a, "entity_type", None), getattr(b, "entity_type", None)),
         "type_similarity": _type_similarity(getattr(a, "entity_type", None), getattr(b, "entity_type", None)),
         "name_text_sim": name_text_sim,
@@ -235,7 +235,7 @@ async def _judge_pair_disamb(
     except Exception:
         pass
     ctx = {
-        "same_group": getattr(a, "group_id", None) == getattr(b, "group_id", None),
+        "same_group": getattr(a, "end_user_id", None) == getattr(b, "end_user_id", None),
         "type_ok": _simple_type_ok(getattr(a, "entity_type", None), getattr(b, "entity_type", None)),
         "name_text_sim": name_text_sim,
         "name_embed_sim": name_embed_sim,
@@ -317,8 +317,8 @@ async def llm_dedup_entities(  # 保留对偶判断作为子流程，是为了�
         a = entity_nodes[i]
         for j in range(i + 1, len(entity_nodes)):
             b = entity_nodes[j]
-            # 规则1：必须属于同一组（group_id相同，不同组的实体不重复）
-            if getattr(a, "group_id", None) != getattr(b, "group_id", None):
+            # 规则1：必须属于同一组（end_user_id相同，不同组的实体不重复）
+            if getattr(a, "end_user_id", None) != getattr(b, "end_user_id", None):
                 continue
             # 规则2：类型必须兼容（调用_simple_type_ok判断）
             if not _simple_type_ok(getattr(a, "entity_type", None), getattr(b, "entity_type", None)):
@@ -474,7 +474,7 @@ async def llm_dedup_entities_iterative_blocks( # 迭代分块并发 LLM 去重
     - max_rounds: upper bound for iterative passes (default 3)
     - auto_merge_threshold: decision confidence for auto-merge when no co-occurrence (default 0.90)
     - co_ctx_threshold: lower threshold when co-occurrence is detected (default 0.83)
-    - shuffle_each_round: whether to shuffle entities within group_id each round to vary block composition
+    - shuffle_each_round: whether to shuffle entities within end_user_id each round to vary block composition
 
     Returns:
     - global_redirect: dict losing_id -> canonical_id accumulated across rounds
@@ -509,7 +509,7 @@ async def llm_dedup_entities_iterative_blocks( # 迭代分块并发 LLM 去重
 
     def _partition_blocks(nodes: List[ExtractedEntityNode]) -> List[List[ExtractedEntityNode]]:
         """
-        按 group_id 分块，避免跨组实体在同一块，减少无效候选对
+        按 end_user_id 分块，避免跨组实体在同一块，减少无效候选对
 
         Args:
             nodes: 实体节点列表
@@ -519,7 +519,7 @@ async def llm_dedup_entities_iterative_blocks( # 迭代分块并发 LLM 去重
         """
         groups: Dict[str, List[ExtractedEntityNode]] = {}
         for e in nodes:
-            gid = getattr(e, "group_id", None)
+            gid = getattr(e, "end_user_id", None)
             groups.setdefault(str(gid), []).append(e)
         blocks: List[List[ExtractedEntityNode]] = []
         for gid, arr in groups.items():
@@ -559,7 +559,7 @@ async def llm_dedup_entities_iterative_blocks( # 迭代分块并发 LLM 去重
         # Collapse nodes to canonical reps before each round to avoid redundant comparisons
         # 步骤1：折叠实体（合并已确定的重复实体，减少后续计算量）
         current_nodes = _collapse_nodes(current_nodes)
-        # 步骤2：分块（按group_id分块，避免跨组处理）
+        # 步骤2：分块（按end_user_id分块，避免跨组处理）
         blocks = _partition_blocks(current_nodes)
         if not blocks: # 无块可处理（实体已全部折叠），退出循环
             break
@@ -645,7 +645,7 @@ async def llm_disambiguate_pairs_iterative(
             a = entity_nodes[i]
             b = entity_nodes[j]
             # 必须同组
-            if getattr(a, "group_id", None) != getattr(b, "group_id", None):
+            if getattr(a, "end_user_id", None) != getattr(b, "end_user_id", None):
                 continue
             ta = getattr(a, "entity_type", None)
             tb = getattr(b, "entity_type", None)

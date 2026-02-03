@@ -155,7 +155,8 @@ async def chat(
                     memory=memory,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
+                    files=payload.files  # 传递多模态文件
                 ):
                     yield event
 
@@ -180,7 +181,8 @@ async def chat(
             memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
+            files=payload.files  # 传递多模态文件
         )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
@@ -235,11 +237,11 @@ async def chat(
 
                     message=payload.message,
                     conversation_id=conversation.id,  # 使用已创建的会话 ID
-                    user_id=new_end_user.id,  # 转换为字符串
+                    user_id=end_user_id,  # 转换为字符串
                     variables=payload.variables,
                     config=config,
-                    web_search=payload.web_search,
-                    memory=payload.memory,
+                    web_search=web_search,
+                    memory=memory,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
                     app_id=app.id,
@@ -268,11 +270,11 @@ async def chat(
 
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
-            user_id=new_end_user.id,  # 转换为字符串
+            user_id=end_user_id,  # 转换为字符串
             variables=payload.variables,
             config=config,
-            web_search=payload.web_search,
-            memory=payload.memory,
+            web_search=web_search,
+            memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
             app_id=app.id,

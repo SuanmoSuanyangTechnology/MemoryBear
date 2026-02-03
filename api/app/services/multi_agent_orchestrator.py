@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import MultiAgentConfig, AgentConfig, ModelConfig
 from app.models.multi_agent_model import AggregationStrategy, OrchestrationMode
+from app.repositories.model_repository import ModelApiKeyRepository
 from app.services.agent_registry import AgentRegistry
 from app.services.master_agent_router import MasterAgentRouter
 from app.services.conversation_state_manager import ConversationStateManager
@@ -279,14 +280,22 @@ class MultiAgentOrchestrator:
 
             # 4. 提取子 Agent 的 conversation_id（用于多轮对话）
             sub_conversation_id = None
+            total_tokens = 0
+            
             if isinstance(results, dict):
                 sub_conversation_id = results.get("conversation_id") or results.get("result", {}).get("conversation_id")
+                # 提取 token 信息
+                usage = results.get("usage", {}) or results.get("result", {}).get("usage", {})
+                total_tokens += usage.get("total_tokens", 0)
             elif isinstance(results, list) and results:
                 for item in results:
                     if "result" in item:
                         sub_conversation_id = item["result"].get("conversation_id")
                         if sub_conversation_id:
                             break
+                    # 累加每个子 Agent 的 token
+                    usage = item.get("usage", {}) or item.get("result", {}).get("usage", {})
+                    total_tokens += usage.get("total_tokens", 0)
 
             logger.info(
                 "多 Agent 任务完成",
@@ -300,9 +309,15 @@ class MultiAgentOrchestrator:
             return {
                 "message": final_result,
                 "conversation_id": sub_conversation_id,
+                "mode": OrchestrationMode.SUPERVISOR,
                 "elapsed_time": elapsed_time,
                 "strategy": routing_decision.get("collaboration_strategy", "single"),
-                "sub_results": results
+                "sub_results": results,
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": total_tokens
+                }
             }
 
         except Exception as e:
@@ -1551,10 +1566,12 @@ class MultiAgentOrchestrator:
             return {
                 "message": result.get("response", ""),
                 "conversation_id": result.get("conversation_id"),
+                "mode": OrchestrationMode.COLLABORATION,
                 "elapsed_time": elapsed_time,
                 "strategy": "collaboration",
                 "active_agent": result.get("active_agent"),
-                "sub_results": result
+                "sub_results": result,
+                "usage": result.get("usage")
             }
 
         except Exception as e:
@@ -2546,10 +2563,14 @@ class MultiAgentOrchestrator:
                 return self._smart_merge_results(results, strategy)
 
             # 获取 API Key 配置
-            api_key_config = self.db.query(ModelApiKey).filter(
-                ModelApiKey.model_config_id == default_model_config_id,
-                ModelApiKey.is_active == True
-            ).first()
+            # api_key_config = self.db.query(ModelApiKey).join(
+            #     ModelConfig, ModelApiKey.model_configs
+            # ).filter(
+            #     ModelConfig.id == default_model_config_id,
+            #     ModelApiKey.is_active.is_(True)
+            # ).first()
+            api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
+            api_key_config = api_keys[0] if api_keys else None
 
             if not api_key_config:
                 logger.warning("Master Agent 没有可用的 API Key，使用简单整合")
@@ -2703,10 +2724,14 @@ class MultiAgentOrchestrator:
                 return
 
             # 获取 API Key 配置
-            api_key_config = self.db.query(ModelApiKey).filter(
-                ModelApiKey.model_config_id == default_model_config_id,
-                ModelApiKey.is_active == True
-            ).first()
+            # api_key_config = self.db.query(ModelApiKey).join(
+            #     ModelConfig, ModelApiKey.model_configs
+            # ).filter(
+            #     ModelConfig.id == default_model_config_id,
+            #     ModelApiKey.is_active.is_(True)
+            # ).first()
+            api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
+            api_key_config = api_keys[0] if api_keys else None
 
             if not api_key_config:
                 logger.warning("Master Agent 没有可用的 API Key，使用简单整合")

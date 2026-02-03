@@ -17,24 +17,24 @@ class HomePageRepository:
         """获取模型统计数据"""
         total_models = db.query(ModelConfig).filter(
             ModelConfig.tenant_id == tenant_id,
-            ModelConfig.is_active == True
+            ModelConfig.is_active.is_(True)
         ).count()
 
         total_llm = db.query(ModelConfig).filter(
             ModelConfig.tenant_id == tenant_id,
-            ModelConfig.is_active == True,
+            ModelConfig.is_active.is_(True),
             ModelConfig.type == "llm"
         ).count()
 
         total_embedding = db.query(ModelConfig).filter(
             ModelConfig.tenant_id == tenant_id,
-            ModelConfig.is_active == True,
+            ModelConfig.is_active.is_(True),
             ModelConfig.type == "embedding"
         ).count()
         
         new_models_this_week = db.query(ModelConfig).filter(
             ModelConfig.tenant_id == tenant_id,
-            ModelConfig.is_active == True,
+            ModelConfig.is_active.is_(True),
             ModelConfig.created_at >= week_start
         ).count()
 
@@ -56,12 +56,12 @@ class HomePageRepository:
         """获取工作空间统计数据"""
         active_workspaces = db.query(Workspace).filter(
             Workspace.tenant_id == tenant_id,
-            Workspace.is_active == True
+            Workspace.is_active.is_(True)
         ).count()
         
         new_workspaces_this_week = db.query(Workspace).filter(
             Workspace.tenant_id == tenant_id,
-            Workspace.is_active == True,
+            Workspace.is_active.is_(True),
             Workspace.created_at >= week_start
         ).count()
 
@@ -83,7 +83,7 @@ class HomePageRepository:
         """获取用户统计数据"""
         workspace_ids = db.query(Workspace.id).filter(
             Workspace.tenant_id == tenant_id,
-            Workspace.is_active == True
+            Workspace.is_active.is_(True)
         ).subquery()
 
         total_users = db.query(EndUser).join(
@@ -91,7 +91,7 @@ class HomePageRepository:
             EndUser.app_id == App.id
         ).filter(
             App.workspace_id.in_(workspace_ids),
-            App.is_active == True,
+            App.is_active.is_(True),
             App.status == "active"
         ).count()
 
@@ -100,7 +100,7 @@ class HomePageRepository:
             EndUser.app_id == App.id
         ).filter(
             App.workspace_id.in_(workspace_ids),
-            App.is_active == True,
+            App.is_active.is_(True),
             App.status == "active",
             EndUser.created_at >= week_start
         ).count()
@@ -123,18 +123,18 @@ class HomePageRepository:
         """获取应用统计数据"""
         workspace_ids = db.query(Workspace.id).filter(
             Workspace.tenant_id == tenant_id,
-            Workspace.is_active == True
+            Workspace.is_active.is_(True)
         ).subquery()
         
         running_apps = db.query(App).filter(
             App.workspace_id.in_(workspace_ids),
-            App.is_active == True,
+            App.is_active.is_(True),
             App.status == "active"
         ).count()
         
         new_apps_this_week = db.query(App).filter(
             App.workspace_id.in_(workspace_ids),
-            App.is_active == True,
+            App.is_active.is_(True),
             App.status == "active",
             App.created_at >= week_start
         ).count()
@@ -158,7 +158,7 @@ class HomePageRepository:
         # 获取工作空间列表
         workspaces = db.query(Workspace).filter(
             Workspace.tenant_id == tenant_id,
-            Workspace.is_active == True
+            Workspace.is_active.is_(True)
         ).all()
 
         workspace_ids = [ws.id for ws in workspaces]
@@ -169,7 +169,7 @@ class HomePageRepository:
             func.count(App.id).label('count')
         ).filter(
             App.workspace_id.in_(workspace_ids),
-            App.is_active,
+            App.is_active.is_(True),
             App.status == "active"
         ).group_by(App.workspace_id).all()
         
@@ -184,7 +184,7 @@ class HomePageRepository:
             EndUser.app_id == App.id
         ).filter(
             App.workspace_id.in_(workspace_ids),
-            App.is_active,
+            App.is_active.is_(True),
             App.status == "active"
         ).group_by(App.workspace_id).all()
         

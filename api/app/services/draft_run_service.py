@@ -16,13 +16,16 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.models import AgentConfig, ModelApiKey, ModelConfig
+from app.repositories.model_repository import ModelApiKeyRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
+from app.schemas.app_schema import FileInput
 from app.services import task_service
 from app.services.langchain_tool_server import Search
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.tool_service import ToolService
+from app.services.multimodal_service import MultimodalService
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -56,31 +59,28 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
         长期记忆工具
     """
     # search_switch = memory_config.get("search_switch", "2")
-    config_id= memory_config.get("memory_content",None)
+    config_id= memory_config.get("memory_content") or memory_config.get("memory_config",None)
     logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
     @tool(args_schema=LongTermMemoryInput)
     def long_term_memory(question: str) -> str:
         """
-        从用户的历史记忆中检索相关信息。这是一个强大的工具，可以帮助你了解用户的背景、偏好和历史对话内容。
+        从用户的历史记忆中检索相关信息。用于了解用户的背景、偏好和历史对话内容。
 
-         以下场景不需要使用此工具：
-        1. 情绪/社交问候场景（如"你好"、"谢谢"、"再见"等简单寒暄）
-        2. 纯任务性场景（如"帮我写代码"、"翻译这段文字"等不需要历史上下文的任务）
-        3. 处理外部内容时（如用户提供的文本、代码、RAG数据等，这些内容本身已经包含所需信息）
+        **何时使用此工具：**
+        - 用户明确询问历史信息（如"我之前说过什么"、"上次我们聊了什么"）
+        - 用户询问个人信息或偏好（如"我喜欢什么"、"我的习惯是什么"）
+        - 需要基于历史上下文提供个性化建议
 
-        除上述场景外的所有其他情况都应该使用此工具，特别是：
-        - 用户询问个人信息或历史对话内容
-        - 需要了解用户偏好、习惯或背景
-        - 用户提到"之前"、"上次"、"记得"等涉及历史的词汇
-        - 需要个性化回复或基于历史上下文的建议
-        - 用户询问关于自己的任何信息
+        **何时不使用此工具：**
+        - 简单问候（如"你好"、"谢谢"、"再见"）
+        - 纯任务性请求（如"写代码"、"翻译文字"、"分析图片"）
+        - 用户已提供完整信息（如提供了文本、图片、文档等内容）
+        - 创作性任务（如"写诗"、"编故事"、"创作谜语"）
 
-         需要对question改写/优化：
-            需要重点关注一以下几点
-            - 相关的关键词，保持原问题的核心语义不变， 根据上下文，使问题更具体、更清晰，将模糊的表达转换为明确的搜索词
-            - 使用同义词或相关术语扩展查询
+        **重要：如果用户的问题可以直接回答，不要调用此工具。只在确实需要历史信息时才使用。**
+
         Args:
-            question: question改写之后的内容
+            question: 需要检索的问题（保持原问题的核心语义，使用清晰的关键词）
 
         Returns:
             检索到的历史记忆内容
@@ -92,7 +92,7 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
             try:
                 memory_content = asyncio.run(
                     MemoryAgentService().read_memory(
-                        group_id=end_user_id,
+                        end_user_id=end_user_id,
                         message=question,
                         history=[],
                         search_switch="2",
@@ -106,9 +106,9 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                     "app.core.memory.agent.read_message",
                     args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
                 )
-                # result = task_service.get_task_memory_read_result(task.id)
-                # status = result.get("status")
-                # logger.info(f"读取任务状态：{status}")
+                result = task_service.get_task_memory_read_result(task.id)
+                status = result.get("status")
+                logger.info(f"读取任务状态：{status}")
 
             finally:
                 db.close()
@@ -123,6 +123,10 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                 }
             )
 
+            # 检查是否有有效内容
+            if not memory_content or str(memory_content).strip() == "" or "answer" in str(memory_content) and str(memory_content).count("''") > 0:
+                return "未找到相关的历史记忆。请直接回答用户的问题，不要再次调用此工具。"
+            
             return f"检索到以下历史记忆：\n\n{memory_content}"
         except Exception as e:
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})
@@ -245,7 +249,8 @@ class DraftRunService:
         user_rag_memory_id: Optional[str] = None,
         web_search: bool = True,
         memory: bool = True,
-        sub_agent: bool = False
+        sub_agent: bool = False,
+        files: Optional[List[FileInput]] = None  # 新增：多模态文件
     ) -> Dict[str, Any]:
         """执行试运行（使用 LangChain Agent）
 
@@ -405,7 +410,16 @@ class DraftRunService:
                     max_history=agent_config.memory.get("max_history", 10)
                 )
 
-            # 6. 知识库检索
+            # 6. 处理多模态文件
+            processed_files = None
+            if files:
+                # 获取 provider 信息
+                provider = api_key_config.get("provider", "openai")
+                multimodal_service = MultimodalService(self.db, provider=provider)
+                processed_files = await multimodal_service.process_files(files)
+                logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
+
+            # 7. 知识库检索
             context = None
 
             logger.debug(
@@ -413,14 +427,15 @@ class DraftRunService:
                 extra={
                     "model": api_key_config["model_name"],
                     "has_history": bool(history),
-                    "has_context": bool(context)
+                    "has_context": bool(context),
+                    "has_files": bool(processed_files)
                 }
             )
 
             memory_config_= agent_config.memory
-            config_id = memory_config_.get("memory_content")
+            config_id = memory_config_.get("memory_content") or memory_config_.get("memory_config",None)
 
-            # 7. 调用 Agent
+            # 8. 调用 Agent（支持多模态）
             result = await agent.chat(
                 message=message,
                 history=history,
@@ -429,19 +444,27 @@ class DraftRunService:
                 config_id=config_id,
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
-                memory_flag=memory_flag
+                memory_flag=memory_flag,
+                files=processed_files  # 传递处理后的文件
             )
 
             elapsed_time = time.time() - start_time
 
-            # 8. 保存会话消息
+            # 9. 保存会话消息
             if not sub_agent and agent_config.memory and agent_config.memory.get("enabled"):
                 await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
                     assistant_message=result["content"],
                     app_id=agent_config.app_id,
-                    user_id=user_id
+                    user_id=user_id,
+                    meta_data={
+                        "usage": result.get("usage", {
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": 0
+                        })
+                    }
                 )
 
             response = {
@@ -485,7 +508,8 @@ class DraftRunService:
         user_rag_memory_id: Optional[str] = None,
         web_search: bool = True,  # 布尔类型默认值
         memory: bool = True,  # 布尔类型默认值
-        sub_agent: bool = False # 是否是作为子Agent运行
+        sub_agent: bool = False, # 是否是作为子Agent运行
+        files: Optional[List[FileInput]] = None  # 新增：多模态文件
 
     ) -> AsyncGenerator[str, None]:
         """执行试运行（流式返回，使用 LangChain Agent）
@@ -634,6 +658,15 @@ class DraftRunService:
                     max_history=agent_config.memory.get("max_history", 10)
                 )
 
+            # 6. 处理多模态文件
+            processed_files = None
+            if files:
+                # 获取 provider 信息
+                provider = api_key_config.get("provider", "openai")
+                multimodal_service = MultimodalService(self.db, provider=provider)
+                processed_files = await multimodal_service.process_files(files)
+                logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
+
             # 7. 知识库检索
             context = None
 
@@ -644,10 +677,11 @@ class DraftRunService:
             })
 
             memory_config_ = agent_config.memory
-            config_id = memory_config_.get("memory_content")
+            config_id = memory_config_.get("memory_content") or memory_config_.get("memory_config",None)
 
-            # 9. 流式调用 Agent
+            # 9. 流式调用 Agent（支持多模态）
             full_content = ""
+            total_tokens = 0
             async for chunk in agent.chat_stream(
                 message=message,
                 history=history,
@@ -656,15 +690,24 @@ class DraftRunService:
                 config_id=config_id,
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
-                memory_flag=memory_flag
+                memory_flag=memory_flag,
+                files=processed_files  # 传递处理后的文件
             ):
-                full_content += chunk
-                # 发送消息块事件
-                yield self._format_sse_event("message", {
-                    "content": chunk
-                })
+                if isinstance(chunk, int):
+                    total_tokens = chunk
+                else:
+                    full_content += chunk
+                    # 发送消息块事件
+                    yield self._format_sse_event("message", {
+                        "content": chunk
+                    })
 
             elapsed_time = time.time() - start_time
+
+            if sub_agent:
+                yield self._format_sse_event("sub_usage", {
+                        "total_tokens": total_tokens
+                    })
 
             # 10. 保存会话消息
             if not sub_agent and agent_config.memory and agent_config.memory.get("enabled"):
@@ -673,7 +716,10 @@ class DraftRunService:
                     user_message=message,
                     assistant_message=full_content,
                     app_id=agent_config.app_id,
-                    user_id=user_id
+                    user_id=user_id,
+                    meta_data={
+                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
+                    }
                 )
 
             # 11. 发送结束事件
@@ -724,17 +770,21 @@ class DraftRunService:
         Raises:
             BusinessException: 当没有可用的 API Key 时
         """
-        stmt = (
-            select(ModelApiKey)
-            .where(
-                ModelApiKey.model_config_id == model_config_id,
-                ModelApiKey.is_active == True
-            )
-            .order_by(ModelApiKey.priority.desc())
-            .limit(1)
-        )
-
-        api_key = self.db.scalars(stmt).first()
+        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
+        # stmt = (
+        #     select(ModelApiKey).join(
+        #         ModelConfig, ModelApiKey.model_configs
+        #     )
+        #     .where(
+        #         ModelConfig.id == model_config_id,
+        #         ModelApiKey.is_active.is_(True)
+        #     )
+        #     .order_by(ModelApiKey.priority.desc())
+        #     .limit(1)
+        # )
+        #
+        # api_key = self.db.scalars(stmt).first()
+        api_key = api_keys[0] if api_keys else None
 
         if not api_key:
             raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
@@ -893,6 +943,7 @@ class DraftRunService:
         conversation_id: str,
         user_message: str,
         assistant_message: str,
+        meta_data: dict,
         app_id: Optional[uuid.UUID] = None,
         user_id: Optional[str] = None
     ) -> None:
@@ -904,6 +955,7 @@ class DraftRunService:
             assistant_message: AI 回复消息
             app_id: 应用ID（未使用，保留用于兼容性）
             user_id: 用户ID（未使用，保留用于兼容性）
+            meta_data: token消耗
         """
         try:
             from app.services.conversation_service import ConversationService
@@ -922,7 +974,8 @@ class DraftRunService:
             conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="assistant",
-                content=assistant_message
+                content=assistant_message,
+                meta_data=meta_data
             )
 
             logger.debug(
