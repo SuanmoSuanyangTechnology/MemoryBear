@@ -61,7 +61,8 @@ async def get_emotion_tags(
                 "emotion_type": request.emotion_type,
                 "start_date": request.start_date,
                 "end_date": request.end_date,
-                "limit": request.limit
+                "limit": request.limit,
+                "language_type": language_type
             }
         )
 
@@ -71,7 +72,8 @@ async def get_emotion_tags(
             emotion_type=request.emotion_type,
             start_date=request.start_date,
             end_date=request.end_date,
-            limit=request.limit
+            limit=request.limit,
+            language=language_type
         )
 
         api_logger.info(
