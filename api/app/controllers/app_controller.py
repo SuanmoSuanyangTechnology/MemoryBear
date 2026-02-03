@@ -454,7 +454,8 @@ async def draft_run(
                         user_id=payload.user_id or str(current_user.id),
                         variables=payload.variables,
                         storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
+                        user_rag_memory_id=user_rag_memory_id,
+                        files=payload.files  # 传递多模态文件
                 ):
                     yield event
 
@@ -475,7 +476,8 @@ async def draft_run(
                 "app_id": str(app_id),
                 "message_length": len(payload.message),
                 "has_conversation_id": bool(payload.conversation_id),
-                "has_variables": bool(payload.variables)
+                "has_variables": bool(payload.variables),
+                "has_files": bool(payload.files)
             }
         )
 
@@ -490,7 +492,8 @@ async def draft_run(
             user_id=payload.user_id or str(current_user.id),
             variables=payload.variables,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id
+            user_rag_memory_id=user_rag_memory_id,
+            files=payload.files  # 传递多模态文件
         )
 
         logger.debug(

@@ -155,7 +155,8 @@ async def chat(
                     memory=memory,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
+                    files=payload.files  # 传递多模态文件
                 ):
                     yield event
 
@@ -180,7 +181,8 @@ async def chat(
             memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
+            files=payload.files  # 传递多模态文件
         )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
