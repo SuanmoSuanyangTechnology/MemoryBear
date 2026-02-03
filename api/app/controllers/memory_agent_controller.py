@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from app.celery_app import celery_app
 from app.core.error_codes import BizCode
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.rag.llm.cv_model import QWenCV
 from app.core.response_utils import fail, success
@@ -132,13 +133,12 @@ async def write_server(
     Returns:
         Response with write operation status
     """
-    # 如果未传 X-Language-Type Header，默认使用中文
-    if not language_type:
-        language_type = "zh"
+    # 使用集中化的语言校验
+    language = get_language_from_header(language_type)
     
     config_id = user_input.config_id
     workspace_id = current_user.current_workspace_id
-    api_logger.info(f"Write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language_type}")
+    api_logger.info(f"Write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")
     
     # 获取 storage_type，如果为 None 则使用默认值
     storage_type = workspace_service.get_workspace_storage_type(
@@ -176,7 +176,7 @@ async def write_server(
             db,
             storage_type, 
             user_rag_memory_id,
-            language_type
+            language
         )
 
         return success(data=result, msg="写入成功")
@@ -210,13 +210,12 @@ async def write_server_async(
         Task ID for tracking async operation
         Use GET /memory/write_result/{task_id} to check task status and get result
     """
-    # 如果未传 X-Language-Type Header，默认使用中文
-    if not language_type:
-        language_type = "zh"
+    # 使用集中化的语言校验
+    language = get_language_from_header(language_type)
     
     config_id = user_input.config_id
     workspace_id = current_user.current_workspace_id
-    api_logger.info(f"Async write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language_type}")
+    api_logger.info(f"Async write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")
 
     # 获取 storage_type，如果为 None 则使用默认值
     storage_type = workspace_service.get_workspace_storage_type(
@@ -241,7 +240,7 @@ async def write_server_async(
 
         task = celery_app.send_task(
             "app.core.memory.agent.write_message",
-            args=[user_input.end_user_id, messages_list, config_id, storage_type, user_rag_memory_id, language_type]
+            args=[user_input.end_user_id, messages_list, config_id, storage_type, user_rag_memory_id, language]
         )
         api_logger.info(f"Write task queued: {task.id}")
         

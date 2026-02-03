@@ -11,6 +11,7 @@ Routes:
 """
 
 from app.core.error_codes import BizCode
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.dependencies import get_current_user, get_db
@@ -50,9 +51,8 @@ async def get_emotion_tags(
 ):
 
     try:
-        # 如果未传 X-Language-Type Header，默认使用中文
-        if not language_type:
-            language_type = "zh"
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
         
         api_logger.info(
             f"用户 {current_user.username} 请求获取情绪标签统计",
@@ -62,7 +62,7 @@ async def get_emotion_tags(
                 "start_date": request.start_date,
                 "end_date": request.end_date,
                 "limit": request.limit,
-                "language_type": language_type
+                "language_type": language
             }
         )
 
@@ -73,7 +73,7 @@ async def get_emotion_tags(
             start_date=request.start_date,
             end_date=request.end_date,
             limit=request.limit,
-            language=language_type
+            language=language
         )
 
         api_logger.info(
@@ -108,9 +108,8 @@ async def get_emotion_wordcloud(
 ):
 
     try:
-        # 如果未传 X-Language-Type Header，默认使用中文
-        if not language_type:
-            language_type = "zh"
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
         
         api_logger.info(
             f"用户 {current_user.username} 请求获取情绪词云数据",
@@ -159,9 +158,8 @@ async def get_emotion_health(
 ):
 
     try:
-        # 如果未传 X-Language-Type Header，默认使用中文
-        if not language_type:
-            language_type = "zh"
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
         
         # 验证时间范围参数
         if request.time_range not in ["7d", "30d", "90d"]:
@@ -228,9 +226,8 @@ async def get_emotion_suggestions(
         缓存的个性化情绪建议响应
     """
     try:
-        # 如果未传 X-Language-Type Header，默认使用中文
-        if not language_type:
-            language_type = "zh"
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
         
         api_logger.info(
             f"用户 {current_user.username} 请求获取个性化情绪建议（缓存）",
@@ -298,9 +295,8 @@ async def generate_emotion_suggestions(
         新生成的个性化情绪建议响应
     """
     try:
-        # 如果未传 X-Language-Type Header，默认使用中文
-        if not language_type:
-            language_type = "zh"
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
         
         api_logger.info(
             f"用户 {current_user.username} 请求生成个性化情绪建议",
@@ -313,7 +309,7 @@ async def generate_emotion_suggestions(
         data = await emotion_service.generate_emotion_suggestions(
             end_user_id=request.end_user_id,
             db=db,
-            language=language_type
+            language=language
         )
 
         # 保存到缓存

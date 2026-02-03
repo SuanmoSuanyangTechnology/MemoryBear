@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends,Header
 
 from app.db import get_db
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
@@ -86,9 +87,8 @@ async def get_user_summary_api(
     - 使用 X-Language-Type Header 指定语言
     - 如果未传 Header，默认使用中文 (zh)
     """
-    # 如果未传 language_type，默认使用中文
-    if not language_type:
-        language_type = "zh"
+    # 使用集中化的语言校验
+    language = get_language_from_header(language_type)
     
     workspace_id = current_user.current_workspace_id
     workspace_repo = WorkspaceRepository(db)
@@ -101,7 +101,7 @@ async def get_user_summary_api(
     api_logger.info(f"用户摘要查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
         # 调用服务层获取缓存数据
-        result = await user_memory_service.get_cached_user_summary(db, end_user_id,model_id,language_type)
+        result = await user_memory_service.get_cached_user_summary(db, end_user_id,model_id,language)
 
         if result["is_cached"]:
             api_logger.info(f"成功返回缓存的用户摘要: end_user_id={end_user_id}")
@@ -131,9 +131,8 @@ async def generate_cache_api(
     - 使用 X-Language-Type Header 指定语言 ("zh" 中文, "en" 英文)
     - 如果未传 Header，默认使用中文 (zh)
     """
-    # 如果未传 X-Language-Type Header，默认使用中文
-    if not language_type:
-        language_type = "zh"
+    # 使用集中化的语言校验
+    language = get_language_from_header(language_type)
     
     workspace_id = current_user.current_workspace_id
 
@@ -146,7 +145,7 @@ async def generate_cache_api(
 
     api_logger.info(
         f"缓存生成请求: user={current_user.username}, workspace={workspace_id}, "
-        f"end_user_id={end_user_id if end_user_id else '全部用户'}, language={language_type}"
+        f"end_user_id={end_user_id if end_user_id else '全部用户'}, language={language}"
     )
 
     try:
@@ -155,10 +154,10 @@ async def generate_cache_api(
             api_logger.info(f"开始为单个用户生成缓存: end_user_id={end_user_id}")
 
             # 生成记忆洞察
-            insight_result = await user_memory_service.generate_and_cache_insight(db, end_user_id, workspace_id, language=language_type)
+            insight_result = await user_memory_service.generate_and_cache_insight(db, end_user_id, workspace_id, language=language)
 
             # 生成用户摘要
-            summary_result = await user_memory_service.generate_and_cache_summary(db, end_user_id, workspace_id, language=language_type)
+            summary_result = await user_memory_service.generate_and_cache_summary(db, end_user_id, workspace_id, language=language)
 
             # 构建响应
             result = {
@@ -192,7 +191,7 @@ async def generate_cache_api(
             # 为整个工作空间生成
             api_logger.info(f"开始为工作空间 {workspace_id} 批量生成缓存")
 
-            result = await user_memory_service.generate_cache_for_workspace(db, workspace_id, language=language_type)
+            result = await user_memory_service.generate_cache_for_workspace(db, workspace_id, language=language)
 
             # 记录统计信息
             api_logger.info(
@@ -396,9 +395,8 @@ async def memory_space_timeline_of_shared_memories(id: str, label: str,language_
                                       current_user: User = Depends(get_current_user),
                                       db: Session = Depends(get_db),
                                       ):
-    # 如果未传 X-Language-Type Header，默认使用中文
-    if not language_type:
-        language_type = "zh"
+    # 使用集中化的语言校验
+    language = get_language_from_header(language_type)
     
     workspace_id=current_user.current_workspace_id
     workspace_repo = WorkspaceRepository(db)
@@ -409,7 +407,7 @@ async def memory_space_timeline_of_shared_memories(id: str, label: str,language_
     else:
         model_id = None
     MemoryEntity = MemoryEntityService(id, label)
-    timeline_memories_result = await MemoryEntity.get_timeline_memories_server(model_id, language_type)
+    timeline_memories_result = await MemoryEntity.get_timeline_memories_server(model_id, language)
 
     return success(data=timeline_memories_result, msg="共同记忆时间线")
 @router.get("/memory_space/relationship_evolution", response_model=ApiResponse)

@@ -3,6 +3,7 @@ import time
 import uuid
 from uuid import UUID
 
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.reflection_engine.self_reflexion import (
     ReflectionConfig,
@@ -216,9 +217,8 @@ async def reflection_run(
     db: Session = Depends(get_db),
 ) -> dict:
     """Activate the reflection function for all matching applications in the workspace"""
-    # 如果未传 X-Language-Type Header，默认使用中文
-    if not language_type:
-        language_type = "zh"
+    # 使用集中化的语言校验
+    language = get_language_from_header(language_type)
 
     api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
     config_id = resolve_config_id(config_id, db)

@@ -3,6 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.core.error_codes import BizCode
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.db import get_db
@@ -284,18 +285,17 @@ async def pilot_run(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    # 如果未传 X-Language-Type Header，默认使用中文
-    if not language_type:
-        language_type = "zh"
+    # 使用集中化的语言校验
+    language = get_language_from_header(language_type)
     
     api_logger.info(
         f"Pilot run requested: config_id={payload.config_id}, "
-        f"dialogue_text_length={len(payload.dialogue_text)}, language={language_type}"
+        f"dialogue_text_length={len(payload.dialogue_text)}, language={language}"
     )
     payload.config_id = resolve_config_id(payload.config_id, db)
     svc = DataConfigService(db)
     return StreamingResponse(
-        svc.pilot_run_stream(payload, language=language_type),
+        svc.pilot_run_stream(payload, language=language),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

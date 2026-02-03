@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.db import get_db
@@ -204,9 +205,8 @@ async def extract_ontology(
     )
     
     try:
-        # 如果未传 X-Language-Type Header，默认使用中文
-        if not language_type:
-            language_type = "zh"
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
         
         # 获取当前工作空间ID
         workspace_id = current_user.current_workspace_id
@@ -227,7 +227,7 @@ async def extract_ontology(
             domain=request.domain,
             scene_id=request.scene_id,
             workspace_id=workspace_id,
-            language=language_type
+            language=language
         )
         
         # 构建响应（语言已在提取时通过模板控制，无需二次翻译）

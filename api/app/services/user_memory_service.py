@@ -1031,7 +1031,7 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None, lan
         }
     """
     from app.core.memory.utils.prompt.prompt_utils import render_memory_insight_prompt
-    from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import validate_language
+    from app.core.language_utils import validate_language
     import re
     
     # 验证语言参数
@@ -1157,7 +1157,7 @@ async def analytics_user_summary(end_user_id: Optional[str] = None, language: st
         }
     """
     from app.core.memory.utils.prompt.prompt_utils import render_user_summary_prompt
-    from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import validate_language
+    from app.core.language_utils import validate_language
     import re
     
     # 验证语言参数

@@ -10,37 +10,10 @@ from app.core.memory.models.base_response import RobustLLMResponse
 from app.core.memory.models.graph_models import MemorySummaryNode
 from app.core.memory.models.message_models import DialogData
 from app.core.memory.utils.prompt.prompt_utils import render_memory_summary_prompt
+from app.core.language_utils import validate_language  # 使用集中化的语言校验
 from pydantic import Field
 
 logger = get_memory_logger(__name__)
-
-# 支持的语言列表和默认回退值
-SUPPORTED_LANGUAGES = {"zh", "en"}
-FALLBACK_LANGUAGE = "zh"
-
-
-def validate_language(language: Optional[str]) -> str:
-    """
-    校验语言参数，确保其为有效值。
-    
-    Args:
-        language: 待校验的语言代码
-        
-    Returns:
-        有效的语言代码（"zh" 或 "en"）
-    """
-    if language is None:
-        return FALLBACK_LANGUAGE
-    
-    lang = str(language).lower().strip()
-    if lang in SUPPORTED_LANGUAGES:
-        return lang
-    
-    logger.warning(
-        f"无效的语言参数 '{language}'，已回退到默认值 '{FALLBACK_LANGUAGE}'。"
-        f"支持的语言: {SUPPORTED_LANGUAGES}"
-    )
-    return FALLBACK_LANGUAGE
 
 
 class MemorySummaryResponse(RobustLLMResponse):
