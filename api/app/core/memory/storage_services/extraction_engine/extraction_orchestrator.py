@@ -95,6 +95,7 @@ class ExtractionOrchestrator:
         config: Optional[ExtractionPipelineConfig] = None,
         progress_callback: Optional[Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]] = None,
         embedding_id: Optional[str] = None,
+        language: str = "zh",
     ):
         """
         初始化流水线编排器
@@ -108,6 +109,7 @@ class ExtractionOrchestrator:
                 - 接受 (stage: str, message: str, data: Optional[Dict[str, Any]]) 并返回 Awaitable[None]
                 - 在管线关键点调用以报告进度和结果数据
             embedding_id: 嵌入模型ID，如果为 None 则从全局配置获取（向后兼容）
+            language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
         """
         self.llm_client = llm_client
         self.embedder_client = embedder_client
@@ -116,6 +118,7 @@ class ExtractionOrchestrator:
         self.is_pilot_run = False  # 默认非试运行模式
         self.progress_callback = progress_callback  # 保存进度回调函数
         self.embedding_id = embedding_id  # 保存嵌入模型ID
+        self.language = language  # 保存语言配置
         
         # 保存去重消歧的详细记录（内存中的数据结构）
         self.dedup_merge_records: List[Dict[str, Any]] = []  # 实体合并记录
@@ -127,7 +130,7 @@ class ExtractionOrchestrator:
             llm_client=llm_client,
             config=self.config.statement_extraction,
         )
-        self.triplet_extractor = TripletExtractor(llm_client=llm_client)
+        self.triplet_extractor = TripletExtractor(llm_client=llm_client, language=language)
         self.temporal_extractor = TemporalExtractor(llm_client=llm_client)
 
         logger.info("ExtractionOrchestrator 初始化完成")
