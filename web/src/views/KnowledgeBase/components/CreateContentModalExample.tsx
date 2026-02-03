@@ -3,18 +3,18 @@ import { Button } from 'antd';
 import CreateContentModal from './CreateContentModal';
 import type { CreateContentModalRef } from '../types';
 
-// 使用示例组件
+// Example usage component
 const CreateContentModalExample = () => {
   const createContentModalRef = useRef<CreateContentModalRef>(null);
 
   const handleOpenModal = () => {
-    // 打开弹窗，传入知识库ID和父级ID
+    // Open modal, pass knowledge base ID and parent ID
     createContentModalRef.current?.handleOpen('kb_123', 'parent_456');
   };
 
   const handleRefreshTable = () => {
-    console.log('刷新表格数据');
-    // 这里可以添加刷新表格的逻辑
+    console.log('Refresh table data');
+    // Add table refresh logic here
   };
 
   return (

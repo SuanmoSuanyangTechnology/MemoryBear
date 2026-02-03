@@ -3,15 +3,16 @@ import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Row, Col, Space, Select, InputNumber, Slider, App, Form } from 'antd'
 import clsx from 'clsx'
+
 import Card from './components/Card'
 import type { ConfigForm, Variable } from './types'
 import { getMemoryExtractionConfig, updateMemoryExtractionConfig } from '@/api/memory'
 import Markdown from '@/components/Markdown'
-import { getModelList } from '@/api/models';
-import type { ModelListItem } from '@/views/ModelManagement/types'
+import { getModelListUrl } from '@/api/models';
 import { configList } from './constant'
 import Result from './components/Result'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
+import CustomSelect from '@/components/CustomSelect'
 
 const keys = [
   // 'example', 
@@ -43,7 +44,6 @@ const MemoryExtractionEngine: FC = () => {
   const values = Form.useWatch<ConfigForm>([], form)
   const [loading, setLoading] = useState(false)
   const [iterationPeriodDisabled, setIterationPeriodDisabled] = useState(false)
-  const [modelList, setModelList] = useState<ModelListItem[]>([])
 
   useEffect(() => {
     if (values?.reflexion_range === 'database') {
@@ -53,14 +53,6 @@ const MemoryExtractionEngine: FC = () => {
       setIterationPeriodDisabled(false)
     }
   }, [values])
-
-  const getModels = () => {
-    getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
-      .then(res => {
-        const response = res as { items: ModelListItem[] }
-        setModelList(response.items)
-      })
-  }
 
   const getConfig = () => {
     if (!id) {
@@ -84,7 +76,6 @@ const MemoryExtractionEngine: FC = () => {
   useEffect(() => {
     if (id) {
       getConfig()
-      getModels()
     }
   }, [id])
 
@@ -123,13 +114,13 @@ const MemoryExtractionEngine: FC = () => {
               label={t('memoryExtractionEngine.model')} 
               name="llm_id"
             >
-              <Select
-                placeholder={t('common.pleaseSelect')}
-                fieldNames={{
-                  label: 'name',
-                  value: 'id',
-                }}
-                options={modelList}
+              <CustomSelect
+                url={getModelListUrl}
+                params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
+                valueKey="id"
+                labelKey="name"
+                hasAll={false}
+                style={{ width: '100%' }}
               />
             </Form.Item>
           </Form>
@@ -222,7 +213,7 @@ const MemoryExtractionEngine: FC = () => {
                                       step={config.step || 0.01}
                                     />
                                   </Form.Item>
-                                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:mt-[-26px]">
+                                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
                                     {config.min || 0}
                                     <span>{t('memoryExtractionEngine.CurrentValue')}: {values?.[config.variableName as keyof ConfigForm]}</span>
                                   </div>

@@ -26,6 +26,9 @@ from .app_schema import (
     MemoryConfig,
     ToolConfig,
     VariableDefinition,
+    FileInput,
+    FileType,
+    TransferMethod,
 )
 from .conversation_schema import (
     Conversation,
@@ -94,6 +97,9 @@ __all__ = [
     "MemoryConfig",
     "ToolConfig",
     "VariableDefinition",
+    "FileInput",
+    "FileType",
+    "TransferMethod",
     "Conversation",
     "ConversationCreate",
     "ConversationWithMessages",

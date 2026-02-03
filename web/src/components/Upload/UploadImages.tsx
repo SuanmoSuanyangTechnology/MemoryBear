@@ -1,35 +1,58 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 15:30:52 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-02 15:57:03
+ */
+/**
+ * UploadImages Component
+ * 
+ * A comprehensive image upload component with:
+ * - Single/multiple file upload support
+ * - File type and size validation
+ * - Image preview functionality
+ * - Auto or manual upload modes
+ * - Drag-and-drop support
+ * - Base64 conversion for non-auto upload
+ * 
+ * @component
+ */
+
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Upload, Image, App } from 'antd';
 import type { GetProp, UploadFile, UploadProps } from 'antd';
-// import { UploadOutlined, } from '@ant-design/icons';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
+
 import PlusIcon from '@/assets/images/plus.svg'
 import { cookieUtils } from '@/utils/request'
 import { fileUploadUrl } from '@/api/fileStorage'
 import styles from './index.module.less'
 
+/** Props interface for UploadImages component */
 interface UploadImagesProps extends Omit<UploadProps, 'onChange' | 'fileList'> {
-  /** 上传接口地址 */
+  /** Upload API URL */
   action?: string;
-  /** 是否支持多选 */
+  /** Support multiple file selection */
   multiple?: boolean;
-  /** 已上传的文件列表 */
+  /** Uploaded file list */
   fileList?: UploadFile[] | UploadFile;
-  /** 文件列表变化回调 */
+  /** File list change callback */
   onChange?: (fileList?: UploadFile[] | UploadFile) => void;
-  /** 禁用上传 */
+  /** Disable upload */
   disabled?: boolean;
-  /** 文件大小限制（MB） */
+  /** File size limit (MB) */
   fileSize?: number;
-  /** 文件类型限制 */
+  /** File type restrictions */
   fileType?: string[];
-  /** 是否自动上传，默认为true */
+  /** Auto upload, default is true */
   isAutoUpload?: boolean;
-  /** 最大上传文件数 */
+  /** Maximum upload file count */
   maxCount?: number;
   className?: string;
 }
+
+/** Supported file type mappings (extension to MIME type) */
 const ALL_FILE_TYPE: {
   [key: string]: string;
 } = {
@@ -41,11 +64,15 @@ const ALL_FILE_TYPE: {
   webp: 'image/webp',
   svg: 'image/svg+xml',
 }
+
+/** Ref methods exposed to parent component */
 interface UploadImagesRef {
   fileList: UploadFile[];
   clearFiles: () => void;
 }
 type FileType = Parameters<GetProp<UploadProps, 'beforeUpload'>>[0];
+
+/** Convert file to base64 string for preview */
 const getBase64 = (file: FileType): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -56,8 +83,8 @@ const getBase64 = (file: FileType): Promise<string> => {
 }
 
 /**
- * 公共上传组件，基于Ant Design Upload组件封装
- * 支持单文件/多文件上传、拖拽上传、文件验证、预览等功能
+ * Common upload component based on Ant Design Upload component
+ * Supports single/multiple file upload, drag-and-drop, file validation, preview, etc.
  */
 const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
   action = fileUploadUrl,
@@ -86,6 +113,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     }
   }, [propFileList])
 
+  /** Update value based on maxCount (single or multiple) */
   const updateValue = (list: UploadFile[]) => {
     if (maxCount === 1) {
       onChange?.(list[0])
@@ -94,7 +122,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     }
   }
 
-  // 处理文件移除
+  /** Handle file removal with confirmation dialog */
   const handleRemove = (file: UploadFile) => {
     modal.confirm({
       title: t('common.confirmRemoveFile'),
@@ -107,12 +135,12 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
         updateValue(newFileList)
       },
     });
-    return false; // 阻止默认删除行为，由confirm控制
+    return false; // Prevent default delete behavior, controlled by confirm
   };
 
-  // 校验文件类型和大小
+  /** Validate file type and size before upload */
   const beforeUpload: RcUploadProps['beforeUpload'] = async (file: UploadFile) => {
-    // 校验文件大小
+    // Validate file size
     if (fileSize && file.size) {
       const isLtMaxSize = (file.size / 1024 / 1024) < fileSize;
       if (!isLtMaxSize) {
@@ -120,7 +148,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
         return Upload.LIST_IGNORE;
       }
     }
-    // 校验文件类型
+    // Validate file type
     if (accept && accept.length > 0 && file.type) {
       const isAccept = accept.includes(file.type);
       if (!isAccept) {
@@ -136,24 +164,25 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
       const newFileList = [...fileList, file];
       setFileList(newFileList);
       updateValue(newFileList);
-      return Upload.LIST_IGNORE; // 阻止自动上传
+      return Upload.LIST_IGNORE; // Prevent auto upload
     }
 
     return isAutoUpload;
   };
 
-  // 处理上传状态变化
+  /** Handle upload status change */
   const handleChange: UploadProps['onChange'] = ({ fileList: newFileList }) => {
     setFileList(newFileList);
     updateValue(newFileList);
   };
 
-  // 清空已上传文件
+  /** Clear all uploaded files */
   const clearFiles = () => {
     setFileList([]);
     updateValue([]);
   }
 
+  /** Handle image preview */
   const handlePreview = async (file: UploadFile) => {
     if (!file.thumbUrl && !file.url && !file.preview) {
       file.preview = await getBase64(file.originFileObj as FileType);
@@ -163,6 +192,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     setPreviewOpen(true);
   };
 
+  /** Build accept string from fileType array */
   useEffect(() => {
     if (fileType && fileType.length > 0) {
       const acceptArray = fileType.map((type: string) => ALL_FILE_TYPE[type.toLowerCase()]).filter(Boolean);
@@ -172,7 +202,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     }
   }, [fileType])
 
-  // 生成上传组件配置
+  /** Generate upload component configuration */
   const uploadProps: UploadProps = {
     action,
     multiple: multiple && maxCount > 1,
@@ -196,7 +226,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     ...props,
   };
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component via ref */
   useImperativeHandle(ref, () => ({
     fileList,
     clearFiles

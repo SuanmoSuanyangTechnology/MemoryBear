@@ -1,32 +1,46 @@
-/**
- * 格式化日期时间
- * @param value 时间戳（毫秒）或日期字符串
- * @param format 目标格式，支持 YYYY-MM-DD HH:mm:ss、YYYY/MM/DD HH:mm:ss、HH:mm 等
- * @returns 格式化后的日期时间字符串
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 16:34:43 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 16:34:43 
  */
+/**
+ * Format Utility
+ * 
+ * Provides date/time formatting functions with timezone support.
+ * 
+ * @module format
+ */
+
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
 
-// 扩展dayjs插件
+/** Extend dayjs with timezone plugins */
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
+/**
+ * Format date/time with timezone support
+ * @param value - Timestamp (milliseconds) or date string
+ * @param format - Target format, supports YYYY-MM-DD HH:mm:ss, YYYY/MM/DD HH:mm:ss, HH:mm, etc.
+ * @returns Formatted date/time string
+ */
 export const formatDateTime = (
   value: string | number | null | undefined,
   format: string = 'YYYY-MM-DD HH:mm:ss'
 ): string => {
   if (!value) return '';
 
-  // 检查日期是否有效
+  /** Check if date is valid */
   if (!dayjs(value).isValid()) {
     return '';
   }
 
-  // 每次调用都获取最新的时区设置
+  /** Get current timezone setting from localStorage */
   const currentTimeZone = localStorage.getItem('timeZone') || 'Asia/Shanghai';
   dayjs.tz.setDefault(currentTimeZone);
   
-  // 使用最新时区格式化日期
+  /** Format date with current timezone */
   return dayjs.tz(value).format(format);
 };
-
