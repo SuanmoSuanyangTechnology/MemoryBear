@@ -413,9 +413,11 @@ class DraftRunService:
             # 6. 处理多模态文件
             processed_files = None
             if files:
-                multimodal_service = MultimodalService(self.db)
+                # 获取 provider 信息
+                provider = api_key_config.get("provider", "openai")
+                multimodal_service = MultimodalService(self.db, provider=provider)
                 processed_files = await multimodal_service.process_files(files)
-                logger.info(f"处理了 {len(processed_files)} 个文件")
+                logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
             # 7. 知识库检索
             context = None
@@ -659,9 +661,11 @@ class DraftRunService:
             # 6. 处理多模态文件
             processed_files = None
             if files:
-                multimodal_service = MultimodalService(self.db)
+                # 获取 provider 信息
+                provider = api_key_config.get("provider", "openai")
+                multimodal_service = MultimodalService(self.db, provider=provider)
                 processed_files = await multimodal_service.process_files(files)
-                logger.info(f"处理了 {len(processed_files)} 个文件")
+                logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
             # 7. 知识库检索
             context = None

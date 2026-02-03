@@ -248,26 +248,46 @@ class LangChainAgent:
         if context:
             user_content = f"参考信息：\n{context}\n\n用户问题：\n{user_content}"
 
-        # 如果有文件，构建多模态消息（使用通义千问原生格式）
+        # 构建用户消息（支持多模态）
         if files and len(files) > 0:
-            # 通义千问多模态格式: [{"text": "..."}, {"image": "url"}]
-            # 注意：不使用 LangChain 的标准格式，因为它会转换为 OpenAI 格式
-            content_parts = [{"text": user_content}]
-            
-            # 添加文件内容（已经是通义千问格式）
-            for file_item in files:
-                if file_item.get("type") == "image":
-                    # 通义千问图片格式: {"image": "url"}
-                    content_parts.append({"image": file_item["image"]})
-                elif file_item.get("type") == "text":
-                    # 文本内容
-                    content_parts.append({"text": file_item["text"]})
-            
-            logger.debug(f"构建多模态消息，content_parts: {content_parts}")
+            content_parts = self._build_multimodal_content(user_content, files)
             messages.append(HumanMessage(content=content_parts))
         else:
-            # 纯文本消息（向后兼容）
+            # 纯文本消息
             messages.append(HumanMessage(content=user_content))
+
+        return messages
+    
+    def _build_multimodal_content(self, text: str, files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        构建多模态消息内容
+        
+        Args:
+            text: 文本内容
+            files: 文件列表（已由 MultimodalService 处理为对应 provider 的格式）
+            
+        Returns:
+            List[Dict]: 消息内容列表
+        """
+        # 根据 provider 使用不同的文本格式
+        if self.provider.lower() in ["bedrock", "anthropic"]:
+            # Anthropic/Bedrock: {"type": "text", "text": "..."}
+            content_parts = [{"type": "text", "text": text}]
+        else:
+            # 通义千问等: {"text": "..."}
+            content_parts = [{"text": text}]
+        
+        # 添加文件内容
+        # MultimodalService 已经根据 provider 返回了正确格式，直接使用
+        content_parts.extend(files)
+        
+        logger.debug(
+            f"构建多模态消息: provider={self.provider}, "
+            f"parts={len(content_parts)}, "
+            f"files={len(files)}"
+        )
+        
+        return content_parts
 
         return messages
 

@@ -3,12 +3,13 @@
 
 处理图片、文档等多模态文件，转换为 LLM 可用的格式
 
-格式说明：
-- 当前使用通义千问格式
-- 通义千问格式: {"type": "image", "image": "url"}
+支持的 Provider:
+- DashScope (通义千问): 支持 URL 格式
+- Bedrock/Anthropic: 仅支持 base64 格式
+- OpenAI: 支持 URL 和 base64 格式
 """
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Protocol
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
@@ -20,11 +21,105 @@ from app.models.generic_file_model import GenericFile
 logger = get_business_logger()
 
 
+class ImageFormatStrategy(Protocol):
+    """图片格式策略接口"""
+    
+    async def format_image(self, url: str) -> Dict[str, Any]:
+        """将图片 URL 转换为特定 provider 的格式"""
+        ...
+
+
+class DashScopeImageStrategy:
+    """通义千问图片格式策略"""
+    
+    async def format_image(self, url: str) -> Dict[str, Any]:
+        """通义千问格式: {"type": "image", "image": "url"}"""
+        return {
+            "type": "image",
+            "image": url
+        }
+
+
+class BedrockImageStrategy:
+    """Bedrock/Anthropic 图片格式策略"""
+    
+    async def format_image(self, url: str) -> Dict[str, Any]:
+        """
+        Bedrock/Anthropic 格式: base64 编码
+        {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
+        """
+        import httpx
+        import base64
+        from mimetypes import guess_type
+        
+        logger.info(f"下载并编码图片: {url}")
+        
+        # 下载图片
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            
+            # 获取图片数据
+            image_data = response.content
+            
+            # 确定 media type
+            content_type = response.headers.get("content-type")
+            if content_type and content_type.startswith("image/"):
+                media_type = content_type
+            else:
+                guessed_type, _ = guess_type(url)
+                media_type = guessed_type if guessed_type and guessed_type.startswith("image/") else "image/jpeg"
+            
+            # 转换为 base64
+            base64_data = base64.b64encode(image_data).decode("utf-8")
+            
+            logger.info(f"图片编码完成: media_type={media_type}, size={len(base64_data)}")
+            
+            return {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": base64_data
+                }
+            }
+
+
+class OpenAIImageStrategy:
+    """OpenAI 图片格式策略"""
+    
+    async def format_image(self, url: str) -> Dict[str, Any]:
+        """OpenAI 格式: {"type": "image_url", "image_url": {"url": "..."}}"""
+        return {
+            "type": "image_url",
+            "image_url": {
+                "url": url
+            }
+        }
+
+
+# Provider 到策略的映射
+PROVIDER_STRATEGIES = {
+    "dashscope": DashScopeImageStrategy,
+    "bedrock": BedrockImageStrategy,
+    "anthropic": BedrockImageStrategy,
+    "openai": OpenAIImageStrategy,
+}
+
+
 class MultimodalService:
     """多模态文件处理服务"""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, provider: str = "dashscope"):
+        """
+        初始化多模态服务
+        
+        Args:
+            db: 数据库会话
+            provider: 模型提供商（dashscope, bedrock, anthropic 等）
+        """
         self.db = db
+        self.provider = provider.lower()
     
     async def process_files(
         self, 
@@ -37,7 +132,7 @@ class MultimodalService:
             files: 文件输入列表
             
         Returns:
-            List[Dict]: LLM 可用的内容格式列表
+            List[Dict]: LLM 可用的内容格式列表（根据 provider 返回不同格式）
         """
         if not files:
             return []
@@ -74,7 +169,7 @@ class MultimodalService:
                     "text": f"[文件处理失败: {str(e)}]"
                 })
         
-        logger.info(f"成功处理 {len(result)}/{len(files)} 个文件")
+        logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
         return result
     
     async def _process_image(self, file: FileInput) -> Dict[str, Any]:
@@ -85,23 +180,87 @@ class MultimodalService:
             file: 图片文件输入
             
         Returns:
-            Dict: 通义千问格式 {"type": "image", "image": "url"}
+            Dict: 根据 provider 返回不同格式
+                - Anthropic/Bedrock: {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
+                - 通义千问: {"type": "image", "image": "url"}
         """
         if file.transfer_method == TransferMethod.REMOTE_URL:
-            # 远程 URL，使用通义千问格式
-            logger.debug(f"处理远程图片: {file.url}")
-            return {
-                "type": "image",
-                "image": file.url
-            }
+            url = file.url
         else:
             # 本地文件，获取访问 URL
             url = await self._get_file_url(file.upload_file_id)
-            logger.debug(f"处理本地图片: {url}")
+        
+        logger.debug(f"处理图片: {url}, provider={self.provider}")
+        
+        # 根据 provider 返回不同格式
+        if self.provider in ["bedrock", "anthropic"]:
+            # Anthropic/Bedrock 只支持 base64 格式，需要下载并转换
+            try:
+                logger.info(f"开始下载并编码图片: {url}")
+                base64_data, media_type = await self._download_and_encode_image(url)
+                result = {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": base64_data[:100] + "..."  # 只记录前100个字符
+                    }
+                }
+                logger.info(f"图片编码完成: media_type={media_type}, data_length={len(base64_data)}")
+                # 返回完整数据
+                result["source"]["data"] = base64_data
+                return result
+            except Exception as e:
+                logger.error(f"下载并编码图片失败: {e}", exc_info=True)
+                # 返回错误提示
+                return {
+                    "type": "text",
+                    "text": f"[图片加载失败: {str(e)}]"
+                }
+        else:
+            # 通义千问等其他格式支持 URL
             return {
                 "type": "image",
                 "image": url
             }
+    
+    async def _download_and_encode_image(self, url: str) -> tuple[str, str]:
+        """
+        下载图片并转换为 base64
+        
+        Args:
+            url: 图片 URL
+            
+        Returns:
+            tuple: (base64_data, media_type)
+        """
+        import httpx
+        import base64
+        from mimetypes import guess_type
+        
+        # 下载图片
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            
+            # 获取图片数据
+            image_data = response.content
+            
+            # 确定 media type
+            content_type = response.headers.get("content-type")
+            if content_type and content_type.startswith("image/"):
+                media_type = content_type
+            else:
+                # 从 URL 推断
+                guessed_type, _ = guess_type(url)
+                media_type = guessed_type if guessed_type and guessed_type.startswith("image/") else "image/jpeg"
+            
+            # 转换为 base64
+            base64_data = base64.b64encode(image_data).decode("utf-8")
+            
+            logger.debug(f"图片编码完成: media_type={media_type}, size={len(base64_data)}")
+            
+            return base64_data, media_type
     
     async def _process_document(self, file: FileInput) -> Dict[str, Any]:
         """
