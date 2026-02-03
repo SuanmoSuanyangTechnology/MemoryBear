@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 14:00:09 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 14:00:09 
+ */
 import { request } from '@/utils/request'
 import type { MultiKeyForm, Query, KeyConfigModalForm, CompositeModelForm, CustomModelForm } from '@/views/ModelManagement/types'
 

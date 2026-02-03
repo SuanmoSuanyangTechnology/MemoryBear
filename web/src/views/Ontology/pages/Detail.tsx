@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 14:10:20 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 14:10:20 
+ */
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -12,22 +18,35 @@ import SearchInput from '@/components/SearchInput';
 import OntologyClassExtractModal from '../components/OntologyClassExtractModal'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 
+/**
+ * Ontology detail page component
+ * Displays and manages classes within a specific ontology scene
+ */
 const Detail: FC = () => {
+  // Hooks
   const { t } = useTranslation();
   const { id } = useParams()
   const { modal, message } = App.useApp()
+  
+  // Refs
   const ontologyClassModalRef = useRef<OntologyClassModalRef>(null)
   const ontologyClassExtractModalRef = useRef<OntologyClassExtractModalRef>(null)
+  
+  // State
   const [query, setQuery] = useState<{
     class_name?: string;
   }>({});
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<OntologyClassData>({} as OntologyClassData)
 
+  // Fetch data when component mounts or dependencies change
   useEffect(() => {
     getData()
   }, [id, query])
 
+  /**
+   * Fetch ontology class list data
+   */
   const getData = () => {
     if (!id) return;
     setLoading(true)
@@ -42,6 +61,11 @@ const Detail: FC = () => {
         setLoading(false)
       })
   }
+  
+  /**
+   * Delete an ontology class with confirmation
+   * @param item - The class item to delete
+   */
   const handleDelete = (item: OntologyClassItem) => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: item.class_name }),
@@ -57,9 +81,17 @@ const Detail: FC = () => {
       }
     })
   }
+  
+  /**
+   * Open modal to add a new class
+   */
   const handleAdd = () => {
     ontologyClassModalRef.current?.handleOpen(data.scene_id)
   }
+  
+  /**
+   * Open modal to extract classes using LLM
+   */
   const handleExtract = () => {
     ontologyClassExtractModalRef.current?.handleOpen(data)
   }
