@@ -26,6 +26,7 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   query?: Q;
   column?: number;
   className?: string;
+  needLoading?: boolean;
 }
 const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   renderItem, 
@@ -33,6 +34,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   url,
   column = 4,
   className = '',
+  needLoading = true,
 }: PageScrollListProps<T, Q>, ref: React.Ref<PageScrollListRef>) => {
   useImperativeHandle(ref, () => ({
     refresh,
@@ -104,9 +106,10 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
           dataLength={data.length}
           next={loadMoreData}
           hasMore={hasMore}
-          loader={<PageLoading />}
+          loader={needLoading ? <PageLoading /> : undefined}
           // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
           scrollableTarget="scrollableDiv"
+          className='rb:h-full!'
         >
           {data.length > 0 ? (
             <List
