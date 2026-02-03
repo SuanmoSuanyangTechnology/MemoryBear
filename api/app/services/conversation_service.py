@@ -1,4 +1,5 @@
 """会话服务"""
+import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Annotated
@@ -529,12 +530,12 @@ class ConversationService:
                 takeaways=[],
                 info_score=0,
             )
-
-        with open('app/services/prompt/conversation_summary_system.jinja2', 'r', encoding='utf-8') as f:
+        prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
+        with open(os.path.join(prompt_path, 'conversation_summary_system.jinja2'), 'r', encoding='utf-8') as f:
             system_prompt = f.read()
         rendered_system_message = Template(system_prompt).render()
 
-        with open('app/services/prompt/conversation_summary_user.jinja2', 'r', encoding='utf-8') as f:
+        with open(os.path.join(prompt_path, 'conversation_summary_user.jinja2'), 'r', encoding='utf-8') as f:
             user_prompt = f.read()
         rendered_user_message = Template(user_prompt).render(
             language=language,
