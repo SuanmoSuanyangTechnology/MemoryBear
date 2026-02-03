@@ -129,6 +129,12 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             if not params.rerank_id:
                 params.rerank_id = configs.get('rerank')
 
+        # reflection_model_id 和 emotion_model_id 默认与 llm_id 一致
+        if not params.reflection_model_id:
+            params.reflection_model_id = params.llm_id
+        if not params.emotion_model_id:
+            params.emotion_model_id = params.llm_id
+
         config = MemoryConfigRepository.create(self.db, params)
         self.db.commit()
         return {"affected": 1, "config_id": config.config_id}
