@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 14:10:15 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 14:10:15 
+ */
 import { type FC, useState, useRef, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -5,29 +11,57 @@ import { Row, Col, Button, Flex, Divider, Space, App, Tooltip } from 'antd'
 
 import SearchInput from '@/components/SearchInput';
 import OntologyModal from './components/OntologyModal'
-import type { OntologyModalRef, OntologyItem, Query } from './types'
+import type { OntologyModalRef, OntologyItem, Query, OntologyImportModalRef, OntologyExportModalRef } from './types'
 import RbCard from '@/components/RbCard/Card'
 import Tag from '@/components/Tag'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { getOntologyScenesUrl, deleteOntologyScene } from '@/api/ontology'
 import { formatDateTime } from '@/utils/format'
+import OntologyImportModal from './components/OntologyImportModal'
+import OntologyExportModal from './components/OntologyExportModal'
 
+/**
+ * Ontology management page component
+ * Displays a list of ontology scenes with search, create, import, export functionality
+ */
 const Ontology: FC = () => {
+  // Hooks
   const { t } = useTranslation();
   const navigate = useNavigate()
   const { modal, message } = App.useApp();
+  
+  // State
   const [query, setQuery] = useState<Query>({});
+  
+  // Refs
   const scrollListRef = useRef<PageScrollListRef>(null)
   const entityModalRef = useRef<OntologyModalRef>(null)
+  const ontologyImportModalRef = useRef<OntologyImportModalRef>(null)
+  const ontologyExportModalRef = useRef<OntologyExportModalRef>(null)
 
+  /**
+   * Open modal to create a new ontology scene
+   */
   const handleCreate = () => {
     entityModalRef.current?.handleOpen()
   }
+  
+  /**
+   * Open modal to edit an existing ontology scene
+   * @param record - The ontology item to edit
+   * @param e - Mouse event to prevent propagation
+   */
   const handleEdit = (record: OntologyItem, e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     entityModalRef.current?.handleOpen(record)
   }
+  
+  /**
+   * Delete an ontology scene with confirmation
+   * @param item - The ontology item to delete
+   * @param e - Mouse event to prevent propagation
+   */
   const handleDelete = (item: OntologyItem, e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -45,8 +79,34 @@ const Ontology: FC = () => {
       }
     })
   }
+  
+  /**
+   * Navigate to ontology detail page
+   * @param record - The ontology item to view
+   */
   const handleJump = (record: OntologyItem) => {
     navigate(`/ontology/${record.scene_id}`)
+  }
+  
+  /**
+   * Refresh the ontology list
+   */
+  const handleRefresh = () => {
+    scrollListRef.current?.refresh()
+  }
+  
+  /**
+   * Open export modal
+   */
+  const handleExport = () => {
+    ontologyExportModalRef.current?.handleOpen()
+  }
+  
+  /**
+   * Open import modal
+   */
+  const handleImport = () => {
+    ontologyImportModalRef.current?.handleOpen()
   }
 
   return (
@@ -60,9 +120,17 @@ const Ontology: FC = () => {
           />
         </Col>
         <Col span={16} className="rb:text-right">
-          <Button type="primary" onClick={handleCreate}>
-            + {t('ontology.create')}
-          </Button>
+          <Space size={12}>
+            <Button onClick={handleExport}>
+              {t('ontology.export')}
+            </Button>
+            <Button onClick={handleImport}>
+              {t('ontology.import')}
+            </Button>
+            <Button type="primary" onClick={handleCreate}>
+              + {t('ontology.create')}
+            </Button>
+          </Space>
         </Col>
       </Row>
 
@@ -124,7 +192,15 @@ const Ontology: FC = () => {
 
       <OntologyModal
         ref={entityModalRef}
-        refresh={() => scrollListRef.current?.refresh()}
+        refresh={handleRefresh}
+      />
+      <OntologyImportModal
+        ref={ontologyImportModalRef}
+        refresh={handleRefresh}
+      />
+      <OntologyExportModal
+        ref={ontologyExportModalRef}
+        refresh={handleRefresh}
       />
     </>
   )

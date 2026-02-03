@@ -1,42 +1,42 @@
 /*
  * @Author: ZhaoYing 
- * @Date: 2026-02-03 14:10:28 
+ * @Date: 2026-02-03 14:10:32 
  * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 14:10:28 
+ * @Last Modified time: 2026-02-03 14:10:32 
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { OntologyItem, OntologyModalData, OntologyModalRef } from '../types'
+import type { OntologyImportModalData, OntologyImportModalRef } from '../types'
 import RbModal from '@/components/RbModal'
-import { createOntologyScene, updateOntologyScene } from '@/api/ontology'
+import { ontologyImport } from '@/api/ontology'
+import UploadFiles from '@/components/Upload/UploadFiles';
 
 const FormItem = Form.Item;
 
 /**
- * Props for OntologyModal component
+ * Props for OntologyImportModal component
  */
-interface OntologyModalProps {
-  /** Callback function to refresh parent list after save */
+interface OntologyImportModalProps {
+  /** Callback function to refresh parent list after import */
   refresh: () => void;
 }
 
 /**
- * Modal component for creating or editing ontology scenes
- * Provides form interface for scene name and description
+ * Modal component for importing ontology files
+ * Supports OWL, TTL, RDF, XML file formats
  */
-const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
+const OntologyImportModal = forwardRef<OntologyImportModalRef, OntologyImportModalProps>(({
   refresh
 }, ref) => {
   // Hooks
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const [form] = Form.useForm<OntologyModalData>();
+  const [form] = Form.useForm<OntologyImportModalData>();
   
   // State
   const [visible, setVisible] = useState(false);
-  const [editVo, setEditVo] = useState<OntologyItem | null>(null)
   const [loading, setLoading] = useState(false)
 
   /**
@@ -46,34 +46,34 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
     setVisible(false);
     form.resetFields();
     setLoading(false)
-    setEditVo(null)
   };
 
   /**
-   * Open modal for creating or editing
-   * @param vo - Optional ontology item data for edit mode
+   * Open the import modal
    */
-  const handleOpen = (vo?: OntologyItem) => {
-    if (vo) {
-      setEditVo(vo);
-      form.setFieldsValue(vo);
-    } else {
-      form.resetFields();
-    }
+  const handleOpen = () => {
+    form.resetFields();
     setVisible(true);
   };
   
   /**
-   * Validate and submit form data
-   * Creates new scene or updates existing one based on editVo
+   * Validate and submit form data to import ontology file
+   * Creates FormData with file and scene information
    */
   const handleSave = () => {
     form
       .validateFields()
       .then((values) => {
+        const { scene_name, scene_description,  file } = values
+        console.log('values', file);
+        const formData = new FormData();
+        formData.append('file', file[0]);
+        formData.append('scene_name', scene_name);
+        if (scene_description) {
+          formData.append('scene_description', scene_description);
+        }
         setLoading(true)
-        const request = editVo?.scene_id ? updateOntologyScene(editVo.scene_id, values) : createOntologyScene(values)
-        request
+        ontologyImport(formData)
           .then(() => {
             message.success(t('common.saveSuccess'));
             handleClose();
@@ -95,10 +95,10 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
 
   return (
     <RbModal
-      title={editVo?.scene_id ? t('ontology.edit') : t('ontology.create')}
+      title={t('ontology.import')}
       open={visible}
       onCancel={handleClose}
-      okText={editVo?.scene_id ? t('common.save') : t('common.create')}
+      okText={t('common.create')}
       onOk={handleSave}
       confirmLoading={loading}
     >
@@ -113,16 +113,27 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
         >
           <Input placeholder={t('common.enter')} />
         </FormItem>
-
         <FormItem
           name="scene_description"
           label={t('ontology.scene_description')}
         >
-          <Input.TextArea placeholder={t('ontology.descriptionPlaceholder')} />
+          <Input.TextArea placeholder={t('common.enter')} />
+        </FormItem>
+
+        <FormItem
+          name="file"
+          label={t('ontology.file')}
+          rules={[{ required: true, message: t('common.pleaseSelect') }]}
+        >
+          <UploadFiles
+            isCanDrag={true}
+            fileType={['owl', 'ttl', 'rdf', 'xml']}
+            isAutoUpload={false}
+          />
         </FormItem>
       </Form>
     </RbModal>
   );
 });
 
-export default OntologyModal;
+export default OntologyImportModal;

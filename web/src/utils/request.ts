@@ -288,19 +288,20 @@ export const request = {
       ...config
     });
   },
-  downloadFile(url: string, fileName: string, data?: unknown) {
+  downloadFile(url: string, fileName: string, data?: unknown, callback?: () => void) {
     service.post(url, data, {
       responseType: "blob",
     })
     .then(res =>{
       const link = document.createElement("a");
-      const blob = new Blob([res.data], { type: "application/vnd.ms-excel" });
+      const blob = new Blob([res as unknown as BlobPart]);
       link.style.display = "none";
       link.href = URL.createObjectURL(blob);
-      link.setAttribute("download", decodeURI(res.headers['filename'] || fileName));
+      link.setAttribute("download", decodeURI(fileName || fileName));
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      callback?.()
     });
   }
 };

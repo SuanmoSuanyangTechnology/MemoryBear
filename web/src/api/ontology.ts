@@ -1,5 +1,11 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 13:59:12 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 13:59:12 
+ */
 import { request } from '@/utils/request'
-import type { Query, OntologyModalData, OntologyClassModalData, OntologyClassExtractModalData } from '@/views/Ontology/types'
+import type { Query, OntologyModalData, OntologyClassModalData, OntologyClassExtractModalData, OntologyExportModalData } from '@/views/Ontology/types'
 
 // Scene list
 export const getOntologyScenesUrl = '/memory/ontology/scenes'
@@ -36,4 +42,12 @@ export const createOntologyClass = (data: OntologyClassModalData) => {
 // Delete ontology class
 export const deleteOntologyClass = (class_id: string) => {
   return request.delete(`/memory/ontology/class/${class_id}`)
+}
+// Import scenario
+export const ontologyImport = (data: unknown) => {
+  return request.uploadFile('/memory/ontology/import', data)
+}
+// Export scenario
+export const ontologyExport = (data: OntologyExportModalData, fileName: string, callback: () => void) => {
+  return request.downloadFile('/memory/ontology/export', fileName, data, callback)
 }

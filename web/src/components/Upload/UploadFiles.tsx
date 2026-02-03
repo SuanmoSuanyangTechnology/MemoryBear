@@ -57,6 +57,10 @@ const ALL_FILE_TYPE: {
   htm: 'text/html',
   html: 'text/html',
   json: 'application/json',
+  owl: 'application/rdf+xml',
+  ttl: 'text/turtle',
+  rdf: 'application/rdf+xml',
+  xml: 'application/rdf+xml',
 }
 export interface UploadFilesRef {
   fileList: UploadFile[];
@@ -122,7 +126,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     if (fileSize) {
       const isLtMaxSize = (file.size / 1024 / 1024) < fileSize;
       if (!isLtMaxSize) {
-        message.error(`文件大小不能超过 ${fileSize}MB`);
+        message.error(t('common.fileSizeTip', { size: fileSize }));
         return Upload.LIST_IGNORE;
       }
     }
@@ -139,7 +143,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
       const isValidMimeType = file.type && accept ? accept.includes(file.type) : true;
       
       if (!isValidExtension && !isValidMimeType) {
-        message.error(`不支持的文件类型: ${fileExtension || file.type}`);
+        message.error(`${t('common.fileAcceptTip')}${fileExtension || file.type}`);
         return Upload.LIST_IGNORE;
       }
     }
@@ -236,12 +240,12 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     fileList,
     beforeUpload,
     headers: {
-      authorization:  cookieUtils.get('authToken') || '',
+      authorization: `Bearer ${cookieUtils.get('authToken')}`,
     },
     onRemove: handleRemove,
     onChange: handleChange,
     accept,
-    disabled,
+    disabled: disabled || fileList.length >= maxCount,
     showUploadList: {
       showPreviewIcon: false,
       showRemoveIcon: true,
@@ -249,12 +253,12 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     },
     itemRender: (_, file, __, actions) => {
       return (
-        <div key={file.uid} className="rb:relative rb:w-full rb:pt-[8px] rb:pl-[10px] rb:pr-[10px] rb-pb-[10px] rb:border-1 rb:border-[#EBEBEB] rb:rounded rb:p-2 rb:mt-2 rb:bg-white">
-          <div className="rb:text-[12px] rb:flex rb:items-center rb:justify-between rb:mb-[2px]">
+        <div key={file.uid} className="rb:relative rb:w-full rb:pt-2 rb:pl-2.5 rb:pr-2.5 rb-pb-[10px] rb:border rb:border-[#EBEBEB] rb:rounded rb:p-2 rb:mt-2 rb:bg-white">
+          <div className="rb:text-[12px] rb:flex rb:items-center rb:justify-between rb:mb-0.5">
             {file.name}
-            <span className="rb:text-[#5B6167] rb:cursor-pointer" onClick={() => actions?.remove()}>Cancel</span>
+            <span className="rb:text-[#5B6167] rb:cursor-pointer" onClick={() => actions?.remove()}>{t('common.cancel')}</span>
           </div>
-          <Progress percent={file.percent || 0} strokeColor={file.status === 'error' ? '#FF5D34' : '#155EEF'} size="small" showInfo={false} />
+          {isAutoUpload && <Progress percent={file.percent || 0} strokeColor={file.status === 'error' ? '#FF5D34' : '#155EEF'} size="small" showInfo={false} />}
         </div>
       );
     },
@@ -267,20 +271,20 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     clearFiles
   }));
 
-  const hasProgress = fileList.some((item) => item.percent !== 100);
+  const hasProgress = isAutoUpload && fileList.some((item) => item.percent !== 100);
 
   if (isCanDrag) {
     return (
-      <div className="rb:mb-[24px] rb:w-full">
+      <div className="rb:mb-6 rb:w-full">
         <Dragger {...uploadProps} style={{ height: '270px' }}>
           <div className="rb:flex rb:justify-center rb:flex-col rb:items-center">
-            <img className="rb:w-[48px] rb:h-[48px]" src={CloudUploadOutlined} />
-            {!hasProgress && (!fileList || !fileList.length) &&
+            <img className="rb:w-12 rb:h-12" src={CloudUploadOutlined} />
+            {(!isAutoUpload || !hasProgress && (!fileList || !fileList.length)) &&
               <>
-                <div className="rb:text-base rb:text-[14px] rb:font-medium rb:flex rb:items-center rb:mt-[8px] rb:leading-[20px]">
-                  {t('common.dragUploadTip')}<span className="rb:ml-[4px] rb:text-[#155EEF]">{t('common.uploadClickTip')}</span>
+                <div className="rb:text-base rb:text-[14px] rb:font-medium rb:flex rb:items-center rb:mt-2 rb:leading-5">
+                  {t('common.dragUploadTip')}<span className="rb:ml-1 rb:text-[#155EEF]">{t('common.uploadClickTip')}</span>
                 </div>
-                {fileType && <div className="rb:text-[12px] rb:text-[#A8A9AA] rb:leading-[14px] rb:mt-[8px] rb:cursor-pointer">{t('common.supportedFileTypes', { types: fileType.join(',') })}</div>}
+                {fileType && <div className="rb:text-[12px] rb:text-[#A8A9AA] rb:leading-3.5 rb:mt-2 rb:cursor-pointer">{t('common.supportedFileTypes', { types: fileType.join(',') })}</div>}
                 {(fileSize || fileType || maxCount > 1) && (
                   <div className='rb:text-xs rb:mt-2 rb:text-[#A8A9AA]'>
                     {t('common.uploadFileTipMax', { max: fileSize, maxCount: maxCount })}
@@ -288,7 +292,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
                 )}
               </>
             }
-            {hasProgress && <div className="rb:text-base rb:text-[14px] rb:font-medium rb:flex rb:items-center rb:mt-[8px] rb:mb-[24px] rb:leading-[20px]">{t('common.uploading')}</div>}
+            {hasProgress && <div className="rb:text-base rb:text-[14px] rb:font-medium rb:flex rb:items-center rb:mt-2 rb:mb-6 rb:leading-5">{t('common.uploading')}</div>}
           </div>
         </Dragger>
       </div>
