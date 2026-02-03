@@ -1,23 +1,39 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 16:33:11 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 16:33:11 
+ */
+/**
+ * Route Configuration
+ * 
+ * Manages application routing with:
+ * - Dynamic route generation from JSON configuration
+ * - Lazy loading of components for code splitting
+ * - Nested route support
+ * - Component mapping validation
+ * - Hash-based routing
+ * 
+ * @module routes
+ */
+
 import { lazy, type LazyExoticComponent, type ComponentType, type ReactNode } from 'react';
 import { createHashRouter, createRoutesFromElements, Route } from 'react-router-dom';
 
-// 导入路由配置JSON
+/** Import route configuration JSON */
 import routesConfig from './routes.json';
-import Ontology from '@/views/Ontology';
 
 
-// 递归函数，用于生成路由元素
-
-// 递归收集所有路由中的element
+/** Recursively collect all element names from routes */
 function collectElements(routes: RouteConfig[]): Set<string> {
   const elements = new Set<string>();
 
   function traverse(routeList: RouteConfig[]) {
     routeList.forEach(route => {
-      // 添加当前路由的element
+      /** Add current route's element */
       elements.add(route.element);
 
-      // 递归处理子路由
+      /** Recursively process child routes */
       if (route.children && route.children.length > 0) {
         traverse(route.children);
       }
@@ -28,15 +44,15 @@ function collectElements(routes: RouteConfig[]): Set<string> {
   return elements;
 }
 
-// 直接定义组件映射表，避免动态路径解析问题
+/** Component mapping table - maps element names to lazy-loaded components */
 const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> = {
-  // 布局组件
+  /** Layout components */
   AuthLayout: lazy(() => import('@/components/Layout/AuthLayout')),
   AuthSpaceLayout: lazy(() => import('@/components/Layout/AuthSpaceLayout')),
   BasicLayout: lazy(() => import('@/components/Layout/BasicLayout')),
   LoginLayout: lazy(() => import('@/components/Layout/LoginLayout')),
   NoAuthLayout: lazy(() => import('@/components/Layout/NoAuthLayout')),
-  // 视图组件
+  /** View components */
   Index: lazy(() => import('@/views/Index')),
   Home: lazy(() => import('@/views/Home')),
   UserMemory: lazy(() => import('@/views/UserMemory')),
@@ -78,7 +94,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   NotFound: lazy(() => import('@/views/NotFound'))
 };
 
-// 检查并报告缺失的组件
+/** Check and report missing components */
 const allElements = collectElements(routesConfig);
 allElements.forEach(elementName => {
   if (!componentMap[elementName]) {
@@ -86,23 +102,27 @@ allElements.forEach(elementName => {
   }
 });
 
-// 确保NotFound组件总是存在作为兜底
+/** Ensure NotFound component always exists as fallback */
 if (!componentMap['NotFound']) {
   componentMap['NotFound'] = lazy(() => import('@/views/NotFound/index.tsx'));
 }
 
-// 路由配置类型定义
+/** Route configuration type definition */
 interface RouteConfig {
+  /** Route path */
   path?: string;
+  /** Component element name */
   element: string;
+  /** Component file path (optional) */
   componentPath?: string;
+  /** Child routes */
   children?: RouteConfig[];
 }
 
-// 递归函数，用于生成路由元素
+/** Recursively generate route elements from configuration */
 const generateRoutes = (routes: RouteConfig[]): ReactNode => {
   return routes.map((route, index) => {
-    // 获取组件
+    /** Get component from mapping */
     const componentKey = route.element as keyof typeof componentMap;
     const Component = componentMap[componentKey];
 
@@ -111,7 +131,7 @@ const generateRoutes = (routes: RouteConfig[]): ReactNode => {
       return null;
     }
 
-    // 如果有子路由
+    /** If has child routes, create nested route */
     if (route.children) {
       return (
         <Route key={index} element={<Component />}>
@@ -120,7 +140,7 @@ const generateRoutes = (routes: RouteConfig[]): ReactNode => {
       );
     }
 
-    // 如果有path属性，则为普通路由
+    /** If has path property, create regular route */
     if (route.path) {
       return <Route key={index} path={route.path} element={<Component />} />;
     }
@@ -129,7 +149,7 @@ const generateRoutes = (routes: RouteConfig[]): ReactNode => {
   });
 };
 
-// 创建路由
+/** Create hash router from route configuration */
 const router = createHashRouter(
   createRoutesFromElements(
     generateRoutes(routesConfig)
