@@ -32,7 +32,6 @@ from app.repositories.memory_short_repository import ShortTermMemoryRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.memory_config_schema import ConfigurationError
-from app.services.memory_base_service import Translation_English
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
@@ -265,7 +264,7 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
-    async def write_memory(self, end_user_id: str, messages:  list[dict], config_id: Optional[uuid.UUID]|int, db: Session, storage_type: str, user_rag_memory_id: str) -> str:
+    async def write_memory(self, end_user_id: str, messages:  list[dict], config_id: Optional[uuid.UUID]|int, db: Session, storage_type: str, user_rag_memory_id: str, language: str = "zh") -> str:
         """
         Process write operation with config_id
 
@@ -276,6 +275,7 @@ class MemoryAgentService:
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
             user_rag_memory_id: User RAG memory ID
+            language: 语言类型 ("zh" 中文, "en" 英文)
 
         Returns:
             Write operation result status
@@ -341,7 +341,8 @@ class MemoryAgentService:
                     initial_state = {
                         "messages": langchain_messages,
                         "end_user_id": end_user_id,
-                        "memory_config": memory_config
+                        "memory_config": memory_config,
+                        "language": language
                     }
 
                     # 获取节点更新信息
@@ -912,11 +913,9 @@ class MemoryAgentService:
             tags = await get_hot_memory_tags(end_user_id, limit=limit, by_user=False)
             payload=[]
             for tag, freq in tags:
-                if language_type!="zh":
-                    tag=await Translation_English(model_id, tag)
-                    payload.append({"name": tag, "frequency": freq})
-                else:
-                    payload.append({"name": tag, "frequency": freq})
+                # 直接返回标签，不进行二次翻译
+                # 标签语言由生成时的 X-Language-Type 决定
+                payload.append({"name": tag, "frequency": freq})
             return payload
         except Exception as e:
             logger.error(f"热门记忆标签查询失败: {e}")

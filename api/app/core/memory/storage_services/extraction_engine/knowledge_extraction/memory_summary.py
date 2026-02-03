@@ -16,7 +16,7 @@ logger = get_memory_logger(__name__)
 
 # 支持的语言列表和默认回退值
 SUPPORTED_LANGUAGES = {"zh", "en"}
-FALLBACK_LANGUAGE = "en"
+FALLBACK_LANGUAGE = "zh"
 
 
 def validate_language(language: Optional[str]) -> str:
@@ -60,7 +60,7 @@ class MemorySummaryResponse(RobustLLMResponse):
 async def generate_title_and_type_for_summary(
     content: str,
     llm_client,
-    language: str = None
+    language: str = "zh"
 ) -> Tuple[str, str]:
     """
     为MemorySummary生成标题和类型
@@ -70,17 +70,14 @@ async def generate_title_and_type_for_summary(
     Args:
         content: Summary的内容文本
         llm_client: LLM客户端实例
-        language: 生成标题使用的语言 ("zh" 中文, "en" 英文)，如果为None则从配置读取
+        language: 生成标题使用的语言 ("zh" 中文, "en" 英文)，默认中文
         
     Returns:
         (标题, 类型)元组
     """
     from app.core.memory.utils.prompt.prompt_utils import render_episodic_title_and_type_prompt
-    from app.core.config import settings
     
-    # 如果没有指定语言，从配置中读取，并校验有效性
-    if language is None:
-        language = settings.DEFAULT_LANGUAGE
+    # 验证语言参数
     language = validate_language(language)
     
     # 定义有效的类型集合
@@ -188,6 +185,7 @@ async def _process_chunk_summary(
     chunk,
     llm_client,
     embedder: OpenAIEmbedderClient,
+    language: str = "zh",
 ) -> Optional[MemorySummaryNode]:
     """Process a single chunk to generate a memory summary node."""
     # Skip empty chunks
@@ -195,9 +193,8 @@ async def _process_chunk_summary(
         return None
 
     try:
-        # 从配置中获取语言设置（只获取一次，复用），并校验有效性
-        from app.core.config import settings
-        language = validate_language(settings.DEFAULT_LANGUAGE)
+        # 验证语言参数
+        language = validate_language(language)
         
         # Render prompt via Jinja2 for a single chunk
         prompt_content = await render_memory_summary_prompt(
@@ -267,13 +264,21 @@ async def memory_summary_generation(
     chunked_dialogs: List[DialogData],
     llm_client,
     embedder_client: OpenAIEmbedderClient,
+    language: str = "zh",
 ) -> List[MemorySummaryNode]:
-    """Generate memory summaries per chunk, embed them, and return nodes."""
+    """Generate memory summaries per chunk, embed them, and return nodes.
+    
+    Args:
+        chunked_dialogs: 分块后的对话数据
+        llm_client: LLM客户端
+        embedder_client: 嵌入客户端
+        language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
+    """
     # Collect all tasks for parallel processing
     tasks = []
     for dialog in chunked_dialogs:
         for chunk in dialog.chunks:
-            tasks.append(_process_chunk_summary(dialog, chunk, llm_client, embedder_client))
+            tasks.append(_process_chunk_summary(dialog, chunk, llm_client, embedder_client, language=language))
 
     # Process all chunks in parallel
     results = await asyncio.gather(*tasks, return_exceptions=False)

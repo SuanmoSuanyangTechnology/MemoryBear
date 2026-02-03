@@ -12,7 +12,6 @@ from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
 from app.core.error_codes import BizCode
 from app.core.api_key_utils import timestamp_to_datetime
-from app.services.memory_base_service import Translation_English
 from app.services.user_memory_service import (
     UserMemoryService,
     analytics_memory_types,
@@ -45,7 +44,6 @@ router = APIRouter(
 @router.get("/analytics/memory_insight/report", response_model=ApiResponse)
 async def get_memory_insight_report_api(
     end_user_id: str,
-    language_type: str = Header(default="zh", alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -55,18 +53,10 @@ async def get_memory_insight_report_api(
     此接口仅查询数据库中已缓存的记忆洞察数据，不执行生成操作。
     如需生成新的洞察报告，请使用专门的生成接口。
     """
-    workspace_id = current_user.current_workspace_id
-    workspace_repo = WorkspaceRepository(db)
-    workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
-
-    if workspace_models:
-        model_id = workspace_models.get("llm", None)
-    else:
-        model_id = None
     api_logger.info(f"记忆洞察报告查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
         # 调用服务层获取缓存数据
-        result = await user_memory_service.get_cached_memory_insight(db, end_user_id,model_id,language_type)
+        result = await user_memory_service.get_cached_memory_insight(db, end_user_id)
 
         if result["is_cached"]:
             api_logger.info(f"成功返回缓存的记忆洞察报告: end_user_id={end_user_id}")
@@ -93,15 +83,12 @@ async def get_user_summary_api(
     如需生成新的用户摘要，请使用专门的生成接口。
     
     语言控制：
-    - 优先使用 X-Language-Type Header
-    - 如果未传 Header，则使用环境变量 DEFAULT_LANGUAGE 配置
+    - 使用 X-Language-Type Header 指定语言
+    - 如果未传 Header，默认使用中文 (zh)
     """
-    from app.core.config import settings
-    from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import validate_language
-    
-    # 如果未传 language_type，使用环境变量配置
-    if language_type is None:
-        language_type = validate_language(settings.DEFAULT_LANGUAGE)
+    # 如果未传 language_type，默认使用中文
+    if not language_type:
+        language_type = "zh"
     
     workspace_id = current_user.current_workspace_id
     workspace_repo = WorkspaceRepository(db)
@@ -130,6 +117,7 @@ async def get_user_summary_api(
 @router.post("/analytics/generate_cache", response_model=ApiResponse)
 async def generate_cache_api(
     request: GenerateCacheRequest,
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -138,7 +126,15 @@ async def generate_cache_api(
 
     - 如果提供 end_user_id，只为该用户生成
     - 如果不提供，为当前工作空间的所有用户生成
+    
+    语言控制：
+    - 使用 X-Language-Type Header 指定语言 ("zh" 中文, "en" 英文)
+    - 如果未传 Header，默认使用中文 (zh)
     """
+    # 如果未传 X-Language-Type Header，默认使用中文
+    if not language_type:
+        language_type = "zh"
+    
     workspace_id = current_user.current_workspace_id
 
     # 检查用户是否已选择工作空间
@@ -150,7 +146,7 @@ async def generate_cache_api(
 
     api_logger.info(
         f"缓存生成请求: user={current_user.username}, workspace={workspace_id}, "
-        f"end_user_id={end_user_id if end_user_id else '全部用户'}"
+        f"end_user_id={end_user_id if end_user_id else '全部用户'}, language={language_type}"
     )
 
     try:
@@ -159,10 +155,10 @@ async def generate_cache_api(
             api_logger.info(f"开始为单个用户生成缓存: end_user_id={end_user_id}")
 
             # 生成记忆洞察
-            insight_result = await user_memory_service.generate_and_cache_insight(db, end_user_id, workspace_id)
+            insight_result = await user_memory_service.generate_and_cache_insight(db, end_user_id, workspace_id, language=language_type)
 
             # 生成用户摘要
-            summary_result = await user_memory_service.generate_and_cache_summary(db, end_user_id, workspace_id)
+            summary_result = await user_memory_service.generate_and_cache_summary(db, end_user_id, workspace_id, language=language_type)
 
             # 构建响应
             result = {
@@ -196,7 +192,7 @@ async def generate_cache_api(
             # 为整个工作空间生成
             api_logger.info(f"开始为工作空间 {workspace_id} 批量生成缓存")
 
-            result = await user_memory_service.generate_cache_for_workspace(db, workspace_id)
+            result = await user_memory_service.generate_cache_for_workspace(db, workspace_id, language=language_type)
 
             # 记录统计信息
             api_logger.info(
@@ -396,10 +392,14 @@ async def update_end_user_profile(
             return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", error_msg)
 
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)
-async def memory_space_timeline_of_shared_memories(id: str, label: str,language_type: str = Header(default="zh", alias="X-Language-Type"),
+async def memory_space_timeline_of_shared_memories(id: str, label: str,language_type: str = Header(default=None, alias="X-Language-Type"),
                                       current_user: User = Depends(get_current_user),
                                       db: Session = Depends(get_db),
                                       ):
+    # 如果未传 X-Language-Type Header，默认使用中文
+    if not language_type:
+        language_type = "zh"
+    
     workspace_id=current_user.current_workspace_id
     workspace_repo = WorkspaceRepository(db)
     workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)

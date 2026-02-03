@@ -6,9 +6,9 @@
 Extract entities and knowledge triplets from the given statement.
 
 {% if language == "zh" %}
-**重要：请使用中文生成实体描述（description）和示例（example）。**
+**重要：请使用中文生成实体名称（name）、描述（description）和示例（example）。**
 {% else %}
-**Important: Please generate entity descriptions and examples in English.**
+**Important: Please generate entity names, descriptions and examples in English. If the original text is in Chinese, translate entity names to English.**
 {% endif %}
 
 ===Inputs===
@@ -20,50 +20,48 @@ Extract entities and knowledge triplets from the given statement.
 **Entity Extraction:**
 - Extract entities with their types, context-independent descriptions, **concise examples**, aliases, and semantic memory classification
 {% if language == "zh" %}
+- **实体名称（name）必须使用中文**
 - **实体描述（description）必须使用中文**
 - **示例（example）必须使用中文**
 {% else %}
+- **Entity names must be in English** (translate if the original is in another language)
 - **Entity descriptions must be in English**
 - **Examples must be in English**
 {% endif %}
 - **Semantic Memory Classification (is_explicit_memory):**
   * Set to `true` if the entity represents **explicit/semantic memory**:
-    - **Concepts:** "Machine Learning", "Photosynthesis", "Democracy", "人工智能", "光合作用", "民主"
-    - **Knowledge:** "Python Programming Language", "Theory of Relativity", "Python编程语言", "相对论"
-    - **Definitions:** "API (Application Programming Interface)", "REST API", "应用程序接口"
-    - **Principles:** "SOLID Principles", "First Law of Thermodynamics", "SOLID原则", "热力学第一定律"
-    - **Theories:** "Evolution Theory", "Quantum Mechanics", "进化论", "量子力学"
-    - **Methods/Techniques:** "Agile Development", "Machine Learning Algorithm", "敏捷开发", "机器学习算法"
-    - **Technical Terms:** "Neural Network", "Database", "神经网络", "数据库"
+    - **Concepts:** "Machine Learning", "Photosynthesis", "Democracy"
+    - **Knowledge:** "Python Programming Language", "Theory of Relativity"
+    - **Definitions:** "API (Application Programming Interface)", "REST API"
+    - **Principles:** "SOLID Principles", "First Law of Thermodynamics"
+    - **Theories:** "Evolution Theory", "Quantum Mechanics"
+    - **Methods/Techniques:** "Agile Development", "Machine Learning Algorithm"
+    - **Technical Terms:** "Neural Network", "Database"
   * Set to `false` for:
-    - **People:** "John Smith", "Dr. Wang", "张明", "王博士"
-    - **Organizations:** "Microsoft", "Harvard University", "微软", "哈佛大学"
-    - **Locations:** "Beijing", "Central Park", "北京", "中央公园"
-    - **Events:** "2024 Conference", "Project Meeting", "2024会议", "项目会议"
-    - **Specific objects:** "iPhone 15", "Building A", "iPhone 15", "A栋"
+    - **People:** "John Smith", "Dr. Wang"
+    - **Organizations:** "Microsoft", "Harvard University"
+    - **Locations:** "Beijing", "Central Park"
+    - **Events:** "2024 Conference", "Project Meeting"
+    - **Specific objects:** "iPhone 15", "Building A"
 - **Example Generation (IMPORTANT for semantic memory entities):**
   * For entities where `is_explicit_memory=true`, generate a **concise example (around 20 characters)** to help understand the concept
   * The example should be:
     - **Specific and concrete**: Use real-world scenarios or applications
     - **Brief**: Around 20 characters (can be slightly longer if needed for clarity)
-    - **In the same language as the entity name**
-  * Examples:
-    - Entity: "机器学习" → example: "如：用神经网络识别图片中的猫狗"
-    - Entity: "SOLID Principles" → example: "e.g., Single Responsibility, Open-Closed"
-    - Entity: "Photosynthesis" → example: "e.g., plants convert sunlight to energy"
-    - Entity: "人工智能" → example: "如：智能客服、自动驾驶"
+{% if language == "zh" %}
+    - **使用中文**
+{% else %}
+    - **In English**
+{% endif %}
   * For non-semantic entities (`is_explicit_memory=false`), the example field can be empty
-- **Aliases Extraction (Important):**
-  * **CRITICAL: Extract aliases ONLY in the SAME LANGUAGE as the input text**
-  * **DO NOT translate or add aliases in different languages**
-  * Include common alternative names in the same language (e.g., "北京" → aliases: ["北平", "京城"])
-  * Include abbreviations and full names in the same language (e.g., "联合国" → aliases: ["联合国组织"])
-  * Include nicknames and common variations in the same language (e.g., "纽约" → aliases: ["纽约市", "大苹果"])
-  * If no aliases exist in the same language, use empty array: []
-  * **Examples:**
-    - Chinese input "北京" → aliases: ["北平", "京城"] (NOT ["Beijing", "Peking"])
-    - English input "Beijing" → aliases: ["Peking"] (NOT ["北京", "北平"])
-    - Chinese input "苹果公司" → aliases: ["苹果"] (NOT ["Apple Inc.", "Apple"])
+- **Aliases Extraction:**
+{% if language == "zh" %}
+  * 别名使用中文
+{% else %}
+  * Aliases should be in English
+{% endif %}
+  * Include common alternative names, abbreviations and full names
+  * If no aliases exist, use empty array: []
 - Exclude lengthy quotes, calendar dates, temporal ranges, and temporal expressions
 - For numeric values: extract as separate entities (instance_of: 'Numeric', name: units, numeric_value: value)
   Example: £30 → name: 'GBP', numeric_value: 30, instance_of: 'Numeric'
@@ -73,6 +71,11 @@ Extract entities and knowledge triplets from the given statement.
   - Subject: main entity performing the action or being described
   - Predicate: relationship between entities (e.g., 'is', 'works at', 'believes')
   - Object: entity, value, or concept affected by the predicate
+{% if language == "zh" %}
+- subject_name 和 object_name 必须使用中文
+{% else %}
+- subject_name and object_name must be in English (translate if original is in another language)
+{% endif %}
 - Exclude all temporal expressions from every field
 - Use ONLY the predicates listed in "Predicate Instructions" (uppercase English tokens)
 - Do NOT translate predicate tokens
@@ -81,7 +84,7 @@ Extract entities and knowledge triplets from the given statement.
 **When NOT to extract triplets:**
 - Non-propositional utterances (emotions, fillers, onomatopoeia)
 - No clear predicate from the given definitions applies
-- Standalone noun phrases or checklist items (e.g., "三脚架", "备用电池") → extract as entities only
+- Standalone noun phrases or checklist items → extract as entities only
 - Do NOT invent generic predicates (e.g., "IS_DOING", "FEELS", "MENTIONS")
 
 **If no valid triplet exists:** Return triplets: [], extract entities if present, otherwise both arrays empty.
@@ -96,248 +99,82 @@ Use ONLY these predicates. If none fits, set triplets to [].
 
 
 ===Examples===
-
-**Example 1 (English):** "I plan to travel to Paris next week and visit the Louvre."
+{% if language == "en" %}
+**Example 1 (English output):** "I plan to travel to Paris next week and visit the Louvre."
 Output:
 {
   "triplets": [
-    {
-      "subject_name": "I",
-      "subject_id": 0,
-      "predicate": "PLANS_TO_VISIT",
-      "object_name": "Paris",
-      "object_id": 1,
-      "value": null
-    },
-    {
-      "subject_name": "I",
-      "subject_id": 0,
-      "predicate": "PLANS_TO_VISIT",
-      "object_name": "Louvre",
-      "object_id": 2,
-      "value": null
-    }
+    {"subject_name": "I", "subject_id": 0, "predicate": "PLANS_TO_VISIT", "object_name": "Paris", "object_id": 1, "value": null},
+    {"subject_name": "I", "subject_id": 0, "predicate": "PLANS_TO_VISIT", "object_name": "Louvre", "object_id": 2, "value": null}
   ],
   "entities": [
-    {
-      "entity_idx": 0,
-      "name": "I",
-      "type": "Person",
-      "description": "The user",
-      "example": "",
-      "aliases": [],
-      "is_explicit_memory": false
-    },
-    {
-      "entity_idx": 1,
-      "name": "Paris",
-      "type": "Location",
-      "description": "Capital city of France",
-      "example": "",
-      "aliases": [],
-      "is_explicit_memory": false
-    },
-    {
-      "entity_idx": 2,
-      "name": "Louvre",
-      "type": "Location",
-      "description": "World-famous museum located in Paris",
-      "example": "",
-      "aliases": ["Louvre Museum"],
-      "is_explicit_memory": false
-    }
+    {"entity_idx": 0, "name": "I", "type": "Person", "description": "The user", "example": "", "aliases": [], "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "Paris", "type": "Location", "description": "Capital city of France", "example": "", "aliases": [], "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "Louvre", "type": "Location", "description": "World-famous museum located in Paris", "example": "", "aliases": ["Louvre Museum"], "is_explicit_memory": false}
   ]
 }
 
-**Example 2 (English):** "John Smith works at Google and is responsible for AI product development."
+**Example 2 (Chinese input → English output - IMPORTANT: translate entity names):** "张明在腾讯工作，负责AI产品开发。"
 Output:
 {
   "triplets": [
-    {
-      "subject_name": "John Smith",
-      "subject_id": 0,
-      "predicate": "WORKS_AT",
-      "object_name": "Google",
-      "object_id": 1,
-      "value": null
-    },
-    {
-      "subject_name": "John Smith",
-      "subject_id": 0,
-      "predicate": "RESPONSIBLE_FOR",
-      "object_name": "AI product development",
-      "object_id": 2,
-      "value": null
-    }
+    {"subject_name": "Zhang Ming", "subject_id": 0, "predicate": "WORKS_AT", "object_name": "Tencent", "object_id": 1, "value": null},
+    {"subject_name": "Zhang Ming", "subject_id": 0, "predicate": "RESPONSIBLE_FOR", "object_name": "AI product development", "object_id": 2, "value": null}
   ],
   "entities": [
-    {
-      "entity_idx": 0,
-      "name": "John Smith",
-      "type": "Person",
-      "description": "Individual person name",
-      "example": "",
-      "aliases": [],
-      "is_explicit_memory": false
-    },
-    {
-      "entity_idx": 1,
-      "name": "Google",
-      "type": "Organization",
-      "description": "American technology company",
-      "example": "",
-      "aliases": ["Google LLC", "Alphabet Inc."],
-      "is_explicit_memory": false
-    },
-    {
-      "entity_idx": 2,
-      "name": "AI product development",
-      "type": "Concept",
-      "description": "Artificial intelligence product development work",
-      "example": "e.g., developing chatbots, recommendation systems",
-      "aliases": [],
-      "is_explicit_memory": true
-    }
+    {"entity_idx": 0, "name": "Zhang Ming", "type": "Person", "description": "Individual person name", "example": "", "aliases": [], "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "Tencent", "type": "Organization", "description": "Chinese technology company", "example": "", "aliases": ["Tencent Holdings"], "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "AI product development", "type": "Concept", "description": "Artificial intelligence product development work", "example": "e.g., developing chatbots", "aliases": [], "is_explicit_memory": true}
   ]
 }
 
-**Example 3 (Chinese):** "我计划下周去巴黎旅行，参观卢浮宫。"
-Output:
-{
-  "triplets": [
-    {
-      "subject_name": "我",
-      "subject_id": 0,
-      "predicate": "PLANS_TO_VISIT",
-      "object_name": "巴黎",
-      "object_id": 1,
-      "value": null
-    },
-    {
-      "subject_name": "我",
-      "subject_id": 0,
-      "predicate": "PLANS_TO_VISIT",
-      "object_name": "卢浮宫",
-      "object_id": 2,
-      "value": null
-    }
-  ],
-  "entities": [
-    {
-      "entity_idx": 0,
-      "name": "我",
-      "type": "Person",
-      "description": "用户本人",
-      "example": "",
-      "aliases": [],
-      "is_explicit_memory": false
-    },
-    {
-      "entity_idx": 1,
-      "name": "巴黎",
-      "type": "Location",
-      "description": "法国首都城市",
-      "example": "",
-      "aliases": [],
-      "is_explicit_memory": false
-    },
-    {
-      "entity_idx": 2,
-      "name": "卢浮宫",
-      "type": "Location",
-      "description": "位于巴黎的世界著名博物馆",
-      "example": "",
-      "aliases": [],
-      "is_explicit_memory": false
-    }
-  ]
-}
-
-**Example 4 (Chinese):** "张明在腾讯工作，负责AI产品开发。"
-Output:
-{
-  "triplets": [
-    {
-      "subject_name": "张明",
-      "subject_id": 0,
-      "predicate": "WORKS_AT",
-      "object_name": "腾讯",
-      "object_id": 1,
-      "value": null
-    },
-    {
-      "subject_name": "张明",
-      "subject_id": 0,
-      "predicate": "RESPONSIBLE_FOR",
-      "object_name": "AI产品开发",
-      "object_id": 2,
-      "value": null
-    }
-  ],
-  "entities": [
-    {
-      "entity_idx": 0,
-      "name": "张明",
-      "type": "Person",
-      "description": "个人姓名",
-      "example": "",
-      "aliases": [],
-      "is_explicit_memory": false
-    },
-    {
-      "entity_idx": 1,
-      "name": "腾讯",
-      "type": "Organization",
-      "description": "中国科技公司",
-      "example": "",
-      "aliases": ["腾讯控股", "腾讯公司"],
-      "is_explicit_memory": false
-    },
-    {
-      "entity_idx": 2,
-      "name": "AI产品开发",
-      "type": "Concept",
-      "description": "人工智能产品研发工作",
-      "example": "如：开发智能客服机器人、推荐系统",
-      "aliases": [],
-      "is_explicit_memory": true
-    }
-  ]
-}
-
-**Example 5 (Entity Only - English):** "Tripod"
+**Example 3 (Chinese input → English output):** "三脚架"
 Output:
 {
   "triplets": [],
   "entities": [
-    {
-      "entity_idx": 0,
-      "name": "Tripod",
-      "type": "Equipment",
-      "description": "Photography equipment accessory",
-      "example": "",
-      "aliases": ["Camera Tripod"],
-      "is_explicit_memory": false
-    }
+    {"entity_idx": 0, "name": "Tripod", "type": "Equipment", "description": "Photography equipment accessory", "example": "", "aliases": ["Camera Tripod"], "is_explicit_memory": false}
+  ]
+}
+{% else %}
+**Example 1 (English input → Chinese output):** "I plan to travel to Paris next week and visit the Louvre."
+Output:
+{
+  "triplets": [
+    {"subject_name": "我", "subject_id": 0, "predicate": "PLANS_TO_VISIT", "object_name": "巴黎", "object_id": 1, "value": null},
+    {"subject_name": "我", "subject_id": 0, "predicate": "PLANS_TO_VISIT", "object_name": "卢浮宫", "object_id": 2, "value": null}
+  ],
+  "entities": [
+    {"entity_idx": 0, "name": "我", "type": "Person", "description": "用户本人", "example": "", "aliases": [], "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "巴黎", "type": "Location", "description": "法国首都城市", "example": "", "aliases": [], "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "卢浮宫", "type": "Location", "description": "位于巴黎的世界著名博物馆", "example": "", "aliases": [], "is_explicit_memory": false}
   ]
 }
 
-**Example 6 (Entity Only - Chinese):** "三脚架"
+**Example 2 (Chinese input → Chinese output):** "张明在腾讯工作，负责AI产品开发。"
+Output:
+{
+  "triplets": [
+    {"subject_name": "张明", "subject_id": 0, "predicate": "WORKS_AT", "object_name": "腾讯", "object_id": 1, "value": null},
+    {"subject_name": "张明", "subject_id": 0, "predicate": "RESPONSIBLE_FOR", "object_name": "AI产品开发", "object_id": 2, "value": null}
+  ],
+  "entities": [
+    {"entity_idx": 0, "name": "张明", "type": "Person", "description": "个人姓名", "example": "", "aliases": [], "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "腾讯", "type": "Organization", "description": "中国科技公司", "example": "", "aliases": ["腾讯控股", "腾讯公司"], "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "AI产品开发", "type": "Concept", "description": "人工智能产品研发工作", "example": "如：开发智能客服机器人", "aliases": [], "is_explicit_memory": true}
+  ]
+}
+
+**Example 3 (Entity Only - Chinese):** "三脚架"
 Output:
 {
   "triplets": [],
   "entities": [
-    {
-      "entity_idx": 0,
-      "name": "三脚架",
-      "type": "Equipment",
-      "description": "摄影器材配件",
-      "example": "",
-      "aliases": ["相机三脚架"],
-      "is_explicit_memory": false
-    }
+    {"entity_idx": 0, "name": "三脚架", "type": "Equipment", "description": "摄影器材配件", "example": "", "aliases": ["相机三脚架"], "is_explicit_memory": false}
   ]
 }
+{% endif %}
+===End of Examples===
 
 ===Output Format===
 
@@ -348,10 +185,10 @@ Output:
 - Ensure proper string closure and comma separation
 - No line breaks within JSON string values
 {% if language == "zh" %}
-- **语言要求：实体描述（description）和示例（example）必须使用中文**
+- **语言要求：实体名称（name）、描述（description）、示例（example）、subject_name、object_name 必须使用中文**
 {% else %}
-- **Language Requirement: Entity descriptions and examples must be in English**
+- **Language Requirement: Entity names, descriptions, examples, subject_name, object_name must be in English**
+- **If the original text is in Chinese, translate all names to English**
 {% endif %}
-- Preserve the original language and do not translate
 
 {{ json_schema }}

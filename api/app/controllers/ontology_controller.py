@@ -30,7 +30,6 @@ from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
-from app.services.memory_base_service import Translation_English
 from app.core.memory.models.ontology_models import OntologyClass
 from typing import List
 from app.schemas.ontology_schemas import (
@@ -61,72 +60,6 @@ router = APIRouter(
     prefix="/memory/ontology",
     tags=["Ontology"],
 )
-
-
-async def translate_ontology_classes(
-    classes: List[OntologyClass], 
-    model_id: str
-) -> List[OntologyClass]:
-    """翻译本体类列表
-    
-    将本体类的中文字段翻译为英文，包括：
-    - name_chinese: 中文名称
-    - description: 描述
-    - examples: 示例列表
-    
-    Args:
-        classes: 本体类列表
-        model_id: LLM模型ID，用于翻译
-        
-    Returns:
-        List[OntologyClass]: 翻译后的本体类列表
-    """
-    translated_classes = []
-    
-    for ontology_class in classes:
-        # 创建类的副本，避免修改原对象
-        translated_class = ontology_class.model_copy(deep=True)
-        
-        # 翻译 name_chinese 字段
-        if translated_class.name_chinese:
-            try:
-                translated_class.name_chinese = await Translation_English(
-                    model_id, 
-                    translated_class.name_chinese
-                )
-            except Exception as e:
-                logger.warning(f"Failed to translate name_chinese: {e}")
-                # 保留原文
-        
-        # 翻译 description 字段
-        if translated_class.description:
-            try:
-                translated_class.description = await Translation_English(
-                    model_id, 
-                    translated_class.description
-                )
-            except Exception as e:
-                logger.warning(f"Failed to translate description: {e}")
-                # 保留原文
-        
-        # 翻译 examples 列表
-        if translated_class.examples:
-            translated_examples = []
-            for example in translated_class.examples:
-                try:
-                    translated_example = await Translation_English(
-                        model_id, 
-                        example
-                    )
-                    translated_examples.append(translated_example)
-                except Exception as e:
-                    logger.warning(f"Failed to translate example: {e}")
-                    translated_examples.append(example)  # 保留原文
-            translated_class.examples = translated_examples
-        
-        translated_classes.append(translated_class)
-    
-    return translated_classes
 
 
 def _get_ontology_service(
@@ -243,7 +176,7 @@ def _get_ontology_service(
 @router.post("/extract", response_model=ApiResponse)
 async def extract_ontology(
     request: ExtractionRequest,
-    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -260,31 +193,6 @@ async def extract_ontology(
         db: 数据库会话
         current_user: 当前用户
         
-    Returns:
-        ApiResponse: 包含提取结果的响应
-        
-    Response format:
-        {
-            "code": 200,
-            "msg": "本体提取成功",
-            "data": {
-                "classes": [
-                    {
-                        "id": "147d9db50b524a9e909e01a753d3acdd",
-                        "name": "Patient",
-                        "name_chinese": "患者",
-                        "description": "在医疗机构中接受诊疗、护理或健康管理的个体",
-                        "examples": ["糖尿病患者", "术后康复患者", "门诊初诊患者"],
-                        "parent_class": null,
-                        "entity_type": "Person",
-                        "domain": "Healthcare"
-                    },
-                    ...
-                ],
-                "domain": "Healthcare",
-                "extracted_count": 7
-            }
-        }
     """
     api_logger.info(
         f"Ontology extraction requested by user {current_user.id}, "
@@ -296,6 +204,10 @@ async def extract_ontology(
     )
     
     try:
+        # 如果未传 X-Language-Type Header，默认使用中文
+        if not language_type:
+            language_type = "zh"
+        
         # 获取当前工作空间ID
         workspace_id = current_user.current_workspace_id
         if not workspace_id:
@@ -314,33 +226,11 @@ async def extract_ontology(
             scenario=request.scenario,
             domain=request.domain,
             scene_id=request.scene_id,
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
+            language=language_type
         )
         
-        # ===== 新增：翻译逻辑 =====
-        # 如果需要英文，则翻译数据
-        if language_type != 'zh':
-            api_logger.info(f"Translating extraction result to English")
-            
-            # 翻译 classes 列表
-            result.classes = await translate_ontology_classes(
-                result.classes, 
-                request.llm_id
-            )
-            
-            # 翻译 domain 字段
-            if result.domain:
-                try:
-                    result.domain = await Translation_English(
-                        request.llm_id, 
-                        result.domain
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to translate domain: {e}")
-                    # 保留原文
-        # ===== 翻译逻辑结束 =====
-        
-        # 构建响应
+        # 构建响应（语言已在提取时通过模板控制，无需二次翻译）
         response = ExtractionResponse(
             classes=result.classes,
             domain=result.domain,

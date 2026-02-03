@@ -118,6 +118,7 @@ async def download_log(
 @cur_workspace_access_guard()
 async def write_server(
     user_input: Write_UserInput,
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -126,13 +127,18 @@ async def write_server(
     
     Args:
         user_input: Write request containing message and end_user_id
+        language_type: 语言类型 ("zh" 中文, "en" 英文)，通过 X-Language-Type Header 传递
     
     Returns:
         Response with write operation status
     """
+    # 如果未传 X-Language-Type Header，默认使用中文
+    if not language_type:
+        language_type = "zh"
+    
     config_id = user_input.config_id
     workspace_id = current_user.current_workspace_id
-    api_logger.info(f"Write service: workspace_id={workspace_id}, config_id={config_id}")
+    api_logger.info(f"Write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language_type}")
     
     # 获取 storage_type，如果为 None 则使用默认值
     storage_type = workspace_service.get_workspace_storage_type(
@@ -169,7 +175,8 @@ async def write_server(
             config_id,
             db,
             storage_type, 
-            user_rag_memory_id
+            user_rag_memory_id,
+            language_type
         )
 
         return success(data=result, msg="写入成功")
@@ -188,6 +195,7 @@ async def write_server(
 @cur_workspace_access_guard()
 async def write_server_async(
     user_input: Write_UserInput,
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -196,14 +204,19 @@ async def write_server_async(
     
     Args:
         user_input: Write request containing message and end_user_id
+        language_type: 语言类型 ("zh" 中文, "en" 英文)，通过 X-Language-Type Header 传递
     
     Returns:
         Task ID for tracking async operation
         Use GET /memory/write_result/{task_id} to check task status and get result
     """
+    # 如果未传 X-Language-Type Header，默认使用中文
+    if not language_type:
+        language_type = "zh"
+    
     config_id = user_input.config_id
     workspace_id = current_user.current_workspace_id
-    api_logger.info(f"Async write service: workspace_id={workspace_id}, config_id={config_id}")
+    api_logger.info(f"Async write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language_type}")
 
     # 获取 storage_type，如果为 None 则使用默认值
     storage_type = workspace_service.get_workspace_storage_type(
@@ -228,7 +241,7 @@ async def write_server_async(
 
         task = celery_app.send_task(
             "app.core.memory.agent.write_message",
-            args=[user_input.end_user_id, messages_list, config_id, storage_type, user_rag_memory_id]
+            args=[user_input.end_user_id, messages_list, config_id, storage_type, user_rag_memory_id, language_type]
         )
         api_logger.info(f"Write task queued: {task.id}")
         
@@ -653,7 +666,7 @@ async def get_knowledge_type_stats_api(
 @router.get("/analytics/hot_memory_tags/by_user", response_model=ApiResponse)
 async def get_hot_memory_tags_by_user_api(
     end_user_id: Optional[str] = Query(None, description="用户ID（可选）"),
-    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     limit: int = Query(20, description="返回标签数量限制"),
     current_user: User = Depends(get_current_user),
     db: Session=Depends(get_db),
@@ -667,6 +680,9 @@ async def get_hot_memory_tags_by_user_api(
         ...
     ]
     """
+    # 如果未传 X-Language-Type Header，默认使用中文
+    if not language_type:
+        language_type = "zh"
 
     workspace_id=current_user.current_workspace_id
     workspace_repo = WorkspaceRepository(db)
