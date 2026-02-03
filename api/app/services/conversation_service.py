@@ -1,4 +1,5 @@
 """会话服务"""
+import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Annotated
@@ -298,7 +299,8 @@ class ConversationService:
             self,
             conversation_id: uuid.UUID,
             user_message: str,
-            assistant_message: str
+            assistant_message: str,
+            meta_data: Optional[dict] = None
     ):
         """
         Save a pair of user and assistant messages to the conversation.
@@ -307,6 +309,7 @@ class ConversationService:
             conversation_id (uuid.UUID): Conversation UUID.
             user_message (str): User's message content.
             assistant_message (str): Assistant's response content.
+            meta_data (Optional[dict]): Optional metadata for the messages.
         """
         self.add_message(
             conversation_id=conversation_id,
@@ -317,7 +320,8 @@ class ConversationService:
         self.add_message(
             conversation_id=conversation_id,
             role="assistant",
-            content=assistant_message
+            content=assistant_message,
+            meta_data=meta_data
         )
 
         logger.debug(
@@ -526,12 +530,12 @@ class ConversationService:
                 takeaways=[],
                 info_score=0,
             )
-
-        with open('app/services/prompt/conversation_summary_system.jinja2', 'r', encoding='utf-8') as f:
+        prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
+        with open(os.path.join(prompt_path, 'conversation_summary_system.jinja2'), 'r', encoding='utf-8') as f:
             system_prompt = f.read()
         rendered_system_message = Template(system_prompt).render()
 
-        with open('app/services/prompt/conversation_summary_user.jinja2', 'r', encoding='utf-8') as f:
+        with open(os.path.join(prompt_path, 'conversation_summary_user.jinja2'), 'r', encoding='utf-8') as f:
             user_prompt = f.read()
         rendered_user_message = Template(user_prompt).render(
             language=language,

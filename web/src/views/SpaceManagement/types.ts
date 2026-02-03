@@ -1,4 +1,6 @@
 // 应用数据类型
+
+export type StorageType = 'rag' | 'neo4j';
 export interface Space {
   id: string;
   name: string;
@@ -7,18 +9,19 @@ export interface Space {
   created_at: string | number;
   is_active: boolean;
   icon: string;
-  storage_type: 'rag' | 'neo4j' | null;
+  storage_type: StorageType | null;
 }
 
 // 创建表单数据类型
 export interface SpaceModalData {
   name: string;
   type: string;
-  icon: string;
+  icon?: any;
+  iconType?: 'remote';
   llm: string;
   embedding: string;
   rerank: string;
-  storage_type: string;
+  storage_type: StorageType;
 }
 
 // 定义组件暴露的方法接口

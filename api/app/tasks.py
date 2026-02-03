@@ -774,7 +774,15 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
         }
 
 
-@celery_app.task(name="app.tasks.regenerate_memory_cache", bind=True)
+@celery_app.task(
+    name="app.tasks.regenerate_memory_cache",
+    bind=True,
+    ignore_result=True,      
+    max_retries=0,          
+    acks_late=False,     
+    time_limit=3600,         
+    soft_time_limit=3300,    
+)
 def regenerate_memory_cache(self) -> Dict[str, Any]:
     """定时任务：为所有用户重新生成记忆洞察和用户摘要缓存
     
@@ -966,7 +974,16 @@ def regenerate_memory_cache(self) -> Dict[str, Any]:
         }
 
 
-@celery_app.task(name="app.tasks.workspace_reflection_task", bind=True)
+
+@celery_app.task(
+    name="app.tasks.workspace_reflection_task",
+    bind=True,
+    ignore_result=True,      
+    max_retries=0,          
+    acks_late=False,       
+    time_limit=300,          
+    soft_time_limit=240,   
+)
 def workspace_reflection_task(self) -> Dict[str, Any]:
     """定时任务：每30秒运行工作空间反思功能
 
@@ -1111,7 +1128,16 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
 
 
 
-@celery_app.task(name="app.tasks.run_forgetting_cycle_task", bind=True)
+
+@celery_app.task(
+    name="app.tasks.run_forgetting_cycle_task",
+    bind=True,
+    ignore_result=True,      
+    max_retries=0,           
+    acks_late=False,         
+    time_limit=7200,        
+    soft_time_limit=7000,    
+)
 def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
     """定时任务：运行遗忘周期
     

@@ -5,10 +5,21 @@
 === Task ===
 Summarize the provided conversation chunks into a concise Memory summary.
 
+{% if language == "zh" %}
+**重要：请使用中文生成摘要内容。**
+{% else %}
+**Important: Please generate the summary content in English.**
+{% endif %}
+
 === Requirements ===
 - Focus on factual statements, user preferences, relationships, and salient temporal context.
 - Avoid repetition and filler; be specific.
 - Keep it under {{ max_words or 200 }} words.
+{% if language == "zh" %}
+- 摘要内容必须使用中文
+{% else %}
+- Summary content must be in English
+{% endif %}
 - Output must be valid JSON conforming to the schema below.
 
 === Input ===
@@ -24,6 +35,11 @@ Summarize the provided conversation chunks into a concise Memory summary.
 4. Do not include line breaks within JSON string values
 5. Example of proper escaping: "statement": "张曼婷说：\"我很喜欢这本书。\""
 
-The output language should always be the same as the input language.
+{% if language == "zh" %}
+**语言要求：输出内容必须使用中文。**
+{% else %}
+**Language Requirement: The output content must be in English.**
+{% endif %}
+
 Return only a list of extracted labelled statements in the JSON ARRAY of objects that match the schema below:
 {{ json_schema }}

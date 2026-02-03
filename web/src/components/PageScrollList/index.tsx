@@ -1,13 +1,14 @@
 import React, { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
-import { List, Skeleton} from 'antd';
+import { List } from 'antd';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import { request } from '@/utils/request';
-import Empty from '@/components/Empty';
+import PageEmpty from '@/components/Empty/PageEmpty'
+import PageLoading from '@/components/Empty/PageLoading'
 
 const PAGE_SIZE = 20;
 
-interface ApiResponse {
-  items?: Record<string, unknown>[];
+interface ApiResponse<T> {
+  items?: T[];
   page: {
     page: number;
     pagesize: number;
@@ -19,26 +20,27 @@ export interface PageScrollListRef {
   refresh: () => void;
 }
 
-interface PageScrollListProps {
+interface PageScrollListProps<T, Q = Record<string, unknown>> {
   url: string;
-  renderItem: (item: Record<string, unknown>) => React.ReactNode;
-  query?: Record<string, unknown>;
+  renderItem: (item: T) => React.ReactNode;
+  query?: Q;
   column?: number;
   className?: string;
+  needLoading?: boolean;
 }
-
-const PageScrollList = forwardRef<PageScrollListRef, PageScrollListProps>(({
+const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   renderItem, 
   query, 
   url,
   column = 4,
   className = '',
-}, ref) => {
+  needLoading = true,
+}: PageScrollListProps<T, Q>, ref: React.Ref<PageScrollListRef>) => {
   useImperativeHandle(ref, () => ({
     refresh,
   }));
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<Record<string, unknown>[]>([]);
+  const [data, setData] = useState<T[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -54,8 +56,8 @@ const PageScrollList = forwardRef<PageScrollListRef, PageScrollListProps>(({
       ...(query||{}),
     })
       .then((res) => {
-        const response = res as ApiResponse;
-        const results = Array.isArray(response.items) ? response.items : Array.isArray(response) ? response : [];
+        const response = res as ApiResponse<T>;
+        const results = Array.isArray(response.items) ? response.items : Array.isArray(response) ? response as T[] : [];
         if (flag) {
           setData(results);
         } else {
@@ -104,9 +106,10 @@ const PageScrollList = forwardRef<PageScrollListRef, PageScrollListProps>(({
           dataLength={data.length}
           next={loadMoreData}
           hasMore={hasMore}
-          loader={<Skeleton active />}
+          loader={needLoading ? <PageLoading /> : undefined}
           // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
           scrollableTarget="scrollableDiv"
+          className='rb:h-full!'
         >
           {data.length > 0 ? (
             <List
@@ -118,11 +121,11 @@ const PageScrollList = forwardRef<PageScrollListRef, PageScrollListProps>(({
                 </List.Item>
               )}
             />
-          ) : !loading ? <Empty /> : null}
+          ) : !loading ? <PageEmpty /> : null}
         </InfiniteScroll>
       </div>
     </>
   );
-});
+}) as <T = Record<string, unknown>, Q = Record<string, unknown>>(props: PageScrollListProps<T, Q> & { ref?: React.Ref<PageScrollListRef> }) => React.ReactElement;
 
 export default PageScrollList;

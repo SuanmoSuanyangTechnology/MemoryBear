@@ -89,7 +89,6 @@ class WorkspaceAppService:
         
         for release in app_releases:
             memory_content = self._extract_memory_content(release.config)
-            memory_content=resolve_config_id(memory_content, self.db)
             if memory_content and memory_content in processed_configs:
                 continue
 
@@ -122,16 +121,12 @@ class WorkspaceAppService:
     def _get_memory_config(self, memory_content: str) -> Dict[str, Any]:
         """Retrieve memory_config information based on memory_content"""
         try:
-            memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, int(memory_content))
-
-            # memory_config_query, memory_config_params = MemoryConfigRepository.build_select_reflection(memory_content)
-            # memory_config_result = self.db.execute(text(memory_config_query), memory_config_params).fetchone()
-            # if memory_config_result is None:
-            #     return None
+            memory_content = resolve_config_id(memory_content, self.db)
+            memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, (memory_content))
 
             if memory_config_result:
                 return {
-                    "config_id": memory_config_result.config_id,
+                    "config_id": memory_content,
                     "enable_self_reflexion": memory_config_result.enable_self_reflexion,
                     "iteration_period": memory_config_result.iteration_period,
                     "reflexion_range": memory_config_result.reflexion_range,
@@ -291,7 +286,7 @@ class MemoryReflectionService:
                 # 检查是否需要执行反思
                 should_execute = False
                 hours_diff = 0
-                
+
                 if current_reflection_time is None:
                     # 首次执行反思
                     should_execute = True
@@ -303,11 +298,11 @@ class MemoryReflectionService:
                             reflection_time = datetime.fromisoformat(current_reflection_time)
                         else:
                             reflection_time = current_reflection_time
-                        
+
                         current_time = datetime.now()
                         time_diff = current_time - reflection_time
                         hours_diff = int(time_diff.total_seconds() / 3600)
-                        
+
                         # 检查是否达到反思周期
                         if hours_diff >= iteration_period:
                             should_execute = True
@@ -317,7 +312,7 @@ class MemoryReflectionService:
                     except (ValueError, TypeError) as e:
                         api_logger.warning(f"解析反思时间失败: {e}，将执行反思")
                         should_execute = True
-                
+
                 if should_execute:
                     api_logger.info(f"与上次的反思时间间隔为: {hours_diff} 小时")
                     # 3. 执行反思引擎
@@ -350,7 +345,7 @@ class MemoryReflectionService:
                         "next_reflection_in_hours": iteration_period - hours_diff
                     }
 
-            
+
         except Exception as e:
             config_id = config_data.get("config_id", "unknown")
             api_logger.error(f"启动反思失败，config_id: {config_id}, end_user_id: {end_user_id}, 错误: {str(e)}")
@@ -361,7 +356,7 @@ class MemoryReflectionService:
                 "end_user_id": end_user_id,
                 "config_data": config_data
             }
-    
+
     def _create_reflection_config_from_data(self, config_data: Dict[str, Any]) -> ReflectionConfig:
         """Create reflective configuration objects from configuration data"""
 
@@ -369,12 +364,12 @@ class MemoryReflectionService:
         if reflexion_range_value is None or reflexion_range_value == "":
             reflexion_range_value = "partial"
         reflexion_range = ReflectionRange(reflexion_range_value)
-        
+
         baseline_value = config_data.get("baseline")
         if baseline_value is None or baseline_value == "":
             baseline_value = "TIME"
         baseline = ReflectionBaseline(baseline_value)
-        
+
         # iteration_period =
         iteration_period = config_data.get("iteration_period", 24)
         if isinstance(iteration_period, str):
@@ -382,7 +377,6 @@ class MemoryReflectionService:
                 iteration_period = int(iteration_period)
             except (ValueError, TypeError):
                 iteration_period = 24  # 默认24小时
-        
         return ReflectionConfig(
             enabled=config_data.get("enable_self_reflexion", False),
             iteration_period=str(iteration_period),  # ReflectionConfig期望字符串
