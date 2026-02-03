@@ -57,24 +57,57 @@ class EmotionAnalyticsService:
         self.emotion_repo = EmotionRepository(connector)
         logger.info("情绪分析服务初始化完成")
 
+    # 情绪类型的中英文映射
+    EMOTION_TYPE_TRANSLATIONS = {
+        'joy': {'zh': '喜悦', 'en': 'Joy'},
+        'sadness': {'zh': '悲伤', 'en': 'Sadness'},
+        'anger': {'zh': '愤怒', 'en': 'Anger'},
+        'fear': {'zh': '恐惧', 'en': 'Fear'},
+        'surprise': {'zh': '惊讶', 'en': 'Surprise'},
+        'neutral': {'zh': '中性', 'en': 'Neutral'}
+    }
+
+    def _translate_emotion_type(self, emotion_type: str, language: str = "zh") -> str:
+        """将情绪类型翻译成指定语言
+        
+        Args:
+            emotion_type: 情绪类型（英文key）
+            language: 目标语言 ("zh" 或 "en")
+        
+        Returns:
+            翻译后的情绪类型名称
+        """
+        if emotion_type in self.EMOTION_TYPE_TRANSLATIONS:
+            return self.EMOTION_TYPE_TRANSLATIONS[emotion_type].get(language, emotion_type)
+        return emotion_type
+
     async def get_emotion_tags(
             self,
             end_user_id: str,
             emotion_type: Optional[str] = None,
             start_date: Optional[str] = None,
             end_date: Optional[str] = None,
-            limit: int = 10
+            limit: int = 10,
+            language: str = "zh"
     ) -> Dict[str, Any]:
         """获取情绪标签统计
 
         查询指定用户的情绪类型分布，包括计数、百分比和平均强度。
         确保返回所有6个情绪维度（joy、sadness、anger、fear、surprise、neutral），
         即使某些维度没有数据也会返回count=0的记录。
+        
+        Args:
+            end_user_id: 用户ID
+            emotion_type: 情绪类型过滤
+            start_date: 开始日期
+            end_date: 结束日期
+            limit: 返回数量限制
+            language: 输出语言 ("zh" 中文, "en" 英文)
 
         """
         try:
             logger.info(f"获取情绪标签统计: user={end_user_id}, type={emotion_type}, "
-                        f"start={start_date}, end={end_date}, limit={limit}")
+                        f"start={start_date}, end={end_date}, limit={limit}, language={language}")
 
             # 调用仓储层查询
             tags = await self.emotion_repo.get_emotion_tags(
@@ -91,15 +124,17 @@ class EmotionAnalyticsService:
             # 将查询结果转换为字典，方便查找
             tags_dict = {tag["emotion_type"]: tag for tag in tags}
 
-            # 补全缺失的情绪维度
+            # 补全缺失的情绪维度，并翻译 emotion_type
             complete_tags = []
             for emotion in all_emotion_types:
                 if emotion in tags_dict:
-                    complete_tags.append(tags_dict[emotion])
+                    tag = tags_dict[emotion].copy()
+                    tag["emotion_type"] = self._translate_emotion_type(emotion, language)
+                    complete_tags.append(tag)
                 else:
                     # 如果该情绪类型不存在，添加默认值
                     complete_tags.append({
-                        "emotion_type": emotion,
+                        "emotion_type": self._translate_emotion_type(emotion, language),
                         "count": 0,
                         "percentage": 0.0,
                         "avg_intensity": 0.0
@@ -556,12 +591,12 @@ class EmotionAnalyticsService:
             except Exception as e:
                 logger.error(f"LLM 结构化输出失败: {str(e)}")
                 # 返回默认建议
-                suggestions_response = self._get_default_suggestions(health_data)
+                suggestions_response = self._get_default_suggestions(health_data, language)
 
             # 8. 验证建议数量（3-5条）
             if len(suggestions_response.suggestions) < 3:
                 logger.warning(f"建议数量不足: {len(suggestions_response.suggestions)}")
-                suggestions_response = self._get_default_suggestions(health_data)
+                suggestions_response = self._get_default_suggestions(health_data, language)
             elif len(suggestions_response.suggestions) > 5:
                 logger.warning(f"建议数量过多: {len(suggestions_response.suggestions)}")
                 suggestions_response.suggestions = suggestions_response.suggestions[:5]
@@ -653,61 +688,108 @@ class EmotionAnalyticsService:
 
         return prompt
 
-    def _get_default_suggestions(self, health_data: Dict[str, Any]) -> EmotionSuggestionsResponse:
+    def _get_default_suggestions(self, health_data: Dict[str, Any], language: str = "zh") -> EmotionSuggestionsResponse:
         """获取默认建议（当LLM调用失败时使用）
 
         Args:
             health_data: 情绪健康数据
+            language: 输出语言 ("zh" 中文, "en" 英文)
 
         Returns:
             EmotionSuggestionsResponse: 默认建议
         """
         health_score = health_data.get('health_score', 0)
 
-        if health_score >= 80:
-            summary = "您的情绪健康状况优秀，请继续保持积极的生活态度。"
-        elif health_score >= 60:
-            summary = "您的情绪健康状况良好，可以通过一些调整进一步提升。"
-        elif health_score >= 40:
-            summary = "您的情绪健康需要关注，建议采取一些改善措施。"
-        else:
-            summary = "您的情绪健康需要重点关注，建议寻求专业帮助。"
+        if language == "en":
+            if health_score >= 80:
+                summary = "Your emotional health is excellent. Keep up the positive attitude."
+            elif health_score >= 60:
+                summary = "Your emotional health is good. Some adjustments can further improve it."
+            elif health_score >= 40:
+                summary = "Your emotional health needs attention. Consider taking improvement measures."
+            else:
+                summary = "Your emotional health needs serious attention. Consider seeking professional help."
 
-        suggestions = [
-            EmotionSuggestion(
-                type="emotion_balance",
-                title="保持情绪平衡",
-                content="通过正念冥想和深呼吸练习，帮助您更好地管理情绪波动，提升情绪稳定性。",
-                priority="high",
-                actionable_steps=[
-                    "每天早晨进行5-10分钟的正念冥想",
-                    "感到情绪波动时，进行3次深呼吸",
-                    "记录每天的情绪变化，识别触发因素"
-                ]
-            ),
-            EmotionSuggestion(
-                type="activity_recommendation",
-                title="增加户外活动",
-                content="适度的户外运动可以有效改善情绪，增强身心健康。建议每周进行3-4次户外活动。",
-                priority="medium",
-                actionable_steps=[
-                    "每周安排2-3次30分钟的散步",
-                    "周末尝试户外运动如骑行或爬山",
-                    "在户外活动时关注周围环境，放松心情"
-                ]
-            ),
-            EmotionSuggestion(
-                type="social_connection",
-                title="加强社交联系",
-                content="与朋友和家人保持良好的社交联系，可以提供情感支持，改善情绪健康。",
-                priority="medium",
-                actionable_steps=[
-                    "每周至少与一位朋友或家人深入交流",
-                    "参加感兴趣的社交活动或兴趣小组",
-                    "主动分享自己的感受和想法"
-                ]
-            )
-        ]
+            suggestions = [
+                EmotionSuggestion(
+                    type="Emotion Balance",
+                    title="Maintain Emotional Balance",
+                    content="Through mindfulness meditation and deep breathing exercises, help you better manage emotional fluctuations and improve emotional stability.",
+                    priority="High",
+                    actionable_steps=[
+                        "Practice 5-10 minutes of mindfulness meditation every morning",
+                        "Take 3 deep breaths when feeling emotional fluctuations",
+                        "Record daily emotional changes to identify triggers"
+                    ]
+                ),
+                EmotionSuggestion(
+                    type="Activity Recommendation",
+                    title="Increase Outdoor Activities",
+                    content="Moderate outdoor exercise can effectively improve mood and enhance physical and mental health. Recommend 3-4 outdoor activities per week.",
+                    priority="Medium",
+                    actionable_steps=[
+                        "Schedule 2-3 30-minute walks per week",
+                        "Try outdoor sports like cycling or hiking on weekends",
+                        "Focus on surroundings and relax during outdoor activities"
+                    ]
+                ),
+                EmotionSuggestion(
+                    type="Social Connection",
+                    title="Strengthen Social Connections",
+                    content="Maintaining good social connections with friends and family can provide emotional support and improve emotional health.",
+                    priority="Medium",
+                    actionable_steps=[
+                        "Have a deep conversation with at least one friend or family member weekly",
+                        "Join social activities or interest groups you enjoy",
+                        "Actively share your feelings and thoughts"
+                    ]
+                )
+            ]
+        else:
+            if health_score >= 80:
+                summary = "您的情绪健康状况优秀，请继续保持积极的生活态度。"
+            elif health_score >= 60:
+                summary = "您的情绪健康状况良好，可以通过一些调整进一步提升。"
+            elif health_score >= 40:
+                summary = "您的情绪健康需要关注，建议采取一些改善措施。"
+            else:
+                summary = "您的情绪健康需要重点关注，建议寻求专业帮助。"
+
+            suggestions = [
+                EmotionSuggestion(
+                    type="情绪平衡",
+                    title="保持情绪平衡",
+                    content="通过正念冥想和深呼吸练习，帮助您更好地管理情绪波动，提升情绪稳定性。",
+                    priority="高",
+                    actionable_steps=[
+                        "每天早晨进行5-10分钟的正念冥想",
+                        "感到情绪波动时，进行3次深呼吸",
+                        "记录每天的情绪变化，识别触发因素"
+                    ]
+                ),
+                EmotionSuggestion(
+                    type="活动建议",
+                    title="增加户外活动",
+                    content="适度的户外运动可以有效改善情绪，增强身心健康。建议每周进行3-4次户外活动。",
+                    priority="中",
+                    actionable_steps=[
+                        "每周安排2-3次30分钟的散步",
+                        "周末尝试户外运动如骑行或爬山",
+                        "在户外活动时关注周围环境，放松心情"
+                    ]
+                ),
+                EmotionSuggestion(
+                    type="社交联系",
+                    title="加强社交联系",
+                    content="与朋友和家人保持良好的社交联系，可以提供情感支持，改善情绪健康。",
+                    priority="中",
+                    actionable_steps=[
+                        "每周至少与一位朋友或家人深入交流",
+                        "参加感兴趣的社交活动或兴趣小组",
+                        "主动分享自己的感受和想法"
+                    ]
+                )
+            ]
 
         return EmotionSuggestionsResponse(
             health_summary=summary,

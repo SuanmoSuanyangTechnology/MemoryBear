@@ -891,9 +891,7 @@ class MemoryAgentService:
     async def get_hot_memory_tags_by_user(
         self,
         end_user_id: Optional[str] = None,
-        limit: int = 20,
-        model_id: Optional[str] = None,
-        language_type: Optional[str] = "zh"
+        limit: int = 20
     ) -> List[Dict[str, Any]]:
         """
         获取指定用户的热门记忆标签
@@ -907,14 +905,14 @@ class MemoryAgentService:
             {"name": "标签名", "frequency": 频次},
             ...
         ]
+        
+        注意：标签语言由写入时的 X-Language-Type 决定，查询时不进行翻译
         """
         try:
             # by_user=False 表示按 end_user_id 查询（在Neo4j中，end_user_id就是用户维度）
             tags = await get_hot_memory_tags(end_user_id, limit=limit, by_user=False)
-            payload=[]
+            payload = []
             for tag, freq in tags:
-                # 直接返回标签，不进行二次翻译
-                # 标签语言由生成时的 X-Language-Type 决定
                 payload.append({"name": tag, "frequency": freq})
             return payload
         except Exception as e:
