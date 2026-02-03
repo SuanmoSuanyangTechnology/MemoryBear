@@ -60,7 +60,7 @@ interface FolderTreeProps {
   onRootLoad?: (nodes: TreeNodeData[] | null) => void;
   onFolderPathChange?: (path: Array<{ id: string; name: string }>) => void;
   selectedKeys?: React.Key[];
-  // 新增：自动展开到指定路径
+  // New: Auto expand to specified path
   autoExpandPath?: Array<{ id: string; name: string }>;
 }
 
@@ -221,7 +221,7 @@ const extractItems = (resp: any): any[] => {
   return [];
 };
 
-// 只加载当前层级的节点，不递归加载子节点
+// Only load nodes at current level, don't recursively load child nodes
 const buildTreeNodes = async (
   kbId: string,
   parentId: string,
@@ -229,7 +229,7 @@ const buildTreeNodes = async (
   const currentParent = String(parentId ?? '');
   if (!currentParent) return [];
 
-  // 只请求一次当前层级的数据，不分页
+  // Only request current level data once, no pagination
   const response = await getFolderList({ 
     kb_id: kbId, 
     parent_id: currentParent, 
@@ -246,20 +246,20 @@ const buildTreeNodes = async (
     const nodeKey = String(keySource);
     const isFolder = isFolderLike(raw);
     
-    // 只显示文件夹
+    // Only show folders
     if (!isFolder) {
       continue;
     }
 
-    // 文件夹节点初始不加载子节点，isLeaf设为false表示可能有子节点
+    // Folder node initially doesn't load child nodes, isLeaf set to false indicates possible child nodes
     nodes.push({
       key: nodeKey,
       title: getNodeTitle(raw),
       icon: getNodeIcon(raw, isFolder),
       switcherIcon: isFolder ? switcherIcon : undefined,
       type: isFolder ? 'folder' : (typeof raw?.type === 'string' ? raw.type : normalizeExt(raw?.file_ext) || 'file'),
-      isLeaf: false, // 文件夹节点初始设为false，表示可能有子节点，需要展开时加载
-      children: undefined, // 初始不加载子节点
+      isLeaf: false, // Folder node initially set to false, indicating possible child nodes, load when expanded
+      children: undefined, // Initially don't load child nodes
     });
   }
 
@@ -283,7 +283,7 @@ const FolderTree: FC<FolderTreeProps> = ({
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [autoExpandInProgress, setAutoExpandInProgress] = useState(false);
 
-  // 更新树节点数据的辅助函数
+  // Helper function to update tree node data
   const updateTreeData = (nodes: TreeNodeData[], key: Key, children: TreeNodeData[]): TreeNodeData[] => {
     return nodes.map((node) => {
       if (node.key === key) {
@@ -303,17 +303,17 @@ const FolderTree: FC<FolderTreeProps> = ({
     });
   };
 
-  // 加载根节点
+  // Load root nodes
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       if (!knowledgeBaseId) {
         setTreeData([]);
-        setExpandedKeys([]); // 重置展开状态
+        setExpandedKeys([]); // Reset expand state
         return;
       }
       try {
-        // 重置展开状态，确保从根目录开始
+        // Reset expand state, ensure starting from root directory
         setExpandedKeys([]);
         
         const nodes = await buildTreeNodes(knowledgeBaseId, knowledgeBaseId);
@@ -324,7 +324,7 @@ const FolderTree: FC<FolderTreeProps> = ({
           }
         }
       } catch (e) {
-        console.error('加载文件夹树失败:', e);
+        console.error('Failed to load folder tree:', e);
         if (!cancelled) {
           const fallback = buildMockTreeData();
           setTreeData(fallback);
@@ -340,27 +340,27 @@ const FolderTree: FC<FolderTreeProps> = ({
     };
   }, [knowledgeBaseId, refreshKey]);
 
-  // 懒加载子节点 - 只在展开时加载
+  // Lazy load child nodes - only load when expanded
   const onLoadData = async (node: any) => {
     const { key } = node;
     
-    // 如果已经加载过子节点，不再重复加载
+    // If child nodes already loaded, don't reload
     if (node.children !== undefined) {
       return Promise.resolve();
     }
 
     try {
-      // 使用节点的 key 作为 parent_id 加载子文件夹
+      // Use node's key as parent_id to load child folders
       const children = await buildTreeNodes(knowledgeBaseId, String(key));
       setTreeData((prevData) => updateTreeData(prevData, key, children));
     } catch (e) {
-      console.error('加载子节点失败:', e);
-      // 加载失败时，将该节点标记为叶子节点（没有子节点）
+      console.error('Failed to load child nodes:', e);
+      // On load failure, mark this node as leaf node (no child nodes)
       setTreeData((prevData) => updateTreeData(prevData, key, []));
     }
   };
 
-  // 查找节点路径的辅助函数
+  // Helper function to find node path
   const findNodePath = (nodes: TreeNodeData[], targetKey: Key, currentPath: Array<{ id: string; name: string }> = []): Array<{ id: string; name: string }> | null => {
     for (const node of nodes) {
       const newPath = [...currentPath, { id: String(node.key), name: String(node.title) }];
@@ -379,7 +379,7 @@ const FolderTree: FC<FolderTreeProps> = ({
     return null;
   };
 
-  // 查找节点的辅助函数
+  // Helper function to find node
   const findNodeInTree = (nodes: TreeNodeData[], key: string): TreeNodeData | null => {
     for (const node of nodes) {
       if (String(node.key) === key) {
@@ -393,7 +393,7 @@ const FolderTree: FC<FolderTreeProps> = ({
     return null;
   };
 
-  // 渐进式自动展开到指定路径
+  // Progressive auto expand to specified path
   useEffect(() => {
     if (!autoExpandPath || autoExpandPath.length === 0 || autoExpandInProgress || treeData.length === 0) {
       return;
@@ -406,46 +406,46 @@ const FolderTree: FC<FolderTreeProps> = ({
         const keysToExpand: React.Key[] = [];
         let currentTreeData = treeData;
         
-        // 逐级展开，从第一级开始（跳过根节点，因为根节点已经加载）
+        // Expand level by level, starting from first level (skip root node as it's already loaded)
         for (let i = 0; i < autoExpandPath.length - 1; i++) {
           const nodeKey = autoExpandPath[i].id;
           keysToExpand.push(nodeKey);
           
-          // 查找当前节点
+          // Find current node
           const targetNode = findNodeInTree(currentTreeData, nodeKey);
           
           if (targetNode && targetNode.children === undefined) {
-            // 如果子节点未加载，先加载
+            // If child nodes not loaded, load first
             try {
-              console.log(`自动展开：加载节点 ${nodeKey} 的子节点`);
+              console.log(`Auto expand: Loading child nodes of ${nodeKey}`);
               const children = await buildTreeNodes(knowledgeBaseId, nodeKey);
               
-              // 更新树数据
+              // Update tree data
               setTreeData((prevData) => {
                 const newData = updateTreeData(prevData, nodeKey, children);
-                currentTreeData = newData; // 更新当前引用
+                currentTreeData = newData; // Update current reference
                 return newData;
               });
               
-              // 等待状态更新完成
+              // Wait for state update to complete
               await new Promise(resolve => setTimeout(resolve, 150));
               
             } catch (error) {
-              console.error(`自动展开时加载节点 ${nodeKey} 失败:`, error);
-              // 加载失败时停止展开
+              console.error(`Failed to load node ${nodeKey} during auto expand:`, error);
+              // Stop expanding on load failure
               break;
             }
           }
         }
         
-        // 设置展开的节点
+        // Set expanded nodes
         setExpandedKeys(keysToExpand);
         
-        // 选中最后一个节点（目标文件夹）
+        // Select last node (target folder)
         const targetKey = autoExpandPath[autoExpandPath.length - 1]?.id;
         if (targetKey) {
-          console.log(`自动展开：选中目标节点 ${targetKey}`);
-          // 延迟选中，确保展开动画完成
+          console.log(`Auto expand: Select target node ${targetKey}`);
+          // Delay selection to ensure expand animation completes
           setTimeout(() => {
             if (onSelect) {
               onSelect([targetKey], {
@@ -460,21 +460,21 @@ const FolderTree: FC<FolderTreeProps> = ({
         }
         
       } catch (error) {
-        console.error('自动展开路径失败:', error);
+        console.error('Auto expand path failed:', error);
       } finally {
-        // 延迟重置标志，确保展开过程完全完成
+        // Delay reset flag to ensure expand process is fully complete
         setTimeout(() => {
           setAutoExpandInProgress(false);
         }, 500);
       }
     };
 
-    // 延迟执行，确保树数据已经加载完成
+    // Delay execution to ensure tree data is loaded
     const timer = setTimeout(expandToPath, 300);
     return () => clearTimeout(timer);
   }, [autoExpandPath, treeData.length, knowledgeBaseId, onSelect, autoExpandInProgress]);
 
-  // 处理展开事件
+  // Handle expand event
   const handleExpand: TreeProps['onExpand'] = (expandedKeys, info) => {
     setExpandedKeys(expandedKeys);
     if (onExpand) {
@@ -482,7 +482,7 @@ const FolderTree: FC<FolderTreeProps> = ({
     }
   };
 
-  // 处理选择事件，计算并传递路径
+  // Handle select event, calculate and pass path
   const handleSelect: TreeProps['onSelect'] = (selectedKeys, info) => {
     if (selectedKeys.length > 0) {
       const path = findNodePath(treeData, selectedKeys[0]);
@@ -493,7 +493,7 @@ const FolderTree: FC<FolderTreeProps> = ({
       onFolderPathChange([]);
     }
     
-    // 调用原始的 onSelect 回调
+    // Call original onSelect callback
     if (onSelect) {
       onSelect(selectedKeys, info);
     }
@@ -503,7 +503,7 @@ const FolderTree: FC<FolderTreeProps> = ({
 
   return (
     <DirectoryTree
-      key={refreshKey} // 添加key确保refreshKey变化时重新渲染整个组件
+      key={refreshKey} // Add key to ensure component re-renders when refreshKey changes
       multiple={multiple}
       className={className}
       style={style}

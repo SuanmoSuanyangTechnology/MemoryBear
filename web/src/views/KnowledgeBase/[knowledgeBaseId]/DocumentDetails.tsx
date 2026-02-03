@@ -1,5 +1,5 @@
-/*
- * @Description: 文档详情
+/**
+ * @Description: Document Details
  * @Version: 0.0.1
  * @Author: yujiangping
  * @Date: 2025-11-15 16:13:47
@@ -57,28 +57,28 @@ const DocumentDetails: FC = () => {
     }
   }, [documentId]);
 
-  // 更新面包屑
+  // Update breadcrumbs
   useEffect(() => {
     if (breadcrumbPath) {
       updateBreadcrumbs(breadcrumbPath);
     }
   }, [breadcrumbPath, updateBreadcrumbs]);
 
-  // 当文档加载完成且 progress === 1 时，加载分块列表
+  // Load chunk list when document is loaded and progress === 1
   useEffect(() => {
     if (document && document.progress === 1 && !isManualRefreshRef.current) {
       ChunkList();
     }
-    // 重置标志
+    // Reset flag
     isManualRefreshRef.current = false;
   }, [document]);
 
-  // 监听 keywords 变化，重新搜索
+  // Listen to keywords changes and re-search
   useEffect(() => {
     if (documentId && keywords && document?.progress === 1) {
-      setPage(1); // 重置页码
-      setChunkList([]); // 清空列表
-      ChunkList(1, false); // 重新加载第一页
+      setPage(1); // Reset page number
+      setChunkList([]); // Clear list
+      ChunkList(1, false); // Reload first page
     }
   }, [keywords]);
 
@@ -129,9 +129,9 @@ const DocumentDetails: FC = () => {
       const url = `${imagePath}/api/files/${response.file_id}`
       setFileUrl(url);
       setParserMode(response?.parser_config?.auto_questions || 0)
-      // ChunkList 会在 useEffect 中根据 document.progress 自动调用
+      // ChunkList will be called automatically in useEffect based on document.progress
     } catch (error) {
-      console.error('获取文档详情失败:', error);
+      console.error('Failed to fetch document details:', error);
       message.error(t('common.loadFailed') || '加载失败');
     } finally {
       setLoading(false);
@@ -140,12 +140,12 @@ const DocumentDetails: FC = () => {
   const ChunkList = async (pageNum: number = 1, append: boolean = false, force: boolean = false) => {
     if (!documentId) return;
     
-    // 如果不是强制刷新，且正在加载中，则跳过
+    // Skip if not force refresh and already loading
     if (!force && chunkLoading) {
       return;
     }
     
-    // 只有当文档处理完成时才获取分块列表
+    // Only fetch chunk list when document processing is complete
     if (document && document.progress !== 1) {
       return;
     }
@@ -157,10 +157,10 @@ const DocumentDetails: FC = () => {
         keywords: keywords || undefined,
         page: pageNum,
         pagesize: 20,
-        _t: force ? Date.now() : undefined, // 强制刷新时添加时间戳破坏缓存
+        _t: force ? Date.now() : undefined, // Add timestamp to break cache when force refresh
       });
       
-      // 转换数据格式以匹配 RecallTestData
+      // Convert data format to match RecallTestData
       const formattedChunks: RecallTestData[] = response.items.map((item: any) => ({
         page_content: item.page_content || item.content || '',
         vector: null,
@@ -172,7 +172,7 @@ const DocumentDetails: FC = () => {
           document_id: item.metadata.document_id || documentId || '',
           knowledge_id: item.metadata.knowledge_id || knowledgeBaseId || '',
           sort_id: item.metadata.sort_id || item.id || 0,
-          score: item.metadata.score || null, // chunk 列表没有相似度分数
+          score: item.metadata.score || null, // Chunk list has no similarity score
           status: item.metadata.status,
         },
         children: null,
@@ -186,7 +186,7 @@ const DocumentDetails: FC = () => {
       
       setHasMore(response.page?.has_next ?? false);
     } catch (error) {
-      console.error('获取文档详情失败:', error);
+      console.error('Failed to fetch document details:', error);
       message.error(t('common.loadFailed') || '加载失败');
     } finally {
       setChunkLoading(false);
@@ -201,17 +201,17 @@ const DocumentDetails: FC = () => {
 
   const handleBack = () => {
     if (knowledgeBaseId && breadcrumbPath) {
-      // 返回到知识库详情页，并传递面包屑信息以恢复状态
+      // Return to knowledge base detail page and pass breadcrumb info to restore state
       const navigationState = {
         fromKnowledgeBaseList: true,
         knowledgeBaseFolderPath: breadcrumbPath.knowledgeBaseFolderPath,
         navigateToDocumentFolder: locationParentId,
         documentFolderPath: breadcrumbPath.documentFolderPath,
-        timestamp: Date.now(), // 添加时间戳确保状态变化
+        timestamp: Date.now(), // Add timestamp to ensure state change
       };
       navigate(`/knowledge-base/${knowledgeBaseId}/private`, { state: navigationState });
     } else if (knowledgeBaseId) {
-      // 降级处理：直接跳转到知识库详情页
+      // Fallback: Navigate directly to knowledge base detail page
       navigate(`/knowledge-base/${knowledgeBaseId}/private`);
     }
   };
@@ -226,61 +226,61 @@ const DocumentDetails: FC = () => {
     insertModalRef.current?.handleOpen(documentId);
   };
 
-  // 处理插入/编辑内容
+  // Handle insert/edit content
   const handleInsertContent = async (_docId: string, content: string, chunkId?: string): Promise<boolean> => {
     try {
       if (chunkId) {
-        // 编辑模式：更新现有块
+        // Edit mode: Update existing chunk
         const response = await updateDocumentChunk(knowledgeBaseId || '', documentId, chunkId, { content });
         
-        // 直接更新前端列表，不等待后端缓存刷新
+        // Update frontend list directly without waiting for backend cache refresh
         setChunkList(prev => prev.map(item => 
           item.metadata?.doc_id === chunkId 
             ? { ...item, page_content: response.page_content || content }
             : item
         ));
         
-        // 编辑模式返回特殊标记，告诉 InsertModal 不要调用 onSuccess
+        // Edit mode returns special flag to tell InsertModal not to call onSuccess
         return true;
       } else {
-        // 插入模式：创建新块
+        // Insert mode: Create new chunk
         await createDocumentChunk(knowledgeBaseId || '', documentId, { content });
         return true;
       }
     } catch (error) {
-      console.error('操作失败:', error);
+      console.error('Operation failed:', error);
       return false;
     }
   };
 
-  // 处理点击文本块
+  // Handle click on text chunk
   const handleChunkClick = (item: RecallTestData, index: number) => {
     if (!documentId) return;
     const chunkId = String(item.metadata?.doc_id || index);
     insertModalRef.current?.handleOpen(documentId, item.page_content, chunkId);
   };
 
-  // 插入成功后的回调（仅用于插入新块，编辑操作已在 handleInsertContent 中同步更新）
+  // Callback after successful insert (only for inserting new chunks, edit operations are already updated synchronously in handleInsertContent)
   const handleInsertSuccess = () => {
-    // 设置手动刷新标志，防止 useEffect 重复调用
+    // Set manual refresh flag to prevent useEffect from calling repeatedly
     isManualRefreshRef.current = true;
     
-    // 重置页码
+    // Reset page number
     setPage(1);
     
-    // 等待后端处理完成，然后重新加载数据（仅用于插入新块的情况）
+    // Wait for backend processing to complete, then reload data (only for inserting new chunks)
     setTimeout(() => {
       ChunkList(1, false, true).then(() => {
         return fetchDocumentDetail();
       }).catch(err => {
-        console.error('刷新失败:', err);
+        console.error('Refresh failed:', err);
       });
     }, 1000);
   };
   const handleAdjustmentParameter = () =>{
     if (!knowledgeBaseId || !document) return;
     const targetFileId = document.id;
-    // 优先使用从 location 传递的 parentId，其次使用 document.parent_id，最后使用 knowledgeBaseId
+    // Prioritize parentId from location, then document.parent_id, finally knowledgeBaseId
     const parentId = locationParentId ?? document.parent_id ?? document.kb_id ?? knowledgeBaseId;
     
     navigate(`/knowledge-base/${knowledgeBaseId}/create-dataset`, {
@@ -317,7 +317,7 @@ const DocumentDetails: FC = () => {
               <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
               <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
           </div>
-          {/* 文档预览 */}
+          {/* Document preview */}
           {fileUrl && (
             <div className='rb:flex-1 rb:border rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:p-4 rb:overflow-hidden'>
               <h3 className="rb:text-sm rb:font-medium rb:mb-3">
@@ -339,7 +339,7 @@ const DocumentDetails: FC = () => {
 
   return (<>
     <div className="rb:flex rb:flex-col rb:h-full rb:p-4">
-      {/* 头部 */}
+      {/* Header */}
       <div className="rb:flex rb:flex-col rb:text-left rb:mb-6">
         <div className='rb:flex rb:items-center rb:justify-between'>
             <div className='rb:flex rb:items-center rb:gap-2 rb:mb-4 rb:cursor-pointer' onClick={handleBack}>
@@ -366,9 +366,9 @@ const DocumentDetails: FC = () => {
         </div>
       </div>
 
-      {/* 内容区域 */}
+      {/* Content area */}
       <div className="rb:flex rb:h-full rb:gap-4 rb:flex-1 rb:overflow-hidden">
-        {/* 左侧：文档信息 */}
+        {/* Left: Document info */}
         <div className='rb:w-80 rb:h-full rb:flex rb:flex-col rb:gap-4 rb:overflow-hidden'>
           <div className='rb:border rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:p-4'>
             <InfoPanel 
@@ -381,7 +381,7 @@ const DocumentDetails: FC = () => {
           </div>
         </div>
         
-        {/* 右侧：分块列表 */}
+        {/* Right: Chunk list */}
         <div 
           id="chunkScrollableDiv"
           className="rb:flex-1 rb:bg-white rb:rounded-lg rb:border rb:border-gray-200 rb:p-6 rb:overflow-y-auto"
@@ -404,7 +404,7 @@ const DocumentDetails: FC = () => {
         </div>
       </div>
       
-      {/* 插入内容弹窗 */}
+      {/* Insert content modal */}
       <InsertModal 
         ref={insertModalRef}
         onInsert={handleInsertContent}
