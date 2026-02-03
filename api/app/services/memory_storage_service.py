@@ -203,6 +203,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "end_user_id": config.end_user_id,
                 "config_id_old": config_id_old,
                 "apply_id": config.apply_id,
+                "scene_id": config.scene_id,
                 "llm_id": config.llm_id,
                 "embedding_id": config.embedding_id,
                 "rerank_id": config.rerank_id,
