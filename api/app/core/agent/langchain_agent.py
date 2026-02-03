@@ -151,6 +151,7 @@ class LangChainAgent:
     # TODO: 移到memory module
     async def term_memory_save(self,long_term_messages,actual_config_id,end_user_id,type):
         db = next(get_db())
+        #TODO: 魔法数字
         scope=6
 
         try:
@@ -160,6 +161,12 @@ class LangChainAgent:
 
             from app.core.memory.agent.utils.redis_tool import write_store
             result = write_store.get_session_by_userid(end_user_id)
+            
+            # Handle case where no session exists in Redis (returns False)
+            if not result or result is False:
+                logger.debug(f"No existing session in Redis for user {end_user_id}, skipping short-term memory update")
+                return
+                
             if type=="chunk" or type=="aggregate":
                 data = await format_parsing(result, "dict")
                 chunk_data = data[:scope]
@@ -167,7 +174,14 @@ class LangChainAgent:
                     repo.upsert(end_user_id, chunk_data)
                     logger.info(f'写入短长期：')
             else:
+                # TODO: This branch handles type="time" strategy, currently unused.
+                # Will be activated when time-based long-term storage is implemented.
+                # TODO: 魔法数字 - extract 5 to a constant
                 long_time_data = write_store.find_user_recent_sessions(end_user_id, 5)
+                # Handle case where no session exists in Redis (returns False or empty)
+                if not long_time_data or long_time_data is False:
+                    logger.debug(f"No recent sessions in Redis for user {end_user_id}")
+                    return
                 long_messages = await messages_parse(long_time_data)
                 repo.upsert(end_user_id, long_messages)
                 logger.info(f'写入短长期：')

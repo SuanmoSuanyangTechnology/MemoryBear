@@ -7,6 +7,10 @@ from celery import Celery
 
 from app.core.config import settings
 
+# macOS fork() safety - must be set before any Celery initialization
+if platform.system() == 'Darwin':
+    os.environ.setdefault('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', 'YES')
+
 # 创建 Celery 应用实例
 # broker: 任务队列（使用 Redis DB 0）
 # backend: 结果存储（使用 Redis DB 10）
