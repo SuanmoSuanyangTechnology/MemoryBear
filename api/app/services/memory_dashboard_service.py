@@ -57,6 +57,10 @@ def get_workspace_end_users(
     
     返回结果按 updated_at 从新到旧排序（NULL 值排在最后）
     """
+    """获取工作空间的所有宿主（优化版本：减少数据库查询次数）
+    
+    返回结果按 updated_at 从新到旧排序（NULL 值排在最后）
+    """
     business_logger.info(f"获取工作空间宿主列表: workspace_id={workspace_id}, 操作者: {current_user.username}")
     
     try:        
@@ -73,6 +77,7 @@ def get_workspace_end_users(
         # 批量查询所有 end_users（一次查询而非循环查询）
         # 按 updated_at 降序排序，NULL 值排在最后；id 作为次级排序键保证确定性
         from app.models.end_user_model import EndUser as EndUserModel
+        from sqlalchemy import desc, nullslast
         from sqlalchemy import desc, nullslast
         end_users_orm = db.query(EndUserModel).filter(
             EndUserModel.app_id.in_(app_ids)
