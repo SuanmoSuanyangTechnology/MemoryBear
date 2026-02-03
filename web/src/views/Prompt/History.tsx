@@ -50,6 +50,7 @@ const History: React.FC<{ query: HistoryQuery; edit: (item: HistoryItem) => void
         url={getPromptReleaseListUrl}
         query={query}
         column={3}
+        needLoading={false}
         renderItem={(item) => {
           const historyItem = item as unknown as HistoryItem;
           return (
