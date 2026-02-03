@@ -71,13 +71,14 @@ def get_workspace_end_users(
         app_ids = [app.id for app in apps_orm]
         
         # 批量查询所有 end_users（一次查询而非循环查询）
-        # 按 updated_at 降序排序，NULL 值排在最后
+        # 按 updated_at 降序排序，NULL 值排在最后；id 作为次级排序键保证确定性
         from app.models.end_user_model import EndUser as EndUserModel
         from sqlalchemy import desc, nullslast
         end_users_orm = db.query(EndUserModel).filter(
             EndUserModel.app_id.in_(app_ids)
         ).order_by(
-            nullslast(desc(EndUserModel.updated_at))
+            nullslast(desc(EndUserModel.updated_at)),
+            desc(EndUserModel.id)
         ).all()
         
         # 转换为 Pydantic 模型（只在需要时转换）
