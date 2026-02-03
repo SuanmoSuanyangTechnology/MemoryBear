@@ -1,3 +1,4 @@
+import os
 import re
 import uuid
 from typing import Any, AsyncGenerator
@@ -182,11 +183,12 @@ class PromptOptimizerService:
             base_url=api_config.api_base
         ), type=ModelType(model_config.type))
         try:
-            with open('app/services/prompt/prompt_optimizer_system.jinja2', 'r', encoding='utf-8') as f:
+            prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
+            with open(os.path.join(prompt_path, 'prompt_optimizer_system.jinja2'), 'r', encoding='utf-8') as f:
                 opt_system_prompt = f.read()
             rendered_system_message = Template(opt_system_prompt).render()
 
-            with open('app/services/prompt/prompt_optimizer_user.jinja2', 'r', encoding='utf-8') as f:
+            with open(os.path.join(prompt_path, 'prompt_optimizer_user.jinja2'), 'r', encoding='utf-8') as f:
                 opt_user_prompt = f.read()
         except FileNotFoundError:
             raise BusinessException(message="System prompt template not found", code=BizCode.NOT_FOUND)
