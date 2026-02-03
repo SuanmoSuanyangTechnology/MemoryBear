@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 15:39:59 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 15:39:59 
+ */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
@@ -31,17 +37,35 @@ import RbSlider from './RbSlider'
 import JinjaRender from './JinjaRender'
 import CodeExecution from './CodeExecution'
 
+/**
+ * Props for Properties component
+ */
 interface PropertiesProps {
+  /** Currently selected node */
   selectedNode?: Node | null; 
+  /** Function to update selected node */
   setSelectedNode: (node: Node | null) => void;
+  /** Reference to graph instance */
   graphRef: React.MutableRefObject<Graph | undefined>;
+  /** Handler for blank canvas click */
   blankClick: () => void;
+  /** Handler for delete event */
   deleteEvent: () => void;
+  /** Handler for copy event */
   copyEvent: () => void;
+  /** Handler for paste event */
   parseEvent: () => void;
+  /** Workflow configuration */
   config?: any;
+  /** Chat variables */
   chatVariables: ChatVariable[];
 }
+
+/**
+ * Properties panel component
+ * Displays and manages configuration for selected workflow node
+ * @param props - Component props
+ */
 const Properties: FC<PropertiesProps> = ({
   selectedNode,
   graphRef,
@@ -83,6 +107,10 @@ const Properties: FC<PropertiesProps> = ({
     }
   }, [selectedNode, form])
 
+  /**
+   * Update node label in graph
+   * @param newLabel - New label text
+   */
   const updateNodeLabel = (newLabel: string) => {
     if (selectedNode && form) {
       const nodeData = selectedNode.data as NodeProperties;
@@ -107,8 +135,6 @@ const Properties: FC<PropertiesProps> = ({
         }))
       }
 
-
-
       Object.keys(values).forEach(key => {
         if (selectedNode.data?.config?.[key]) {
           // Create a deep copy to avoid reference sharing between nodes
@@ -131,7 +157,12 @@ const Properties: FC<PropertiesProps> = ({
 
 
 
-  // Filter out boolean type variables for loop and llm nodes
+  /**
+   * Get filtered variable list based on node type and config key
+   * @param nodeType - Type of the node
+   * @param key - Configuration key
+   * @returns Filtered variable list
+   */
   const getFilteredVariableList = (nodeType?: string, key?: string) => {
     // Check if current node is a child of iteration node
     const parentIterationNode = selectedNode ? (() => {
@@ -321,14 +352,32 @@ const Properties: FC<PropertiesProps> = ({
 
   console.log('values', values)
 
+  /**
+   * Get current node output variables
+   */
   const currentNodeVariables = useMemo(() => {
     if (!selectedNode) return []
     return getCurrentNodeVariables(selectedNode?.getData(), values)
   }, [selectedNode?.getData(), values])
 
   const [outputCollapsed, setOutputCollapsed] = useState(true)
+  /**
+   * Toggle output section collapsed state
+   */
   const handleToggle = () => {
     setOutputCollapsed((prev: boolean) => !prev)
+  }
+
+  /**
+   * Handle variable list change and update output type for iteration nodes
+   * @param _value - Selected value
+   * @param option - Selected option
+   * @param key - Configuration key
+   */
+  const handleChangeVariableList = (_value: string, option: any, key: string) => {
+    if (selectedNode?.data?.type === 'iteration' && key === 'output') {
+      form.setFieldValue('output_type', option?.dataType)
+    }
   }
   console.log('variableList', variableList, currentNodeVariables)
 
@@ -421,6 +470,9 @@ const Properties: FC<PropertiesProps> = ({
                     />
                   </Form.Item>
                 )
+              }
+              if (selectedNode?.data?.type === 'iteration' && key === 'output_type') {
+                return (<Form.Item key={key} name={key} hidden />)
               }
               if (config.type === 'define') {
                 return null
@@ -628,8 +680,8 @@ const Properties: FC<PropertiesProps> = ({
                           );
                         }
                         return baseVariableList;
-                      })()
-                      }
+                      })()}
+                      onChange={(value, option) => handleChangeVariableList(value, option, key)}
                       size="small"
                     />
                     : config.type === 'switch'
