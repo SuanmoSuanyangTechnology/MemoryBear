@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:44:04 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:44:04 
+ */
+/**
+ * Prompt History Component
+ * Displays saved prompts with view, edit, and delete actions
+ */
+
 import React, { useRef, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Tooltip, Space, App } from 'antd';
@@ -17,9 +28,11 @@ const History: React.FC<{ query: HistoryQuery; edit: (item: HistoryItem) => void
   const detailRef = useRef<PromptDetailRef>(null)
   const { message, modal } = App.useApp()
 
+  /** View prompt details */
   const handleView = (item: HistoryItem) => {
     detailRef.current?.handleOpen(item)
   }
+  /** Delete prompt */
   const handleDelete = (item: HistoryItem, e?: MouseEvent) => {
     e?.preventDefault();
     e?.stopPropagation();
@@ -39,6 +52,7 @@ const History: React.FC<{ query: HistoryQuery; edit: (item: HistoryItem) => void
     })
 
   }
+  /** Edit prompt */
   const handleEdit = (item: HistoryItem) => {
     edit(item)
   }

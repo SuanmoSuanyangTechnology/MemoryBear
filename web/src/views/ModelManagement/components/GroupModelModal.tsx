@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:49:33 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:49:33 
+ */
+/**
+ * Group Model Modal
+ * Modal for creating and editing composite/group models
+ * Supports multiple API key configuration and load balancing
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +22,9 @@ import UploadImages from '@/components/Upload/UploadImages'
 import ModelImplement from './ModelImplement'
 import { getFileLink } from '@/api/fileStorage'
 
+/**
+ * Group model modal component
+ */
 const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
   refresh
 }, ref) => {
@@ -22,6 +37,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
   const [loading, setLoading] = useState(false)
   const type = Form.useWatch(['type'], form)
 
+  /** Close modal and reset state */
   const handleClose = () => {
     setModel({} as ModelListItem);
     form.resetFields();
@@ -29,6 +45,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
     setVisible(false);
   };
 
+  /** Open modal with optional model data for editing */
   const handleOpen = (model?: ModelListItem) => {
     if (model) {
       setIsEdit(true);
@@ -44,6 +61,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
     }
     setVisible(true);
   };
+  /** Validate and save group model */
   const handleSave = () => {
     form
       .validateFields()
@@ -73,6 +91,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
       });
   }
 
+  /** Update or create group model */
   const handleUpdate = (data: CompositeModelForm) => {
     setLoading(true)
     const { type, ...rest } = data
@@ -90,6 +109,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
       });
   }
 
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

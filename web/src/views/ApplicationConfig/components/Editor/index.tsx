@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:25:17 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:25:17 
+ */
+/**
+ * Rich text editor component using Lexical framework
+ * Provides text editing with insert, append, clear, and scroll capabilities
+ */
+
 import {forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -6,25 +17,44 @@ import { ContentEditable } from '@lexical/react/LexicalContentEditable';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import { $getSelection, $getRoot, $createParagraphNode, $createTextNode, $isParagraphNode, $isTextNode } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
+
 import InitialValuePlugin from './plugin/InitialValuePlugin'
 import LineBreakPlugin from './plugin/LineBreakPlugin';
 import InsertTextPlugin from './plugin/InsertTextPlugin';
 
+/**
+ * Editor ref methods exposed to parent components
+ */
 export interface EditorRef {
+  /** Insert text at current cursor position */
   insertText: (text: string) => void;
+  /** Append text to the end of content */
   appendText: (text: string) => void;
+  /** Clear all editor content */
   clear: () => void;
+  /** Scroll editor to bottom */
   scrollToBottom: () => void;
 }
 
+/**
+ * Editor component props
+ */
 interface LexicalEditorProps {
+  /** Additional CSS class names */
   className?: string;
+  /** Placeholder text when editor is empty */
   placeholder?: string;
+  /** Initial editor value */
   value?: string;
+  /** Callback when content changes */
   onChange?: (value: string) => void;
+  /** Editor height in pixels */
   height?: number;
 }
 
+/**
+ * Lexical editor theme configuration
+ */
 const theme = {
   paragraph: 'editor-paragraph',
   text: {
@@ -33,6 +63,9 @@ const theme = {
   },
 };
 
+/**
+ * Editor content component with Lexical context
+ */
 const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
   className = '',
   value,
@@ -41,6 +74,13 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
 }, ref) => {
   const [editor] = useLexicalComposerContext();
   
+  /**
+   * Expose editor methods to parent component
+   * - insertText: Insert at cursor position
+   * - appendText: Append to end of content
+   * - clear: Clear all content
+   * - scrollToBottom: Scroll to bottom
+   */
   useImperativeHandle(ref, () => ({
     insertText: (text: string) => {
       editor.update(() => {
@@ -109,6 +149,10 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
   );
 });
 
+/**
+ * Main editor wrapper component
+ * Initializes Lexical composer with configuration
+ */
 const Editor = forwardRef<EditorRef, LexicalEditorProps>((props, ref) => {
   const initialConfig = {
     namespace: 'Editor',

@@ -1,16 +1,34 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:57 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:57 
+ */
 import { type FC, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react'
+
 import Empty from '@/components/Empty'
 import Loading from '@/components/Empty/Loading'
 import type { Interaction } from '../pages/GraphDetail'
 
+/**
+ * Props for InteractionBar component
+ * @property {Interaction[]} chartData - Interaction count data over time
+ * @property {boolean} [loading] - Loading state
+ */
 interface InteractionBarProps {
   chartData: Interaction[];
   loading?: boolean;
 }
 
 const Colors = ['#155EEF', '#369F21', '#FF5D34']
+
+/**
+ * InteractionBar Component
+ * Displays user interaction counts over time as a bar chart
+ * Shows daily interaction frequency
+ */
 const InteractionBar: FC<InteractionBarProps> = ({ chartData, loading }) => {
   const { t } = useTranslation()
 

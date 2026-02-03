@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:33:39 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:33:39 
+ */
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -8,10 +14,22 @@ import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
 import { getWordCloud } from '@/api/memory'
 
+/**
+ * Tag list data structure
+ * @property {Array} keywords - List of keywords with emotion data
+ * @property {number} total_keywords - Total number of keywords
+ */
 interface TagList {
   keywords: Array<{ keyword: string; frequency: number; emotion_type: string; avg_intensity: number; }>;
   total_keywords: number;
 }
+
+/**
+ * EmotionTags Component
+ * Displays emotion-tagged keywords as a word cloud
+ * Each keyword is colored based on its associated emotion type
+ * Shows emotion statistics summary at the bottom
+ */
 const EmotionTags: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
@@ -32,6 +50,11 @@ const EmotionTags: FC = () => {
       })
   }
 
+  /**
+   * Get color for emotion type
+   * @param {string} emotionType - Emotion type (joy, anger, sadness, etc.)
+   * @returns {string} Color hex code
+   */
   const getEmotionColor = (emotionType: string) => {
     const colors: Record<string, string> = {
       joy: '#52c41a',

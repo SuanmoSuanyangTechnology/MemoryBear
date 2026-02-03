@@ -1,6 +1,20 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:34:10 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:34:10 
+ */
+/**
+ * Card Component
+ * Reusable card wrapper with theme support
+ */
+
 import { type FC, type ReactNode } from 'react'
 import clsx from 'clsx'
 
+/**
+ * Component props
+ */
 interface CardProps {
   title?: string;
   children: ReactNode;

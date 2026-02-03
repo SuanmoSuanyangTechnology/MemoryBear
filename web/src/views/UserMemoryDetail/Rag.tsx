@@ -1,8 +1,21 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:57:11 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:57:11 
+ */
+/**
+ * RAG User Memory Detail View
+ * Displays user memory details using RAG storage
+ * Shows profile, tags, summary, memory count, and conversation history
+ */
+
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx'
 import { Row, Col, Skeleton } from 'antd'
 import { useParams } from 'react-router-dom'
+
 import aboutUs from '@/assets/images/userMemory/aboutUs.svg'
 import down from '@/assets/images/userMemory/down.svg'
 import interestDistribution from '@/assets/images/userMemory/interestDistribution.svg'
@@ -17,8 +30,12 @@ import {
 import Empty from '@/components/Empty'
 import ConversationMemory from './components/ConversationMemory'
 
+/** Tag color palette */
 const tagColors = ['21, 94, 239', '156, 111, 255', '255, 93, 52', '54, 159, 33']
 
+/**
+ * Title component props
+ */
 interface TitleProps {
   type: string;
   title: string
@@ -27,6 +44,7 @@ interface TitleProps {
   expanded: boolean;
   onClick: (type: string) => void;
 }
+/** Collapsible section title */
 const Title: FC<TitleProps> = ({ type, title, icon, t, expanded, onClick }) => (
   <div className="rb:flex rb:items-center rb:justify-between rb:py-4.25 rb:border-b rb:border-[#DFE4ED] rb:text-[16px] rb:font-semibold rb:leading-5.5">
     <span className="rb:flex rb:items-center">
@@ -67,10 +85,11 @@ const Rag: FC = () => {
     getInsightReport()
   }, [id])
 
+  /** Toggle section expansion */
   const handleTitleClick = (key: string) => {
     setExpanded(expanded.includes(key) ? expanded.filter((item) => item !== key) : [...expanded, key])
   }
-  // 用户记忆详情
+  /** Fetch user memory detail */
   const getDetail = () => {
     if (!id) return
     setLoading(prev => ({ ...prev, detail: true }))
@@ -81,14 +100,14 @@ const Rag: FC = () => {
     setLoading(prev => ({ ...prev, detail: false }))
     })
   }
-  // 记忆总览
+  /** Fetch memory count */
   const getMemory = () => {
     if (!id) return
     getTotalRagMemoryCountByUser(id).then((res) => {
       setMemory(res as number || 0)
     })
   }
-  // 用户摘要
+  /** Fetch user summary */
   const getSummary = () => {
     if (!id) return
     setLoading(prev => ({ ...prev, summary: true }))
@@ -102,7 +121,7 @@ const Rag: FC = () => {
       setLoading(prev => ({ ...prev, summary: false }))
     })
   }
-  // 记忆洞察
+  /** Fetch memory insight */
   const getInsightReport = () => {
     if (!id) return
     setLoading(prev => ({ ...prev, insight: true }))

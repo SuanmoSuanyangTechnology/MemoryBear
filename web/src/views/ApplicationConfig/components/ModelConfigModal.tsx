@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:28:07 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:28:07 
+ */
+/**
+ * Model Configuration Modal
+ * Allows configuring model parameters like temperature, max_tokens, top_p, etc.
+ * Supports different sources: model, chat, and multi_agent
+ */
+
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Form, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -9,12 +21,24 @@ import RbSlider from '@/components/RbSlider'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface ModelConfigModalProps {
+  /** List of available models */
   modelList?: ModelListItem[];
+  /** Callback to update model configuration */
   refresh: (values: ModelConfig, type: Source) => void;
+  /** Application configuration data */
   data: Config;
 }
 
+/**
+ * Modal for configuring model parameters
+ */
+/**
+ * Model parameter configuration fields
+ */
 const configFields = [
   { key: 'temperature', max: 2, min: 0, step: 0.1, defaultValue: 0.7 },
   { key: 'max_tokens', max: 32000, min: 256, step: 1, defaultValue: 2000 },
@@ -36,12 +60,13 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
 
   const values = Form.useWatch([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
   };
 
+  /** Open modal with configuration source */
   const handleOpen = (source: Source, model?: any) => {
     setSource(source)
     if (source === 'model') {
@@ -64,7 +89,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
     }
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save model configuration */
   const handleSave = () => {
     form
       .validateFields()
@@ -76,13 +101,14 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         console.log('err', err)
       });
   }
+  /** Handle model selection change */
   const handleChange = (_value: string, option: ModelListItem | ModelListItem[] | undefined) => {
     if (source === 'chat') {
       form.setFieldValue('label', (option as ModelListItem).name)
     }
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

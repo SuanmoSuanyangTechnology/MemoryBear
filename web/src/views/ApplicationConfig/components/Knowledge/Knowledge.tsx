@@ -1,6 +1,19 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:25:32 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:25:32 
+ */
+/**
+ * Knowledge Base Component
+ * Manages knowledge base associations for the application
+ * Allows adding, configuring, and removing knowledge bases
+ */
+
 import { type FC, useRef, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Space, Button, List } from 'antd'
+
 import knowledgeEmpty from '@/assets/images/application/knowledgeEmpty.svg'
 import type {
   KnowledgeConfigForm,
@@ -19,6 +32,11 @@ import Tag from '@/components/Tag'
 import { getKnowledgeBaseList } from '@/api/knowledgeBase'
 import Card from '../Card'
 
+/**
+ * Knowledge base management component
+ * @param value - Current knowledge configuration
+ * @param onChange - Callback when configuration changes
+ */
 const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfig) => void}> = ({value = {knowledge_bases: []}, onChange}) => {
   const { t } = useTranslation()
   const knowledgeModalRef = useRef<KnowledgeModalRef>(null)
@@ -32,10 +50,10 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
       setEditConfig({ ...(value || {}) })
       const knowledge_bases = [...(value.knowledge_bases || [])]
       
-      // 检查是否有knowledge_bases缺少name字段
+      // Check if knowledge_bases are missing name field
       const basesWithoutName = knowledge_bases.filter(base => !base.name)
       if (basesWithoutName.length > 0) {
-        // 调用接口获取完整的知识库信息
+        // Call API to get complete knowledge base information
         getKnowledgeBaseList().then(res => {
           const fullBases = knowledge_bases.map(base => {
             if (!base.name) {
@@ -54,12 +72,15 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
     }
   }, [value])
 
+  /** Open global knowledge configuration modal */
   const handleKnowledgeConfig = () => {
     knowledgeGlobalConfigModalRef.current?.handleOpen()
   }
+  /** Open knowledge base selection modal */
   const handleAddKnowledge = () => {
     knowledgeModalRef.current?.handleOpen()
   }
+  /** Remove knowledge base from list */
   const handleDeleteKnowledge = (id: string) => {
     const list = knowledgeList.filter(item => item.id !== id)
     setKnowledgeList([...list])
@@ -68,9 +89,11 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
       knowledge_bases: [...list],
     })
   }
+  /** Open knowledge base configuration modal */
   const handleEditKnowledge = (item: KnowledgeBase) => {
     knowledgeConfigModalRef.current?.handleOpen(item)
   }
+  /** Update knowledge configuration */
   const refresh = (values: KnowledgeBase[] | KnowledgeConfigForm | RerankerConfig, type: 'knowledge' | 'knowledgeConfig' | 'rerankerConfig') => {
     if (type === 'knowledge') {
         let list = [...knowledgeList]

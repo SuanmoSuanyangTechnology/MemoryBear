@@ -1,13 +1,32 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:33:06 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:33:06 
+ */
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Space, Progress } from 'antd';
+
 import RbCard from '@/components/RbCard/Card'
 import Empty from '@/components/Empty'
 import {
   getImplicitHabits,
 } from '@/api/memory'
 
+/**
+ * Habits item data structure
+ * @property {string} habit_description - Description of the habit
+ * @property {string} frequency_pattern - Frequency pattern
+ * @property {string} time_context - Time context
+ * @property {number} confidence_level - Confidence level percentage
+ * @property {string[]} supporting_summaries - Supporting summaries
+ * @property {string} first_observed - First observation date
+ * @property {string} last_observed - Last observation date
+ * @property {boolean} is_current - Whether habit is current
+ * @property {string[]} specific_examples - Specific examples
+ */
 interface HabitsItem {
   habit_description: string;
   frequency_pattern: string;
@@ -20,6 +39,11 @@ interface HabitsItem {
   specific_examples: string[];
 }
 
+/**
+ * Habits Component
+ * Displays user habits with confidence levels and specific examples
+ * Shows habit descriptions, time context, and supporting evidence
+ */
 const Habits = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()

@@ -1,6 +1,15 @@
+/**
+ * Card Component
+ * Styled wrapper for conversation and analysis panels
+ * Provides consistent layout and styling
+ */
+
 import { Card } from 'antd'
 import { type FC, type ReactNode } from 'react'
 
+/**
+ * Component props
+ */
 interface RbCardProps {
   children: ReactNode;
   title: string;

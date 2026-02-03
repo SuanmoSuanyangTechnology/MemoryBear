@@ -1,5 +1,17 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:30:06 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:30:06 
+ */
+/**
+ * Memory Extraction Engine Configuration Constants
+ * Defines configuration structure for storage and arrangement layer modules
+ */
+
 import type { ConfigVo } from './types'
 
+/** Configuration list for memory extraction engine */
 export const configList: ConfigVo[] = [
   {
     type: 'storageLayerModule',
@@ -206,6 +218,7 @@ export const configList: ConfigVo[] = [
   }
 ]
 
+/** Mock module data for testing */
 export const mockModuleData = [
     {
         "data": [
@@ -1074,7 +1087,12 @@ export const mockModuleData = [
         }
     }
 ]
-// 按type聚合数据的处理函数
+/**
+ * Group data by specified key
+ * @param data - Array of data items
+ * @param groupKey - Key to group by
+ * @returns Grouped data object
+ */
 export const groupDataByType = (data: any[], groupKey: string) => {
   const grouped: { [key: string]: any[] } = {}
   

@@ -1,20 +1,34 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:24:59 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:24:59 
+ */
+/**
+ * Initial Value Plugin
+ * Sets the initial content of the Lexical editor
+ * Only updates when the value prop changes
+ */
+
 import { type FC, useEffect, useRef } from 'react';
 import { $getRoot, $createParagraphNode, $createTextNode } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 
-// 设置初始值的插件
+/**
+ * Plugin to set initial editor value
+ */
 const InitialValuePlugin: FC<{ value?: string }> = ({ value }) => {
   const [editor] = useLexicalComposerContext();
   const lastValueRef = useRef<string | undefined>(undefined);
   
   useEffect(() => {
-    // 只有当value真正发生变化时才更新
+    // Only update when value actually changes
     if (lastValueRef.current !== value) {
       editor.update(() => {
         const root = $getRoot();
         const currentText = root.getTextContent();
         
-        // 如果当前内容和新值相同，则不更新
+        // If current content matches new value, don't update
         if (currentText === (value || '')) {
           return;
         }
@@ -26,7 +40,7 @@ const InitialValuePlugin: FC<{ value?: string }> = ({ value }) => {
           paragraph.append(textNode);
           root.append(paragraph);
         } else {
-          // 当value为undefined或空时，创建一个空段落
+          // When value is undefined or empty, create an empty paragraph
           const paragraph = $createParagraphNode();
           root.append(paragraph);
         }

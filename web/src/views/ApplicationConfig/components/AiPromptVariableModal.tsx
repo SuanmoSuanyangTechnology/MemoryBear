@@ -1,25 +1,42 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:27:14 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:27:14 
+ */
+/**
+ * AI Prompt Variable Modal
+ * Allows users to insert variables into AI-generated prompts
+ * Supports autocomplete with existing variables
+ */
+
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Select, AutoComplete, type AutoCompleteProps } from 'antd';
+import { Form, AutoComplete, type AutoCompleteProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { Application } from '@/views/ApplicationManagement/types'
 import type { AiPromptVariableModalRef } from '../types'
-import { createApiKey  } from '@/api/apiKey';
 import RbModal from '@/components/RbModal'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface AiPromptVariableModalProps {
+  /** Callback to insert variable into prompt */
   refresh: (value: string) => void;
+  /** List of available variables */
   variables: string[];
 }
 
+/**
+ * Variable selection modal for AI prompt assistant
+ */
 const AiPromptVariableModal = forwardRef<AiPromptVariableModalRef, AiPromptVariableModalProps>(({
   refresh,
   variables
 }, ref) => {
   const { t } = useTranslation();
-  const { message } = App.useApp();
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false)
@@ -31,6 +48,7 @@ const AiPromptVariableModal = forwardRef<AiPromptVariableModalRef, AiPromptVaria
       label: `{{${key}}}`
     })))
   }, [variables])
+  /** Search and filter variables */
   const handleSearch = (value: string) => {
     const filterKeys = variables?.filter(key => key.includes(value))
 
@@ -47,18 +65,19 @@ const AiPromptVariableModal = forwardRef<AiPromptVariableModalRef, AiPromptVaria
     }
   }
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setLoading(false)
   };
 
+  /** Open modal */
   const handleOpen = () => {
     setVisible(true);
       form.resetFields();
   };
-  // 封装保存方法，添加提交逻辑
+  /** Apply selected variable */
   const handleSave = () => {
     const variableName = form.getFieldValue('variableName')
 
@@ -68,7 +87,7 @@ const AiPromptVariableModal = forwardRef<AiPromptVariableModalRef, AiPromptVaria
     handleClose()
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

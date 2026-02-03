@@ -1,4 +1,10 @@
-import { forwardRef, useImperativeHandle, useState, useCallback } from 'react';
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:33:16 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:33:16 
+ */
+import { forwardRef, useImperativeHandle, useState } from 'react';
 import { useParams } from 'react-router-dom'
 import { Descriptions, Skeleton } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +15,17 @@ import { formatDateTime } from '@/utils/format'
 import type { ExplicitDetailModalRef, EpisodicMemory, SemanticMemory } from '../pages/ExplicitDetail'
 
 
+/**
+ * Explicit memory detail data structure
+ * @property {string} memory_type - Type of memory (episodic or semantic)
+ * @property {string} title - Memory title
+ * @property {string} content - Memory content
+ * @property {string} emotion - Associated emotion
+ * @property {number} created_at - Creation timestamp
+ * @property {string} name - Memory name
+ * @property {string} core_definition - Core definition for semantic memory
+ * @property {string} detailed_notes - Detailed notes
+ */
 interface Data {
   memory_type: 'episodic' | 'semantic';
   title: string;
@@ -20,6 +37,12 @@ interface Data {
   core_definition: string;
   detailed_notes: string;
 }
+
+/**
+ * ExplicitDetailModal Component
+ * Modal dialog for displaying detailed information about explicit memories
+ * Shows different fields based on memory type (episodic vs semantic)
+ */
 const ExplicitDetailModal = forwardRef<ExplicitDetailModalRef>((_props, ref) => {
   const { t } = useTranslation();
   const { id } = useParams()
@@ -27,12 +50,18 @@ const ExplicitDetailModal = forwardRef<ExplicitDetailModalRef>((_props, ref) => 
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<Data>({} as Data)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /**
+   * Close modal and reset data
+   */
   const handleClose = () => {
     setVisible(false);
     setData({} as Data)
   };
 
+  /**
+   * Open modal and load memory details
+   * @param {EpisodicMemory | SemanticMemory} vo - Memory object
+   */
   const handleOpen = (vo: EpisodicMemory | SemanticMemory) => {
     setLoading(true)
     getExplicitMemoryDetails({
@@ -48,6 +77,11 @@ const ExplicitDetailModal = forwardRef<ExplicitDetailModalRef>((_props, ref) => 
       })
   };
 
+  /**
+   * Get color for emotion type
+   * @param {string} emotionType - Emotion type
+   * @returns {string} Color hex code
+   */
   const getEmotionColor = (emotionType: string) => {
     const colors: Record<string, string> = {
       joy: '#52c41a',
@@ -60,7 +94,9 @@ const ExplicitDetailModal = forwardRef<ExplicitDetailModalRef>((_props, ref) => 
     return colors[emotionType] || '#8c8c8c'
   }
 
-  // 暴露给父组件的方法
+  /**
+   * Expose methods to parent component
+   */
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));

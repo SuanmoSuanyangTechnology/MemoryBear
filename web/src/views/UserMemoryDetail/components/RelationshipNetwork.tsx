@@ -1,11 +1,23 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:00 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:00 
+ */
+/**
+ * Relationship Network Component
+ * Displays memory relationship graph with node details
+ * Interactive force-directed graph visualization
+ */
+
 import React, { type FC, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Col, Row, Space, Button } from 'antd'
 import dayjs from 'dayjs'
+import ReactEcharts from 'echarts-for-react'
 
 import RbCard from '@/components/RbCard/Card'
-import ReactEcharts from 'echarts-for-react'
 import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
 import type { Node, Edge, GraphData, StatementNodeProperties, ExtractedEntityNodeProperties } from '../types'
 import {
@@ -14,6 +26,7 @@ import {
 import Empty from '@/components/Empty'
 import Tag from '@/components/Tag'
 
+/** Node color palette */
 const colors = ['#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
 const RelationshipNetwork:FC = () => {
   const { t } = useTranslation()
@@ -28,7 +41,7 @@ const RelationshipNetwork:FC = () => {
   const navigate = useNavigate()
 
   console.log('categories', categories)
-  // 关系网络
+  /** Fetch relationship network data */
   const getEdgeData = useCallback(() => {
     if (!id) return
     setSelectedNode(null)
@@ -134,6 +147,7 @@ const RelationshipNetwork:FC = () => {
     }
   }, [nodes])
 
+  /** Navigate to full graph view */
   const handleViewAll = () => {
     if (!selectedNode) return
     const params = new URLSearchParams({
@@ -343,5 +357,5 @@ const RelationshipNetwork:FC = () => {
     </Row>
   )
 }
-// 使用React.memo包装组件，避免不必要的渲染
+/** Use React.memo to avoid unnecessary renders */
 export default React.memo(RelationshipNetwork)

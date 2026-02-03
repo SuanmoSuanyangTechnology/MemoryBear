@@ -1,18 +1,43 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:53 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:53 
+ */
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Progress } from 'antd';
+
 import RbCard from '@/components/RbCard/Card'
 import {
   getImplicitInterestAreas,
 } from '@/api/memory'
 
+/**
+ * Interest category item structure
+ * @property {string} category_name - Category name
+ * @property {number} percentage - Interest percentage
+ * @property {string[]} evidence - Supporting evidence
+ * @property {string | null} trending_direction - Trending direction
+ */
 interface Item {
   category_name: string;
   percentage: number;
   evidence: string[];
   trending_direction: string | null;
 }
+
+/**
+ * Interest areas data structure
+ * @property {string} user_id - User ID
+ * @property {number | string} analysis_timestamp - Analysis timestamp
+ * @property {number} total_summaries_analyzed - Total summaries analyzed
+ * @property {Item} tech - Technology interest
+ * @property {Item} lifestyle - Lifestyle interest
+ * @property {Item} music - Music interest
+ * @property {Item} art - Art interest
+ */
 interface InterestAreasItem {
   user_id: string;
   analysis_timestamp: number | string;
@@ -23,6 +48,11 @@ interface InterestAreasItem {
   art: Item;
 }
 
+/**
+ * InterestAreas Component
+ * Displays user interest distribution across different categories
+ * Shows percentage breakdown for art, music, tech, and lifestyle
+ */
 const InterestAreas = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()

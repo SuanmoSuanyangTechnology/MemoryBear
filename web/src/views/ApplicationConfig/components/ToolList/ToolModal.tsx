@@ -1,18 +1,37 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:26:06 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:26:06 
+ */
+/**
+ * Tool Selection Modal
+ * Provides cascading selection of tools by type, tool, and method
+ * Supports MCP, builtin, and custom tool types
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Cascader, type CascaderProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { ToolModalRef, ToolOption } from '../types'
+import type { ToolModalRef, ToolOption } from './types'
 import RbModal from '@/components/RbModal'
 import { getToolMethods, getTools } from '@/api/tools'
 import type { ToolType, ToolItem } from '@/views/ToolManagement/types'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface ToolModalProps {
+  /** Callback to add selected tool */
   refresh: (tool: ToolOption) => void;
 }
 
+/**
+ * Modal for selecting tools
+ */
 const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
   refresh,
 }, ref) => {
@@ -27,7 +46,7 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
   ])
   const [selectdTools, setSelectedTools] = useState<ToolOption[]>([])
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset state */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
@@ -35,12 +54,13 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
     setSelectedTools([])
   };
 
+  /** Open modal */
   const handleOpen = () => {
     setVisible(true);
     form.resetFields();
     setSelectedTools([])
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save selected tool */
   const handleSave = () => {
     form.validateFields().then(() => {
       setLoading(false)
@@ -64,6 +84,7 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
       handleClose()
     })
   }
+  /** Load cascader options dynamically */
   const loadData = (selectedOptions: ToolOption[]) => {
     const targetOption = selectedOptions[selectedOptions.length - 1];
     if (selectedOptions.length === 1) {
@@ -98,12 +119,13 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
     }
   };
 
+  /** Handle cascader selection change */
   const handleChange: CascaderProps<ToolOption>['onChange'] = (_value, selectedOptions) => {
     console.log('selectedOptions', selectedOptions)
     setSelectedTools(selectedOptions)
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

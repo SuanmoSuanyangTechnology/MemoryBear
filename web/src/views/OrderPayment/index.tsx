@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:37:31 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 17:37:51
+ */
+/**
+ * Order Payment Page
+ * Displays order details and payment voucher submission form
+ * Supports corporate transfer payment method
+ */
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Button, Input, App, Form, DatePicker } from 'antd';
@@ -12,6 +24,7 @@ import type { PriceItem, VoucherForm } from './types'
 
 const { TextArea } = Input;
 
+/** Payment information */
 const paymentInfo = {
   payee: '上海算模算样科技有限公司',
   bankName: '交通银行上海同济支行',
@@ -27,6 +40,7 @@ const OrderPayment: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedType, setSelectedType] = useState('biz');
 
+  /** Price plan list */
   const PRICE_LIST: PriceItem[] = [
     {
       type: 'personal',
@@ -127,6 +141,7 @@ const OrderPayment: React.FC = () => {
     getTypeSupportService: (type: string, key: string) => t(`pricing.${type}.${key}`),
   }), [t]);
 
+  /** Map product type to API value */
   const getProductType = (type: string) => {
     const typeMap: Record<string, string> = {
       'personal': 'FREE',
@@ -137,6 +152,7 @@ const OrderPayment: React.FC = () => {
     return typeMap[type] || 'ENTERPRISE';
   };
 
+  /** Generate unique order number */
   const generateOrderNumber = () => {
     const date = new Date();
     const dateStr = date.getFullYear().toString() + 
@@ -165,11 +181,13 @@ const OrderPayment: React.FC = () => {
     };
   }, [selectedPlan, t]);
 
+  /** Copy text to clipboard */
   const copyText = (text: string) => {
     copy(text)
     message.success(t('common.copySuccess'))
   };
 
+  /** Submit payment voucher */
   const submitPayment = (values: VoucherForm) => {
     if (isSubmitting) return;
     
@@ -182,7 +200,7 @@ const OrderPayment: React.FC = () => {
         pay_time: values.transferDate.valueOf(),
       };
       submitPaymentVoucherAPI(submitData)
-        .then(res => {
+        .then(() => {
           form.resetFields()
 
           modal.confirm({

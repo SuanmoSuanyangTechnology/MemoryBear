@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:57:26 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:57:26 
+ */
+/**
+ * Neo4j User Memory Detail View
+ * Displays user memory details using Neo4j graph storage
+ * Shows profile, interests, node statistics, relationships, and insights
+ */
+
 import { type FC, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Row, Col, Space, Button } from 'antd'
@@ -24,10 +36,12 @@ const Neo4j: FC = () => {
   const memoryInsightRef = useRef<MemoryInsightRef>(null)
   const aboutMeRef = useRef<AboutMeRef>(null)
 
+  /** Update displayed name */
   const handleNameUpdate = (data: { other_name?: string; id: string }) => {
     setName(data.other_name && data.other_name !== '' ? data.other_name : data.id)
   }
 
+  /** Refresh analytics data */
   const handleRefresh = () => {
     setLoading(true)
     analyticsRefresh(id as string)

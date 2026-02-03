@@ -1,9 +1,23 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:30:11 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:30:11 
+ */
+/**
+ * Result Component
+ * Displays real-time extraction results with progress tracking
+ * Shows text preprocessing, knowledge extraction, node/edge creation, and deduplication
+ */
+
 import { type FC, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Space, Button, Progress } from 'antd'
 import { ExclamationCircleFilled, CheckCircleFilled, ClockCircleOutlined, LoadingOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
+import type { AnyObject } from 'antd/es/_util/type';
+
 import Card from './Card'
 import RbCard from '@/components/RbCard/Card'
 import RbAlert from '@/components/RbAlert'
@@ -13,18 +27,24 @@ import { type SSEMessage } from '@/utils/stream'
 import Tag, { type TagProps } from '@/components/Tag'
 import Markdown from '@/components/Markdown'
 import { groupDataByType } from '../constant'
-import type { AnyObject } from 'antd/es/_util/type';
 
+/** Result metric mapping */
 const resultObj = {
   extractTheNumberOfEntities: 'entities.extracted_count',
   numberOfEntityDisambiguation: 'disambiguation.block_count',
   memoryFragments: 'memory.chunks',
   numberOfRelationalTriples: 'triplets.count'
 }
+/**
+ * Component props
+ */
 interface ResultProps {
   loading: boolean;
   handleSave: () => void;
 }
+/**
+ * Module processing item
+ */
 interface ModuleItem {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   data: any[],
@@ -32,6 +52,7 @@ interface ModuleItem {
   start_at?: number;
   end_at?: number;
 }
+/** Tag color mapping by status */
 const tagColors: {
   [key: string]:  TagProps['color']
 } = {
@@ -40,6 +61,7 @@ const tagColors: {
   completed: 'success',
   failed: 'error'
 }
+/** Initial module state */
 const initObj = {
   data: [],
   status: 'pending',
@@ -57,6 +79,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
   const [creatingNodesEdges, setCreatingNodesEdges] = useState<ModuleItem>(initObj as ModuleItem)
   const [deduplication, setDeduplication] = useState<ModuleItem>(initObj as ModuleItem)
 
+  /** Run pilot test */
   const handleRun = () => {
     if(!id) return
     setTextPreprocessing({...initObj} as ModuleItem)
@@ -172,6 +195,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
   const completedNum = [textPreprocessing, knowledgeExtraction, creatingNodesEdges, deduplication].filter(item => item.status === 'completed').length
   const deduplicationData = groupDataByType(deduplication.data, 'result_type')
 
+  /** Format status tag */
   const formatTag = (status: string) => {
     return (
       <Tag color={tagColors[status]}>
@@ -181,12 +205,14 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
       </Tag>
     )
   }
+  /** Format processing time */
   const formatTime = (data: ModuleItem, color?: string) => {
     if (typeof data.end_at === 'number' && typeof data.start_at === 'number') {
       return <div className={`rb:mt-3 rb:text-[${color ?? '#155EEF'}]`}>{t('memoryExtractionEngine.time')}{data.end_at - data.start_at}ms</div>
     }
     return null
   }
+  /** Convert first character to lowercase */
   const lowercaseFirst = (str: string) => str.charAt(0).toLowerCase() + str.slice(1)
   return (
     <Card
@@ -307,7 +333,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
                   const keys = (resultObj as Record<string, string>)[key].split('.')
                   return (
                   <div key={index}>
-                    <div className="rb:text-[24px] rb:leading-[30px] rb:font-extrabold">{(testResult?.[keys[0] as keyof TestResult] as any)?.[keys[1]]}</div>
+                    <div className="rb:text-[24px] rb:leading-7.5 rb:font-extrabold">{(testResult?.[keys[0] as keyof TestResult] as any)?.[keys[1]]}</div>
                     <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">{t(`memoryExtractionEngine.${key}`)}</div>
                     <div className="rb:mt-1 rb:text-[12px] rb:text-[#369F21] rb:leading-3.5 rb:font-regular">
                       {}

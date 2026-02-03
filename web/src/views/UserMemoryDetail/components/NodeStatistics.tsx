@@ -1,8 +1,20 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:35 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:35 
+ */
+/**
+ * Node Statistics Component
+ * Displays memory node statistics by type with navigation to detail views
+ */
+
 import { type FC, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Skeleton } from 'antd';
+
 import RbCard from '@/components/RbCard/Card'
 import {
   getNodeStatistics,
@@ -10,6 +22,7 @@ import {
 import type { NodeStatisticsItem } from '../types'
 
 
+/** Background gradient list */
 const BG_LIST = [
   'rb:bg-[linear-gradient(316deg,rgba(21,94,239,0.06)_0%,rgba(251,253,255,0)_100%)]',
   'rb:bg-[linear-gradient(316deg,rgba(54,159,33,0.06)_0%,rgba(251,253,255,0)_100%)]',
@@ -18,6 +31,7 @@ const BG_LIST = [
   'rb:bg-[linear-gradient(313deg,rgba(156,111,255,0.06)_0%,rgba(251,253,255,0)_100%)]',
   'rb:bg-[linear-gradient(332deg,rgba(54,159,33,0.06)_0%,rgba(251,253,255,0)_100%)]',
 ]
+/** Memory type configuration */
 const typeList = [
   { key: 'PERCEPTUAL_MEMORY', bg: 0 },
   { key: 'WORKING_MEMORY', bg: 1 },
@@ -48,6 +62,7 @@ const NodeStatistics: FC = () => {
     getData()
   }, [id])
 
+  /** Fetch node statistics */
   const getData = () => {
     if (!id) return
     setLoading(true)
@@ -63,9 +78,11 @@ const NodeStatistics: FC = () => {
       setLoading(false)
     })
   }
+  /** Navigate to detail page */
   const handleViewDetail = (type: string) => {
     navigate(`/user-memory/detail/${id}/${type}`)
   }
+  /** Render statistics card */
   const renderCard = (key: string, bgIndex: number | null, isChild: boolean = false) => {
     const item = data.find((item) => item.type === key)
     return (

@@ -1,6 +1,19 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:26:32 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:26:32 
+ */
+/**
+ * Variable List Component
+ * Manages application input variables configuration
+ * Allows adding, editing, and removing variables
+ */
+
 import { type FC, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Space, Button, Switch, Form } from 'antd'
+
 import variablesEmpty from '@/assets/images/application/variablesEmpty.svg'
 import Card from '../Card'
 import Table from '@/components/Table';
@@ -8,17 +21,27 @@ import type { Variable, VariableEditModalRef } from './types'
 import Empty from '@/components/Empty'
 import VariableEditModal from './VariableEditModal'
 
+/**
+ * Component props
+ */
 interface VariableListProps {
+  /** Current variable list */
   value?: Variable[];
+  /** Callback when variables change */
   onChange?: (value: Variable[]) => void;
 }
-const VariableList: FC<VariableListProps> = ({value = [], onChange}) => {
+
+/**
+ * Variable list management component
+ */const VariableList: FC<VariableListProps> = ({value = [], onChange}) => {
   const { t } = useTranslation()
   const variableEditModalRef = useRef<VariableEditModalRef>(null)
   
+  /** Open variable edit modal */
   const handleAddVariable = () => {
     variableEditModalRef.current?.handleOpen()
   }
+  /** Save variable changes */
   const handleSaveVariable = (variable: Variable) => {
     const newList = [...(value || [])]
     if (variable.index !== undefined && variable.index >= 0) {

@@ -1,10 +1,26 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:49:40 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:49:40 
+ */
+/**
+ * Key Configuration Modal
+ * Modal for configuring API keys for model providers
+ * Allows setting API key and base URL
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App } from 'antd';
 import { useTranslation } from 'react-i18next';
+
 import type { KeyConfigModalForm, ProviderModelItem, KeyConfigModalRef, KeyConfigModalProps } from '../types';
 import RbModal from '@/components/RbModal'
 import { updateProviderApiKeys } from '@/api/models'
 
+/**
+ * Key configuration modal component
+ */
 const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
   refresh
 }, ref) => {
@@ -15,6 +31,7 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
   const [form] = Form.useForm<KeyConfigModalForm>();
   const [loading, setLoading] = useState(false)
 
+  /** Close modal and reset state */
   const handleClose = () => {
     setModel({} as ProviderModelItem);
     form.resetFields();
@@ -22,10 +39,12 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
     setVisible(false);
   };
 
+  /** Open modal with provider model data */
   const handleOpen = (vo: ProviderModelItem) => {
     setVisible(true);
     setModel(vo);
   };
+  /** Save API key configuration */
   const handleSave = () => {
     form
       .validateFields()
@@ -51,6 +70,7 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
       });
   }
 
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

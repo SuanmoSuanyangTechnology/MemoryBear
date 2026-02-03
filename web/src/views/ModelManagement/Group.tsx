@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:50:00 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:50:00 
+ */
+/**
+ * Group Model View
+ * Displays composite/group models in card grid layout
+ * Supports filtering and configuration
+ */
+
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
 import { Button } from 'antd'
@@ -9,12 +21,16 @@ import { getModelNewList } from '@/api/models'
 import PageEmpty from '@/components/Empty/PageEmpty';
 import { formatDateTime } from '@/utils/format';
 
+/**
+ * Group model list component
+ */
 const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem) => void; }>(({ query, handleEdit }, ref) => {
   const { t } = useTranslation();
   const [list, setList] = useState<ModelListItem[]>([])
   useEffect(() => {
     getList()
   }, [query])
+  /** Fetch group model list */
   const getList = () => {
     getModelNewList({
       ...query,
@@ -26,6 +42,7 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
         setList(response[0]?.models || [])
       })
   }
+  /** Format model data for display */
   const formatData = (data: ModelListItem) => {
     return [
       {
@@ -46,6 +63,7 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
     ]
   }
 
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     getList,
   }));

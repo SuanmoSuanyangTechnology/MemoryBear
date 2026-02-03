@@ -1,10 +1,23 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:37:12 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:37:12 
+ */
+/**
+ * Invite Register Page
+ * Handles user registration via workspace invitation link
+ * Validates invite token and allows new users to set up their account
+ */
+
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button, Input, Form, Progress, App } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
-import { useUser, type LoginInfo } from '@/store/user';
 import type { FormProps } from 'antd';
+
+import { useUser, type LoginInfo } from '@/store/user';
 import { login } from '@/api/user'
 import inviteBg from '@/assets/images/login/inviteBg.png'
 import checkBg from '@/assets/images/login/checkBg.png'
@@ -13,13 +26,19 @@ import { validateInviteToken } from '@/api/member'
 import RbAlert from '@/components/RbAlert'
 import styles from './index.module.css'
 
+/**
+ * Alert extra content wrapper
+ */
 const Extra = ({ children }: { children: React.ReactNode }) => (
   <div className="rb:flex rb:items-start">
-    <ExclamationCircleFilled className="rb:mr-[4px] rb:mt-[3px]" />
+    <ExclamationCircleFilled className="rb:mr-1 rb:mt-0.75" />
     {children}
   </div>
 )
 
+/**
+ * Invite registration component
+ */
 const InviteRegister: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -36,6 +55,7 @@ const InviteRegister: React.FC = () => {
     getInitalData()
   }, []);
 
+  /** Fetch and validate invite token */
   const getInitalData = () => {
     if (!token) {
       message.warning(t('user.inviteLinkInvalid'))
@@ -49,39 +69,39 @@ const InviteRegister: React.FC = () => {
     })
   }
 
-  // 密码强度校验函数
+  /** Validate password strength and return score */
   const validatePasswordStrength = (password: string): { strength: 'weak' | 'medium' | 'strong', error: string } => {
     let strength: 'weak' | 'medium' | 'strong' = 'weak';
     let score = 0;
     let error = '';
 
-    // 密码长度检查
+    // Password length check
     if (password.length < 8) {
       error = t('login.lengthDesc');
       return { strength, error };
     }
     score += 1;
 
-    // 包含数字
+    // Contains number
     if (/\d/.test(password)) score += 1;
     
-    // 包含小写字母
+    // Contains lowercase letter
     if (/[a-z]/.test(password)) score += 1;
     
-    // 包含大写字母
+    // Contains uppercase letter
     if (/[A-Z]/.test(password)) score += 1;
     
-    // 包含特殊字符
+    // Contains special character
     if (/[^A-Za-z0-9]/.test(password)) score += 1;
 
-    // 判断强度
+    // Determine strength
     if (score >= 4) {
       strength = 'strong';
     } else if (score >= 3) {
       strength = 'medium';
     }
 
-    // 根据强度返回提示
+    // Return message based on strength
     if (strength === 'weak' && score >= 1) {
       error = t('login.weakDesc');
     } else if (strength === 'medium') {
@@ -91,7 +111,7 @@ const InviteRegister: React.FC = () => {
     return { strength, error };
   };
 
-  // 监听密码变化，更新强度
+  /** Update password strength indicator on change */
   const handlePasswordChange = (value: string) => {
     if (!value) {
       setPasswordStrength(null);
@@ -101,19 +121,19 @@ const InviteRegister: React.FC = () => {
     setPasswordStrength(strength);
   };
 
-  // 密码一致性校验
+  /** Validate password confirmation matches */
   const validateConfirmPassword = (_: unknown, value: string) => {
     const password = values.password;
     if (!value) {
-      return Promise.reject(new Error('请确认密码'));
+      return Promise.reject(new Error('Please confirm password'));
     }
     if (value !== password) {
-      return Promise.reject(new Error('两次输入的密码不一致'));
+      return Promise.reject(new Error('Passwords do not match'));
     }
     return Promise.resolve();
   };
 
-  // 处理注册提交
+  /** Handle registration form submission */
   const handleRegister: FormProps<LoginForm>['onFinish'] = async (values) => {
     setLoading(true);
     login({
@@ -133,12 +153,12 @@ const InviteRegister: React.FC = () => {
 
   return (
     <div className="rb:w-screen rb:h-screen rb:flex rb:items-center rb:justify-center">
-      <img src={inviteBg} className="rb:w-screen rb:h-screen rb:fixed rb:top-0 rb:left-0 rb:z-[0]" />
+      <img src={inviteBg} className="rb:w-screen rb:h-screen rb:fixed rb:top-0 rb:left-0 rb:z-0" />
 
-      <div className="rb:relative rb:z-[1] rb:w-[480px] rb:max-h-full rb:overflow-y-auto rb:bg-[#FFFFFF] rb:rounded-[12px] rb:shadow-[0px_2px_10px_0px_rgba(11,49,124,0.2)]">
-        <div className="rb:bg-[url('@/assets/images/login/inviteForm.png')] rb:bg-cover rb:bg-no-repeat rb:text-[24px] rb:font-bold rb:leading-[32px] rb:p-[28px_24px]">
+      <div className="rb:relative rb:z-1 rb:w-120 rb:max-h-full rb:overflow-y-auto rb:bg-[#FFFFFF] rb:rounded-xl rb:shadow-[0px_2px_10px_0px_rgba(11,49,124,0.2)]">
+        <div className="rb:bg-[url('@/assets/images/login/inviteForm.png')] rb:bg-cover rb:bg-no-repeat rb:text-[24px] rb:font-bold rb:leading-8 rb:p-[28px_24px]">
           {t('login.welcomeTeam')}
-          <div className="rb:text-[#5B6167] rb:text-[12px] rb:font-regular rb:leading-[16px] rb:mt-[10px]">{t('login.welcomeTeamSubTitle')}</div>
+          <div className="rb:text-[#5B6167] rb:text-[12px] rb:font-regular rb:leading-4 rb:mt-2.5">{t('login.welcomeTeamSubTitle')}</div>
         </div>
         <Form
           form={form}
@@ -146,10 +166,10 @@ const InviteRegister: React.FC = () => {
           layout="vertical"
           className={styles.form}
         >
-          <RbAlert icon={<img src={checkBg} className="rb:w-[24px] rb:h-[24px]" />} className="rb:mb-[24px]">
-            <div className="rb:text-[14px] rb:font-medium rb:leading-[20px]">
+          <RbAlert icon={<img src={checkBg} className="rb:w-6 rb:h-6" />} className="rb:mb-6">
+            <div className="rb:text-[14px] rb:font-medium rb:leading-5">
               {t('login.invitationVerified')}
-              <div className="rb:text-[12px] rb:font-regular rb:leading-[16px] rb:mt-[4px]">{t('login.account')}: {values?.email || '-'}</div>
+              <div className="rb:text-[12px] rb:font-regular rb:leading-4 rb:mt-1">{t('login.account')}: {values?.email || '-'}</div>
             </div>
           </RbAlert>
           <Form.Item 
@@ -164,14 +184,14 @@ const InviteRegister: React.FC = () => {
             label={t('login.setPassword')}
             extra={
               <div>
-                <div className="rb:mb-[12px]">
+                <div className="rb:mb-3">
                   <Progress 
                     percent={passwordStrength === 'weak' ? 33 : passwordStrength === 'medium' ? 66 : passwordStrength === 'strong' ? 100 : 0} 
                     steps={3} 
                     showInfo={false} 
                     style={{width: '100%'}}
                   />
-                  <div className="rb:font-medium rb:mt-[8px]">
+                  <div className="rb:font-medium rb:mt-2">
                     {t('login.passwordStrength')}:
                     {passwordStrength
                       ? <span className="rb:text-[#155EEF]">{t(`login.${passwordStrength}`)}</span>
@@ -221,7 +241,7 @@ const InviteRegister: React.FC = () => {
           </Form.Item>
           <Form.Item 
             name="username"
-            label={<>{t('login.name')}<span className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-[20px]"> {t('login.nameSubTitle')}</span></>}
+            label={<>{t('login.name')}<span className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5"> {t('login.nameSubTitle')}</span></>}
           >
             <Input placeholder={t('login.namePlaceholder')} />
           </Form.Item>
@@ -230,7 +250,7 @@ const InviteRegister: React.FC = () => {
             block
             loading={loading}
             htmlType="submit"
-            className="rb:h-[40px]! rb:rounded-[8px]!"
+            className="rb:h-10! rb:rounded-lg!"
           >
             {t('login.register')}
           </Button>
