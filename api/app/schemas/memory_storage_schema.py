@@ -236,6 +236,8 @@ class ConfigParamsCreate(BaseModel):  # 创建配置参数模型（仅 body，�
     llm_id: Optional[str] = Field(None, description="LLM模型配置ID")
     embedding_id: Optional[str] = Field(None, description="嵌入模型配置ID")
     rerank_id: Optional[str] = Field(None, description="重排序模型配置ID")
+    reflection_model_id: Optional[str] = Field(None, description="反思模型ID，默认与llm_id一致")
+    emotion_model_id: Optional[str] = Field(None, description="情绪分析模型ID，默认与llm_id一致")
 
 
 class ConfigParamsDelete(BaseModel):  # 删除配置参数模型（请求体）
