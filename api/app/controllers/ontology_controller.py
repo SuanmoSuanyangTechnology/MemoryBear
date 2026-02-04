@@ -190,19 +190,48 @@ def _get_ontology_service(
                 detail="指定的LLM模型没有配置API密钥"
             )
         
-        api_key_config = model_config.api_keys[0]
+        # 获取可用的 API Key（只选择激活状态的）
+        active_api_keys = [ak for ak in model_config.api_keys if ak.is_active]
+        if not active_api_keys:
+            logger.error(f"Model {llm_id} has no active API key")
+            raise HTTPException(
+                status_code=400,
+                detail="指定的LLM模型没有可用的API密钥"
+            )
+        
+        # 对于组合模型，根据负载均衡策略选择 API Key
+        if model_config.is_composite and len(active_api_keys) > 1:
+            from app.models.models_model import LoadBalanceStrategy
+            if model_config.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
+                # 轮询策略：选择使用次数最少的 API Key
+                api_key_config = min(active_api_keys, key=lambda x: int(x.usage_count or "0"))
+            else:
+                # 默认策略：按优先级选择
+                api_key_config = min(active_api_keys, key=lambda x: int(x.priority or "1"))
+            logger.info(
+                f"Composite model using load balance strategy: {model_config.load_balance_strategy}, "
+                f"selected API Key: {api_key_config.id}, provider: {api_key_config.provider}"
+            )
+        else:
+            api_key_config = active_api_keys[0]
         
         logger.info(
             f"Using specified model - user: {current_user.id}, "
-            f"model_id: {llm_id}, model_name: {api_key_config.model_name}"
+            f"model_id: {llm_id}, model_name: {api_key_config.model_name}, "
+            f"is_composite: {model_config.is_composite}"
         )
         
         # 创建模型配置对象
         from app.core.models.base import RedBearModelConfig
         
+        # 对于组合模型，使用 API Key 的 provider；否则使用 model_config 的 provider
+        actual_provider = api_key_config.provider if model_config.is_composite else (
+            model_config.provider if hasattr(model_config, 'provider') else "openai"
+        )
+        
         llm_model_config = RedBearModelConfig(
             model_name=api_key_config.model_name,
-            provider=model_config.provider if hasattr(model_config, 'provider') else "openai",
+            provider=actual_provider,
             api_key=api_key_config.api_key,
             base_url=api_key_config.api_base,
             max_retries=3,
