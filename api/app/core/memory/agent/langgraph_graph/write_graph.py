@@ -7,12 +7,13 @@ from contextlib import asynccontextmanager
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 
-from app.core.memory.agent.langgraph_graph.tools.write_tool import format_parsing, messages_parse
 from app.db import get_db
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.llm_tools import WriteState
 from app.core.memory.agent.langgraph_graph.nodes.write_nodes import write_node
+from app.schemas.memory_agent_schema import AgentMemory_Long_Term
 from app.services.memory_config_service import MemoryConfigService
+
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = get_agent_logger(__name__)
@@ -61,6 +62,21 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
         """方案三：聚合判断"""
         await aggregate_judgment(end_user_id, langchain_messages, memory_config)
 
+
+async def write_long_term(storage_type,end_user_id,message_chat,aimessages,user_rag_memory_id,actual_config_id):
+    from app.services.memory_konwledges_server import write_rag
+    from app.core.memory.agent.langgraph_graph.routing.write_router import term_memory_save
+    from app.core.memory.agent.langgraph_graph.tools.write_tool import  agent_chat_messages
+    if storage_type == AgentMemory_Long_Term.STORAGE_RAG:
+        await write_rag(end_user_id, message_chat, aimessages, user_rag_memory_id)
+    else:
+        # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
+        CHUNK = AgentMemory_Long_Term.STRATEGY_CHUNK
+        SCOPE = AgentMemory_Long_Term.DEFAULT_SCOPE
+        long_term_messages = await agent_chat_messages(message_chat, aimessages)
+        await long_term_storage(long_term_type=CHUNK, langchain_messages=long_term_messages,
+                                memory_config=actual_config_id, end_user_id=end_user_id, scope=SCOPE)
+        await term_memory_save(long_term_messages, actual_config_id, end_user_id, CHUNK, scope=SCOPE)
 
 # async def main():
 #     """主函数 - 运行工作流"""

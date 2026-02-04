@@ -7,33 +7,21 @@ LangChain Agent 封装
 - 支持流式输出
 - 使用 RedBearLLM 支持多提供商
 """
-import os
+
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
-from app.core.memory.agent.langgraph_graph.routing.write_router import term_memory_save
-from app.core.memory.agent.langgraph_graph.tools.write_tool import agent_chat_messages, format_parsing, messages_parse
-from app.core.memory.agent.langgraph_graph.write_graph import long_term_storage
-from app.core.memory.agent.utils.write_tools import write
+from app.core.memory.agent.langgraph_graph.write_graph import  write_long_term
 from app.db import get_db
 from app.core.logging_config import get_business_logger
-from app.core.memory.agent.utils.redis_tool import store
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.models.models_model import ModelType
-from app.repositories.memory_short_repository import LongTermMemoryRepository
-from app.schemas.memory_agent_schema import AgentMemory_Long_Term
 from app.services.memory_agent_service import (
     get_end_user_connected_config,
 )
-from app.services.memory_konwledges_server import write_rag
-from app.services.task_service import get_task_memory_write_result
-from app.tasks import write_message_task
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
-
-from app.utils.config_utils import resolve_config_id
-
 logger = get_business_logger()
 
 
@@ -224,14 +212,7 @@ class LangChainAgent:
 
             elapsed_time = time.time() - start_time
             if memory_flag:
-                if storage_type == "rag":
-                    await write_rag(end_user_id, message_chat, content, user_rag_memory_id)
-                else:
-                    long_term_messages=await agent_chat_messages(message_chat,content)
-                    # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
-                    await long_term_storage(long_term_type="chunk",langchain_messages=long_term_messages,memory_config=actual_config_id,end_user_id=end_user_id,scope=2)
-                    '''长期'''
-                    await term_memory_save(long_term_messages,actual_config_id,end_user_id,"chunk")
+                await write_long_term(storage_type, end_user_id, message_chat, content, user_rag_memory_id, actual_config_id)
             response = {
                 "content": content,
                 "model": self.model_name,
@@ -362,16 +343,7 @@ class LangChainAgent:
                         yield total_tokens
                         break
                 if memory_flag:
-                    if storage_type == AgentMemory_Long_Term.STORAGE_RAG:
-                        await write_rag(end_user_id, message_chat, full_content, user_rag_memory_id)
-                    else:
-                        # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
-                        CHUNK=AgentMemory_Long_Term.STRATEGY_CHUNK
-                        SCOPE=AgentMemory_Long_Term.DEFAULT_SCOPE
-                        long_term_messages = await agent_chat_messages(message_chat, full_content)
-                        await long_term_storage(long_term_type=CHUNK,langchain_messages=long_term_messages,memory_config=actual_config_id,end_user_id=end_user_id,scope=SCOPE)
-                        await term_memory_save(long_term_messages, actual_config_id, end_user_id, CHUNK,scope=SCOPE)
-                
+                    await write_long_term(storage_type, end_user_id, message_chat, full_content, user_rag_memory_id, actual_config_id)
             except Exception as e:
                 logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)
                 raise
