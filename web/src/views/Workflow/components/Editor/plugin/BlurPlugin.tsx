@@ -16,6 +16,12 @@ export default function BlurPlugin() {
             return;
           }
           
+          // 检查是否是粘贴操作导致的焦点变化
+          const relatedTarget = e.relatedTarget as HTMLElement;
+          if (!relatedTarget || relatedTarget === document.body) {
+            return;
+          }
+          
           editor.update(() => {
             $setSelection(null);
           });
