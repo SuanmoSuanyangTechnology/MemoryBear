@@ -766,6 +766,47 @@ async def delete_scene(
         return fail(BizCode.INTERNAL_ERROR, "场景删除失败", str(e))
 
 
+@router.get("/scenes/simple", response_model=ApiResponse)
+async def get_scenes_simple(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取场景简单列表（轻量级，用于下拉选择）
+    
+    仅返回 scene_id 和 scene_name，不加载关联数据，响应速度快。
+    适用于前端下拉选择场景的场景。
+    
+    Args:
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含场景简单列表
+        
+    Examples:
+        GET /scenes/simple
+        返回: {"items": [{"scene_id": "xxx", "scene_name": "场景1"}, ...]}
+    """
+    api_logger.info(f"Simple scene list requested by user {current_user.id}")
+    
+    try:
+        workspace_id = current_user.current_workspace_id
+        if not workspace_id:
+            api_logger.warning(f"User {current_user.id} has no current workspace")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        from app.repositories.ontology_scene_repository import OntologySceneRepository
+        repo = OntologySceneRepository(db)
+        scenes = repo.get_simple_list(workspace_id)
+        
+        api_logger.info(f"Simple scene list retrieved: {len(scenes)} scenes")
+        return success(data={"items": scenes}, msg="查询成功")
+        
+    except Exception as e:
+        api_logger.error(f"Failed to get simple scene list: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
+
+
 @router.get("/scenes", response_model=ApiResponse)
 async def get_scenes(
     workspace_id: Optional[str] = None,

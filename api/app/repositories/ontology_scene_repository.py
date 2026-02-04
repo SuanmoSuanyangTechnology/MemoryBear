@@ -392,3 +392,48 @@ class OntologySceneRepository:
                 exc_info=True
             )
             raise
+
+    def get_simple_list(self, workspace_id: UUID) -> List[dict]:
+        """获取场景简单列表（仅包含scene_id和scene_name，用于下拉选择）
+        
+        这是一个轻量级查询，不加载关联的classes，响应速度快。
+        
+        Args:
+            workspace_id: 工作空间ID
+            
+        Returns:
+            List[dict]: 场景简单列表，每项包含scene_id和scene_name
+            
+        Examples:
+            >>> repo = OntologySceneRepository(db)
+            >>> scenes = repo.get_simple_list(workspace_id)
+            >>> # [{"scene_id": "xxx", "scene_name": "场景1"}, ...]
+        """
+        try:
+            logger.debug(f"Getting simple scene list for workspace: {workspace_id}")
+            
+            # 只查询需要的字段，不加载关联数据
+            results = self.db.query(
+                OntologyScene.scene_id,
+                OntologyScene.scene_name
+            ).filter(
+                OntologyScene.workspace_id == workspace_id
+            ).order_by(
+                OntologyScene.updated_at.desc()
+            ).all()
+            
+            scenes = [
+                {"scene_id": str(r.scene_id), "scene_name": r.scene_name}
+                for r in results
+            ]
+            
+            logger.info(f"Found {len(scenes)} scenes (simple list) in workspace {workspace_id}")
+            
+            return scenes
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to get simple scene list: {str(e)}",
+                exc_info=True
+            )
+            raise

@@ -279,6 +279,9 @@ class MemoryConfigRepository:
             if update.config_desc is not None:
                 db_config.config_desc = update.config_desc
                 has_update = True
+            if hasattr(update, 'scene_id') and update.scene_id is not None:
+                db_config.scene_id = update.scene_id
+                has_update = True
 
             if not has_update:
                 raise ValueError("No fields to update")
@@ -650,28 +653,32 @@ class MemoryConfigRepository:
             raise
 
     @staticmethod
-    def get_all(db: Session, workspace_id: Optional[uuid.UUID] = None) -> List[MemoryConfig]:
-        """获取所有配置参数
+    def get_all(db: Session, workspace_id: Optional[uuid.UUID] = None) -> List[Tuple[MemoryConfig, Optional[str]]]:
+        """获取所有配置参数，包含关联的场景名称
 
         Args:
             db: 数据库会话
             workspace_id: 工作空间ID，用于过滤查询结果
 
         Returns:
-            List[MemoryConfig]: 配置列表
+            List[Tuple[MemoryConfig, Optional[str]]]: 配置列表，每项为 (配置对象, 场景名称)
         """
+        from app.models.ontology_scene import OntologyScene
+        
         db_logger.debug(f"查询所有配置: workspace_id={workspace_id}")
 
         try:
-            query = db.query(MemoryConfig)
+            query = db.query(MemoryConfig, OntologyScene.scene_name).outerjoin(
+                OntologyScene, MemoryConfig.scene_id == OntologyScene.scene_id
+            )
 
             if workspace_id:
                 query = query.filter(MemoryConfig.workspace_id == workspace_id)
 
-            configs = query.order_by(desc(MemoryConfig.updated_at)).all()
+            results = query.order_by(desc(MemoryConfig.updated_at)).all()
 
-            db_logger.debug(f"配置列表查询成功: 数量={len(configs)}")
-            return configs
+            db_logger.debug(f"配置列表查询成功: 数量={len(results)}")
+            return results
 
         except Exception as e:
             db_logger.error(f"查询所有配置失败: workspace_id={workspace_id} - {str(e)}")
