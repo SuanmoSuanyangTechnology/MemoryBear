@@ -980,6 +980,7 @@ export const zh = {
       fileAcceptTip: '不支持的文件类型:',
       nextStep: '下一步',
       prevStep: '上一步',
+      exportSuccess: '导出成功',
     },
     product: {
       applicationManagement: '应用管理',
@@ -2561,6 +2562,11 @@ export const zh = {
       extract: '工程推理',
       source: '未添加项',
       target: '已添加项',
+      import: '导入场景',
+      format: '导出格式',
+      export: '导出场景',
+      scene_id: '场景',
+      file: '导入文件',
     },
     prompt: {
       editor: '提示词生成器',

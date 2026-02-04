@@ -481,13 +481,16 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True)
-def write_message_task(self, end_user_id: str, message: str, config_id: str, storage_type:str, user_rag_memory_id:str) -> Dict[str, Any]:
+def write_message_task(self, end_user_id: str, message: str, config_id: str, storage_type:str, user_rag_memory_id:str, language: str = "zh") -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     
     Args:
         end_user_id: Group ID for the memory agent (also used as end_user_id)
         message: Message to write
         config_id: Configuration ID as string (will be converted to UUID)
+        storage_type: Storage type (neo4j or rag)
+        user_rag_memory_id: User RAG memory ID
+        language: 语言类型 ("zh" 中文, "en" 英文)
         
     Returns:
         Dict containing the result and metadata
@@ -498,7 +501,7 @@ def write_message_task(self, end_user_id: str, message: str, config_id: str, sto
     from app.core.logging_config import get_logger
     logger = get_logger(__name__)
     
-    logger.info(f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
+    logger.info(f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}, language={language}")
     start_time = time.time()
     
     # Convert config_id string to UUID
@@ -535,9 +538,9 @@ def write_message_task(self, end_user_id: str, message: str, config_id: str, sto
     async def _run() -> str:
         db = next(get_db())
         try:
-            logger.info(f"[CELERY WRITE] Executing MemoryAgentService.write_memory with config_id={actual_config_id} (type: {type(actual_config_id).__name__})")
+            logger.info(f"[CELERY WRITE] Executing MemoryAgentService.write_memory with config_id={actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
             service = MemoryAgentService()
-            result = await service.write_memory(end_user_id, message, actual_config_id, db, storage_type, user_rag_memory_id)
+            result = await service.write_memory(end_user_id, message, actual_config_id, db, storage_type, user_rag_memory_id, language)
             logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
             return result
         except Exception as e:

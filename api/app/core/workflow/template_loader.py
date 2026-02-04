@@ -4,16 +4,19 @@
 从文件系统加载预定义的工作流模板
 """
 
+import os
 from pathlib import Path
 from typing import Optional
 
 import yaml
 
+TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+
 
 class TemplateLoader:
     """工作流模板加载器"""
-    
-    def __init__(self, templates_dir: str = "app/templates/workflows"):
+
+    def __init__(self, templates_dir: str = TEMPLATE_DIR):
         """初始化模板加载器
         
         Args:
@@ -22,7 +25,7 @@ class TemplateLoader:
         self.templates_dir = Path(templates_dir)
         if not self.templates_dir.exists():
             raise ValueError(f"模板目录不存在: {templates_dir}")
-    
+
     def list_templates(self) -> list[dict]:
         """列出所有可用的模板
         
@@ -30,22 +33,22 @@ class TemplateLoader:
             模板列表，每个模板包含 id, name, description 等信息
         """
         templates = []
-        
+
         # 遍历模板目录
         for template_dir in self.templates_dir.iterdir():
             if not template_dir.is_dir():
                 continue
-            
+
             # 检查是否有 template.yml 文件
             template_file = template_dir / "template.yml"
             if not template_file.exists():
                 continue
-            
+
             try:
                 # 读取模板配置
                 with open(template_file, 'r', encoding='utf-8') as f:
                     template_data = yaml.safe_load(f)
-                
+
                 # 提取模板信息
                 templates.append({
                     "id": template_dir.name,
@@ -59,9 +62,9 @@ class TemplateLoader:
             except Exception as e:
                 print(f"加载模板 {template_dir.name} 失败: {e}")
                 continue
-        
+
         return templates
-    
+
     def load_template(self, template_id: str) -> Optional[dict]:
         """加载指定的模板
         
@@ -73,14 +76,14 @@ class TemplateLoader:
         """
         template_dir = self.templates_dir / template_id
         template_file = template_dir / "template.yml"
-        
+
         if not template_file.exists():
             return None
-        
+
         try:
             with open(template_file, 'r', encoding='utf-8') as f:
                 template_data = yaml.safe_load(f)
-            
+
             # 返回工作流配置部分
             return {
                 "name": template_data.get("name", template_id),
@@ -94,7 +97,7 @@ class TemplateLoader:
         except Exception as e:
             print(f"加载模板 {template_id} 失败: {e}")
             return None
-    
+
     def get_template_readme(self, template_id: str) -> Optional[str]:
         """获取模板的 README 文档
         
@@ -106,10 +109,10 @@ class TemplateLoader:
         """
         template_dir = self.templates_dir / template_id
         readme_file = template_dir / "README.md"
-        
+
         if not readme_file.exists():
             return None
-        
+
         try:
             with open(readme_file, 'r', encoding='utf-8') as f:
                 return f.read()

@@ -426,6 +426,7 @@ export const en = {
       fileAcceptTip: 'Unsupported file type:',
       nextStep: 'Next Step',
       prevStep: 'Previous Step',
+      exportSuccess: 'Export successful',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -2472,6 +2473,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       extract: 'Project Inference',
       source: 'Not Added',
       target: 'Added',
+      import: 'Import Scenario',
+      format: 'Export Format',
+      export: 'Export Scenario',
+      scene_id: 'Scenario',
+      file: 'Import File',
     },
     prompt: {
       editor: 'Prompt Generator',

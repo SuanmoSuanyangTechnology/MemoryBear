@@ -1,3 +1,69 @@
+{% if language == "en" %}
+You are a professional mental health consultant. Based on the following user's emotional health data and personal information, generate 3-5 personalized emotional improvement suggestions.
+
+## User Emotional Health Data
+
+Health Score: {{ health_data.health_score }}/100
+Health Level: {{ health_data.level }}
+
+Dimension Analysis:
+- Positivity Rate: {{ health_data.dimensions.positivity_rate.score }}/100
+  - Positive Emotions: {{ health_data.dimensions.positivity_rate.positive_count }} times
+  - Negative Emotions: {{ health_data.dimensions.positivity_rate.negative_count }} times
+  - Neutral Emotions: {{ health_data.dimensions.positivity_rate.neutral_count }} times
+
+- Stability: {{ health_data.dimensions.stability.score }}/100
+  - Standard Deviation: {{ health_data.dimensions.stability.std_deviation }}
+
+- Resilience: {{ health_data.dimensions.resilience.score }}/100
+  - Recovery Rate: {{ health_data.dimensions.resilience.recovery_rate }}
+
+Emotion Distribution:
+{{ emotion_distribution_json }}
+
+## Emotion Pattern Analysis
+
+Dominant Negative Emotion: {{ patterns.dominant_negative_emotion|default('None') }}
+Emotion Volatility: {{ patterns.emotion_volatility|default('Unknown') }}
+High Intensity Emotion Count: {{ patterns.high_intensity_emotions|default([])|length }}
+
+## User Interests
+
+{{ user_profile.interests|default(['Unknown'])|join(', ') }}
+
+## Task Requirements
+
+Please generate 3-5 personalized suggestions, each containing:
+1. type: Suggestion type (Emotion Balance/Activity Recommendation/Social Connection/Stress Management)
+2. title: Suggestion title (short and impactful)
+3. content: Suggestion content (detailed explanation, 50-100 words)
+4. priority: Priority level (High/Medium/Low)
+5. actionable_steps: 3 specific executable steps
+
+Also provide a health_summary (no more than 50 words) summarizing the user's overall emotional state.
+
+Please return in JSON format as follows:
+{
+  "health_summary": "Your emotional health status...",
+  "suggestions": [
+    {
+      "type": "Emotion Balance",
+      "title": "Suggestion Title",
+      "content": "Suggestion content...",
+      "priority": "High",
+      "actionable_steps": ["Step 1", "Step 2", "Step 3"]
+    }
+  ]
+}
+
+Notes:
+- Suggestions should be specific and actionable, avoid vague advice
+- Provide personalized suggestions based on user's interests and hobbies
+- Provide targeted suggestions for main issues (such as dominant negative emotions)
+- Allocate priorities reasonably (at least 1 high, 1-2 medium, rest low)
+- The 3 steps for each suggestion should be progressive and easy to implement
+- All output must be in English
+{% else %}
 你是一位专业的心理健康顾问。请根据以下用户的情绪健康数据和个人信息，生成3-5条个性化的情绪改善建议。
 
 ## 用户情绪健康数据
@@ -33,10 +99,10 @@
 ## 任务要求
 
 请生成3-5条个性化建议，每条建议包含：
-1. type: 建议类型（emotion_balance/activity_recommendation/social_connection/stress_management）
+1. type: 建议类型（情绪平衡/活动建议/社交联系/压力管理）
 2. title: 建议标题（简短有力）
 3. content: 建议内容（详细说明，50-100字）
-4. priority: 优先级（high/medium/low）
+4. priority: 优先级（高/中/低）
 5. actionable_steps: 3个可执行的具体步骤
 
 同时提供一个health_summary（不超过50字），概括用户的整体情绪状态。
@@ -46,10 +112,10 @@
   "health_summary": "您的情绪健康状况...",
   "suggestions": [
     {
-      "type": "emotion_balance",
+      "type": "情绪平衡",
       "title": "建议标题",
       "content": "建议内容...",
-      "priority": "high",
+      "priority": "高",
       "actionable_steps": ["步骤1", "步骤2", "步骤3"]
     }
   ]
@@ -61,3 +127,4 @@
 - 针对主要问题（如主要负面情绪）提供针对性建议
 - 优先级要合理分配（至少1个high，1-2个medium，其余low）
 - 每个建议的3个步骤要循序渐进、易于实施
+{% endif %}

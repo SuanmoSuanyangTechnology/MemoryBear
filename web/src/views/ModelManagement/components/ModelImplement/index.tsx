@@ -51,7 +51,6 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
   const handleDelete = (vo: any) => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: [vo.model_name, vo.api_key].join(' / ') }),
-      content: t('application.apiKeyDeleteContent'),
       okText: t('common.delete'),
       cancelText: t('common.cancel'),
       okType: 'danger',

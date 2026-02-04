@@ -15,7 +15,7 @@ import RbModal from '@/components/RbModal'
 const { TextArea } = Input;
 const { confirm } = Modal
 
-// 全局模型数据常量
+// Global model data constant
 let models: any = null;
 
 const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ 
@@ -33,9 +33,9 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const [activeTab, setActiveTab] = useState('basic');
   const [generatingEntityTypes, setGeneratingEntityTypes] = useState(false);
   const [isRebuildMode, setIsRebuildMode] = useState(false);
-  const [originalType, setOriginalType] = useState<string>(''); // 保存原始的 type 参数
+  const [originalType, setOriginalType] = useState<string>(''); // Save original type parameter
   
-  // 监听 parser_config.graphrag 相关字段的变化
+  // Watch for changes to parser_config.graphrag related fields
   const parserConfig = Form.useWatch('parser_config', form);
   const graphragConfig = parserConfig?.graphrag;
   const enableKnowledgeGraph = graphragConfig?.use_graphrag || false;
@@ -43,30 +43,30 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const entityNormalization = graphragConfig?.resolution || false;
   const communityReportGeneration = graphragConfig?.community || false;
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  // Encapsulate cancel method, add close modal logic
   const handleClose = () => {
     setDatasets(null);
     form.resetFields();
     setLoading(false);
     setActiveTab('basic');
-    setIsRebuildMode(false); // 重置重建模式标识
-    setOriginalType(''); // 重置原始 type
+    setIsRebuildMode(false); // Reset rebuild mode flag
+    setOriginalType(''); // Reset original type
     setVisible(false);
   };
 
-  // 生成实体类型的函数
+  // Generate entity types function
   const generateEntityTypes = async () => {
     const sceneName = form.getFieldValue(['parser_config', 'graphrag', 'scene_name']);
     if (!sceneName) {
-      // 可以添加提示用户输入场景名称
+      // Can add prompt for user to enter scenario name
       messageApi.error(t('knowledgeBase.enterScenarioName'));
       return;
     }
 
-    // 检查是否选择了 LLM 模型
+    // Check if LLM model is selected
     const llmId = form.getFieldValue('llm_id');
     if (!llmId) {
-      // 跳转到基础配置页
+      // Navigate to basic configuration page
       setActiveTab('basic');
       messageApi.error(t('knowledgeBase.pleaseSelectLLMModel'));
       return;
@@ -74,7 +74,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     
     setGeneratingEntityTypes(true);
     try {
-      // 这里应该调用实际的API接口
+      // Call the actual API interface here
       // const user = JSON.parse(localStorage.getItem('user') as any);
       //datasets?.id || datasets?.parent_id || user?.current_workspace_id, 
       const params = {
@@ -82,17 +82,17 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         llm_id: llmId
       };
       const response = await getKnowledgeGraphEntityTypes(params);
-      // 模拟API调用
+      // Simulate API call
       // await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // 处理API响应数据
-      console.log('API Response:', response); // 调试日志
+      // Process API response data
+      console.log('API Response:', response); // Debug log
       
-      // 检查响应结构 - API直接返回字符串
+      // Check response structure - API returns string directly
       if (response && typeof response === 'string' && response.trim()) {
-        // 将逗号分隔的字符串转换为换行分隔的格式以便在TextArea中显示
+        // Convert comma-separated string to newline-separated format for TextArea display
         const entityTypesString = response.replace(/,\s*/g, '\n');
-        console.log('Converted entity types:', entityTypesString); // 调试日志
+        console.log('Converted entity types:', entityTypesString); // Debug log
         
         const currentGraphrag = form.getFieldValue(['parser_config', 'graphrag']) || {};
         const updatedGraphrag = {
@@ -100,22 +100,22 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           entity_types: entityTypesString
         };
         
-        console.log('Updating form with:', updatedGraphrag); // 调试日志
+        console.log('Updating form with:', updatedGraphrag); // Debug log
         
-        // 使用更直接的方式更新表单字段
+        // Use more direct way to update form field
         form.setFieldValue(['parser_config', 'graphrag', 'entity_types'], entityTypesString);
         
-        // 强制触发表单重新渲染
+        // Force trigger form re-render
         form.validateFields([['parser_config', 'graphrag', 'entity_types']]);
         
-        // 额外的强制更新机制
+        // Additional forced update mechanism
         setTimeout(() => {
           form.setFieldValue(['parser_config', 'graphrag', 'entity_types'], entityTypesString);
         }, 100);
         
         messageApi.success(t('knowledgeBase.generateEntityTypesSuccess'));
       } else {
-        messageApi.error(t('knowledgeBase.generateEntityTypesFailed') + '：' + t('knowledgeBase.unknownError'));
+        messageApi.error(t('knowledgeBase.generateEntityTypesFailed') + ': ' + t('knowledgeBase.unknownError'));
       }
     } catch (error) {
       console.error(t('knowledgeBase.generateEntityTypesFailed') + ':', error);
@@ -143,7 +143,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   };
 
   const fetchModelLists = async (types: string[]) => {
-    // 如果还没有获取过全部模型数据，则获取一次
+    // If model data hasn't been fetched yet, fetch it once
     if (!models) {
       try {
         models = await getModelList({ page: 1, pagesize: 100 });
@@ -153,7 +153,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       }
     }
 
-    // 从全部模型数据中过滤出需要的类型
+    // Filter out the required types from all model data
     const typesToFetch = types.includes('llm') ? [...types, 'chat'] : types;
     const next: Record<string, { label: string; value: string }[]> = {};
     
@@ -165,7 +165,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     
     setModelOptionsByType(next);
 
-    // 如果不是编辑模式，为每个类型的下拉框设置默认值为第一条数据
+    // If not in edit mode, set default value to first item for each type dropdown
     if (!datasets?.id) {
       const defaultValues: Record<string, string> = {};
       types.forEach((tp) => {
@@ -174,7 +174,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           ? [...(next['llm'] || []), ...(next['chat'] || [])]
           : next[tp] || [];
         
-        // 如果有选项且当前字段没有值，设置第一个选项为默认值
+        // If there are options and current field has no value, set first option as default
         if (options.length > 0 && !form.getFieldValue(fieldKey)) {
           defaultValues[fieldKey] = options[0].value;
         }
@@ -204,7 +204,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       status: record.status,
     };
 
-    // 处理 parser_config 配置数据，如果没有则设置默认值
+    // Process parser_config data, set default values if not present
     baseValues.parser_config = record.parser_config || {
       graphrag: {
         use_graphrag: false,
@@ -216,13 +216,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       }
     };
 
-    // 如果存在 entity_types，转换为换行分隔格式用于 TextArea 显示
+    // If entity_types exists, convert to newline-separated format for TextArea display
     if (baseValues.parser_config.graphrag.entity_types) {
       if (Array.isArray(baseValues.parser_config.graphrag.entity_types)) {
-        // 如果是数组格式，转换为换行分隔字符串
+        // If array format, convert to newline-separated string
         (baseValues.parser_config.graphrag as any).entity_types = baseValues.parser_config.graphrag.entity_types.join('\n');
       } else if (typeof baseValues.parser_config.graphrag.entity_types === 'string') {
-        // 如果是逗号分隔字符串格式，转换为换行分隔字符串（兼容旧数据）
+        // If comma-separated string format, convert to newline-separated string (compatible with old data)
         (baseValues.parser_config.graphrag as any).entity_types = (baseValues.parser_config.graphrag.entity_types as string).replace(/,\s*/g, '\n');
       }
     }
@@ -249,13 +249,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const handleOpen = (record?: KnowledgeBaseListItem | null, type?: string) => {
     setDatasets(record || null);
     
-    // 如果是重建模式，使用记录的实际类型，否则使用传入的类型
+    // If rebuild mode, use record's actual type, otherwise use passed type
     const actualType = type === 'rebuild' ? (record?.type || 'General') : (type || currentType);
     setCurrentType(actualType as any);
-    setIsRebuildMode(type === 'rebuild'); // 设置重建模式标识
-    setOriginalType(type || ''); // 保存原始的 type 参数
+    setIsRebuildMode(type === 'rebuild'); // Set rebuild mode flag
+    setOriginalType(type || ''); // Save original type parameter
     
-    // 如果是重建模式，默认切换到知识图谱标签页
+    // If rebuild mode, default to knowledge graph tab
     if (type === 'rebuild') {
       setActiveTab('knowledgeGraph');
     } else {
@@ -285,13 +285,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     setDynamicModelFields(datasets, modelTypeList);
   }, [visible, datasets, currentType, modelTypeList]);
 
-  // 封装保存方法，添加提交逻辑
+  // Encapsulate save method, add submit logic
   const handleSave = () => {
-    // 获取当前表单中的知识图谱开启状态
+    // Get current knowledge graph enabled status from form
     const currentFormValues = form.getFieldsValue();
     const isGraphragEnabled = currentFormValues?.parser_config?.graphrag?.use_graphrag || false;
     
-    // 如果原始 type 是 'rebuild' 并且知识图谱开启为true，显示确认弹框
+    // If original type is 'rebuild' and knowledge graph is enabled, show confirmation dialog
     if (originalType === 'rebuild' && isGraphragEnabled) {
       confirm({
         title: t('knowledgeBase.rebuildConfirmTitle'),
@@ -302,11 +302,11 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           await rebuildKnowledgeGraph(datasets?.id || '')
         },
         onCancel: () => {
-          // 用户取消，不执行任何操作
+          // User cancelled, no action taken
         },
       });
     } else {
-      // 非重建模式或知识图谱未开启，直接保存
+      // Non-rebuild mode or knowledge graph not enabled, save directly
       performSave();
     }
   };
@@ -318,7 +318,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         messageApi.error(t('knowledgeBase.deleteGraphFailed'))
      }
   };
-  // 实际的保存逻辑
+  // Actual save logic
   const performSave = () => {
     form
       .validateFields()
@@ -326,7 +326,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         setLoading(true)
         const formValues = form.getFieldsValue();
         
-        // 处理 entity_types 格式转换：从换行分隔字符串转换为字符串数组
+        // Process entity_types format conversion: from newline-separated string to string array
         if (formValues.parser_config && formValues.parser_config.graphrag && formValues.parser_config.graphrag.entity_types) {
           const entityTypesString = formValues.parser_config.graphrag.entity_types as any as string;
           const entityTypesArray = entityTypesString
@@ -336,7 +336,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           formValues.parser_config.graphrag.entity_types = entityTypesArray;
         }
         
-        // 确保保存时使用正确的类型（不是 'rebuild'）
+        // Ensure correct type is used when saving (not 'rebuild')
         const saveType = originalType === 'rebuild' ? currentType : (formValues.type || currentType);
         
         const payload: KnowledgeBaseFormData = {
@@ -346,7 +346,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           parent_id: datasets?.parent_id || undefined,
         };
         
-        console.log('Saving payload:', payload); // 调试日志
+        console.log('Saving payload:', payload); // Debug log
         
         const submit = datasets?.id
           ? updateKnowledgeBase(datasets.id, payload)
@@ -367,32 +367,32 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       });
   }
   const handleChange = (_value: string, tp: string) => {
-    // 只在编辑模式且类型为 embedding 时触发提示
+    // Only trigger prompt in edit mode and when type is embedding
     if (datasets?.id && tp.toLowerCase() === 'embedding') {
       const fieldKey = typeToFieldKey(tp);
-      // 从原始 datasets 对象中获取之前的值
+      // Get previous value from original datasets object
       const previousValue = (datasets as any)[fieldKey];
       
       confirm({
         title: t('common.updateWarning'),
         content: t('knowledgeBase.updateEmbeddingContent'),
         onOk: () => {
-          // 确定时什么也不做，保持新值
+          // Do nothing on confirm, keep new value
         },
         onCancel: () => {
-          // 取消时恢复之前的值
+          // Restore previous value on cancel
           form.setFieldsValue({ [fieldKey]: previousValue } as any);
         },
       });
     }
   }
-  // 暴露给父组件的方法
+  // Methods exposed to parent component
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
   }));
 
-  // 根据 type 获取标题
+  // Get title based on type
   const getTitle = () => {
     if (isRebuildMode) {
       return t('knowledgeBase.rebuildGraph') + ' - ' + (datasets?.name || '');
@@ -408,7 +408,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
 
   const dynamicTypeList = useMemo(() => modelTypeList.filter((tp) => (modelOptionsByType[tp] || []).length), [modelTypeList, modelOptionsByType]);
 
-  // 基础配置表单内容
+  // Basic configuration form content
   const renderBasicConfig = () => (
     <>
       {!datasets?.id && (
@@ -426,7 +426,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
 
       {currentType !== 'Folder' && dynamicTypeList.map((tp) => {
         const fieldKey = typeToFieldKey(tp);
-        // 当 tp 为 'llm' 时，合并 llm 和 chat 的选项
+        // When tp is 'llm', merge llm and chat options
         const options = tp.toLowerCase() === 'llm' 
           ? [...(modelOptionsByType['llm'] || []), ...(modelOptionsByType['chat'] || [])]
           : modelOptionsByType[tp] || [];
@@ -451,7 +451,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     </>
   );
 
-  // 知识图谱配置表单内容
+  // Knowledge graph configuration form content
   const renderKnowledgeGraphConfig = () => (
     <>
       <div className={`rb:flex rb:w-full rb:items-center rb:p-4 rb:border-1 rb:rounded-lg rb:mb-4 ${
@@ -482,7 +482,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           <div className='rb:text-[#212332] rb:text-base rb:font-medium rb:mb-4'>
             {t('knowledgeBase.graphConfig')}
           </div>
-          {/* 场景名称 */}
+          {/* Scene name */}
           <div className='rb:flex rb:items-center rb:gap-2'>
               <Form.Item
                 name={['parser_config', 'graphrag', 'scene_name']}
@@ -506,7 +506,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           </div>
           
 
-          {/* 实体类型 */}
+          {/* Entity types */}
           <Form.Item
             name={['parser_config', 'graphrag', 'entity_types']}
             label={t('knowledgeBase.entityTypes')}
@@ -517,7 +517,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             />
           </Form.Item>
 
-          {/* 实体归一化 */}
+          {/* Entity normalization */}
           <div className={`rb:flex rb:w-full rb:gap-2 rb:items-center rb:p-4 rb:border-1 rb:rounded-lg rb:mb-4 ${
             entityNormalization 
               ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
@@ -541,7 +541,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           </div>
          
 
-          {/* 实体方法 */}
+          {/* Entity method */}
           <Form.Item
             name={['parser_config', 'graphrag', 'method']}
             label={t('knowledgeBase.entityMethod')}
@@ -553,7 +553,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             </Radio.Group>
           </Form.Item>
 
-          {/* 社区报告生成 */}
+          {/* Community report generation */}
           <div className={`rb:flex rb:w-full rb:gap-2 rb:items-center rb:p-4 rb:border-1 rb:rounded-lg rb:mb-4 ${
             communityReportGeneration 
               ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
@@ -580,7 +580,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     </>
   );
 
-  // Tabs 配置
+  // Tabs configuration
   const tabItems = [
     {
       key: 'basic',
@@ -607,16 +607,16 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         form={form}
         layout="vertical"
         initialValues={{
-          permission_id: 'Private', // 设置 permission_id 的默认值
+          permission_id: 'Private', // Set default value for permission_id
           type: currentType,
           parser_config: {
             graphrag: {
-              use_graphrag: false, // 默认不启用知识图谱
-              scene_name: '', // 场景名称
-              entity_types: '' as any, // 实体类型（界面上显示为字符串，保存时转为数组）
-              method: 'general', // 默认使用通用方法
-              resolution: false, // 默认不启用实体归一化
-              community: false, // 默认不生成社区报告
+              use_graphrag: false, // Default not to enable knowledge graph
+              scene_name: '', // Scene name
+              entity_types: '' as any, // Entity types (displayed as string in UI, converted to array when saving)
+              method: 'general', // Default to use general method
+              resolution: false, // Default not to enable entity normalization
+              community: false, // Default not to generate community reports
             }
           }
         }}

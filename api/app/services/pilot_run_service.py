@@ -36,6 +36,7 @@ async def run_pilot_extraction(
     dialogue_text: str,
     db: Session,
     progress_callback: Optional[Callable[[str, str, Optional[dict]], Awaitable[None]]] = None,
+    language: str = "zh",
 ) -> None:
     """
     执行试运行模式的知识提取流水线。
@@ -43,10 +44,12 @@ async def run_pilot_extraction(
     Args:
         memory_config: 从数据库加载的内存配置对象
         dialogue_text: 输入的对话文本
+        db: 数据库会话
         progress_callback: 可选的进度回调函数
             - 参数1 (stage): 当前处理阶段标识符
             - 参数2 (message): 人类可读的进度消息
             - 参数3 (data): 可选的附加数据字典
+        language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
     """
     log_file = "logs/time.log"
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
@@ -146,6 +149,7 @@ async def run_pilot_extraction(
             config=config,
             progress_callback=progress_callback,
             embedding_id=str(memory_config.embedding_model_id),
+            language=language,
         )
 
         log_time("Orchestrator Initialization", time.time() - step_start, log_file)
@@ -191,6 +195,7 @@ async def run_pilot_extraction(
                 chunked_dialogs,
                 llm_client=llm_client,
                 embedder_client=embedder_client,
+                language=language,
             )
 
             log_time("Memory Summary Generation", time.time() - step_start, log_file)

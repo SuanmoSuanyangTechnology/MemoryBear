@@ -388,7 +388,7 @@ const KnowledgeBaseManagement: FC = () => {
         });
       },
       onCancel: () => {
-        console.log('取消删除');
+        console.log('Cancel delete');
       },
     });
   };

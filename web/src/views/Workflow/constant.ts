@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 15:06:18 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 15:25:25
+ */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
 import ConditionNode from './components/Nodes/ConditionNode';
@@ -9,33 +15,33 @@ import type { ReactShapeConfig } from '@antv/x6-react-shape';
 // Import workflow icons
 import startIcon from '@/assets/images/workflow/start.png';
 import endIcon from '@/assets/images/workflow/end.png';
-import answerIcon from '@/assets/images/workflow/answer.png';
+// import answerIcon from '@/assets/images/workflow/answer.png';
 import llmIcon from '@/assets/images/workflow/llm.png';
-import modelSelectionIcon from '@/assets/images/workflow/model_selection.png';
-import modelVotingIcon from '@/assets/images/workflow/model_voting.png';
+// import modelSelectionIcon from '@/assets/images/workflow/model_selection.png';
+// import modelVotingIcon from '@/assets/images/workflow/model_voting.png';
 import ragIcon from '@/assets/images/workflow/rag.png';
-import classificationIcon from '@/assets/images/workflow/classification.png';
+// import classificationIcon from '@/assets/images/workflow/classification.png';
 import parameterExtractionIcon from '@/assets/images/workflow/parameter_extraction.png';
-import taskPlanningIcon from '@/assets/images/workflow/task_planning.png';
-import reasoningControlIcon from '@/assets/images/workflow/reasoning_control.png';
-import selfReflectionIcon from '@/assets/images/workflow/self_reflection.png';
-import memoryEnhancementIcon from '@/assets/images/workflow/memory_enhancement.png';
-import agentSchedulingIcon from '@/assets/images/workflow/agent_scheduling.png';
-import agentCollaborationIcon from '@/assets/images/workflow/agent_collaboration.png';
-import agentArbitrationIcon from '@/assets/images/workflow/agent_arbitration.png';
+// import taskPlanningIcon from '@/assets/images/workflow/task_planning.png';
+// import reasoningControlIcon from '@/assets/images/workflow/reasoning_control.png';
+// import selfReflectionIcon from '@/assets/images/workflow/self_reflection.png';
+// import memoryEnhancementIcon from '@/assets/images/workflow/memory_enhancement.png';
+// import agentSchedulingIcon from '@/assets/images/workflow/agent_scheduling.png';
+// import agentCollaborationIcon from '@/assets/images/workflow/agent_collaboration.png';
+// import agentArbitrationIcon from '@/assets/images/workflow/agent_arbitration.png';
 import conditionIcon from '@/assets/images/workflow/condition.png';
 import iterationIcon from '@/assets/images/workflow/iteration.png';
 import loopIcon from '@/assets/images/workflow/loop.png';
-import parallelIcon from '@/assets/images/workflow/parallel.png';
+// import parallelIcon from '@/assets/images/workflow/parallel.png';
 import aggregatorIcon from '@/assets/images/workflow/aggregator.png';
 import httpRequestIcon from '@/assets/images/workflow/http_request.png';
 import toolsIcon from '@/assets/images/workflow/tools.png';
 import codeExecutionIcon from '@/assets/images/workflow/code_execution.png';
 import templateRenderingIcon from '@/assets/images/workflow/template_rendering.png';
-import sensitiveDetectionIcon from '@/assets/images/workflow/sensitive_detection.png';
-import outputAuditIcon from '@/assets/images/workflow/output_audit.png';
-import selfOptimizationIcon from '@/assets/images/workflow/self_optimization.png';
-import processEvolutionIcon from '@/assets/images/workflow/process_evolution.png';
+// import sensitiveDetectionIcon from '@/assets/images/workflow/sensitive_detection.png';
+// import outputAuditIcon from '@/assets/images/workflow/output_audit.png';
+// import selfOptimizationIcon from '@/assets/images/workflow/self_optimization.png';
+// import processEvolutionIcon from '@/assets/images/workflow/process_evolution.png';
 import questionClassifierIcon from '@/assets/images/workflow/question-classifier.png'
 import breakIcon from '@/assets/images/workflow/break.png'
 import assignerIcon from '@/assets/images/workflow/assigner.png'
@@ -47,6 +53,10 @@ import { memoryConfigListUrl } from '@/api/memory'
 import { getModelListUrl } from '@/api/models'
 import type { NodeLibrary } from './types'
 
+/**
+ * Workflow node library configuration
+ * Defines all available node types, their icons, and configuration schemas
+ */
 export const nodeLibrary: NodeLibrary[] = [
   {
     category: "coreNode",
@@ -300,13 +310,16 @@ export const nodeLibrary: NodeLibrary[] = [
             dependsOn: 'parallel',
             dependsOnValue: true
           },
-          flatten: { // 扁平化输出
+          flatten: { // Flatten output
             type: 'switch',
             defaultValue: false
           },
           output: {
             type: 'variableList',
             filterChildNodes: true
+          },
+          output_type: {
+            type: 'define',
           }
         },
       },
@@ -345,6 +358,9 @@ export const nodeLibrary: NodeLibrary[] = [
           group_variables: {
             type: 'groupVariableList',
             defaultValue: [],
+          },
+          group_type: {
+            type: 'define',
           }
         }
       },
@@ -490,7 +506,10 @@ export const nodeLibrary: NodeLibrary[] = [
   // },
 ];
 
-// 节点注册库
+/**
+ * Node registration library for X6 graph
+ * Maps node shapes to their React components
+ */
 export const nodeRegisterLibrary: ReactShapeConfig[] = [
   {
     shape: 'loop-node',
@@ -530,21 +549,39 @@ export const nodeRegisterLibrary: ReactShapeConfig[] = [
   },
 ];
 
+/**
+ * Port configuration interface
+ */
 interface PortsConfig {
+  /** Port group metadata */
   groups?: GroupMetadata;
+  /** Port item metadata array */
   items?: PortMetadata[];
 }
 
+/**
+ * Node configuration interface
+ */
 interface NodeConfig {
+  /** Node width in pixels */
   width: number;
+  /** Node height in pixels */
   height: number;
+  /** Node shape type */
   shape: string;
+  /** Port configuration */
   ports?: PortsConfig;
 }
 
+/** Edge color for normal state */
 export const edge_color = '#155EEF';
+/** Edge color for selected state */
 export const edge_selected_color = '#4DA8FF'
-// 统一的端口 markup 配置
+
+/**
+ * Unified port markup configuration
+ * Defines SVG elements for port rendering
+ */
 export const portMarkup = [
   {
     tagName: 'circle',
@@ -556,7 +593,10 @@ export const portMarkup = [
   },
 ];
 
-// 统一的端口属性配置
+/**
+ * Unified port attributes configuration
+ * Defines visual styling for ports
+ */
 export const portAttrs = {
   body: {
     r: 6, 
@@ -576,20 +616,34 @@ export const portAttrs = {
   }
 }
 
-// 统一的端口组配置
+/**
+ * Unified port group configuration
+ * Defines port positions and attributes for different sides
+ */
 const defaultPortGroups = {
   // top: { position: 'top', markup: portMarkup, attrs: portAttrs },
   right: { position: 'right', markup: portMarkup, attrs: portAttrs },
   // bottom: { position: 'bottom', markup: portMarkup, attrs: portAttrs },
   left: { position: 'left', markup: portMarkup, attrs: portAttrs },
 }
+/**
+ * Default port items for standard nodes
+ */
 const defaultPortItems = [
   // { group: 'top' },
   { group: 'right' },
   // { group: 'bottom' },
   { group: 'left' }
 ];
+/**
+ * Port position arguments
+ */
 export const portArgs = { dy: 18 }
+
+/**
+ * Graph node library configuration
+ * Maps node types to their visual and structural properties
+ */
 export const graphNodeLibrary: Record<string, NodeConfig> = {
   iteration: {
     width: 240,
@@ -701,21 +755,33 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
 }
 
 
+/**
+ * Output variable configuration interface
+ */
 export interface OutputVariable {
+  /** Default output variables */
   default?: Array<{
     name: string;
     type: string;
   }>;
+  /** Dynamically defined variable keys */
   define?: string[];
+  /** System-level output variables */
   sys?: Array<{
     name: string;
     type: string;
   }>;
+  /** Error-related output variables */
   error?: Array<{
     name: string;
     type: string;
   }>;
 }
+
+/**
+ * Output variable definitions for each node type
+ * Specifies what variables each node produces
+ */
 export const outputVariable: { [key: string]: OutputVariable } = {
   start: {
     sys: [
@@ -806,6 +872,10 @@ export const outputVariable: { [key: string]: OutputVariable } = {
   },
 }
 
+/**
+ * Default edge attributes configuration
+ * Defines visual styling for edges/connections
+ */
 export const edgeAttrs = {
   attrs: {
     line: {

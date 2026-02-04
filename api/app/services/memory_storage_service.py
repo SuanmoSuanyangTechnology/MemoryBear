@@ -236,12 +236,13 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
         return self._convert_timestamps_to_format(data_list)
 
 
-    async def pilot_run_stream(self, payload: ConfigPilotRun) -> AsyncGenerator[str, None]:
+    async def pilot_run_stream(self, payload: ConfigPilotRun, language: str = "zh") -> AsyncGenerator[str, None]:
         """
         流式执行试运行，产生 SSE 格式的进度事件
         
         Args:
             payload: 试运行配置和对话文本
+            language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
             
         Yields:
             SSE 格式的字符串，包含以下事件类型：
@@ -315,6 +316,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                         dialogue_text=dialogue_text,
                         db=self.db,
                         progress_callback=progress_callback,
+                        language=language,
                     )
                     logger.info("[PILOT_RUN_STREAM] pipeline_main completed")
                     

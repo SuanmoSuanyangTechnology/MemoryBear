@@ -38,7 +38,6 @@ const History: React.FC<{ query: HistoryQuery; edit: (item: HistoryItem) => void
     e?.stopPropagation();
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: item.title }),
-      content: t('application.apiKeyDeleteContent'),
       okText: t('common.delete'),
       cancelText: t('common.cancel'),
       okType: 'danger',
