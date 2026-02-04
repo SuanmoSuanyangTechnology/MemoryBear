@@ -39,7 +39,6 @@ from . import (
     upload_controller,
     user_controller,
     user_memory_controllers,
-    workflow_controller,
     workspace_controller,
     memory_forget_controller,
     home_page_controller,
@@ -78,7 +77,6 @@ manager_router.include_router(release_share_controller.router)
 manager_router.include_router(public_share_controller.router)  # 公开路由（无需认证）
 manager_router.include_router(memory_dashboard_controller.router)
 manager_router.include_router(multi_agent_controller.router)
-manager_router.include_router(workflow_controller.router)
 manager_router.include_router(emotion_controller.router)
 manager_router.include_router(emotion_config_controller.router)
 manager_router.include_router(prompt_optimizer_controller.router)

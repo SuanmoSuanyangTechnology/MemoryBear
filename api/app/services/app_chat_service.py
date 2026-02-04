@@ -618,6 +618,7 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            public=False
 
     ) -> AsyncGenerator[dict, None]:
         """聊天（流式）"""
@@ -634,7 +635,8 @@ class AppChatService:
                 payload=payload,
                 config=config,
                 workspace_id=workspace_id,
-                release_id=release_id
+                release_id=release_id,
+                public=public
         ):
             yield event
 

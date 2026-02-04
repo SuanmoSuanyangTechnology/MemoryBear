@@ -11,10 +11,15 @@
 
 import logging
 import re
-from typing import Any, TYPE_CHECKING
+from asyncio import Lock
+from collections import defaultdict
+from copy import deepcopy
+from typing import Any, Generic
 
-if TYPE_CHECKING:
-    from app.core.workflow.nodes import WorkflowState
+from pydantic import BaseModel
+
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable.variable_objects import T, create_variable_instance
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +28,6 @@ class VariableSelector:
     """变量选择器
     
     用于引用变量的路径表示。
-    
-    Examples:
-        >>> selector = VariableSelector(["sys", "message"])
-        >>> selector = VariableSelector(["node_A", "output"])
-        >>> selector = VariableSelector.from_string("sys.message")
     """
 
     def __init__(self, path: list[str]):
@@ -52,10 +52,6 @@ class VariableSelector:
         
         Returns:
             VariableSelector 实例
-        
-        Examples:
-            >>> selector = VariableSelector.from_string("sys.message")
-            >>> selector = VariableSelector.from_string("llm_qa.output")
         """
         path = selector_str.split(".")
         return cls(path)
@@ -67,160 +63,212 @@ class VariableSelector:
         return f"VariableSelector({self.path})"
 
 
+class VariableStruct(BaseModel, Generic[T]):
+    """A typed variable struct.
+
+    Represents a runtime variable with an associated logical type and
+    a concrete value object.
+
+    This class bridges the static type system (via generics) and the
+    runtime type system (via ``VariableType``).
+
+    Attributes:
+        type:
+            Logical variable type descriptor used for runtime validation,
+            serialization, and workflow type checking.
+        instance:
+            The concrete variable object. The actual Python type is
+            represented by the generic parameter ``T`` (e.g. StringObject,
+            NumberObject, ArrayObject[StringObject]).
+        mut:
+            Whether the variable is mutable.
+    """
+    type: VariableType
+    instance: T
+    mut: bool
+
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
+
+
 class VariablePool:
-    """变量池
-    
-    管理工作流执行过程中的所有变量。
-    
-    变量命名空间：
-    - sys.*: 系统变量（message, execution_id, workspace_id, user_id, conversation_id）
-    - conv.*: 会话变量（跨多轮对话保持的变量）
-    - <node_id>.*: 节点输出
-    
-    Examples:
-        >>> pool = VariablePool(state)
-        >>> pool.get(["sys", "message"])
-        "用户的问题"
-        >>> pool.get(["llm_qa", "output"])
-        "AI 的回答"
-        >>> pool.set(["conv", "user_name"], "张三")
+    """Variable pool.
+
+    Manages all variables during workflow execution, including storage,
+    namespacing, and concurrency control.
+
+    Variable namespace conventions:
+        - ``sys.*``:
+            System variables (e.g. message, execution_id, workspace_id,
+            user_id, conversation_id).
+        - ``conv.*``:
+            Conversation-level variables that persist across multiple turns.
+        - ``<node_id>.*``:
+            Variables produced by workflow nodes.
     """
 
-    def __init__(self, state: "WorkflowState"):
-        """初始化变量池
-        
-        Args:
-            state: 工作流状态（LangGraph State）
-        """
-        self.state = state
+    def __init__(self):
+        """Initialize the variable pool.
 
-    def get(self, selector: list[str] | str, default: Any = None) -> Any:
-        """获取变量值
-        
+        Attributes:
+            self.locks:
+                A per-key lock table used for fine-grained concurrency control.
+
+            self.variables:
+                Storage for all variables managed by the pool.
+        """
+        self.locks = defaultdict(Lock)
+        self.variables: dict[str, dict[str, VariableStruct[Any]]] = {}
+
+    @staticmethod
+    def transform_selector(selector):
+        pattern = r"\{\{\s*(.*?)\s*\}\}"
+        variable_literal = re.sub(pattern, r"\1", selector).strip()
+        selector = VariableSelector.from_string(variable_literal).path
+        if len(selector) != 2:
+            raise ValueError(f"Selector not valid - {selector}")
+        return selector
+
+    def _get_variable_struct(
+            self,
+            selector: str
+    ) -> VariableStruct[T] | None:
+        """Retrieve a variable struct from the variable pool.
+
         Args:
-            selector: 变量选择器，可以是列表或字符串
-            default: 默认值（变量不存在时返回）
-        
+            selector:
+                Variable selector, either:
+                - A string variable literal (e.g. "{{ sys.message }}")
+
         Returns:
-            变量值
-        
-        Examples:
-            >>> pool.get(["sys", "message"])
-            >>> pool.get("sys.message")
-            >>> pool.get(["llm_qa", "output"])
-            >>> pool.get("llm_qa.output")
-        
-        Raises:
-            KeyError: 变量不存在且未提供默认值
+            The variable's struct if it exists; otherwise returns None.
         """
-        # 转换为 VariableSelector
-        if isinstance(selector, str):
-            pattern = r"\{\{\s*(.*?)\s*\}\}"
-            variable_literal = re.sub(pattern, r"\1", selector).strip()
-            selector = VariableSelector.from_string(variable_literal).path
-
-        if not selector or len(selector) < 1:
-            raise ValueError("变量选择器不能为空")
+        selector = self.transform_selector(selector)
 
         namespace = selector[0]
+        variable_name = selector[1]
 
-        try:
-            # 系统变量
-            if namespace == "sys":
-                key = selector[1] if len(selector) > 1 else None
-                if not key:
-                    return self.state.get("variables", {}).get("sys", {})
-                return self.state.get("variables", {}).get("sys", {}).get(key, default)
+        namespace_variables = self.variables.get(namespace)
+        if namespace_variables is None:
+            return None
 
-            # 会话变量
-            elif namespace == "conv":
-                key = selector[1] if len(selector) > 1 else None
-                if not key:
-                    return self.state.get("variables", {}).get("conv", {})
-                return self.state.get("variables", {}).get("conv", {}).get(key, default)
+        var_instance = namespace_variables.get(variable_name)
+        if var_instance is None:
+            return None
+        return var_instance
 
-            # 节点输出（从 runtime_vars 读取）
-            else:
-                node_id = namespace
-                runtime_vars = self.state.get("runtime_vars", {})
+    def get_value(
+            self,
+            selector: str,
+            default: Any = None,
+            strict: bool = True,
+    ) -> Any:
+        """Retrieve a variable value from the variable pool.
 
-                if node_id not in runtime_vars:
-                    if default is not None:
-                        return default
-                    raise KeyError(f"节点 '{node_id}' 的输出不存在")
+        Args:
+            selector:
+                Variable selector, either:
+                - A list of path components (e.g. ["sys", "message"])
+                - A string variable literal (e.g. "{{ sys.message }}")
+            default:
+                The value to return if the variable does not exist.
+            strict:
+                If True, raises KeyError when the variable does not exist.
 
-                node_var = runtime_vars[node_id]
+        Returns:
+            The variable's value if it exists; otherwise returns `default`.
 
-                # 如果只有节点 ID，返回整个变量
-                if len(selector) == 1:
-                    return node_var
+        Raises:
+            KeyError: If strict is True and the variable does not exist.
+        """
+        variable_struct = self._get_variable_struct(selector)
+        if variable_struct is None:
+            if strict:
+                raise KeyError(f"{selector} not exist")
+            return default
 
-                # 获取特定字段
-                # 支持嵌套访问，如 node_id.field.subfield
-                result = node_var
-                for k in selector[1:]:
-                    if isinstance(result, dict):
-                        result = result.get(k)
-                        if result is None:
-                            if default is not None:
-                                return default
-                            raise KeyError(f"字段 '{'.'.join(selector)}' 不存在")
-                    else:
-                        if default is not None:
-                            return default
-                        raise KeyError(f"无法访问 '{'.'.join(selector)}'")
+        return variable_struct.instance.get_value()
 
-                return result
+    def get_literal(
+            self,
+            selector: str,
+            default: Any = None,
+            strict: bool = True,
+    ) -> Any:
+        """Retrieve a variable value from the variable pool.
 
-        except KeyError:
-            if default is not None:
-                return default
-            raise
+        Args:
+            selector:
+                Variable selector, either:
+                - A list of path components (e.g. ["sys", "message"])
+                - A string variable literal (e.g. "{{ sys.message }}")
+            default:
+                The value to return if the variable does not exist.
+            strict:
+                If True, raises KeyError when the variable does not exist.
 
-    def set(self, selector: list[str] | str, value: Any):
+        Returns:
+            The variable's value if it exists; otherwise returns `default`.
+
+        Raises:
+            KeyError: If strict is True and the variable does not exist.
+        """
+        variable_struct = self._get_variable_struct(selector)
+        if variable_struct is None:
+            if strict:
+                raise KeyError(f"{selector} not exist")
+            return default
+
+        return variable_struct.instance.to_literal()
+
+    async def set(
+            self,
+            selector: str,
+            value: Any
+    ):
         """设置变量值
         
         Args:
             selector: 变量选择器
             value: 变量值
-        
-        Examples:
-            >>> pool.set(["conv", "user_name"], "张三")
-            >>> pool.set("conv.user_name", "张三")
-        
+
         Note:
             - 只能设置会话变量 (conv.*)
             - 系统变量和节点输出是只读的
         """
-        # 转换为 VariableSelector
-        if isinstance(selector, str):
-            selector = VariableSelector.from_string(selector).path
+        variable_struct = self._get_variable_struct(selector)
+        if variable_struct is None:
+            raise KeyError(f"Variable {selector} is not defined")
+        if not variable_struct.mut:
+            raise KeyError(f"{selector} cannot be modified")
+        async with self.locks[selector]:
+            variable_struct.instance.set(value)
 
-        if not selector or len(selector) < 2:
-            raise ValueError("变量选择器必须包含命名空间和键名")
+    async def new(
+            self,
+            namespace: str,
+            key: str,
+            value: Any,
+            var_type: VariableType,
+            mut: bool
+    ):
+        if self.has(f"{namespace}.{key}"):
+            try:
+                await self.set(f"{namespace}.{key}", value)
+            except KeyError:
+                pass
+        instance = create_variable_instance(var_type, value)
+        variable_struct = VariableStruct(type=var_type, instance=instance, mut=mut)
+        namespace_variable = self.variables.get(namespace)
+        if namespace_variable is None:
+            self.variables[namespace] = {
+                key: variable_struct
+            }
+        else:
+            self.variables[namespace][key] = variable_struct
 
-        namespace = selector[0]
-
-        if namespace != "conv" and namespace not in self.state["cycle_nodes"]:
-            raise ValueError("Only conversation or cycle variables can be assigned.")
-
-        key = selector[1]
-
-        # 确保 variables 结构存在
-        if "variables" not in self.state:
-            self.state["variables"] = {"sys": {}, "conv": {}}
-        if namespace == "conv":
-            if "conv" not in self.state["variables"]:
-                self.state["variables"]["conv"] = {}
-
-            # 设置值
-            self.state["variables"]["conv"][key] = value
-        elif namespace in self.state["cycle_nodes"]:
-            self.state["runtime_vars"][namespace][key] = value
-
-        logger.debug(f"设置变量: {'.'.join(selector)} = {value}")
-
-    def has(self, selector: list[str] | str) -> bool:
+    def has(self, selector: str) -> bool:
         """检查变量是否存在
         
         Args:
@@ -228,18 +276,8 @@ class VariablePool:
         
         Returns:
             变量是否存在
-        
-        Examples:
-            >>> pool.has(["sys", "message"])
-            True
-            >>> pool.has("llm_qa.output")
-            False
         """
-        try:
-            self.get(selector)
-            return True
-        except KeyError:
-            return False
+        return self._get_variable_struct(selector) is not None
 
     def get_all_system_vars(self) -> dict[str, Any]:
         """获取所有系统变量
@@ -247,7 +285,8 @@ class VariablePool:
         Returns:
             系统变量字典
         """
-        return self.state.get("variables", {}).get("sys", {})
+        sys_namespace = self.variables.get("sys", {})
+        return {k: v.instance.value for k, v in sys_namespace.items()}
 
     def get_all_conversation_vars(self) -> dict[str, Any]:
         """获取所有会话变量
@@ -255,7 +294,8 @@ class VariablePool:
         Returns:
             会话变量字典
         """
-        return self.state.get("variables", {}).get("conv", {})
+        conv_namespace = self.variables.get("conv", {})
+        return {k: v.instance.value for k, v in conv_namespace.items()}
 
     def get_all_node_outputs(self) -> dict[str, Any]:
         """获取所有节点输出（运行时变量）
@@ -263,18 +303,37 @@ class VariablePool:
         Returns:
             节点输出字典，键为节点 ID
         """
-        return self.state.get("runtime_vars", {})
+        runtime_vars = {
+            namespace: {
+                k: v.instance.value
+                for k, v in vars_dict.items()
+            }
+            for namespace, vars_dict in self.variables.items()
+            if namespace not in ("sys", "conv")
+        }
+        return runtime_vars
 
-    def get_node_output(self, node_id: str) -> dict[str, Any] | None:
+    def get_node_output(self, node_id: str, defalut: Any = None, strict: bool = True) -> dict[str, Any] | None:
         """获取指定节点的输出（运行时变量）
         
         Args:
             node_id: 节点 ID
+            defalut: 默认值
+            strict: 是否严格模式
         
         Returns:
             节点输出或 None
         """
-        return self.state.get("runtime_vars", {}).get(node_id)
+        node_namespace = self.variables.get(node_id)
+        if node_namespace:
+            return {k: v.instance.value for k, v in node_namespace.items()}
+        if strict:
+            raise KeyError(f"node {node_id} output not exist")
+        else:
+            return defalut
+
+    def copy(self, pool: 'VariablePool'):
+        self.variables = deepcopy(pool.variables)
 
     def to_dict(self) -> dict[str, Any]:
         """导出为字典

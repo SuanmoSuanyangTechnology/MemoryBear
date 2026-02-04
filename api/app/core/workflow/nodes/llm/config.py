@@ -4,7 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition, VariableType
+from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition
+from app.core.workflow.variable.base_variable import VariableType
 
 
 class MessageConfig(BaseModel):
