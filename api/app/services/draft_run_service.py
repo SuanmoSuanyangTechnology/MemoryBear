@@ -10,6 +10,11 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from langchain.tools import tool
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from app.celery_app import celery_app
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -26,10 +31,8 @@ from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.tool_service import ToolService
 from app.services.multimodal_service import MultimodalService
-from langchain.tools import tool
-from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from app.core.agent.agent_middleware import AgentMiddleware
+
 
 logger = get_business_logger()
 class KnowledgeRetrievalInput(BaseModel):
@@ -310,6 +313,7 @@ class DraftRunService:
             tools = []
 
             tool_service = ToolService(self.db)
+            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
             # 从配置中获取启用的工具
             if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, list):
@@ -320,9 +324,7 @@ class DraftRunService:
                         print(f"tool_config:{tool_config}")
                         if tool_config.get("enabled", False):
                             # 根据工具名称查找工具实例
-                            tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
-                                                                            ToolRepository.get_tenant_id_by_workspace_id(
-                                                                                self.db, str(workspace_id)))
+                            tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
                             if tool_instance:
                                 if tool_instance.name == "baidu_search_tool" and not web_search:
                                     continue
@@ -344,6 +346,22 @@ class DraftRunService:
                                 "tool_count": len(tools)
                             }
                         )
+
+            # 加载技能关联的工具
+            if hasattr(agent_config, 'skill_ids') and agent_config.skill_ids:
+                middleware = AgentMiddleware(skill_ids=agent_config.skill_ids)
+                skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
+                tools.extend(skill_tools)
+                logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
+
+                # 应用动态过滤
+                if skill_configs:
+                    tools, activated_skill_ids = middleware.filter_tools(tools, message, skill_configs, tool_to_skill_map)
+                    logger.debug(f"过滤后剩余 {len(tools)} 个工具")
+                    active_prompts = AgentMiddleware.get_active_prompts(
+                        activated_skill_ids, skill_configs
+                    )
+                    system_prompt = f"{system_prompt}\n\n{active_prompts}"
 
             # 添加知识库检索工具
             if agent_config.knowledge_retrieval:
@@ -558,6 +576,7 @@ class DraftRunService:
             tools = []
 
             tool_service = ToolService(self.db)
+            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
             # 从配置中获取启用的工具
             if hasattr(agent_config, 'tools') and agent_config.tools and isinstance(agent_config.tools, list):
@@ -567,9 +586,7 @@ class DraftRunService:
                     # print(f"tool_config:{tool_config}")
                     if tool_config.get("enabled", False):
                         # 根据工具名称查找工具实例
-                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
-                                                                        ToolRepository.get_tenant_id_by_workspace_id(
-                                                                            self.db, str(workspace_id)))
+                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
                         if tool_instance:
                             if tool_instance.name == "baidu_search_tool" and not web_search:
                                 continue
@@ -591,6 +608,23 @@ class DraftRunService:
                                 "tool_count": len(tools)
                             }
                         )
+
+            # 加载技能关联的工具
+            skill_configs = {}
+            if hasattr(agent_config, 'skill_ids') and agent_config.skill_ids:
+                middleware = AgentMiddleware(skill_ids=agent_config.skill_ids)
+                skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
+                tools.extend(skill_tools)
+                logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
+
+                # 应用动态过滤
+                if skill_configs:
+                    tools, activated_skill_ids = middleware.filter_tools(tools, message, skill_configs, tool_to_skill_map)
+                    logger.debug(f"过滤后剩余 {len(tools)} 个工具")
+                    active_prompts = AgentMiddleware.get_active_prompts(
+                        activated_skill_ids, skill_configs
+                    )
+                    system_prompt = f"{system_prompt}\n\n{active_prompts}"
 
 
             # 添加知识库检索工具
@@ -627,7 +661,6 @@ class DraftRunService:
                                 "tool_count": len(tools)
                             }
                         )
-
 
             # 4. 创建 LangChain Agent
             agent = LangChainAgent(

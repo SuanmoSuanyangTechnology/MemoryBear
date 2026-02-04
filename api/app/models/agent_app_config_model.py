@@ -30,6 +30,7 @@ class AgentConfig(Base):
     memory = Column(JSON, nullable=True, comment="记忆配置")
     variables = Column(JSON, default=list, nullable=True, comment="变量配置")
     tools = Column(JSON, default=dict, nullable=True, comment="工具配置")
+    skill_ids = Column(JSON, default=list, nullable=True, comment="关联的技能ID列表")
 
     # 多 Agent 相关字段
     agent_role = Column(String(20), comment="Agent 角色: master|sub|standalone")

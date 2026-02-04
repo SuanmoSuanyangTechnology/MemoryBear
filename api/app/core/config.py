@@ -215,6 +215,9 @@ class Settings:
     # official environment system version
     SYSTEM_VERSION: str = os.getenv("SYSTEM_VERSION", "v0.2.1")
 
+    # model square loading
+    LOAD_MODEL: bool = os.getenv("LOAD_MODEL", "false").lower() == "true"
+
     # workflow config
     WORKFLOW_NODE_TIMEOUT: int = int(os.getenv("WORKFLOW_NODE_TIMEOUT", 600))
 
