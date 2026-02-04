@@ -159,13 +159,13 @@ const Rag: FC = () => {
             ))}
           </div>
 
-          {/* 记忆总量 */}
+          {/* Total Memory */}
           <div className="rb:font-regular rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:mb-6.25">
             {t('userMemory.totalNumOfMemories')}
             <div className="rb:font-extrabold rb:text-[24px] rb:text-[#212332] rb:leading-7.5 rb:mt-2">{memory || 0}</div>
           </div>
 
-          {/* 关于我 */}
+          {/* About Me */}
           <>
             <Title
               type="aboutUs"
@@ -188,7 +188,7 @@ const Rag: FC = () => {
               </>
             )}
           </>
-          {/* 记忆洞察 */}
+          {/* Memory Insights */}
           <>
             <Title
               type="memoryInsight"

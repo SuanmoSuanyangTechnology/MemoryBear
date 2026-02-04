@@ -69,7 +69,7 @@ const NodeStatistics: FC = () => {
     getNodeStatistics(id).then((res) => {
       const response = res as NodeStatisticsItem[]
       setData(response)
-      // 计算count总计
+      // Calculate total count
       const totalCount = response.reduce((sum, item) => sum + (item.count || 0), 0)
       setTotal(totalCount)
       setLoading(false) 

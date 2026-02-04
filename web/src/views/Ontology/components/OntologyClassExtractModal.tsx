@@ -29,7 +29,6 @@ const OntologyClassExtractModal = forwardRef<OntologyClassExtractModalRef, Ontol
   const [targetKeys, setTargetKeys] = useState<TransferProps['targetKeys']>([]);
   const [selectedKeys, setSelectedKeys] = useState<TransferProps['selectedKeys']>([]);
 
-  // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
@@ -43,7 +42,6 @@ const OntologyClassExtractModal = forwardRef<OntologyClassExtractModalRef, Ontol
     setVisible(true);
     setData(vo)
   };
-  // 封装保存方法，添加提交逻辑
   const handleSave = () => {
     if (!data?.scene_id) return;
     form
@@ -104,7 +102,6 @@ const OntologyClassExtractModal = forwardRef<OntologyClassExtractModalRef, Ontol
     setSelectedKeys([...sourceSelectedKeys, ...targetSelectedKeys].filter(Boolean));
   };
 
-  // 暴露给父组件的方法
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));

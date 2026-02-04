@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:52:47 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 15:52:47 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 10:00:01
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, Switch, App, DatePicker } from 'antd';
@@ -162,7 +162,6 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
           <Switch />
         </FormItem>
 
-        {/* 高级设置 */}
         <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.advancedSettings')}</div>
 
         <FormItem

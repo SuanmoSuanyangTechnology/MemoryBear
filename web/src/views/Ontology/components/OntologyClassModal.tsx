@@ -22,7 +22,6 @@ const OntologyClassModal = forwardRef<OntologyClassModalRef, OntologyClassModalP
   const [loading, setLoading] = useState(false)
   const [scene_id, setSceneId] = useState<string | null>(null)
 
-  // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
@@ -34,7 +33,6 @@ const OntologyClassModal = forwardRef<OntologyClassModalRef, OntologyClassModalP
     setVisible(true);
     setSceneId(scene_id)
   };
-  // 封装保存方法，添加提交逻辑
   const handleSave = () => {
     if (!scene_id) return;
     form
@@ -56,7 +54,6 @@ const OntologyClassModal = forwardRef<OntologyClassModalRef, OntologyClassModalP
       });
   }
 
-  // 暴露给父组件的方法
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));

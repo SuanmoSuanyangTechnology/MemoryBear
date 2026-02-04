@@ -146,7 +146,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                 </div>
               </RbCard>
 
-              {/* 日志 */}
+              {/* Logs */}
               <RbCard title={t('application.changeLog')} headerType="borderless">
                 <Space size={16} direction="vertical" style={{ width: '100%' }}>
                 {selectedVersion && (

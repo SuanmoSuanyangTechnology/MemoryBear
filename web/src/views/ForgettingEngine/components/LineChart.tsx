@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:00:20 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:00:20 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 10:03:35
  */
 /**
  * Line Chart Component
@@ -126,7 +126,6 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
   }, [t])
 
   useEffect(() => {
-    // 语言切换时重新生成数据
     if (config) {
       getCaculateData(config)
     }

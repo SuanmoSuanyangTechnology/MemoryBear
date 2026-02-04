@@ -137,7 +137,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
           layout="vertical"
           scrollToFirstError={{ behavior: 'instant', block: 'end', focus: true }}
         >
-          {/* 变量类型 */}
+          {/* Variable Type */}
           <FormItem
             name="type"
             label={t('application.variableType')}
@@ -154,7 +154,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               optionRender={(props) => <div className="rb:flex rb:justify-between rb:items-center">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></div>}
             />
           </FormItem>
-          {/* 变量名称 */}
+          {/* Variable Name */}
           <FormItem
             name="name"
             label={t('application.variableName')}
@@ -172,7 +172,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               }}
             />
           </FormItem>
-          {/* 显示名称 */}
+          {/* Display Name */}
           <FormItem
             name="display_name"
             label={t('application.displayName')}
@@ -180,14 +180,14 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
           >
             <Input placeholder={t('common.enter')} />
           </FormItem>
-          {/* 描述 */}
+          {/* Description */}
           <FormItem
             name="description"
             label={t('application.description')}
           >
             <Input placeholder={t('common.enter')} />
           </FormItem>
-          {/* 最大长度 */}
+          {/* Max Length */}
           {['text', 'paragraph'].includes(values?.type) && (
             <FormItem
               name="max_length"
@@ -196,7 +196,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
             </FormItem>
           )}
-          {/* 默认值 */}
+          {/* Default Value */}
           {/* {['text', 'paragraph', 'number', 'checkbox'].includes(values?.type) && (
             <FormItem
               name="default_value"
@@ -208,7 +208,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               {['checkbox'].includes(values.type) && <Select options={[{ value: true, label: t('application.defaultChecked') }, { value: false, label: t('application.notDefaultChecked') }]} />}
             </FormItem>
           )} */}
-          {/* 选项 */}
+          {/* Options */}
           {['dropdownOptions'].includes(values?.type) && (
             <FormItem
               name="options"
@@ -217,7 +217,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               <SortableList />
             </FormItem>
           )}
-          {/* API 扩展 */}
+          {/* API Extension */}
           {['apiVariable'].includes(values?.type) && (
             <FormItem
               name="api_extension"
@@ -237,14 +237,14 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               />
             </FormItem>
           )}
-          {/* 是否必填 */}
+          {/* Required */}
           <FormItem
             name="required"
             valuePropName="checked"
           >
             <Checkbox>{t('application.required')}</Checkbox>
           </FormItem>
-          {/* 是否隐藏 */}
+          {/* Hidden */}
           {/* <FormItem
             name="hidden"
             valuePropName="checked"

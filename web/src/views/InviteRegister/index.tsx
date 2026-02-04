@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:37:12 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:37:12 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 10:05:39
  */
 /**
  * Invite Register Page
@@ -211,7 +211,7 @@ const InviteRegister: React.FC = () => {
                   }
                   const { error } = validatePasswordStrength(value);
                   if (error && value.length >= 8) {
-                    return Promise.resolve(); // 强度提示但不阻止提交
+                    return Promise.resolve();
                   } else if (error) {
                     return Promise.reject(new Error(error));
                   }

@@ -2242,6 +2242,7 @@ export const zh = {
       resilience: '恢复力',
       suggestions: '个性化建议',
       suggestionLoading: '您的个性化建议正在生成中',
+      item: '个',
     },
     reflectionEngine: {
       reflectionEngineConfig: '反思引擎配置',

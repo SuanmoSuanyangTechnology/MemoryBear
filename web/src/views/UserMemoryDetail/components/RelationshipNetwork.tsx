@@ -51,19 +51,19 @@ const RelationshipNetwork:FC = () => {
       const curEdges: Edge[] = []
       const curNodeTypes = Object.keys(statistics.node_types).filter(vo => vo !== 'Dialogue')
       
-      // 计算每个节点的连接数
+      // Calculate connection count for each node
       const connectionCount: Record<string, number> = {}
       edges.forEach(edge => {
         connectionCount[edge.source] = (connectionCount[edge.source] || 0) + 1
         connectionCount[edge.target] = (connectionCount[edge.target] || 0) + 1
       })
       
-      // 处理节点数据
+      // Process node data
       nodes.filter(vo => vo.label !== 'Dialogue').forEach(node => {
         const connections = connectionCount[node.id] || 0
         const categoryIndex = curNodeTypes.indexOf(node.label)
         
-        // 根据节点类型获取显示名称
+        // Get display name based on node type
         let displayName = ''
         switch (node.label) {
           // case 'Statement':
@@ -93,16 +93,16 @@ const RelationshipNetwork:FC = () => {
           ...node,
           name: displayName,
           category: categoryIndex >= 0 ? categoryIndex : 0,
-          symbolSize: symbolSize, // 根据连接数调整节点大小
+          symbolSize: symbolSize, // Adjust node size based on connection count
         })
       })
       
-      // 创建节点ID到标签的映射
+      // Create mapping from node ID to label
       const nodeIdToLabel: Record<string, string> = {}
       nodes.forEach(node => {
         nodeIdToLabel[node.id] = node.label
       })
-      // 处理边数据
+      // Process edge data
       edges.forEach(edge => {
         curEdges.push({
           ...edge,
@@ -112,7 +112,7 @@ const RelationshipNetwork:FC = () => {
         })
       })
       
-      // 设置分类
+      // Set categories
       const curCategories = curNodeTypes.map(type => ({ name: type }))
       
       setNodes(curNodes)
@@ -160,7 +160,7 @@ const RelationshipNetwork:FC = () => {
 
   return (
     <Row gutter={16}>
-      {/* 关系网络 */}
+      {/* Relationship Network */}
       <Col span={16}>
         <RbCard 
           title={t('userMemory.relationshipNetwork')}
@@ -211,22 +211,22 @@ const RelationshipNetwork:FC = () => {
                       },
                       force: {
                         repulsion: 100,
-                        // 启用类别聚合
+                        // Enable category aggregation
                         edgeLength: 80,
                         gravity: 0.3,
-                        // 同类别的节点相互吸引
+                        // Nodes of the same category attract each other
                         layoutAnimation: true,
-                        // 防止点击时重新计算布局
+                        // Prevent layout recalculation on click
                         preventOverlap: true,
-                        // 点击节点后保持布局稳定
+                        // Keep layout stable after node click
                         edgeSymbol: ['none', 'arrow'],
                         edgeSymbolSize: [4, 10],
-                        // 初始布局完成后关闭力导向
+                        // Disable force-directed after initial layout
                         initLayout: 'force'
                       },
                       selectedMode: 'single',
                       draggable: true,
-                      // 防止数据更新时重新计算布局
+                      // Prevent layout recalculation on data update
                       animationDurationUpdate: 0,
                       select: {
                         itemStyle: {
@@ -242,12 +242,12 @@ const RelationshipNetwork:FC = () => {
                 notMerge={false}
                 lazyUpdate={true}
                 onEvents={{
-                  // 节点点击事件处理
+                  // Node click event handler
                   click: (params: { dataType: string; data: Node; name: string }) => {
                     if (params.dataType === 'node') {
-                      // 处理节点点击事件
+                      // Handle node click event
                       console.log('Node clicked:', params.data);
-                      // 使用函数式更新避免状态依赖问题
+                      // Use functional update to avoid state dependency issues
                       setSelectedNode(params.data)
                     }
                   }
@@ -257,7 +257,7 @@ const RelationshipNetwork:FC = () => {
           </div>
         </RbCard>
       </Col>
-      {/* 记忆详情 */}
+      {/* Memory Details */}
       <Col span={8}>
         <RbCard 
           title={t('userMemory.memoryDetails')}

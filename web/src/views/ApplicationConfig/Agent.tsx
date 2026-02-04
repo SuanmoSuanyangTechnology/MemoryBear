@@ -255,7 +255,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     const { memory, knowledge_retrieval, tools, ...rest } = values
     const { knowledge_bases = [], ...knowledgeRest } = knowledge_retrieval || {}
     const { memory_content } = memory || {}
-    // 从原数据中获取memory的其他必要属性
+    // Get other necessary properties of memory from original data
     const originalMemory = data.memory || ({} as MemoryConfig)
     
     const params: Config = {
@@ -425,7 +425,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                 <Knowledge />
               </Form.Item>
 
-              {/* 记忆配置 */}
+              {/* Memory Configuration */}
               <Card title={t('application.memoryConfiguration')}>
                 <Space size={24} direction='vertical' style={{ width: '100%' }}>
                   <SwitchWrapper title="dialogueHistoricalMemory" desc="dialogueHistoricalMemoryDesc" name={['memory', 'enabled']} />
@@ -442,7 +442,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                 <VariableList />
               </Form.Item>
               
-              {/* 工具配置 */}
+              {/* Tool Configuration */}
               <Form.Item name="tools">
                 <ToolList />
               </Form.Item>

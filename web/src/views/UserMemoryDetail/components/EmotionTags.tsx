@@ -134,11 +134,10 @@ const EmotionTags: FC = () => {
           <div ref={chartRef} className="rb:mt-6 rb:px-6" style={{ height: '320px', width: '100%' }} />
           <div className="rb:flex rb:flex-wrap rb:items-center rb:justify-center rb:gap-10 rb:text-sm rb:mt-3 rb:p-3 rb:bg-[#F0F3F8] rb:rounded-[0_0_8px_8px]">
             {Object.entries(emotionStats).map(([type, count]) => {
-              console.log(type)
               return (
                 <div key={type} className="rb:flex rb:items-center rb:gap-2">
                   <div className="rb:w-3 rb:h-3 rb:rounded-full" style={{ backgroundColor: getEmotionColor(type) }}></div>
-                  <span className="rb:leading-5">{t(`statementDetail.${type || 'neutral'}`)} ({count}个)</span>
+                  <span className="rb:leading-5">{t(`statementDetail.${type || 'neutral'}`)} ({count}{t('statementDetail.item')})</span>
                 </div>
               )
             })}

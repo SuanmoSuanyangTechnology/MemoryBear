@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:52:44 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 15:54:22
+ * @Last Modified time: 2026-02-04 10:00:02
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Switch, Button, Tooltip } from 'antd';
@@ -106,7 +106,6 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
         </span>
       </div>
 
-      {/* 高级设置 */}
       {data.expires_at && <>
         <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:my-4">{t('apiKey.advancedSettings')}</div>
 

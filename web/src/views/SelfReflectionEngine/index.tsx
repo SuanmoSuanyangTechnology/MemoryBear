@@ -27,19 +27,19 @@ import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 
 /** Configuration list */
 const configList = [
-  // 启用反思引擎
+  // Enable reflection engine
   {
     key: 'reflection_enabled',
     type: 'switch',
   },
-  // 反思模型
+  // Reflection model
   {
     key: 'reflection_model_id',
     type: 'customSelect',
     url: getModelListUrl,
     params: { type: 'chat,llm', page: 1, pagesize: 100, is_active: true }, // chat,llm
   },
-  // 迭代周期
+  // Iteration period
   {
     key: 'reflection_period_in_hours',
     type: 'select',
@@ -51,7 +51,7 @@ const configList = [
       { label: 'daily', value: '24' },
     ],
   },
-  // 反思范围
+  // Reflection scope
   {
     key: 'reflexion_range',
     type: 'select',
@@ -61,7 +61,7 @@ const configList = [
       { label: 'all', value: 'all' },
     ],
   },
-  // 反思基线
+  // Reflection baseline
   {
     key: 'baseline',
     type: 'select',
@@ -72,12 +72,12 @@ const configList = [
       { label: 'HYBRID', value: 'HYBRID' },
     ],
   },
-  // 质量评估
+  // Quality assessment
   {
     key: 'quality_assessment',
     type: 'switch',
   },
-  // 质量评估
+  // Quality assessment
   {
     key: 'memory_verify',
     type: 'switch',

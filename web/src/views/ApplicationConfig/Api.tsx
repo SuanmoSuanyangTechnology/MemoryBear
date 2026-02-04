@@ -162,7 +162,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
           }
         >
           <div className="rb:text-[#5B6167] rb:text-[12px] rb:mb-2">{t('application.apiKeySubTitle')}</div>
-          {/* 总览数据 */}
+          {/* Overview Data */}
           <Row>
             <Col span={6}>
               <Statistic title={t('application.apiKeyTotal')} value={apiKeyList.length} />
@@ -171,7 +171,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
               <Statistic title={t('application.apiKeyRequestTotal')} value={totalRequests} />
             </Col>
           </Row>
-          {/* API Key 列表 */}
+          {/* API Key List */}
           {apiKeyList.sort((a, b) => b.created_at - a.created_at).map(item => (
             <div key={item.id} className="rb:mt-4 rb:p-[10px_12px] rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
               <div className="rb:flex rb:items-center rb:justify-between">

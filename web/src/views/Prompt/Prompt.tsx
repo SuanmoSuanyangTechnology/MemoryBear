@@ -110,7 +110,7 @@ const Prompt: FC<{ editVo: HistoryItem | null; refresh: () => void; }> = ({ edit
             break;
           case 'end':
             setLoading(false)
-            // 流结束时同步表单值
+            // Sync form values when stream ends
             form.setFieldsValue({ current_prompt: currentPromptValueRef.current })
             break
         }

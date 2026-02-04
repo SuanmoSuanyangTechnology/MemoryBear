@@ -22,7 +22,6 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
   const [form] = Form.useForm<OntologyModalData>();
   const [loading, setLoading] = useState(false)
 
-  // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
@@ -39,7 +38,6 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
     }
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
   const handleSave = () => {
     form
       .validateFields()
@@ -59,7 +57,6 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
       });
   }
 
-  // 暴露给父组件的方法
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));

@@ -69,7 +69,7 @@ const theme = {
 const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
   className = '',
   value,
-  placeholder = "请输入内容...",
+  placeholder = "Please enter content...",
   onChange,
 }, ref) => {
   const [editor] = useLexicalComposerContext();

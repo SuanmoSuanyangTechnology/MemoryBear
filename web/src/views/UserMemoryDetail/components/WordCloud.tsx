@@ -79,7 +79,7 @@ const WordCloud: FC = () => {
   const radarOption = useMemo(() => {
     if (!wordCloud?.tags.length) return {}
     
-    // 将avg_intensity转换为1-100范围
+    // Convert avg_intensity to 1-100 range
     const radarData = wordCloud.tags.map(item => ({
       name: item.emotion_type,
       value: Math.round(item.avg_intensity * 100),
