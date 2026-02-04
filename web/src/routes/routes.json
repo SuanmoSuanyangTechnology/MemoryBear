@@ -53,7 +53,8 @@
   {
     "element": "NoAuthLayout",
     "children": [
-      { "path": "/conversation/:token", "element": "Conversation" }
+      { "path": "/conversation/:token", "element": "Conversation" },
+      { "path": "/jump", "element": "Jump" }
     ]
   },
   {

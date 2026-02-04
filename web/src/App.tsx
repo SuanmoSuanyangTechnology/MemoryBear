@@ -37,7 +37,7 @@ function App() {
   const { checkJump } = useUser();
   useEffect(() => {
     const authToken = cookieUtils.get('authToken')
-    if (!authToken && !window.location.hash.includes('#/login') && !window.location.hash.includes('#/conversation/')) {
+    if (!authToken && !window.location.hash.includes('#/login') && !window.location.hash.includes('#/conversation/') && !window.location.hash.includes('#/jump')) {
       window.location.href = `/#/login`;
     } else {
       checkJump()
