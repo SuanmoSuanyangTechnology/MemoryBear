@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-04 18:34:36 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-04 18:34:36 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 18:49:59
  */
 import { useEffect, type FC } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -33,8 +33,8 @@ const JumpPage: FC = () => {
     const { access_token, refresh_token, target } = data
 
     // Store authentication tokens in cookies for API authorization
-    cookieUtils.set('access_token', access_token)
-    cookieUtils.set('refresh_token', refresh_token)
+    cookieUtils.set('authToken', access_token)
+    cookieUtils.set('refreshToken', refresh_token)
 
     // Redirect to the target page if specified
     if (target) {
