@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 
-from app.db import get_db
+from app.db import get_db, get_db_context
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.llm_tools import WriteState
 from app.core.memory.agent.langgraph_graph.nodes.write_nodes import write_node
@@ -46,21 +46,27 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
     from app.core.memory.agent.utils.redis_tool import write_store
     write_store.save_session_write(end_user_id,  (langchain_messages))
     # 获取数据库会话
-    db_session = next(get_db())
-    config_service = MemoryConfigService(db_session)
-    memory_config = config_service.load_memory_config(
-        config_id=memory_config,  # 改为整数
-        service_name="MemoryAgentService"
-    )
-    if long_term_type=='chunk':
-        '''方案一:对话窗口6轮对话'''
-        await window_dialogue(end_user_id,langchain_messages,memory_config,scope)
-    if long_term_type=='time':
-        """时间"""
-        await memory_long_term_storage(end_user_id, memory_config,5)
-    if  long_term_type=='aggregate':
-        """方案三：聚合判断"""
-        await aggregate_judgment(end_user_id, langchain_messages, memory_config)
+    with get_db_context() as db_session:
+        try:
+            config_service = MemoryConfigService(db_session)
+            memory_config = config_service.load_memory_config(
+                config_id=memory_config,  # 改为整数
+                service_name="MemoryAgentService"
+            )
+            if long_term_type=='chunk':
+                '''方案一:对话窗口6轮对话'''
+                await window_dialogue(end_user_id,langchain_messages,memory_config,scope)
+            if long_term_type=='time':
+                """时间"""
+                await memory_long_term_storage(end_user_id, memory_config,5)
+            if  long_term_type=='aggregate':
+                """方案三：聚合判断"""
+                await aggregate_judgment(end_user_id, langchain_messages, memory_config)
+        finally:
+            if db_session.in_transaction():
+                db_session.rollback()
+            db_session.close()
+
 
 
 async def write_long_term(storage_type,end_user_id,message_chat,aimessages,user_rag_memory_id,actual_config_id):
