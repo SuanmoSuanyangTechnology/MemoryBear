@@ -190,15 +190,6 @@ def _get_ontology_service(
                 detail="指定的LLM模型没有配置API密钥"
             )
         
-        # 获取可用的 API Key（只选择激活状态的）
-        active_api_keys = [ak for ak in model_config.api_keys if getattr(ak, 'is_active', True)]
-        if not active_api_keys:
-            logger.error(f"Model {llm_id} has no active API key")
-            raise HTTPException(
-                status_code=400,
-                detail="指定的LLM模型没有可用的API密钥"
-            )
-        
         # 安全的数值转换辅助函数
         def safe_int(value, default: int = 0) -> int:
             """安全地将值转换为整数，异常时返回默认值"""
@@ -209,9 +200,19 @@ def _get_ontology_service(
             except (ValueError, TypeError):
                 return default
         
-        # 对于组合模型，根据负载均衡策略选择 API Key
+        # 获取可用的 API Key（只选择激活状态的）
+        # 注意：is_active 为 None 时视为非激活状态，避免旧记录被错误地当作激活
+        active_api_keys = [ak for ak in model_config.api_keys if getattr(ak, 'is_active', None) is True]
+        if not active_api_keys:
+            logger.error(f"Model {llm_id} has no active API key")
+            raise HTTPException(
+                status_code=400,
+                detail="指定的LLM模型没有可用的API密钥"
+            )
+        
+        # 根据负载均衡策略选择 API Key（组合模型和非组合模型统一处理）
         is_composite = getattr(model_config, 'is_composite', False)
-        if is_composite and len(active_api_keys) > 1:
+        if len(active_api_keys) > 1:
             from app.models.models_model import LoadBalanceStrategy
             load_balance_strategy = getattr(model_config, 'load_balance_strategy', None)
             if load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
@@ -221,7 +222,7 @@ def _get_ontology_service(
                 # 默认策略：按优先级选择（优先级数值越小越优先）
                 api_key_config = min(active_api_keys, key=lambda x: safe_int(x.priority, 1))
             logger.info(
-                f"Composite model using load balance strategy: {load_balance_strategy}, "
+                f"Model (is_composite={is_composite}) using load balance strategy: {load_balance_strategy}, "
                 f"selected API Key: {api_key_config.id}, provider: {api_key_config.provider}"
             )
         else:
