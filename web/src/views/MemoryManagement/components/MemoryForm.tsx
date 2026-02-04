@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { MemoryFormData, Memory, MemoryFormRef } from '../types';
 import RbModal from '@/components/RbModal'
 import { createMemoryConfig, updateMemoryConfig } from '@/api/memory'
-import { getOntologyScenesUrl } from '@/api/ontology'
+import { getOntologyScenesSimpleUrl } from '@/api/ontology'
 import CustomSelect from '@/components/CustomSelect';
 
 const FormItem = Form.Item;
@@ -114,8 +114,7 @@ const MemoryForm = forwardRef<MemoryFormRef, MemoryFormProps>(({
         >
           <CustomSelect
             placeholder={t('common.pleaseSelect')}
-            url={getOntologyScenesUrl}
-            params={{ pagesize: 100, page: 1 }}
+            url={getOntologyScenesSimpleUrl}
             hasAll={false}
             valueKey='scene_id'
             labelKey="scene_name"
