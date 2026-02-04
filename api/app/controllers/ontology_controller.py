@@ -182,27 +182,35 @@ def _get_ontology_service(
                 detail=f"找不到指定的LLM模型: {llm_id}"
             )
         
-        # 验证模型配置了API密钥
-        if not model_config.api_keys:
-            logger.error(f"Model {llm_id} has no API key configuration")
+        # 通过 Repository 获取可用的 API Key（负载均衡逻辑由 Repository 处理）
+        from app.repositories.model_repository import ModelApiKeyRepository
+        api_keys = ModelApiKeyRepository.get_by_model_config(db, model_config.id)
+        if not api_keys:
+            logger.error(f"Model {llm_id} has no active API key")
             raise HTTPException(
                 status_code=400,
-                detail="指定的LLM模型没有配置API密钥"
+                detail="指定的LLM模型没有可用的API密钥"
             )
+        api_key_config = api_keys[0]
         
-        api_key_config = model_config.api_keys[0]
-        
+        is_composite = getattr(model_config, 'is_composite', False)
         logger.info(
             f"Using specified model - user: {current_user.id}, "
-            f"model_id: {llm_id}, model_name: {api_key_config.model_name}"
+            f"model_id: {llm_id}, model_name: {api_key_config.model_name}, "
+            f"is_composite: {is_composite}, api_key_id: {api_key_config.id}"
         )
         
         # 创建模型配置对象
         from app.core.models.base import RedBearModelConfig
         
+        # 对于组合模型，使用 API Key 的 provider；否则使用 model_config 的 provider
+        actual_provider = api_key_config.provider if is_composite else (
+            getattr(model_config, 'provider', None) or "openai"
+        )
+        
         llm_model_config = RedBearModelConfig(
             model_name=api_key_config.model_name,
-            provider=model_config.provider if hasattr(model_config, 'provider') else "openai",
+            provider=actual_provider,
             api_key=api_key_config.api_key,
             base_url=api_key_config.api_base,
             max_retries=3,
