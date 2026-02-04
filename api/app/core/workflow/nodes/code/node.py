@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import re
+import urllib.parse
 from string import Template
 from textwrap import dedent
 from typing import Any

@@ -21,6 +21,7 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import InitialValuePlugin from './plugin/InitialValuePlugin'
 import LineBreakPlugin from './plugin/LineBreakPlugin';
 import InsertTextPlugin from './plugin/InsertTextPlugin';
+import EditablePlugin from './plugin/EditablePlugin';
 
 /**
  * Editor ref methods exposed to parent components
@@ -50,6 +51,7 @@ interface LexicalEditorProps {
   onChange?: (value: string) => void;
   /** Editor height in pixels */
   height?: number;
+  disabled?: boolean;
 }
 
 /**
@@ -71,6 +73,7 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
   value,
   placeholder = "Please enter content...",
   onChange,
+  disabled
 }, ref) => {
   const [editor] = useLexicalComposerContext();
   
@@ -132,7 +135,11 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
       <RichTextPlugin
         contentEditable={
           <ContentEditable
-            className={clsx("rb:outline-none rb:resize-none rb:text-[14px] rb:leading-5 rb:px-4 rb:py-5 rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:overflow-auto", className)}
+            className={clsx(
+              "rb:outline-none rb:resize-none rb:text-[14px] rb:leading-5 rb:px-4 rb:py-5 rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:overflow-auto",
+              disabled && "rb:cursor-not-allowed rb:bg-[#F6F8FC] rb:text-[#5B6167]",
+              className
+            )}
           />
         }
         placeholder={
@@ -145,6 +152,7 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
       <LineBreakPlugin onChange={onChange} />
       <InitialValuePlugin value={value} />
       <InsertTextPlugin />
+      <EditablePlugin disabled={disabled} />
     </div>
   );
 });
@@ -158,6 +166,7 @@ const Editor = forwardRef<EditorRef, LexicalEditorProps>((props, ref) => {
     namespace: 'Editor',
     theme,
     nodes: [],
+    editable: !props.disabled,
     onError: (error: Error) => {
       console.error(error);
     },

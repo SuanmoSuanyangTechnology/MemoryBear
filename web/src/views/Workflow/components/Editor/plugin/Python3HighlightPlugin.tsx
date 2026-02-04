@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { TextNode, $createTextNode, $getSelection, $isRangeSelection } from 'lexical';
+import { TextNode, $createTextNode, $getSelection, $isRangeSelection, COMMAND_PRIORITY_LOW, PASTE_COMMAND } from 'lexical';
 
 const PYTHON_KEYWORDS = new Set([
   'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue',
@@ -11,12 +11,30 @@ const PYTHON_KEYWORDS = new Set([
 
 const Python3HighlightPlugin = () => {
   const [editor] = useLexicalComposerContext();
+  const isPastingRef = useRef(false);
+
+  useEffect(() => {
+    return editor.registerCommand(
+      PASTE_COMMAND,
+      () => {
+        isPastingRef.current = true;
+        setTimeout(() => {
+          isPastingRef.current = false;
+        }, 100);
+        return false;
+      },
+      COMMAND_PRIORITY_LOW
+    );
+  }, [editor]);
 
   useEffect(() => {
     return editor.registerNodeTransform(TextNode, (textNode: TextNode) => {
+      if (isPastingRef.current) return;
+      
       const text = textNode.getTextContent();
       
       if (textNode.hasFormat('code')) return;
+      if (textNode.getStyle()) return;
       if (!needsHighlight(text)) return;
       
       const parent = textNode.getParent();

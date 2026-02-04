@@ -43,6 +43,7 @@ async def write_messages(end_user_id,langchain_messages,memory_config):
                 for node_name, node_data in update_event.items():
                     if 'save_neo4j' == node_name:
                         massages = node_data
+            # TODO：删除
             massagesstatus = massages.get('write_result')['status']
             contents = massages.get('write_result')
             print(contents)
@@ -60,6 +61,7 @@ async def window_dialogue(end_user_id,langchain_messages,memory_config,scope):
         scope：窗口大小
     '''
     scope=scope
+    redis_messages = []
     is_end_user_id = count_store.get_sessions_count(end_user_id)
     if is_end_user_id is not False:
         is_end_user_id = count_store.get_sessions_count(end_user_id)[0]
@@ -91,6 +93,9 @@ async def memory_long_term_storage(end_user_id,memory_config,time):
         memory_config: 内存配置对象
     '''
     long_time_data = write_store.find_user_recent_sessions(end_user_id, time)
+    # Handle case where no session exists in Redis (returns False or empty)
+    if not long_time_data or long_time_data is False:
+        return
     format_messages = await chat_data_format(long_time_data)
     if format_messages!=[]:
         await write_messages(end_user_id, format_messages, memory_config)
@@ -108,8 +113,9 @@ async def aggregate_judgment(end_user_id: str, ori_messages: list, memory_config
     try:
         # 1. 获取历史会话数据（使用新方法）
         result = write_store.get_all_sessions_by_end_user_id(end_user_id)
-        history = await format_parsing(result)
-        if not result:
+        
+        # Handle case where no session exists in Redis (returns False or empty)
+        if not result or result is False:
             history = []
         else:
             history = await format_parsing(result)
