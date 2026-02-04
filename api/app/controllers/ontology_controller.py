@@ -182,14 +182,6 @@ def _get_ontology_service(
                 detail=f"找不到指定的LLM模型: {llm_id}"
             )
         
-        # 检查是否为组合模型
-        if hasattr(model_config, 'is_composite') and model_config.is_composite:
-            logger.error(f"Model {llm_id} is a composite model, which is not supported for ontology extraction")
-            raise HTTPException(
-                status_code=400,
-                detail="本体提取不支持使用组合模型，请选择单个模型"
-            )
-        
         # 验证模型配置了API密钥
         if not model_config.api_keys:
             logger.error(f"Model {llm_id} has no API key configuration")

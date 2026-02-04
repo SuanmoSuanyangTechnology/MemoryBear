@@ -33,7 +33,7 @@ async def run_code(request: RunCodeRequest):
     """Execute code in sandbox"""
     if request.language == "python3":
         return await run_python_code(request.code, request.preload, request.options)
-    elif request.language == "nodejs":
+    elif request.language == "javascript":
         return await run_nodejs_code(request.code, request.preload, request.options)
     else:
         return error_response(-400, "unsupported language")
