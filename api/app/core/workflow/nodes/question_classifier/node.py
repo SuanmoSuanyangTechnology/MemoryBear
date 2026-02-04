@@ -23,6 +23,18 @@ class QuestionClassifierNode(BaseNode):
         super().__init__(node_config, workflow_config)
         self.typed_config: QuestionClassifierNodeConfig | None = None
         self.category_to_case_map = {}
+        self.response_metadata = {}
+
+    def _extract_token_usage(self, business_result: Any) -> dict[str, int] | None:
+        if self.response_metadata:
+            usage = self.response_metadata.get('token_usage')
+            if usage:
+                return {
+                    "prompt_tokens": usage.get('prompt_tokens', 0),
+                    "completion_tokens": usage.get('completion_tokens', 0),
+                    "total_tokens": usage.get('total_tokens', 0)
+                }
+        return None
 
     def _get_llm_instance(self) -> RedBearLLM:
         """获取LLM实例"""
@@ -112,6 +124,7 @@ class QuestionClassifierNode(BaseNode):
 
             response = await llm.ainvoke(messages)
             result = response.content.strip()
+            self.response_metadata = response.response_metadata
 
             if result in category_names:
                 category = result
