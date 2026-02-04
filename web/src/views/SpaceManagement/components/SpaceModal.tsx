@@ -85,6 +85,8 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
             }).catch(() => {
               handleUpdate(formData)
             })
+          } else {
+            handleUpdate(formData)
           }
         }
       })
@@ -139,6 +141,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
           label={t('space.spaceIcon')}
           valuePropName="fileList"
           hidden={currentStep === 1}
+          rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.spaceIcon') }) }]}
         >
           <UploadImages />
         </Form.Item>
