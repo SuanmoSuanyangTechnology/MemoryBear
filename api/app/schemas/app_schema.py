@@ -156,6 +156,9 @@ class AgentConfigCreate(BaseModel):
         description="Agent 可用的工具列表"
     )
 
+    # 技能配置
+    skill_ids: Optional[List[str]] = Field(default=None, description="关联的技能ID列表")
+
 
 class AppCreate(BaseModel):
     name: str
@@ -207,6 +210,9 @@ class AgentConfigUpdate(BaseModel):
 
     # 工具配置
     tools: Optional[List[ToolConfig]] = Field(default_factory=list, description="工具列表")
+    
+    # 技能配置
+    skill_ids: Optional[List[str]] = Field(default=None, description="关联的技能ID列表")
 
 
 # ---------- Output Schemas ----------
@@ -265,6 +271,8 @@ class AgentConfig(BaseModel):
 
     # 工具配置
     tools: Union[List[ToolConfig], Dict[str, ToolOldConfig]] = []
+
+    skill_ids: Optional[List[str]] = []
 
     is_active: bool
     created_at: datetime.datetime
