@@ -279,7 +279,7 @@ class MemoryConfigRepository:
             if update.config_desc is not None:
                 db_config.config_desc = update.config_desc
                 has_update = True
-            if hasattr(update, 'scene_id') and update.scene_id is not None:
+            if update.scene_id is not None:
                 db_config.scene_id = update.scene_id
                 has_update = True
 

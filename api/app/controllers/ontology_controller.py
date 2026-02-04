@@ -52,6 +52,7 @@ from app.services.ontology_service import OntologyService
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.validation.owl_validator import OWLValidator
 from app.services.model_service import ModelConfigService
+from app.repositories.ontology_scene_repository import OntologySceneRepository
 
 
 api_logger = get_api_logger()
@@ -785,7 +786,7 @@ async def get_scenes_simple(
         
     Examples:
         GET /scenes/simple
-        返回: {"items": [{"scene_id": "xxx", "scene_name": "场景1"}, ...]}
+        返回: {"data": [{"scene_id": "xxx", "scene_name": "场景1"}, ...]}
     """
     api_logger.info(f"Simple scene list requested by user {current_user.id}")
     
@@ -795,12 +796,11 @@ async def get_scenes_simple(
             api_logger.warning(f"User {current_user.id} has no current workspace")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
-        from app.repositories.ontology_scene_repository import OntologySceneRepository
         repo = OntologySceneRepository(db)
         scenes = repo.get_simple_list(workspace_id)
         
         api_logger.info(f"Simple scene list retrieved: {len(scenes)} scenes")
-        return success(data={"items": scenes}, msg="查询成功")
+        return success(data=scenes, msg="查询成功")
         
     except Exception as e:
         api_logger.error(f"Failed to get simple scene list: {str(e)}", exc_info=True)
