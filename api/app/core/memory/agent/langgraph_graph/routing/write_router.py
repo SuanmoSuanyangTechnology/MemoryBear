@@ -18,7 +18,6 @@ from app.services.memory_konwledges_server import write_rag
 from app.services.task_service import get_task_memory_write_result
 from app.tasks import write_message_task
 from app.utils.config_utils import resolve_config_id
-
 logger = get_agent_logger(__name__)
 template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
 
@@ -95,29 +94,24 @@ async def write(storage_type, end_user_id, user_message, ai_message, user_rag_me
 
 async def term_memory_save(long_term_messages,actual_config_id,end_user_id,type,scope):
     with get_db_context() as db_session:
-        try:
-            repo = LongTermMemoryRepository(db_session)
-            await long_term_storage(long_term_type=AgentMemory_Long_Term.STRATEGY_CHUNK, langchain_messages=long_term_messages,
-                                    memory_config=actual_config_id, end_user_id=end_user_id, scope=scope)
+        repo = LongTermMemoryRepository(db_session)
+        await long_term_storage(long_term_type=AgentMemory_Long_Term.STRATEGY_CHUNK, langchain_messages=long_term_messages,
+                                memory_config=actual_config_id, end_user_id=end_user_id, scope=scope)
 
-            from app.core.memory.agent.utils.redis_tool import write_store
-            result = write_store.get_session_by_userid(end_user_id)
-            if type==AgentMemory_Long_Term.STRATEGY_CHUNK or AgentMemory_Long_Term.STRATEGY_AGGREGATE:
-                data = await format_parsing(result, "dict")
-                chunk_data = data[:scope]
-                if len(chunk_data)==scope:
-                    repo.upsert(end_user_id, chunk_data)
-                    logger.info(f'---------写入短长期-----------')
-            else:
-                long_time_data = write_store.find_user_recent_sessions(end_user_id, 5)
-                long_messages = await messages_parse(long_time_data)
-                repo.upsert(end_user_id, long_messages)
-                logger.info(f'写入短长期：')
-            # yield db_session
-        finally:
-            if db_session.in_transaction():
-                db_session.rollback()
-            db_session.close()
+        from app.core.memory.agent.utils.redis_tool import write_store
+        result = write_store.get_session_by_userid(end_user_id)
+        if type==AgentMemory_Long_Term.STRATEGY_CHUNK or AgentMemory_Long_Term.STRATEGY_AGGREGATE:
+            data = await format_parsing(result, "dict")
+            chunk_data = data[:scope]
+            if len(chunk_data)==scope:
+                repo.upsert(end_user_id, chunk_data)
+                logger.info(f'---------写入短长期-----------')
+        else:
+            long_time_data = write_store.find_user_recent_sessions(end_user_id, 5)
+            long_messages = await messages_parse(long_time_data)
+            repo.upsert(end_user_id, long_messages)
+            logger.info(f'写入短长期：')
+
 
 
 '''根据窗口'''
