@@ -15,8 +15,6 @@ import CharacterCountPlugin from './plugin/CharacterCountPlugin'
 import InitialValuePlugin from './plugin/InitialValuePlugin';
 import CommandPlugin from './plugin/CommandPlugin';
 import Jinja2HighlightPlugin from './plugin/Jinja2HighlightPlugin';
-import Python3HighlightPlugin from './plugin/Python3HighlightPlugin';
-import JavaScriptHighlightPlugin from './plugin/JavaScriptHighlightPlugin';
 import LineNumberPlugin from './plugin/LineNumberPlugin';
 import BlurPlugin from './plugin/BlurPlugin';
 import { VariableNode } from './nodes/VariableNode'
@@ -32,7 +30,7 @@ export interface LexicalEditorProps {
   lineHeight?: number;
   size?: 'default' | 'small';
   type?: 'input' | 'textarea',
-  language?: 'string' | 'jinja2' | 'python3' | 'javascript'
+  language?: 'string' | 'jinja2'
 }
 
 const theme = {
@@ -67,7 +65,7 @@ const Editor: FC<LexicalEditorProps> =({
   const [enableLineNumbers, setEnableLineNumbers] = useState(false)
 
   useEffect(() => {
-    const needsLineNumbers = language === 'jinja2' || language === 'python3' || language === 'javascript';
+    const needsLineNumbers = language === 'jinja2';
     setEnableJinja2(language === 'jinja2');
     setEnableLineNumbers(needsLineNumbers);
 
@@ -237,13 +235,11 @@ const Editor: FC<LexicalEditorProps> =({
         <HistoryPlugin />
         <CommandPlugin />
         {language === 'jinja2' && <Jinja2HighlightPlugin />}
-        {language === 'python3' && <Python3HighlightPlugin />}
-        {language === 'javascript' && <JavaScriptHighlightPlugin />}
         {enableLineNumbers && <LineNumberPlugin />}
         <AutocompletePlugin options={options} enableJinja2={enableJinja2} />
         <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
-        <InitialValuePlugin key={language} value={value} options={options} enableLineNumbers={enableLineNumbers} />
-        {enableLineNumbers && <BlurPlugin />}
+        <InitialValuePlugin value={value} options={options} enableLineNumbers={enableLineNumbers} />
+        {enableJinja2 && <BlurPlugin />}
       </div>
     </LexicalComposer>
   );
