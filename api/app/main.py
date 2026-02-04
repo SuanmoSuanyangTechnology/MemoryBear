@@ -77,10 +77,14 @@ default_origins = [
 ]
 allowed_origins = list({o for o in (default_origins + settings.CORS_ORIGINS) if o})
 
+# 如果 CORS_ORIGINS 包含 "*"，则允许所有来源
+if "*" in settings.CORS_ORIGINS:
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=True if "*" not in allowed_origins else False,  # 允许所有来源时不能使用 credentials
     allow_methods=["*"],
     allow_headers=["*"],
 )
