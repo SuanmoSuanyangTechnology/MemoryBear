@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:43:58 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:43:58 
+ */
+/**
+ * Prompt Variable Modal
+ * Modal for adding variables to prompt with autocomplete suggestions
+ */
+
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { Form, AutoComplete, type AutoCompleteProps } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +18,9 @@ import RbModal from '@/components/RbModal'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface PromptVariableModalProps {
   refresh: (value: string) => void;
   variables: string[];
@@ -28,6 +42,7 @@ const PromptVariableModal = forwardRef<PromptVariableModalRef, PromptVariableMod
       label: `{{${key}}}`
     })))
   }, [variables])
+  /** Handle search and filter variables */
   const handleSearch = (value: string) => {
     const filterKeys = variables?.filter(key => key.includes(value))
 
@@ -44,18 +59,19 @@ const PromptVariableModal = forwardRef<PromptVariableModalRef, PromptVariableMod
     }
   }
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setLoading(false)
   };
 
+  /** Open modal */
   const handleOpen = () => {
     setVisible(true);
       form.resetFields();
   };
-  // 封装保存方法，添加提交逻辑
+  /** Apply variable to editor */
   const handleSave = () => {
     const variableName = form.getFieldValue('variableName')
 
@@ -65,7 +81,7 @@ const PromptVariableModal = forwardRef<PromptVariableModalRef, PromptVariableMod
     handleClose()
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

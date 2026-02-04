@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:49:09 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:49:09 
+ */
+/**
+ * Space Modal Component
+ * Two-step modal for creating workspace with basic info and model configuration
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Steps, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -15,13 +26,18 @@ import neo4jIcon from '@/assets/images/space/neo4j.png'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface SpaceModalProps {
   refresh: () => void;
 }
+/** Storage types */
 const types: StorageType[] = [
   'rag',
   'neo4j',
 ]
+/** Type icons mapping */
 const typeIcons: Record<StorageType, string> = {
   rag: ragIcon,
   neo4j: neo4jIcon
@@ -40,7 +56,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
 
   const values = Form.useWatch([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
@@ -48,10 +64,12 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
     setEditVo(null)
     setCurrentStep(0)
   };
+  /** Go to previous step */
   const handlePrevStep = () => {
     setCurrentStep(prev => prev - 1)
   }
 
+  /** Open modal with optional data */
   const handleOpen = (space?: Space) => {
     if (space) {
       setEditVo(space || null)
@@ -64,7 +82,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
     }
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save or proceed to next step */
   const handleSave = () => {
     form
       .validateFields()
@@ -92,6 +110,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
         console.log('err', err)
       });
   }
+  /** Update workspace */
   const handleUpdate = (formData: SpaceModalData) => {
     setLoading(true)
     createWorkspace(formData)
@@ -106,7 +125,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
       });
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

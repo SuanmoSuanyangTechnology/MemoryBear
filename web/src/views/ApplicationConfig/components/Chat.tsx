@@ -1,7 +1,20 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:27:39 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:27:39 
+ */
+/**
+ * Chat debugging component for application testing
+ * Supports both single agent and multi-agent cluster modes
+ * Provides real-time streaming responses and conversation history
+ */
+
 import { type FC, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
 import { Input, Form } from 'antd'
+
 import ChatIcon from '@/assets/images/application/chat.png'
 import ChatSendIcon from '@/assets/images/application/chatSend.svg'
 import DebuggingEmpty from '@/assets/images/application/debuggingEmpty.png'
@@ -12,13 +25,26 @@ import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
 import { type SSEMessage } from '@/utils/stream'
 
+/**
+ * Component props
+ */
 interface ChatProps {
+  /** List of chat configurations for comparison */
   chatList: ChatData[];
+  /** Application configuration data */
   data: Config;
+  /** Update chat list state */
   updateChatList: React.Dispatch<React.SetStateAction<ChatData[]>>;
+  /** Save configuration before running */
   handleSave: (flag?: boolean) => Promise<unknown>;
+  /** Source type: multi-agent cluster or single agent */
   source?: 'multi_agent' | 'agent';
 }
+
+/**
+ * Chat debugging component
+ * Allows testing application with different model configurations side-by-side
+ */
 const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, source = 'agent' }) => {
   const { t } = useTranslation();
   const [form] = Form.useForm<{ message: string }>()
@@ -31,6 +57,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
     setIsCluster(source === 'multi_agent')
   }, [source])
 
+  /** Add user message to all chat lists */
   const addUserMessage = (message: string) => {
     const newUserMessage: ChatItem = {
       role: 'user',
@@ -42,6 +69,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       list: [...(item.list || []), newUserMessage]
     })))
   }
+  /** Add empty assistant message placeholder */
   const addAssistantMessage = () => {
     const assistantMessage: ChatItem = {
       role: 'assistant',
@@ -65,6 +93,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       })))
     }
   }
+  /** Update assistant message with streaming content */
   const updateAssistantMessage = (content?: string, model_config_id?: string, conversation_id?: string) => {
     if (!content || !model_config_id) return
     updateChatList(prev => {
@@ -92,6 +121,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       return prev;
     })
   }
+  /** Update assistant message when error occurs */
   const updateErrorAssistantMessage  = (message_length: number, model_config_id?: string) => {
     if (message_length > 0 || !model_config_id) return
 
@@ -120,6 +150,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       return prev
     })
   }
+  /** Send message for agent comparison mode */
   const handleSend = () => {
     if (loading) return
     setLoading(true)
@@ -176,6 +207,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       })
   }
 
+  /** Add assistant message for cluster mode */
   const addClusterAssistantMessage = () => {
     const assistantMessage: ChatItem = {
       role: 'assistant',
@@ -187,6 +219,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       list: [...(item.list || []), assistantMessage]
     })))
   }
+  /** Update cluster assistant message with content */
   const updateClusterAssistantMessage = (content?: string) => {
     if (!content) return
     updateChatList(prev => {
@@ -209,6 +242,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       return [...modelChatList]
     })
   }
+  /** Update cluster message when error occurs */
   const updateClusterErrorAssistantMessage  = (message_length: number) => {
     if (message_length > 0) return
 
@@ -232,6 +266,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       return [...modelChatList]
     })
   }
+  /** Send message for cluster mode */
   const handleClusterSend = () => {
     if (loading) return
     setLoading(true)
@@ -291,6 +326,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       })
   }
 
+  /** Delete chat configuration from list */
   const handleDelete = (index: number) => {
     updateChatList(chatList.filter((_, voIndex) => voIndex !== index))
   }

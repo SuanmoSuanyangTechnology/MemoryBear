@@ -1,28 +1,48 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 15:52:47 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 10:00:01
+ */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, Switch, App, DatePicker } from 'antd';
 import { useTranslation } from 'react-i18next';
+import dayjs from 'dayjs'
+
 import type { ApiKey, ApiKeyModalRef } from '../types';
 import RbModal from '@/components/RbModal'
-import dayjs from 'dayjs'
 import { createApiKey, updateApiKey  } from '@/api/apiKey';
 
 const FormItem = Form.Item;
 
+/**
+ * Props for ApiKeyModal component
+ */
 interface CreateModalProps {
+  /** Callback to refresh parent list after save */
   refresh: () => void;
 }
 
+/**
+ * Modal component for creating or editing API keys
+ * Handles API key configuration including permissions and expiration
+ */
 const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
   refresh,
 }, ref) => {
+  // Hooks
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<ApiKey>();
+  
+  // State
+  const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [editVo, setEditVo] = useState<ApiKey | null>(null);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /**
+   * Close modal and reset form state
+   */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
@@ -30,10 +50,14 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
     setEditVo(null);
   };
 
+  /**
+   * Open modal for creating or editing
+   * @param apiKey - Optional API key data for edit mode
+   */
   const handleOpen = (apiKey?: ApiKey) => {
     if (apiKey?.id) {
       const { scopes = [], expires_at } = apiKey
-      // 编辑模式，填充表单
+      // Edit mode - populate form with existing data
       form.setFieldsValue({
         name: apiKey.name,
         description: apiKey.description,
@@ -46,7 +70,10 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
     setVisible(true);
   };
 
-  // 封装保存方法，添加提交逻辑
+  /**
+   * Validate and submit form data
+   * Creates new API key or updates existing one
+   */
   const handleSave = async () => {
     form.validateFields()
       .then((values) => {
@@ -59,7 +86,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
         if (rag) {
           scopes.push('rag')
         }
-        // 准备新的/更新的API Key数据
+        // Prepare new/updated API key data
         const apiKeyData = {
           ...rest,
           scopes,
@@ -78,7 +105,9 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
       })
   }
 
-  // 暴露给父组件的方法
+  /**
+   * Expose methods to parent component via ref
+   */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -133,7 +162,6 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
           <Switch />
         </FormItem>
 
-        {/* 高级设置 */}
         <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.advancedSettings')}</div>
 
         <FormItem

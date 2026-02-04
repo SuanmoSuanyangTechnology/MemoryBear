@@ -1,10 +1,23 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:58:03 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 16:58:35
+ */
+/**
+ * Conversation Page
+ * Public conversation interface for shared applications
+ * Supports conversation history, streaming responses, and memory/web search features
+ */
+
 import { type FC, useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
 import { Flex, Skeleton, Form } from 'antd'
 import clsx from 'clsx'
-import AnalysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.svg'
+import dayjs from 'dayjs'
+
 import { getConversationHistory, sendConversation, getConversationDetail, getShareToken } from '@/api/application'
 import type { HistoryItem, QueryParams } from './types'
 import Empty from '@/components/Empty'
@@ -19,9 +32,11 @@ import MemoryFunctionIcon from '@/assets/images/conversation/memoryFunction.svg'
 import OnlineIcon from '@/assets/images/conversation/online.svg'
 import OnlineCheckedIcon from '@/assets/images/conversation/onlineChecked.svg'
 import MemoryFunctionCheckedIcon from '@/assets/images/conversation/memoryFunctionChecked.svg'
-import dayjs from 'dayjs'
 import { type SSEMessage } from '@/utils/stream'
 
+/**
+ * Conversation component for shared applications
+ */
 const Conversation: FC = () => {
   const { t } = useTranslation()
   const { token } = useParams()
@@ -61,7 +76,7 @@ const Conversation: FC = () => {
     }
   }, [token, shareToken, page, hasMore, historyList])
 
-  // 按日期分组历史记录
+  /** Group conversation history by date */
   const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]> => {
     return items.reduce((groups: Record<string, HistoryItem[]>, item) => {
       const date = formatDateTime(item.created_at, 'YYYY-MM-DD')
@@ -74,6 +89,7 @@ const Conversation: FC = () => {
     }, {});
   }
 
+  /** Fetch conversation history with pagination */
   const getHistory = (flag: boolean = false) => {
     if (!token || (pageLoading || !hasMore) && !flag) {
       return
@@ -104,6 +120,7 @@ const Conversation: FC = () => {
         setPageLoading(false);
       })
   }
+  /** Switch to different conversation or start new one */
   const handleChangeHistory = (id: string | null) => {
     if (id !== conversation_id) {
       setConversationId(id)
@@ -124,6 +141,7 @@ const Conversation: FC = () => {
     }
   }, [conversation_id])
 
+  /** Add user message to chat */
   const addUserMessage = (message: string = '') => {
     const newUserMessage: ChatItem = {
       conversation_id,
@@ -133,6 +151,7 @@ const Conversation: FC = () => {
     };
     setChatList(prev => [...prev, newUserMessage])
   }
+  /** Add empty assistant message placeholder */
   const addAssistantMessage = () => {
     const newAssistantMessage: ChatItem = {
       created_at: Date.now(),
@@ -141,6 +160,7 @@ const Conversation: FC = () => {
     }
     setChatList(prev => [...prev, newAssistantMessage])
   }
+  /** Update assistant message with streaming content */
   const updateAssistantMessage = (content: string = '') => {
     if (!content) return
     if (streamLoading) {
@@ -164,6 +184,7 @@ const Conversation: FC = () => {
     })
   }
 
+  /** Send message and handle streaming response */
   const handleSend = () => {
     if (!token || !shareToken) {
       return
@@ -261,7 +282,7 @@ const Conversation: FC = () => {
       </div>
 
       <div className="rb:relative rb:h-screen rb:px-4 rb:flex-[1_1_auto]">
-        <div className='rb:w-[760px]  rb:h-screen rb:mx-auto rb:pt-10'>
+        <div className='rb:w-190  rb:h-screen rb:mx-auto rb:pt-10'>
         <Chat
           empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
           contentClassName="rb:h-[calc(100%-152px)] "

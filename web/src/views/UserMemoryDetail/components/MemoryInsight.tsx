@@ -1,8 +1,20 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:41 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:41 
+ */
+/**
+ * Memory Insight Component
+ * Displays memory insights including behavior patterns, key findings, and growth trajectory
+ */
+
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Space } from 'antd';
+
 import RbCard from '@/components/RbCard/Card'
 import Empty from '@/components/Empty';
 import {
@@ -10,6 +22,9 @@ import {
 } from '@/api/memory'
 import type { MemoryInsightRef } from '../types'
 
+/**
+ * Insight data structure
+ */
 interface Data {
   memory_insight?: string;
   behavior_pattern?: string;
@@ -30,7 +45,7 @@ const MemoryInsight = forwardRef<MemoryInsightRef>((_props, ref) => {
     getData()
   }, [id])
   
-  // 记忆洞察
+  /** Fetch memory insight data */
   const getData = () => {
     if (!id) return
     setLoading(true)
@@ -42,7 +57,7 @@ const MemoryInsight = forwardRef<MemoryInsightRef>((_props, ref) => {
       setLoading(false)
     })
   }
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     getData,
   }));

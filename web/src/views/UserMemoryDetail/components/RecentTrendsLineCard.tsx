@@ -1,11 +1,23 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:07 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:07 
+ */
 import { type FC, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react';
-import * as echarts from 'echarts';
+
 import Empty from '@/components/Empty'
 import Loading from '@/components/Empty/Loading'
 import RbCard from '@/components/RbCard/Card'
 
+/**
+ * Props for RecentTrendsLineCard component
+ * @property {Array<Record<string, string | number>>} chartData - Trend data over time
+ * @property {string[]} seriesList - List of series keys to display
+ * @property {boolean} [loading] - Loading state
+ */
 interface RecentTrendsLineCardProps {
   chartData: Array<Record<string, string | number>>;
   seriesList: string[];
@@ -14,6 +26,11 @@ interface RecentTrendsLineCardProps {
 
 const Colors = ['#155EEF', '#FF5D34']
 
+/**
+ * RecentTrendsLineCard Component
+ * Displays forgetting trends with dual Y-axis line chart
+ * Shows merged count and average activation over time
+ */
 const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, seriesList, loading }) => {
   const { t } = useTranslation()
   const chartRef = useRef<ReactEcharts>(null);

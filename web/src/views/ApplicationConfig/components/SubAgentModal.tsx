@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:28:51 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:28:51 
+ */
+/**
+ * Sub-Agent Modal
+ * Allows adding or editing sub-agents in multi-agent cluster configuration
+ */
+
 import { forwardRef, useImperativeHandle, useState, type Key } from 'react';
 import { Form, Select, Input } from 'antd';
 import type { DefaultOptionType } from 'antd/es/select'
@@ -10,10 +21,17 @@ import { getApplicationListUrl } from '@/api/application';
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface SubAgentModalProps {
+  /** Callback to update sub-agent */
   refresh: (agent: SubAgentItem) => void;
 }
 
+/**
+ * Modal for managing sub-agents
+ */
 const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
   refresh,
 }, ref) => {
@@ -24,19 +42,20 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
   const [editVo, setEditVo] = useState<SubAgentItem>()
   const values = Form.useWatch([], form)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setLoading(false)
   };
 
+  /** Open modal with optional agent data */
   const handleOpen = (agent?: SubAgentItem) => {
     setVisible(true);
     form.setFieldsValue(agent)
     setEditVo(agent)
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save sub-agent configuration */
   const handleSave = () => {
     form.validateFields().then(() => {
       setLoading(false)
@@ -47,6 +66,7 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
       handleClose()
     })
   }
+  /** Handle agent selection change */
   const handleChange = (value: Key, option?: DefaultOptionType | DefaultOptionType[] | undefined) => {
     console.log(value, option)
     if (option && !Array.isArray(option)) {
@@ -54,7 +74,7 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
     }
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -73,7 +93,7 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
         form={form}
         layout="vertical"
       >
-        {/* Agent名称 */}
+        {/* Agent name */}
         <FormItem
           name="agent_id"
           label={t('application.agentName')}
@@ -93,14 +113,14 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
           />
         </FormItem>
         <FormItem name="name" hidden />
-        {/* 描述 */}
+        {/* Description */}
         <FormItem
           name="role"
           label={t('application.description')}
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </FormItem>
-        {/* 关键词 */}
+        {/* Keywords */}
         <FormItem
           name="capabilities"
           label={t('application.capabilities')}

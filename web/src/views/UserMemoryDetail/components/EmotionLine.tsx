@@ -1,10 +1,22 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:33:44 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:33:44 
+ */
 import { type FC, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react';
+
 import Empty from '@/components/Empty'
 import Loading from '@/components/Empty/Loading'
 import type { Emotion } from '../pages/GraphDetail'
 
+/**
+ * Props for EmotionLine component
+ * @property {Emotion[]} chartData - Emotion data over time
+ * @property {boolean} [loading] - Loading state
+ */
 interface EmotionLineProps {
   chartData: Emotion[];
   loading?: boolean;
@@ -12,6 +24,11 @@ interface EmotionLineProps {
 
 const Colors = ['#369F21', '#155EEF', '#FF5D34']
 
+/**
+ * EmotionLine Component
+ * Displays emotion intensity trends over time as a multi-line chart
+ * Shows different emotion types with smooth lines and area fills
+ */
 const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
   const { t } = useTranslation()
   const chartRef = useRef<ReactEcharts>(null);

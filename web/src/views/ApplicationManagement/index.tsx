@@ -1,8 +1,21 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:34:12 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:34:12 
+ */
+/**
+ * Application Management Page
+ * Displays and manages all applications in the workspace
+ * Supports creating, editing, and deleting applications
+ */
+
 import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Row, Col, App } from 'antd';
 import clsx from 'clsx';
 import { DeleteOutlined } from '@ant-design/icons';
+
 import type { Application, ApplicationModalRef, Query } from './types';
 import ApplicationModal from './components/ApplicationModal';
 import SearchInput from '@/components/SearchInput'
@@ -11,6 +24,9 @@ import { getApplicationListUrl, deleteApplication } from '@/api/application'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { formatDateTime } from '@/utils/format';
 
+/**
+ * Application management main component
+ */
 const ApplicationManagement: React.FC = () => {
   const { t } = useTranslation();
   const { modal } = App.useApp();
@@ -18,16 +34,20 @@ const ApplicationManagement: React.FC = () => {
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const scrollListRef = useRef<PageScrollListRef>(null)
 
+  /** Refresh application list */
   const refresh = () => {
     scrollListRef.current?.refresh();
   }
   
+  /** Open create application modal */
   const handleCreate = () => {
     applicationModalRef.current?.handleOpen();
   }
+  /** Navigate to application configuration page */
   const handleEdit = (item: Application) => {
     window.open(`/#/application/config/${item.id}`);
   }
+  /** Delete application with confirmation */
   const handleDelete = (item: Application) => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: item.name }),

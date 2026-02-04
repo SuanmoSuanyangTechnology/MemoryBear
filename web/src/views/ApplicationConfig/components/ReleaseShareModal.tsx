@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:28:46 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:28:46 
+ */
+/**
+ * Release Share Modal
+ * Generates and displays a shareable link for a specific application version
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Button, App } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
@@ -9,10 +20,17 @@ import RbModal from '@/components/RbModal'
 import { shareRelease } from '@/api/application'
 import RbAlert from '@/components/RbAlert'
 
+/**
+ * Component props
+ */
 interface ReleaseShareModalProps {
+  /** Version to share */
   version: Release | null
 }
 
+/**
+ * Modal for sharing application versions
+ */
 const ReleaseShareModal = forwardRef<ReleaseShareModalRef, ReleaseShareModalProps>(({
   version
 }, ref) => {
@@ -22,12 +40,13 @@ const ReleaseShareModal = forwardRef<ReleaseShareModalRef, ReleaseShareModalProp
   const [loading, setLoading] = useState(false)
   const [shareLink, setShareLink] = useState<string | null>(null)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal */
   const handleClose = () => {
     setVisible(false);
     setLoading(false)
   };
 
+  /** Open modal and generate share link */
   const handleOpen = () => {
     if (!version) {
       return
@@ -45,13 +64,14 @@ const ReleaseShareModal = forwardRef<ReleaseShareModalRef, ReleaseShareModalProp
         setLoading(false)
       })
   };
+  /** Copy share link to clipboard */
   const handleCopy = () => {
     if (!shareLink) return
     copy(shareLink)
     message.success(t('common.copySuccess'))
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -65,9 +85,9 @@ const ReleaseShareModal = forwardRef<ReleaseShareModalRef, ReleaseShareModalProp
       footer={false}
     >
       <>
-        <div className="rb:leading-[20px] rb:mb-[8px]">{t('application.shareLink')}</div>
-        <div className="rb:mb-[12px] rb:flex rb:items-center rb:gap-[10px] rb:justify-between">
-          <div className="rb:overflow-hidden rb:whitespace-nowrap rb:text-ellipsis rb:cursor-pointer rb:h-[32px] rb:p-[6px_10px] rb:bg-[#FFFFFF] rb:border rb:border-[#EBEBEB] rb:rounded-[6px] rb:leading-[20px]">{shareLink}</div>
+        <div className="rb:leading-5 rb:mb-2">{t('application.shareLink')}</div>
+        <div className="rb:mb-3 rb:flex rb:items-center rb:gap-2.5 rb:justify-between">
+          <div className="rb:overflow-hidden rb:whitespace-nowrap rb:text-ellipsis rb:cursor-pointer rb:h-8 rb:p-[6px_10px] rb:bg-[#FFFFFF] rb:border rb:border-[#EBEBEB] rb:rounded-md rb:leading-5">{shareLink}</div>
 
           <Button type="primary" loading={loading} disabled={!shareLink} onClick={handleCopy}>
             {t('common.copy')}
