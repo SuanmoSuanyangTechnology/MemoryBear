@@ -8,12 +8,13 @@ import { type Suggestion } from '../plugin/AutocompletePlugin'
 interface InitialValuePluginProps {
   value: string;
   options?: Suggestion[];
-  enableJinja2?: boolean;
+  enableLineNumbers?: boolean;
 }
 
-const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [], enableJinja2 = false }) => {
+const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [], enableLineNumbers = false }) => {
   const [editor] = useLexicalComposerContext();
   const prevValueRef = useRef<string>('');
+  const prevEnableLineNumbersRef = useRef<boolean>(enableLineNumbers);
   const isUserInputRef = useRef(false);
 
   useEffect(() => {
@@ -32,7 +33,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
   }, [editor]);
 
   useEffect(() => {
-    if (value !== prevValueRef.current && !isUserInputRef.current) {
+    if ((value !== prevValueRef.current || enableLineNumbers !== prevEnableLineNumbersRef.current) && !isUserInputRef.current) {
       queueMicrotask(() => {
         editor.update(() => {
         const root = $getRoot();
@@ -40,7 +41,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
 
         const parts = value.split(/(\{\{[^}]+\}\})/);
 
-        if (enableJinja2) {
+        if (enableLineNumbers) {
           // Handle newlines properly in Jinja2 mode
           const lines = value.split('\n');
           lines.forEach((line) => {
@@ -104,8 +105,9 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
     }
     
     prevValueRef.current = value;
+    prevEnableLineNumbersRef.current = enableLineNumbers;
     isUserInputRef.current = false;
-  }, [value, options, editor, enableJinja2]);
+  }, [value, options, editor, enableLineNumbers]);
 
   return null;
 };

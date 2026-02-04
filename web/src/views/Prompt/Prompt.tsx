@@ -140,7 +140,6 @@ const Prompt: FC<{ editVo: HistoryItem | null; refresh: () => void; }> = ({ edit
     refresh()
   }
 
-  console.log(values)
   return (
     <>
       <Form form={form}>
@@ -199,12 +198,13 @@ const Prompt: FC<{ editVo: HistoryItem | null; refresh: () => void; }> = ({ edit
                 ref={editorRef}
                 placeholder={t('prompt.promptPlaceholder')}
                 className="rb:h-[calc(100vh-260px)]"
+                disabled={loading}
                 // onChange={(value) => form.setFieldValue('current_prompt', value)}
               />
             </Form.Item>
             <div className="rb:grid rb:grid-cols-2 rb:gap-4 rb:mt-6">
-              <Button type="primary" block disabled={!values?.current_prompt} onClick={handleSave}>{t('common.save')}</Button>
-              <Button block disabled={!values?.current_prompt} onClick={handleCopy}>{t('common.copy')}</Button>
+              <Button type="primary" block disabled={!values?.current_prompt || loading} onClick={handleSave}>{t('common.save')}</Button>
+              <Button block disabled={!values?.current_prompt || loading} onClick={handleCopy}>{t('common.copy')}</Button>
             </div>
           </div>
         </div>
