@@ -18,7 +18,6 @@ from app.services.memory_konwledges_server import write_rag
 from app.services.task_service import get_task_memory_write_result
 from app.tasks import write_message_task
 from app.utils.config_utils import resolve_config_id
-
 logger = get_agent_logger(__name__)
 template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
 
