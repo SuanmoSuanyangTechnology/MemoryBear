@@ -110,7 +110,7 @@ class CodeNode(BaseNode):
                 code=code,
                 inputs_variable=input_variable_dict,
             )
-        elif self.typed_config.language == 'nodejs':
+        elif self.typed_config.language == 'javascript':
             final_script = NODEJS_SCRIPT_TEMPLATE.substitute(
                 code=code,
                 inputs_variable=input_variable_dict,

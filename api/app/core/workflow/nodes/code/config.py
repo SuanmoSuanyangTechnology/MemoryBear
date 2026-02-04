@@ -44,7 +44,7 @@ class CodeNodeConfig(BaseNodeConfig):
         description="code content"
     )
 
-    language: Literal['python3', 'nodejs'] = Field(
+    language: Literal['python3', 'javascript'] = Field(
         ...,
         description="language"
     )
