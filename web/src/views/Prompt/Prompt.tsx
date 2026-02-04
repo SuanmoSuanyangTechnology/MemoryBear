@@ -138,6 +138,7 @@ const Prompt: FC<{ editVo: HistoryItem | null; refresh: () => void; }> = ({ edit
     currentPromptValueRef.current = undefined;
     setChatList([])
     refresh()
+    updateSession()
   }
 
   return (

@@ -242,7 +242,7 @@ const Editor: FC<LexicalEditorProps> =({
         {enableLineNumbers && <LineNumberPlugin />}
         <AutocompletePlugin options={options} enableJinja2={enableJinja2} />
         <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
-        <InitialValuePlugin value={value} options={options} enableLineNumbers={enableLineNumbers} />
+        <InitialValuePlugin key={language} value={value} options={options} enableLineNumbers={enableLineNumbers} />
         {enableLineNumbers && <BlurPlugin />}
       </div>
     </LexicalComposer>
