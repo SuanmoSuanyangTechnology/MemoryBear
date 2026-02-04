@@ -763,22 +763,24 @@ async def get_class(
 
 @router.post("/import", response_model=ApiResponse)
 async def import_owl_file(
-    scene_id: str = Form(..., description="目标场景ID"),
+    scene_name: str = Form(..., description="场景名称"),
+    scene_description: Optional[str] = Form(None, description="场景描述（可选）"),
     file: UploadFile = File(..., description="OWL/TTL文件"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """导入 OWL/TTL 文件到指定场景
+    """导入 OWL/TTL 文件并创建新场景
     
     上传 OWL 或 TTL 文件，解析其中定义的本体类型（owl:Class），
-    并直接保存到指定场景的 ontology_class 表中。
+    解析成功后创建新场景，并将类型保存到该场景的 ontology_class 表中。
     
     文件格式根据文件扩展名自动识别：
     - .owl, .rdf, .xml -> rdfxml 格式
     - .ttl -> turtle 格式
     
     Args:
-        scene_id: 目标场景ID（表单字段）
+        scene_name: 场景名称（表单字段）
+        scene_description: 场景描述（表单字段，可选）
         file: 上传的文件（支持 .owl, .ttl, .rdf, .xml）
         db: 数据库会话
         current_user: 当前用户
@@ -788,7 +790,6 @@ async def import_owl_file(
     """
     from app.repositories.ontology_scene_repository import OntologySceneRepository
     from app.repositories.ontology_class_repository import OntologyClassRepository
-    from uuid import UUID
     
     # 根据文件扩展名确定格式
     filename = file.filename.lower() if file.filename else ""
@@ -807,39 +808,36 @@ async def import_owl_file(
     
     api_logger.info(
         f"OWL import requested by user {current_user.id}, "
-        f"scene_id={scene_id}, "
+        f"scene_name={scene_name}, "
         f"filename={file.filename}, "
         f"format={owl_format}"
     )
     
     try:
-        # 验证 scene_id 格式
-        try:
-            scene_uuid = UUID(scene_id)
-        except ValueError:
-            return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的场景ID格式")
-        
         # 获取当前工作空间ID
         workspace_id = current_user.current_workspace_id
         if not workspace_id:
             api_logger.warning(f"User {current_user.id} has no current workspace")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
-        # 1. 验证场景存在且属于当前工作空间
+        # 1. 验证场景名称不为空
+        if not scene_name or not scene_name.strip():
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "场景名称不能为空")
+        
+        scene_name = scene_name.strip()
+        
+        # 2. 检查场景名称是否已存在
         scene_repo = OntologySceneRepository(db)
-        scene = scene_repo.get_by_id(scene_uuid)
-        
-        if not scene:
-            api_logger.warning(f"Scene not found: {scene_id}")
-            return fail(BizCode.NOT_FOUND, "场景不存在", f"找不到场景: {scene_id}")
-        
-        if scene.workspace_id != workspace_id:
-            api_logger.warning(
-                f"Scene {scene_id} does not belong to workspace {workspace_id}"
+        existing_scene = scene_repo.get_by_name(scene_name, workspace_id)
+        if existing_scene:
+            api_logger.warning(f"Scene name already exists: {scene_name}")
+            return fail(
+                BizCode.BAD_REQUEST,
+                "场景名称已存在",
+                f"工作空间下已存在名为 '{scene_name}' 的场景"
             )
-            return fail(BizCode.FORBIDDEN, "无权访问", "该场景不属于当前工作空间")
         
-        # 2. 读取文件内容
+        # 3. 读取文件内容
         try:
             content = await file.read()
             owl_content = content.decode('utf-8')
@@ -850,7 +848,7 @@ async def import_owl_file(
                 "文件编码错误，请确保文件使用 UTF-8 编码"
             )
         
-        # 3. 解析 OWL 内容
+        # 4. 解析 OWL 内容（先解析，成功后再创建场景）
         owl_validator = OWLValidator()
         parsed_classes = owl_validator.parse_owl_content(
             owl_content=owl_content,
@@ -865,23 +863,32 @@ async def import_owl_file(
                 "文件中没有定义任何本体类型（owl:Class）"
             )
         
-        # 4. 获取场景下已有的类型名称（用于去重）
-        class_repo = OntologyClassRepository(db)
-        existing_classes = class_repo.get_by_scene(scene_uuid)
-        existing_names = {cls.class_name for cls in existing_classes}
+        # 5. 文件解析成功，创建场景
+        scene = scene_repo.create(
+            scene_data={
+                "scene_name": scene_name,
+                "scene_description": scene_description
+            },
+            workspace_id=workspace_id
+        )
+        scene_uuid = scene.scene_id
         
-        # 5. 批量创建类型
+        api_logger.info(f"Scene created for import: {scene_uuid}")
+        
+        # 6. 批量创建类型（去重同一批次内的重复类型）
+        class_repo = OntologyClassRepository(db)
         created_items = []
+        existing_names = set()
         skipped_count = 0
         
         for cls in parsed_classes:
             class_name = cls["name"]
             class_description = cls.get("description")
             
-            # 检查是否重复
+            # 检查同一批次内是否重复
             if class_name in existing_names:
                 skipped_count += 1
-                api_logger.debug(f"Skipping duplicate class: {class_name}")
+                api_logger.debug(f"Skipping duplicate class in batch: {class_name}")
                 continue
             
             # 创建类型
@@ -905,21 +912,8 @@ async def import_owl_file(
                 updated_at=ontology_class.updated_at
             ))
         
-        # 6. 提交事务
+        # 7. 提交事务
         db.commit()
-        
-        # 7. 检查是否所有类型都被跳过（重复导入）
-        if len(created_items) == 0 and skipped_count > 0:
-            api_logger.warning(
-                f"{file_type} import failed - all classes already exist, "
-                f"scene_id={scene_id}, "
-                f"skipped={skipped_count}"
-            )
-            return fail(
-                BizCode.BAD_REQUEST,
-                f"{file_type}文件导入失败",
-                f"所有本体类型已存在，跳过 {skipped_count} 个重复类型"
-            )
         
         # 8. 构建响应
         response = ImportOwlResponse(
@@ -932,7 +926,8 @@ async def import_owl_file(
         
         api_logger.info(
             f"{file_type} import completed, "
-            f"scene_id={scene_id}, "
+            f"scene_id={scene_uuid}, "
+            f"scene_name={scene_name}, "
             f"format={owl_format}, "
             f"imported={len(created_items)}, "
             f"skipped={skipped_count}"
