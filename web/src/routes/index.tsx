@@ -3,7 +3,6 @@ import { createHashRouter, createRoutesFromElements, Route } from 'react-router-
 
 // 导入路由配置JSON
 import routesConfig from './routes.json';
-import Ontology from '@/views/Ontology';
 
 
 // 递归函数，用于生成路由元素

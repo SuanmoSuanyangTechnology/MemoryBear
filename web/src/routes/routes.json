@@ -7,6 +7,7 @@
       { "path": "/model", "element": "ModelManagement" },
       { "path": "/space", "element": "SpaceManagement" },
       { "path": "/tool", "element": "ToolManagement" },
+      { "path": "/prompt", "element": "Prompt" },
       { "path": "/pricing", "element": "Pricing" },
       { "path": "/order-pay", "element": "OrderPayment" },
       { "path": "/orders", "element": "OrderHistory" },
@@ -35,7 +36,6 @@
       { "path": "/reflection-engine/:id", "element": "SelfReflectionEngine" },
       { "path": "/space-config", "element": "SpaceConfig" },
       { "path": "/ontology", "element": "Ontology" },
-      { "path": "/prompt", "element": "Prompt" },
       { "path": "/no-permission", "element": "NoPermission" },
       { "path": "/*", "element": "NotFound" }
     ]
