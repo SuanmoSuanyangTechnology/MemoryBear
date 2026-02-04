@@ -83,7 +83,7 @@ class AgentConfigConverter:
             "memory": MemoryConfig(enabled=True),
             "variables": [],
             "tools": [],
-            "skills": {}
+            "skills": SkillConfig(enabled=False, all_skills=False, skill_ids=[])
         }
         
         # 1. 解析模型参数配置
@@ -126,5 +126,7 @@ class AgentConfigConverter:
 
         if skills:
             result["skills"] = SkillConfig(**skills)
+        else:
+            result["skills"] = SkillConfig(enabled=False, all_skills=False, skill_ids=[])
         
         return result
