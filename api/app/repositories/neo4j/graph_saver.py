@@ -21,7 +21,8 @@ from app.core.memory.models.graph_models import (
     ExtractedEntityNode,
     EntityEntityEdge,
 )
-
+import logging
+logger = logging.getLogger(__name__)
 async def save_entities_and_relationships(
     entity_nodes: List[ExtractedEntityNode],
     entity_entity_edges: List[EntityEntityEdge],
@@ -193,7 +194,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(CHUNK_NODE_SAVE, chunks=chunk_data)
             chunk_uuids = [record["uuid"] async for record in result]
             results['chunks'] = chunk_uuids
-            print(f"Successfully saved {len(chunk_uuids)} chunk nodes to Neo4j")
+            logger.info(f"Successfully saved {len(chunk_uuids)} chunk nodes to Neo4j")
 
         # 3. Save all statement nodes in batch
         if statement_nodes:
@@ -202,7 +203,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(STATEMENT_NODE_SAVE, statements=statement_data)
             statement_uuids = [record["uuid"] async for record in result]
             results['statements'] = statement_uuids
-            print(f"Successfully saved {len(statement_uuids)} statement nodes to Neo4j")
+            logger.info(f"Successfully saved {len(statement_uuids)} statement nodes to Neo4j")
 
         # 4. Save entities
         if entity_nodes:
@@ -211,7 +212,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(EXTRACTED_ENTITY_NODE_SAVE, entities=entity_data)
             entity_uuids = [record["uuid"] async for record in result]
             results['entities'] = entity_uuids
-            print(f"Successfully saved {len(entity_uuids)} entity nodes to Neo4j")
+            logger.info(f"Successfully saved {len(entity_uuids)} entity nodes to Neo4j")
 
         # 5. Create entity relationships
         if entity_edges:
@@ -235,7 +236,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(ENTITY_RELATIONSHIP_SAVE, relationships=relationship_data)
             rel_uuids = [record["uuid"] async for record in result]
             results['entity_relationships'] = rel_uuids
-            print(f"Successfully saved {len(rel_uuids)} entity relationships to Neo4j")
+            logger.info(f"Successfully saved {len(rel_uuids)} entity relationships to Neo4j")
 
         # 6. Save statement-chunk edges
         if statement_chunk_edges:
@@ -254,7 +255,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(STATEMENT_CHUNK_EDGE_SAVE, edges=sc_edge_data)
             sc_uuids = [record["uuid"] async for record in result]
             results['statement_chunk_edges'] = sc_uuids
-            print(f"Successfully saved {len(sc_uuids)} statement-chunk edges to Neo4j")
+            logger.info(f"Successfully saved {len(sc_uuids)} statement-chunk edges to Neo4j")
 
         # 7. Save statement-entity edges
         if statement_entity_edges:
@@ -273,7 +274,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(STATEMENT_ENTITY_EDGE_SAVE, edges=se_edge_data)
             se_uuids = [record["uuid"] async for record in result]
             results['statement_entity_edges'] = se_uuids
-            print(f"Successfully saved {len(se_uuids)} statement-entity edges to Neo4j")
+            logger.info(f"Successfully saved {len(se_uuids)} statement-entity edges to Neo4j")
 
         return results
 
