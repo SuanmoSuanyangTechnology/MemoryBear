@@ -182,56 +182,22 @@ def _get_ontology_service(
                 detail=f"找不到指定的LLM模型: {llm_id}"
             )
         
-        # 验证模型配置了API密钥
-        if not model_config.api_keys:
-            logger.error(f"Model {llm_id} has no API key configuration")
-            raise HTTPException(
-                status_code=400,
-                detail="指定的LLM模型没有配置API密钥"
-            )
-        
-        # 安全的数值转换辅助函数
-        def safe_int(value, default: int = 0) -> int:
-            """安全地将值转换为整数，异常时返回默认值"""
-            if value is None:
-                return default
-            try:
-                return int(value)
-            except (ValueError, TypeError):
-                return default
-        
-        # 获取可用的 API Key（只选择激活状态的）
-        # 注意：is_active 为 None 时视为非激活状态，避免旧记录被错误地当作激活
-        active_api_keys = [ak for ak in model_config.api_keys if getattr(ak, 'is_active', None) is True]
-        if not active_api_keys:
+        # 通过 Repository 获取可用的 API Key（负载均衡逻辑由 Repository 处理）
+        from app.repositories.model_repository import ModelApiKeyRepository
+        api_keys = ModelApiKeyRepository.get_by_model_config(db, model_config.id)
+        if not api_keys:
             logger.error(f"Model {llm_id} has no active API key")
             raise HTTPException(
                 status_code=400,
                 detail="指定的LLM模型没有可用的API密钥"
             )
+        api_key_config = api_keys[0]
         
-        # 根据负载均衡策略选择 API Key（组合模型和非组合模型统一处理）
         is_composite = getattr(model_config, 'is_composite', False)
-        if len(active_api_keys) > 1:
-            from app.models.models_model import LoadBalanceStrategy
-            load_balance_strategy = getattr(model_config, 'load_balance_strategy', None)
-            if load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
-                # 轮询策略：选择使用次数最少的 API Key
-                api_key_config = min(active_api_keys, key=lambda x: safe_int(x.usage_count, 0))
-            else:
-                # 默认策略：按优先级选择（优先级数值越小越优先）
-                api_key_config = min(active_api_keys, key=lambda x: safe_int(x.priority, 1))
-            logger.info(
-                f"Model (is_composite={is_composite}) using load balance strategy: {load_balance_strategy}, "
-                f"selected API Key: {api_key_config.id}, provider: {api_key_config.provider}"
-            )
-        else:
-            api_key_config = active_api_keys[0]
-        
         logger.info(
             f"Using specified model - user: {current_user.id}, "
             f"model_id: {llm_id}, model_name: {api_key_config.model_name}, "
-            f"is_composite: {is_composite}"
+            f"is_composite: {is_composite}, api_key_id: {api_key_config.id}"
         )
         
         # 创建模型配置对象
