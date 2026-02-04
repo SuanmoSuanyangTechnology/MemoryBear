@@ -179,7 +179,7 @@ def knowledge_retrieval(
                         "reranker_id": reranker_id,
                         "query": query,
                         "doc_count": len(all_results),
-                        "error": str(e),
+                        "error": str(rerank_error),
                     },
                 )
 
