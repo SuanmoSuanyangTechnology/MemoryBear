@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:34:12 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 18:57:35
  */
 /**
  * Application Management Page
@@ -12,12 +12,12 @@
 
 import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Row, Col, App } from 'antd';
+import { Button, Row, Col, App, Select } from 'antd';
 import clsx from 'clsx';
 import { DeleteOutlined } from '@ant-design/icons';
 
 import type { Application, ApplicationModalRef, Query } from './types';
-import ApplicationModal from './components/ApplicationModal';
+import ApplicationModal, { types } from './components/ApplicationModal';
 import SearchInput from '@/components/SearchInput'
 import RbCard from '@/components/RbCard/Card'
 import { getApplicationListUrl, deleteApplication } from '@/api/application'
@@ -65,10 +65,25 @@ const ApplicationManagement: React.FC = () => {
       }
     })
   }
+  const handleChangeType = (value?: string) => {
+    setQuery(prev => ({...prev, type: value}))
+  }
   return (
     <>
       <Row gutter={16} className="rb:mb-4">
-        <Col span={12}>
+        <Col span={3}>
+          <Select
+            placeholder={t('application.applicationType')}
+            options={types.map((type) => ({
+              value: type,
+              label: t(`application.${type}`),
+            }))}
+            allowClear
+            className="rb:w-full"
+            onChange={handleChangeType}
+          />
+        </Col>
+        <Col span={9}>
           <SearchInput
             placeholder={t('application.searchPlaceholder')}
             onSearch={(value) => setQuery({ search: value })}
