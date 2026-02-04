@@ -10,14 +10,17 @@ from app.repositories.skill_repository import SkillRepository
 class AgentMiddleware:
     """Agent 中间件 - 用于动态过滤和加载技能"""
     
-    def __init__(self, skill_ids: Optional[List[str]] = None):
+    def __init__(self, skills: Optional[dict] = None):
         """
         初始化中间件
         
         Args:
-            skill_ids: 技能ID列表
+            skills: 技能配置字典 {"enabled": bool, "all_skills": bool, "skill_ids": [...]}
         """
-        self.skill_ids = skill_ids or []
+        self.skills = skills or {}
+        self.enabled = self.skills.get('enabled', False)
+        self.all_skills = self.skills.get('all_skills', False)
+        self.skill_ids = self.skills.get('skill_ids', [])
 
     @staticmethod
     def filter_tools(
@@ -95,9 +98,17 @@ class AgentMiddleware:
                 # base_tools 不属于任何 skill，不加入映射
 
         skill_configs = {}
+        skill_ids_to_load = []
         
-        if self.skill_ids:
-            for skill_id in self.skill_ids:
+        # 如果启用技能且 all_skills 为 True，加载租户下所有激活的技能
+        if self.enabled and self.all_skills:
+            skills, _ = SkillRepository.list_skills(db, tenant_id, is_active=True, page=1, pagesize=1000)
+            skill_ids_to_load = [str(skill.id) for skill in skills]
+        elif self.enabled and self.skill_ids:
+            skill_ids_to_load = self.skill_ids
+        
+        if skill_ids_to_load:
+            for skill_id in skill_ids_to_load:
                 try:
                     skill = SkillRepository.get_by_id(db, uuid.UUID(skill_id), tenant_id)
                     if skill and skill.is_active:
@@ -110,7 +121,7 @@ class AgentMiddleware:
                     continue
             
             # 加载技能工具并获取映射关系
-            skill_tools, skill_tool_map = SkillService.load_skill_tools(db, self.skill_ids, tenant_id)
+            skill_tools, skill_tool_map = SkillService.load_skill_tools(db, skill_ids_to_load, tenant_id)
             
             # 只添加不冲突的 skill_tools
             for tool in skill_tools:

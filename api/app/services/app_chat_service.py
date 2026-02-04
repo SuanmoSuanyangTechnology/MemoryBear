@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -79,21 +80,55 @@ class AppChatService:
 
         # 获取工具服务
         tool_service = ToolService(self.db)
+        tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
         # 从配置中获取启用的工具
         if hasattr(config, 'tools') and config.tools and isinstance(config.tools, list):
             for tool_config in config.tools:
                 if tool_config.get("enabled", False):
                     # 根据工具名称查找工具实例
-                    tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
-                                                                    ToolRepository.get_tenant_id_by_workspace_id(
-                                                                        self.db, workspace_id))
+                    tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
                     if tool_instance:
                         if tool_instance.name == "baidu_search_tool" and not web_search:
                             continue
                         # 转换为LangChain工具
                         langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                         tools.append(langchain_tool)
+        elif hasattr(config, 'tools') and config.tools and isinstance(config.tools, dict):
+            web_tools = config.tools
+            web_search_choice = web_tools.get("web_search", {})
+            web_search_enable = web_search_choice.get("enabled", False)
+            if web_search:
+                if web_search_enable:
+                    search_tool = create_web_search_tool({})
+                    tools.append(search_tool)
+
+                    logger.debug(
+                        "已添加网络搜索工具",
+                        extra={
+                            "tool_count": len(tools)
+                        }
+                    )
+
+        # 加载技能关联的工具
+        if hasattr(config, 'skills') and config.skills:
+            skills = config.skills
+            skill_enable = skills.get("enabled", False)
+            if skill_enable:
+                middleware = AgentMiddleware(skills=skills)
+                skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
+                tools.extend(skill_tools)
+                logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
+
+                # 应用动态过滤
+                if skill_configs:
+                    tools, activated_skill_ids = middleware.filter_tools(tools, message, skill_configs,
+                                                                         tool_to_skill_map)
+                    logger.debug(f"过滤后剩余 {len(tools)} 个工具")
+                    active_prompts = AgentMiddleware.get_active_prompts(
+                        activated_skill_ids, skill_configs
+                    )
+                    system_prompt = f"{system_prompt}\n\n{active_prompts}"
 
         # 添加知识库检索工具
         knowledge_retrieval = config.knowledge_retrieval
@@ -112,22 +147,6 @@ class AppChatService:
                 memory_flag = True
                 memory_tool = create_long_term_memory_tool(memory_config, user_id)
                 tools.append(memory_tool)
-
-        if hasattr(config, 'tools') and config.tools and isinstance(config.tools, dict):
-            web_tools = config.tools
-            web_search_choice = web_tools.get("web_search", {})
-            web_search_enable = web_search_choice.get("enabled", False)
-            if web_search:
-                if web_search_enable:
-                    search_tool = create_web_search_tool({})
-                    tools.append(search_tool)
-
-                    logger.debug(
-                        "已添加网络搜索工具",
-                        extra={
-                            "tool_count": len(tools)
-                        }
-                    )
 
         # 获取模型参数
         model_parameters = config.model_parameters
@@ -246,20 +265,54 @@ class AppChatService:
 
             # 获取工具服务
             tool_service = ToolService(self.db)
+            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
             if hasattr(config, 'tools') and config.tools and isinstance(config.tools, list):
                 for tool_config in config.tools:
                     if tool_config.get("enabled", False):
                         # 根据工具名称查找工具实例
-                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""),
-                                                                        ToolRepository.get_tenant_id_by_workspace_id(
-                                                                            self.db, workspace_id))
+                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
                         if tool_instance:
                             if tool_instance.name == "baidu_search_tool" and not web_search:
                                 continue
                             # 转换为LangChain工具
                             langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                             tools.append(langchain_tool)
+            elif hasattr(config, 'tools') and config.tools and isinstance(config.tools, dict):
+                web_tools = config.tools
+                web_search_choice = web_tools.get("web_search", {})
+                web_search_enable = web_search_choice.get("enabled", False)
+                if web_search:
+                    if web_search_enable:
+                        search_tool = create_web_search_tool({})
+                        tools.append(search_tool)
+
+                        logger.debug(
+                            "已添加网络搜索工具",
+                            extra={
+                                "tool_count": len(tools)
+                            }
+                        )
+
+            # 加载技能关联的工具
+            if hasattr(config, 'skills') and config.skills:
+                skills = config.skills
+                skill_enable = skills.get("enabled", False)
+                if skill_enable:
+                    middleware = AgentMiddleware(skills=skills)
+                    skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
+                    tools.extend(skill_tools)
+                    logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
+
+                    # 应用动态过滤
+                    if skill_configs:
+                        tools, activated_skill_ids = middleware.filter_tools(tools, message, skill_configs,
+                                                                             tool_to_skill_map)
+                        logger.debug(f"过滤后剩余 {len(tools)} 个工具")
+                        active_prompts = AgentMiddleware.get_active_prompts(
+                            activated_skill_ids, skill_configs
+                        )
+                        system_prompt = f"{system_prompt}\n\n{active_prompts}"
 
             # 添加知识库检索工具
             knowledge_retrieval = config.knowledge_retrieval
@@ -278,22 +331,6 @@ class AppChatService:
                     memory_flag = True
                     memory_tool = create_long_term_memory_tool(memory_config, user_id)
                     tools.append(memory_tool)
-
-            if hasattr(config, 'tools') and config.tools and isinstance(config.tools, dict):
-                web_tools = config.tools
-                web_search_choice = web_tools.get("web_search", {})
-                web_search_enable = web_search_choice.get("enabled", False)
-                if web_search:
-                    if web_search_enable:
-                        search_tool = create_web_search_tool({})
-                        tools.append(search_tool)
-
-                        logger.debug(
-                            "已添加网络搜索工具",
-                            extra={
-                                "tool_count": len(tools)
-                            }
-                        )
 
             # 获取模型参数
             model_parameters = config.model_parameters
