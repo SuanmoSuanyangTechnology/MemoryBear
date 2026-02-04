@@ -4,9 +4,8 @@
 import datetime
 import logging
 import uuid
-from typing import Any, Annotated, AsyncGenerator, Optional
+from typing import Any, Annotated, Optional
 
-from deprecated import deprecated
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
@@ -566,6 +565,41 @@ class WorkflowService:
                 message=f"工作流执行失败: {str(e)}"
             )
 
+    @staticmethod
+    def _map_public_event(event: dict) -> dict | None:
+        event_type = event.get("event")
+        payload = event.get("data")
+        match event_type:
+            case "workflow_start":
+                return {
+                    "event": "start",
+                    "data": {
+                        "conversation_id": payload.get("conversation_id"),
+                    }
+                }
+            case "workflow_end":
+                return {
+                    "event": "end",
+                    "data": {
+                        "elapsed_time": payload.get("elapsed_time"),
+                        "message_length": len(payload.get("output", ""))
+                    }
+                }
+            case "node_start" | "node_end" | "node_error":
+                return None
+            case _:
+                return event
+
+    def _emit(self, public: bool, internal_event: dict):
+        """
+        decide
+        """
+        if public:
+            mapped = self._map_public_event(internal_event)
+        else:
+            mapped = internal_event
+        return mapped
+
     async def run_stream(
             self,
             app_id: uuid.UUID,
@@ -663,7 +697,7 @@ class WorkflowService:
                     input_data=input_data,
                     execution_id=execution.execution_id,
                     workspace_id=str(workspace_id),
-                    user_id=payload.user_id
+                    user_id=payload.user_id,
             ):
                 if event.get("event") == "workflow_end":
 
@@ -694,7 +728,9 @@ class WorkflowService:
                         )
                     else:
                         logger.error(f"unexpect workflow run status, status: {status}")
-                yield event
+                event = self._emit(public, event)
+                if event:
+                    yield event
 
         except Exception as e:
             logger.error(f"工作流流式执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)

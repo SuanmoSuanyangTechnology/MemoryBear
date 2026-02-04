@@ -3,77 +3,11 @@
 定义所有节点配置的通用字段和数据结构。
 """
 
-from enum import StrEnum
-from typing import Any
+from pydantic import BaseModel, Field
 
-from pydantic import BaseModel, Field, ConfigDict
+from app.core.workflow.variable.base_variable import VariableType
 
 VARIABLE_PATTERN = r"\{\{\s*(.*?)\s*\}\}"
-
-
-class VariableType(StrEnum):
-    """变量类型枚举"""
-
-    STRING = "string"
-    NUMBER = "number"
-    BOOLEAN = "boolean"
-    OBJECT = "object"
-
-    ARRAY_STRING = "array[string]"
-    ARRAY_NUMBER = "array[number]"
-    ARRAY_BOOLEAN = "array[boolean]"
-    ARRAY_OBJECT = "array[object]"
-
-
-class TypedVariable(BaseModel):
-    """
-    TODO: 强类型限制
-    Strongly typed variable that validates value on assignment.
-    """
-
-    value: Any = Field(..., description="Variable value")
-    type: VariableType = Field(..., description="Declared type of the variable")
-
-    model_config = ConfigDict(
-        validate_assignment=True
-    )
-
-    def __setattr__(self, name, value):
-        if name == "value":
-            self._validate_value(value)
-        if name == "type":
-            raise RuntimeError("Cannot modify variable type at runtime")
-        super().__setattr__(name, value)
-
-    def _validate_value(self, v: Any):
-        t = self.type
-        match t:
-            case VariableType.STRING:
-                if not isinstance(v, str):
-                    raise TypeError("Variable value does not match type STRING")
-            case VariableType.BOOLEAN:
-                if not isinstance(v, bool):
-                    raise TypeError("Variable value does not match type BOOLEAN")
-            case VariableType.NUMBER:
-                if not isinstance(v, (int, float)):
-                    raise TypeError("Variable value does not match type NUMBER")
-            case VariableType.OBJECT:
-                if not isinstance(v, dict):
-                    raise TypeError("Variable value does not match type OBJECT")
-            case VariableType.ARRAY_STRING:
-                if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
-                    raise TypeError("Variable value does not match type ARRAY_STRING")
-            case VariableType.ARRAY_NUMBER:
-                if not isinstance(v, list) or not all(isinstance(i, (int, float)) for i in v):
-                    raise TypeError("Variable value does not match type ARRAY_NUMBER")
-            case VariableType.ARRAY_BOOLEAN:
-                if not isinstance(v, list) or not all(isinstance(i, bool) for i in v):
-                    raise TypeError("Variable value does not match type ARRAY_BOOLEAN")
-            case VariableType.ARRAY_OBJECT:
-                if not isinstance(v, list) or not all(isinstance(i, dict) for i in v):
-                    raise TypeError("Variable value does not match type ARRAY_OBJECT")
-            case _:
-                raise TypeError(f"Unknown variable type: {t}")
 
 
 class VariableDefinition(BaseModel):

@@ -2,6 +2,7 @@
 Agent 节点实现
 
 调用已发布的 Agent 应用。
+# TODO
 """
 
 import logging
@@ -9,6 +10,8 @@ from typing import Any
 from langchain_core.messages import AIMessage
 
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 from app.services.draft_run_service import DraftRunService
 from app.models import AppRelease
 from app.db import get_db
@@ -30,19 +33,22 @@ class AgentNode(BaseNode):
         }
     }
     """
-    
-    def _prepare_agent(self, state: WorkflowState) -> tuple[DraftRunService, AppRelease, str]:
+
+    def _output_types(self) -> dict[str, VariableType]:
+        return {"output": VariableType.STRING}
+
+    def _prepare_agent(self, variable_pool: VariablePool) -> tuple[DraftRunService, AppRelease, str]:
         """准备 Agent（公共逻辑）
         
         Args:
-            state: 工作流状态
+            variable_pool: 变量池
         
         Returns:
             (draft_service, release, message): 服务实例、发布配置、消息
         """
         # 1. 渲染消息
         message_template = self.config.get("message", "")
-        message = self._render_template(message_template, state)
+        message = self._render_template(message_template, variable_pool)
         
         # 2. 获取 Agent 配置
         agent_id = self.config.get("agent_id")
@@ -61,16 +67,17 @@ class AgentNode(BaseNode):
         
         return draft_service, release, message
     
-    async def execute(self, state: WorkflowState) -> dict[str, Any]:
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """非流式执行
         
         Args:
             state: 工作流状态
+            variable_pool: 变量池
         
         Returns:
             状态更新字典
         """
-        draft_service, release, message = self._prepare_agent(state)
+        draft_service, release, message = self._prepare_agent(variable_pool)
         
         logger.info(f"节点 {self.node_id} 开始执行 Agent 调用（非流式）")
         
@@ -79,9 +86,9 @@ class AgentNode(BaseNode):
             agent_config=release.config,
             model_config=None,
             message=message,
-            workspace_id=state.get("workspace_id"),
+            workspace_id=variable_pool.get_value("sys.workspace_id"),
             user_id=state.get("user_id"),
-            variables=state.get("variables", {})
+            variables=variable_pool.get_all_conversation_vars()
         )
         
         response = result.get("response", "")
@@ -99,16 +106,17 @@ class AgentNode(BaseNode):
             }
         }
     
-    async def execute_stream(self, state: WorkflowState):
+    async def execute_stream(self, state: WorkflowState, variable_pool: VariablePool):
         """流式执行
         
         Args:
             state: 工作流状态
+            variable_pool: 变量池
         
         Yields:
             流式事件字典
         """
-        draft_service, release, message = self._prepare_agent(state)
+        draft_service, release, message = self._prepare_agent(variable_pool)
         
         logger.info(f"节点 {self.node_id} 开始执行 Agent 调用（流式）")
         
@@ -120,9 +128,9 @@ class AgentNode(BaseNode):
             agent_config=release.config,
             model_config=None,
             message=message,
-            workspace_id=state.get("workspace_id"),
+            workspace_id=variable_pool.get_value("sys.workspace_id"),
             user_id=state.get("user_id"),
-            variables=state.get("variables", {})
+            variables=variable_pool.get_all_conversation_vars()
         ):
             # 提取内容
             content = chunk.get("content", "")

@@ -22,7 +22,6 @@ from app.core.workflow.nodes.llm import LLMNode
 from app.core.workflow.nodes.memory import MemoryReadNode, MemoryWriteNode
 from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNode
 from app.core.workflow.nodes.start import StartNode
-from app.core.workflow.nodes.transform import TransformNode
 from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
 from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
 from app.core.workflow.nodes.breaker import BreakNode
@@ -37,7 +36,6 @@ WorkflowNode = Union[
     LLMNode,
     IfElseNode,
     AgentNode,
-    TransformNode,
     AssignerNode,
     HttpRequestNode,
     KnowledgeRetrievalNode,
@@ -67,7 +65,6 @@ class NodeFactory:
         NodeType.END: EndNode,
         NodeType.LLM: LLMNode,
         NodeType.AGENT: AgentNode,
-        NodeType.TRANSFORM: TransformNode,
         NodeType.IF_ELSE: IfElseNode,
         NodeType.KNOWLEDGE_RETRIEVAL: KnowledgeRetrievalNode,
         NodeType.ASSIGNER: AssignerNode,

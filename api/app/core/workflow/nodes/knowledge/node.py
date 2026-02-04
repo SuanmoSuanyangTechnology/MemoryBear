@@ -8,6 +8,8 @@ from app.core.models import RedBearRerank, RedBearModelConfig
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 from app.db import get_db_read
 from app.models import knowledge_model, knowledgeshare_model, ModelType
 from app.repositories import knowledge_repository, knowledgeshare_repository
@@ -21,6 +23,11 @@ class KnowledgeRetrievalNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
         self.typed_config: KnowledgeRetrievalNodeConfig | None = None
+
+    def _output_types(self) -> dict[str, VariableType]:
+        return {
+            "output": VariableType.ARRAY_STRING
+        }
 
     @staticmethod
     def _build_kb_filter(kb_ids: list[uuid.UUID], permission: knowledge_model.PermissionType):
@@ -149,7 +156,7 @@ class KnowledgeRetrievalNode(BaseNode):
         )
         return reranker
 
-    async def execute(self, state: WorkflowState) -> Any:
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
         Execute the knowledge retrieval workflow node.
 
@@ -163,6 +170,7 @@ class KnowledgeRetrievalNode(BaseNode):
 
         Args:
             state (WorkflowState): Current workflow execution state.
+            variable_pool: Variable Pool
 
         Returns:
             Any: List of retrieved knowledge chunks (dict format).
@@ -171,7 +179,7 @@ class KnowledgeRetrievalNode(BaseNode):
             RuntimeError: If no valid knowledge base is found or access is denied.
         """
         self.typed_config = KnowledgeRetrievalNodeConfig(**self.config)
-        query = self._render_template(self.typed_config.query, state)
+        query = self._render_template(self.typed_config.query, variable_pool)
         with get_db_read() as db:
             knowledge_bases = self.typed_config.knowledge_bases
             existing_ids = self._get_existing_kb_ids(db, [kb.kb_id for kb in knowledge_bases])

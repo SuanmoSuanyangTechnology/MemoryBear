@@ -7,6 +7,8 @@ End 节点实现
 import logging
 
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +19,18 @@ class EndNode(BaseNode):
     工作流的结束节点，根据配置的模板输出最终结果。
     支持实时流式输出：如果模板引用了上游节点的输出，会实时监听其流式缓冲区。
     """
+    def _output_types(self) -> dict[str, VariableType]:
+        """声明此节点的输出类型"""
+        return {
+            "output": VariableType.STRING
+        }
 
-    async def execute(self, state: WorkflowState) -> str:
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> str:
         """执行 end 节点业务逻辑
 
         Args:
             state: 工作流状态
+            variable_pool: 变量池
 
         Returns:
             最终输出字符串
@@ -34,7 +42,7 @@ class EndNode(BaseNode):
 
         # 如果配置了输出模板，使用模板渲染；否则使用默认输出
         if output_template:
-            output = self._render_template(output_template, state, strict=False)
+            output = self._render_template(output_template, variable_pool, strict=False)
         else:
             output = ""
 

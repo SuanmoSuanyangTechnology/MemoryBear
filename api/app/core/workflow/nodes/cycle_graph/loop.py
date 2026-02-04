@@ -31,6 +31,8 @@ class LoopRuntime:
             node_id: str,
             config: dict[str, Any],
             state: WorkflowState,
+            variable_pool: VariablePool,
+            child_variable_pool: VariablePool
     ):
         """
         Initialize the loop runtime executor.
@@ -40,6 +42,8 @@ class LoopRuntime:
             node_id: The unique identifier of the loop node in the workflow.
             config: Raw configuration dictionary for the loop node.
             state: The current workflow state before entering the loop.
+            variable_pool: A VariablePool instance for accessing and modifying workflow variables.
+            child_variable_pool: A VariablePool instance for managing child node outputs.
         """
         self.start_id = start_id
         self.graph = graph
@@ -47,8 +51,10 @@ class LoopRuntime:
         self.node_id = node_id
         self.typed_config = LoopNodeConfig(**config)
         self.looping = True
+        self.variable_pool = variable_pool
+        self.child_variable_pool = child_variable_pool
 
-    def _init_loop_state(self):
+    async def _init_loop_state(self):
         """
         Initialize workflow state for loop execution.
 
@@ -62,33 +68,35 @@ class LoopRuntime:
         Returns:
             WorkflowState: A prepared workflow state used for loop execution.
         """
-        pool = VariablePool(self.state)
         # 循环变量
-        self.state["runtime_vars"][self.node_id] = {
-            variable.name: evaluate_expression(
-                expression=variable.value,
-                variables=pool.get_all_conversation_vars(),
-                node_outputs=pool.get_all_node_outputs(),
-                system_vars=pool.get_all_system_vars(),
-            )
-            if variable.input_type == ValueInputType.VARIABLE
-            else TypeTransformer.transform(variable.value, variable.type)
-            for variable in self.typed_config.cycle_vars
-        }
-        self.state["node_outputs"][self.node_id] = {
-            variable.name: evaluate_expression(
-                expression=variable.value,
-                variables=pool.get_all_conversation_vars(),
-                node_outputs=pool.get_all_node_outputs(),
-                system_vars=pool.get_all_system_vars(),
-            )
-            if variable.input_type == ValueInputType.VARIABLE
-            else TypeTransformer.transform(variable.value, variable.type)
-            for variable in self.typed_config.cycle_vars
-        }
+        self.child_variable_pool.copy(self.variable_pool)
+
+        for variable in self.typed_config.cycle_vars:
+            if variable.input_type == ValueInputType.VARIABLE:
+                value = evaluate_expression(
+                    expression=variable.value,
+                    conv_var=self.variable_pool.get_all_conversation_vars(),
+                    node_outputs=self.variable_pool.get_all_node_outputs(),
+                    system_vars=self.variable_pool.get_all_system_vars(),
+                )
+            else:
+                value = TypeTransformer.transform(variable.value, variable.type)
+            await self.child_variable_pool.new(self.node_id, variable.name, value, variable.type, mut=True)
         loopstate = WorkflowState(
             **self.state
         )
+        loopstate["node_outputs"][self.node_id] = {
+            variable.name: evaluate_expression(
+                expression=variable.value,
+                conv_var=self.variable_pool.get_all_conversation_vars(),
+                node_outputs=self.variable_pool.get_all_node_outputs(),
+                system_vars=self.variable_pool.get_all_system_vars(),
+            )
+            if variable.input_type == ValueInputType.VARIABLE
+            else TypeTransformer.transform(variable.value, variable.type)
+            for variable in self.typed_config.cycle_vars
+        }
+
         loopstate["looping"] = 1
         loopstate["activate"][self.start_id] = True
         return loopstate
@@ -134,7 +142,12 @@ class LoopRuntime:
             case _:
                 raise ValueError(f"Invalid condition: {operator}")
 
-    def evaluate_conditional(self, state) -> bool:
+    def merge_conv_vars(self):
+        self.variable_pool.variables["conv"].update(
+            self.child_variable_pool.variables.get("conv", {})
+        )
+
+    def evaluate_conditional(self) -> bool:
         """
         Evaluate the loop continuation condition at runtime.
 
@@ -143,18 +156,15 @@ class LoopRuntime:
         - Evaluates each comparison expression immediately
         - Combines results using the configured logical operator (AND / OR)
 
-        Args:
-            state: The current workflow state during loop execution.
-
         Returns:
             bool: True if the loop should continue, False otherwise.
         """
         conditions = []
 
         for expression in self.typed_config.condition.expressions:
-            left_value = VariablePool(state).get(expression.left)
+            left_value = self.child_variable_pool.get_value(expression.left)
             evaluator = ConditionExpressionResolver.resolve_by_value(left_value)(
-                VariablePool(state),
+                self.child_variable_pool,
                 expression.left,
                 expression.right,
                 expression.input_type
@@ -177,16 +187,18 @@ class LoopRuntime:
         Returns:
             dict[str, Any]: The final runtime variables of this loop node.
         """
-        loopstate = self._init_loop_state()
+        loopstate = await self._init_loop_state()
         loop_time = self.typed_config.max_loop
         child_state = []
-        while self.evaluate_conditional(loopstate) and self.looping and loop_time > 0:
+        while not self.evaluate_conditional() and self.looping and loop_time > 0:
             logger.info(f"loop node {self.node_id}: running")
             result = await self.graph.ainvoke(loopstate)
             child_state.append(result)
+
+            self.merge_conv_vars()
             if result["looping"] == 2:
                 self.looping = False
             loop_time -= 1
 
         logger.info(f"loop node {self.node_id}: execution completed")
-        return loopstate["runtime_vars"][self.node_id] | {"__child_state": child_state}
+        return self.child_variable_pool.get_node_output(self.node_id) | {"__child_state": child_state}
