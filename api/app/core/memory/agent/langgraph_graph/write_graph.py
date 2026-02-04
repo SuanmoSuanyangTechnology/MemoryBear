@@ -47,23 +47,20 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
     write_store.save_session_write(end_user_id,  (langchain_messages))
     # 获取数据库会话
     with get_db_context() as db_session:
-        try:
-            config_service = MemoryConfigService(db_session)
-            memory_config = config_service.load_memory_config(
-                config_id=memory_config,  # 改为整数
-                service_name="MemoryAgentService"
-            )
-            if long_term_type=='chunk':
-                '''方案一:对话窗口6轮对话'''
-                await window_dialogue(end_user_id,langchain_messages,memory_config,scope)
-            if long_term_type=='time':
-                """时间"""
-                await memory_long_term_storage(end_user_id, memory_config,5)
-            if  long_term_type=='aggregate':
-                """方案三：聚合判断"""
-                await aggregate_judgment(end_user_id, langchain_messages, memory_config)
-        finally:
-            db_session.close()
+        config_service = MemoryConfigService(db_session)
+        memory_config = config_service.load_memory_config(
+            config_id=memory_config,  # 改为整数
+            service_name="MemoryAgentService"
+        )
+        if long_term_type=='chunk':
+            '''方案一:对话窗口6轮对话'''
+            await window_dialogue(end_user_id,langchain_messages,memory_config,scope)
+        if long_term_type=='time':
+            """时间"""
+            await memory_long_term_storage(end_user_id, memory_config,5)
+        if  long_term_type=='aggregate':
+            """方案三：聚合判断"""
+            await aggregate_judgment(end_user_id, langchain_messages, memory_config)
 
 
 
