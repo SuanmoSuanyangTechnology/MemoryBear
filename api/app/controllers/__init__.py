@@ -39,13 +39,13 @@ from . import (
     upload_controller,
     user_controller,
     user_memory_controllers,
-    workflow_controller,
     workspace_controller,
     memory_forget_controller,
     home_page_controller,
     memory_perceptual_controller,
     memory_working_controller,
     ontology_controller,
+    skill_controller
 )
 
 # 创建管理端 API 路由器
@@ -78,7 +78,6 @@ manager_router.include_router(release_share_controller.router)
 manager_router.include_router(public_share_controller.router)  # 公开路由（无需认证）
 manager_router.include_router(memory_dashboard_controller.router)
 manager_router.include_router(multi_agent_controller.router)
-manager_router.include_router(workflow_controller.router)
 manager_router.include_router(emotion_controller.router)
 manager_router.include_router(emotion_config_controller.router)
 manager_router.include_router(prompt_optimizer_controller.router)
@@ -92,5 +91,6 @@ manager_router.include_router(memory_perceptual_controller.router)
 manager_router.include_router(memory_working_controller.router)
 manager_router.include_router(file_storage_controller.router)
 manager_router.include_router(ontology_controller.router)
+manager_router.include_router(skill_controller.router)
 
 __all__ = ["manager_router"]

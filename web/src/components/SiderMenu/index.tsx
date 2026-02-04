@@ -1,19 +1,40 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 15:25:31 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 15:25:31 
+ */
+/**
+ * SiderMenu Component
+ * 
+ * A collapsible sidebar navigation menu with:
+ * - Dynamic menu generation from configuration
+ * - Active state management with icon switching
+ * - Nested submenu support
+ * - Workspace/space context switching
+ * - Role-based menu filtering
+ * - Internationalization support
+ * 
+ * @component
+ */
+
 import { useState, useEffect, type FC } from 'react';
 import { Menu as AntMenu, Layout } from 'antd';
 import { UserOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import clsx from 'clsx';
+
 import { useMenu, type MenuItem } from '@/store/menu';
 import styles from './index.module.css'
 import logo from '@/assets/images/logo.png'
 import menuFold from '@/assets/images/menuFold.png'
 import menuUnfold from '@/assets/images/menuUnfold.png'
-import clsx from 'clsx';
 import { useUser } from '@/store/user';
 import logout from '@/assets/images/logout.svg'
 
-// 导入SVG文件
+// Import SVG files
 import dashboardIcon from '@/assets/images/menu/dashboard.svg';
 import dashboardActiveIcon from '@/assets/images/menu/dashboard_active.svg';
 import modelIcon from '@/assets/images/menu/model.svg';
@@ -47,7 +68,7 @@ import ontologyActiveIcon from '@/assets/images/menu/ontology_active.svg'
 import promptIcon from '@/assets/images/menu/prompt.svg'
 import promptActiveIcon from '@/assets/images/menu/prompt_active.svg'
 
-// 图标路径映射表
+/** Icon path mapping table for menu items (normal and active states) */
 const iconPathMap: Record<string, string> = {
   'dashboard': dashboardIcon,
   'dashboardActive': dashboardActiveIcon,
@@ -85,8 +106,11 @@ const iconPathMap: Record<string, string> = {
 
 const { Sider } = Layout;
 
+/** Sidebar menu component with collapsible navigation */
 const Menu: FC<{
+  /** Menu display mode */
   mode?: 'vertical' | 'horizontal' | 'inline';
+  /** Menu context (space or manage) */
   source?: 'space' | 'manage';
 }> = ({ mode = 'inline', source = 'manage' }) => {
   const navigate = useNavigate();
@@ -97,6 +121,7 @@ const Menu: FC<{
   const [menus, setMenus] = useState<MenuItem[]>([])
   const { user, storageType } = useUser()
 
+  /** Filter menus based on user role and source */
   useEffect(() => {
     if (user.role === 'member' && source === 'space') {
       setMenus((allMenus[source] || []).filter(menu => menu.code !== 'member'))
@@ -104,7 +129,8 @@ const Menu: FC<{
       setMenus(allMenus[source] || [])
     }
   }, [source, allMenus, user])
-  // 处理菜单项点击
+  
+  /** Handle menu item click and navigate to path */
   const handleMenuClick: MenuProps['onClick'] = (e) => {
     const path = e.key;
     if (path) {
@@ -113,14 +139,14 @@ const Menu: FC<{
     }
   };
 
-  // 将自定义菜单格式转换为Ant Design Menu的items格式
+  /** Convert custom menu format to Ant Design Menu items format */
   const generateMenuItems = (menuList: MenuItem[]): MenuProps['items'] => {
 
     return menuList.filter(menu => menu.display).map((menu) => {
       const iconKey = selectedKeys.includes(menu.path || '') ? `${menu.code}Active` : menu.code;
       const iconSrc = iconPathMap[iconKey as keyof typeof iconPathMap];
       const subs = (menu.subs || []).filter(sub => sub.display);
-      // 叶子节点
+      /** Leaf node - menu item without children */
       if (!subs || subs.length === 0) {
         if (!menu.path) return null;
 
@@ -134,13 +160,12 @@ const Menu: FC<{
           ),
           icon: iconSrc ? <img
             src={iconSrc}
-            className="rb:w-[16px] rb:h-[16px] rb:mr-[8px]"
+            className="rb:w-4 rb:h-4 rb:mr-2"
           /> : null,
         };
       }
 
-      // 有子菜单的节点
-
+      /** Node with submenu - menu item with children */
       const menuLabel = menu.i18nKey ? t(menu.i18nKey) : menu.label;
       return {
         key: `submenu-${menu.id}`,
@@ -148,32 +173,33 @@ const Menu: FC<{
         label: menuLabel,
         icon: iconSrc ? <img
           src={iconSrc}
-          className="rb:w-[16px] rb:h-[16px] rb:mr-[8px]"
+          className="rb:w-4 rb:h-4 rb:mr-2"
         /> : <UserOutlined/>,
         children: generateMenuItems(subs),
       };
     }).filter(Boolean);
   };
 
-  // 生成菜单项
+  /** Generate menu items from configuration */
   const menuItems = generateMenuItems(menus);
-  // 初始加载菜单
+  
+  /** Load menus on component mount */
   useEffect(() => {
     loadMenus(source);
   }, [])
 
-  // 处理当前路径匹配
+  /** Handle current path matching and update selected keys */
   useEffect(() => {
-    // 使用location.pathname获取当前路径，确保与路由系统保持一致
+    /** Use location.pathname to get current path, ensuring consistency with routing system */
     const currentPath = location.pathname || '/';
 
-    // 尝试找到匹配的菜单项和对应的父菜单路径
+    /** Try to find matching menu item and corresponding parent menu path */
     const findMatchingKey = (menuList: MenuItem[], parentPaths: string[] = []): { key: string | null; } => {
       for (const menu of menuList) {
         if (menu.path) {
           const menuPath = menu.path[0] !== '/' ? '/' + menu.path : menu.path;
 
-          // 精确匹配或路径前缀匹配（确保是完整路径段匹配）
+          /** Exact match or path prefix match (ensure complete path segment match) */
           const isExactMatch = menuPath === currentPath;
           const isPrefixMatch = currentPath.startsWith(menuPath + '/') ||
             currentPath === menuPath;
@@ -183,7 +209,7 @@ const Menu: FC<{
           }
         }
 
-        // 递归检查子菜单
+        /** Recursively check submenus */
         if (menu.subs && menu.subs.length > 0) {
           const newParentPaths = [...parentPaths, `submenu-${menu.id}`];
           const found = findMatchingKey(menu.subs, newParentPaths);
@@ -203,6 +229,7 @@ const Menu: FC<{
     }
   }, [menus, location.pathname]);
 
+  /** Navigate to space list and clear user cache */
   const goToSpace = () => {
     navigate('/space')
     localStorage.removeItem('user')
@@ -215,14 +242,15 @@ const Menu: FC<{
       collapsed={collapsed}
       className={styles.sider}
     >
+      {/* Sidebar header with logo/workspace name and collapse toggle */}
       <div className={clsx(styles.title, {
         [styles.collapsed]: collapsed,
-        'rb:flex rb:items-center rb:text-[14px]! rb:py-[8px]!': !collapsed && source === 'space' && user.current_workspace_name,
+        'rb:flex rb:items-center rb:text-[14px]! rb:py-2!': !collapsed && source === 'space' && user.current_workspace_name,
       })}>
         {!collapsed && source === 'space' && user.current_workspace_name
-          ? <div className="rb:w-[175px] rb:text-center">
+          ? <div className="rb:w-43.75 rb:text-center">
             <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{user.current_workspace_name}</div>
-            <span className="rb:text-[12px] rb:text-[#5B6167] rb:leading-[16px] rb:font-regular">
+            <span className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">
               {t(`space.${storageType}`)}
             </span>
           </div>
@@ -235,6 +263,7 @@ const Menu: FC<{
         }
         <img src={collapsed ? menuUnfold : menuFold} className={styles.menuIcon} onClick={toggleSider} />
       </div>
+      {/* Main navigation menu */}
       <AntMenu
         style={{ borderRight: 0 }}
         mode={mode}
@@ -246,12 +275,13 @@ const Menu: FC<{
         inlineIndent={13}
         className="rb:max-h-[calc(100vh-136px)] rb:overflow-y-auto"
       />
+      {/* Return to space button for superusers */}
       {user?.is_superuser && source === 'space' &&
         <div
           onClick={goToSpace}
-          className="rb:pl-[25px] rb:flex rb:items-center rb:justify-start rb:absolute rb:bottom-[32px] rb:w-full rb:text-[12px] rb:text-[#5B6167] rb:hover:text-[#212332] rb:leading-[16px] rb:font-regular rb:text-center rb:mt-[24px] rb:cursor-pointer"
+          className="rb:pl-6.25 rb:flex rb:items-center rb:justify-start rb:absolute rb:bottom-8 rb:w-full rb:text-[12px] rb:text-[#5B6167] rb:hover:text-[#212332] rb:leading-4 rb:font-regular rb:text-center rb:mt-6 rb:cursor-pointer"
         >
-          <img src={logout} className="rb:w-[16px] rb:h-[16px] rb:mr-[16px]" />
+          <img src={logout} className="rb:w-4 rb:h-4 rb:mr-4" />
           {collapsed ? null : t('common.returnToSpace')}
         </div>
       }

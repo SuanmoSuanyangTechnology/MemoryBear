@@ -1,48 +1,90 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 15:17:48 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 15:17:48 
+ */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { App } from 'antd'
 import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
+import type { PortMetadata } from '@antv/x6/lib/model/port';
 
 import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portArgs } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
-import type { PortMetadata } from '@antv/x6/lib/model/port';
 
+/**
+ * Props for useWorkflowGraph hook
+ */
 export interface UseWorkflowGraphProps {
+  /** Reference to the main graph container element */
   containerRef: React.RefObject<HTMLDivElement>;
+  /** Reference to the minimap container element */
   miniMapRef: React.RefObject<HTMLDivElement>;
 }
 
+/**
+ * Return type for useWorkflowGraph hook
+ */
 export interface UseWorkflowGraphReturn {
+  /** Current workflow configuration */
   config: WorkflowConfig | null;
+  /** Function to update workflow configuration */
   setConfig: React.Dispatch<React.SetStateAction<WorkflowConfig | null>>;
+  /** Reference to the X6 graph instance */
   graphRef: React.MutableRefObject<Graph | undefined>;
+  /** Currently selected node */
   selectedNode: Node | null;
+  /** Function to update selected node */
   setSelectedNode: React.Dispatch<React.SetStateAction<Node | null>>;
+  /** Current zoom level of the graph */
   zoomLevel: number;
+  /** Function to update zoom level */
   setZoomLevel: React.Dispatch<React.SetStateAction<number>>;
+  /** Whether hand/pan mode is enabled */
   isHandMode: boolean;
+  /** Function to toggle hand mode */
   setIsHandMode: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Handler for dropping nodes onto canvas */
   onDrop: (event: React.DragEvent) => void;
+  /** Handler for clicking blank canvas area */
   blankClick: () => void;
+  /** Handler for delete keyboard event */
   deleteEvent: () => boolean | void;
+  /** Handler for copy keyboard event */
   copyEvent: () => boolean | void;
+  /** Handler for paste keyboard event */
   parseEvent: () => boolean | void;
+  /** Function to save workflow configuration */
   handleSave: (flag?: boolean) => Promise<unknown>;
+  /** Chat variables for workflow */
   chatVariables: ChatVariable[];
+  /** Function to update chat variables */
   setChatVariables: React.Dispatch<React.SetStateAction<ChatVariable[]>>;
 }
 
+/**
+ * Custom hook for managing workflow graph
+ * Handles graph initialization, node/edge operations, and workflow configuration
+ * @param props - Hook props containing container references
+ * @returns Object containing graph state and handlers
+ */
 export const useWorkflowGraph = ({
   containerRef,
   miniMapRef,
 }: UseWorkflowGraphProps): UseWorkflowGraphReturn => {
+  // Hooks
   const { id } = useParams();
   const { message } = App.useApp();
   const { t } = useTranslation()
+  
+  // Refs
   const graphRef = useRef<Graph>();
+  
+  // State
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isHandMode, setIsHandMode] = useState(true);
@@ -52,6 +94,9 @@ export const useWorkflowGraph = ({
   useEffect(() => {
     getConfig()
   }, [id])
+  /**
+   * Fetch workflow configuration from API
+   */
   const getConfig = () => {
     if (!id) return
     getWorkflowConfig(id)
@@ -73,6 +118,9 @@ export const useWorkflowGraph = ({
     initWorkflow()
   }, [config, graphRef.current])
   
+  /**
+   * Initialize workflow graph with nodes and edges from configuration
+   */
   const initWorkflow = () => {
     if (!config || !graphRef.current) return
     const { nodes, edges } = config
@@ -111,7 +159,7 @@ export const useWorkflowGraph = ({
               nodeLibraryConfig.config[key].defaultValue = Object.entries(config[key]).map(([name, value]) => ({ name, value }))
             } else if (type === 'code' && key === 'code' && config[key] && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
               try {
-                nodeLibraryConfig.config[key].defaultValue = atob(config[key] as string)
+                nodeLibraryConfig.config[key].defaultValue = decodeURIComponent(atob(config[key] as string))
               } catch {
                 nodeLibraryConfig.config[key].defaultValue = config[key]
               }
@@ -129,7 +177,7 @@ export const useWorkflowGraph = ({
           ...position,
         }
         
-        // 如果是if-else节点，根据cases动态生成端口
+        // Generate ports dynamically for if-else node based on cases
         if (type === 'if-else' && config.cases && Array.isArray(config.cases)) {
           const caseCount = config.cases.length;
           const totalPorts = caseCount + 1; // IF/ELIF + ELSE
@@ -141,7 +189,7 @@ export const useWorkflowGraph = ({
             { group: 'right', id: 'CASE1', args: portArgs, attrs: { text: { text: 'IF', fontSize: 12, fill: '#5B6167' }} }
           ];
           
-          // 添加 ELIF 端口
+          // Add ELIF ports
           for (let i = 1; i < caseCount; i++) {
             portItems.push({
               group: 'right',
@@ -151,7 +199,7 @@ export const useWorkflowGraph = ({
             });
           }
           
-          // 添加 ELSE 端口
+          // Add ELSE port
           portItems.push({
             group: 'right',
             id: `CASE${caseCount + 1}`,
@@ -170,7 +218,7 @@ export const useWorkflowGraph = ({
           nodeConfig.height = newHeight;
         }
         
-        // 如果是question-classifier节点，根据categories动态生成端口
+        // Generate ports dynamically for question-classifier node based on categories
         if (type === 'question-classifier' && config.categories && Array.isArray(config.categories)) {
           const categoryCount = config.categories.length;
           const baseHeight = 88;
@@ -180,7 +228,7 @@ export const useWorkflowGraph = ({
             { group: 'left' }
           ];
           
-          // 添加分类端口
+          // Add category ports
           config.categories.forEach((_category: any, index: number) => {
             portItems.push({
               group: 'right',
@@ -201,7 +249,7 @@ export const useWorkflowGraph = ({
           nodeConfig.height = newHeight;
         }
         
-        // 如果是http-request节点，检查error_handle.method配置
+        // Check error_handle.method config for http-request node
         if (type === 'http-request' && (config as any).error_handle?.method === 'branch') {
           nodeConfig.ports = {
             groups: {
@@ -219,14 +267,14 @@ export const useWorkflowGraph = ({
         return nodeConfig
       })
       
-      // 分离父节点和子节点
+      // Separate parent nodes and child nodes
       const parentNodes = nodeList.filter(node => !node.data.cycle)
       const childNodes = nodeList.filter(node => node.data.cycle)
       
-      // 先添加父节点
+      // Add parent nodes first
       graphRef.current?.addNodes(parentNodes)
       
-      // 然后处理子节点，使用addChild添加到对应的父节点
+      // Then process child nodes, use addChild to add to corresponding parent node
       childNodes.forEach(childNode => {
         const cycleId = childNode.data.cycle
         if (cycleId) {
@@ -240,7 +288,7 @@ export const useWorkflowGraph = ({
         }
       })
       
-      // 调整父节点大小以适应子节点
+      // Adjust parent node size to fit child nodes
       setTimeout(() => {
         const parentNodesWithChildren = parentNodes.filter(parentNode => {
           const parentId = parentNode.data.id
@@ -274,7 +322,7 @@ export const useWorkflowGraph = ({
       }, 100)
     }
     if (edges.length) {
-      // 去重处理：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
+      // Deduplication: For if-else and question-classifier nodes, different ports can connect to same node
       const uniqueEdges = edges.filter((edge, index, arr) => {
         return arr.findIndex(e => {
           const sourceCell = graphRef.current?.getCellById(e.source);
@@ -282,10 +330,10 @@ export const useWorkflowGraph = ({
           const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
           
           if (isMultiPortNode) {
-            // 多端口节点需要同时比较source、target和label
+            // Multi-port nodes need to compare source, target and label
             return e.source === edge.source && e.target === edge.target && e.label === edge.label;
           } else {
-            // 其他节点只比较source和target
+            // Other nodes only compare source and target
             return e.source === edge.source && e.target === edge.target;
           }
         }) === index;
@@ -302,16 +350,16 @@ export const useWorkflowGraph = ({
           
           let sourcePort = sourcePorts.find((port: any) => port.group === 'right')?.id || 'right';
           
-          // 如果是if-else节点且有label，根据label匹配对应的端口
+          // If if-else node has label, match corresponding port by label
           if (sourceCell.getData()?.type === 'if-else' && label) {
-            // 查找匹配的端口ID
+            // Find matching port ID
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
               sourcePort = label;
             }
           }
           
-          // 如果是question-classifier节点且有label，根据label匹配对应的端口
+          // If question-classifier node has label, match corresponding port by label
           if (sourceCell.getData()?.type === 'question-classifier' && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
@@ -319,7 +367,7 @@ export const useWorkflowGraph = ({
             }
           }
           
-          // 如果是http-request节点且有label，根据label匹配对应的端口
+          // If http-request node has label, match corresponding port by label
           if (sourceCell.getData()?.type === 'http-request' && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
@@ -348,7 +396,7 @@ export const useWorkflowGraph = ({
       graphRef.current.addEdges(edgeList.filter(vo => vo !== null))
     }
     
-    // 初始化完成后，将节点展示在可视区域内
+    // Initialize after completion, display nodes in visible area
     if (nodes.length > 0 || edges.length > 0) {
       setTimeout(() => {
         if (graphRef.current) {
@@ -357,7 +405,9 @@ export const useWorkflowGraph = ({
       }, 200)
     }
   }
-  // 使用插件
+  /**
+   * Setup X6 graph plugins (MiniMap, Snapline, Clipboard, Keyboard)
+   */
   const setupPlugins = () => {
     if (!graphRef.current || !miniMapRef.current) return;
     // 添加小地图
@@ -395,9 +445,12 @@ export const useWorkflowGraph = ({
   //     ports[i].style.visibility = show ? 'visible' : 'hidden';
   //   }
   // };
-  // 节点选择事件
+  /**
+   * Handle node click event
+   * @param node - Clicked node
+   */
   const nodeClick = ({ node }: { node: Node }) => {
-    // 忽略 add-node 类型的节点点击
+    // Ignore add-node type node clicks
     if (node.getData()?.type === 'add-node' || node.getData().type === 'break' || node.getData().type === 'cycle-start') {
       setSelectedNode(null)
       return;
@@ -420,12 +473,17 @@ export const useWorkflowGraph = ({
     });
     setSelectedNode(node);
   };
-  // 连线选择事件
+  /**
+   * Handle edge click event
+   * @param edge - Clicked edge
+   */
   const edgeClick = ({ edge }: { edge: Edge }) => {
     edge.setAttrByPath('line/stroke', edge_selected_color);
     clearNodeSelect();
   };
-  // 清空选中节点
+  /**
+   * Clear all selected nodes
+   */
   const clearNodeSelect = () => {
     const nodes = graphRef.current?.getNodes();
 
@@ -440,44 +498,54 @@ export const useWorkflowGraph = ({
     });
     setSelectedNode(null);
   };
-  // 清空选中连线
+  /**
+   * Clear all selected edges
+   */
   const clearEdgeSelect = () => {
     graphRef.current?.getEdges().forEach(e => {
       e.setAttrByPath('line/stroke', edge_color);
       e.setAttrByPath('line/strokeWidth', 1);
     });
   };
-  // 画布点击事件，取消选择
+  /**
+   * Handle blank canvas click - deselect all
+   */
   const blankClick = () => {
     clearNodeSelect();
     clearEdgeSelect();
     graphRef.current?.cleanSelection();
   };
-  // 画布缩放事件
+  /**
+   * Handle canvas scale/zoom event
+   * @param sx - Scale factor on x-axis
+   */
   const scaleEvent = ({ sx }: { sx: number }) => {
     setZoomLevel(sx);
   };
-  // 节点移动事件
+  /**
+   * Handle node moved event - restrict child nodes within parent bounds
+   * @param node - Moved node
+   */
   const nodeMoved = ({ node }: { node: Node }) => {
     const cycle = node.getData()?.cycle;
     if (cycle) {
       const parentNode = graphRef.current!.getNodes().find(n => n.id === cycle);
       if (parentNode?.getData()?.isGroup) {
-        // 获取父节点和子节点的边界框
+        // Get parent node and child node bounding boxes
         const parentBBox = parentNode.getBBox();
         const childBBox = node.getBBox();
         
-        // 计算父节点的内边距
+        // Calculate parent node padding
         const padding = 24;
         const headerHeight = 50;
         
-        // 计算子节点允许的最小和最大位置
+        // Calculate minimum and maximum positions allowed for child node
         const minX = parentBBox.x + padding;
         const minY = parentBBox.y + padding + headerHeight;
         const maxX = parentBBox.x + parentBBox.width - padding - childBBox.width;
         const maxY = parentBBox.y + parentBBox.height - padding - childBBox.height;
         
-        // 限制子节点在父节点内移动
+        // Restrict child node movement within parent node
         let newX = childBBox.x;
         let newY = childBBox.y;
         
@@ -486,14 +554,17 @@ export const useWorkflowGraph = ({
         if (newX > maxX) newX = maxX;
         if (newY > maxY) newY = maxY;
         
-        // 如果子节点位置被限制，更新其位置
+        // If child node position is restricted, update its position
         if (newX !== childBBox.x || newY !== childBBox.y) {
           node.setPosition(newX, newY);
         }
       }
     }
   };
-  // 复制快捷键事件
+  /**
+   * Handle copy keyboard shortcut (Ctrl+C / Cmd+C)
+   * @returns false to prevent default behavior
+   */
   const copyEvent = () => {
     if (!graphRef.current) return false;
     const selectedNodes = graphRef.current.getNodes().filter(node => node.getData()?.isSelected);
@@ -502,7 +573,10 @@ export const useWorkflowGraph = ({
     }
     return false;
   };
-  // 粘贴快捷键事件
+  /**
+   * Handle paste keyboard shortcut (Ctrl+V / Cmd+V)
+   * @returns false to prevent default behavior
+   */
   const parseEvent = () => {
     if (!graphRef.current?.isClipboardEmpty()) {
       graphRef.current?.paste({ offset: 32 });
@@ -510,7 +584,11 @@ export const useWorkflowGraph = ({
     }
     return false;
   };
-  // 删除选中的节点和连线事件
+  /**
+   * Handle delete keyboard shortcut
+   * Removes selected nodes, edges, and handles parent-child relationships
+   * @returns false to prevent default behavior
+   */
   const deleteEvent = () => {
     if (!graphRef.current) return;
     const nodes = graphRef.current?.getNodes();
@@ -519,16 +597,16 @@ export const useWorkflowGraph = ({
     const nodesToDelete: Node[] = [];
     const parentNodesToUpdate: Node[] = [];
 
-    // 首先收集所有选中的节点，但排除默认子节点
+    // First collect all selected nodes, but exclude default child nodes
     nodes?.forEach(node => {
       const data = node.getData();
-      // 如果节点是默认子节点，不允许单独删除
+      // If node is default child node, do not allow individual deletion
       if (data.isSelected && !data.isDefault) {
         nodesToDelete.push(node);
       }
     });
 
-    // 收集与选中节点相关的连线
+    // Collect edges related to selected nodes
     edges?.forEach(edge => {
       const attrs = edge.getAttrs()
       if (attrs.line.stroke === edge_selected_color) {
@@ -545,35 +623,35 @@ export const useWorkflowGraph = ({
       }
     })
 
-    // 对于每个选中的节点
+    // For each selected node
     if (nodesToDelete.length > 0) {
       nodesToDelete.forEach(nodeToDelete => {
-        // 检查是否为子节点
+        // Check if it's a child node
         const nodeData = nodeToDelete.getData();
         if (nodeData.cycle) {
-          // 找到对应的父节点
+          // Find corresponding parent node
           const parentNode = nodes?.find(n => n.id === nodeData.cycle);
           if (parentNode) {
-            // 使用removeChild方法删除子节点
+            // Use removeChild method to delete child node
             parentNode.removeChild(nodeToDelete);
             parentNodesToUpdate.push(parentNode);
           }
-          // 将子节点添加到删除列表
+          // Add child node to deletion list
           cells.push(nodeToDelete);
         } 
-        // 检查是否为 LoopNode、IterationNode 或 SubGraphNode
+        // Check if it's LoopNode, IterationNode or SubGraphNode
         else if (nodeToDelete.shape === 'loop-node' || nodeToDelete.shape === 'iteration-node' || nodeToDelete.shape === 'subgraph-node') {
-          // 查找所有 cycle 为当前节点 id 的子节点
+          // Find all child nodes with cycle equal to current node id
           nodes?.forEach(node => {
             const data = node.getData();
             if (data.cycle === nodeToDelete.id || data.cycle === nodeToDelete.getData()?.id) {
               cells.push(node);
             }
           });
-          // 添加父节点到删除列表
+          // Add parent node to deletion list
           cells.push(nodeToDelete);
         } 
-        // 普通节点
+        // Normal node
         else {
           cells.push(nodeToDelete);
         }
@@ -581,25 +659,29 @@ export const useWorkflowGraph = ({
       blankClick();
     }
       
-    // 删除所有收集的节点和连线
+    // Delete all collected nodes and edges
     if (cells.length > 0) {
       graphRef.current?.removeCells(cells);
     }
     return false;
   };
 
-  // 调整画布大小
+  /**
+   * Handle window resize event
+   */
   const handleResize = () => {
     if (containerRef.current && graphRef.current) {
       graphRef.current.resize(containerRef.current.offsetWidth, containerRef.current.offsetHeight);
     }
   };
 
-  // 初始化
+  /**
+   * Initialize X6 graph with configuration and event listeners
+   */
   const init = () => {
     if (!containerRef.current || !miniMapRef.current) return;
 
-    // 注册React形状
+    // Register React shapes
     nodeRegisterLibrary.forEach((item) => {
       register(item);
     });
@@ -616,8 +698,8 @@ export const useWorkflowGraph = ({
         type: 'dot',
         size: 10,
         args: {
-          color: '#939AB1', // 网点颜色
-          thickness: 1, // 网点大小
+          color: '#939AB1', // Grid dot color
+          thickness: 1, // Grid dot size
         }
       },
       panning: isHandMode,
@@ -649,32 +731,32 @@ export const useWorkflowGraph = ({
         validateConnection({ sourceCell, targetCell, targetMagnet }) {
           if (!targetMagnet) return false;
           
-          // 节点不能与自己连线
+          // Node cannot connect to itself
           if (sourceCell?.id === targetCell?.id) return false;
           
           const sourceType = sourceCell?.getData()?.type;
           const targetType = targetCell?.getData()?.type;
           
-          // 开始节点不能作为连线的终点
+          // Start node cannot be connection target
           if (targetType === 'start') return false;
           
-          // 结束节点不能作为连线的起点
+          // End node cannot be connection source
           if (sourceType === 'end') return false;
           
-          // 获取源节点和目标节点的父节点ID
+          // Get source node and target node parent IDs
           const sourceParentId = sourceCell?.getData()?.cycle;
           const targetParentId = targetCell?.getData()?.cycle;
           
-          // 验证父子节点关系：
-          // 1. 如果两个节点都有父节点ID，必须相同才能连线
-          // 2. 如果两个都没有父节点ID，可以正常连线
-          // 3. 如果一个有父节点，一个没有，不能连线
+          // Validate parent-child relationship:
+          // 1. If both nodes have parent IDs, they must be same to connect
+          // 2. If both have no parent ID, can connect normally
+          // 3. If one has parent, one doesn't, cannot connect
           console.log('sourceParentId', sourceParentId, targetParentId)
           if (sourceParentId && targetParentId) {
-            // 同一父节点下的子节点可以互相连线
+            // Child nodes under same parent can connect to each other
             return sourceParentId === targetParentId;
           } else if (sourceParentId || targetParentId) {
-            // 一个有父节点，一个没有，不能连线
+            // One has parent, one doesn't, cannot connect
             return false;
           }
           
@@ -710,26 +792,26 @@ export const useWorkflowGraph = ({
         },
       },
     });
-    // 使用插件
+    // Use plugins
     setupPlugins();
-    // 监听连线mouseleave事件
+    // Listen to edge mouseleave event
     graphRef.current.on('edge:mouseleave', ({ edge }: { edge: Edge }) => {
       if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
         edge.setAttrByPath('line/stroke', edge_color);
         edge.setAttrByPath('line/strokeWidth', 1);
       }
     });
-    // 监听节点选择事件
+    // Listen to node selection event
     graphRef.current.on('node:click', nodeClick);
-    // 监听连线选择事件
+    // Listen to edge selection event
     graphRef.current.on('edge:click', edgeClick);
-    // 监听连接桩点击事件
+    // Listen to port click event
     graphRef.current.on('node:port:click', ({ e, node, port }: { e: MouseEvent, node: Node, port: string }) => {
       e.stopPropagation();
       const portElement = e.target as HTMLElement;
       const rect = portElement.getBoundingClientRect();
       
-      // 创建临时的popover触发元素
+      // Create temporary popover trigger element
       const tempDiv = document.createElement('div');
       tempDiv.style.position = 'fixed';
       tempDiv.style.left = rect.left + 'px';
@@ -739,23 +821,23 @@ export const useWorkflowGraph = ({
       tempDiv.style.zIndex = '9999';
       document.body.appendChild(tempDiv);
       
-      // 触发自定义事件来显示节点选择popover
+      // Trigger custom event to show node selection popover
       const customEvent = new CustomEvent('port:click', {
         detail: { node, port, element: tempDiv, rect }
       });
       window.dispatchEvent(customEvent);
     });
-    // 监听画布点击事件，取消选择
+    // Listen to canvas click event, cancel selection
     graphRef.current.on('blank:click', blankClick);
-    // 监听缩放事件
+    // Listen to zoom event
     graphRef.current.on('scale', scaleEvent);
-    // 监听节点移动事件
+    // Listen to node move event
     graphRef.current.on('node:moved', nodeMoved);
-    // 监听复制键盘事件
+    // Listen to copy keyboard event
     graphRef.current.bindKey(['ctrl+c', 'cmd+c'], copyEvent);
-    // 监听粘贴键盘事件
+    // Listen to paste keyboard event
     graphRef.current.bindKey(['ctrl+v', 'cmd+v'], parseEvent);
-    // 删除选中的节点和连线
+    // Delete selected nodes and edges
     graphRef.current.bindKey(['ctrl+d', 'cmd+d', 'delete', 'backspace'], deleteEvent);
 
   };
@@ -771,6 +853,11 @@ export const useWorkflowGraph = ({
     };
   }, []);
 
+  /**
+   * Handle node drop event from drag-and-drop
+   * Creates new node at drop position
+   * @param event - React drag event
+   */
   const onDrop = (event: React.DragEvent) => {
     if (!graphRef.current) return;
     event.preventDefault();
@@ -780,13 +867,13 @@ export const useWorkflowGraph = ({
 
     const point = graphRef.current.clientToLocal(event.clientX, event.clientY);
     
-    // 获取节点库中的原始配置，避免config数据串联
+    // Get original config from node library to avoid config data chaining
     let nodeLibraryConfig = [...nodeLibrary]
       .flatMap(category => category.nodes)
       .find(n => n.type === dragData.type);
     nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
     
-    // 创建干净的节点数据，只保留必要的字段
+    // Create clean node data, only keep necessary fields
     const cleanNodeData = {
       id: `${dragData.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: t(`workflow.${dragData.type}`),
@@ -802,7 +889,7 @@ export const useWorkflowGraph = ({
         data: { ...cleanNodeData, isGroup: true },
       });
     } else if (dragData.type === 'if-else') {
-      // 创建条件节点
+      // Create condition node
       graphRef.current.addNode({
         ...graphNodeLibrary[dragData.type],
         x: point.x - 100,
@@ -811,7 +898,7 @@ export const useWorkflowGraph = ({
         data: { ...cleanNodeData },
       });
     } else {
-      // 普通节点创建，不支持拖拽到循环节点内
+      // Normal node creation, does not support dragging into loop node
       graphRef.current.addNode({
         ...(graphNodeLibrary[dragData.type] || graphNodeLibrary.default),
         x: point.x - 60,
@@ -821,7 +908,12 @@ export const useWorkflowGraph = ({
       });
     }
   };
-  // 保存workflow配置
+  /**
+   * Save workflow configuration to backend
+   * Serializes graph state (nodes, edges, variables) and sends to API
+   * @param flag - Whether to show success message (default: true)
+   * @returns Promise that resolves when save is complete
+   */
   const handleSave = (flag = true) => {
     if (!graphRef.current || !config) return Promise.resolve()
     return new Promise((resolve, reject) => {
@@ -851,7 +943,7 @@ export const useWorkflowGraph = ({
                 const code = data.config[key].defaultValue || ''
                 itemConfig = {
                   ...itemConfig,
-                  code: btoa(code || '')
+                  code: btoa(encodeURIComponent(code || ''))
                 }
               } else if (key === 'memory' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const { messages, ...rest } = data.config[key].defaultValue
@@ -869,6 +961,18 @@ export const useWorkflowGraph = ({
                   })
                 }
                 itemConfig[key] = group_variables
+              } else if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_type') {
+                let group = data.config.group.defaultValue
+                let group_type = group ? {} : data.config[key].defaultValue
+                let group_variables = data.config.group_variables.defaultValue
+
+                if (group) {
+                  group_variables.forEach((item: any, index: number) => {
+                    group_type[item.key] = data.config[key].defaultValue[index] || data.config[key].defaultValue[item.key]
+                  })
+                }
+
+                itemConfig[key] = group_type
               } else if (data.type === 'http-request' && (key === 'headers' || key === 'params') && data.config[key] && 'defaultValue' in data.config[key]) {
                 const value = data.config[key].defaultValue
                 itemConfig[key] = {}
@@ -885,7 +989,7 @@ export const useWorkflowGraph = ({
                   ...itemConfig,
                   ...(data.config[key].defaultValue || {}),
                   knowledge_bases: knowledge_bases?.map((vo: any) => {
-                    const kb_config = vo.config || { similarity_threshold: vo.similarity_threshold, strategy: vo.strategy, top_k: vo.top_k, weight: vo.weight }
+                    const kb_config = vo.config || { similarity_threshold: vo.similarity_threshold, retrieve_type: vo.retrieve_type, top_k: vo.top_k, weight: vo.weight }
                     return { kb_id: vo.kb_id || vo.id, ...kb_config, }
                   })
                 }
@@ -897,7 +1001,7 @@ export const useWorkflowGraph = ({
             id: data.id || node.id,
             type: data.type,
             name: data.name,
-            cycle: data.cycle, // 保存cycle参数
+            cycle: data.cycle, // Save cycle parameter
             position: {
               x: position.x,
               y: position.y,
@@ -910,13 +1014,13 @@ export const useWorkflowGraph = ({
           const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
           const sourcePortId = edge.getSourcePortId();
 
-          // 过滤无效连线：源节点或目标节点不存在，或者是add-node类型
+          // Filter invalid edges: source or target node doesn't exist, or is add-node type
           if (!sourceCell?.getData()?.id || !targetCell?.getData()?.id || 
               sourceCell?.getData()?.type === 'add-node' || targetCell?.getData()?.type === 'add-node') {
             return null;
           }
           
-          // 如果是if-else节点的右侧端口连线，添加label
+          // If if-else node right port connection, add label
           if (sourceCell?.getData()?.type === 'if-else' && sourcePortId?.startsWith('CASE')) {
             return {
               source: sourceCell.getData().id,
@@ -925,7 +1029,7 @@ export const useWorkflowGraph = ({
             };
           }
           
-          // 如果是question-classifier节点的右侧端口连线，添加label
+          // If question-classifier node right port connection, add label
           if (sourceCell?.getData()?.type === 'question-classifier' && sourcePortId?.startsWith('CASE')) {
             return {
               source: sourceCell.getData().id,
@@ -934,7 +1038,7 @@ export const useWorkflowGraph = ({
             };
           }
           
-          // 如果是http-request节点的右侧端口连线，添加label
+          // If http-request node right port connection, add label
           if (sourceCell?.getData()?.type === 'http-request') {
             if (sourcePortId === 'ERROR') {
               return {
@@ -958,7 +1062,7 @@ export const useWorkflowGraph = ({
         })
         .filter(edge => edge !== null)
         .filter((edge, index, arr) => {
-          // 去重：对于if-else和question-classifier节点，不同连接桩允许连接到相同节点
+          // Deduplication: For if-else and question-classifier nodes, different ports can connect to same node
           return arr.findIndex(e => {
             if (!e || !edge) return false;
             const sourceCell = graphRef.current?.getCellById(e.source);
@@ -966,10 +1070,10 @@ export const useWorkflowGraph = ({
             const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
             
             if (isMultiPortNode) {
-              // 多端口节点需要同时比较source、target和label
+              // Multi-port nodes need to compare source, target and label
               return e.source === edge.source && e.target === edge.target && e.label === edge.label;
             } else {
-              // 其他节点只比较source和target
+              // Other nodes only compare source and target
               return e.source === edge.source && e.target === edge.target;
             }
           }) === index;

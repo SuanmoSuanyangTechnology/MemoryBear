@@ -1,3 +1,18 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 15:08:58 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 15:08:58 
+ */
+/**
+ * SettingModal Component
+ * 
+ * A modal dialog for configuring application settings including language and timezone.
+ * Uses forwardRef to expose open/close methods to parent components.
+ * 
+ * @component
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -7,34 +22,39 @@ import { useI18n } from '@/store/locale'
 import { timezones } from '@/utils/timezones'
 
 const FormItem = Form.Item;
+
+/** Interface for SettingModal ref methods exposed to parent components */
 export interface SettingModalRef {
+  /** Open the settings modal */
   handleOpen: () => void;
+  /** Close the settings modal */
   handleClose: () => void;
 }
 
+/** Settings modal component for language and timezone configuration */
 const SettingModal = forwardRef<SettingModalRef>((_props, ref) => {
   const { t } = useTranslation();
   const { changeLanguage, language, timeZone, changeTimeZone } = useI18n()
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm();
 
-  const values = Form.useWatch([], form);
-
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form to initial state */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
   };
 
+  /** Open modal and populate form with current settings */
   const handleOpen = () => {
     form.setFieldsValue({ language, timeZone })
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  
+  /** Validate and save settings, update language and timezone if changed */
   const handleSave = () => {
     form
       .validateFields()
-      .then(() => {
+      .then((values) => {
         const { language: newLanguage, timeZone: newTimeZone } = values
         if (newLanguage !== language) {
           changeLanguage(newLanguage);
@@ -47,11 +67,12 @@ const SettingModal = forwardRef<SettingModalRef>((_props, ref) => {
       });
   }
 
-  // 暴露给父组件的方法
+  /** Expose handleOpen and handleClose methods to parent component via ref */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
   }));
+  
   return (
     <RbModal
       title={t('header.setting')}
@@ -64,7 +85,7 @@ const SettingModal = forwardRef<SettingModalRef>((_props, ref) => {
         form={form}
         layout="vertical"
       >
-        {/* 中英文切换 */}
+        {/* Language selection dropdown */}
         <FormItem
           name="language"
           label={t('header.language')}
@@ -73,7 +94,7 @@ const SettingModal = forwardRef<SettingModalRef>((_props, ref) => {
             options={['zh', 'en'].map(key => ({ label: t(`header.${key}`), value: key }))}
           />
         </FormItem>
-        {/* 时区切换 */}
+        {/* Timezone selection dropdown */}
         <FormItem
           name="timeZone"
           label={t('header.timeZone')}

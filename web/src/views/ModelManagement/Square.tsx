@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:50:14 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:50:14 
+ */
+/**
+ * Model Square View
+ * Displays public model marketplace grouped by provider
+ * Allows adding models and viewing details
+ */
+
 import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Button, Space, App, Divider, Flex, Tooltip } from 'antd'
 import { UsergroupAddOutlined } from '@ant-design/icons';
@@ -11,6 +23,9 @@ import Tag from '@/components/Tag';
 import ModelSquareDetail from './components/ModelSquareDetail'
 import { getLogoUrl } from './utils'
 
+/**
+ * Model square component
+ */
 const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPlazaItem) => void; }>(({ query, handleEdit }, ref) => {
   const { t } = useTranslation();
   const { message } = App.useApp()
@@ -19,6 +34,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPl
   useEffect(() => {
     getList()
   }, [query])
+  /** Fetch model plaza list */
   const getList = () => {
     getModelPlaza(query)
       .then(res => {
@@ -26,9 +42,11 @@ const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPl
       })
   }
 
+  /** Open model detail drawer */
   const handleMore = (vo: ModelPlaza) => {
     modelSquareDetailRef.current?.handleOpen(vo)
   }
+  /** Add model to workspace */
   const handleAdd = (item: ModelPlazaItem) => {
     addModelPlaza(item.id)
       .then(() => {
@@ -37,6 +55,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPl
       })
   }
 
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     getList,
   }));

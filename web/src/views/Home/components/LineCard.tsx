@@ -1,13 +1,28 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:17:05 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 17:18:32
+ */
+/**
+ * Line Chart Card Component
+ * Displays time-series data with ECharts line chart
+ * Supports multiple series and date range selection
+ */
+
 import { type FC, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Select } from 'antd'
 import ReactEcharts from 'echarts-for-react';
 import * as echarts from 'echarts';
+
 import { formatDateTime } from '@/utils/format';
 import Empty from '@/components/Empty'
-
 import Card from './Card'
 
+/**
+ * Component props
+ */
 interface LineCardProps {
   chartData: Array<Record<string, string | number>>;
   limit: number;
@@ -17,6 +32,7 @@ interface LineCardProps {
   seriesList: string[];
 }
 
+/** ECharts series configuration */
 const SeriesConfig = {
   type: 'line',
   stack: 'Total',
@@ -34,6 +50,7 @@ const SeriesConfig = {
   },
   data: [220, 302, 181, 234, 210, 290, 150]
 }
+/** Chart color palette */
 const Colors = ['#FFB048', '#4DA8FF', '#155EEF']
 
 const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, className, seriesList }) => {
@@ -47,6 +64,7 @@ const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, classNa
     { label: t('dashboard.lastYear'), value: 365 },
   ]
 
+  /** Generate series data with gradient colors */
   const getSeries = () => {
     const list = seriesList.map((key, index) => {
       return {
@@ -71,6 +89,7 @@ const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, classNa
 
     return list
   }
+  /** Format series list for legend */
   const formatSeriesList = () => {
     return seriesList.map(key => ({
       ...SeriesConfig,
@@ -85,11 +104,11 @@ const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, classNa
         <Select 
           value={limit}
           options={options} 
-          onChange={(value) => onChange(value, type)} 
+          onChange={(value) => onChange(String(value), type)} 
           style={{ width: '150px' }} 
         />
       }
-      className={`rb:pb-[24px] ${className}`}
+      className={`rb:pb-6 ${className}`}
     >
       {chartData && chartData.length > 0 ? (
         <ReactEcharts
@@ -157,7 +176,7 @@ const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, classNa
           notMerge={true}
           lazyUpdate={true}
         />
-      ) : <Empty size={120} className="rb:mt-[48px] rb:mb-[81px]" />}
+      ) : <Empty size={120} className="rb:mt-12 rb:mb-20.25" />}
     </Card>
   )
 }

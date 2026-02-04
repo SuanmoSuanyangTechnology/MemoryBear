@@ -1,15 +1,29 @@
 /*
- * @Description: 
- * @Version: 0.0.1
- * @Author: yujiangping
- * @Date: 2025-12-16 10:19:18
- * @LastEditors: yujiangping
- * @LastEditTime: 2025-12-22 12:31:31
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 15:23:01 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 15:23:01 
  */
+/**
+ * RbModal Component
+ * 
+ * A customized modal component that extends Ant Design's Modal with:
+ * - Default width and styling
+ * - Internationalized cancel button text
+ * - Scrollable content area with max height
+ * - Prevents closing on mask click
+ * - Auto-destroys on hidden
+ * 
+ * @component
+ */
+
 import { type FC } from 'react'
 import { Modal, type ModalProps } from 'antd'
 import { useTranslation } from 'react-i18next'
+
 import './index.css'
+
+/** Custom modal component wrapper with default configurations */
 const RbModal: FC<ModalProps> = ({
   onOk,
   onCancel,
@@ -29,6 +43,7 @@ const RbModal: FC<ModalProps> = ({
       maskClosable={false}
       {...props}
     >
+      {/* Scrollable content container */}
       <div className='rb:max-h-137.5 rb:overflow-y-auto rb:overflow-x-hidden'>
         {children}
       </div>

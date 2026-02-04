@@ -9,7 +9,6 @@ class NodeType(StrEnum):
     KNOWLEDGE_RETRIEVAL = "knowledge-retrieval"
     IF_ELSE = "if-else"
     CODE = "code"
-    TRANSFORM = "transform"
     QUESTION_CLASSIFIER = "question-classifier"
     HTTP_REQUEST = "http-request"
     TOOL = "tool"

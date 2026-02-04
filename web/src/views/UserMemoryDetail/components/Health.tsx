@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:33:01 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:33:01 
+ */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -7,6 +13,14 @@ import ReactEcharts from 'echarts-for-react'
 import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
 import { getEmotionHealth } from '@/api/memory'
+/**
+ * Health data structure
+ * @property {number} health_score - Overall health score
+ * @property {string} level - Health level
+ * @property {Object} dimensions - Health dimensions (positivity, stability, resilience)
+ * @property {Object} emotion_distribution - Distribution of emotions
+ * @property {string} time_range - Time range for analysis
+ */
 interface Health {
   health_score: number;
   level: string;
@@ -36,6 +50,12 @@ interface Health {
   };
   time_range: string;
 }
+
+/**
+ * Health Component
+ * Displays emotional health score with radar chart and dimension breakdowns
+ * Shows positivity rate, stability, and resilience metrics
+ */
 const Health: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()

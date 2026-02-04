@@ -1,4 +1,12 @@
-// 标签表单数据类型
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:46:23 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:46:23 
+ */
+/**
+ * Tag form data type
+ */
 export interface TagFormData {
   tagName: string;
   type: string;
@@ -7,12 +15,14 @@ export interface TagFormData {
   applicableScope?: string[];
   semanticExpansion?: string;
   isActive?: boolean;
-  // 扩展字段用于区分编辑和新增操作
+  /** Distinguish between edit and create operations */
   isEditing?: boolean;
   tagId?: string;
 }
 
-// 记忆总览数据类型
+/**
+ * Memory overview record type
+ */
 export interface MemoryOverviewRecord {
   id: number;
   memoryID: string,
@@ -23,12 +33,16 @@ export interface MemoryOverviewRecord {
   retentionDegree: string;
   status: string;
 }
-// 定义组件暴露的方法接口
+/**
+ * Component exposed methods interface
+ */
 export interface MemoryOverviewFormRef {
   handleOpen: (memoryOverview?: MemoryOverviewRecord | null) => void;
 }
 
-// 遗忘曲线数据类型
+/**
+ * Forgetting curve data type
+ */
 export interface CurveRecord {
   memoryID: string;
   type: string;
@@ -38,6 +52,9 @@ export interface CurveRecord {
   reinforcementCount: string;
 }
 
+/**
+ * Reflection engine configuration
+ */
 export interface ConfigForm {
   config_id: number | string;
   reflection_enabled: boolean;
@@ -49,20 +66,32 @@ export interface ConfigForm {
   quality_assessment: boolean;
 }
 
+/**
+ * Quality assessment result
+ */
 export interface QualityAssessment {
   score: number;
   summary: string;
 }
+/**
+ * Memory verification result
+ */
 export interface MemoryVerify {
   has_privacy: boolean;
   privacy_types: string[];
   summary: string;
 }
+/**
+ * Reflection data
+ */
 export interface ReflexionData {
   reason: string;
   solution: string;
 }
 
+/**
+ * Reflection engine test result
+ */
 export interface Result {
   baseline: string;
   source_data: string;

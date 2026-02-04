@@ -1,7 +1,19 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:25:49 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:25:49 
+ */
+/**
+ * Knowledge List Modal
+ * Displays and allows selection of knowledge bases to associate with the application
+ */
+
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { Space, List } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
+
 import type { KnowledgeModalRef, KnowledgeBase } from './types'
 import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types'
 import RbModal from '@/components/RbModal'
@@ -9,11 +21,19 @@ import { getKnowledgeBaseList } from '@/api/knowledgeBase'
 import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
+/**
+ * Component props
+ */
 interface KnowledgeModalProps {
+  /** Callback to add selected knowledge bases */
   refresh: (rows: KnowledgeBase[], type: 'knowledge') => void;
+  /** Currently selected knowledge bases */
   selectedList: KnowledgeBase[];
 }
 
+/**
+ * Modal for selecting knowledge bases
+ */
 const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   refresh,
   selectedList
@@ -26,7 +46,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedRows, setSelectedRows] = useState<KnowledgeBase[]>([])
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset state */
   const handleClose = () => {
     setVisible(false);
     setQuery({})
@@ -34,6 +54,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     setSelectedRows([])
   };
 
+  /** Open modal */
   const handleOpen = () => {
     setVisible(true);
     setQuery({})
@@ -46,6 +67,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
       getList()
     }
   }, [query.keywords, visible])
+  /** Fetch knowledge base list */
   const getList = () => {
     getKnowledgeBaseList(undefined, {
       ...query,
@@ -58,13 +80,13 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
         setList(response.items || [])
       })
   }
-  // 封装保存方法，添加提交逻辑
+  /** Save selected knowledge bases */
   const handleSave = () => {
     refresh(selectedRows.map(item => ({
       ...item,
       config: {
         similarity_threshold: 0.7,
-        strategy: "hybrid",
+        retrieve_type: "hybrid",
         top_k: 3,
         weight: 1,
       }
@@ -72,16 +94,18 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     setVisible(false);
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
   }));
+  /** Search knowledge bases */
   const handleSearch = (value?: string) => {
     setQuery({keywords: value})
     setSelectedIds([])
     setSelectedRows([])
   }
+  /** Toggle knowledge base selection */
   const handleSelect = (item: KnowledgeBase) => {
     const index = selectedIds.indexOf(item.id)
     if (index === -1) {

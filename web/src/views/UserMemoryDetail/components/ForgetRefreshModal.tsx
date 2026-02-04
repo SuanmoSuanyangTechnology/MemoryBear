@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:33:10 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:33:10 
+ */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { useParams } from 'react-router-dom'
 import { Form, Slider } from 'antd';
@@ -7,10 +13,19 @@ import RbModal from '@/components/RbModal'
 import { forgetTrigger } from '@/api/memory'
 import type { ForgetRefreshModalRef } from '../pages/ForgetDetail'
 
+/**
+ * Props for ForgetRefreshModal component
+ * @property {Function} refresh - Callback function to refresh data
+ */
 interface ForgetRefreshModalProps {
   refresh: (flag: boolean) => void;
 }
 
+/**
+ * ForgetRefreshModal Component
+ * Modal for triggering memory forgetting process with configurable parameters
+ * Allows setting max merge batch size and minimum days since access
+ */
 const ForgetRefreshModal = forwardRef<ForgetRefreshModalRef, ForgetRefreshModalProps>(({
   refresh
 }, ref) => {
@@ -21,18 +36,26 @@ const ForgetRefreshModal = forwardRef<ForgetRefreshModalRef, ForgetRefreshModalP
   const [loading, setLoading] = useState(false)
   const values = Form.useWatch([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /**
+   * Close modal and reset form
+   */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setLoading(false)
   };
 
+  /**
+   * Open modal and reset form
+   */
   const handleOpen = () => {
     form.resetFields();
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+
+  /**
+   * Submit form and trigger forget process
+   */
   const handleSave = () => {
     if(!id) return
     form
@@ -56,7 +79,9 @@ const ForgetRefreshModal = forwardRef<ForgetRefreshModalRef, ForgetRefreshModalP
       });
   }
 
-  // 暴露给父组件的方法
+  /**
+   * Expose methods to parent component
+   */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

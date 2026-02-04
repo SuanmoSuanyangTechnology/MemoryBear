@@ -18,6 +18,7 @@ class WriteState(TypedDict):
     memory_config: object
     write_result: dict
     data: str
+    language: str  # 语言类型 ("zh" 中文, "en" 英文)
 
 class ReadState(TypedDict):
     """

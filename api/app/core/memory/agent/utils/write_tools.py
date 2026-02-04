@@ -34,17 +34,17 @@ async def write(
     memory_config: MemoryConfig,
     messages: list,
     ref_id: str = "wyl20251027",
+    language: str = "zh",
 ) -> None:
     """
     Execute the complete knowledge extraction pipeline.
 
     Args:
-        user_id: User identifier
-        apply_id: Application identifier
         end_user_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
         messages: Structured message list [{"role": "user", "content": "..."}, ...]
         ref_id: Reference ID, defaults to "wyl20251027"
+        language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
     """
     # Extract config values
     embedding_model_id = str(memory_config.embedding_model_id)
@@ -100,6 +100,7 @@ async def write(
         connector=neo4j_connector,
         config=pipeline_config,
         embedding_id=embedding_model_id,
+        language=language,
     )
 
     # Run the complete extraction pipeline
@@ -173,7 +174,7 @@ async def write(
     step_start = time.time()
     try:
         summaries = await memory_summary_generation(
-            chunked_dialogs, llm_client=llm_client, embedder_client=embedder_client
+            chunked_dialogs, llm_client=llm_client, embedder_client=embedder_client, language=language
         )
 
         try:

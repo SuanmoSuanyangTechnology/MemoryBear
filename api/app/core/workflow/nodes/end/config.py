@@ -2,7 +2,8 @@
 
 from pydantic import Field
 
-from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition, VariableType
+from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition
+from app.core.workflow.variable.base_variable import VariableType
 
 
 class EndNodeConfig(BaseNodeConfig):

@@ -1,8 +1,49 @@
 import datetime
 import uuid
 from typing import Optional, Any, List, Dict, Union
+from enum import Enum
 
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
+
+
+# ---------- Multimodal File Support ----------
+
+class FileType(str, Enum):
+    """文件类型枚举"""
+    IMAGE = "image"
+    DOCUMENT = "document"
+    AUDIO = "audio"
+    VIDEO = "video"
+
+
+class TransferMethod(str, Enum):
+    """文件传输方式枚举"""
+    LOCAL_FILE = "local_file"  # 已上传到系统的文件
+    REMOTE_URL = "remote_url"  # 外部URL
+
+
+class FileInput(BaseModel):
+    """文件输入 Schema"""
+    type: FileType = Field(..., description="文件类型: image/document/audio/video")
+    transfer_method: TransferMethod = Field(..., description="传输方式: local_file/remote_url")
+    upload_file_id: Optional[uuid.UUID] = Field(None, description="已上传文件ID（local_file时必填）")
+    url: Optional[str] = Field(None, description="远程URL（remote_url时必填）")
+    
+    @field_validator("upload_file_id")
+    @classmethod
+    def validate_local_file(cls, v, info):
+        """验证 local_file 时必须提供 upload_file_id"""
+        if info.data.get("transfer_method") == TransferMethod.LOCAL_FILE and not v:
+            raise ValueError("transfer_method 为 local_file 时，upload_file_id 不能为空")
+        return v
+    
+    @field_validator("url")
+    @classmethod
+    def validate_remote_url(cls, v, info):
+        """验证 remote_url 时必须提供 url"""
+        if info.data.get("transfer_method") == TransferMethod.REMOTE_URL and not v:
+            raise ValueError("transfer_method 为 remote_url 时，url 不能为空")
+        return v
 
 
 # ---------- Input Schemas ----------
@@ -40,6 +81,12 @@ class ToolConfig(BaseModel):
     enabled: bool = Field(default=False, description="是否启用该工具")
     tool_id: Optional[str] = Field(default=None, description="工具ID")
     operation: Optional[str] = Field(default=None, description="工具特定配置")
+
+class SkillConfig(BaseModel):
+    """技能配置"""
+    enabled: bool = Field(default=True, description="是否启用该技能")
+    skill_ids: Optional[list[str]] = Field(default=list, description="技能ID列表")
+    all_skills: Optional[bool] = Field(default=False, description="是否允许访问所有技能")
 
 
 class ToolOldConfig(BaseModel):
@@ -115,6 +162,9 @@ class AgentConfigCreate(BaseModel):
         description="Agent 可用的工具列表"
     )
 
+    # 技能配置
+    skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
+
 
 class AppCreate(BaseModel):
     name: str
@@ -166,6 +216,9 @@ class AgentConfigUpdate(BaseModel):
 
     # 工具配置
     tools: Optional[List[ToolConfig]] = Field(default_factory=list, description="工具列表")
+    
+    # 技能配置
+    skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
 
 
 # ---------- Output Schemas ----------
@@ -224,6 +277,8 @@ class AgentConfig(BaseModel):
 
     # 工具配置
     tools: Union[List[ToolConfig], Dict[str, ToolOldConfig]] = []
+
+    skills: Optional[SkillConfig] = {}
 
     is_active: bool
     created_at: datetime.datetime
@@ -360,6 +415,7 @@ class AppChatRequest(BaseModel):
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
+    files: Optional[List[FileInput]] = Field(default=None, description="附件列表（支持多文件）")
 
 
 class DraftRunRequest(BaseModel):
@@ -369,6 +425,7 @@ class DraftRunRequest(BaseModel):
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
+    files: Optional[List[FileInput]] = Field(default=None, description="附件列表（支持多文件）")
 
 
 class DraftRunResponse(BaseModel):

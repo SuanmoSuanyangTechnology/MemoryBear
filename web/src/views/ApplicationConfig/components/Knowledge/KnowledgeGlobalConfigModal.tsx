@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:25:42 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:25:42 
+ */
+/**
+ * Knowledge Global Configuration Modal
+ * Configures global reranker settings for all knowledge bases
+ */
+
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Form, InputNumber, Switch } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -9,11 +20,19 @@ import { getModelListUrl } from '@/api/models'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface KnowledgeGlobalConfigModalProps {
+  /** Current reranker configuration */
   data: RerankerConfig;
+  /** Callback to update reranker configuration */
   refresh: (values: RerankerConfig, type: 'rerankerConfig') => void;
 }
 
+/**
+ * Modal for configuring global reranker settings
+ */
 const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, KnowledgeGlobalConfigModalProps>(({
   refresh,
   data,
@@ -23,17 +42,18 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
   const [form] = Form.useForm<RerankerConfig>();
   const values = Form.useWatch<RerankerConfig>([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
   };
 
+  /** Open modal with current configuration */
   const handleOpen = () => {
     form.setFieldsValue({ ...data, rerank_model: !!data?.reranker_id })
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save reranker configuration */
   const handleSave = () => {
     form
       .validateFields()
@@ -54,7 +74,7 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
     }
   }, [values?.rerank_model])
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));
@@ -73,7 +93,7 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
       >
         <div className="rb:text-[#5B6167] rb:mb-6">{t('application.globalConfigDesc')}</div>
 
-        {/* 结果重排 */}
+        {/* Result reranking */}
         <div className="rb:flex rb:items-center rb:justify-between rb:my-6">
           <div className="rb:text-[14px] rb:font-medium rb:leading-5">
             {t('application.rerankModel')}

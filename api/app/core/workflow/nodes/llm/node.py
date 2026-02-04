@@ -15,6 +15,8 @@ from app.core.exceptions import BusinessException
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.llm.config import LLMNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 from app.db import get_db_context
 from app.models import ModelType
 from app.services.model_service import ModelConfigService
@@ -66,19 +68,27 @@ class LLMNode(BaseNode):
     - ai/assistant: AI 消息（AIMessage）
     """
 
+    def _output_types(self) -> dict[str, VariableType]:
+        return {"output": VariableType.STRING}
+
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
         self.typed_config: LLMNodeConfig | None = None
 
-    def _render_context(self, message, state):
-        context = f"<context>{self._render_template(self.typed_config.context, state)}</context>"
+    def _render_context(self, message: str, variable_pool: VariablePool):
+        context = f"<context>{self._render_template(self.typed_config.context, variable_pool)}</context>"
         return re.sub(r"{{context}}", context, message)
 
-    def _prepare_llm(self, state: WorkflowState, stream: bool = False) -> tuple[RedBearLLM, list | str]:
+    def _prepare_llm(
+            self,
+            state: WorkflowState,
+            variable_pool: VariablePool,
+            stream: bool = False
+    ) -> tuple[RedBearLLM, list | str]:
         """准备 LLM 实例（公共逻辑）
         
         Args:
-            state: 工作流状态
+            variable_pool: 变量池
         
         Returns:
             (llm, messages_or_prompt): LLM 实例和消息列表或 prompt 字符串
@@ -94,8 +104,8 @@ class LLMNode(BaseNode):
             for msg_config in messages_config:
                 role = msg_config.role.lower()
                 content_template = msg_config.content
-                content_template = self._render_context(content_template, state)
-                content = self._render_template(content_template, state)
+                content_template = self._render_context(content_template, variable_pool)
+                content = self._render_template(content_template, variable_pool)
 
                 # 根据角色创建对应的消息对象
                 if role == "system":
@@ -115,7 +125,7 @@ class LLMNode(BaseNode):
         else:
             # 使用简单的 prompt 格式（向后兼容）
             prompt_template = self.config.get("prompt", "")
-            prompt_or_messages = self._render_template(prompt_template, state)
+            prompt_or_messages = self._render_template(prompt_template, variable_pool)
 
         # 2. 获取模型配置
         model_id = self.config.get("model_id")
@@ -159,17 +169,18 @@ class LLMNode(BaseNode):
 
         return llm, prompt_or_messages
 
-    async def execute(self, state: WorkflowState) -> AIMessage:
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> AIMessage:
         """非流式执行 LLM 调用
         
         Args:
             state: 工作流状态
+            variable_pool: 变量池
         
         Returns:
             LLM 响应消息
         """
         # self.typed_config = LLMNodeConfig(**self.config)
-        llm, prompt_or_messages = self._prepare_llm(state, True)
+        llm, prompt_or_messages = self._prepare_llm(state, variable_pool, False)
 
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（非流式）")
 
@@ -186,9 +197,9 @@ class LLMNode(BaseNode):
         # 返回 AIMessage（包含响应元数据）
         return response if isinstance(response, AIMessage) else AIMessage(content=content)
 
-    def _extract_input(self, state: WorkflowState) -> dict[str, Any]:
+    def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """提取输入数据（用于记录）"""
-        _, prompt_or_messages = self._prepare_llm(state)
+        _, prompt_or_messages = self._prepare_llm(state, variable_pool)
 
         return {
             "prompt": prompt_or_messages if isinstance(prompt_or_messages, str) else None,
@@ -221,18 +232,19 @@ class LLMNode(BaseNode):
                 }
         return None
 
-    async def execute_stream(self, state: WorkflowState):
+    async def execute_stream(self, state: WorkflowState, variable_pool: VariablePool):
         """流式执行 LLM 调用
         
         Args:
             state: 工作流状态
+            variable_pool: 变量池
         
         Yields:
             文本片段（chunk）或完成标记
         """
         self.typed_config = LLMNodeConfig(**self.config)
 
-        llm, prompt_or_messages = self._prepare_llm(state, True)
+        llm, prompt_or_messages = self._prepare_llm(state, variable_pool, True)
 
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式）")
         logger.debug(f"LLM 配置: streaming={getattr(llm._model, 'streaming', 'unknown')}")

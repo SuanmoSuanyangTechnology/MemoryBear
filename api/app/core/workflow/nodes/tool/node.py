@@ -6,6 +6,8 @@ from typing import Any
 
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.tool.config import ToolNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 from app.services.tool_service import ToolService
 from app.db import get_db_read
 
@@ -21,13 +23,20 @@ class ToolNode(BaseNode):
         super().__init__(node_config, workflow_config)
         self.typed_config: ToolNodeConfig | None = None
 
-    async def execute(self, state: WorkflowState) -> dict[str, Any]:
+    def _output_types(self) -> dict[str, VariableType]:
+        return {
+            "data": VariableType.STRING,
+            "error_code": VariableType.STRING,
+            "execution_time": VariableType.NUMBER
+        }
+
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """执行工具"""
         self.typed_config = ToolNodeConfig(**self.config)
         # 获取租户ID和用户ID
-        tenant_id = self.get_variable("sys.tenant_id", state)
-        user_id = self.get_variable("sys.user_id", state)
-        workspace_id = self.get_variable("sys.workspace_id", state)
+        tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
+        user_id = self.get_variable("sys.user_id", variable_pool)
+        workspace_id = self.get_variable("sys.workspace_id", variable_pool)
 
         # 如果没有租户ID，尝试从工作流ID获取
         if not tenant_id:
@@ -48,7 +57,7 @@ class ToolNode(BaseNode):
         for param_name, param_template in self.typed_config.tool_parameters.items():
             if isinstance(param_template, str) and TEMPLATE_PATTERN.search(param_template):
                 try:
-                    rendered_value = self._render_template(param_template, state)
+                    rendered_value = self._render_template(param_template, variable_pool)
                 except Exception as e:
                     raise ValueError(f"模板渲染失败：参数 {param_name} 的模板 {param_template} 解析错误") from e
             else:

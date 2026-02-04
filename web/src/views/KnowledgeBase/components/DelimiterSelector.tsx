@@ -17,13 +17,13 @@ const DelimiterSelector: FC<DelimiterSelectorProps> = ({
   className = '',
 }) => {
   const { t } = useTranslation();
-  // 默认值为空字符串（不设置）
+  // Default value is empty string (not set)
   const [selectedValue, setSelectedValue] = useState<string>(value || '');
   const [customValue, setCustomValue] = useState<string>('');
   const [showCustomInput, setShowCustomInput] = useState(false);
 
   useEffect(() => {
-    // 检查当前值是否为自定义值
+    // Check if current value is a custom delimiter
     if (value && isCustomDelimiter(value) && value !== 'custom') {
       setSelectedValue('custom');
       setCustomValue(value);
@@ -39,15 +39,15 @@ const DelimiterSelector: FC<DelimiterSelectorProps> = ({
     
     if (val === 'custom') {
       setShowCustomInput(true);
-      // 如果已有自定义值，使用它；否则等待用户输入
+      // If custom value exists, use it; otherwise wait for user input
       if (customValue) {
         onChange?.(customValue);
       } else {
-        // 自定义但还没输入值，暂不触发 onChange
+        // Custom selected but no value entered yet, don't trigger onChange
         onChange?.(undefined);
       }
     } else if (val === '') {
-      // 选择"不设置"时，返回 undefined（不传递该参数）
+      // When "Not set" is selected, return undefined (don't pass this parameter)
       setShowCustomInput(false);
       onChange?.(undefined);
     } else {
@@ -59,7 +59,7 @@ const DelimiterSelector: FC<DelimiterSelectorProps> = ({
   const handleCustomInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setCustomValue(val);
-    // 只有当输入不为空时才触发 onChange
+    // Only trigger onChange when input is not empty
     onChange?.(val || undefined);
   };
 

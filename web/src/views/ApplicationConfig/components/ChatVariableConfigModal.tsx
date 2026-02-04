@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:27:44 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:27:44 
+ */
+/**
+ * Chat Variable Configuration Modal
+ * Allows users to configure variable values before starting a chat session
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -6,10 +17,17 @@ import type { ChatVariableConfigModalRef } from '../types'
 import type { Variable } from './VariableList/types'
 import RbModal from '@/components/RbModal'
 
+/**
+ * Component props
+ */
 interface VariableEditModalProps {
+  /** Callback to update variables */
   refresh: (values: Variable[]) => void;
 }
 
+/**
+ * Modal for configuring chat variables
+ */
 const ChatVariableConfigModal = forwardRef<ChatVariableConfigModalRef, VariableEditModalProps>(({
   refresh,
 }, ref) => {
@@ -19,20 +37,21 @@ const ChatVariableConfigModal = forwardRef<ChatVariableConfigModalRef, VariableE
   const [loading, setLoading] = useState(false)
   const [initialValues, setInitialValues] = useState<Variable[]>([])
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setLoading(false)
   };
 
+  /** Open modal with variable list */
   const handleOpen = (values: Variable[]) => {
     console.log('values', values)
     setVisible(true);
     form.setFieldsValue({variables: values})
     setInitialValues([...values])
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save variable configuration */
   const handleSave = () => {
     form.validateFields().then((values) => {
       refresh([
@@ -42,7 +61,7 @@ const ChatVariableConfigModal = forwardRef<ChatVariableConfigModalRef, VariableE
     })
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

@@ -12,7 +12,7 @@ const RecallTestDrawer = forwardRef<RecallTestDrawerRef>(({},ref) => {
     const pendingKbIdRef = useRef<string | undefined>(undefined);
     const shouldCallHandleOpenRef = useRef(false);
 
-    // 调用 RecallTest 的 handleOpen 方法
+    // Call RecallTest's handleOpen method
     const callRecallTestHandleOpen = useCallback(() => {
         if (recallTestRef.current && shouldCallHandleOpenRef.current) {
             recallTestRef.current.handleOpen(pendingKbIdRef.current);
@@ -26,14 +26,14 @@ const RecallTestDrawer = forwardRef<RecallTestDrawerRef>(({},ref) => {
         setOpen(true);
     }
 
-    // 当 Drawer 打开时，尝试调用 handleOpen
+    // When Drawer opens, try to call handleOpen
     useLayoutEffect(() => {
         if (open) {
             callRecallTestHandleOpen();
         }
     }, [open, callRecallTestHandleOpen]);
 
-    // 使用回调 ref 确保在组件挂载后立即调用
+    // Use callback ref to ensure immediate call after component mount
     const setRecallTestRef = useCallback((node: any) => {
         recallTestRef.current = node;
         if (open && shouldCallHandleOpenRef.current) {
@@ -41,7 +41,7 @@ const RecallTestDrawer = forwardRef<RecallTestDrawerRef>(({},ref) => {
         }
     }, [open, callRecallTestHandleOpen]);
 
-    // 暴露给父组件的方法
+    // Expose methods to parent component
     useImperativeHandle(ref, () => ({
         handleOpen,
     }));

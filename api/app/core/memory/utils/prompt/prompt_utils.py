@@ -283,7 +283,8 @@ async def render_emotion_extraction_prompt(
 async def render_emotion_suggestions_prompt(
     health_data: dict,
     patterns: dict,
-    user_profile: dict
+    user_profile: dict,
+    language: str = "zh"
 ) -> str:
     """
     Renders the emotion suggestions generation prompt using the generate_emotion_suggestions.jinja2 template.
@@ -292,6 +293,7 @@ async def render_emotion_suggestions_prompt(
         health_data: 情绪健康数据
         patterns: 情绪模式分析结果
         user_profile: 用户画像数据
+        language: 输出语言 ("zh" 中文, "en" 英文)
 
     Returns:
         Rendered prompt content as string
@@ -310,7 +312,8 @@ async def render_emotion_suggestions_prompt(
         health_data=health_data,
         patterns=patterns,
         user_profile=user_profile,
-        emotion_distribution_json=emotion_distribution_json
+        emotion_distribution_json=emotion_distribution_json,
+        language=language
     )
     
     # 记录渲染结果到提示日志
@@ -328,7 +331,8 @@ async def render_emotion_suggestions_prompt(
 async def render_user_summary_prompt(
     user_id: str,
     entities: str,
-    statements: str
+    statements: str,
+    language: str = "zh"
 ) -> str:
     """
     Renders the user summary prompt using the user_summary.jinja2 template.
@@ -337,6 +341,7 @@ async def render_user_summary_prompt(
         user_id: User identifier
         entities: Core entities with frequency information
         statements: Representative statement samples
+        language: The language to use for summary generation ("zh" for Chinese, "en" for English)
 
     Returns:
         Rendered prompt content as string
@@ -345,7 +350,8 @@ async def render_user_summary_prompt(
     rendered_prompt = template.render(
         user_id=user_id,
         entities=entities,
-        statements=statements
+        statements=statements,
+        language=language
     )
     
     # 记录渲染结果到提示日志
@@ -354,7 +360,8 @@ async def render_user_summary_prompt(
     log_template_rendering('user_summary.jinja2', {
         'user_id': user_id,
         'entities_len': len(entities),
-        'statements_len': len(statements)
+        'statements_len': len(statements),
+        'language': language
     })
     
     return rendered_prompt
@@ -363,7 +370,8 @@ async def render_user_summary_prompt(
 async def render_memory_insight_prompt(
     domain_distribution: str = None,
     active_periods: str = None,
-    social_connections: str = None
+    social_connections: str = None,
+    language: str = "zh"
 ) -> str:
     """
     Renders the memory insight prompt using the memory_insight.jinja2 template.
@@ -372,6 +380,7 @@ async def render_memory_insight_prompt(
         domain_distribution: 核心领域分布信息
         active_periods: 活跃时段信息
         social_connections: 社交关联信息
+        language: The language to use for report generation ("zh" for Chinese, "en" for English)
 
     Returns:
         Rendered prompt content as string
@@ -380,7 +389,8 @@ async def render_memory_insight_prompt(
     rendered_prompt = template.render(
         domain_distribution=domain_distribution,
         active_periods=active_periods,
-        social_connections=social_connections
+        social_connections=social_connections,
+        language=language
     )
     
     # 记录渲染结果到提示日志
@@ -389,7 +399,8 @@ async def render_memory_insight_prompt(
     log_template_rendering('memory_insight.jinja2', {
         'has_domain_distribution': bool(domain_distribution),
         'has_active_periods': bool(active_periods),
-        'has_social_connections': bool(social_connections)
+        'has_social_connections': bool(social_connections),
+        'language': language
     })
     
     return rendered_prompt
@@ -424,7 +435,8 @@ async def render_ontology_extraction_prompt(
     scenario: str,
     domain: str | None = None,
     max_classes: int = 15,
-    json_schema: dict | None = None
+    json_schema: dict | None = None,
+    language: str = "zh"
 ) -> str:
     """
     Renders the ontology extraction prompt using the extract_ontology.jinja2 template.
@@ -434,6 +446,7 @@ async def render_ontology_extraction_prompt(
         domain: Optional domain hint for the scenario (e.g., "Healthcare", "Education")
         max_classes: Maximum number of classes to extract (default: 15)
         json_schema: JSON schema for the expected output format
+        language: Language for output ("zh" for Chinese, "en" for English)
 
     Returns:
         Rendered prompt content as string
@@ -443,7 +456,8 @@ async def render_ontology_extraction_prompt(
         scenario=scenario,
         domain=domain,
         max_classes=max_classes,
-        json_schema=json_schema
+        json_schema=json_schema,
+        language=language
     )
     
     # 记录渲染结果到提示日志

@@ -1,8 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:27:52 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:27:52 
+ */
 import { type FC, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Layout, Tabs, Dropdown, Button, Flex } from 'antd';
 import type { MenuProps } from 'antd';
 import { useTranslation } from 'react-i18next';
+
 import styles from '../index.module.css'
 import logoutIcon from '@/assets/images/logout.svg'
 import editIcon from '@/assets/images/edit_hover.svg'
@@ -17,21 +24,43 @@ import CopyModal from './CopyModal'
 
 const { Header } = Layout;
 
+/**
+ * Tab keys for application configuration
+ */
 const tabKeys = ['arrangement', 'api', 'release', 'statistics']
+
+/**
+ * Menu icon mapping
+ */
 const menuIcons: Record<string, string> = {
   edit: editIcon,
   copy: copyIcon,
   export: exportIcon,
   delete: deleteIcon
 }
+
+/**
+ * Props for ConfigHeader component
+ */
 interface ConfigHeaderProps {
+  /** Application data */
   application?: Application;
+  /** Active tab key */
   activeTab: string;
+  /** Tab change handler */
   handleChangeTab: (key: string) => void;
+  /** Refresh application data */
   refresh: () => void;
+  /** Workflow component ref */
   workflowRef: React.RefObject<WorkflowRef>
+  /** App component ref (Agent/Cluster/Workflow) */
   appRef?: React.RefObject<AgentRef | ClusterRef | WorkflowRef>
 }
+
+/**
+ * Configuration header component
+ * Displays application name, tabs, and action buttons
+ */
 const ConfigHeader: FC<ConfigHeaderProps> = ({ 
   application, activeTab, handleChangeTab, refresh,
   workflowRef,
@@ -42,12 +71,18 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const copyModalRef = useRef<CopyModalRef>(null);
 
+  /**
+   * Format tab items for display
+   */
   const formatTabItems = () => {
     return tabKeys.map(key => ({
       key,
       label: t(`application.${key}`),
     }))
   }
+  /**
+   * Format dropdown menu items
+   */
   const formatMenuItems = () => {
     const items =  ['edit', 'copy', 'export', 'delete'].map(key => ({
       key,
@@ -59,6 +94,9 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
       onClick: handleClick
     }
   }
+  /**
+   * Handle menu item click
+   */
   const handleClick: MenuProps['onClick'] = ({ key }) => {
     switch (key) {
       case 'edit':
@@ -74,6 +112,9 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         break;
     }
   }
+  /**
+   * Delete application with confirmation
+   */
   const handleDelete = () => {
     if (!id) {
       return
@@ -86,21 +127,36 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         console.error('Failed to delete application');
       });
   }
+  /**
+   * Navigate to application list
+   */
   const goToApplication = () => {
     navigate('/application', { replace: true })
   }
+  /**
+   * Save workflow configuration
+   */
   const save = () => {
     workflowRef.current?.handleSave()
   }
+  /**
+   * Run workflow
+   */
   const run = () => {
     workflowRef.current?.handleSave(false)
       .then(() => {
         workflowRef.current?.handleRun()
       })
   }
+  /**
+   * Clear workflow canvas
+   */
   const clear = () => {
     workflowRef?.current?.graphRef?.current?.clearCells()
   }
+  /**
+   * Add variable to workflow
+   */
   const addvariable = () => {
     workflowRef?.current?.addVariable()
   }

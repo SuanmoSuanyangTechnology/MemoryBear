@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:38:12 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:38:12 
+ */
+/**
+ * Pricing Page
+ * Displays subscription plans with features and pricing
+ * Supports navigation to payment or order history
+ */
+
 import React from 'react';
 import { Button } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -12,6 +24,9 @@ import alertIcon from '@/assets/images/order/alert.svg';
 import { useUser } from '@/store/user'
 import { useI18n } from '@/store/locale'
 
+/**
+ * Price item configuration interface
+ */
 interface PriceItem {
   type: string;
   label: string;
@@ -32,6 +47,7 @@ interface PriceItem {
   flexibleDeployment?: boolean;
   reliableGuarantee?: boolean;
 }
+/** Button style classes by plan type */
 const btnClassNames = {
   personal: 'rb:h-10! rb:rounded-[8px]!',
   team: 'rb:h-10! rb:rounded-[8px]! rb:bg-[#FF5D34]! rb:text-white! rb:border-0! rb:hover:border-0! rb:hover:opacity-[0.8]',
@@ -39,6 +55,7 @@ const btnClassNames = {
   commerce: 'rb:h-10! rb:rounded-[8px]! rb:bg-[#212332]! rb:text-white! rb:border-0! rb:hover:border-0! rb:hover:opacity-[0.8]',
 }
 
+/** Price plan list configuration */
 export const PRICE_LIST: PriceItem[] = [
   {
     type: 'personal',
@@ -119,6 +136,7 @@ const PricingView: React.FC = () => {
   const { user } = useUser();
   const { language } = useI18n()
 
+  /** Handle plan selection */
   const handleChoosePlan = (type: string) => {
     switch(type) {
       case 'team':
@@ -133,10 +151,12 @@ const PricingView: React.FC = () => {
         break
     }
   };
+  /** Navigate to order history */
   const goToHistory = () => {
     navigate('/orders');
   }
 
+  /** Get card icon by plan type */
   const getCardIcon = (type: string) => {
     const iconMap: Record<string, string> = {
       personal: personal,

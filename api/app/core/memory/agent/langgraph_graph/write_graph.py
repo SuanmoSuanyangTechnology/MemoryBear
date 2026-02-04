@@ -1,18 +1,14 @@
 
 import asyncio
-import json
 import sys
 import warnings
 from contextlib import asynccontextmanager
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 
-from app.core.memory.agent.langgraph_graph.tools.write_tool import format_parsing, chat_data_format, messages_parse
-from app.db import get_db
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.llm_tools import WriteState
 from app.core.memory.agent.langgraph_graph.nodes.write_nodes import write_node
-from app.services.memory_config_service import MemoryConfigService
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = get_agent_logger(__name__)
@@ -39,31 +35,58 @@ async def make_write_graph():
     graph = workflow.compile()
 
     yield graph
-
 async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[],memory_config:str='',end_user_id:str='',scope:int=6):
-    from app.core.memory.agent.langgraph_graph.routing.write_router import memory_long_term_storage, window_dialogue,aggregate_judgment
-    from app.core.memory.agent.langgraph_graph.tools.write_tool import chat_data_format
-    from app.core.memory.agent.utils.redis_tool import write_store
-    write_store.save_session_write(end_user_id, await chat_data_format(langchain_messages))
-    # 获取数据库会话
-    db_session = next(get_db())
-    config_service = MemoryConfigService(db_session)
-    memory_config = config_service.load_memory_config(
-        config_id="08ed205c-0f05-49c3-8e0c-a580d28f5fd4",  # 改为整数
-        service_name="MemoryAgentService"
+    """Dispatch long-term memory storage to Celery background tasks.
+    
+    Args:
+        long_term_type: Storage strategy - 'chunk' (window), 'time', or 'aggregate'
+        langchain_messages: List of messages to store
+        memory_config: Memory configuration ID (string)
+        end_user_id: End user identifier
+        scope: Window size for 'chunk' strategy (default: 6)
+    """
+    from app.tasks import (
+        long_term_storage_window_task,
+        # TODO: Uncomment when implemented
+        # long_term_storage_time_task,
+        # long_term_storage_aggregate_task,
     )
-    if long_term_type=='chunk':
-        '''方案一:对话窗口6轮对话'''
-        await window_dialogue(end_user_id,langchain_messages,memory_config,scope)
-    if long_term_type=='time':
-        """时间"""
-        await memory_long_term_storage(end_user_id, memory_config,5)
-    if  long_term_type=='aggregate':
+    from app.core.logging_config import get_logger
+    
+    logger = get_logger(__name__)
+    
+    # Convert config to string if needed
+    config_id = str(memory_config) if memory_config else ''
+    
+    if long_term_type == 'chunk':
+        # Strategy 1: Window-based batching (6 rounds of dialogue)
+        logger.info(f"[LONG_TERM] Dispatching window task - end_user_id={end_user_id}, scope={scope}")
+        long_term_storage_window_task.delay(
+            end_user_id=end_user_id,
+            langchain_messages=langchain_messages,
+            config_id=config_id,
+            scope=scope
+        )
+    # TODO: Uncomment when time-based strategy is fully implemented
+    # elif long_term_type == 'time':
+    #     # Strategy 2: Time-based retrieval
+    #     logger.info(f"[LONG_TERM] Dispatching time task - end_user_id={end_user_id}")
+    #     long_term_storage_time_task.delay(
+    #         end_user_id=end_user_id,
+    #         config_id=config_id,
+    #         time_window=5
+    #     )
+    # TODO: Uncomment when aggregate strategy is fully implemented
+    # elif long_term_type == 'aggregate':
+    #     # Strategy 3: Aggregate judgment (deduplication)
+    #     logger.info(f"[LONG_TERM] Dispatching aggregate task - end_user_id={end_user_id}")
+    #     long_term_storage_aggregate_task.delay(
+    #         end_user_id=end_user_id,
+    #         langchain_messages=langchain_messages,
+    #         config_id=config_id
+    #     )
 
-        """方案三：聚合判断"""
-        await aggregate_judgment(end_user_id, langchain_messages, memory_config)
 
-#
 # async def main():
 #     """主函数 - 运行工作流"""
 #     langchain_messages = [
@@ -80,14 +103,7 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
 #     end_user_id = '837fee1b-04a2-48ee-94d7-211488908940'  # 组ID
 #     memory_config="08ed205c-0f05-49c3-8e0c-a580d28f5fd4"
 #     # await long_term_storage(long_term_type="chunk",langchain_messages=langchain_messages,memory_config=memory_config,end_user_id=end_user_id,scope=2)
-#     from app.core.memory.agent.utils.redis_tool import write_store
-#     result=write_store.get_session_by_userid(end_user_id)
-#     data=await format_parsing(result,"dict")
-#     chunk_data=data[:6]
-#
-#     long_time_data = write_store.find_user_recent_sessions(end_user_id, 240)
-#     long_=await messages_parse(long_time_data)
-#     print(long_)
+#     result=await long_term_storage(long_term_type="chunk",langchain_messages=langchain_messages,memory_config=memory_config,end_user_id=end_user_id,scope=2)
 #
 #
 # if __name__ == "__main__":

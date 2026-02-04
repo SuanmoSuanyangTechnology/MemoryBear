@@ -24,7 +24,7 @@ const { TextArea } = Input;
   const radioWrapperBaseStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'flex-start',
-    columnGap: 14, // 点与文字更宽的间距
+    columnGap: 14, // Wider gap between dot and text
     width: '100%',
     border: '1px solid #E5E5E5',
     borderRadius: 8,
@@ -97,7 +97,7 @@ const CreateDataset = () => {
     () => [
       { title: t('knowledgeBase.selectFile') },
       { title: t('knowledgeBase.parameterSettings') },
-      // { title: t('knowledgeBase.dataPreview') }, // 暂时隐藏第三步
+      // { title: t('knowledgeBase.dataPreview') }, // Temporarily hide step 3
       { title: t('knowledgeBase.confirmUpload') },
     ],
     [t],
@@ -105,27 +105,27 @@ const CreateDataset = () => {
   // 存储每个文件的 AbortController，用于取消上传
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const uploadRef = useRef<{ fileList: UploadFile[]; clearFiles: () => void }>(null);
-  console.log('上传文件',uploadRef.current?.fileList.length)
+  console.log('Upload files', uploadRef.current?.fileList.length)
   const handleNext = async () => {
-    // 暂时隐藏第三步：调整步骤索引（0->1->2 对应 选择文件->参数设置->确认上传）
+    // Temporarily hide step 3: adjust step index (0->1->2 corresponds to select file->parameter settings->confirm upload)
     let nextStep = current + 1;
     
     if(nextStep === 1 && source === 'local') {
-      // 检查是否有文件已上传
+      // Check if files have been uploaded
       if (rechunkFileIds.length === 0) {
-        // 如果没有文件，提示用户先上传文件
+        // If no files, prompt user to upload first
         Modal.warning({
-          title: t('common.warning') || '提示',
-          content: t('knowledgeBase.pleaseUploadFileFirst') || '请先上传文件',
+          title: t('common.warning') || 'Warning',
+          content: t('knowledgeBase.pleaseUploadFileFirst') || 'Please upload files first',
         });
-        return; // 不进入下一步
+        return; // Don't proceed to next step
       }
     }else if(nextStep === 1 && source === 'text'){
         try {
             const values = await form.validateFields();
             // setLoading(true);
 
-            // TODO: 这里需要调用相应的API来保存内容
+            // TODO: Need to call corresponding API to save content here
             const params = {
               // ...values,
               kb_id: knowledgeBaseId,
@@ -162,41 +162,41 @@ const CreateDataset = () => {
             })
         }
 
-        // 立即执行一次，加载文档列表用于预览（不自动返回）
+        // Execute once immediately to load document list for preview (don't auto-return)
         pollDocumentStatus(false);
     }
     
-    // 限制最大步骤为 2（确认上传）
+    // Limit max step to 2 (confirm upload)
     setCurrent(Math.min(nextStep, 2));
   };
   const handlePrev = () => setCurrent((c) => Math.max(c - 1, 0));
   
-  // 开始上传：触发文档解析并启动轮询
+  // Start upload: trigger document parsing and start polling
   const handleStartUpload = () => {
     if (rechunkFileIds.length === 0) {
       Modal.warning({
-        title: t('common.warning') || '提示',
-        content: t('knowledgeBase.pleaseUploadFileFirst') || '请先上传文件',
+        title: t('common.warning') || 'Warning',
+        content: t('knowledgeBase.pleaseUploadFileFirst') || 'Please upload files first',
       });
       return;
     }
 
     // 显示确认弹框
     confirm({
-      title: t('knowledgeBase.startUploadConfirmTitle') || '开始处理文档',
-      content: t('knowledgeBase.startUploadConfirmContent') || '文档处理将在后台进行，您可以选择立即返回列表页或停留在此页面查看处理进度。',
-      okText: t('knowledgeBase.returnToList') || '返回列表页',
-      cancelText: t('knowledgeBase.stayOnPage') || '停留在此页',
+      title: t('knowledgeBase.startUploadConfirmTitle') || 'Start processing documents',
+      content: t('knowledgeBase.startUploadConfirmContent') || 'Document processing will proceed in the background. You can choose to return to the list page immediately or stay on this page to view processing progress.',
+      okText: t('knowledgeBase.returnToList') || 'Return to list',
+      cancelText: t('knowledgeBase.stayOnPage') || 'Stay on this page',
       onOk: () => {
-        // 用户选择返回列表页 - 不显示 loading，直接跳转
+        // User chose to return to list - don't show loading, navigate directly
         startProcessing(true);
       },
       onCancel: () => {
-        // 用户选择停留在当前页 - 显示 loading 并开始轮询
-        console.log('用户选择停留，开始显示 loading');
+        // User chose to stay on current page - show loading and start polling
+        console.log('User chose to stay, starting to show loading');
         setPollingLoading(true);
         
-        // 延迟一点时间让用户看到 loading 效果，然后开始处理
+        // Delay a bit to let user see loading effect, then start processing
         setTimeout(() => {
           startProcessing(false);
         }, 100);
@@ -204,25 +204,25 @@ const CreateDataset = () => {
     });
   };
 
-  // 实际开始处理的函数
+  // Function to actually start processing
   const startProcessing = (autoReturnToList: boolean) => {
-    // 触发文档解析
+    // Trigger document parsing
     rechunkFileIds.map((id) => {
       parseDocument(id, {});
     });
 
     if (autoReturnToList) {
-      // 用户选择立即返回，直接跳转（不显示 loading）
-      console.log('用户选择立即返回列表页');
+      // User chose to return immediately, navigate directly (no loading shown)
+      console.log('User chose to return to list page immediately');
       handleBack();
     } else {
-      // 用户选择停留，启动轮询查看进度（loading 已在 onCancel 中设置）
-      console.log('用户选择停留查看进度');
+      // User chose to stay, start polling to view progress (loading already set in onCancel)
+      console.log('User chose to stay and view progress');
       
-      // 立即执行一次轮询（启用自动返回）
+      // Execute polling once immediately (enable auto-return)
       pollDocumentStatus(true);
 
-      // 然后每3秒执行一次（启用自动返回）
+      // Then execute every 3 seconds (enable auto-return)
       pollingTimerRef.current = setInterval(() => {
         pollDocumentStatus(true);
       }, 3000);
@@ -244,11 +244,11 @@ const CreateDataset = () => {
             
           },
           onCancel: () => {
-            console.log('取消删除');
+            console.log('Delete cancelled');
           },
       });
   }
-  // 表格列配置
+  // Table column configuration
   const columns: ColumnsType = [
     {
       title: t('knowledgeBase.name'),
@@ -261,7 +261,7 @@ const CreateDataset = () => {
       dataIndex: 'progress',
       key: 'progress',
       render: (value: number, record: any) => {
-        // value >= 1 时完成，0～1 时显示进度条
+        // When value >= 1 it's complete, when 0～1 show progress bar
         if (value >= 1) {
           return (
             <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
@@ -270,7 +270,7 @@ const CreateDataset = () => {
             </span>
           );
         } else if (value >= 0 && value < 1) {
-          // 处理中，显示进度条
+          // Processing, show progress bar
           return (
             <div className="rb:flex rb:items-center rb:gap-2">
               <Progress 
@@ -286,7 +286,7 @@ const CreateDataset = () => {
             </div>
           );
         } else {
-          // value = 0 或其他情况，显示待处理
+          // value = 0 or other cases, show pending
           return (
             <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
               <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#FF8A4C' }}></span>
@@ -304,7 +304,7 @@ const CreateDataset = () => {
       ),
     },
   ];
-  // 检查媒体文件时长的辅助函数
+  // Helper function to check media file duration
   const checkMediaDuration = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
@@ -324,36 +324,36 @@ const CreateDataset = () => {
     });
   };
 
-  // 上传文件
+  // Upload file
   const handleUpload = async (options: UploadRequestOption) => {
     const { file, onSuccess, onError, onProgress, filename = 'file' } = options;
     
-    // 创建 AbortController 用于取消上传
+    // Create AbortController for cancelling upload
     const abortController = new AbortController();
     const fileUid = (file as any).uid;
     abortControllersRef.current.set(fileUid, abortController);
 
-    // 获取文件扩展名
+    // Get file extension
     const fileExtension = (file as File).name.split('.').pop()?.toLowerCase();
     const mediaExtensions = ['mp3', 'mp4', 'mov', 'wav'];
     
-    // 如果是媒体文件，进行大小和时长检查
+    // If media file, check size and duration
     if (fileExtension && mediaExtensions.includes(fileExtension)) {
       const fileSizeInMB = (file as File).size / (1024 * 1024);
       
       // 检查文件大小（50MB限制）
       if (fileSizeInMB > 100) {
-        messageApi.error(`${t('knowledgeBase.sizeLimitError')}：${fileSizeInMB.toFixed(2)}MB`);
+        messageApi.error(`${t('knowledgeBase.sizeLimitError')}: ${fileSizeInMB.toFixed(2)}MB`);
         onError?.(new Error(`${t('knowledgeBase.fileSizeExceeds')}`));
         abortControllersRef.current.delete(fileUid);
         return;
       }
       
       try {
-        // 检查媒体时长（150秒限制）
+        // Check media duration (150 second limit)
         const duration = await checkMediaDuration(file as File);
         if (duration > 150) {
-          messageApi.error(`${t('knowledgeBase.fileDurationLimitError')}：${Math.round(duration)}秒`);
+          messageApi.error(`${t('knowledgeBase.fileDurationLimitError')}: ${Math.round(duration)}s`);
           onError?.(new Error(`${t('knowledgeBase.fileDurationExceeds')}`));
           abortControllersRef.current.delete(fileUid);
           return;
@@ -386,7 +386,7 @@ const CreateDataset = () => {
       },
     })
       .then((res: UploadFileResponse) => {
-        // 上传成功，移除 AbortController
+        // Upload successful, remove AbortController
         abortControllersRef.current.delete(fileUid);
         
         onSuccess?.(res, new XMLHttpRequest());
@@ -399,12 +399,12 @@ const CreateDataset = () => {
         }
       })
       .catch((error) => {
-        // 移除 AbortController
+        // Remove AbortController
         abortControllersRef.current.delete(fileUid);
         
-        // 如果是用户主动取消，不显示错误信息
+        // If user actively cancelled, don't show error message
         if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
-          console.log('上传已取消:', (file as File).name);
+          console.log('Upload cancelled:', (file as File).name);
           return;
         }
         onError?.(error as Error);
@@ -413,12 +413,12 @@ const CreateDataset = () => {
 
 
   // 轮询检查文档处理状态
-  // autoReturn: 是否在所有文档完成时自动返回列表页
+  // autoReturn: whether to automatically return to list page when all documents are completed
   const pollDocumentStatus = (autoReturn: boolean = false) => {
-    console.log('开始轮询文档状态，当前 pollingLoading:', pollingLoading);
+    console.log('Start polling document status, current pollingLoading:', pollingLoading);
     
     if (!knowledgeBaseId || !parentId || rechunkFileIds.length === 0) {
-      console.log('轮询条件不满足，退出');
+      console.log('Polling conditions not met, exiting');
       return;
     }
 
@@ -436,10 +436,10 @@ const CreateDataset = () => {
       }
       
       console.log('documents', documents);
-      // 检查是否所有文档的 progress 都为 1
+      // Check if all documents have progress of 1
       const allCompleted = documents.every((doc: KnowledgeBaseDocumentData) => doc.progress === 1);
       
-      console.log('轮询状态:', allCompleted);
+      console.log('Polling status:', allCompleted);
       
       // 检查是否所有文档都完成了
       // debugger
@@ -455,23 +455,23 @@ const CreateDataset = () => {
           setPollingLoading(false);
         }, 1000);
         
-        // 只有在 autoReturn 为 true 时才自动返回
+        // Only auto-return when autoReturn is true
         if (autoReturn) {
-          // 延迟 2 秒后跳转，让用户看到完成状态
-          console.log('所有文档处理完成，2秒后返回列表页');
+          // Delay 2 seconds before navigating to let user see completion status
+          console.log('All documents processed, returning to list page in 2 seconds');
           setTimeout(() => {
             handleBack();
           }, 2000);
         } else {
-          console.log('所有文档处理完成，用户可手动操作');
+          console.log('All documents processed, user can operate manually');
         }
       } else {
-        // 如果还有文档在处理中，确保 loading 状态保持
-        console.log('还有文档在处理中，保持 loading 状态');
+        // If documents are still processing, keep loading state
+        console.log('Documents still processing, maintaining loading state');
       }
     })
     .catch((error) => {
-      console.error('轮询文档状态失败:', error);
+      console.error('Failed to poll document status:', error);
       setPollingLoading(false);
     });
   };
@@ -486,7 +486,7 @@ const CreateDataset = () => {
         },
       });
     } else {
-      console.warn('缺少路由参数，无法返回');
+      console.warn('Missing route parameters, unable to return');
     }
   };
   const handleChange = (value: number | null) =>{
@@ -498,17 +498,17 @@ const CreateDataset = () => {
   const handleDeleteFile = async (fileId: string) => {
     try {
       await deleteDocument(fileId);
-      // 删除成功，从 rechunkFileIds 中移除该 id
+      // Delete successful, remove the id from rechunkFileIds
       setRechunkFileIds((prev) => prev.filter((id) => id !== fileId));
       console.log(`${t('common.deleteSuccess')}`);
     } catch (error) {
       messageApi.error(`${t('common.deleteFailed')}`);
     }
   };
-  // 当从其他页面跳转过来且带有 fileIds 时，加载对应的文档数据
+  // When navigating from other pages with fileIds, load corresponding document data
   // useEffect(() => {
   //   if (initialFileIds.length > 0 && initialStepKey !== 'selectFile' && knowledgeBaseId && parentId) {
-  //     // 加载文档列表数据
+  //     // Load document list data
   //     getDocumentList(knowledgeBaseId,{
   //       document_ids: initialFileIds.join(','),
   //     })
@@ -517,12 +517,12 @@ const CreateDataset = () => {
   //       setData(documents);
   //     })
   //     .catch((error) => {
-  //       console.error('加载文档列表失败:', error);
+  //       console.error('Failed to load document list:', error);
   //     });
   //   }
   // }, []);
 
-  // 清理函数：组件卸载时清除定时器和 loading 状态
+  // Cleanup function: clear timer and loading state when component unmounts
   useEffect(() => {
     return () => {
       if (pollingTimerRef.current) {
@@ -533,10 +533,10 @@ const CreateDataset = () => {
     };
   }, []);
 
-  // 监听路由变化，确保在页面切换时清理状态
+  // Watch for route changes, ensure state is cleaned up when page switches
   useEffect(() => {
     return () => {
-      // 页面卸载时清理状态
+      // Clean up state when page unmounts
       if (pollingTimerRef.current) {
         clearInterval(pollingTimerRef.current);
         pollingTimerRef.current = null;
@@ -574,7 +574,7 @@ const CreateDataset = () => {
                   fileType={fileType} 
                   customRequest={handleUpload}
                   onChange={(fileList) => {
-                    console.log('文件列表变化:', fileList);
+                    console.log('File list changed:', fileList);
                   }}
                   onRemove={async (file) => {
                       // 如果文件正在上传，取消上传
@@ -583,26 +583,26 @@ const CreateDataset = () => {
                       if (abortController) {
                         abortController.abort();
                         abortControllersRef.current.delete(fileUid);
-                        console.log('已取消上传:', (file as any).name);
+                        console.log('Upload cancelled:', (file as any).name);
                         // 取消上传后直接返回 true，允许移除文件
                         return true;
                       }
                       
-                      // 只有当文件已经上传成功（有response.id）时，才删除服务器上的文件
+                      // Only delete server file when file upload was successful (has response.id)
                       if (file.response?.id) {
                         try {
                           await deleteDocument(file.response.id);
                           setRechunkFileIds(prev => prev.filter(id => id !== file.response.id));
-                          console.log('已删除服务器文件:', file.response.id);
+                          console.log('Server file deleted:', file.response.id);
                           return true;
                         } catch (error) {
-                          console.error('删除文件失败:', error);
-                          messageApi.error(t('common.deleteFailed') || '删除文件失败');
-                          return false; // 删除失败时不移除文件
+                          console.error('Failed to delete file:', error);
+                          messageApi.error(t('common.deleteFailed') || 'Failed to delete file');
+                          return false; // Don't remove file when deletion fails
                         }
                       }
                       
-                      // 其他情况（如上传失败的文件）也允许移除
+                      // Also allow removal in other cases (such as failed uploads)
                       return true;
                     }} />
             )}

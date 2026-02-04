@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:26:44 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:26:44 
+ */
+/**
+ * AI Prompt Assistant Modal
+ * Provides an interactive chat interface to help users optimize their prompts using AI
+ * Features model selection, chat history, and variable insertion
+ */
+
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Button, Form, Input, App, Row, Col } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -19,11 +31,20 @@ import AiPromptVariableModal from './AiPromptVariableModal'
 import { type SSEMessage } from '@/utils/stream'
 import Editor from './Editor'
 
+/**
+ * Component props
+ */
 interface AiPromptModalProps {
+  /** Callback to refresh prompt with optimized value */
   refresh: (value: string) => void;
+  /** Default model to pre-select */
   defaultModel: ModelListItem | null;
 }
 
+/**
+ * AI Prompt Assistant Modal Component
+ * Helps users create and optimize prompts through AI-powered conversation
+ */
 const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
   refresh,
   defaultModel,
@@ -42,7 +63,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
 
   const values = Form.useWatch([], form)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset state */
   const handleClose = () => {
     setVisible(false);
     setLoading(false)
@@ -54,6 +75,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
     })
   };
 
+  /** Open modal and create new prompt session */
   const handleOpen = () => {
     createPromptSessions()
       .then(res => {
@@ -66,6 +88,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
         setVisible(true);
       })
   };
+  /** Send user message and get AI response */
   const handleSend = () => {
     if (!promptSession) return
     if (!values.model_id) {
@@ -115,7 +138,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
             break;
           case 'end':
             setLoading(false)
-            // 流结束时同步表单值
+            // Sync form value when stream ends
             form.setFieldsValue({ current_prompt: currentPromptValueRef.current })
             break
         }
@@ -134,14 +157,17 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
         setLoading(false)
       })
   }
+  /** Copy current prompt to clipboard */
   const handleCopy = () => {
     if (!values.current_prompt || values?.current_prompt?.trim() === '') return
     copy(values.current_prompt)
     message.success(t('common.copySuccess'))
   }
+  /** Open variable selection modal */
   const handleAdd = () => {
     aiPromptVariableModalRef.current?.handleOpen()
   }
+  /** Insert variable into prompt editor */
   const handleVariableApply = (value: string) => {
     if (editorRef.current?.insertText) {
       editorRef.current.insertText(value)
@@ -149,6 +175,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
       form.setFieldValue('current_prompt', (values.current_prompt || '') + value)
     }
   }
+  /** Apply optimized prompt and close modal */
   const handleApply = () => {
     if (!values.current_prompt) {
       return
@@ -157,7 +184,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
     handleClose()
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));

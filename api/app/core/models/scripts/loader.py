@@ -1,11 +1,11 @@
 """模型配置加载器 - 用于将预定义模型批量导入到数据库"""
 
-import os
 from pathlib import Path
 from typing import Callable
 
 import yaml
 from sqlalchemy.orm import Session
+
 from app.models.models_model import ModelBase, ModelProvider
 
 
@@ -19,29 +19,7 @@ def _load_yaml_config(provider: ModelProvider) -> list[dict]:
     
     with open(config_file, 'r', encoding='utf-8') as f:
         data = yaml.safe_load(f)
-        
-        # 检查是否需要加载（默认为 true）
-        if not data.get('enabled', True):
-            return []
-        
         return data.get('models', [])
-
-
-def _disable_yaml_config(provider: ModelProvider) -> None:
-    """将YAML文件的enabled标志设置为false"""
-    config_dir = Path(__file__).parent
-    config_file = config_dir / f"{provider.value}_models.yaml"
-    
-    if not config_file.exists():
-        return
-    
-    with open(config_file, 'r', encoding='utf-8') as f:
-        data = yaml.safe_load(f)
-    
-    data['enabled'] = False
-    
-    with open(config_file, 'w', encoding='utf-8') as f:
-        yaml.dump(data, f, allow_unicode=True, sort_keys=False)
 
 
 def load_models(db: Session, providers: list[str] = None, silent: bool = False) -> dict:
@@ -75,8 +53,7 @@ def load_models(db: Session, providers: list[str] = None, silent: bool = False) 
             
         if not silent:
             print(f"\n正在加载 {provider.value} 的 {len(models)} 个模型...")
-        
-        # provider_success = 0
+
         for model_data in models:
             try:
                 # 检查模型是否已存在
@@ -93,7 +70,6 @@ def load_models(db: Session, providers: list[str] = None, silent: bool = False) 
                     if not silent:
                         print(f"更新成功: {model_data['name']}")
                     result["success"] += 1
-                    # provider_success += 1
                 else:
                     # 创建新模型
                     model = ModelBase(**model_data)
@@ -102,17 +78,12 @@ def load_models(db: Session, providers: list[str] = None, silent: bool = False) 
                     if not silent:
                         print(f"添加成功: {model_data['name']}")
                     result["success"] += 1
-                    # provider_success += 1
                 
             except Exception as e:
                 db.rollback()
                 if not silent:
                     print(f"添加失败: {model_data['name']} - {str(e)}")
                 result["failed"] += 1
-        
-        # 如果该供应商的模型全部加载成功，将enabled设置为false
-        # if provider_success == len(models):
-        _disable_yaml_config(provider)
     
     return result
 

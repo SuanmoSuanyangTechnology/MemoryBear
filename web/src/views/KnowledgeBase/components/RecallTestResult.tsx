@@ -1,5 +1,5 @@
-/*
- * @Description: 滚动列表
+/**
+ * @Description: Scroll List
  * @Version: 0.0.1
  * @Author: yujiangping
  * @Date: 2025-11-18 16:19:58
@@ -22,9 +22,9 @@ interface RecallTestResultProps {
   loadMore?: () => void;
   loading?: boolean;
   scrollableTarget?: string;
-  editable?: boolean; // 是否可编辑
-  onItemClick?: (item: RecallTestData, index: number) => void; // 点击项的回调
-  parserMode?: number; // 解析模式，1 表示 QA 格式
+  editable?: boolean; // Whether editable
+  onItemClick?: (item: RecallTestData, index: number) => void; // Click item callback
+  parserMode?: number; // Parser mode, 1 means QA format
 }
 
 const RecallTestResult = ({ 
@@ -40,7 +40,7 @@ const RecallTestResult = ({
 }: RecallTestResultProps) => {
   const { t } = useTranslation();
 
-  // 解析 QA 格式内容
+  // Parse QA format content
   const parseQAContent = (content: string) => {
     if (!content || parserMode !== 1) return null;
     
@@ -56,25 +56,25 @@ const RecallTestResult = ({
     return null;
   };
 
-  // 格式化 QA 内容为显示格式
+  // Format QA content for display
   const formatQAContent = (question: string, answer: string) => {
     return `**${t('knowledgeBase.question')}:** ${question}\n**${t('knowledgeBase.answer')}:** ${answer}`;
   };
 
   const handleItemClick = (e: React.MouseEvent, item: RecallTestData, index: number) => {
-    // 检查点击的是否是图片或图片相关元素
+    // Check if the click is on an image or image-related element
     const target = e.target as HTMLElement;
     
-    // 检查是否点击了图片本身、图片的容器、预览层、关闭按钮或 SVG 图标
+    // Check if clicked on image itself, image container, preview layer, close button or SVG icon
     if (
       target.tagName === 'IMG' || 
-      target.tagName === 'SVG' || // SVG 图标
-      target.tagName === 'PATH' || // SVG 路径
+      target.tagName === 'SVG' || // SVG icon
+      target.tagName === 'PATH' || // SVG path
       target.closest('.ant-image') ||
       target.closest('.ant-image-preview') ||
       target.closest('.ant-image-preview-wrap') ||
       target.closest('.ant-image-preview-operations') ||
-      target.closest('.anticon') || // Ant Design 图标
+      target.closest('.anticon') || // Ant Design icon
       target.classList.contains('ant-image-img') ||
       target.classList.contains('ant-image-mask') ||
       target.classList.contains('ant-image-preview-close') ||
@@ -88,7 +88,7 @@ const RecallTestResult = ({
     }
   };
 
-  // 根据分数获取颜色类名
+  // Get color class based on score
   const getScoreColorClass = (score: number): string => {
     const percentage = score * 100;
     if (percentage >= 90) {
@@ -177,7 +177,7 @@ const RecallTestResult = ({
     </div>
   );
 
-  // 如果提供了 loadMore 和 hasMore，使用 InfiniteScroll
+  // If loadMore and hasMore are provided, use InfiniteScroll
   if (loadMore && hasMore !== undefined) {
     return (
       <div className='rb:flex rb:h-full rb:flex-col'>
@@ -200,7 +200,7 @@ const RecallTestResult = ({
     );
   }
 
-  // 否则使用普通渲染
+  // Otherwise use normal rendering
   return (
     <div className='rb:flex rb:flex-col'>
       <div className='rb:flex rb:items-center rb:justify-start rb:gap-2'>

@@ -1,18 +1,38 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:28:03 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:28:03 
+ */
+/**
+ * Line chart card component for displaying statistics
+ * Uses ECharts to render time-series data with gradient area fill
+ */
+
 import { type FC, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react';
 import * as echarts from 'echarts';
-import Empty from '@/components/Empty'
 
+import Empty from '@/components/Empty'
 import Card from './Card'
 import type { StatisticsItem } from '../types'
 
+/**
+ * Component props
+ */
 interface LineCardProps {
+  /** Chart data points */
   chartData: StatisticsItem[];
+  /** Statistics type key */
   type: string;
+  /** Total count to display */
   total: number;
 }
 
+/**
+ * ECharts series configuration
+ */
 const SeriesConfig = {
   type: 'line',
   stack: 'Total',
@@ -30,6 +50,9 @@ const SeriesConfig = {
   },
 }
 
+/**
+ * Color mapping for different statistic types
+ */
 const ColorObj: Record<string, string> = {
   daily_conversations: '#FFB048',
   daily_new_users: '#4DA8FF',
@@ -37,6 +60,10 @@ const ColorObj: Record<string, string> = {
   daily_tokens: '#AD88FF'
 }
 
+/**
+ * Line chart card component
+ * Displays time-series statistics with gradient area chart
+ */
 const LineCard: FC<LineCardProps> = ({ chartData, type, total }) => {
   const { t } = useTranslation()
   const chartRef = useRef<ReactEcharts>(null);

@@ -1,5 +1,19 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:57:15 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:57:15 
+ */
+/**
+ * User Memory Detail Types
+ * Type definitions for user memory detail views including nodes, edges, and statistics
+ */
+
 import type { Dayjs } from "dayjs";
 
+/**
+ * User memory data structure
+ */
 export interface Data {
   id: string | number
   name: string;
@@ -41,11 +55,17 @@ export interface Data {
   }[];
   [key: string]: unknown;
 }
+/**
+ * Base node properties
+ */
 export interface BaseProperties {
   content: string;
   created_at: number;
   associative_memory: number;
 }
+/**
+ * Statement node properties
+ */
 export interface StatementNodeProperties {
   temporal_info: string;
   stmt_type: string;
@@ -58,6 +78,9 @@ export interface StatementNodeProperties {
   importance_score: number;
   associative_memory: number;
 }
+/**
+ * Extracted entity node properties
+ */
 export interface ExtractedEntityNodeProperties {
   description: string;
   name: string;
@@ -68,6 +91,9 @@ export interface ExtractedEntityNodeProperties {
   importance_score: number;
   associative_memory: number;
 }
+/**
+ * Memory summary node
+ */
 export interface MemorySummaryNode {
   id: string;
   label: 'MemorySummary';
@@ -85,6 +111,9 @@ export interface MemorySummaryNode {
   associative_memory: number;
 }
 
+/**
+ * Graph node
+ */
 export interface Node {
   id: string;
   label: 'Dialogue' | 'ExtractedEntity' | 'Chunk' | 'MemorySummary' | 'Statement';
@@ -97,6 +126,9 @@ export interface Node {
   properties: BaseProperties | StatementNodeProperties | ExtractedEntityNodeProperties
   caption: string;
 }
+/**
+ * Graph edge
+ */
 export interface Edge {
   id: string;
   source: string;
@@ -112,6 +144,9 @@ export interface Edge {
   value: number;
   weight: number;
 }
+/**
+ * Graph data structure
+ */
 export interface GraphData {
   nodes: Node[];
   edges: Edge[];
@@ -123,11 +158,17 @@ export interface GraphData {
   }
 }
 
+/**
+ * Node statistics item
+ */
 export interface NodeStatisticsItem {
   type: string;
   count: number;
   percentage: number;
 }
+/**
+ * End user profile
+ */
 export interface EndUser {
   end_user_id: string;
   id: string;
@@ -139,20 +180,35 @@ export interface EndUser {
   hire_date: string | number | Dayjs | null;
   updatetime_profile?: number;
 }
+/**
+ * End user profile modal ref
+ */
 export interface EndUserProfileModalRef {
   handleOpen: (vo: EndUser) => void;
 }
+/**
+ * Memory insight component ref
+ */
 export interface MemoryInsightRef {
   getData: () => void
 }
+/**
+ * About me component ref
+ */
 export interface AboutMeRef {
   getData: () => void
 }
+/**
+ * End user profile component ref
+ */
 export interface EndUserProfileRef {
   data: EndUser | null
 }
 
 
+/**
+ * Forget engine data
+ */
 export interface ForgetData {
   activation_metrics: {
     total_nodes: number;
@@ -185,6 +241,9 @@ export interface ForgetData {
   }[],
   timestamp: number;
 }
+/**
+ * Graph detail modal ref
+ */
 export interface GraphDetailRef {
   handleOpen: (vo: Node) => void
 }
