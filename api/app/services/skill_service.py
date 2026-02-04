@@ -66,10 +66,10 @@ class SkillService:
             raise e
 
     @staticmethod
-    def delete_skill(db: Session, skill_id: uuid.UUID, workspace_id: uuid.UUID) -> bool:
+    def delete_skill(db: Session, skill_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:
         """删除技能"""
         try:
-            success = SkillRepository.delete(db, skill_id, workspace_id)
+            success = SkillRepository.delete(db, skill_id, tenant_id)
             if not success:
                 raise BusinessException("技能不存在或无权限", BizCode.NOT_FOUND)
             db.commit()
@@ -91,7 +91,7 @@ class SkillService:
         
         for skill_id in skill_ids:
             try:
-                skill = SkillRepository.get_by_id(db, uuid.UUID(skill_id))
+                skill = SkillRepository.get_by_id(db, uuid.UUID(skill_id), tenant_id)
                 if skill and skill.is_active:
                     # 加载技能关联的工具
                     for tool_config in skill.tools:
