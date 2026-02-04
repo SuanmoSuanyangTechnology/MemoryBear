@@ -636,10 +636,9 @@ async def analytics_recent_activity_stats() -> Dict[str, Any]:
                 if m < 1:
                     latest_relative = "刚刚"
                 elif m < 60:
-                    latest_relative = f"{m}分钟前"
+                    latest_relative = "一会前"
                 else:
-                    h = int(m // 60)
-                    latest_relative = f"{h}小时前" if h < 24 else f"{int(h // 24)}天前"
+                    latest_relative = "较早前"
     except Exception:
         pass
 
