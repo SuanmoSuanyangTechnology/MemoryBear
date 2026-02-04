@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 
-from app.core.memory.agent.langgraph_graph.tools.write_tool import format_parsing, chat_data_format, messages_parse
+from app.core.memory.agent.langgraph_graph.tools.write_tool import format_parsing, messages_parse
 from app.db import get_db
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.llm_tools import WriteState
@@ -42,9 +42,8 @@ async def make_write_graph():
 
 async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[],memory_config:str='',end_user_id:str='',scope:int=6):
     from app.core.memory.agent.langgraph_graph.routing.write_router import memory_long_term_storage, window_dialogue,aggregate_judgment
-    from app.core.memory.agent.langgraph_graph.tools.write_tool import chat_data_format
     from app.core.memory.agent.utils.redis_tool import write_store
-    write_store.save_session_write(end_user_id, await chat_data_format(langchain_messages))
+    write_store.save_session_write(end_user_id,  (langchain_messages))
     # 获取数据库会话
     db_session = next(get_db())
     config_service = MemoryConfigService(db_session)
@@ -62,31 +61,24 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
         """方案三：聚合判断"""
         await aggregate_judgment(end_user_id, langchain_messages, memory_config)
 
-#
+
 # async def main():
 #     """主函数 - 运行工作流"""
 #     langchain_messages = [
 #     {
 #       "role": "user",
-#       "content": "今天周五好开心啊"
+#       "content": "今天周五去爬山"
 #     },
 #     {
 #       "role": "assistant",
-#       "content": "你也这么觉得，我也是耶"
+#       "content": "好耶"
 #     }
 #
 #   ]
 #     end_user_id = '837fee1b-04a2-48ee-94d7-211488908940'  # 组ID
 #     memory_config="08ed205c-0f05-49c3-8e0c-a580d28f5fd4"
-#     # await long_term_storage(long_term_type="chunk",langchain_messages=langchain_messages,memory_config=memory_config,end_user_id=end_user_id,scope=2)
-#     from app.core.memory.agent.utils.redis_tool import write_store
-#     result=write_store.get_session_by_userid(end_user_id)
-#     data=await format_parsing(result,"dict")
-#     chunk_data=data[:6]
+#     await long_term_storage(long_term_type="chunk",langchain_messages=langchain_messages,memory_config=memory_config,end_user_id=end_user_id,scope=2)
 #
-#     long_time_data = write_store.find_user_recent_sessions(end_user_id, 240)
-#     long_=await messages_parse(long_time_data)
-#     print(long_)
 #
 #
 # if __name__ == "__main__":
