@@ -129,7 +129,7 @@ class IterationNodeConfig(BaseNodeConfig):
     )
 
     output_type: VariableType = Field(
-        ...,
+        default=None,
         description="Data type of the loop iteration output"
     )
 

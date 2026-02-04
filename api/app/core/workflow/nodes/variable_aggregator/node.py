@@ -19,6 +19,10 @@ class VariableAggregatorNode(BaseNode):
     def _output_types(self) -> dict[str, VariableType]:
         config = VariableAggregatorNodeConfig(**self.config)
         output = {}
+        if not config.group_type:
+            for group_name in config.group_variables.keys():
+                output[group_name] = VariableType.ANY
+            return output
         for var_type in config.group_type:
             output[var_type] = config.group_type[var_type]
         return output
@@ -64,6 +68,8 @@ class VariableAggregatorNode(BaseNode):
                     return value
 
             logger.info("No variable found in non-group mode; returning empty string.")
+            if not self.typed_config.group_type:
+                return ""
             return DEFAULT_VALUE(self.typed_config.group_type["output"])
 
         # --------------------------
@@ -83,7 +89,10 @@ class VariableAggregatorNode(BaseNode):
                     result[group_name] = value
                     break
             else:
-                result[group_name] = DEFAULT_VALUE(self.typed_config.group_type[group_name])
+                if not self.typed_config.group_type:
+                    result[group_name] = ""
+                else:
+                    result[group_name] = DEFAULT_VALUE(self.typed_config.group_type[group_name])
                 logger.info(f"No variable found for group '{group_name}'; set empty string.")
         logger.info(f"Node: {self.node_id} variable aggregation result: {result}")
         return result

@@ -53,6 +53,9 @@ class CycleGraphNode(BaseNode):
         elif self.node_type == NodeType.ITERATION:
             # Iteration node outputs the processed collection
             config = IterationNodeConfig(**self.config)
+            if not config.output_type:
+                outputs['output'] = VariableType.ANY
+                return outputs
             if config.output_type in [
                 VariableType.ARRAY_FILE,
                 VariableType.ARRAY_STRING,

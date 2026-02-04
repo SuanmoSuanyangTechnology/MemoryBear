@@ -5,12 +5,12 @@ import re
 from string import Template
 from textwrap import dedent
 from typing import Any
-
+import urllib.parse
 import httpx
 
 from app.core.workflow.nodes import BaseNode, WorkflowState
-from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.nodes.code.config import CodeNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
@@ -108,6 +108,7 @@ class CodeNode(BaseNode):
         code = base64.b64decode(
             self.typed_config.code
         ).decode("utf-8")
+        code = urllib.parse.unquote(code, encoding='utf-8')
 
         input_variable_dict = base64.b64encode(
             json.dumps(input_variable_dict).encode("utf-8")

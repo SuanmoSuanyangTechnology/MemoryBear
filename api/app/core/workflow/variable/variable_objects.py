@@ -107,6 +107,16 @@ class NestedArrayObject(BaseVariable):
         return [[item.get_value() for item in row] for row in self.value]
 
 
+class AnyObject(BaseVariable):
+    type = 'any'
+
+    def valid_value(self, value: Any) -> Any:
+        return value
+
+    def to_literal(self) -> str:
+        return str(self.value)
+
+
 def make_array(child_type: Type[T], value: list[Any]) -> ArrayObject[T]:
     """简化 ArrayObject 创建，不需要重复写类型"""
 
@@ -133,5 +143,7 @@ def create_variable_instance(var_type: VariableType, value: Any) -> T:
             return make_array(DictObject, value)
         case VariableType.ARRAY_FILE:
             return make_array(FileObject, value)
+        case VariableType.ANY:
+            return AnyObject(value)
         case _:
             raise TypeError(f"Invalid type - {var_type}")

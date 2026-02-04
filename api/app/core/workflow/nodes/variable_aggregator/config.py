@@ -16,7 +16,7 @@ class VariableAggregatorNodeConfig(BaseNodeConfig):
     )
 
     group_type: dict[str, VariableType] = Field(
-        ...,
+        default=None,
         description="每个分组的变量类型"
     )
 

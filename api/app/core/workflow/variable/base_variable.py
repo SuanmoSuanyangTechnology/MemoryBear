@@ -20,6 +20,8 @@ class VariableType(StrEnum):
 
     NESTED_ARRAY = "array_nest"
 
+    ANY = 'any'
+
     @classmethod
     def type_map(cls, var: Any) -> "VariableType":
         """Maps a Python value to a corresponding VariableType.
