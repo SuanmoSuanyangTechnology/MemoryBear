@@ -1,8 +1,6 @@
 import json
 
 from langchain_core.messages import HumanMessage, AIMessage
-
-
 async def format_parsing(messages: list,type:str='string'):
     """
     格式化解析消息列表
