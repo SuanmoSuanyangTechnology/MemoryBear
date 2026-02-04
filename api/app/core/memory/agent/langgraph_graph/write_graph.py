@@ -63,8 +63,6 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
                 """方案三：聚合判断"""
                 await aggregate_judgment(end_user_id, langchain_messages, memory_config)
         finally:
-            if db_session.in_transaction():
-                db_session.rollback()
             db_session.close()
 
 

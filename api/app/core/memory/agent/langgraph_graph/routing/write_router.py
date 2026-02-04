@@ -115,8 +115,6 @@ async def term_memory_save(long_term_messages,actual_config_id,end_user_id,type,
                 logger.info(f'写入短长期：')
             # yield db_session
         finally:
-            if db_session.in_transaction():
-                db_session.rollback()
             db_session.close()
 
 
