@@ -142,7 +142,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
           dataLength={data.length}
           next={loadMoreData}
           hasMore={hasMore}
-          loader={needLoading ? <PageLoading /> : undefined}
+          loader={loading && needLoading ? <PageLoading /> : false}
           // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
           scrollableTarget="scrollableDiv"
           className='rb:h-full!'

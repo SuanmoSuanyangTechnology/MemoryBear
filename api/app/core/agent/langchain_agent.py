@@ -291,6 +291,7 @@ class LangChainAgent:
 
     async def term_memory_save(self,long_term_messages,actual_config_id,end_user_id,type):
         db = next(get_db())
+        #TODO: 魔法数字
         scope=6
 
         try:
@@ -300,6 +301,12 @@ class LangChainAgent:
 
             from app.core.memory.agent.utils.redis_tool import write_store
             result = write_store.get_session_by_userid(end_user_id)
+            
+            # Handle case where no session exists in Redis (returns False)
+            if not result or result is False:
+                logger.debug(f"No existing session in Redis for user {end_user_id}, skipping short-term memory update")
+                return
+                
             if type=="chunk" or type=="aggregate":
                 data = await format_parsing(result, "dict")
                 chunk_data = data[:scope]
@@ -307,7 +314,14 @@ class LangChainAgent:
                     repo.upsert(end_user_id, chunk_data)
                     logger.info(f'写入短长期：')
             else:
+                # TODO: This branch handles type="time" strategy, currently unused.
+                # Will be activated when time-based long-term storage is implemented.
+                # TODO: 魔法数字 - extract 5 to a constant
                 long_time_data = write_store.find_user_recent_sessions(end_user_id, 5)
+                # Handle case where no session exists in Redis (returns False or empty)
+                if not long_time_data or long_time_data is False:
+                    logger.debug(f"No recent sessions in Redis for user {end_user_id}")
+                    return
                 long_messages = await messages_parse(long_time_data)
                 repo.upsert(end_user_id, long_messages)
                 logger.info(f'写入短长期：')
@@ -507,9 +521,12 @@ class LangChainAgent:
             elapsed_time = time.time() - start_time
             if memory_flag:
                 long_term_messages=await agent_chat_messages(message_chat,content)
-                # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
+                # TODO: DUPLICATE WRITE - Remove this immediate write once batched write (term_memory_save) is verified stable.
+                # This writes to Neo4j immediately via Celery task, but term_memory_save also writes to Neo4j
+                # when the window buffer reaches scope (6 messages). This causes duplicate entities in the graph.
+                # Recommended: Keep only term_memory_save for batched efficiency, or only self.write for real-time.
                 await self.write(storage_type, actual_end_user_id, message_chat, content, user_rag_memory_id, actual_end_user_id, actual_config_id)
-                '''长期'''
+                # Batched long-term memory storage (Redis buffer + Neo4j when window full)
                 await self.term_memory_save(long_term_messages,actual_config_id,end_user_id,"chunk")
             response = {
                 "content": content,
@@ -693,9 +710,13 @@ class LangChainAgent:
                         yield total_tokens
                         break
                 if memory_flag:
-                    # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
+                    # TODO: DUPLICATE WRITE - Remove this immediate write once batched write (term_memory_save) is verified stable.
+                    # This writes to Neo4j immediately via Celery task, but term_memory_save also writes to Neo4j
+                    # when the window buffer reaches scope (6 messages). This causes duplicate entities in the graph.
+                    # Recommended: Keep only term_memory_save for batched efficiency, or only self.write for real-time.
                     long_term_messages = await agent_chat_messages(message_chat, full_content)
                     await self.write(storage_type, end_user_id, message_chat, full_content, user_rag_memory_id, end_user_id, actual_config_id)
+                    # Batched long-term memory storage (Redis buffer + Neo4j when window full)
                     await self.term_memory_save(long_term_messages, actual_config_id, end_user_id, "chunk")
                 
             except Exception as e:

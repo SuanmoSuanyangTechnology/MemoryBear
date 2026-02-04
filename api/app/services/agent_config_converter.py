@@ -48,6 +48,9 @@ class AgentConfigConverter:
         # 5. 工具配置
         if hasattr(config, 'tools') and config.tools:
             result["tools"] = [tool.model_dump() for tool in config.tools]
+
+        if hasattr(config, "skill_ids") and config.skill_ids:
+            result["skill_ids"] = [skill for skill in config.skill_ids]
         
         return result
     
@@ -58,6 +61,7 @@ class AgentConfigConverter:
         memory: Optional[Dict[str, Any]],
         variables: Optional[list],
         tools: Optional[Union[list, Dict[str, Any]]],
+        skill_ids: Optional[list]
     ) -> Dict[str, Any]:
         """
         将数据库存储格式转换为 Pydantic 对象
@@ -68,6 +72,7 @@ class AgentConfigConverter:
             memory: 记忆配置
             variables: 变量配置
             tools: 工具配置
+            skill_ids: 技能 ID 列表
             
         Returns:
             包含 Pydantic 对象的字典
@@ -78,6 +83,7 @@ class AgentConfigConverter:
             "memory": MemoryConfig(enabled=True),
             "variables": [],
             "tools": [],
+            "skill_ids": []
         }
         
         # 1. 解析模型参数配置
@@ -117,5 +123,8 @@ class AgentConfigConverter:
                     name: ToolOldConfig(**tool_data)
                     for name, tool_data in tools.items()
                 }
+
+        if skill_ids:
+            result["skill_ids"] = [skill for skill in skill_ids]
         
         return result

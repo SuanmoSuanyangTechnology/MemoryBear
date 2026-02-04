@@ -304,6 +304,7 @@ class AppService:
             memory=storage_data.get("memory"),
             variables=storage_data.get("variables", []),
             tools=storage_data.get("tools", []),
+            skill_ids=storage_data.get("skill_ids", []),
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -907,6 +908,7 @@ class AppService:
         agent_cfg.variables = storage_data.get("variables", [])
         # if data.tools is not None:
         agent_cfg.tools = storage_data.get("tools", [])
+        agent_cfg.skill_ids = storage_data.get("skill_ids", [])
 
         agent_cfg.updated_at = now
 
