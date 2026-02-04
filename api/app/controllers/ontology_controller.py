@@ -191,7 +191,7 @@ def _get_ontology_service(
             )
         
         # 获取可用的 API Key（只选择激活状态的）
-        active_api_keys = [ak for ak in model_config.api_keys if ak.is_active]
+        active_api_keys = [ak for ak in model_config.api_keys if getattr(ak, 'is_active', True)]
         if not active_api_keys:
             logger.error(f"Model {llm_id} has no active API key")
             raise HTTPException(
@@ -199,17 +199,29 @@ def _get_ontology_service(
                 detail="指定的LLM模型没有可用的API密钥"
             )
         
+        # 安全的数值转换辅助函数
+        def safe_int(value, default: int = 0) -> int:
+            """安全地将值转换为整数，异常时返回默认值"""
+            if value is None:
+                return default
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                return default
+        
         # 对于组合模型，根据负载均衡策略选择 API Key
-        if model_config.is_composite and len(active_api_keys) > 1:
+        is_composite = getattr(model_config, 'is_composite', False)
+        if is_composite and len(active_api_keys) > 1:
             from app.models.models_model import LoadBalanceStrategy
-            if model_config.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
+            load_balance_strategy = getattr(model_config, 'load_balance_strategy', None)
+            if load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
                 # 轮询策略：选择使用次数最少的 API Key
-                api_key_config = min(active_api_keys, key=lambda x: int(x.usage_count or "0"))
+                api_key_config = min(active_api_keys, key=lambda x: safe_int(x.usage_count, 0))
             else:
-                # 默认策略：按优先级选择
-                api_key_config = min(active_api_keys, key=lambda x: int(x.priority or "1"))
+                # 默认策略：按优先级选择（优先级数值越小越优先）
+                api_key_config = min(active_api_keys, key=lambda x: safe_int(x.priority, 1))
             logger.info(
-                f"Composite model using load balance strategy: {model_config.load_balance_strategy}, "
+                f"Composite model using load balance strategy: {load_balance_strategy}, "
                 f"selected API Key: {api_key_config.id}, provider: {api_key_config.provider}"
             )
         else:
@@ -218,15 +230,15 @@ def _get_ontology_service(
         logger.info(
             f"Using specified model - user: {current_user.id}, "
             f"model_id: {llm_id}, model_name: {api_key_config.model_name}, "
-            f"is_composite: {model_config.is_composite}"
+            f"is_composite: {is_composite}"
         )
         
         # 创建模型配置对象
         from app.core.models.base import RedBearModelConfig
         
         # 对于组合模型，使用 API Key 的 provider；否则使用 model_config 的 provider
-        actual_provider = api_key_config.provider if model_config.is_composite else (
-            model_config.provider if hasattr(model_config, 'provider') else "openai"
+        actual_provider = api_key_config.provider if is_composite else (
+            getattr(model_config, 'provider', None) or "openai"
         )
         
         llm_model_config = RedBearModelConfig(
