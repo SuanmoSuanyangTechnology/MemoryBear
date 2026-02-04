@@ -248,8 +248,9 @@ class ConfigParamsDelete(BaseModel):  # 删除配置参数模型（请求体）
 
 class ConfigUpdate(BaseModel):  # 更新记忆萃取引擎配置参数时使用的模型
     config_id: Union[uuid.UUID, int, str] = None
-    config_name: str = Field("配置名称", description="配置名称（字符串）")
-    config_desc: str = Field("配置描述", description="配置描述（字符串）")
+    config_name: Optional[str] = Field(None, description="配置名称（字符串）")
+    config_desc: Optional[str] = Field(None, description="配置描述（字符串）")
+    scene_id: Optional[uuid.UUID] = Field(None, description="本体场景ID")
 
 
 class ConfigUpdateExtracted(BaseModel):  # 更新记忆萃取引擎配置参数时使用的模型
