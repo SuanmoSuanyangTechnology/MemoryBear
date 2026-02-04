@@ -188,6 +188,6 @@ class AppStatisticsService:
             daily_tokens[date_str] += int(tokens)
         
         daily_data = [{"date": date, "count": tokens} for date, tokens in sorted(daily_tokens.items()) if tokens != 0]
-        total = sum(row["tokens"] for row in daily_data)
+        total = sum(row["count"] for row in daily_data)
         
         return {"daily": daily_data, "total": total}
