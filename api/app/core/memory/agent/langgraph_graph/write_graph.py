@@ -64,11 +64,11 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
 
 
 async def write_long_term(storage_type,end_user_id,message_chat,aimessages,user_rag_memory_id,actual_config_id):
-    from app.services.memory_konwledges_server import write_rag
+    from app.core.memory.agent.langgraph_graph.routing.write_router import write_rag_agent
     from app.core.memory.agent.langgraph_graph.routing.write_router import term_memory_save
     from app.core.memory.agent.langgraph_graph.tools.write_tool import  agent_chat_messages
     if storage_type == AgentMemory_Long_Term.STORAGE_RAG:
-        await write_rag(end_user_id, message_chat, aimessages, user_rag_memory_id)
+        await write_rag_agent(end_user_id, message_chat, aimessages, user_rag_memory_id)
     else:
         # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
         CHUNK = AgentMemory_Long_Term.STRATEGY_CHUNK
