@@ -2,7 +2,7 @@ from typing import Any, TypeVar, Type, Generic
 
 from deprecated import deprecated
 
-from app.core.workflow.variable.base_variable import BaseVariable, VariableType, FileObject
+from app.core.workflow.variable.base_variable import BaseVariable, VariableType, FileObject, FileType
 
 T = TypeVar("T", bound=BaseVariable)
 
@@ -75,7 +75,7 @@ class FileVariable(BaseVariable):
         raise TypeError(f"Value must be a FileObject - {type(value)}:{value}")
 
     def to_literal(self) -> str:
-        return str(self.value.model_dump())
+        return f'{"!"if self.value.type == FileType.IMAGE else ""}[file]({self.value.url})'
 
     def get_value(self) -> Any:
         return self.value.model_dump()

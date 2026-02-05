@@ -667,6 +667,15 @@ class BaseNode(ABC):
 
     @staticmethod
     def process_model_output(content) -> str:
-        if isinstance(content, dict):
-            return content.get("text")
-        return content
+        result = ""
+        if isinstance(content, list):
+            for msg in content:
+                if isinstance(msg, dict):
+                    result += msg.get("text")
+                elif isinstance(msg, str):
+                    result += msg
+        elif isinstance(content, dict):
+            result = content.get("text")
+        elif isinstance(content, str):
+            return content
+        return result
