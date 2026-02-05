@@ -652,7 +652,7 @@ class ModelApiKeyService:
     @staticmethod
     def record_api_key_usage(db: Session, api_key_id: uuid.UUID | None) -> bool:
         """记录API Key使用"""
-        if not api_key_id:
+        if api_key_id:
             success = ModelApiKeyRepository.update_usage(db, api_key_id)
             if success:
                 db.commit()
