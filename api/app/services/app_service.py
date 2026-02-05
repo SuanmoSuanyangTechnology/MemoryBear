@@ -1220,7 +1220,7 @@ class AppService:
                 "memory": agent_cfg.memory,
                 "variables": agent_cfg.variables or [],
                 "tools": agent_cfg.tools or [],
-                "skill_ids": agent_cfg.skill_ids or [],
+                "skills": agent_cfg.skills or {},
             }
             # config = AgentConfigConverter.from_storage_format(agent_cfg)
             default_model_config_id = agent_cfg.default_model_config_id
