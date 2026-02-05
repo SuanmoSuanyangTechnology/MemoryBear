@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-05 10:44:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 10:52:29
+ * @Last Modified time: 2026-02-05 10:56:28
  */
 import { type FC, useEffect, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next';
@@ -15,7 +15,7 @@ import AiPromptModal from '@/views/ApplicationConfig/components/AiPromptModal'
 import ToolList from '../components/ToolList/ToolList'
 import type { AiPromptModalRef } from '@/views/ApplicationConfig/types'
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
-import type { SkillFormData, Skill } from '../types'
+import type { SkillFormData } from '../types'
 import { getSkillDetail, createSkill, updateSkill } from '@/api/skill'
 
 /**
@@ -42,7 +42,6 @@ const SkillConfig: FC = () => {
   const { message } = App.useApp()
   const [loading, setLoading] = useState(false)
   const [form] = Form.useForm<SkillFormData>();
-  const [data, setData] = useState<Skill>({} as Skill)
 
   /**
    * Effect: Load skill data if editing existing skill
@@ -69,7 +68,6 @@ const SkillConfig: FC = () => {
     setLoading(true)
     getSkillDetail(id)
       .then(res => {
-        setData(res as Skill)
         form.setFieldsValue(res as SkillFormData)
       })
       .finally(() => {
@@ -108,7 +106,6 @@ const SkillConfig: FC = () => {
   const handleSave = () => {
     form.validateFields()
       .then((values) => {
-        console.log(values, data)
         const { tools, ...rest } = values;
         // Format tools data for API
         const formData = {
@@ -118,6 +115,7 @@ const SkillConfig: FC = () => {
             operation: item.operation
           }))
         }
+        setLoading(true)
         // Choose create or update based on whether id exists
         const request = id ? updateSkill(id, formData) : createSkill(formData)
         request
