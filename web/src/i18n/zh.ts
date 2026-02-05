@@ -1970,6 +1970,7 @@ export const zh = {
           enable_window: '记忆窗口',
           inner: '内置',
           messagesPlaceholder: '在此处编写提示，输入“{”插入变量，输入“insert”插入',
+          vision: '视觉',
         },
         start: {
           variables: '输入字段',

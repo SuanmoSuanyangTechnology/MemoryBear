@@ -1882,6 +1882,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           enable_window: 'Memory Window',
           inner: 'Built-in',
           messagesPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
+          vision: 'Vision',
         },
         start: {
           variables: 'Input Fields',
