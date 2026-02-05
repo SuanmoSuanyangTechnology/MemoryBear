@@ -269,7 +269,7 @@ async def save_dialog_and_statements_to_neo4j(
                     "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
                     "run_id": edge.run_id,
                     "end_user_id": edge.end_user_id,
-                    "connect_strength": edge.connect_strength if hasattr(edge, 'connect_strength') else 'strong',
+                    "connect_strength": getattr(edge, "connect_strength", "strong"),
                 })
             result = await tx.run(STATEMENT_ENTITY_EDGE_SAVE, relationships=se_edge_data)
             se_uuids = [record["uuid"] async for record in result]
