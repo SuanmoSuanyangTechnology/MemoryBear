@@ -327,6 +327,18 @@ class RedisCountStore:
         try:
             # 使用索引键快速查找
             index_key = f'session:count:index:{end_user_id}'
+            
+            # 检查索引键类型，避免 WRONGTYPE 错误
+            try:
+                key_type = self.r.type(index_key)
+                if key_type != 'string' and key_type != 'none':
+                    # 索引键类型错误，删除并返回 False
+                    print(f"[get_sessions_count] 索引键类型错误: {key_type}，删除索引")
+                    self.r.delete(index_key)
+                    return False
+            except Exception as type_error:
+                print(f"[get_sessions_count] 检查键类型失败: {type_error}")
+            
             session_id = self.r.get(index_key)
             
             if not session_id:
@@ -368,6 +380,19 @@ class RedisCountStore:
         try:
             # 使用索引键快速查找
             index_key = f'session:count:index:{end_user_id}'
+            
+            # 检查索引键类型，避免 WRONGTYPE 错误
+            try:
+                key_type = self.r.type(index_key)
+                if key_type != 'string' and key_type != 'none':
+                    # 索引键类型错误，删除并返回 False
+                    print(f"[update_sessions_count] 索引键类型错误: {key_type}，删除索引")
+                    self.r.delete(index_key)
+                    print(f"[update_sessions_count] 未找到记录: end_user_id={end_user_id}")
+                    return False
+            except Exception as type_error:
+                print(f"[update_sessions_count] 检查键类型失败: {type_error}")
+            
             session_id = self.r.get(index_key)
             
             if not session_id:
