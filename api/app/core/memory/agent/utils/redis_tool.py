@@ -352,7 +352,6 @@ class RedisCountStore:
         except Exception as e:
             print(f"[get_sessions_count] 查询失败: {e}")
             return False
-
     def update_sessions_count(self, end_user_id: str, new_count: int, 
                              messages: Any) -> bool:
         """
