@@ -10,6 +10,7 @@
       { "path": "/pricing", "element": "Pricing" },
       { "path": "/order-pay", "element": "OrderPayment" },
       { "path": "/orders", "element": "OrderHistory" },
+      { "path": "/skills", "element": "Skills" },
       { "path": "/no-permission", "element": "NoPermission" }
     ]
   },
@@ -48,6 +49,13 @@
       { "path": "/statement/:id", "element": "StatementDetail" },
       { "path": "/user-memory/detail/:id/:type", "element": "MemoryNodeDetail" },
       { "path": "/ontology/:id", "element": "OntologyDetail" }
+    ]
+  },
+  {
+    "element": "BasicAuthLayout",
+    "children": [
+      { "path": "/skills/add", "element": "SkillConfig" },
+      { "path": "/skills/config/:id", "element": "SkillConfig" }
     ]
   },
   {
