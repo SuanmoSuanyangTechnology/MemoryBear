@@ -42,8 +42,8 @@ async def save_entities_and_relationships(
             'statement': edge.statement,
             'valid_at': edge.valid_at.isoformat() if edge.valid_at else None,
             'invalid_at': edge.invalid_at.isoformat() if edge.invalid_at else None,
-            'created_at': edge.created_at.isoformat(),
-            'expired_at': edge.expired_at.isoformat(),
+            'created_at': edge.created_at.isoformat() if edge.created_at else None,
+            'expired_at': edge.expired_at.isoformat() if edge.expired_at else None,
             'run_id': edge.run_id,
             'end_user_id': edge.end_user_id,
         }
@@ -228,8 +228,8 @@ async def save_dialog_and_statements_to_neo4j(
                     'statement': edge.statement,
                     'valid_at': edge.valid_at.isoformat() if edge.valid_at else None,
                     'invalid_at': edge.invalid_at.isoformat() if edge.invalid_at else None,
-                    'created_at': edge.created_at.isoformat(),
-                    'expired_at': edge.expired_at.isoformat(),
+                    'created_at': edge.created_at.isoformat() if edge.created_at else None,
+                    'expired_at': edge.expired_at.isoformat() if edge.expired_at else None,
                     'run_id': edge.run_id,
                     'end_user_id': edge.end_user_id,
                 })
@@ -247,8 +247,8 @@ async def save_dialog_and_statements_to_neo4j(
                     "id": edge.id,
                     "source": edge.source,
                     "target": edge.target,
-                    "created_at": edge.created_at.isoformat(),
-                    "expired_at": edge.expired_at.isoformat(),
+                    "created_at": edge.created_at.isoformat() if edge.created_at else None,
+                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
                     "run_id": edge.run_id,
                     "end_user_id": edge.end_user_id,
                 })
@@ -266,12 +266,13 @@ async def save_dialog_and_statements_to_neo4j(
                     "id": edge.id,
                     "source": edge.source,
                     "target": edge.target,
-                    "created_at": edge.created_at.isoformat(),
-                    "expired_at": edge.expired_at.isoformat(),
+                    "created_at": edge.created_at.isoformat() if edge.created_at else None,
+                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
                     "run_id": edge.run_id,
                     "end_user_id": edge.end_user_id,
+                    "connect_strength": getattr(edge, 'connect_strength', None),
                 })
-            result = await tx.run(STATEMENT_ENTITY_EDGE_SAVE, edges=se_edge_data)
+            result = await tx.run(STATEMENT_ENTITY_EDGE_SAVE, relationships=se_edge_data)
             se_uuids = [record["uuid"] async for record in result]
             results['statement_entity_edges'] = se_uuids
             logger.info(f"Successfully saved {len(se_uuids)} statement-entity edges to Neo4j")
