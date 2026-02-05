@@ -72,7 +72,8 @@ def _row_to_entity(row: Dict[str, Any]) -> ExtractedEntityNode:
         description=row.get("description") or "",
         aliases=row.get("aliases") or [],
         name_embedding=row.get("name_embedding") or [],
-        fact_summary=row.get("fact_summary") or "",
+        # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+        # fact_summary=row.get("fact_summary") or "",
         connect_strength=row.get("connect_strength") or "",
     )
 
