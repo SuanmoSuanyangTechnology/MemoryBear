@@ -95,8 +95,7 @@ async def write(storage_type, end_user_id, user_message, ai_message, user_rag_me
 async def term_memory_save(long_term_messages,actual_config_id,end_user_id,type,scope):
     with get_db_context() as db_session:
         repo = LongTermMemoryRepository(db_session)
-        await long_term_storage(long_term_type=AgentMemory_Long_Term.STRATEGY_CHUNK, langchain_messages=long_term_messages,
-                                memory_config=actual_config_id, end_user_id=end_user_id, scope=scope)
+
 
         from app.core.memory.agent.utils.redis_tool import write_store
         result = write_store.get_session_by_userid(end_user_id)
