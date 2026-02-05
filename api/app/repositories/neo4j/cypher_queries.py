@@ -207,19 +207,6 @@ CHUNK_STATEMENT_EDGE_SAVE = """
     RETURN e.id AS uuid
 """
 
-# Statement -> Chunk 边保存查询 (用于 graph_saver.py)
-STATEMENT_CHUNK_EDGE_SAVE = """
-    UNWIND $edges AS edge
-    MATCH (statement:Statement {id: edge.source, run_id: edge.run_id})
-    MATCH (chunk:Chunk {id: edge.target, run_id: edge.run_id})
-    MERGE (statement)-[e:BELONGS_TO_CHUNK {id: edge.id}]->(chunk)
-    SET e.end_user_id = edge.end_user_id,
-        e.run_id = edge.run_id,
-        e.created_at = edge.created_at,
-        e.expired_at = edge.expired_at
-    RETURN e.id AS uuid
-"""
-
 STATEMENT_ENTITY_EDGE_SAVE = """
 UNWIND $relationships AS rel
 // Statement nodes are per-run; keep run_id constraint on statements
@@ -711,7 +698,7 @@ MEMORY_SUMMARY_STATEMENT_EDGE_SAVE = """
 UNWIND $edges AS e
 MATCH (ms:MemorySummary {id: e.summary_id, run_id: e.run_id})
 MATCH (c:Chunk {id: e.chunk_id, run_id: e.run_id})
-MATCH (s:Statement {run_id: e.run_id})-[:BELONGS_TO_CHUNK]->(c)
+MATCH (c)-[:CONTAINS]->(s:Statement {run_id: e.run_id})
 MERGE (ms)-[r:DERIVED_FROM_STATEMENT]->(s)
 SET r.end_user_id = e.end_user_id,
     r.run_id = e.run_id,
