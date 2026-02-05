@@ -92,7 +92,7 @@ class WorkflowExecutor:
                 - "conversation_id": conversation identifier
         """
         user_message = input_data.get("message") or ""
-        user_file = input_data.get("file") or []
+        user_files = input_data.get("files") or []
 
         config_variables_list = self.workflow_config.get("variables") or []
         conv_vars = input_data.get("conv", {})
@@ -119,12 +119,12 @@ class WorkflowExecutor:
         input_variables = input_data.get("variables") or {}
         sys_vars = {
             "message": (user_message, VariableType.STRING),
-            "file": (user_file, VariableType.ARRAY_FILE),
             "conversation_id": (input_data.get("conversation_id"), VariableType.STRING),
             "execution_id": (self.execution_id, VariableType.STRING),
             "workspace_id": (self.workspace_id, VariableType.STRING),
             "user_id": (self.user_id, VariableType.STRING),
             "input_variables": (input_variables, VariableType.OBJECT),
+            "files": (user_files, VariableType.ARRAY_FILE)
         }
         for key, var_def in sys_vars.items():
             value = var_def[0]
@@ -564,6 +564,7 @@ class WorkflowExecutor:
                     "input": result.get("node_outputs", {}).get(node_name, {}).get("input"),
                     "output": result.get("node_outputs", {}).get(node_name, {}).get("output"),
                     "elapsed_time": result.get("node_outputs", {}).get(node_name, {}).get("elapsed_time"),
+                    "token_usage": result.get("node_outputs", {}).get(node_name, {}).get("token_usage")
                 }
             }
 
