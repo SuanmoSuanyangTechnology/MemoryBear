@@ -294,6 +294,7 @@ class RedisCountStore:
         """
         session_id = str(uuid.uuid4())
         key = generate_session_key(session_id, key_type="count")
+        index_key = f'session:count:index:{end_user_id}'  # 索引键
         
         pipe = self.r.pipeline()
         pipe.hset(key, mapping={
@@ -304,6 +305,10 @@ class RedisCountStore:
             "starttime": get_current_timestamp()
         })
         pipe.expire(key, 30 * 24 * 60 * 60)  # 30天过期
+        
+        # 创建索引：end_user_id -> session_id 映射
+        pipe.set(index_key, session_id, ex=30 * 24 * 60 * 60)
+        
         result = pipe.execute()
         
         print(f"[save_sessions_count] 保存结果: {result}, session_id: {session_id}")
@@ -320,21 +325,28 @@ class RedisCountStore:
             list 或 False: 如果找到返回 [count, messages]，否则返回 False
         """
         try:
-            search_pattern = 'session:count:*'
+            # 使用索引键快速查找
+            index_key = f'session:count:index:{end_user_id}'
+            session_id = self.r.get(index_key)
             
-            for key in self.r.keys(search_pattern):
-                data = self.r.hgetall(key)
-                
-                if not data:
-                    continue
-                
-                if data.get('end_user_id') == end_user_id:
-                    count = data.get('count')
-                    messages_str = data.get('messages')
-                    
-                    if count is not None:
-                        messages = deserialize_messages(messages_str)
-                        return [int(count), messages]
+            if not session_id:
+                return False
+            
+            # 直接获取数据
+            key = generate_session_key(session_id, key_type="count")
+            data = self.r.hgetall(key)
+            
+            if not data:
+                # 索引存在但数据不存在，清理索引
+                self.r.delete(index_key)
+                return False
+            
+            count = data.get('count')
+            messages_str = data.get('messages')
+            
+            if count is not None:
+                messages = deserialize_messages(messages_str)
+                return [int(count), messages]
             
             return False
         except Exception as e:
@@ -344,7 +356,7 @@ class RedisCountStore:
     def update_sessions_count(self, end_user_id: str, new_count: int, 
                              messages: Any) -> bool:
         """
-        通过 end_user_id 修改访问次数统计
+        通过 end_user_id 修改访问次数统计（优化版：使用索引）
         
         Args:
             end_user_id: 终端用户ID
@@ -355,23 +367,26 @@ class RedisCountStore:
             bool: 更新成功返回 True，未找到记录返回 False
         """
         try:
+            # 使用索引键快速查找
+            index_key = f'session:count:index:{end_user_id}'
+            session_id = self.r.get(index_key)
+            
+            if not session_id:
+                print(f"[update_sessions_count] 未找到记录: end_user_id={end_user_id}")
+                return False
+            
+            # 直接更新数据
+            key = generate_session_key(session_id, key_type="count")
             messages_str = serialize_messages(messages)
-            search_pattern = 'session:count:*'
             
-            for key in self.r.keys(search_pattern):
-                data = self.r.hgetall(key)
-                
-                if not data:
-                    continue
-                
-                if data.get('end_user_id') == end_user_id:
-                    self.r.hset(key, 'count', int(new_count))
-                    self.r.hset(key, 'messages', messages_str)
-                    print(f"[update_sessions_count] 更新成功: end_user_id={end_user_id}, new_count={new_count}, key={key}")
-                    return True
+            pipe = self.r.pipeline()
+            pipe.hset(key, 'count', int(new_count))
+            pipe.hset(key, 'messages', messages_str)
+            result = pipe.execute()
             
-            print(f"[update_sessions_count] 未找到记录: end_user_id={end_user_id}")
-            return False
+            print(f"[update_sessions_count] 更新成功: end_user_id={end_user_id}, new_count={new_count}, key={key}")
+            return True
+            
         except Exception as e:
             print(f"[update_sessions_count] 更新失败: {e}")
             return False
