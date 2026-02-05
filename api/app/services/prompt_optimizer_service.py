@@ -23,6 +23,7 @@ from app.repositories.prompt_optimizer_repository import (
     PromptReleaseRepository
 )
 from app.schemas.prompt_optimizer_schema import OptimizePromptResult
+from app.services.model_service import ModelApiKeyService
 
 logger = get_business_logger()
 
@@ -176,8 +177,9 @@ class PromptOptimizerService:
         logger.info(f"Prompt optimization started, user_id={user_id}, session_id={session_id}")
 
         # Create LLM instance
-        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config.id)
-        api_config: ModelApiKey = api_keys[0] if api_keys else None
+        # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config.id)
+        # api_config: ModelApiKey = api_keys[0] if api_keys else None
+        api_config: ModelApiKey = ModelApiKeyService.get_available_api_key(self.db, model_config.id)
         llm = RedBearLLM(RedBearModelConfig(
             model_name=api_config.model_name,
             provider=api_config.provider,
@@ -252,6 +254,7 @@ class PromptOptimizerService:
         optim_result = json_repair.repair_json(buffer, return_objects=True)
         # prompt = optim_result.get("prompt")
         desc = optim_result.get("desc")
+        ModelApiKeyService.record_api_key_usage(self.db, api_config.id)
         self.create_message(
             tenant_id=tenant_id,
             session_id=session_id,
