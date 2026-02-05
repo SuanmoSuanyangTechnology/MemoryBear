@@ -86,7 +86,8 @@ class MemoryConfigRepository:
         n.description AS description, 
         n.entity_type AS entity_type, 
         n.name AS name,
-        COALESCE(n.fact_summary, '') AS fact_summary,
+        // TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+        // COALESCE(n.fact_summary, '') AS fact_summary,
         n.end_user_id AS end_user_id,
         n.apply_id AS apply_id,
         n.user_id AS user_id,
