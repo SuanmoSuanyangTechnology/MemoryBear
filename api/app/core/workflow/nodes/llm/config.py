@@ -71,6 +71,16 @@ class LLMNodeConfig(BaseNodeConfig):
         description="对话上下文窗口"
     )
 
+    vision: bool = Field(
+        default=False,
+        description="是否启用视觉模型"
+    )
+
+    vision_input: str = Field(
+        default=None,
+        description="视觉输入"
+    )
+
     # 简单模式
     prompt: str | None = Field(
         default=None,

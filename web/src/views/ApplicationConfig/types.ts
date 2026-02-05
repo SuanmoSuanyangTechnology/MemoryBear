@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:29:49 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-05 10:31:10
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -10,6 +10,7 @@ import type { ToolOption } from './components/ToolList/types'
 import type { ChatItem } from '@/components/Chat/types'
 import type { GraphRef } from '@/views/Workflow/types';
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
+import type { SkillConfigForm } from './components/Skill/types'
 
 /**
  * Model configuration parameters
@@ -75,6 +76,7 @@ export interface Config extends MultiAgentConfig {
   created_at: number;
   /** Last update timestamp */
   updated_at: number;
+  skills?: SkillConfigForm | null;
 }
 
 /**
@@ -353,6 +355,7 @@ export interface AiPromptForm {
   message?: string;
   /** Current prompt */
   current_prompt?: string;
+  skill?: boolean;
 }
 
 /**

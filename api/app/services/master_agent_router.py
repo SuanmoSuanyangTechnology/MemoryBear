@@ -349,7 +349,7 @@ class MasterAgentRouter:
             from app.models import ModelApiKey, ModelType
 
             # 获取 API Key 配置
-            api_key_config = ModelApiKeyService.get_a_api_key(self.db, self.master_model_config.id)
+            api_key_config = ModelApiKeyService.get_available_api_key(self.db, self.master_model_config.id)
 
             if not api_key_config:
                 raise Exception("Master Agent 模型没有可用的 API Key")
@@ -400,6 +400,7 @@ class MasterAgentRouter:
 
             # 调用模型
             response = await llm.ainvoke(prompt)
+            ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
 
             # 提取响应内容
             if hasattr(response, 'content'):

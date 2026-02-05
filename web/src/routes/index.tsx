@@ -51,6 +51,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   BasicLayout: lazy(() => import('@/components/Layout/BasicLayout')),
   LoginLayout: lazy(() => import('@/components/Layout/LoginLayout')),
   NoAuthLayout: lazy(() => import('@/components/Layout/NoAuthLayout')),
+  BasicAuthLayout: lazy(() => import('@/components/Layout/BasicAuthLayout')),
   /** View components */
   Index: lazy(() => import('@/views/Index')),
   Home: lazy(() => import('@/views/Home')),
@@ -87,6 +88,8 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   Ontology: lazy(() => import('@/views/Ontology')),
   OntologyDetail: lazy(() => import('@/views/Ontology/pages/Detail')),
   Prompt: lazy(() => import('@/views/Prompt')),
+  Skills: lazy(() => import('@/views/Skills')),
+  SkillConfig: lazy(() => import('@/views/Skills/pages/SkillConfig')),
   Jump: lazy(() => import('@/views/JumpPage')),
   Login: lazy(() => import('@/views/Login')),
   InviteRegister: lazy(() => import('@/views/InviteRegister')),

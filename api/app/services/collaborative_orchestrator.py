@@ -24,6 +24,7 @@ from app.core.error_codes import BizCode
 from app.core.models import RedBearLLM
 from app.core.models.base import RedBearModelConfig
 from app.models import ModelType
+from app.services.model_service import ModelApiKeyService
 
 logger = get_business_logger()
 
@@ -357,6 +358,8 @@ class CollaborativeOrchestrator:
                 "usage": response.get("usage", {"total_tokens": 0}),
                 "is_final_answer": True
             }
+
+            ModelApiKeyService.record_api_key_usage(self.db, agent_config.get("api_key_id"))
             
             # 检查是否有工具调用（handoff）
             tool_calls = response.get("tool_calls", [])
@@ -427,7 +430,7 @@ class CollaborativeOrchestrator:
                 )
             
             # 获取 API Key
-            api_key_config = ModelApiKeyService.get_a_api_key(self.db, model_config_id)
+            api_key_config = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
             if not api_key_config:
                 raise BusinessException(
                     f"Agent 模型没有可用的 API Key: {agent_id}",
@@ -442,7 +445,8 @@ class CollaborativeOrchestrator:
                 "provider": api_key_config.provider,
                 "api_key": api_key_config.api_key,
                 "api_base": api_key_config.api_base,
-                "model_parameters": config_data.get("model_parameters", {})
+                "model_parameters": config_data.get("model_parameters", {}),
+                "api_key_id": api_key_config.id
             }
             
         except ValueError:

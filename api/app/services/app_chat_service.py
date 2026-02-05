@@ -64,7 +64,7 @@ class AppChatService:
 
         # 获取模型配置ID
         model_config_id = config.default_model_config_id
-        api_key_obj = ModelApiKeyService.get_a_api_key(self.db, model_config_id)
+        api_key_obj = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
         # 处理系统提示词（支持变量替换）
         system_prompt = config.system_prompt
         if variables:
@@ -211,6 +211,8 @@ class AppChatService:
             }
         )
 
+        ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
+
         elapsed_time = time.time() - start_time
 
         return {
@@ -249,7 +251,7 @@ class AppChatService:
 
             # 获取模型配置ID
             model_config_id = config.default_model_config_id
-            api_key_obj = ModelApiKeyService.get_a_api_key(self.db, model_config_id)
+            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
             # 处理系统提示词（支持变量替换）
             system_prompt = config.system_prompt
             if variables:
@@ -410,6 +412,8 @@ class AppChatService:
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
                 }
             )
+
+            ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
 
             # 发送结束事件
             end_data = {"elapsed_time": elapsed_time, "message_length": len(full_content)}

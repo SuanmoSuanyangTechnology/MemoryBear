@@ -22,6 +22,7 @@ from app.services import app_service, workspace_service
 from app.services.agent_config_helper import enrich_agent_config
 from app.services.app_service import AppService
 from app.services.workflow_service import WorkflowService, get_workflow_service
+from app.services.app_statistics_service import AppStatisticsService
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -904,12 +905,43 @@ def get_app_statistics(
         - total_tokens: 总token消耗
     """
     workspace_id = current_user.current_workspace_id
-    
-    from app.services.app_statistics_service import AppStatisticsService
     stats_service = AppStatisticsService(db)
     
     result = stats_service.get_app_statistics(
         app_id=app_id,
+        workspace_id=workspace_id,
+        start_date=start_date,
+        end_date=end_date
+    )
+    
+    return success(data=result)
+
+
+@router.get("/workspace/api-statistics", summary="工作空间API调用统计")
+@cur_workspace_access_guard()
+def get_workspace_api_statistics(
+        start_date: int,
+        end_date: int,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """获取工作空间API调用统计
+    
+    Args:
+        start_date: 开始时间戳（毫秒）
+        end_date: 结束时间戳（毫秒）
+    
+    Returns:
+        每日统计数据列表，每项包含：
+        - date: 日期
+        - total_calls: 当日总调用次数
+        - app_calls: 当日应用调用次数
+        - service_calls: 当日服务调用次数
+    """
+    workspace_id = current_user.current_workspace_id
+    stats_service = AppStatisticsService(db)
+    
+    result = stats_service.get_workspace_api_statistics(
         workspace_id=workspace_id,
         start_date=start_date,
         end_date=end_date

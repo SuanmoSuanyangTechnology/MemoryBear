@@ -1,14 +1,14 @@
 import datetime
 import uuid
 from typing import Optional, Any, List, Dict, Union
-from enum import Enum
+from enum import Enum, StrEnum
 
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
 
 
 # ---------- Multimodal File Support ----------
 
-class FileType(str, Enum):
+class FileType(StrEnum):
     """文件类型枚举"""
     IMAGE = "image"
     DOCUMENT = "document"

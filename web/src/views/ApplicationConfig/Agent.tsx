@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:29:21 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 20:16:45
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -39,6 +39,8 @@ import aiPrompt from '@/assets/images/application/aiPrompt.png'
 import AiPromptModal from './components/AiPromptModal'
 import ToolList from './components/ToolList/ToolList'
 import ChatVariableConfigModal from './components/ChatVariableConfigModal';
+import SkillList from './components/Skill'
+import type { Skill } from '@/views/Skills/types'
 
 /**
  * Description wrapper component
@@ -164,6 +166,8 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     setLoading(true)
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
+      const { skills } = response
+      let allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
       let allTools = Array.isArray(response.tools) ? response.tools : []
       const memoryContent = response.memory?.memory_content
       const parsedMemoryContent = memoryContent === null || memoryContent === '' 
@@ -175,6 +179,10 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         memory: {
           ...response.memory,
           memory_content: parsedMemoryContent
+        },
+        skills: {
+          ...skills,
+          skill_ids: allSkills
         }
       })
       setData({
@@ -252,7 +260,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
    */
   const handleSave = (flag = true) => {
     if (!isSave || !data) return Promise.resolve()
-    const { memory, knowledge_retrieval, tools, ...rest } = values
+    const { memory, knowledge_retrieval, tools, skills, ...rest } = values
     const { knowledge_bases = [], ...knowledgeRest } = knowledge_retrieval || {}
     const { memory_content } = memory || {}
     // Get other necessary properties of memory from original data
@@ -278,7 +286,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         tool_id: vo.tool_id,
         operation: vo.operation,
         enabled: vo.enabled
-      }))
+      })),
+      skills: {
+        ...skills,
+        skill_ids: (skills?.skill_ids as Skill[])?.map(vo => vo.id)
+      }
     }
     
     return new Promise((resolve, reject) => {
@@ -438,12 +450,16 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                 </Space>
               </Card>
 
-              <Form.Item name="variables">
+              <Form.Item name="variables" noStyle>
                 <VariableList />
               </Form.Item>
-              
+
+              <Form.Item name="skills" noStyle>
+                <SkillList />
+              </Form.Item>
+
               {/* Tool Configuration */}
-              <Form.Item name="tools">
+              <Form.Item name="tools" noStyle>
                 <ToolList />
               </Form.Item>
             </Space>

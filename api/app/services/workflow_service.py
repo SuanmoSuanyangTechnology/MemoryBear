@@ -22,6 +22,7 @@ from app.repositories.workflow_repository import (
 from app.schemas import DraftRunRequest
 from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
+from app.services.multimodal_service import MultimodalService
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class WorkflowService:
         self.execution_repo = WorkflowExecutionRepository(db)
         self.node_execution_repo = WorkflowNodeExecutionRepository(db)
         self.conversation_service = ConversationService(db)
+        self.multimodal_service = MultimodalService(db)
 
     # ==================== 配置管理 ====================
 
@@ -444,24 +446,22 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
-        input_data = {"message": payload.message, "variables": payload.variables,
-                      "conversation_id": payload.conversation_id}
+        files = []
+        if payload.files:
+            for file in payload.files:
+                files.append(
+                    {
+                        "type": file.type,
+                        "url": await self.multimodal_service.get_file_url(file),
+                        "__file": True
+                    }
+                )
 
-        # 转换 user_id 为 UUID
-        triggered_by_uuid = None
-        if payload.user_id:
-            try:
-                triggered_by_uuid = uuid.UUID(payload.user_id)
-            except (ValueError, AttributeError):
-                logger.warning(f"无效的 user_id 格式: {payload.user_id}")
+        input_data = {"message": payload.message, "variables": payload.variables,
+                      "conversation_id": payload.conversation_id, "files": files}
 
         # 转换 conversation_id 为 UUID
-        conversation_id_uuid = None
-        if payload.conversation_id:
-            try:
-                conversation_id_uuid = uuid.UUID(payload.conversation_id)
-            except (ValueError, AttributeError):
-                logger.warning(f"无效的 conversation_id 格式: {payload.conversation_id}")
+        conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
 
         # 2. 创建执行记录
         execution = self.create_execution(
@@ -633,24 +633,23 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
-        input_data = {"message": payload.message, "variables": payload.variables,
-                      "conversation_id": payload.conversation_id}
 
-        # 转换 user_id 为 UUID
-        triggered_by_uuid = None
-        if payload.user_id:
-            try:
-                triggered_by_uuid = uuid.UUID(payload.user_id)
-            except (ValueError, AttributeError):
-                logger.warning(f"无效的 user_id 格式: {payload.user_id}")
+        files = []
+        if payload.files:
+            for file in payload.files:
+                files.append(
+                    {
+                        "type": file.type,
+                        "url": await self.multimodal_service.get_file_url(file),
+                        "__file": True
+                    }
+                )
+
+        input_data = {"message": payload.message, "variables": payload.variables,
+                      "conversation_id": payload.conversation_id, "files": files}
 
         # 转换 conversation_id 为 UUID
-        conversation_id_uuid = None
-        if payload.conversation_id:
-            try:
-                conversation_id_uuid = uuid.UUID(payload.conversation_id)
-            except (ValueError, AttributeError):
-                logger.warning(f"无效的 conversation_id 格式: {payload.conversation_id}")
+        conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
 
         # 2. 创建执行记录
         execution = self.create_execution(

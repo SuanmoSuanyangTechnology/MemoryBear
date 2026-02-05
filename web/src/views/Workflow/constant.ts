@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 15:25:25
+ * @Last Modified time: 2026-02-05 14:15:13
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -91,6 +91,11 @@ export const nodeLibrary: NodeLibrary[] = [
                 type: "string",
                 readonly: true
               },
+              {
+                name: "files",
+                type: "array[file]",
+                readonly: true
+              },
             ],
             defaultValue: []
           }
@@ -155,6 +160,13 @@ export const nodeLibrary: NodeLibrary[] = [
               enable_window: false,
               window_size: 20
             }
+          },
+          vision: {
+            type: 'switch'
+          },
+          vision_input: {
+            type: 'variableList',
+            onFilterVariableNames: ['sys.files']
           }
         }
       },

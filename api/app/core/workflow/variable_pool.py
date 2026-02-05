@@ -78,8 +78,8 @@ class VariableStruct(BaseModel, Generic[T]):
             serialization, and workflow type checking.
         instance:
             The concrete variable object. The actual Python type is
-            represented by the generic parameter ``T`` (e.g. StringObject,
-            NumberObject, ArrayObject[StringObject]).
+            represented by the generic parameter ``T`` (e.g. StringVariable,
+            NumberVariable, ArrayObject[StringVariable]).
         mut:
             Whether the variable is mutable.
     """
@@ -286,7 +286,7 @@ class VariablePool:
             系统变量字典
         """
         sys_namespace = self.variables.get("sys", {})
-        return {k: v.instance.value for k, v in sys_namespace.items()}
+        return {k: v.instance.get_value() for k, v in sys_namespace.items()}
 
     def get_all_conversation_vars(self) -> dict[str, Any]:
         """获取所有会话变量
@@ -295,7 +295,7 @@ class VariablePool:
             会话变量字典
         """
         conv_namespace = self.variables.get("conv", {})
-        return {k: v.instance.value for k, v in conv_namespace.items()}
+        return {k: v.instance.get_value() for k, v in conv_namespace.items()}
 
     def get_all_node_outputs(self) -> dict[str, Any]:
         """获取所有节点输出（运行时变量）
@@ -305,7 +305,7 @@ class VariablePool:
         """
         runtime_vars = {
             namespace: {
-                k: v.instance.value
+                k: v.instance.get_value()
                 for k, v in vars_dict.items()
             }
             for namespace, vars_dict in self.variables.items()
@@ -326,7 +326,7 @@ class VariablePool:
         """
         node_namespace = self.variables.get(node_id)
         if node_namespace:
-            return {k: v.instance.value for k, v in node_namespace.items()}
+            return {k: v.instance.get_value() for k, v in node_namespace.items()}
         if strict:
             raise KeyError(f"node {node_id} output not exist")
         else:

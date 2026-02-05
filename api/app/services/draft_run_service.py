@@ -29,6 +29,7 @@ from app.services import task_service
 from app.services.langchain_tool_server import Search
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
+from app.services.model_service import ModelApiKeyService
 from app.services.tool_service import ToolService
 from app.services.multimodal_service import MultimodalService
 from app.core.agent.agent_middleware import AgentMiddleware
@@ -471,6 +472,8 @@ class DraftRunService:
 
             elapsed_time = time.time() - start_time
 
+            ModelApiKeyService.record_api_key_usage(self.db, api_key_config.get("api_key_id"))
+
             # 9. 保存会话消息
             if not sub_agent and agent_config.memory and agent_config.memory.get("enabled"):
                 await self._save_conversation_message(
@@ -742,6 +745,8 @@ class DraftRunService:
 
             elapsed_time = time.time() - start_time
 
+            ModelApiKeyService.record_api_key_usage(self.db, api_key_config.get("api_key_id"))
+
             if sub_agent:
                 yield self._format_sse_event("sub_usage", {
                         "total_tokens": total_tokens
@@ -808,7 +813,7 @@ class DraftRunService:
         Raises:
             BusinessException: 当没有可用的 API Key 时
         """
-        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
+        # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
         # stmt = (
         #     select(ModelApiKey).join(
         #         ModelConfig, ModelApiKey.model_configs
@@ -822,7 +827,8 @@ class DraftRunService:
         # )
         #
         # api_key = self.db.scalars(stmt).first()
-        api_key = api_keys[0] if api_keys else None
+        # api_key = api_keys[0] if api_keys else None
+        api_key = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
 
         if not api_key:
             raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
@@ -831,7 +837,8 @@ class DraftRunService:
             "model_name": api_key.model_name,
             "provider": api_key.provider,
             "api_key": api_key.api_key,
-            "api_base": api_key.api_base
+            "api_base": api_key.api_base,
+            "api_key_id": api_key.id
         }
 
     async def _ensure_conversation(
@@ -1089,7 +1096,7 @@ class DraftRunService:
 
         except Exception as e:
             # 对于多 Agent 应用，没有直接的 AgentConfig 是正常的
-            logger.debug("获取配置快照失败（可能是多 Agent 应用）", extra={"error": str(e)})
+            logger.debug("获取配置快照失败（可能是多 Agent 应用）", exc_info=True, extra={"error": str(e)})
             return {}
 
     def _replace_variables(
