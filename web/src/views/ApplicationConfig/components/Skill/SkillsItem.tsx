@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-05 10:43:03 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-05 10:43:03 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-05 11:10:01
  */
 import { type FC, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -128,8 +128,8 @@ const SkillsItem: FC<SkillsItemProps> = ({
                           {/* Skill name and description */}
                           <div className="rb:flex-1 rb:max-w-[calc(100%-60px)]">
                             <div className="rb:font-medium rb:wrap-break-word rb:line-clamp-1">{skill.name}</div>
-                            <Tooltip title={skill.desciption}>
-                              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1">{skill.desciption}</div>
+                            <Tooltip title={skill.description}>
+                              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1">{skill.description}</div>
                             </Tooltip>
                           </div>
                         </Flex>
