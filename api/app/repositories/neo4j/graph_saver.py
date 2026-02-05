@@ -228,8 +228,8 @@ async def save_dialog_and_statements_to_neo4j(
                     'statement': edge.statement,
                     'valid_at': edge.valid_at.isoformat() if edge.valid_at else None,
                     'invalid_at': edge.invalid_at.isoformat() if edge.invalid_at else None,
-                    'created_at': edge.created_at.isoformat() if edge.created_at else None,
-                    'expired_at': edge.expired_at.isoformat() if edge.expired_at else None,
+                    'created_at': edge.created_at.isoformat(),
+                    'expired_at': edge.expired_at.isoformat(),
                     'run_id': edge.run_id,
                     'end_user_id': edge.end_user_id,
                 })
@@ -248,7 +248,7 @@ async def save_dialog_and_statements_to_neo4j(
                     "source": edge.source,
                     "target": edge.target,
                     "created_at": edge.created_at.isoformat() if edge.created_at else None,
-                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
+                    "expired_at": edge.expired_at.isoformat()if edge.expired_at else None,
                     "run_id": edge.run_id,
                     "end_user_id": edge.end_user_id,
                 })
