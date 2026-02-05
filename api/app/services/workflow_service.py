@@ -22,6 +22,7 @@ from app.repositories.workflow_repository import (
 from app.schemas import DraftRunRequest
 from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
+from app.services.multimodal_service import MultimodalService
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class WorkflowService:
         self.execution_repo = WorkflowExecutionRepository(db)
         self.node_execution_repo = WorkflowNodeExecutionRepository(db)
         self.conversation_service = ConversationService(db)
+        self.multimodal_service = MultimodalService(db)
 
     # ==================== 配置管理 ====================
 
@@ -444,8 +446,19 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
+        files = []
+        if payload.files:
+            for file in payload.files:
+                files.append(
+                    {
+                        "type": file.type,
+                        "url": await self.multimodal_service.get_file_url(file),
+                        "__file": True
+                    }
+                )
+
         input_data = {"message": payload.message, "variables": payload.variables,
-                      "conversation_id": payload.conversation_id}
+                      "conversation_id": payload.conversation_id, "files": files}
 
         # 转换 user_id 为 UUID
         triggered_by_uuid = None
@@ -633,8 +646,20 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
+
+        files = []
+        if payload.files:
+            for file in payload.files:
+                files.append(
+                    {
+                        "type": file.type,
+                        "url": await self.multimodal_service.get_file_url(file),
+                        "__file": True
+                    }
+                )
+
         input_data = {"message": payload.message, "variables": payload.variables,
-                      "conversation_id": payload.conversation_id}
+                      "conversation_id": payload.conversation_id, "files": files}
 
         # 转换 user_id 为 UUID
         triggered_by_uuid = None

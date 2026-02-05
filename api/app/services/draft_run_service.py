@@ -1089,7 +1089,7 @@ class DraftRunService:
 
         except Exception as e:
             # 对于多 Agent 应用，没有直接的 AgentConfig 是正常的
-            logger.debug("获取配置快照失败（可能是多 Agent 应用）", extra={"error": str(e)})
+            logger.debug("获取配置快照失败（可能是多 Agent 应用）", exc_info=True, extra={"error": str(e)})
             return {}
 
     def _replace_variables(

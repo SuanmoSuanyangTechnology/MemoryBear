@@ -2,6 +2,10 @@ from enum import StrEnum
 from abc import abstractmethod, ABC
 from typing import Any
 
+from pydantic import BaseModel
+
+from app.schemas import FileType
+
 
 class VariableType(StrEnum):
     """Enumeration of supported variable types in the workflow."""
@@ -42,7 +46,7 @@ class VariableType(StrEnum):
             return cls.NUMBER
         elif isinstance(var_type, bool):
             return cls.BOOLEAN
-        elif isinstance(var_type, FileObj):
+        elif isinstance(var_type, FileObject) or (isinstance(var, dict) and var.get('__file')):
             return cls.FILE
         elif isinstance(var_type, dict):
             return cls.OBJECT
@@ -103,8 +107,10 @@ def DEFAULT_VALUE(var_type: VariableType) -> Any:
             raise TypeError(f"Invalid type - {type}")
 
 
-class FileObj:
-    pass
+class FileObject(BaseModel):
+    type: FileType
+    url: str
+    __file: bool
 
 
 class BaseVariable(ABC):

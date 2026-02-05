@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.workflow.nodes.enums import BRANCH_NODES
 from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.variable_pool import VariablePool
+from app.services.multimodal_service import PROVIDER_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
@@ -651,3 +652,21 @@ class BaseNode(ABC):
             True if the variable exists in the pool, False otherwise.
         """
         return variable_pool.has(selector)
+
+    @staticmethod
+    async def process_message(provider, content, enable_file=False) -> dict | str | None:
+        if isinstance(content, str):
+            if enable_file:
+                return {"text": content}
+            return content
+        elif isinstance(content, dict):
+            trans_tool = PROVIDER_STRATEGIES[provider]()
+            result = await trans_tool.format_image(content["url"])
+            return result
+        raise TypeError('Unexpect input value type')
+
+    @staticmethod
+    def process_model_output(content) -> str:
+        if isinstance(content, dict):
+            return content.get("text")
+        return content

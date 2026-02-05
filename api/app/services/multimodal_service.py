@@ -23,7 +23,7 @@ logger = get_business_logger()
 
 class ImageFormatStrategy(Protocol):
     """图片格式策略接口"""
-    
+
     async def format_image(self, url: str) -> Dict[str, Any]:
         """将图片 URL 转换为特定 provider 的格式"""
         ...
@@ -31,7 +31,7 @@ class ImageFormatStrategy(Protocol):
 
 class DashScopeImageStrategy:
     """通义千问图片格式策略"""
-    
+
     async def format_image(self, url: str) -> Dict[str, Any]:
         """通义千问格式: {"type": "image", "image": "url"}"""
         return {
@@ -42,7 +42,7 @@ class DashScopeImageStrategy:
 
 class BedrockImageStrategy:
     """Bedrock/Anthropic 图片格式策略"""
-    
+
     async def format_image(self, url: str) -> Dict[str, Any]:
         """
         Bedrock/Anthropic 格式: base64 编码
@@ -51,17 +51,17 @@ class BedrockImageStrategy:
         import httpx
         import base64
         from mimetypes import guess_type
-        
+
         logger.info(f"下载并编码图片: {url}")
-        
+
         # 下载图片
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(url)
             response.raise_for_status()
-            
+
             # 获取图片数据
             image_data = response.content
-            
+
             # 确定 media type
             content_type = response.headers.get("content-type")
             if content_type and content_type.startswith("image/"):
@@ -69,12 +69,12 @@ class BedrockImageStrategy:
             else:
                 guessed_type, _ = guess_type(url)
                 media_type = guessed_type if guessed_type and guessed_type.startswith("image/") else "image/jpeg"
-            
+
             # 转换为 base64
             base64_data = base64.b64encode(image_data).decode("utf-8")
-            
+
             logger.info(f"图片编码完成: media_type={media_type}, size={len(base64_data)}")
-            
+
             return {
                 "type": "image",
                 "source": {
@@ -87,7 +87,7 @@ class BedrockImageStrategy:
 
 class OpenAIImageStrategy:
     """OpenAI 图片格式策略"""
-    
+
     async def format_image(self, url: str) -> Dict[str, Any]:
         """OpenAI 格式: {"type": "image_url", "image_url": {"url": "..."}}"""
         return {
@@ -109,7 +109,7 @@ PROVIDER_STRATEGIES = {
 
 class MultimodalService:
     """多模态文件处理服务"""
-    
+
     def __init__(self, db: Session, provider: str = "dashscope"):
         """
         初始化多模态服务
@@ -120,10 +120,10 @@ class MultimodalService:
         """
         self.db = db
         self.provider = provider.lower()
-    
+
     async def process_files(
-        self, 
-        files: Optional[List[FileInput]]
+            self,
+            files: Optional[List[FileInput]]
     ) -> List[Dict[str, Any]]:
         """
         处理文件列表，返回 LLM 可用的格式
@@ -136,7 +136,7 @@ class MultimodalService:
         """
         if not files:
             return []
-        
+
         result = []
         for idx, file in enumerate(files):
             try:
@@ -168,10 +168,10 @@ class MultimodalService:
                     "type": "text",
                     "text": f"[文件处理失败: {str(e)}]"
                 })
-        
+
         logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
         return result
-    
+
     async def _process_image(self, file: FileInput) -> Dict[str, Any]:
         """
         处理图片文件
@@ -184,14 +184,10 @@ class MultimodalService:
                 - Anthropic/Bedrock: {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
                 - 通义千问: {"type": "image", "image": "url"}
         """
-        if file.transfer_method == TransferMethod.REMOTE_URL:
-            url = file.url
-        else:
-            # 本地文件，获取访问 URL
-            url = await self._get_file_url(file.upload_file_id)
-        
+        url = await self.get_file_url(file)
+
         logger.debug(f"处理图片: {url}, provider={self.provider}")
-        
+
         # 根据 provider 返回不同格式
         if self.provider in ["bedrock", "anthropic"]:
             # Anthropic/Bedrock 只支持 base64 格式，需要下载并转换
@@ -223,7 +219,7 @@ class MultimodalService:
                 "type": "image",
                 "image": url
             }
-    
+
     async def _download_and_encode_image(self, url: str) -> tuple[str, str]:
         """
         下载图片并转换为 base64
@@ -237,15 +233,15 @@ class MultimodalService:
         import httpx
         import base64
         from mimetypes import guess_type
-        
+
         # 下载图片
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(url)
             response.raise_for_status()
-            
+
             # 获取图片数据
             image_data = response.content
-            
+
             # 确定 media type
             content_type = response.headers.get("content-type")
             if content_type and content_type.startswith("image/"):
@@ -254,14 +250,14 @@ class MultimodalService:
                 # 从 URL 推断
                 guessed_type, _ = guess_type(url)
                 media_type = guessed_type if guessed_type and guessed_type.startswith("image/") else "image/jpeg"
-            
+
             # 转换为 base64
             base64_data = base64.b64encode(image_data).decode("utf-8")
-            
+
             logger.debug(f"图片编码完成: media_type={media_type}, size={len(base64_data)}")
-            
+
             return base64_data, media_type
-    
+
     async def _process_document(self, file: FileInput) -> Dict[str, Any]:
         """
         处理文档文件（PDF、Word 等）
@@ -284,14 +280,14 @@ class MultimodalService:
             generic_file = self.db.query(GenericFile).filter(
                 GenericFile.id == file.upload_file_id
             ).first()
-            
+
             file_name = generic_file.file_name if generic_file else "unknown"
-            
+
             return {
                 "type": "text",
                 "text": f"<document name=\"{file_name}\">\n{text}\n</document>"
             }
-    
+
     async def _process_audio(self, file: FileInput) -> Dict[str, Any]:
         """
         处理音频文件
@@ -307,7 +303,7 @@ class MultimodalService:
             "type": "text",
             "text": "[音频文件，暂不支持处理]"
         }
-    
+
     async def _process_video(self, file: FileInput) -> Dict[str, Any]:
         """
         处理视频文件
@@ -323,13 +319,13 @@ class MultimodalService:
             "type": "text",
             "text": "[视频文件，暂不支持处理]"
         }
-    
-    async def _get_file_url(self, file_id: uuid.UUID) -> str:
+
+    async def get_file_url(self, file: FileInput) -> str:
         """
         获取文件的访问 URL
         
         Args:
-            file_id: 文件ID
+            file: File Input Struct
             
         Returns:
             str: 文件访问 URL
@@ -337,26 +333,31 @@ class MultimodalService:
         Raises:
             BusinessException: 文件不存在
         """
-        generic_file = self.db.query(GenericFile).filter(
-            GenericFile.id == file_id,
-            GenericFile.status == "active"
-        ).first()
-        
-        if not generic_file:
-            raise BusinessException(
-                f"文件不存在或已删除: {file_id}",
-                BizCode.NOT_FOUND
-            )
-        
-        # 如果有 access_url，直接返回
-        if generic_file.access_url:
-            return generic_file.access_url
-        
-        # 否则，根据 storage_path 生成 URL
-        # TODO: 根据实际存储方式生成 URL（本地存储、OSS 等）
-        # 这里暂时返回一个占位 URL
-        return f"/api/files/{file_id}/download"
-    
+        if file.transfer_method == TransferMethod.REMOTE_URL:
+            return file.url
+        else:
+            # 本地文件，获取访问 URL
+            file_id = file.upload_file_id
+            generic_file = self.db.query(GenericFile).filter(
+                GenericFile.id == file.upload_file_id,
+                GenericFile.status == "active"
+            ).first()
+
+            if not generic_file:
+                raise BusinessException(
+                    f"文件不存在或已删除: {file.upload_file_id}",
+                    BizCode.NOT_FOUND
+                )
+
+            # 如果有 access_url，直接返回
+            if generic_file.access_url:
+                return generic_file.access_url
+
+            # 否则，根据 storage_path 生成 URL
+            # TODO: 根据实际存储方式生成 URL（本地存储、OSS 等）
+            # 这里暂时返回一个占位 URL
+            return f"/api/files/{file_id}/download"
+
     async def _extract_document_text(self, file_id: uuid.UUID) -> str:
         """
         提取文档文本内容
@@ -371,20 +372,20 @@ class MultimodalService:
             GenericFile.id == file_id,
             GenericFile.status == "active"
         ).first()
-        
+
         if not generic_file:
             raise BusinessException(
                 f"文件不存在或已删除: {file_id}",
                 BizCode.NOT_FOUND
             )
-        
+
         # TODO: 根据文件类型提取文本
         # - PDF: 使用 PyPDF2 或 pdfplumber
         # - Word: 使用 python-docx
         # - TXT/MD: 直接读取
-        
+
         file_ext = generic_file.file_ext.lower()
-        
+
         if file_ext in ['.txt', '.md', '.markdown']:
             return await self._read_text_file(generic_file.storage_path)
         elif file_ext == '.pdf':
@@ -393,7 +394,7 @@ class MultimodalService:
             return await self._extract_word_text(generic_file.storage_path)
         else:
             return f"[不支持的文档格式: {file_ext}]"
-    
+
     async def _read_text_file(self, storage_path: str) -> str:
         """读取纯文本文件"""
         try:
@@ -402,7 +403,7 @@ class MultimodalService:
         except Exception as e:
             logger.error(f"读取文本文件失败: {e}")
             return f"[文件读取失败: {str(e)}]"
-    
+
     async def _extract_pdf_text(self, storage_path: str) -> str:
         """提取 PDF 文本"""
         try:
@@ -412,7 +413,7 @@ class MultimodalService:
         except Exception as e:
             logger.error(f"提取 PDF 文本失败: {e}")
             return f"[PDF 提取失败: {str(e)}]"
-    
+
     async def _extract_word_text(self, storage_path: str) -> str:
         """提取 Word 文档文本"""
         try:

@@ -128,7 +128,8 @@ class PromptOptimizerService:
             session_id: uuid.UUID,
             user_id: uuid.UUID,
             current_prompt: str,
-            user_require: str
+            user_require: str,
+            skill: bool = False
     ) -> AsyncGenerator[dict[str, str | Any], Any]:
         """
         Optimize a user-provided prompt using a configured prompt optimizer LLM.
@@ -157,6 +158,7 @@ class PromptOptimizerService:
             user_id (uuid.UUID): Identifier of the user associated with the session.
             current_prompt (str): Original prompt to optimize.
             user_require (str): User's requirements or instructions for optimization.
+            skill(bool): Is skill required
 
         Returns:
             OptimizePromptResult: An object containing:
@@ -186,7 +188,7 @@ class PromptOptimizerService:
             prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
             with open(os.path.join(prompt_path, 'prompt_optimizer_system.jinja2'), 'r', encoding='utf-8') as f:
                 opt_system_prompt = f.read()
-            rendered_system_message = Template(opt_system_prompt).render()
+            rendered_system_message = Template(opt_system_prompt).render(skill=skill)
 
             with open(os.path.join(prompt_path, 'prompt_optimizer_user.jinja2'), 'r', encoding='utf-8') as f:
                 opt_user_prompt = f.read()
