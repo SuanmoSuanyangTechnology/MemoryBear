@@ -332,8 +332,6 @@ class RedisCountStore:
             try:
                 key_type = self.r.type(index_key)
                 if key_type != 'string' and key_type != 'none':
-                    # 索引键类型错误，删除并返回 False
-                    print(f"[get_sessions_count] 索引键类型错误: {key_type}，删除索引")
                     self.r.delete(index_key)
                     return False
             except Exception as type_error:
