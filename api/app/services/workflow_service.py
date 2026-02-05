@@ -460,21 +460,8 @@ class WorkflowService:
         input_data = {"message": payload.message, "variables": payload.variables,
                       "conversation_id": payload.conversation_id, "files": files}
 
-        # 转换 user_id 为 UUID
-        triggered_by_uuid = None
-        if payload.user_id:
-            try:
-                triggered_by_uuid = uuid.UUID(payload.user_id)
-            except (ValueError, AttributeError):
-                logger.warning(f"无效的 user_id 格式: {payload.user_id}")
-
         # 转换 conversation_id 为 UUID
-        conversation_id_uuid = None
-        if payload.conversation_id:
-            try:
-                conversation_id_uuid = uuid.UUID(payload.conversation_id)
-            except (ValueError, AttributeError):
-                logger.warning(f"无效的 conversation_id 格式: {payload.conversation_id}")
+        conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
 
         # 2. 创建执行记录
         execution = self.create_execution(
@@ -661,21 +648,8 @@ class WorkflowService:
         input_data = {"message": payload.message, "variables": payload.variables,
                       "conversation_id": payload.conversation_id, "files": files}
 
-        # 转换 user_id 为 UUID
-        triggered_by_uuid = None
-        if payload.user_id:
-            try:
-                triggered_by_uuid = uuid.UUID(payload.user_id)
-            except (ValueError, AttributeError):
-                logger.warning(f"无效的 user_id 格式: {payload.user_id}")
-
         # 转换 conversation_id 为 UUID
-        conversation_id_uuid = None
-        if payload.conversation_id:
-            try:
-                conversation_id_uuid = uuid.UUID(payload.conversation_id)
-            except (ValueError, AttributeError):
-                logger.warning(f"无效的 conversation_id 格式: {payload.conversation_id}")
+        conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
 
         # 2. 创建执行记录
         execution = self.create_execution(
