@@ -228,8 +228,8 @@ async def save_dialog_and_statements_to_neo4j(
                     'statement': edge.statement,
                     'valid_at': edge.valid_at.isoformat() if edge.valid_at else None,
                     'invalid_at': edge.invalid_at.isoformat() if edge.invalid_at else None,
-                    'created_at': edge.created_at.isoformat(),
-                    'expired_at': edge.expired_at.isoformat(),
+                    'created_at': edge.created_at.isoformat() if edge.created_at else None,
+                    'expired_at': edge.expired_at.isoformat() if edge.expired_at else None,
                     'run_id': edge.run_id,
                     'end_user_id': edge.end_user_id,
                 })
@@ -240,19 +240,19 @@ async def save_dialog_and_statements_to_neo4j(
 
         # 6. Save statement-chunk edges
         if statement_chunk_edges:
-            from app.repositories.neo4j.cypher_queries import STATEMENT_CHUNK_EDGE_SAVE
+            from app.repositories.neo4j.cypher_queries import CHUNK_STATEMENT_EDGE_SAVE
             sc_edge_data = []
             for edge in statement_chunk_edges:
                 sc_edge_data.append({
                     "id": edge.id,
                     "source": edge.source,
                     "target": edge.target,
-                    "created_at": edge.created_at.isoformat(),
-                    "expired_at": edge.expired_at.isoformat(),
+                    "created_at": edge.created_at.isoformat() if edge.created_at else None,
+                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
                     "run_id": edge.run_id,
                     "end_user_id": edge.end_user_id,
                 })
-            result = await tx.run(STATEMENT_CHUNK_EDGE_SAVE, edges=sc_edge_data)
+            result = await tx.run(CHUNK_STATEMENT_EDGE_SAVE, chunk_statement_edges=sc_edge_data)
             sc_uuids = [record["uuid"] async for record in result]
             results['statement_chunk_edges'] = sc_uuids
             logger.info(f"Successfully saved {len(sc_uuids)} statement-chunk edges to Neo4j")
@@ -263,15 +263,15 @@ async def save_dialog_and_statements_to_neo4j(
             se_edge_data = []
             for edge in statement_entity_edges:
                 se_edge_data.append({
-                    "id": edge.id,
                     "source": edge.source,
                     "target": edge.target,
-                    "created_at": edge.created_at.isoformat(),
-                    "expired_at": edge.expired_at.isoformat(),
+                    "created_at": edge.created_at.isoformat() if edge.created_at else None,
+                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
                     "run_id": edge.run_id,
                     "end_user_id": edge.end_user_id,
+                    "connect_strength": edge.connect_strength if hasattr(edge, 'connect_strength') else 'strong',
                 })
-            result = await tx.run(STATEMENT_ENTITY_EDGE_SAVE, edges=se_edge_data)
+            result = await tx.run(STATEMENT_ENTITY_EDGE_SAVE, relationships=se_edge_data)
             se_uuids = [record["uuid"] async for record in result]
             results['statement_entity_edges'] = se_uuids
             logger.info(f"Successfully saved {len(se_uuids)} statement-entity edges to Neo4j")
@@ -281,10 +281,12 @@ async def save_dialog_and_statements_to_neo4j(
     try:
         # 使用显式写事务执行所有操作，避免死锁
         results = await connector.execute_write_transaction(_save_all_in_transaction)
-        print("Successfully saved all data to Neo4j in a single transaction")
+        logger.info(f"Transaction completed, results: {results}")
+        print(f"Successfully saved all data to Neo4j in a single transaction. Results: {results}")
         return True
 
     except Exception as e:
+        logger.error(f"Neo4j integration error: {e}", exc_info=True)
         print(f"Neo4j integration error: {e}")
         print("Continuing without database storage...")
         return False
