@@ -18,21 +18,32 @@ Extract entities and knowledge triplets from the given statement.
 {% if ontology_types %}
 ===Ontology Type Guidance===
 
-**IMPORTANT: Prioritize the following predefined ontology types for entity classification.**
+**CRITICAL: Use predefined ontology types for entity classification with the following priority:**
 
-When classifying entity types, you MUST:
-1. First check if the entity matches any of the predefined ontology types below
-2. If a match is found, use the EXACT type name from the list (do not modify or translate)
-3. Only use default types (Person, Organization, Location, Concept, Equipment, Numeric, etc.) if no ontology type matches
+**Type Priority (from highest to lowest):**
+1. **[场景类型] Scene Types** - Domain-specific types, use these first if applicable
+2. **[通用类型] General Types** - Common types from standard ontologies (DBpedia)
+3. **[通用父类] Parent Types** - Provide type hierarchy context
+
+**Type Matching Rules:**
+- Entity type MUST exactly match one of the predefined type names
+- Do NOT modify, translate, or use variations of type names
+- Prefer scene types over general types when both could apply
+- If uncertain between types, check the type description for guidance
 
 **Predefined Ontology Types:**
 {{ ontology_types }}
 
-**Type Matching Rules:**
-- Entity type MUST exactly match one of: {{ ontology_type_names | join(', ') }}
-- Do NOT use variations, translations, or similar names
-- If uncertain, prefer ontology types over default types
-- The entity's `type` field must be the EXACT `class_name` from the ontology type list
+{% if type_hierarchy_hints %}
+**Type Hierarchy Reference:**
+The following shows type inheritance relationships (Child → Parent → Grandparent):
+{% for hint in type_hierarchy_hints %}
+- {{ hint }}
+{% endfor %}
+{% endif %}
+
+**Available Type Names (use EXACTLY as shown):**
+{{ ontology_type_names | join(', ') }}
 
 {% endif %}
 ===Guidelines===

@@ -146,7 +146,7 @@ async def run_pilot_extraction(
         ontology_types = None
         if memory_config.scene_id:
             try:
-                from app.core.memory.models.ontology_types import OntologyTypeList
+                from app.core.memory.models.ontology_extraction_models import OntologyTypeList
                 from app.repositories.ontology_class_repository import OntologyClassRepository
                 
                 ontology_repo = OntologyClassRepository(db)
@@ -164,6 +164,18 @@ async def run_pilot_extraction(
                     f"Failed to fetch ontology types for scene_id {memory_config.scene_id}: {e}",
                     exc_info=True
                 )
+        
+        # 如果没有场景类型，创建空的 OntologyTypeList 以便启用通用类型融合
+        if ontology_types is None:
+            try:
+                from app.core.memory.models.ontology_extraction_models import OntologyTypeList
+                from app.core.memory.ontology_services.ontology_type_loader import is_general_ontology_enabled
+                
+                if is_general_ontology_enabled():
+                    ontology_types = OntologyTypeList(types=[])
+                    logger.info("No scene ontology types, will use general ontology types only")
+            except Exception as e:
+                logger.warning(f"Failed to initialize empty OntologyTypeList: {e}")
 
         orchestrator = ExtractionOrchestrator(
             llm_client=llm_client,

@@ -34,7 +34,7 @@ from app.core.memory.models.graph_models import (
     StatementNode,
 )
 from app.core.memory.models.message_models import DialogData
-from app.core.memory.models.ontology_types import OntologyTypeList
+from app.core.memory.models.ontology_extraction_models import OntologyTypeList
 from app.core.memory.models.variate_config import (
     ExtractionPipelineConfig,
 )

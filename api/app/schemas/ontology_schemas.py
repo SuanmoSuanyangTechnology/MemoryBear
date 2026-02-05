@@ -24,7 +24,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, ConfigDict
 
-from app.core.memory.models.ontology_models import OntologyClass
+from app.core.memory.models.ontology_scenario_models import OntologyClass
 
 
 class ExtractionRequest(BaseModel):
