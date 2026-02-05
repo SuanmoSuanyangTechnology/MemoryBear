@@ -382,6 +382,7 @@ class LLMRouter:
             from app.core.models import RedBearLLM
             from app.core.models.base import RedBearModelConfig
             from app.models import ModelApiKey, ModelType
+            from app.services.model_service import ModelApiKeyService
             
             # 获取 API Key 配置（通过关联关系）
             # api_key_config = self.db.query(ModelApiKey).join(
@@ -389,8 +390,9 @@ class LLMRouter:
             # ).filter(ModelConfig.id == self.routing_model_config.id,
             #     ModelApiKey.is_active == True
             # ).first()
-            api_keys = ModelApiKeyRepository.get_by_model_config(self.db, self.routing_model_config.id)
-            api_key_config = api_keys[0] if api_keys else None
+            # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, self.routing_model_config.id)
+            # api_key_config = api_keys[0] if api_keys else None
+            api_key_config = ModelApiKeyService.get_available_api_key(self.db, self.routing_model_config.id)
             
             if not api_key_config:
                 raise Exception("路由模型没有可用的 API Key")
@@ -424,7 +426,6 @@ class LLMRouter:
             # 调用模型
             response = await llm.ainvoke(prompt)
 
-            from app.services.model_service import ModelApiKeyService
             ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
             
             # 提取响应内容

@@ -1,15 +1,13 @@
 """应用统计服务"""
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any
 import uuid
 from sqlalchemy import func, and_, cast, Date
 from sqlalchemy.orm import Session
 
 from app.models.conversation_model import Conversation, Message
 from app.models.end_user_model import EndUser
-from app.models.api_key_model import ApiKey, ApiKeyLog
-from app.core.exceptions import BusinessException
-from app.core.error_codes import BizCode
+from app.models.api_key_model import ApiKey, ApiKeyLog, ApiKeyType
 
 
 class AppStatisticsService:
@@ -146,7 +144,6 @@ class AppStatisticsService:
         end_dt: datetime
     ) -> Dict[str, Any]:
         """获取Token消耗统计（从Message的meta_data中提取）"""
-        from sqlalchemy import text
         
         # 查询所有相关消息的token使用情况
         # meta_data中可能包含: {"usage": {"total_tokens": 100}} 或 {"tokens": 100}
@@ -191,3 +188,76 @@ class AppStatisticsService:
         total = sum(row["count"] for row in daily_data)
         
         return {"daily": daily_data, "total": total}
+    
+    def get_workspace_api_statistics(
+        self,
+        workspace_id: uuid.UUID,
+        start_date: int,
+        end_date: int
+    ) -> list[Any]:
+        """获取工作空间API调用统计
+        
+        Args:
+            workspace_id: 工作空间ID
+            start_date: 开始时间戳（毫秒）
+            end_date: 结束时间戳（毫秒）
+        
+        Returns:
+            统计数据字典
+        """
+        # 将毫秒时间戳转换为 datetime
+        start_time = datetime.fromtimestamp(start_date / 1000)
+        end_time = datetime.fromtimestamp(end_date / 1000)
+        
+        # 应用类型（agent, multi_agent, workflow）
+        app_types = [ApiKeyType.AGENT, ApiKeyType.CLUSTER, ApiKeyType.WORKFLOW]
+        
+        # 每日应用类型调用次数
+        daily_app_calls = self.db.query(
+            cast(ApiKeyLog.created_at, Date).label('date'),
+            func.count(ApiKeyLog.id).label('count')
+        ).join(
+            ApiKey, ApiKeyLog.api_key_id == ApiKey.id
+        ).filter(
+            and_(
+                ApiKey.workspace_id == workspace_id,
+                ApiKey.type.in_(app_types),
+                ApiKeyLog.created_at >= start_time,
+                ApiKeyLog.created_at <= end_time
+            )
+        ).group_by(cast(ApiKeyLog.created_at, Date)).all()
+        
+        # 每日服务类型调用次数
+        daily_service_calls = self.db.query(
+            cast(ApiKeyLog.created_at, Date).label('date'),
+            func.count(ApiKeyLog.id).label('count')
+        ).join(
+            ApiKey, ApiKeyLog.api_key_id == ApiKey.id
+        ).filter(
+            and_(
+                ApiKey.workspace_id == workspace_id,
+                ApiKey.type == ApiKeyType.SERVICE,
+                ApiKeyLog.created_at >= start_time,
+                ApiKeyLog.created_at <= end_time
+            )
+        ).group_by(cast(ApiKeyLog.created_at, Date)).all()
+        
+        # 构建每日数据
+        app_calls_dict = {str(row.date): row.count for row in daily_app_calls}
+        service_calls_dict = {str(row.date): row.count for row in daily_service_calls}
+        
+        # 合并所有日期
+        all_dates = sorted(set(app_calls_dict.keys()) | set(service_calls_dict.keys()))
+        
+        daily_data = []
+        for date in all_dates:
+            app_count = app_calls_dict.get(date, 0)
+            service_count = service_calls_dict.get(date, 0)
+            daily_data.append({
+                "date": date,
+                "total_calls": app_count + service_count,
+                "app_calls": app_count,
+                "service_calls": service_count
+            })
+        
+        return daily_data

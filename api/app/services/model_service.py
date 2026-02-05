@@ -6,7 +6,7 @@ import math
 import time
 import asyncio
 
-from app.models.models_model import ModelConfig, ModelApiKey, ModelType
+from app.models.models_model import ModelConfig, ModelApiKey, ModelType, LoadBalanceStrategy
 from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository, ModelBaseRepository
 from app.schemas import model_schema
 from app.schemas.model_schema import (
@@ -633,14 +633,24 @@ class ModelApiKeyService:
 
     @staticmethod
     def get_available_api_key(db: Session, model_config_id: uuid.UUID) -> Optional[ModelApiKey]:
-        """获取可用的API Key（按优先级和负载均衡）"""
-        api_keys = ModelApiKeyRepository.get_by_model_config(db, model_config_id, is_active=True)
+        """获取可用的API Key（根据负载均衡策略）"""
+        model_config = ModelConfigRepository.get_by_id(db, model_config_id)
+        if not model_config:
+            return None
+        
+        api_keys = [key for key in model_config.api_keys if key.is_active]
         if not api_keys:
             return None
-        return min(api_keys, key=lambda x: int(x.usage_count or "0"))
+        
+        # 如果是轮询策略，按使用次数最少，次数相同则选最早使用的
+        if model_config.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
+            return min(api_keys, key=lambda x: (int(x.usage_count or "0"), x.last_used_at or datetime.min))
+        
+        # 否则返回第一个
+        return api_keys[0]
 
     @staticmethod
-    def record_api_key_usage(db: Session, api_key_id: uuid.UUID) -> bool:
+    def record_api_key_usage(db: Session, api_key_id: uuid.UUID | None) -> bool:
         """记录API Key使用"""
         success = ModelApiKeyRepository.update_usage(db, api_key_id)
         if success:
