@@ -281,8 +281,13 @@ async def save_dialog_and_statements_to_neo4j(
     try:
         # 使用显式写事务执行所有操作，避免死锁
         results = await connector.execute_write_transaction(_save_all_in_transaction)
-        logger.info(f"Transaction completed, results: {results}")
-        print(f"Successfully saved all data to Neo4j in a single transaction. Results: {results}")
+        summary = {
+            key: len(value)
+            for key, value in results.items()
+            if isinstance(value, (list, tuple, set))
+        }
+        logger.info("Transaction completed. Summary: %s", summary)
+        logger.debug("Full transaction results: %r", results)
         return True
 
     except Exception as e:
