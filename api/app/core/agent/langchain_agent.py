@@ -512,7 +512,10 @@ class LangChainAgent:
                 # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
                 await self.write(storage_type, actual_end_user_id, message_chat, content, user_rag_memory_id, actual_end_user_id, actual_config_id)
                 '''长期'''
-                await self.term_memory_save(long_term_messages,actual_config_id,end_user_id,"chunk")
+                if actual_config_id:
+                    await self.term_memory_save(long_term_messages,actual_config_id,end_user_id,"chunk")
+                else:
+                    logger.warning(f"Skipping term_memory_save: no memory config available for end_user {end_user_id}")
             response = {
                 "content": content,
                 "model": self.model_name,
@@ -698,7 +701,10 @@ class LangChainAgent:
                     # AI 回复写入（用户消息和 AI 回复配对，一次性写入完整对话）
                     long_term_messages = await agent_chat_messages(message_chat, full_content)
                     await self.write(storage_type, end_user_id, message_chat, full_content, user_rag_memory_id, end_user_id, actual_config_id)
-                    await self.term_memory_save(long_term_messages, actual_config_id, end_user_id, "chunk")
+                    if actual_config_id:
+                        await self.term_memory_save(long_term_messages, actual_config_id, end_user_id, "chunk")
+                    else:
+                        logger.warning(f"Skipping term_memory_save: no memory config available for end_user {end_user_id}")
                 
             except Exception as e:
                 logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)

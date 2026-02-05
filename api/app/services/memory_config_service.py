@@ -525,7 +525,7 @@ class MemoryConfigService:
                 "No memory config ID provided, using workspace default",
                 extra={"workspace_id": str(workspace_id)}
             )
-            return self._get_workspace_default_config(workspace_id)
+            return self.get_workspace_default_config(workspace_id)
         
         config = self.db.get(MemoryConfigModel, memory_config_id)
         
@@ -540,7 +540,7 @@ class MemoryConfigService:
             }
         )
         
-        return self._get_workspace_default_config(workspace_id)
+        return self.get_workspace_default_config(workspace_id)
 
     def delete_config(
         self,

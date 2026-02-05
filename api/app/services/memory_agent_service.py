@@ -1194,7 +1194,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
         workspace_id=app.workspace_id
     )
 
-    memory_config_id = str(memory_config.id) if memory_config else None
+    memory_config_id = str(memory_config.config_id) if memory_config else None
 
     result = {
         "end_user_id": str(end_user_id),
