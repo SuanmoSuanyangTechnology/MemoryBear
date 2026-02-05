@@ -58,16 +58,23 @@ from app.core.memory.models.triplet_models import (
     TripletExtractionResponse,
 )
 
-# Ontology models
-from app.core.memory.models.ontology_models import (
+# Ontology scenario models (LLM extracted from scenarios)
+from app.core.memory.models.ontology_scenario_models import (
     OntologyClass,
     OntologyExtractionResponse,
 )
 
-# Ontology type models for extraction flow
-from app.core.memory.models.ontology_types import (
+# Ontology extraction models (for extraction flow)
+from app.core.memory.models.ontology_extraction_models import (
     OntologyTypeInfo,
     OntologyTypeList,
+)
+
+# Ontology general models (loaded from external ontology files)
+from app.core.memory.models.ontology_general_models import (
+    OntologyFileFormat,
+    GeneralOntologyType,
+    GeneralOntologyTypeRegistry,
 )
 
 # Variable configuration models
@@ -123,6 +130,10 @@ __all__ = [
     # Ontology type models for extraction flow
     "OntologyTypeInfo",
     "OntologyTypeList",
+    # General ontology type models
+    "OntologyFileFormat",
+    "GeneralOntologyType",
+    "GeneralOntologyTypeRegistry",
     # Variable configuration
     "StatementExtractionConfig",
     "ForgettingEngineConfig",

@@ -34,7 +34,7 @@ from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
-from app.core.memory.models.ontology_models import OntologyClass
+from app.core.memory.models.ontology_scenario_models import OntologyClass
 from app.schemas.ontology_schemas import (
     ExportBySceneRequest,
     ExportBySceneResponse,

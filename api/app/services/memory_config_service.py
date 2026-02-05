@@ -450,7 +450,7 @@ class MemoryConfigService:
         Returns:
             OntologyTypeList if scene_id is valid and has types, None otherwise
         """
-        from app.core.memory.models.ontology_types import OntologyTypeList
+        from app.core.memory.models.ontology_extraction_models import OntologyTypeList
         from app.repositories.ontology_class_repository import OntologyClassRepository
         
         if not memory_config.scene_id:

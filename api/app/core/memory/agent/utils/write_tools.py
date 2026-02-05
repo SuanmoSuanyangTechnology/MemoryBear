@@ -97,7 +97,7 @@ async def write(
     ontology_types = None
     if memory_config.scene_id:
         try:
-            from app.core.memory.models.ontology_types import OntologyTypeList
+            from app.core.memory.models.ontology_extraction_models import OntologyTypeList
             from app.repositories.ontology_class_repository import OntologyClassRepository
             
             with get_db_context() as db:

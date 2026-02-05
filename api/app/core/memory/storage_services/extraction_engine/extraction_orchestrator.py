@@ -34,7 +34,7 @@ from app.core.memory.models.graph_models import (
     StatementNode,
 )
 from app.core.memory.models.message_models import DialogData
-from app.core.memory.models.ontology_types import OntologyTypeList
+from app.core.memory.models.ontology_extraction_models import OntologyTypeList
 from app.core.memory.models.variate_config import (
     ExtractionPipelineConfig,
 )
@@ -97,6 +97,7 @@ class ExtractionOrchestrator:
         progress_callback: Optional[Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]] = None,
         embedding_id: Optional[str] = None,
         ontology_types: Optional[OntologyTypeList] = None,
+        enable_general_types: bool = True,
     ):
         """
         初始化流水线编排器
@@ -111,6 +112,7 @@ class ExtractionOrchestrator:
                 - 在管线关键点调用以报告进度和结果数据
             embedding_id: 嵌入模型ID，如果为 None 则从全局配置获取（向后兼容）
             ontology_types: 本体类型列表，用于指导实体类型提取
+            enable_general_types: 是否启用通用本体类型融合，默认为 True
         """
         self.llm_client = llm_client
         self.embedder_client = embedder_client
@@ -119,7 +121,27 @@ class ExtractionOrchestrator:
         self.is_pilot_run = False  # 默认非试运行模式
         self.progress_callback = progress_callback  # 保存进度回调函数
         self.embedding_id = embedding_id  # 保存嵌入模型ID
-        self.ontology_types = ontology_types  # 保存本体类型列表
+        
+        # 处理本体类型：根据 enable_general_types 决定是否合并通用类型
+        if enable_general_types and ontology_types:
+            from app.core.memory.ontology_services.ontology_type_loader import (
+                get_ontology_type_merger,
+                is_general_ontology_enabled,
+            )
+            if is_general_ontology_enabled():
+                merger = get_ontology_type_merger()
+                self.ontology_types = merger.merge(ontology_types)
+                logger.info(
+                    f"已启用通用本体类型融合: 场景类型 {len(ontology_types.types) if ontology_types.types else 0} 个 -> "
+                    f"合并后 {len(self.ontology_types.types) if self.ontology_types.types else 0} 个"
+                )
+            else:
+                self.ontology_types = ontology_types
+                logger.info("通用本体类型功能已在配置中禁用，仅使用场景类型")
+        else:
+            self.ontology_types = ontology_types
+            if not enable_general_types and ontology_types:
+                logger.info("enable_general_types=False，仅使用场景类型")
         
         # 保存去重消歧的详细记录（内存中的数据结构）
         self.dedup_merge_records: List[Dict[str, Any]] = []  # 实体合并记录
@@ -133,7 +155,7 @@ class ExtractionOrchestrator:
         )
         self.triplet_extractor = TripletExtractor(
             llm_client=llm_client,
-            ontology_types=ontology_types,
+            ontology_types=self.ontology_types,
         )
         self.temporal_extractor = TemporalExtractor(llm_client=llm_client)
 

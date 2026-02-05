@@ -8,7 +8,7 @@ from app.core.memory.utils.prompt.prompt_utils import render_triplet_extraction_
 from app.core.memory.utils.data.ontology import PREDICATE_DEFINITIONS, Predicate # 引入枚举 Predicate 白名单过滤
 from app.core.memory.models.triplet_models import TripletExtractionResponse
 from app.core.memory.models.message_models import DialogData, Statement
-from app.core.memory.models.ontology_types import OntologyTypeList
+from app.core.memory.models.ontology_extraction_models import OntologyTypeList
 from app.core.memory.utils.log.logging_utils import prompt_logger
 
 logger = get_memory_logger(__name__)
