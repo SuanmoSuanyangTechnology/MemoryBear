@@ -1,5 +1,5 @@
 """Skill Schema 定义"""
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel, Field, field_serializer
 import uuid
 from datetime import datetime
@@ -32,10 +32,17 @@ class SkillUpdate(BaseModel):
     is_public: Optional[bool] = None
 
 
-class Skill(SkillBase):
+class Skill(BaseModel):
     """Skill 响应 Schema"""
     id: uuid.UUID
     tenant_id: uuid.UUID
+    name: str
+    description: Optional[str] = None
+    tools: Union[List[Dict[str, Any]], List[Dict[str, str]]] = Field(default_factory=list, description="工具列表，可以是简单格式或包含工具详情")
+    config: Dict[str, Any] = Field(default_factory=dict)
+    prompt: Optional[str] = None
+    is_active: bool = True
+    is_public: bool = False
     created_at: datetime
     updated_at: datetime
 

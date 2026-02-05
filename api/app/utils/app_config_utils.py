@@ -99,7 +99,8 @@ def agent_config_4_app_release(release: AppRelease) -> AgentConfig:
         knowledge_retrieval=config_dict.get("knowledge_retrieval"),
         memory=config_dict.get("memory"),
         variables=config_dict.get("variables", []),
-        tools=config_dict.get("tools", {}),
+        tools=config_dict.get("tools", []),
+        skill_ids=config_dict.get("skill_ids", [])
     )
 
     return agent_config

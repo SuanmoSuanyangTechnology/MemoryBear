@@ -348,20 +348,23 @@ class DraftRunService:
                         )
 
             # 加载技能关联的工具
-            if hasattr(agent_config, 'skill_ids') and agent_config.skill_ids:
-                middleware = AgentMiddleware(skill_ids=agent_config.skill_ids)
-                skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
-                tools.extend(skill_tools)
-                logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
+            if hasattr(agent_config, 'skills') and agent_config.skills:
+                skills = agent_config.skills
+                skill_enable = skills.get("enabled", False)
+                if skill_enable:
+                    middleware = AgentMiddleware(skills=skills)
+                    skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
+                    tools.extend(skill_tools)
+                    logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
 
-                # 应用动态过滤
-                if skill_configs:
-                    tools, activated_skill_ids = middleware.filter_tools(tools, message, skill_configs, tool_to_skill_map)
-                    logger.debug(f"过滤后剩余 {len(tools)} 个工具")
-                    active_prompts = AgentMiddleware.get_active_prompts(
-                        activated_skill_ids, skill_configs
-                    )
-                    system_prompt = f"{system_prompt}\n\n{active_prompts}"
+                    # 应用动态过滤
+                    if skill_configs:
+                        tools, activated_skill_ids = middleware.filter_tools(tools, message, skill_configs, tool_to_skill_map)
+                        logger.debug(f"过滤后剩余 {len(tools)} 个工具")
+                        active_prompts = AgentMiddleware.get_active_prompts(
+                            activated_skill_ids, skill_configs
+                        )
+                        system_prompt = f"{system_prompt}\n\n{active_prompts}"
 
             # 添加知识库检索工具
             if agent_config.knowledge_retrieval:
@@ -610,21 +613,23 @@ class DraftRunService:
                         )
 
             # 加载技能关联的工具
-            skill_configs = {}
-            if hasattr(agent_config, 'skill_ids') and agent_config.skill_ids:
-                middleware = AgentMiddleware(skill_ids=agent_config.skill_ids)
-                skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
-                tools.extend(skill_tools)
-                logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
+            if hasattr(agent_config, 'skills') and agent_config.skills:
+                skills = agent_config.skills
+                skill_enable = skills.get("enabled", False)
+                if skill_enable:
+                    middleware = AgentMiddleware(skills=skills)
+                    skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
+                    tools.extend(skill_tools)
+                    logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
 
-                # 应用动态过滤
-                if skill_configs:
-                    tools, activated_skill_ids = middleware.filter_tools(tools, message, skill_configs, tool_to_skill_map)
-                    logger.debug(f"过滤后剩余 {len(tools)} 个工具")
-                    active_prompts = AgentMiddleware.get_active_prompts(
-                        activated_skill_ids, skill_configs
-                    )
-                    system_prompt = f"{system_prompt}\n\n{active_prompts}"
+                    # 应用动态过滤
+                    if skill_configs:
+                        tools, activated_skill_ids = middleware.filter_tools(tools, message, skill_configs, tool_to_skill_map)
+                        logger.debug(f"过滤后剩余 {len(tools)} 个工具")
+                        active_prompts = AgentMiddleware.get_active_prompts(
+                            activated_skill_ids, skill_configs
+                        )
+                        system_prompt = f"{system_prompt}\n\n{active_prompts}"
 
 
             # 添加知识库检索工具

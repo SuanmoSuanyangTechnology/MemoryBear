@@ -35,7 +35,7 @@ interface ApplicationModalProps {
 /**
  * Supported application types
  */
-const types = [
+export const types = [
   'agent',
   'multi_agent',
   'workflow'
