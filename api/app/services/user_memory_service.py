@@ -1580,7 +1580,6 @@ async def analytics_graph_data(
             node_labels = record.get("labels", [])
             node_label = node_labels[0] if node_labels else "Unknown"
             node_props = record["properties"]
-            
             # 根据节点类型提取需要的属性字段
             filtered_props = await _extract_node_properties(node_label, node_props,node_id)
             
