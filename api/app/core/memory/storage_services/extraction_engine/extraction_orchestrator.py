@@ -1085,7 +1085,8 @@ class ExtractionOrchestrator:
                                     entity_type=getattr(entity, 'type', 'unknown'),  # 使用 type 而不是 entity_type
                                     description=getattr(entity, 'description', ''),  # 添加必需的 description 字段
                                     example=getattr(entity, 'example', ''),  # 新增：传递示例字段
-                                    fact_summary=getattr(entity, 'fact_summary', ''),  # 添加必需的 fact_summary 字段
+                                    # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+                                    # fact_summary=getattr(entity, 'fact_summary', ''),  # 添加必需的 fact_summary 字段
                                     connect_strength=entity_connect_strength if entity_connect_strength is not None else 'Strong',  # 添加必需的 connect_strength 字段
                                     aliases=getattr(entity, 'aliases', []) or [],  # 传递从三元组提取阶段获取的aliases
                                     name_embedding=getattr(entity, 'name_embedding', None),
