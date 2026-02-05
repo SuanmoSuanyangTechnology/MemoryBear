@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:25:31 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 13:49:16
  */
 /**
  * SiderMenu Component
@@ -67,6 +67,8 @@ import ontologyIcon from '@/assets/images/menu/ontology.svg'
 import ontologyActiveIcon from '@/assets/images/menu/ontology_active.svg'
 import promptIcon from '@/assets/images/menu/prompt.svg'
 import promptActiveIcon from '@/assets/images/menu/prompt_active.svg'
+import skillsIcon from '@/assets/images/menu/skills.svg'
+import skillsActiveIcon from '@/assets/images/menu/skills_active.svg'
 
 /** Icon path mapping table for menu items (normal and active states) */
 const iconPathMap: Record<string, string> = {
@@ -102,6 +104,8 @@ const iconPathMap: Record<string, string> = {
   'ontologyActive': ontologyActiveIcon,
   'prompt': promptIcon,
   'promptActive': promptActiveIcon,
+  'skills': skillsIcon,
+  'skillsActive': skillsActiveIcon,
 };
 
 const { Sider } = Layout;

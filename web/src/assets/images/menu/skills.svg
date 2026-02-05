@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>技能点</title>
+    <g id="页面-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="首页-超级管理员" transform="translate(-46, -456)" fill-rule="nonzero" stroke="#5B6167" stroke-width="1.1">
+            <g id="技能点" transform="translate(46, 456)">
+                <g id="编组-21" transform="translate(1, 1)">
+                    <path d="M7,0.55 C8.78106,0.55 10.3935572,1.27197468 11.5607913,2.43920873 C12.7280253,3.60644278 13.45,5.21894 13.45,7 C13.45,8.78106 12.7280253,10.3935572 11.5607913,11.5607913 C10.3935572,12.7280253 8.78106,13.45 7,13.45 C5.21894,13.45 3.60644278,12.7280253 2.43920873,11.5607913 C1.27197468,10.3935572 0.55,8.78106 0.55,7 C0.55,5.21894 1.27197468,3.60644278 2.43920873,2.43920873 C3.60644278,1.27197468 5.21894,0.55 7,0.55 Z" id="路径"></path>
+                    <polygon id="路径" stroke-linejoin="round" points="6.66706155 11 6.44510258 7.80088942 4 7.80088942 7.55505896 3 7.55505896 6.20059295 10 6.4285479"></polygon>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

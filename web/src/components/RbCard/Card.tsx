@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:21:14 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:21:14 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 13:49:05
  */
 /**
  * RbCard Component
@@ -18,7 +18,7 @@
  */
 
 import { type FC, type ReactNode } from 'react'
-import { Card, Tooltip } from 'antd';
+import { Card, Tooltip, Flex } from 'antd';
 import clsx from 'clsx';
 
 /** Props interface for RbCard component */
@@ -51,6 +51,7 @@ interface RbCardProps {
   className?: string;
   /** Click handler */
   onClick?: () => void;
+  variant?: 'borderL';
 }
 
 /** Custom card component with flexible styling and header options */
@@ -68,6 +69,7 @@ const RbCard: FC<RbCardProps> = ({
   bgColor = '#FBFDFF',
   height = 'auto',
   className,
+  variant,
   ...props
 }) => {
   /** Calculate body padding based on header type and avatar presence */
@@ -82,7 +84,45 @@ const RbCard: FC<RbCardProps> = ({
     : (headerType === 'border' && !avatarUrl && !avatar) || headerType === 'borderBL'
     ? 'rb:p-[16px_16px_20px_16px]!'
     : ''
-    
+  
+  if (variant === 'borderL') {
+    return (
+      <div
+        className="rb:p-[12px_16px] rb:rounded-lg rb:shadow-[inset_4px_0px_0px_0px_#155EEF] rb:border rb:border-[#DFE4ED]"
+      >
+        <Flex justify="space-between" className={`rb:mb-3! ${headerClassName || ''}`}>
+          <Flex vertical gap={4}>
+            <div className="rb:font-medium rb:leading-5.5">
+              {typeof title === 'function' ? title() : title ?
+                <div className="rb:flex rb:items-center">
+                  {avatarUrl
+                    ? <img src={avatarUrl} className="rb:mr-3.25 rb:w-12 rb:h-12 rb:rounded-lg" />
+                    : avatar ? avatar : null
+                  }
+                  <div className={
+                    clsx(
+                      {
+                        'rb:max-w-full': !avatarUrl && !avatar,
+                        'rb:max-w-[calc(100%-60px)]': avatarUrl || avatar,
+                      }
+                    )
+                  }>
+                    <div className="rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{title}</div>
+                    {subTitle && <div className="rb:text-[#5B6167] rb:text-[12px]">{subTitle}</div>}
+                  </div>
+                </div> : null
+              }
+            </div>
+            {subTitle && <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{subTitle}</div>}
+          </Flex>
+          {extra}
+        </Flex>
+        <div className={bodyClassNames ? bodyClassNames : children ? bodyClassName : 'rb:p-0!'}>
+          {children}
+        </div>
+      </div>
+    )
+  }
   return (
     <Card
       {...props}
@@ -126,7 +166,7 @@ const RbCard: FC<RbCardProps> = ({
           },
           headerClassName,
         ),
-        body: bodyClassNames ? bodyClassNames : children ? bodyClassName : 'rb:p-[0]!',
+        body: bodyClassNames ? bodyClassNames : children ? bodyClassName : 'rb:p-0!',
       }}
       style={{
         background: bgColor,

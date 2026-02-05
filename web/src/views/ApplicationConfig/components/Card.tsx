@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:31 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:27:31 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 13:50:47
  */
 import { type FC, type ReactNode } from 'react'
 
@@ -20,6 +20,7 @@ interface CardProps {
   children: ReactNode;
   /** Extra content in header */
   extra?: ReactNode;
+  variant?: 'borderL';
 }
 
 /**
@@ -31,14 +32,16 @@ const Card: FC<CardProps> = ({
   subTitle,
   children,
   extra,
+  variant
 }) => {
   return (
     <RbCard
       title={title}
       subTitle={subTitle}
       extra={extra}
+      variant={variant}
       headerType="borderL"
-      headerClassName="rb:before:bg-[#155EEF]! rb:before:h-[19px]"
+      headerClassName={variant ? '' : "rb:before:bg-[#155EEF]! rb:before:h-[19px]"}
     >
       {children}
     </RbCard>
