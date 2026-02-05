@@ -190,7 +190,7 @@ def create_hybrid_retrieval_tool_async(memory_config, **search_params):
         fields_to_remove = {
             'invalid_at', 'valid_at', 'chunk_id_from_rel', 'entity_ids', 
             'expired_at', 'created_at', 'chunk_id', 'id', 'apply_id', 
-            'user_id', 'statement_ids', 'updated_at',"chunk_ids"  # ,"fact_summary"
+            'user_id', 'statement_ids', 'updated_at',"chunk_ids"  ,"fact_summary"
         }
         
         if isinstance(data, dict):
