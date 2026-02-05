@@ -1002,3 +1002,58 @@ RETURN DISTINCT
  x.statement as statement,x.created_at as created_at
 """
 
+Graph_Node_query = """
+            MATCH (n:MemorySummary)
+                WHERE n.end_user_id = $end_user_id
+                RETURN
+                  elementId(n) AS id,
+                  labels(n) AS labels,
+                  properties(n) AS properties,
+                  0 AS priority
+                LIMIT $limit
+                
+                UNION ALL
+
+                    MATCH (n:Dialogue)
+                    WHERE n.end_user_id =  $end_user_id
+                    RETURN
+                      elementId(n) AS id,
+                      labels(n) AS labels,
+                      properties(n) AS properties,
+                      1 AS priority
+                    LIMIT 1
+
+                UNION ALL
+
+                MATCH (n:Statement)
+                WHERE n.end_user_id =  $end_user_id
+                RETURN
+                  elementId(n) AS id,
+                  labels(n) AS labels,
+                  properties(n) AS properties,
+                  1 AS priority
+                LIMIT $limit
+
+                UNION ALL
+
+                MATCH (n:ExtractedEntity)
+                WHERE n.end_user_id =  $end_user_id
+                RETURN
+                  elementId(n) AS id,
+                  labels(n) AS labels,
+                  properties(n) AS properties,
+                  2 AS priority
+                LIMIT $limit
+
+                UNION ALL
+
+                MATCH (n:Chunk)
+                WHERE n.end_user_id =  $end_user_id
+                RETURN
+                  elementId(n) AS id,
+                  labels(n) AS labels,
+                  properties(n) AS properties,
+                  3 AS priority
+                LIMIT $limit
+
+            """
