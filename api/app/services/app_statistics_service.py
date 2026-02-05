@@ -203,7 +203,7 @@ class AppStatisticsService:
             end_date: 结束时间戳（毫秒）
         
         Returns:
-            统计数据字典
+            每日统计数据列表
         """
         # 将毫秒时间戳转换为 datetime
         start_time = datetime.fromtimestamp(start_date / 1000)
