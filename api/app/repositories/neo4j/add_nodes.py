@@ -217,8 +217,10 @@ async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector
             summaries=flattened
         )
         created_ids = [record.get("uuid") for record in result]
+        print(f"Successfully saved {len(created_ids)} MemorySummary nodes to Neo4j")
         return created_ids
-    except Exception:
+    except Exception as e:
+        print(f"Failed to save MemorySummary nodes to Neo4j: {e}")
         return None
 
 
