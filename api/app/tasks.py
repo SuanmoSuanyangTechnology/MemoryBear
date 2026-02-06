@@ -1544,7 +1544,6 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
                         for data in result['apps_detailed_info']:
                             if data['memory_configs'] == []:
                                 continue
-
                             releases = data['releases']
                             memory_configs = data['memory_configs']
                             end_users = data['end_users']
