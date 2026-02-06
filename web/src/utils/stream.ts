@@ -178,7 +178,7 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
         const errorData = await response.json();
         errorData.error || i18n.t('common.serviceUpgrading');
         message.warning(errorData.error || i18n.t('common.serviceUpgrading'));
-        break
+        return;
       case 400:
         const error = await response.json();
         message.warning(error.error);
@@ -186,7 +186,7 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
       case 504:
         const errorJson = await response.json();
         message.warning(errorJson.error || i18n.t('common.serverError'));
-        break
+        return;
       case 401:
         if (url?.includes('/public')) {
           return message.warning(i18n.t('common.publicApiCannotRefreshToken'));

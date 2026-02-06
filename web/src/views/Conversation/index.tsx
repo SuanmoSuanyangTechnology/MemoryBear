@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 16:58:35
+ * @Last Modified time: 2026-02-06 21:11:23
  */
 /**
  * Conversation Page
@@ -14,12 +14,12 @@ import { type FC, useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Flex, Skeleton, Form } from 'antd'
+import { Flex, Skeleton, Form, Dropdown, type MenuProps } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
 import { getConversationHistory, sendConversation, getConversationDetail, getShareToken } from '@/api/application'
-import type { HistoryItem, QueryParams } from './types'
+import type { HistoryItem, QueryParams, UploadFileListModalRef } from './types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import { randomString } from '@/utils/common'
@@ -33,6 +33,10 @@ import OnlineIcon from '@/assets/images/conversation/online.svg'
 import OnlineCheckedIcon from '@/assets/images/conversation/onlineChecked.svg'
 import MemoryFunctionCheckedIcon from '@/assets/images/conversation/memoryFunctionChecked.svg'
 import { type SSEMessage } from '@/utils/stream'
+import UploadFiles from './components/FileUpload'
+// import AudioRecorder from '@/components/AudioRecorder'
+import { shareFileUploadUrl } from '@/api/fileStorage'
+import UploadFileListModal from './components/UploadFileListModal'
 
 /**
  * Conversation component for shared applications
@@ -58,6 +62,8 @@ const Conversation: FC = () => {
 
   const [form] = Form.useForm<QueryParams>()
   const queryValues = Form.useWatch<QueryParams>([], form)
+
+  const uploadFileListModalRef = useRef<UploadFileListModalRef>(null)
   useEffect(() => {
     const shareToken = localStorage.getItem(`shareToken_${token}`)
     setShareToken(shareToken)
@@ -142,12 +148,13 @@ const Conversation: FC = () => {
   }, [conversation_id])
 
   /** Add user message to chat */
-  const addUserMessage = (message: string = '') => {
+  const addUserMessage = (message: string = '', files?: any[]) => {
     const newUserMessage: ChatItem = {
       conversation_id,
       role: 'user',
       content: message,
-      created_at: Date.now()
+      created_at: Date.now(),
+      files
     };
     setChatList(prev => [...prev, newUserMessage])
   }
@@ -189,9 +196,10 @@ const Conversation: FC = () => {
     if (!token || !shareToken) {
       return
     }
+    const { files = [], ...rest } = queryValues || {}
     setLoading(true)
     setStreamLoading(true)
-    addUserMessage(message)
+    addUserMessage(message, files)
     addAssistantMessage()
 
     let currentConversationId: string | null = null
@@ -222,16 +230,52 @@ const Conversation: FC = () => {
         }
       })
     };
-    
+
+    form.setFieldValue('files', [])
     sendConversation({
-      ...queryValues,
+      ...rest,
       message: message || '',
       stream: true,
       conversation_id: conversation_id || null,
+      files: files.map(file => {
+        if (file.url) {
+          return file
+        } else {
+          return {
+            type: file.type,
+            transfer_method: 'local_file',
+            upload_file_id: file.response.data.file_id
+          }
+        }
+      })
     }, handleStreamMessage, shareToken)
       .finally(() => {
         setLoading(false)
       })
+  }
+
+  const [update, setUpdate] = useState(false)
+  const fileChange = (file?: any) => {
+    form.setFieldValue('files', [...(queryValues.files || []), file])
+    setUpdate(prev => !prev)
+  }
+  // const handleRecordingComplete = async (file: any) => {
+  //   console.log('file', file)
+  // }
+
+  const handleShowUpload: MenuProps['onClick'] = ({ key }) => {
+    switch(key) {
+      case 'define':
+        uploadFileListModalRef.current?.handleOpen()
+        break
+    }
+  }
+  const addFileList = (fileList?: any[]) => {
+    if (!fileList || fileList.length <= 0) return
+    form.setFieldValue('files', [...(queryValues.files || []), ...fileList])
+  }
+  const updateFileList = (fileList?: any[]) => {
+    form.setFieldValue('files', [...(fileList || [])])
   }
 
   return (
@@ -285,37 +329,75 @@ const Conversation: FC = () => {
         <div className='rb:w-190  rb:h-screen rb:mx-auto rb:pt-10'>
         <Chat
           empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
-          contentClassName="rb:h-[calc(100%-152px)] "
+          contentClassName="rb:h-[calc(100%-180px)]"
           data={chatList}
           streamLoading={streamLoading}
           loading={loading}
           onChange={setMessage}
           onSend={handleSend}
           labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+          fileList={queryValues?.files || []}
+          fileChange={updateFileList}
         >
           <Form form={form} initialValues={{ memory: false, web_search: false}}>
-            <Flex gap={8}>
-              <Form.Item name="web_search" valuePropName="checked" className="rb:mb-0!">
-                <ButtonCheckbox
-                  icon={OnlineIcon}
-                  checkedIcon={OnlineCheckedIcon}
-                >
-                  {t(`memoryConversation.web_search`)}
-                </ButtonCheckbox>
-              </Form.Item>
-              <Form.Item name="memory" valuePropName="checked" className="rb:mb-0!">
-                <ButtonCheckbox
-                  icon={MemoryFunctionIcon}
-                  checkedIcon={MemoryFunctionCheckedIcon}
-                >
-                  {t(`memoryConversation.memory`)}
-                </ButtonCheckbox>
-              </Form.Item>
+            <Flex justify="space-between" className="rb:flex-1">
+              <Flex gap={8} align="center">
+                <Form.Item name="files" noStyle>
+                  <Dropdown
+                    menu={{
+                      items: [
+                        { key: 'define', label: t('memoryConversation.addRemoteFile') },
+                        {
+                          key: 'upload', label: (
+                            <UploadFiles
+                              action={shareFileUploadUrl}
+                              fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']}
+                              onChange={fileChange}
+                              fileList={[]}
+                              update={update}
+                            />
+                          )
+                        },
+                      ],
+                      onClick: handleShowUpload
+                    }}
+                  >
+                    <div
+                      className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('src/assets/images/conversation/link.svg')] rb:hover:bg-[url('src/assets/images/conversation/link_hover.svg')]"
+                    ></div>
+                  </Dropdown>
+                </Form.Item>
+                <Form.Item name="web_search" valuePropName="checked" className="rb:mb-0!">
+                  <ButtonCheckbox
+                    icon={OnlineIcon}
+                    checkedIcon={OnlineCheckedIcon}
+                  >
+                    {t(`memoryConversation.web_search`)}
+                  </ButtonCheckbox>
+                </Form.Item>
+                <Form.Item name="memory" valuePropName="checked" className="rb:mb-0!">
+                  <ButtonCheckbox
+                    icon={MemoryFunctionIcon}
+                    checkedIcon={MemoryFunctionCheckedIcon}
+                  >
+                    {t(`memoryConversation.memory`)}
+                  </ButtonCheckbox>
+                </Form.Item>
+              </Flex>
+              {/* <Flex align="center">
+                <AudioRecorder onRecordingComplete={handleRecordingComplete} />
+                <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
+              </Flex> */}
             </Flex>
           </Form>
         </Chat>
         </div>
       </div>
+
+      <UploadFileListModal
+        ref={uploadFileListModalRef}
+        refresh={addFileList}
+      />
     </Flex>
   )
 }

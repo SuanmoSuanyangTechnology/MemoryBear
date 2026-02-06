@@ -1,7 +1,30 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-06 21:10:56 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-06 21:10:56 
+ */
+/**
+ * Workflow Chat Component
+ * 
+ * A drawer-based chat interface for testing and debugging workflow executions.
+ * Provides real-time streaming of workflow node execution status, input/output data,
+ * and error messages. Supports variable configuration and file attachments.
+ * 
+ * Key Features:
+ * - Real-time workflow execution monitoring with SSE streaming
+ * - Node-level execution tracking (start, end, error states)
+ * - Variable configuration for workflow inputs
+ * - File upload support (images and documents)
+ * - Collapsible node execution details with input/output inspection
+ * - Error handling and display
+ * 
+ * @component
+ */
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx'
-import { Input, Form, App, Space, Button, Collapse } from 'antd'
+import { App, Space, Button, Collapse, Flex, Dropdown, type MenuProps } from 'antd'
 import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons'
 import CodeBlock from '@/components/Markdown/CodeBlock'
 
@@ -12,30 +35,43 @@ import { draftRun } from '@/api/application';
 import Empty from '@/components/Empty'
 import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
-import ChatSendIcon from '@/assets/images/application/chatSend.svg'
 import dayjs from 'dayjs'
 import type { ChatRef, VariableConfigModalRef, GraphRef } from '../../types'
 import { type SSEMessage } from '@/utils/stream'
 import type { Variable } from '../Properties/VariableList/types'
 import styles from './chat.module.css'
 import Markdown from '@/components/Markdown'
+import ChatInput from '@/components/Chat/ChatInput'
+import UploadFiles from '@/views/Conversation/components/FileUpload'
+// import AudioRecorder from '@/components/AudioRecorder'
+import UploadFileListModal from '@/views/Conversation/components/UploadFileListModal'
+import type { UploadFileListModalRef } from '@/views/Conversation/types'
 
 const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId, graphRef }, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
-  const [form] = Form.useForm<{ message: string }>()
   const variableConfigModalRef = useRef<VariableConfigModalRef>(null)
-  const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [chatList, setChatList] = useState<ChatItem[]>([])
-  const [variables, setVariables] = useState<Variable[]>([])
-  const [streamLoading, setStreamLoading] = useState(false)
-  const [conversationId, setConversationId] = useState<string | null>(null)
+  // State management
+  const [open, setOpen] = useState(false) // Drawer visibility
+  const [loading, setLoading] = useState(false) // Send button loading state
+  const [chatList, setChatList] = useState<ChatItem[]>([]) // Chat message history
+  const [variables, setVariables] = useState<Variable[]>([]) // Workflow input variables
+  const [streamLoading, setStreamLoading] = useState(false) // SSE streaming state
+  const [conversationId, setConversationId] = useState<string | null>(null) // Current conversation ID
+  const [fileList, setFileList] = useState<any[]>([]) // Uploaded files
+  const [message, setMessage] = useState<string | undefined>(undefined) // Current input message
+  const uploadFileListModalRef = useRef<UploadFileListModalRef>(null)
 
+  /**
+   * Opens the chat drawer and loads workflow variables from the start node
+   */
   const handleOpen = () => {
     setOpen(true)
     getVariables()
   }
+  /**
+   * Extracts variables from the workflow's start node and merges with previous values
+   */
   const getVariables = () => {
     const nodes = graphRef.current?.getNodes()
     const list = nodes?.map(node => node.getData()) || []
@@ -55,20 +91,42 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
       setVariables(curVariables)
     }
   }
+  /**
+   * Closes the drawer and resets all state
+   */
   const handleClose = () => {
     setOpen(false)
     setChatList([])
     setVariables([])
     setConversationId(null)
   }
+  /**
+   * Opens the variable configuration modal
+   */
   const handleEditVariables = () => {
     variableConfigModalRef.current?.handleOpen(variables)
   }
+  /**
+   * Saves updated variable values from the modal
+   */
   const handleSave = (values: Variable[]) => {
     setVariables([...values])
   }
-  const handleSend = () => {
+  /**
+   * Sends a message to execute the workflow
+   * 
+   * Process:
+   * 1. Validates required variables
+   * 2. Adds user message to chat
+   * 3. Initiates SSE stream for workflow execution
+   * 4. Handles real-time node execution updates
+   * 5. Updates chat with results or errors
+   * 
+   * @param msg - Optional message to send (uses state if not provided)
+   */
+  const handleSend = async (msg?: string) => {
     if (loading || !appId) return
+    // Validate required variables before sending
     let isCanSend = true
     const params: Record<string, any> = {}
     if (variables.length > 0) {
@@ -90,8 +148,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
       return
     }
 
-    setLoading(true)
-    const message = form.getFieldValue('message')
+    // setLoading(true)
+    const message = msg
     setChatList(prev => [...prev, {
       role: 'user',
       content: message,
@@ -104,6 +162,16 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
       subContent: [],
     }])
 
+    /**
+     * Handles SSE stream messages from workflow execution
+     * 
+     * Events:
+     * - message: Streaming text chunks for final output
+     * - node_start: Node execution begins
+     * - node_end: Node execution completes successfully
+     * - node_error: Node execution fails
+     * - workflow_end: Entire workflow completes
+     */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
         const { chunk, conversation_id, node_id, input, output, error, elapsed_time, status } = item.data as {
@@ -125,6 +193,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
         console.log('node', node?.getData())
 
         switch(item.event) {
+          // Append streaming text chunks to assistant message
           case 'message':
             setChatList(prev => {
               const newList = [...prev]
@@ -138,6 +207,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
               return newList
             })
             break
+          // Track node execution start
           case 'node_start':
             setChatList(prev => {
               const newList = [...prev]
@@ -170,6 +240,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
               return newList
             })
             break
+          // Update node with execution results or errors
           case 'node_end':
           case 'node_error':
             setChatList(prev => {
@@ -198,6 +269,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
               return newList
             })
             break
+          // Mark workflow as complete
           case 'workflow_end':
             setChatList(prev => {
               const newList = [...prev]
@@ -221,14 +293,27 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
       })
     }
 
-    form.setFieldValue('message', undefined)
-    setStreamLoading(true)
-    draftRun(appId, {
+    setMessage(undefined)
+    setFileList([])
+    const data = {
       message: message,
       variables: params,
       stream: true,
-      conversation_id: conversationId
-    }, handleStreamMessage)
+      conversation_id: conversationId,
+      files: fileList.map(file => {
+        if (file.url) {
+          return file
+        } else {
+          return {
+            type: file.type,
+            transfer_method: 'local_file',
+            upload_file_id: file.response.data.file_id
+          }
+        }
+      })
+    }
+    setStreamLoading(true)
+    draftRun(appId, data, handleStreamMessage)
       .catch((error) => {
         setChatList(prev => {
           const newList = [...prev]
@@ -243,29 +328,72 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
           }
           return newList
         })
-      })
-      .finally(() => {
+      }).finally(() => {
         setLoading(false)
         setStreamLoading(false)
       })
   }
-  // 暴露给父组件的方法
+
+  /**
+   * Updates the current input message
+   */
+  const handleMessageChange = (message: string) => {
+    setMessage(message)
+  }
+  const [update, setUpdate] = useState(false)
+  /**
+   * Handles file upload from local device
+   */
+  const fileChange = (file?: any) => {
+    setFileList([...fileList, file])
+    setUpdate(prev => !prev)
+  }
+  // const handleRecordingComplete = async (file: any) => {
+  //   console.log('file', file)
+  // }
+
+  /**
+   * Handles dropdown menu actions for file upload
+   */
+  const handleShowUpload: MenuProps['onClick'] = ({ key }) => {
+    switch(key) {
+      case 'define':
+        uploadFileListModalRef.current?.handleOpen()
+        break
+    }
+  }
+  /**
+   * Adds files from remote URL modal
+   */
+  const addFileList = (list?: any[]) => {
+    if (!list || list.length <= 0) return
+    setFileList([...fileList, ...(list || [])])
+  }
+  /**
+   * Updates the entire file list (used when removing files)
+   */
+  const updateFileList = (list?: any[]) => {
+    setFileList([...list || []])
+  }
+
+  // Expose methods to parent component via ref
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
   }));
 
+  /**
+   * Returns CSS class for status-based text color
+   */
   const getStatus = (status?: string) => {
     return status === 'completed' ? 'rb:text-[#369F21]' : status === 'failed' ? 'rb:text-[#FF5D34]' : 'rb:text-[#5B6167]'
   }
-
-  console.log('chatList', chatList)
   return (
     <RbDrawer
       title={<div className="rb:flex rb:items-center rb:gap-2.5">
         {t('workflow.run')}
         {variables.length > 0 && <Space>
-          <Button size="small" onClick={handleEditVariables}>变量</Button>
+          <Button size="small" onClick={handleEditVariables}>{t('application.variable')}</Button>
         </Space>}
       </div>}
       classNames={{
@@ -275,7 +403,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
       onClose={handleClose}
     >
       <ChatContent
-        classNames="rb:mx-[16px] rb:pt-[24px] rb:h-[calc(100%-76px)]"
+        classNames="rb:mx-[16px] rb:pt-[24px] rb:h-[calc(100%-86px)]"
         contentClassNames="rb:max-w-[400px]!'"
         empty={<Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
         data={chatList}
@@ -365,25 +493,58 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
           )
         }}
       />
-      <div className="rb:flex rb:items-center rb:gap-2.5 rb:p-4">
-        <Form form={form} style={{width: 'calc(100% - 54px)'}}>
-          <Form.Item name="message" className="rb:mb-0!">
-            <Input 
-              className="rb:h-11 rb:shadow-[0px_2px_8px_0px_rgba(33,35,50,0.1)]" 
-              placeholder={t('application.chatPlaceholder')}
-              onPressEnter={handleSend}
-            />
-          </Form.Item>
-        </Form>
-        <img src={ChatSendIcon} className={clsx("rb:w-11 rb:h-11 rb:cursor-pointer", {
-          'rb:opacity-50': loading,
-        })} onClick={handleSend} />
+      <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:m-4 rb:mb-1">
+        <ChatInput
+          message={message}
+          className="rb:relative!"
+          loading={loading}
+          fileChange={updateFileList}
+          fileList={fileList}
+          onSend={handleSend}
+          onChange={handleMessageChange}
+        >
+          <Flex justify="space-between" className="rb:flex-1">
+            <Flex gap={8} align="center">
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'define', label: t('memoryConversation.addRemoteFile') },
+                    {
+                      key: 'upload', label: (
+                        <UploadFiles
+                          fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']}
+                          onChange={fileChange}
+                          fileList={[]}
+                          update={update}
+                        />
+                      )
+                    },
+                  ],
+                  onClick: handleShowUpload
+                }}
+              >
+                <div
+                  className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('src/assets/images/conversation/link.svg')] rb:hover:bg-[url('src/assets/images/conversation/link_hover.svg')]"
+                ></div>
+              </Dropdown>
+            </Flex>
+            {/* <Flex align="center">
+              <AudioRecorder onRecordingComplete={handleRecordingComplete} />
+              <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
+            </Flex> */}
+          </Flex>
+        </ChatInput>
       </div>
 
       <VariableConfigModal
         ref={variableConfigModalRef}
         refresh={handleSave}
         variables={variables}
+      />
+
+      <UploadFileListModal
+        ref={uploadFileListModalRef}
+        refresh={addFileList}
       />
     </RbDrawer>
   )

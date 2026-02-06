@@ -684,6 +684,13 @@ export const zh = {
       analyTask: '分析任务意图',
       dynamicMatchSkill: '动态匹配技能',
       executeTask: '执行任务',
+
+      upload: '上传与解析',
+      complex: '兼容性分析',
+      node: '节点映射',
+      configCheck: '配置校验',
+      sureInfo: '信息确认',
+      completed: '完成导入',
     },
     role: {
       roleManagement: '角色管理',
@@ -1648,6 +1655,12 @@ export const zh = {
       memory: '记忆',
       memoryConversationAnalysisEmpty: '目前没有可用的对话分析内容',
       memoryConversationAnalysisEmptySubTitle: '输入您的用户ID后，点击"测试记忆"查看对话记忆',
+
+      uploadFile: '上传文件',
+      fileType: '文件类型',
+      image: '图片',
+      fileUrl: '文件链接',
+      addRemoteFile: '添加远程文件'
     },
     login: {
       title: '红熊记忆科学',

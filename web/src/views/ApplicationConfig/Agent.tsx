@@ -140,6 +140,8 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   const values = Form.useWatch<Config>([], form) 
   const [isSave, setIsSave] = useState(false)
   const initialized = useRef(false)
+
+  console.log('chatList', chatList)
   
   // Initialization flag
   useEffect(() => {
