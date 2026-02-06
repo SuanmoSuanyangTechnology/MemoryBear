@@ -1233,30 +1233,43 @@ class AppService:
                 - is_legacy_int: 是否检测到旧格式 int 数据
         """
         try:
-            memory_content = config.get("memory", {}).get("memory_content")
-            if memory_content:
+            memory_dict = config.get("memory", {})
+            # Support both field names: memory_config_id (new) and memory_content (legacy)
+            memory_value = memory_dict.get("memory_config_id") or memory_dict.get("memory_content")
+            logger.info(f"Extracting memory_config_id: memory_value={memory_value}, type={type(memory_value).__name__ if memory_value else 'None'}")
+            if memory_value:
                 # 处理字符串、UUID 和 int（旧数据兼容）三种情况
-                if isinstance(memory_content, uuid.UUID):
-                    return memory_content, False
-                elif isinstance(memory_content, str):
-                    return uuid.UUID(memory_content), False
-                elif isinstance(memory_content, int):
+                if isinstance(memory_value, uuid.UUID):
+                    return memory_value, False
+                elif isinstance(memory_value, str):
+                    # Check if it's a numeric string (legacy int format)
+                    if memory_value.isdigit():
+                        logger.warning(
+                            f"Agent 配置中 memory_config_id 为旧格式 int 字符串，将使用工作空间默认配置: "
+                            f"value={memory_value}"
+                        )
+                        return None, True
+                    try:
+                        return uuid.UUID(memory_value), False
+                    except ValueError:
+                        logger.warning(f"Invalid UUID string: {memory_value}")
+                        return None, False
+                elif isinstance(memory_value, int):
                     # 旧数据存储为 int，需要回退到工作空间默认配置
                     logger.warning(
-                        f"Agent 配置中 memory_content 为旧格式 int，将使用工作空间默认配置: "
-                        f"value={memory_content}"
+                        f"Agent 配置中 memory_config_id 为旧格式 int，将使用工作空间默认配置: "
+                        f"value={memory_value}"
                     )
                     return None, True
                 else:
                     logger.warning(
-                        f"Agent 配置中 memory_content 格式无效: type={type(memory_content)}, "
-                        f"value={memory_content}"
+                        f"Agent 配置中 memory_config_id 格式无效: type={type(memory_value)}, "
+                        f"value={memory_value}"
                     )
             return None, False
         except (ValueError, TypeError) as e:
             logger.warning(
-                f"Agent 配置中 memory_content 格式无效: error={str(e)}, "
-                f"memory_content={memory_content}"
+                f"Agent 配置中 memory_config_id 格式无效: error={str(e)}"
             )
             return None, False
 
@@ -1282,8 +1295,8 @@ class AppService:
         for node in nodes:
             node_type = node.get("type", "")
             
-            # 检查是否为记忆节点
-            if node_type in ["MemoryRead", "MemoryWrite"]:
+            # 检查是否为记忆节点 (support both formats: memory-read/memory-write and MemoryRead/MemoryWrite)
+            if node_type.lower() in ["memoryread", "memorywrite", "memory-read", "memory-write"]:
                 config_id = node.get("config", {}).get("config_id")
                 
                 if config_id:
@@ -1337,7 +1350,7 @@ class AppService:
             )
             return None
         
-        return config.id
+        return config.config_id
 
     def _update_endusers_memory_config(
         self,
