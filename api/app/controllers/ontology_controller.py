@@ -192,12 +192,14 @@ async def extract_ontology(
     提取结果仅返回给前端，不会自动保存到数据库。
     前端可以从返回结果中选择需要的类型，然后调用 /class 接口创建类型。
     输出语言由环境变量 DEFAULT_LANGUAGE 控制（"zh" 或 "en"）。
+    输出语言由环境变量 DEFAULT_LANGUAGE 控制（"zh" 或 "en"）。
     
     Args:
         request: 提取请求,包含scenario、domain、llm_id和scene_id
         db: 数据库会话
         current_user: 当前用户
         
+
     """
     api_logger.info(
         f"Ontology extraction requested by user {current_user.id}, "
@@ -205,6 +207,7 @@ async def extract_ontology(
         f"domain={request.domain}, "
         f"llm_id={request.llm_id}, "
         f"scene_id={request.scene_id}, "
+        f"language={settings.DEFAULT_LANGUAGE}"
         f"language={settings.DEFAULT_LANGUAGE}"
     )
     

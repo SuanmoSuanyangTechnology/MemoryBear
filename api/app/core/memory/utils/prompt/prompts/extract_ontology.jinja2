@@ -24,6 +24,23 @@ This scenario belongs to the **{{ domain }}** domain. Consider domain-specific c
 {% endif %}
 {%- endif %}
 
+===Output Language===
+{% if language == "en" -%}
+**IMPORTANT: All output content MUST be in English.**
+- Class names (name field): English in PascalCase format
+- Chinese name (name_chinese field): Provide Chinese translation
+- Descriptions: MUST be in English
+- Examples: MUST be in English
+- Domain: MUST be in English
+{%- else -%}
+**IMPORTANT: Output content language requirements:**
+- Class names (name field): English in PascalCase format
+- Chinese name (name_chinese field): Chinese translation
+- Descriptions: MUST be in Chinese (中文)
+- Examples: MUST be in Chinese (中文)
+- Domain: Can be in Chinese or English
+{%- endif %}
+
 ===Extraction Rules===
 
 {% if language == "zh" %}
@@ -101,15 +118,29 @@ This scenario belongs to the **{{ domain }}** domain. Consider domain-specific c
 
 
 **5. Clear Descriptions:**
+{% if language == "en" -%}
+- Provide concise, informative descriptions in English (max 500 characters)
+- Describe what the class represents, not specific instances
+- Use clear, natural English language that explains the class's role in the domain
+{%- else -%}
 - Provide concise, informative descriptions in English (max 500 characters)
 - Describe what the class represents, not specific instances
 - Use clear, natural English language
+{%- endif %}
 
 **6. Concrete Examples:**
+{% if language == "en" -%}
+- Provide 2-5 concrete instance examples in English for each class
+- Examples should be specific, realistic instances of the class
+- Examples help clarify the class's scope and meaning
+- Use natural English language for examples
+- Example format: ["Example1", "Example2", "Example3"]
+{%- else -%}
 - Provide 2-5 concrete instance examples in English for each class
 - Examples should be specific, realistic instances of the class
 - Examples help clarify the class's scope and meaning
 - Example format: ["Example1", "Example2", "Example3"]
+{%- endif %}
 
 **7. Class Hierarchy:**
 - Identify parent-child relationships where applicable
@@ -235,6 +266,64 @@ This scenario belongs to the **{{ domain }}** domain. Consider domain-specific c
 }
 
 {% else %}
+
+{% if language == "en" -%}
+**Example 1 (Healthcare Domain):**
+Scenario: "A hospital manages patient records, schedules appointments, and coordinates medical procedures. Doctors diagnose conditions and prescribe treatments."
+
+Output:
+{
+  "classes": [
+    {
+      "name": "Patient",
+      "name_chinese": "患者",
+      "description": "A person who receives medical care or treatment at a healthcare facility",
+      "examples": ["Outpatient", "Inpatient", "Emergency patient", "Chronic disease patient"],
+      "parent_class": null,
+      "entity_type": "Person",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "MedicalProcedure",
+      "name_chinese": "医疗程序",
+      "description": "A systematic operation or process performed for medical diagnosis or treatment",
+      "examples": ["Surgery", "Blood test", "X-ray examination", "Vaccination"],
+      "parent_class": null,
+      "entity_type": "Process",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "Diagnosis",
+      "name_chinese": "诊断",
+      "description": "The identification of a disease or condition based on symptoms and examination results",
+      "examples": ["Diabetes diagnosis", "Cancer diagnosis", "Flu diagnosis"],
+      "parent_class": null,
+      "entity_type": "Concept",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "Doctor",
+      "name_chinese": "医生",
+      "description": "A licensed medical professional who diagnoses and treats patients",
+      "examples": ["General practitioner", "Surgeon", "Cardiologist"],
+      "parent_class": null,
+      "entity_type": "Role",
+      "domain": "Healthcare"
+    },
+    {
+      "name": "Treatment",
+      "name_chinese": "治疗",
+      "description": "Medical care or therapy provided to cure or manage a disease condition",
+      "examples": ["Medication therapy", "Physical therapy", "Chemotherapy", "Surgical treatment"],
+      "parent_class": null,
+      "entity_type": "Process",
+      "domain": "Healthcare"
+    }
+  ],
+  "domain": "Healthcare",
+  "namespace": "http://example.org/healthcare#"
+}
+{%- else -%}
 **Example 1 (Healthcare Domain):**
 Scenario: "A hospital manages patient records, schedules appointments, and coordinates medical procedures. Doctors diagnose conditions and prescribe treatments."
 

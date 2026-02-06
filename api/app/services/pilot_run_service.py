@@ -185,6 +185,7 @@ async def run_pilot_extraction(
             progress_callback=progress_callback,
             embedding_id=str(memory_config.embedding_model_id),
             language=language,
+            ontology_types=ontology_types,
         )
 
         log_time("Orchestrator Initialization", time.time() - step_start, log_file)

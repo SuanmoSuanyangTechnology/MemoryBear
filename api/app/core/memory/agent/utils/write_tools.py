@@ -118,6 +118,30 @@ async def write(
                 exc_info=True
             )
 
+    # Fetch ontology types if scene_id is configured
+    ontology_types = None
+    if memory_config.scene_id:
+        try:
+            from app.core.memory.models.ontology_extraction_models import OntologyTypeList
+            from app.repositories.ontology_class_repository import OntologyClassRepository
+            
+            with get_db_context() as db:
+                ontology_repo = OntologyClassRepository(db)
+                ontology_classes = ontology_repo.get_by_scene(memory_config.scene_id)
+                
+                if ontology_classes:
+                    ontology_types = OntologyTypeList.from_db_models(ontology_classes)
+                    logger.info(
+                        f"Loaded {len(ontology_types.types)} ontology types for scene_id: {memory_config.scene_id}"
+                    )
+                else:
+                    logger.info(f"No ontology classes found for scene_id: {memory_config.scene_id}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch ontology types for scene_id {memory_config.scene_id}: {e}",
+                exc_info=True
+            )
+
     orchestrator = ExtractionOrchestrator(
         llm_client=llm_client,
         embedder_client=embedder_client,

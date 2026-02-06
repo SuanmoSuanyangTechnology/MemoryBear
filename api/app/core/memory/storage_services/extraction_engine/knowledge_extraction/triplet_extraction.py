@@ -18,14 +18,21 @@ logger = get_memory_logger(__name__)
 class TripletExtractor:
     """Extracts knowledge triplets and entities from statements using LLM"""
 
-    def __init__(self, llm_client: OpenAIClient, language: str = "zh"):
+    def __init__(
+        self,
+        llm_client: OpenAIClient,
+        ontology_types: Optional[OntologyTypeList] = None,
+        language: str = "zh"):
         """Initialize the TripletExtractor with an LLM client
 
         Args:
             llm_client: OpenAIClient instance for processing
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
+            ontology_types: Optional OntologyTypeList containing predefined ontology types
+                for entity classification guidance
         """
         self.llm_client = llm_client
+        self.ontology_types = ontology_types
         self.language = language
 
     def _get_language(self) -> str:
