@@ -1617,7 +1617,8 @@ export const zh = {
       text_preprocessing_desc: '文本切分为{{count}}个语义片段',
       knowledge_extraction_desc: '知识抽取完成，共识别{{entities}}个实体,{{statements}}个句子, {{temporal_ranges_count}}个时间提取, {{triplets}}个三元组',
       creating_nodes_edges_desc: '实体关系创建完成，共{{num}}条关系',
-      deduplication_desc: '去重消歧完成，最终{{count}}个唯一实体'
+      deduplication_desc: '去重消歧完成，最终{{count}}个唯一实体',
+      custom_text: '调试文本',
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',

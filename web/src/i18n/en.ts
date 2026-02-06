@@ -1543,7 +1543,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       text_preprocessing_desc: 'Text split into {{count}} semantic fragments',
       knowledge_extraction_desc: 'Knowledge extraction completed, identified {{entities}} entities, {{statements}} statements, {{temporal_ranges_count}} temporal extractions, {{triplets}} triplets',
       creating_nodes_edges_desc: 'Entity relationship creation completed, {{num}} relationships in total',
-      deduplication_desc: 'Deduplication and disambiguation completed, {{count}} unique entities in total'
+      deduplication_desc: 'Deduplication and disambiguation completed, {{count}} unique entities in total',
+      custom_text: 'Debug Text',
     },
     memoryConversation: {
       searchPlaceholder: 'Enter user ID...',

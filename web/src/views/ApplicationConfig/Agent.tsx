@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-04 20:16:45
+ * @Last Modified time: 2026-02-06 11:20:14
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -38,8 +38,8 @@ import CustomSelect from '@/components/CustomSelect'
 import aiPrompt from '@/assets/images/application/aiPrompt.png'
 import AiPromptModal from './components/AiPromptModal'
 import ToolList from './components/ToolList/ToolList'
-import ChatVariableConfigModal from './components/ChatVariableConfigModal';
 import SkillList from './components/Skill'
+import ChatVariableConfigModal from './components/ChatVariableConfigModal';
 import type { Skill } from '@/views/Skills/types'
 
 /**
@@ -169,7 +169,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
       const { skills } = response
       let allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
       let allTools = Array.isArray(response.tools) ? response.tools : []
-      const memoryContent = response.memory?.memory_content
+      const memoryContent = response.memory?.memory_config_id
       const parsedMemoryContent = memoryContent === null || memoryContent === '' 
         ? undefined 
         : !isNaN(Number(memoryContent)) ? Number(memoryContent) : memoryContent
@@ -178,7 +178,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         tools: allTools,
         memory: {
           ...response.memory,
-          memory_content: parsedMemoryContent
+          memory_config_id: parsedMemoryContent
         },
         skills: {
           ...skills,
@@ -262,7 +262,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     if (!isSave || !data) return Promise.resolve()
     const { memory, knowledge_retrieval, tools, skills, ...rest } = values
     const { knowledge_bases = [], ...knowledgeRest } = knowledge_retrieval || {}
-    const { memory_content } = memory || {}
+    const { memory_config_id } = memory || {}
     // Get other necessary properties of memory from original data
     const originalMemory = data.memory || ({} as MemoryConfig)
     
@@ -272,7 +272,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
       memory: {
         ...originalMemory,
         ...memory,
-        memory_content: memory_content ? String(memory_content) : '',
+        memory_config_id: memory_config_id ? String(memory_config_id) : '',
       },
       knowledge_retrieval: knowledge_bases.length > 0 ? {
         ...data.knowledge_retrieval,
@@ -444,7 +444,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                   <SelectWrapper 
                     title="selectMemoryContent" 
                     desc="selectMemoryContentDesc" 
-                    name={['memory', 'memory_content']}
+                    name={['memory', 'memory_config_id']}
                     url={memoryConfigListUrl}
                   />
                 </Space>

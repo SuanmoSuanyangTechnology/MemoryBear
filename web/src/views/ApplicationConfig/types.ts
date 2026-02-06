@@ -43,7 +43,7 @@ export interface MemoryConfig {
   /** Whether memory is enabled */
   enabled: boolean;
   /** Memory content */
-  memory_content?: string;
+  memory_config_id?: string;
   /** Maximum history length */
   max_history?: number | string;
 }
