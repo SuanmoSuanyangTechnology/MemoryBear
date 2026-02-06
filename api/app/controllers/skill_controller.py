@@ -5,7 +5,7 @@ from typing import Optional
 import uuid
 
 from app.db import get_db
-from app.dependencies import get_current_user, cur_workspace_access_guard
+from app.dependencies import get_current_user
 from app.models import User
 from app.schemas import skill_schema
 from app.schemas.response_schema import PageData, PageMeta
@@ -16,7 +16,6 @@ router = APIRouter(prefix="/skills", tags=["Skills"])
 
 
 @router.post("", summary="创建技能")
-@cur_workspace_access_guard()
 def create_skill(
     data: skill_schema.SkillCreate,
     db: Session = Depends(get_db),
@@ -29,7 +28,6 @@ def create_skill(
 
 
 @router.get("", summary="技能列表")
-@cur_workspace_access_guard()
 def list_skills(
     search: Optional[str] = Query(None, description="搜索关键词"),
     is_active: Optional[bool] = Query(None, description="是否激活"),
@@ -51,7 +49,6 @@ def list_skills(
 
 
 @router.get("/{skill_id}", summary="获取技能详情")
-@cur_workspace_access_guard()
 def get_skill(
     skill_id: uuid.UUID,
     db: Session = Depends(get_db),
@@ -64,7 +61,6 @@ def get_skill(
 
 
 @router.put("/{skill_id}", summary="更新技能")
-@cur_workspace_access_guard()
 def update_skill(
     skill_id: uuid.UUID,
     data: skill_schema.SkillUpdate,
@@ -78,7 +74,6 @@ def update_skill(
 
 
 @router.delete("/{skill_id}", summary="删除技能")
-@cur_workspace_access_guard()
 def delete_skill(
     skill_id: uuid.UUID,
     db: Session = Depends(get_db),
