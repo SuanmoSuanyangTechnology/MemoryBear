@@ -271,12 +271,6 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             if not cid:
                 raise ValueError("未提供 payload.config_id，禁止启动试运行")
 
-            # 验证 dialogue_text 必须提供
-            dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
-            logger.info(f"[PILOT_RUN_STREAM] Received dialogue_text length: {len(dialogue_text)}, preview: {dialogue_text[:100]}")
-            if not dialogue_text:
-                raise ValueError("试运行模式必须提供 dialogue_text 参数")
-
             # Load configuration from database only using centralized manager
             try:
                 config_service = MemoryConfigService(self.db)
@@ -287,6 +281,30 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
             except ConfigurationError as e:
                 raise RuntimeError(f"Configuration loading failed: {e}")
+
+            # 根据是否关联本体场景选择使用的文本
+            # 如果配置关联了本体场景（scene_id 不为空），使用 custom_text（如果提供）
+            # 否则使用 dialogue_text
+            if memory_config.scene_id:
+                # 关联了本体场景，优先使用 custom_text
+                if hasattr(payload, 'custom_text') and payload.custom_text:
+                    dialogue_text = payload.custom_text.strip()
+                    logger.info(f"[PILOT_RUN_STREAM] Using custom_text for scene_id={memory_config.scene_id}, length: {len(dialogue_text)}")
+                else:
+                    # 如果没有提供 custom_text，回退到 dialogue_text
+                    dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
+                    logger.info(f"[PILOT_RUN_STREAM] No custom_text provided, using dialogue_text for scene_id={memory_config.scene_id}")
+            else:
+                # 没有关联本体场景，使用 dialogue_text
+                dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
+                logger.info(f"[PILOT_RUN_STREAM] No scene_id, using dialogue_text, length: {len(dialogue_text)}")
+            
+            # 验证最终使用的文本不为空
+            if not dialogue_text:
+                raise ValueError("试运行模式必须提供有效的文本内容（dialogue_text 或 custom_text）")
+            
+            logger.info(f"[PILOT_RUN_STREAM] Final text preview: {dialogue_text[:100]}")
+
 
             # 步骤 2: 创建进度回调函数捕获管线进度
             # 使用队列在回调和生成器之间传递进度事件
