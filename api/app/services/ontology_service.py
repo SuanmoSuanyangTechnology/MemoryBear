@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.core.memory.llm_tools.openai_client import OpenAIClient
-from app.core.memory.models.ontology_models import (
+from app.core.memory.models.ontology_scenario_models import (
     OntologyClass,
     OntologyExtractionResponse,
 )
@@ -48,6 +48,10 @@ class OntologyService:
     DEFAULT_LLM_MAX_TOKENS = 2000
     DEFAULT_LLM_TIMEOUT = 30.0
     DEFAULT_ENABLE_OWL_VALIDATION = True
+    
+    # 从环境变量获取默认语言
+    from app.core.config import settings
+    DEFAULT_LANGUAGE = settings.DEFAULT_LANGUAGE
     
     def __init__(
         self,

@@ -221,6 +221,28 @@ class Settings:
     # workflow config
     WORKFLOW_NODE_TIMEOUT: int = int(os.getenv("WORKFLOW_NODE_TIMEOUT", 600))
 
+    # ========================================================================
+    # General Ontology Type Configuration
+    # ========================================================================
+    # 通用本体文件路径列表（逗号分隔）
+    GENERAL_ONTOLOGY_FILES: str = os.getenv("GENERAL_ONTOLOGY_FILES", "General_purpose_entity.ttl")
+    
+    # 是否启用通用本体类型功能
+    ENABLE_GENERAL_ONTOLOGY_TYPES: bool = os.getenv("ENABLE_GENERAL_ONTOLOGY_TYPES", "true").lower() == "true"
+    
+    # Prompt 中最大类型数量
+    MAX_ONTOLOGY_TYPES_IN_PROMPT: int = int(os.getenv("MAX_ONTOLOGY_TYPES_IN_PROMPT", "50"))
+    
+    # 核心通用类型列表（逗号分隔）
+    CORE_GENERAL_TYPES: str = os.getenv(
+        "CORE_GENERAL_TYPES",
+        "Person,Organization,Company,GovernmentAgency,Place,Location,City,Country,Building,"
+        "Event,SportsEvent,SocialEvent,Work,Book,Film,Software,Concept,TopicalConcept,AcademicSubject"
+    )
+    
+    # 实验模式开关（允许通过 API 动态切换本体配置）
+    ONTOLOGY_EXPERIMENT_MODE: bool = os.getenv("ONTOLOGY_EXPERIMENT_MODE", "true").lower() == "true"
+
     def get_memory_output_path(self, filename: str = "") -> str:
         """
         Get the full path for memory module output files.

@@ -268,6 +268,8 @@ class MemoryConfigService:
                 pruning_enabled=bool(memory_config.pruning_enabled) if memory_config.pruning_enabled is not None else False,
                 pruning_scene=memory_config.pruning_scene or "education",
                 pruning_threshold=float(memory_config.pruning_threshold) if memory_config.pruning_threshold is not None else 0.5,
+                # Ontology scene association
+                scene_id=memory_config.scene_id,
             )
 
             elapsed_ms = (time.time() - start_time) * 1000
@@ -438,3 +440,40 @@ class MemoryConfigService:
             "pruning_scene": memory_config.pruning_scene,
             "pruning_threshold": memory_config.pruning_threshold,
         }
+
+    def get_ontology_types(self, memory_config: MemoryConfig):
+        """Fetch ontology types for the memory configuration's scene.
+        
+        Args:
+            memory_config: MemoryConfig object containing scene_id
+            
+        Returns:
+            OntologyTypeList if scene_id is valid and has types, None otherwise
+        """
+        from app.core.memory.models.ontology_extraction_models import OntologyTypeList
+        from app.repositories.ontology_class_repository import OntologyClassRepository
+        
+        if not memory_config.scene_id:
+            logger.debug("No scene_id configured, skipping ontology type fetch")
+            return None
+        
+        try:
+            ontology_repo = OntologyClassRepository(self.db)
+            ontology_classes = ontology_repo.get_by_scene(memory_config.scene_id)
+            
+            if not ontology_classes:
+                logger.info(f"No ontology classes found for scene_id: {memory_config.scene_id}")
+                return None
+            
+            ontology_types = OntologyTypeList.from_db_models(ontology_classes)
+            logger.info(
+                f"Loaded {len(ontology_types.types)} ontology types for scene_id: {memory_config.scene_id}"
+            )
+            return ontology_types
+            
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch ontology types for scene_id {memory_config.scene_id}: {e}",
+                exc_info=True
+            )
+            return None

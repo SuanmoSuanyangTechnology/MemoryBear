@@ -20,7 +20,7 @@ from owlready2 import (
     OwlReadyInconsistentOntologyError,
 )
 
-from app.core.memory.models.ontology_models import OntologyClass
+from app.core.memory.models.ontology_scenario_models import OntologyClass
 logger = logging.getLogger(__name__)
 
 
@@ -583,3 +583,156 @@ class OWLValidator:
         is_compatible = len(warnings) == 0
         
         return is_compatible, warnings
+
+    def parse_owl_content(
+        self,
+        owl_content: str,
+        format: str = "rdfxml"
+    ) -> List[dict]:
+        """从 OWL 内容解析出本体类型
+        
+        支持解析 RDF/XML、Turtle 和 JSON 格式的 OWL 文件，
+        提取其中定义的 owl:Class 及其 rdfs:label 和 rdfs:comment。
+        
+        Args:
+            owl_content: OWL 文件内容字符串
+            format: 文件格式，支持 "rdfxml"、"turtle"、"json"
+            
+        Returns:
+            解析出的类型列表，每个元素包含:
+            - name: 类型名称（英文标识符）
+            - name_chinese: 中文名称（如果有）
+            - description: 类型描述
+            - parent_class: 父类名称
+            
+        Raises:
+            ValueError: 如果格式不支持或解析失败
+            
+        Examples:
+            >>> validator = OWLValidator()
+            >>> classes = validator.parse_owl_content(owl_xml, format="rdfxml")
+            >>> for cls in classes:
+            ...     print(cls["name"], cls["description"])
+        """
+        valid_formats = ["rdfxml", "turtle", "json"]
+        if format not in valid_formats:
+            raise ValueError(
+                f"Unsupported format '{format}'. Must be one of: {', '.join(valid_formats)}"
+            )
+        
+        # JSON 格式单独处理
+        if format == "json":
+            return self._parse_json_owl(owl_content)
+        
+        # 使用 rdflib 解析 RDF/XML 或 Turtle
+        try:
+            from rdflib import Graph, RDF, RDFS, OWL, Namespace
+            
+            g = Graph()
+            rdf_format = "xml" if format == "rdfxml" else "turtle"
+            g.parse(data=owl_content, format=rdf_format)
+            
+            classes = []
+            
+            # 查找所有 owl:Class
+            for cls_uri in g.subjects(RDF.type, OWL.Class):
+                cls_str = str(cls_uri)
+                
+                # 跳过空节点和 OWL 内置类
+                if cls_str.startswith("http://www.w3.org/") or "/.well-known/" in cls_str:
+                    continue
+                
+                # 提取类名（从 URI 中获取本地名称）
+                if '#' in cls_str:
+                    name = cls_str.split('#')[-1]
+                else:
+                    name = cls_str.split('/')[-1]
+                
+                # 跳过空名称
+                if not name or name == "Thing":
+                    continue
+                
+                # 获取 rdfs:label（可能有多个，包括中英文）
+                labels = list(g.objects(cls_uri, RDFS.label))
+                name_chinese = None
+                label_str = name  # 默认使用 URI 中的名称
+                
+                for label in labels:
+                    label_text = str(label)
+                    # 检查是否包含中文
+                    if any('\u4e00' <= char <= '\u9fff' for char in label_text):
+                        name_chinese = label_text
+                    else:
+                        label_str = label_text
+                
+                # 获取 rdfs:comment（描述）
+                comments = list(g.objects(cls_uri, RDFS.comment))
+                description = str(comments[0]) if comments else None
+                
+                # 获取父类（rdfs:subClassOf）
+                parent_class = None
+                for parent_uri in g.objects(cls_uri, RDFS.subClassOf):
+                    parent_str = str(parent_uri)
+                    # 跳过 owl:Thing
+                    if parent_str == str(OWL.Thing) or parent_str.endswith("#Thing"):
+                        continue
+                    # 提取父类名称
+                    if '#' in parent_str:
+                        parent_class = parent_str.split('#')[-1]
+                    else:
+                        parent_class = parent_str.split('/')[-1]
+                    break  # 只取第一个非 Thing 的父类
+                
+                classes.append({
+                    "name": name,
+                    "name_chinese": name_chinese,
+                    "description": description,
+                    "parent_class": parent_class
+                })
+            
+            logger.info(f"Parsed {len(classes)} classes from OWL content (format: {format})")
+            return classes
+            
+        except Exception as e:
+            error_msg = f"Failed to parse OWL（文档格式不正确） content: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise ValueError(error_msg) from e
+    
+    def _parse_json_owl(self, json_content: str) -> List[dict]:
+        """解析 JSON 格式的 OWL 内容
+        
+        JSON 格式是简化的本体表示，由 export_to_owl 的 json 格式导出。
+        
+        Args:
+            json_content: JSON 格式的 OWL 内容
+            
+        Returns:
+            解析出的类型列表
+        """
+        import json
+        
+        try:
+            data = json.loads(json_content)
+            
+            # 检查是否是我们导出的 JSON 格式
+            if "ontology" in data and "classes" in data["ontology"]:
+                raw_classes = data["ontology"]["classes"]
+            elif "classes" in data:
+                raw_classes = data["classes"]
+            else:
+                raise ValueError("Invalid JSON format: missing 'classes' field")
+            
+            classes = []
+            for cls in raw_classes:
+                classes.append({
+                    "name": cls.get("name", ""),
+                    "name_chinese": cls.get("name_chinese"),
+                    "description": cls.get("description"),
+                    "parent_class": cls.get("parent_class")
+                })
+            
+            logger.info(f"Parsed {len(classes)} classes from JSON content")
+            return classes
+            
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON content: {str(e)}") from e
