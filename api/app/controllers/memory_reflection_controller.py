@@ -104,14 +104,18 @@ async def start_workspace_reflection(
 ) -> dict:
     """启动工作空间中所有匹配应用的反思功能"""
     workspace_id = current_user.current_workspace_id
-    reflection_service = MemoryReflectionService(db)
 
     try:
         api_logger.info(f"用户 {current_user.username} 启动workspace反思，workspace_id: {workspace_id}")
 
-        service = WorkspaceAppService(db)
-        result = service.get_workspace_apps_detailed(workspace_id)
+        # 使用独立的数据库会话来获取工作空间应用详情，避免事务失败
+        from app.db import get_db_context
+        with get_db_context() as query_db:
+            service = WorkspaceAppService(query_db)
+            result = service.get_workspace_apps_detailed(workspace_id)
+        
         reflection_results = []
+        
         for data in result['apps_detailed_info']:
             # 跳过没有配置的应用
             if not data['memory_configs']:
@@ -133,33 +137,36 @@ async def start_workspace_reflection(
                     api_logger.debug(f"配置 {config_id_str} 没有匹配的release")
                     continue
 
-                # 为每个用户执行反思
+                # 为每个用户执行反思 - 使用独立的数据库会话
                 for user in end_users:
                     api_logger.info(f"为用户 {user['id']} 启动反思，config_id: {config_id_str}")
 
-                    try:
-                        reflection_result = await reflection_service.start_text_reflection(
-                            config_data=config,
-                            end_user_id=user['id']
-                        )
+                    # 为每个用户创建独立的数据库会话，避免事务失败影响其他用户
+                    with get_db_context() as user_db:
+                        try:
+                            reflection_service = MemoryReflectionService(user_db)
+                            reflection_result = await reflection_service.start_text_reflection(
+                                config_data=config,
+                                end_user_id=user['id']
+                            )
 
-                        reflection_results.append({
-                            "app_id": data['id'],
-                            "config_id": config_id_str,
-                            "end_user_id": user['id'],
-                            "reflection_result": reflection_result
-                        })
-                    except Exception as e:
-                        api_logger.error(f"用户 {user['id']} 反思失败: {str(e)}")
-                        reflection_results.append({
-                            "app_id": data['id'],
-                            "config_id": config_id_str,
-                            "end_user_id": user['id'],
-                            "reflection_result": {
-                                "status": "错误",
-                                "message": f"反思失败: {str(e)}"
-                            }
-                        })
+                            reflection_results.append({
+                                "app_id": data['id'],
+                                "config_id": config_id_str,
+                                "end_user_id": user['id'],
+                                "reflection_result": reflection_result
+                            })
+                        except Exception as e:
+                            api_logger.error(f"用户 {user['id']} 反思失败: {str(e)}")
+                            reflection_results.append({
+                                "app_id": data['id'],
+                                "config_id": config_id_str,
+                                "end_user_id": user['id'],
+                                "reflection_result": {
+                                    "status": "错误",
+                                    "message": f"反思失败: {str(e)}"
+                                }
+                            })
 
         return success(data=reflection_results, msg="反思配置成功")
 

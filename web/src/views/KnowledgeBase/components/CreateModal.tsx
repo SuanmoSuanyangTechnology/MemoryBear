@@ -211,7 +211,8 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
 
     // Process parser_config data, set default values if not present
     const recordAny = record as any;
-    baseValues.parser_config = record.parser_config || {
+    baseValues.parser_config = {
+      ...record.parser_config,
       graphrag: {
         use_graphrag: false,
         scene_name: '',
@@ -219,6 +220,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         method: 'general',
         resolution: false,
         community: false,
+        ...(record.parser_config?.graphrag || {})
       }
     };
 
@@ -656,7 +658,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       {currentType !== 'Folder' && dynamicTypeList.map((tp) => {
         const fieldKey = typeToFieldKey(tp);
         // When tp is 'llm', merge llm and chat options
-        const options = tp.toLowerCase() === 'llm' 
+        const options = tp.toLowerCase() === 'llm' || tp.toLowerCase() === 'image2text'
           ? [...(modelOptionsByType['llm'] || []), ...(modelOptionsByType['chat'] || [])]
           : modelOptionsByType[tp] || [];
         return (

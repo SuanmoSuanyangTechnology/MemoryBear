@@ -313,13 +313,16 @@ class MemoryAgentService:
         start_time = time.time()
 
         # Load configuration from database with workspace fallback
+        # Use a separate database session to avoid transaction failures
         try:
-            config_service = MemoryConfigService(db)
-            memory_config = config_service.load_memory_config(
-                config_id=config_id,
-                workspace_id=workspace_id,
-                service_name="MemoryAgentService"
-            )
+            from app.db import get_db_context
+            with get_db_context() as config_db:
+                config_service = MemoryConfigService(config_db)
+                memory_config = config_service.load_memory_config(
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    service_name="MemoryAgentService"
+                )
             logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
         except ConfigurationError as e:
             error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
@@ -454,12 +457,15 @@ class MemoryAgentService:
 
         config_load_start = time.time()
         try:
-            config_service = MemoryConfigService(db)
-            memory_config = config_service.load_memory_config(
-                config_id=config_id,
-                workspace_id=workspace_id,
-                service_name="MemoryAgentService"
-            )
+            # Use a separate database session to avoid transaction failures
+            from app.db import get_db_context
+            with get_db_context() as config_db:
+                config_service = MemoryConfigService(config_db)
+                memory_config = config_service.load_memory_config(
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    service_name="MemoryAgentService"
+                )
             config_load_time = time.time() - config_load_start
             logger.info(f"[PERF] Configuration loaded in {config_load_time:.4f}s: {memory_config.config_name}")
         except ConfigurationError as e:

@@ -802,7 +802,8 @@ async def draft_run_compare(
                     web_search=True,
                     memory=True,
                     parallel=payload.parallel,
-                    timeout=payload.timeout or 60
+                    timeout=payload.timeout or 60,
+                    files=payload.files
             ):
                 yield event
 
@@ -906,14 +907,14 @@ def get_app_statistics(
     """
     workspace_id = current_user.current_workspace_id
     stats_service = AppStatisticsService(db)
-    
+
     result = stats_service.get_app_statistics(
         app_id=app_id,
         workspace_id=workspace_id,
         start_date=start_date,
         end_date=end_date
     )
-    
+
     return success(data=result)
 
 
@@ -940,11 +941,11 @@ def get_workspace_api_statistics(
     """
     workspace_id = current_user.current_workspace_id
     stats_service = AppStatisticsService(db)
-    
+
     result = stats_service.get_workspace_api_statistics(
         workspace_id=workspace_id,
         start_date=start_date,
         end_date=end_date
     )
-    
+
     return success(data=result)
