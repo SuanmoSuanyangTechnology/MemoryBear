@@ -10,6 +10,8 @@ class FileBase(BaseModel):
     file_name: str
     file_ext: str
     file_size: int
+    file_url: str | None = None
+    created_at: datetime.datetime | None = None
 
 
 class FileCreate(FileBase):
@@ -26,6 +28,7 @@ class FileUpdate(BaseModel):
     file_name: str | None = Field(None)
     file_ext: str | None = Field(None)
     file_size: str | None = Field(None)
+    file_url: str | None = Field(None)
 
 
 class File(FileBase):
