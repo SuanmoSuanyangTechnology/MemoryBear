@@ -364,6 +364,13 @@ class MemoryReflectionService:
         reflexion_range_value = config_data.get("reflexion_range")
         if reflexion_range_value is None or reflexion_range_value == "":
             reflexion_range_value = "partial"
+            # Map legacy/invalid values to valid enum values
+        reflexion_range_mapping = {
+            "retrieval": "partial",  # Map old 'retrieval' to 'partial'
+            "partial": "partial",
+            "all": "all"
+        }
+        reflexion_range_value = reflexion_range_mapping.get(reflexion_range_value, "partial")
         reflexion_range = ReflectionRange(reflexion_range_value)
 
         baseline_value = config_data.get("baseline")
