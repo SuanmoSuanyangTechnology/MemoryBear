@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:50:05 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:50:05 
+ */
+/**
+ * Model Management Main Page
+ * Manages AI models with three views: group models, model list, and model square
+ * Supports filtering, searching, and CRUD operations
+ */
+
 import { useState, useRef, type FC } from 'react';
 import { Button, Flex, Space, type SegmentedProps, Form } from 'antd'
 import { useTranslation } from 'react-i18next';
@@ -13,8 +25,14 @@ import CustomModelModal from './components/CustomModelModal'
 import CustomSelect from '@/components/CustomSelect'
 import { modelTypeUrl, modelProviderUrl } from '@/api/models'
 
+/**
+ * Available tab keys
+ */
 const tabKeys = ['group', 'list', 'square']
-const ModelManagement: FC = () => {
+
+/**
+ * Model management main component
+ */const ModelManagement: FC = () => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('group');
   const configModalRef = useRef<GroupModelModalRef>(null)
@@ -24,17 +42,20 @@ const ModelManagement: FC = () => {
   const [form] = Form.useForm<Query>()
   const query = Form.useWatch([], form)
 
+  /** Format tab items with translations */
   const formatTabItems = () => {
     return tabKeys.map(value => ({
       value,
       label: t(`modelNew.${value}`),
     }))
   }
+  /** Handle tab change */
   const handleChangeTab = (value: SegmentedProps['value']) => {
     setActiveTab(value as string);
     form.resetFields()
   }
 
+  /** Open edit modal based on active tab */
   const handleEdit = (vo?: ModelListItem | ModelPlazaItem) => {
     switch(activeTab) {
       case 'group':
@@ -45,6 +66,7 @@ const ModelManagement: FC = () => {
         break
     }
   }
+  /** Refresh list based on active tab */
   const handleRefresh = () => {
     switch (activeTab) {
       case 'group':

@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:25:37 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:25:37 
+ */
+/**
+ * Knowledge Configuration Modal
+ * Configures retrieval settings for individual knowledge bases
+ * Supports different retrieval modes: participle, semantic, and hybrid
+ */
+
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { Form, Select, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -9,11 +21,22 @@ import { formatDateTime } from '@/utils/format';
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface KnowledgeConfigModalProps {
+  /** Callback to update knowledge configuration */
   refresh: (values: KnowledgeConfigForm, type: 'knowledgeConfig') => void;
 }
+
+/**
+ * Available retrieval types
+ */
 const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid']
 
+/**
+ * Modal for configuring knowledge base retrieval settings
+ */
 const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfigModalProps>(({
   refresh,
 }, ref) => {
@@ -24,13 +47,14 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
 
   const values = Form.useWatch<KnowledgeConfigForm>([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setData(null)
   };
 
+  /** Open modal with knowledge base data */
   const handleOpen = (data: KnowledgeBase) => {
     form.setFieldsValue({
       retrieve_type: data?.config?.retrieve_type || retrieveTypes[0],
@@ -44,7 +68,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
     setData({...data})
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save knowledge configuration */
   const handleSave = () => {
     form
       .validateFields()
@@ -57,7 +81,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
       });
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -94,7 +118,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           </div>
         )}
         <FormItem name="kb_id" hidden />
-        {/* 检索模式 */}
+        {/* Retrieval mode */}
         <FormItem
           name="retrieve_type"
           label={t('application.retrieve_type')}
@@ -124,7 +148,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             onChange={(value) => form.setFieldValue('top_k', value)}
           />
         </FormItem>
-        {/* 语义相似度阈值 similarity_threshold */}
+        {/* Semantic similarity threshold */}
         {values?.retrieve_type === 'semantic' && (
           <FormItem
             name="similarity_threshold"
@@ -139,7 +163,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             />
           </FormItem>
         )}
-        {/* 分词匹配度阈值 vector_similarity_weight */}
+        {/* Word segmentation matching threshold */}
         {values?.retrieve_type === 'participle' && (
           <FormItem
             name="vector_similarity_weight"
@@ -154,7 +178,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             />
           </FormItem>
         )}
-        {/* 混合检索权重 */}
+        {/* Hybrid retrieval weight */}
         {values?.retrieve_type === 'hybrid' && (
           <>
             <FormItem

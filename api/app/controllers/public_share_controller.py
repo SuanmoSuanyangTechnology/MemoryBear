@@ -587,7 +587,8 @@ async def chat(
                         user_rag_memory_id=user_rag_memory_id,
                         app_id=release.app_id,
                         workspace_id=workspace_id,
-                        release_id=release.id
+                        release_id=release.id,
+                        public=True
                 ):
                     event_type = event.get("event", "message")
                     event_data = event.get("data", {})

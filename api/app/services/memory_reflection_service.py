@@ -108,13 +108,14 @@ class WorkspaceAppService:
             app_info["releases"].append(release_info)
 
     def _extract_memory_content(self, config: Any) -> str:
-        """Extract memory_comtent from config"""
+        """Extract memory_config_id from config (兼容新旧字段名)"""
         if not config or not isinstance(config, dict):
             return None
 
         memory_obj = config.get('memory')
         if memory_obj and isinstance(memory_obj, dict):
-            return memory_obj.get('memory_content')
+            # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
+            return memory_obj.get('memory_config_id') or memory_obj.get('memory_content')
 
         return None
 

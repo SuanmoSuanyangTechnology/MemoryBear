@@ -7,6 +7,10 @@ from celery import Celery
 
 from app.core.config import settings
 
+# macOS fork() safety - must be set before any Celery initialization
+if platform.system() == 'Darwin':
+    os.environ.setdefault('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', 'YES')
+
 # 创建 Celery 应用实例
 # broker: 任务队列（使用 Redis DB 0）
 # backend: 结果存储（使用 Redis DB 10）
@@ -63,6 +67,11 @@ celery_app.conf.update(
         'app.core.memory.agent.read_message_priority': {'queue': 'memory_tasks'},
         'app.core.memory.agent.read_message': {'queue': 'memory_tasks'},
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
+        
+        # Long-term storage tasks → memory_tasks queue (batched write strategies)
+        'app.core.memory.agent.long_term_storage.window': {'queue': 'memory_tasks'},
+        'app.core.memory.agent.long_term_storage.time': {'queue': 'memory_tasks'},
+        'app.core.memory.agent.long_term_storage.aggregate': {'queue': 'memory_tasks'},
         
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},

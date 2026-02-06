@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:42:17 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:42:17 
+ */
+/**
+ * Member Modal
+ * Modal for inviting new members or editing existing member roles
+ * Generates invitation links for new members
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, Select, Modal, App } from 'antd';
 import type { SelectProps } from 'antd';
@@ -12,10 +24,17 @@ const FormItem = Form.Item;
 const { Option } = Select;
 type LabelRender = SelectProps['labelRender'];
 
+/**
+ * Component props
+ */
 interface MemberModalProps {
+  /** Callback to refresh member list */
   refreshTable: () => void;
 }
 
+/**
+ * Modal for member invitation and editing
+ */
 const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
   refreshTable
 }, ref) => {
@@ -36,7 +55,7 @@ const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
   ]
   const values: MemberModalData = Form.useWatch([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     setEditingUser(null);
@@ -44,10 +63,11 @@ const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
     setLoading(false)
   };
 
+  /** Open modal with optional member data for editing */
   const handleOpen = (member?: Member | null) => {
     if (member) {
       setEditingUser(member);
-      // 设置表单值
+      // Set form values
       form.setFieldsValue({
         email: member.account,
         role: member.role
@@ -57,7 +77,7 @@ const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
     }
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save member (invite or update) */
   const handleSave = () => {
     form
       .validateFields()
@@ -100,11 +120,12 @@ const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
       });
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
   }));
+  /** Custom label renderer for role select */
   const labelRender: LabelRender = (props) => {
     const { label, value } = props;
 

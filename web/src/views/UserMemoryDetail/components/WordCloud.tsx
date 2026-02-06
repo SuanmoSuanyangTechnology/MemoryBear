@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:31:24 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:31:24 
+ */
 import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -8,6 +14,11 @@ import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
 import { getEmotionTags } from '@/api/memory'
 
+/**
+ * Word cloud data structure
+ * @property {Array} tags - Emotion tags with statistics
+ * @property {number} total_count - Total count of tags
+ */
 interface WordCloud {
   tags: Array<{
     emotion_type: string;
@@ -17,6 +28,12 @@ interface WordCloud {
   }>;
   total_count: number;
 }
+
+/**
+ * WordCloud Component
+ * Displays emotion distribution as radar chart with statistics
+ * Shows emotion types, counts, percentages, and average intensity
+ */
 const WordCloud: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
@@ -62,7 +79,7 @@ const WordCloud: FC = () => {
   const radarOption = useMemo(() => {
     if (!wordCloud?.tags.length) return {}
     
-    // 将avg_intensity转换为1-100范围
+    // Convert avg_intensity to 1-100 range
     const radarData = wordCloud.tags.map(item => ({
       name: item.emotion_type,
       value: Math.round(item.avg_intensity * 100),

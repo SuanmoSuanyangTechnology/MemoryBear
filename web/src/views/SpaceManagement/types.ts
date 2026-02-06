@@ -1,6 +1,19 @@
-// 应用数据类型
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:48:51 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:48:51 
+ */
+/**
+ * Application data type
+ */
 
+/** Storage type */
 export type StorageType = 'rag' | 'neo4j';
+
+/**
+ * Space data structure
+ */
 export interface Space {
   id: string;
   name: string;
@@ -12,7 +25,9 @@ export interface Space {
   storage_type: StorageType | null;
 }
 
-// 创建表单数据类型
+/**
+ * Create form data type
+ */
 export interface SpaceModalData {
   name: string;
   type: string;
@@ -24,7 +39,9 @@ export interface SpaceModalData {
   storage_type: StorageType;
 }
 
-// 定义组件暴露的方法接口
+/**
+ * Component exposed methods interface
+ */
 export interface SpaceModalRef {
   handleOpen: (space?: Space) => void;
 }

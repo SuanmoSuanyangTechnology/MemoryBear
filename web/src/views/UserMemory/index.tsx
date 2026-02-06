@@ -1,9 +1,20 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:53:44 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 17:54:33
+ */
+/**
+ * User Memory Page
+ * Displays list of end users with their memory statistics and configuration
+ */
+
 import { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom'
 import { Row, Col, List, Skeleton } from 'antd';
-import Empty from '@/components/Empty'
 
+import Empty from '@/components/Empty'
 import type { Data } from './types'
 import { getUserMemoryList } from '@/api/memory';
 import { useUser } from '@/store/user'
@@ -18,11 +29,12 @@ export default function UserMemory() {
   const [data, setData] = useState<Data[]>([]);
   const [search, setSearch] = useState<string | undefined>(undefined);
 
-  // 获取数据
+  /** Fetch user memory list */
   useEffect(() => {
     getData()
   }, []);
 
+  /** Get data from API */
   const getData = () => {
     setLoading(true)
     getUserMemoryList().then((res) => {
@@ -32,6 +44,7 @@ export default function UserMemory() {
       setLoading(false)
     })
   }
+  /** Navigate to user memory detail */
   const handleViewDetail = (id: string | number) => {
     switch (storageType) {
       case 'neo4j':
@@ -41,12 +54,14 @@ export default function UserMemory() {
         navigate(`/user-memory/${id}`)
     }
   }
+  /** Navigate to memory configuration */
   const handleViewMemoryConfig = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     navigate(`/memory`)
   }
 
+  /** Filter data by search term */
   const filterData = useMemo(() => {
     if (search && search.trim() !== '') {
       return data.filter((item) => {

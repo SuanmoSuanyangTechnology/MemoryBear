@@ -1,5 +1,4 @@
 provider: bedrock
-enabled: false
 models:
 - name: ai21
   type: llm

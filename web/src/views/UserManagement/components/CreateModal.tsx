@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:51:40 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:51:40 
+ */
+/**
+ * Create User Modal
+ * Modal for creating new user with email, username, and password
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +19,9 @@ import { addUser } from '@/api/user'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface CreateModalProps {
   refreshTable: () => void;
 }
@@ -23,18 +37,19 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalProps>(({
 
   const values = Form.useWatch([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setLoading(false)
   };
 
+  /** Open modal */
   const handleOpen = () => {
     form.resetFields();
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save user */
   const handleSave = () => {
     form
       .validateFields()
@@ -56,7 +71,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalProps>(({
       });
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

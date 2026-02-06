@@ -1,14 +1,14 @@
 import datetime
 import uuid
 from typing import Optional, Any, List, Dict, Union
-from enum import Enum
+from enum import Enum, StrEnum
 
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
 
 
 # ---------- Multimodal File Support ----------
 
-class FileType(str, Enum):
+class FileType(StrEnum):
     """文件类型枚举"""
     IMAGE = "image"
     DOCUMENT = "document"
@@ -82,6 +82,12 @@ class ToolConfig(BaseModel):
     tool_id: Optional[str] = Field(default=None, description="工具ID")
     operation: Optional[str] = Field(default=None, description="工具特定配置")
 
+class SkillConfig(BaseModel):
+    """技能配置"""
+    enabled: bool = Field(default=True, description="是否启用该技能")
+    skill_ids: Optional[list[str]] = Field(default=list, description="技能ID列表")
+    all_skills: Optional[bool] = Field(default=False, description="是否允许访问所有技能")
+
 
 class ToolOldConfig(BaseModel):
     """工具配置"""
@@ -92,7 +98,7 @@ class ToolOldConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """记忆配置"""
     enabled: bool = Field(default=True, description="是否启用对话历史记忆")
-    memory_content: Optional[str] = Field(default=None, description="选择记忆的内容类型")
+    memory_config_id: Optional[str] = Field(default=None, description="选择记忆的内容类型")
     max_history: int = Field(default=10, ge=0, le=100, description="最大保留的历史对话轮数")
 
 
@@ -156,6 +162,9 @@ class AgentConfigCreate(BaseModel):
         description="Agent 可用的工具列表"
     )
 
+    # 技能配置
+    skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
+
 
 class AppCreate(BaseModel):
     name: str
@@ -207,6 +216,9 @@ class AgentConfigUpdate(BaseModel):
 
     # 工具配置
     tools: Optional[List[ToolConfig]] = Field(default_factory=list, description="工具列表")
+    
+    # 技能配置
+    skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
 
 
 # ---------- Output Schemas ----------
@@ -265,6 +277,8 @@ class AgentConfig(BaseModel):
 
     # 工具配置
     tools: Union[List[ToolConfig], Dict[str, ToolOldConfig]] = []
+
+    skills: Optional[SkillConfig] = {}
 
     is_active: bool
     created_at: datetime.datetime

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:33:54 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 16:33:54 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 18:30:10
  */
 /**
  * User Store
@@ -59,7 +59,8 @@ export interface UserState {
 export const whitePage = [
   '/conversation',
   '/login',
-  '/invite-register'
+  '/invite-register',
+  'jump'
 ]
 
 /** User store */

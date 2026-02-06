@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 15:39:59 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-05 14:21:45
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -612,11 +612,19 @@ const Properties: FC<PropertiesProps> = ({
                 )
               }
 
+              if (key === 'vision_input' && !values?.vision) {
+                return null
+              }
+
               return (
                 <Form.Item 
                   key={key} 
                   name={key}
-                  label={key === 'parallel_count' ? <span className="rb:text-[10px] rb:text-[#5B6167] rb:leading-3.5 rb:-mb-1!">{t(`workflow.config.${selectedNode?.data?.type}.${key}`)}</span> : t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
+                  label={key === 'vision_input'
+                    ? undefined : key === 'parallel_count'
+                    ? <span className="rb:text-[10px] rb:text-[#5B6167] rb:leading-3.5 rb:-mb-1!">{t(`workflow.config.${selectedNode?.data?.type}.${key}`)}</span>
+                    : t(`workflow.config.${selectedNode?.data?.type}.${key}`)
+                  }
                   layout={config.type === 'switch' ? 'horizontal' : 'vertical'}
                   className={key === 'parallel_count' ? 'rb:-mt-3! rb:leading-3.5!' : ''}
                 >
@@ -655,12 +663,15 @@ const Properties: FC<PropertiesProps> = ({
                         // Apply filtering if specified in config
                         if (config.filterNodeTypes || config.filterVariableNames) {
                           return baseVariableList.filter(variable => {
-                            const nodeTypeMatch = !config.filterNodeTypes || 
+                            const nodeTypeMatch = !config.filterNodeTypes ||
                               (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
-                            const variableNameMatch = !config.filterVariableNames || 
+                            const variableNameMatch = !config.filterVariableNames ||
                               (Array.isArray(config.filterVariableNames) && config.filterVariableNames.includes(variable.label));
                             return nodeTypeMatch || variableNameMatch;
                           });
+                        }
+                        if (config.onFilterVariableNames) {
+                          return baseVariableList.filter(variable => Array.isArray(config.onFilterVariableNames) && config.onFilterVariableNames.includes(variable.label));
                         }
                         // Filter child nodes for iteration output
                         if (config.filterChildNodes && selectedNode) {
@@ -685,7 +696,13 @@ const Properties: FC<PropertiesProps> = ({
                       size="small"
                     />
                     : config.type === 'switch'
-                    ? <Switch onChange={key === 'group' ? () => { form.setFieldValue('group_variables', []) } : undefined} />
+                    ? <Switch onChange={
+                        key === 'group'
+                        ? () => { form.setFieldValue('group_variables', []) }
+                        : key === 'vision'
+                        ? () => { form.setFieldValue('vision_input', undefined) }
+                        : undefined
+                      } />
                     : config.type === 'categoryList'
                     ? <CategoryList 
                       parentName={key} 

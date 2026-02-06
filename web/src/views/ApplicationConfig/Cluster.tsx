@@ -1,8 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:29:33 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:29:33 
+ */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom';
-import Card from './components/Card'
 import { Form, Space, Row, Col, Button, Flex, App, Select } from 'antd'
+
+import Card from './components/Card'
 import Tag, { type TagProps } from './components/Tag'
 import CustomSelect from '@/components/CustomSelect';
 import { getMultiAgentConfig, saveMultiAgentConfig, getApplicationList } from '@/api/application';
@@ -26,6 +33,10 @@ import type { Application } from '@/views/ApplicationManagement/types'
 
 const tagColors = ['processing', 'warning', 'default']
 const MAX_LENGTH = 5;
+/**
+ * Multi-agent cluster configuration component
+ * Manages multi-agent orchestration, sub-agents, and collaboration modes
+ */
 const Cluster = forwardRef<ClusterRef>((_props, ref) => {
   const { t } = useTranslation()
   const { message } = App.useApp()
@@ -41,6 +52,11 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
     },
   ])
 
+  /**
+   * Save cluster configuration
+   * @param flag - Whether to show success message
+   * @returns Promise that resolves when save is complete
+   */
   const handleSave = (flag = true) => {
     if (!data) return Promise.resolve()
     if (!values.default_model_config_id && values.orchestration_mode === 'supervisor') {
@@ -80,6 +96,9 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
     getData()
   }, [id])
 
+  /**
+   * Fetch cluster configuration data
+   */
   const getData = () => {
     if (!id) {
       return
@@ -113,9 +132,17 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
       }
     })
   }
+  /**
+   * Open sub-agent modal for add or edit
+   * @param agent - Optional agent data for edit mode
+   */
   const handleSubAgentModal = (agent?: SubAgentItem) => {
     subAgentModalRef.current?.handleOpen(agent)
   }
+  /**
+   * Refresh sub-agents list after add or edit
+   * @param agent - Agent data to add or update
+   */
   const refreshSubAgents = (agent: SubAgentItem) => {
     const index = subAgents.findIndex(item => item.agent_id === agent.agent_id)
       const newSubAgents = [...subAgents]
@@ -130,6 +157,10 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
       setSubAgents(newSubAgents)
     }
   }
+  /**
+   * Delete sub-agent from list
+   * @param agent - Agent to delete
+   */
   const handleDeleteSubAgent = (agent: SubAgentItem) => {
     setSubAgents(prev => prev.filter(item => item.agent_id !== agent.agent_id))
   }
@@ -138,9 +169,16 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
   }))
 
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
+  /**
+   * Open model configuration modal
+   */
   const handleEditModelConfig = () => {
     modelConfigModalRef.current?.handleOpen('multi_agent', values.model_parameters)
   }
+  /**
+   * Save model configuration
+   * @param values - Model parameters
+   */
   const handleSaveModelConfig = (values: Config['model_parameters']) => {
     form.setFieldsValue({
       model_parameters: values

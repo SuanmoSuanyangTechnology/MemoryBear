@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:30:02 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:30:02 
+ */
+/**
+ * Memory Extraction Engine Configuration Page
+ * Configures entity deduplication, disambiguation, semantic anchoring, and pruning
+ * Supports real-time testing with example data
+ */
+
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -14,12 +26,15 @@ import Result from './components/Result'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import CustomSelect from '@/components/CustomSelect'
 
+/** Available configuration section keys */
 const keys = [
-  // 'example', 
   'storageLayerModule', 
   'arrangementLayerModule'
 ]
 
+/**
+ * Configuration description component
+ */
 const ConfigDesc: FC<{ config: Variable, className?: string }> = ({config, className}) => {
   const { t } = useTranslation();
   return (
@@ -54,6 +69,7 @@ const MemoryExtractionEngine: FC = () => {
     }
   }, [values])
 
+  /** Fetch configuration data */
   const getConfig = () => {
     if (!id) {
       return
@@ -79,11 +95,13 @@ const MemoryExtractionEngine: FC = () => {
     }
   }, [id])
 
+  /** Toggle section expansion */
   const handleExpand = (key: string) => {
     const newKeys = expandedKeys.includes(key) ? expandedKeys.filter(item => item !== key) : [...expandedKeys, key]
 
     setExpandedKeys(newKeys)
   }
+  /** Save configuration */
   const handleSave = () => {
     if (!id) {
       return

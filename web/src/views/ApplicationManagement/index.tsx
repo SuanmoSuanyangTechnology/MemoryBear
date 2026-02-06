@@ -1,33 +1,65 @@
-import React, { useState, useRef } from 'react';
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:34:12 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-06 11:10:16
+ */
+/**
+ * Application Management Page
+ * Displays and manages all applications in the workspace
+ * Supports creating, editing, and deleting applications
+ */
+
+import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Row, Col, App } from 'antd';
+import { Button, Row, Col, App, Select } from 'antd';
 import clsx from 'clsx';
 import { DeleteOutlined } from '@ant-design/icons';
+import { useSearchParams } from 'react-router-dom'
+
 import type { Application, ApplicationModalRef, Query } from './types';
-import ApplicationModal from './components/ApplicationModal';
+import ApplicationModal, { types } from './components/ApplicationModal';
 import SearchInput from '@/components/SearchInput'
 import RbCard from '@/components/RbCard/Card'
 import { getApplicationListUrl, deleteApplication } from '@/api/application'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { formatDateTime } from '@/utils/format';
 
+/**
+ * Application management main component
+ */
 const ApplicationManagement: React.FC = () => {
   const { t } = useTranslation();
   const { modal } = App.useApp();
+  const [searchParams] = useSearchParams()
   const [query, setQuery] = useState<Query>({} as Query);
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const scrollListRef = useRef<PageScrollListRef>(null)
 
+  useEffect(() => {
+    // Convert URLSearchParams to a plain object for easier access
+    const data = Object.fromEntries(searchParams)
+    const { type } = data
+    setQuery(prev => ({
+      ...prev,
+      type: type || undefined
+    }))
+  }, [searchParams])
+
+  /** Refresh application list */
   const refresh = () => {
     scrollListRef.current?.refresh();
   }
   
+  /** Open create application modal */
   const handleCreate = () => {
     applicationModalRef.current?.handleOpen();
   }
+  /** Navigate to application configuration page */
   const handleEdit = (item: Application) => {
     window.open(`/#/application/config/${item.id}`);
   }
+  /** Delete application with confirmation */
   const handleDelete = (item: Application) => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: item.name }),
@@ -45,10 +77,26 @@ const ApplicationManagement: React.FC = () => {
       }
     })
   }
+  const handleChangeType = (value?: string) => {
+    setQuery(prev => ({...prev, type: value}))
+  }
   return (
     <>
       <Row gutter={16} className="rb:mb-4">
-        <Col span={12}>
+        <Col span={4}>
+          <Select
+            value={query.type}
+            placeholder={t('application.applicationType')}
+            options={types.map((type) => ({
+              value: type,
+              label: t(`application.${type}`),
+            }))}
+            allowClear
+            className="rb:w-full"
+            onChange={handleChangeType}
+          />
+        </Col>
+        <Col span={8}>
           <SearchInput
             placeholder={t('application.searchPlaceholder')}
             onSearch={(value) => setQuery({ search: value })}

@@ -6,6 +6,8 @@ from app.core.workflow.nodes.question_classifier.config import QuestionClassifie
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 from app.db import get_db_read
 from app.models import ModelType
 from app.services.model_service import ModelConfigService
@@ -23,6 +25,12 @@ class QuestionClassifierNode(BaseNode):
         super().__init__(node_config, workflow_config)
         self.typed_config: QuestionClassifierNodeConfig | None = None
         self.category_to_case_map = {}
+
+    def _output_types(self) -> dict[str, VariableType]:
+        return {
+            "class_name": VariableType.STRING,
+            "output": VariableType.STRING
+        }
 
     def _get_llm_instance(self) -> RedBearLLM:
         """获取LLM实例"""
@@ -65,7 +73,7 @@ class QuestionClassifierNode(BaseNode):
             category_map[category_name] = case_tag
         return category_map
 
-    async def execute(self, state: WorkflowState) -> dict:
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict:
         """执行问题分类"""
         self.typed_config = QuestionClassifierNodeConfig(**self.config)
         self.category_to_case_map = self._build_category_case_map()
@@ -102,7 +110,7 @@ class QuestionClassifierNode(BaseNode):
                     categories=", ".join(category_names),
                     supplement_prompt=supplement_prompt
                 ),
-                state
+                variable_pool
             )
 
             messages = [

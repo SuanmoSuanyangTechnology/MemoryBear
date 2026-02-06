@@ -1,8 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:29:21 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 20:16:45
+ */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom';
 import { Row, Col, Space, Form, Input, Switch, Button, App, Spin } from 'antd'
+
 import Chat from './components/Chat'
 import RbCard from '@/components/RbCard/Card'
 import Card from './components/Card'
@@ -32,7 +39,14 @@ import aiPrompt from '@/assets/images/application/aiPrompt.png'
 import AiPromptModal from './components/AiPromptModal'
 import ToolList from './components/ToolList/ToolList'
 import ChatVariableConfigModal from './components/ChatVariableConfigModal';
+import SkillList from './components/Skill'
+import type { Skill } from '@/views/Skills/types'
 
+/**
+ * Description wrapper component
+ * @param desc - Description text
+ * @param className - Additional CSS classes
+ */
 const DescWrapper: FC<{desc: string, className?: string}> = ({desc, className}) => {
   return (
     <div className={clsx(className, "rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 ")}>
@@ -40,6 +54,12 @@ const DescWrapper: FC<{desc: string, className?: string}> = ({desc, className}) 
     </div>
   )
 }
+/**
+ * Label wrapper component
+ * @param title - Label title
+ * @param className - Additional CSS classes
+ * @param children - Child elements
+ */
 const LabelWrapper: FC<{title: string, className?: string; children?: ReactNode}> = ({title, className, children}) => {
   return (
     <div className={clsx(className, "rb:text-[14px] rb:font-medium rb:leading-5")}>
@@ -48,6 +68,13 @@ const LabelWrapper: FC<{title: string, className?: string; children?: ReactNode}
     </div>
   )
 }
+/**
+ * Switch wrapper component with label and description
+ * @param title - Switch title
+ * @param desc - Optional description
+ * @param name - Form field name
+ * @param needTransition - Whether to translate text
+ */
 const SwitchWrapper: FC<{ title: string, desc?: string, name: string | string[]; needTransition?: boolean; }> = ({ title, desc, name, needTransition = true }) => {
   const { t } = useTranslation();
   return (
@@ -65,6 +92,13 @@ const SwitchWrapper: FC<{ title: string, desc?: string, name: string | string[];
     </div>
   )
 }
+/**
+ * Select wrapper component with label and description
+ * @param title - Select title
+ * @param desc - Description text
+ * @param name - Form field name
+ * @param url - API URL for options
+ */
 const SelectWrapper: FC<{ title: string, desc: string, name: string | string[], url: string }> = ({ title, desc, name, url }) => {
   const { t } = useTranslation();
   return (
@@ -88,6 +122,10 @@ const SelectWrapper: FC<{ title: string, desc: string, name: string | string[], 
   )
 }
 
+/**
+ * Agent configuration component
+ * Manages single agent configuration including prompts, knowledge, memory, variables, and tools
+ */
 const Agent = forwardRef<AgentRef>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams();
@@ -103,7 +141,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   const [isSave, setIsSave] = useState(false)
   const initialized = useRef(false)
   
-  // 初始化完成标记
+  // Initialization flag
   useEffect(() => {
     if (data) {
       initialized.current = true
@@ -121,10 +159,15 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     getData()
   }, [])
 
+  /**
+   * Fetch agent configuration data
+   */
   const getData = () => {
     setLoading(true)
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
+      const { skills } = response
+      let allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
       let allTools = Array.isArray(response.tools) ? response.tools : []
       const memoryContent = response.memory?.memory_content
       const parsedMemoryContent = memoryContent === null || memoryContent === '' 
@@ -136,6 +179,10 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         memory: {
           ...response.memory,
           memory_content: parsedMemoryContent
+        },
+        skills: {
+          ...skills,
+          skill_ids: allSkills
         }
       })
       setData({
@@ -147,6 +194,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     })
   }
 
+  /**
+   * Refresh configuration after model changes
+   * @param vo - Model configuration
+   * @param type - Source type (model or chat)
+   */
   const refresh = (vo: ModelConfig, type: Source) => {
     if (type === 'model') {
       const { default_model_config_id, ...rest } = vo
@@ -188,20 +240,30 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     }
   }
 
+  /**
+   * Open model configuration modal
+   */
   const handleModelConfig = () => {
     modelConfigModalRef.current?.handleOpen('model')
   }
+  /**
+   * Clear all debugging chat sessions
+   */
   const handleClearDebugging = () => {
     setChatList([])
   }
 
-  // 保存Agent配置
+  /**
+   * Save agent configuration
+   * @param flag - Whether to show success message
+   * @returns Promise that resolves when save is complete
+   */
   const handleSave = (flag = true) => {
     if (!isSave || !data) return Promise.resolve()
-    const { memory, knowledge_retrieval, tools, ...rest } = values
+    const { memory, knowledge_retrieval, tools, skills, ...rest } = values
     const { knowledge_bases = [], ...knowledgeRest } = knowledge_retrieval || {}
     const { memory_content } = memory || {}
-    // 从原数据中获取memory的其他必要属性
+    // Get other necessary properties of memory from original data
     const originalMemory = data.memory || ({} as MemoryConfig)
     
     const params: Config = {
@@ -224,7 +286,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         tool_id: vo.tool_id,
         operation: vo.operation,
         enabled: vo.enabled
-      }))
+      })),
+      skills: {
+        ...skills,
+        skill_ids: (skills?.skill_ids as Skill[])?.map(vo => vo.id)
+      }
     }
     
     return new Promise((resolve, reject) => {
@@ -240,6 +306,9 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
       })
     })
   }
+  /**
+   * Fetch available models list
+   */
   const getModels = () => {
     getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
       .then(res => {
@@ -247,6 +316,9 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         setModelList(response.items)
       })
   }
+  /**
+   * Add new model for debugging
+   */
   const handleAddModel = () => {
     modelConfigModalRef.current?.handleOpen('chat')
   }
@@ -268,9 +340,16 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   }))
 
   const aiPromptModalRef = useRef<AiPromptModalRef>(null)
+  /**
+   * Open AI prompt generation modal
+   */
   const handlePrompt = () => {
     aiPromptModalRef.current?.handleOpen()
   }
+  /**
+   * Update prompt and extract variables
+   * @param value - New prompt value
+   */
   const updatePrompt = (value: string) => {
     form.setFieldValue('system_prompt', value)
     const variables = value.match(/\{\{([^}]+)\}\}/g)?.map(match => match.slice(2, -2)) || []
@@ -285,15 +364,26 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     updateVariableList(newVariableList)
   }
 
+  /**
+   * Update variable list
+   * @param list - New variable list
+   */
   const updateVariableList = (list: Variable[]) => {
     form.setFieldValue('variables', [...list])
     setChatVariables([...list])
   }
   const chatVariableConfigModalRef = useRef<ChatVariableConfigModalRef>(null)
   const [chatVariables, setChatVariables] = useState<Variable[]>([])
+  /**
+   * Open chat variable configuration modal
+   */
   const handleOpenVariableConfig = () => {
     chatVariableConfigModalRef.current?.handleOpen(chatVariables)
   }
+  /**
+   * Save chat variable configuration
+   * @param values - Variable values
+   */
   const handleSaveChatVariable = (values: Variable[]) => {
     setChatVariables(values)
   }
@@ -347,7 +437,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                 <Knowledge />
               </Form.Item>
 
-              {/* 记忆配置 */}
+              {/* Memory Configuration */}
               <Card title={t('application.memoryConfiguration')}>
                 <Space size={24} direction='vertical' style={{ width: '100%' }}>
                   <SwitchWrapper title="dialogueHistoricalMemory" desc="dialogueHistoricalMemoryDesc" name={['memory', 'enabled']} />
@@ -360,12 +450,16 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                 </Space>
               </Card>
 
-              <Form.Item name="variables">
+              <Form.Item name="variables" noStyle>
                 <VariableList />
               </Form.Item>
-              
-              {/* 工具配置 */}
-              <Form.Item name="tools">
+
+              <Form.Item name="skills" noStyle>
+                <SkillList />
+              </Form.Item>
+
+              {/* Tool Configuration */}
+              <Form.Item name="tools" noStyle>
                 <ToolList />
               </Form.Item>
             </Space>

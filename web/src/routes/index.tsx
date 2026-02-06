@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:33:11 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 16:33:11 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 18:11:34
  */
 /**
  * Route Configuration
@@ -22,7 +22,6 @@ import { createHashRouter, createRoutesFromElements, Route } from 'react-router-
 
 /** Import route configuration JSON */
 import routesConfig from './routes.json';
-
 
 /** Recursively collect all element names from routes */
 function collectElements(routes: RouteConfig[]): Set<string> {
@@ -52,6 +51,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   BasicLayout: lazy(() => import('@/components/Layout/BasicLayout')),
   LoginLayout: lazy(() => import('@/components/Layout/LoginLayout')),
   NoAuthLayout: lazy(() => import('@/components/Layout/NoAuthLayout')),
+  BasicAuthLayout: lazy(() => import('@/components/Layout/BasicAuthLayout')),
   /** View components */
   Index: lazy(() => import('@/views/Index')),
   Home: lazy(() => import('@/views/Home')),
@@ -88,6 +88,9 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   Ontology: lazy(() => import('@/views/Ontology')),
   OntologyDetail: lazy(() => import('@/views/Ontology/pages/Detail')),
   Prompt: lazy(() => import('@/views/Prompt')),
+  Skills: lazy(() => import('@/views/Skills')),
+  SkillConfig: lazy(() => import('@/views/Skills/pages/SkillConfig')),
+  Jump: lazy(() => import('@/views/JumpPage')),
   Login: lazy(() => import('@/views/Login')),
   InviteRegister: lazy(() => import('@/views/InviteRegister')),
   NoPermission: lazy(() => import('@/views/NoPermission')),

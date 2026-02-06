@@ -1,7 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:23 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:23 
+ */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Space, Tooltip, Image } from 'antd';
+
 import RbCard from '@/components/RbCard/Card'
 import {
   getPerceptualLastVisual,
@@ -9,6 +16,22 @@ import {
   getPerceptualLastText,
 } from '@/api/memory'
 
+/**
+ * Perceptual last info item structure
+ * @property {string} id - Item ID
+ * @property {string} file_name - File name
+ * @property {string} file_ext - File extension
+ * @property {string} file_path - File path URL
+ * @property {number} storage_type - Storage type
+ * @property {string} summary - Content summary
+ * @property {string[]} keywords - Keywords
+ * @property {string} topic - Topic
+ * @property {string} domain - Domain
+ * @property {number | string} created_time - Creation time
+ * @property {string[]} scene - Scene information
+ * @property {number} speaker_count - Speaker count
+ * @property {number} section_count - Section count
+ */
 interface PerceptualLastInfoItem {
   id: string;
   file_name: string;
@@ -25,12 +48,20 @@ interface PerceptualLastInfoItem {
   section_count: number;
 }
 
+/**
+ * Field keys for different perceptual types
+ */
 const KEYS = {
   last_visual: ['summary', 'keywords', 'topic', 'domain', 'scene'],
   last_listen: ['summary', 'keywords', 'topic', 'domain', 'speaker_count'],
   last_text: ['summary', 'keywords', 'topic', 'domain', 'section_count'],
 }
 
+/**
+ * PerceptualLastInfo Component
+ * Displays the last perceptual memory (visual, audio, or text)
+ * Shows file preview and metadata based on perceptual type
+ */
 const PerceptualLastInfo: FC<{ type: 'last_visual' | 'last_listen' | 'last_text' }> = ({ type }) => {
   const { t } = useTranslation()
   const { id } = useParams()

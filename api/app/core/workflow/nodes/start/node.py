@@ -7,9 +7,10 @@ Start 节点实现
 import logging
 from typing import Any
 
-from app.core.workflow.nodes.base_config import VariableType
+from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.start.config import StartNodeConfig
+from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +37,25 @@ class StartNode(BaseNode):
 
         # 解析并验证配置
         self.typed_config: StartNodeConfig | None = None
+        self.output_var_types = {}
 
-    async def execute(self, state: WorkflowState) -> dict[str, Any]:
+    def _output_types(self) -> dict[str, VariableType]:
+        return self.output_var_types | {
+            "message": VariableType.STRING,
+            "execution_id": VariableType.STRING,
+            "conversation_id": VariableType.STRING,
+            "workspace_id": VariableType.STRING,
+            "user_id": VariableType.STRING,
+        }
+
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """执行 start 节点业务逻辑
         
         Start 节点输出系统变量、会话变量和自定义变量。
         
         Args:
             state: 工作流状态
+            variable_pool: 变量池
         
         Returns:
             包含系统参数、会话变量和自定义变量的字典
@@ -51,19 +63,16 @@ class StartNode(BaseNode):
         self.typed_config = StartNodeConfig(**self.config)
         logger.info(f"节点 {self.node_id} (Start) 开始执行")
 
-        # 创建变量池实例（在方法内复用）
-        pool = self.get_variable_pool(state)
-
         # 处理自定义变量（传入 pool 避免重复创建）
-        custom_vars = self._process_custom_variables(pool)
+        custom_vars = self._process_custom_variables(variable_pool)
 
         # 返回业务数据（包含自定义变量）
         result = {
-            "message": pool.get("sys.message"),
-            "execution_id": pool.get("sys.execution_id"),
-            "conversation_id": pool.get("sys.conversation_id"),
-            "workspace_id": pool.get("sys.workspace_id"),
-            "user_id": pool.get("sys.user_id"),
+            "message": variable_pool.get_value("sys.message"),
+            "execution_id": variable_pool.get_value("sys.execution_id"),
+            "conversation_id": variable_pool.get_value("sys.conversation_id"),
+            "workspace_id": variable_pool.get_value("sys.workspace_id"),
+            "user_id": variable_pool.get_value("sys.user_id"),
             **custom_vars  # 自定义变量作为节点输出的一部分
         }
 
@@ -74,7 +83,7 @@ class StartNode(BaseNode):
 
         return result
 
-    def _process_custom_variables(self, pool) -> dict[str, Any]:
+    def _process_custom_variables(self, pool: VariablePool) -> dict[str, Any]:
         """处理自定义变量
         
         从输入数据中提取自定义变量，应用默认值和验证。
@@ -89,13 +98,14 @@ class StartNode(BaseNode):
             ValueError: 缺少必需变量
         """
         # 获取输入数据中的自定义变量
-        input_variables = pool.get("sys.input_variables", default={})
+        input_variables = pool.get_value("sys.input_variables", default={}, strict=False)
 
         processed = {}
 
         # 遍历配置的变量定义
         for var_def in self.typed_config.variables:
             var_name = var_def.name
+            var_type = var_def.type
 
             # 检查变量是否存在
             if var_name in input_variables:
@@ -116,21 +126,12 @@ class StartNode(BaseNode):
                     f"变量 '{var_name}' 使用默认值: {var_def.default}"
                 )
             else:
-                match var_def.type:
-                    case VariableType.STRING:
-                        processed[var_name] = ""
-                    case VariableType.NUMBER:
-                        processed[var_name] = 0
-                    case VariableType.OBJECT:
-                        processed[var_name] = {}
-                    case VariableType.BOOLEAN:
-                        processed[var_name] = False
-                    case VariableType.ARRAY_NUMBER | VariableType.ARRAY_OBJECT | VariableType.ARRAY_BOOLEAN | VariableType.ARRAY_STRING:
-                        processed[var_name] = []
+                processed[var_name] = DEFAULT_VALUE(var_type)
+            self.output_var_types[var_name] = var_type
 
         return processed
 
-    def _extract_input(self, state: WorkflowState) -> dict[str, Any]:
+    def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """提取输入数据（用于记录）
         
         Args:
@@ -139,11 +140,9 @@ class StartNode(BaseNode):
         Returns:
             输入数据字典
         """
-        pool = self.get_variable_pool(state)
-
         return {
-            "execution_id": pool.get("sys.execution_id"),
-            "conversation_id": pool.get("sys.conversation_id"),
-            "message": pool.get("sys.message"),
-            "conversation_vars": pool.get_all_conversation_vars()
+            "execution_id": variable_pool.get_value("sys.execution_id"),
+            "conversation_id": variable_pool.get_value("sys.conversation_id"),
+            "message": variable_pool.get_value("sys.message"),
+            "conversation_vars": variable_pool.get_all_conversation_vars()
         }

@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:43:51 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:43:51 
+ */
+/**
+ * Prompt Detail Modal
+ * Displays full prompt details with copy, edit, and delete actions
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Flex, Button, App } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -14,16 +25,18 @@ const PromptDetail = forwardRef<PromptDetailRef, { handleEdit: (item: HistoryIte
   const [visible, setVisible] = useState(false);
   const [data, setData] = useState<HistoryItem>({} as HistoryItem)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal */
   const handleClose = () => {
     setVisible(false);
   };
 
+  /** Open modal with data */
   const handleOpen = (vo: HistoryItem) => {
     setVisible(true);
     setData(vo)
   };
-    const handleCopy = (text = '') => {
+  /** Copy text to clipboard */
+  const handleCopy = (text = '') => {
       copy(text)
       message.success(t('common.copySuccess'))
     }

@@ -43,7 +43,7 @@ class TemplateRenderer:
     def render(
             self,
             template: str,
-            variables: dict[str, Any],
+            conv_vars: dict[str, Any],
             node_outputs: dict[str, Any],
             system_vars: dict[str, Any] | None = None
     ) -> str:
@@ -51,7 +51,7 @@ class TemplateRenderer:
         
         Args:
             template: 模板字符串
-            variables: 用户定义的变量
+            conv_vars: 会话变量
             node_outputs: 节点输出结果
             system_vars: 系统变量
         
@@ -80,20 +80,11 @@ class TemplateRenderer:
             '分析结果: 正面情绪'
         """
         # 构建命名空间上下文
-        # variables 的结构：{"sys": {...}, "conv": {...}}
-        sys_vars = variables.get("sys", {}) if isinstance(variables, dict) else {}
-        conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
-        if self.strict:
-            context = defaultdict(dict)
-            context["conv"] = conv_vars
-            context["node"] = node_outputs
-            context["sys"] = {**(system_vars or {}), **sys_vars}
-        else:
-            context = {
-                "conv": conv_vars,  # 会话变量：{{conv.user_name}}
-                "node": node_outputs,  # 节点输出：{{node.node_1.output}}
-                "sys": {**(system_vars or {}), **sys_vars},  # 系统变量：{{sys.execution_id}}（合并两个来源）
-            }
+        context = {
+            "conv": conv_vars,  # 会话变量：{{conv.user_name}}
+            "node": node_outputs,  # 节点输出：{{node.node_1.output}}
+            "sys": system_vars,  # 系统变量：{{sys.execution_id}}
+        }
 
         # 支持直接通过节点ID访问节点输出：{{llm_qa.output}}
         # 将所有节点输出添加到顶层上下文
@@ -157,9 +148,9 @@ _default_renderer = TemplateRenderer(strict=True)
 
 def render_template(
         template: str,
-        variables: dict[str, Any],
+        conv_vars: dict[str, Any],
         node_outputs: dict[str, Any],
-        system_vars: dict[str, Any] | None = None,
+        system_vars: dict[str, Any],
         strict: bool = True
 ) -> str:
     """渲染模板（便捷函数）
@@ -167,7 +158,7 @@ def render_template(
     Args:
         strict: 严格模式
         template: 模板字符串
-        variables: 用户变量
+        conv_vars: 会话变量
         node_outputs: 节点输出
         system_vars: 系统变量
     
@@ -184,7 +175,7 @@ def render_template(
         '请分析: 这是一段文本'
     """
     renderer = TemplateRenderer(strict=strict)
-    return renderer.render(template, variables, node_outputs, system_vars)
+    return renderer.render(template, conv_vars, node_outputs, system_vars)
 
 
 def validate_template(template: str) -> list[str]:

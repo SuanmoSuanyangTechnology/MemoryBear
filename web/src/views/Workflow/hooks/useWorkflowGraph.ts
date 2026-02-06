@@ -159,7 +159,7 @@ export const useWorkflowGraph = ({
               nodeLibraryConfig.config[key].defaultValue = Object.entries(config[key]).map(([name, value]) => ({ name, value }))
             } else if (type === 'code' && key === 'code' && config[key] && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
               try {
-                nodeLibraryConfig.config[key].defaultValue = atob(config[key] as string)
+                nodeLibraryConfig.config[key].defaultValue = decodeURIComponent(atob(config[key] as string))
               } catch {
                 nodeLibraryConfig.config[key].defaultValue = config[key]
               }
@@ -943,7 +943,7 @@ export const useWorkflowGraph = ({
                 const code = data.config[key].defaultValue || ''
                 itemConfig = {
                   ...itemConfig,
-                  code: btoa(code || '')
+                  code: btoa(encodeURIComponent(code || ''))
                 }
               } else if (key === 'memory' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const { messages, ...rest } = data.config[key].defaultValue

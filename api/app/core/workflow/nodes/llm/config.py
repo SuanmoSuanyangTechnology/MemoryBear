@@ -4,7 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition, VariableType
+from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition
+from app.core.workflow.variable.base_variable import VariableType
 
 
 class MessageConfig(BaseModel):
@@ -68,6 +69,16 @@ class LLMNodeConfig(BaseNodeConfig):
     memory: MemoryWindowSetting = Field(
         default_factory=MemoryWindowSetting,
         description="对话上下文窗口"
+    )
+
+    vision: bool = Field(
+        default=False,
+        description="是否启用视觉模型"
+    )
+
+    vision_input: str = Field(
+        default=None,
+        description="视觉输入"
     )
 
     # 简单模式

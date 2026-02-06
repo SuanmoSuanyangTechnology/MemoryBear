@@ -1,9 +1,23 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:30:11 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 10:08:49
+ */
+/**
+ * Result Component
+ * Displays real-time extraction results with progress tracking
+ * Shows text preprocessing, knowledge extraction, node/edge creation, and deduplication
+ */
+
 import { type FC, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Space, Button, Progress } from 'antd'
 import { ExclamationCircleFilled, CheckCircleFilled, ClockCircleOutlined, LoadingOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
+import type { AnyObject } from 'antd/es/_util/type';
+
 import Card from './Card'
 import RbCard from '@/components/RbCard/Card'
 import RbAlert from '@/components/RbAlert'
@@ -13,18 +27,24 @@ import { type SSEMessage } from '@/utils/stream'
 import Tag, { type TagProps } from '@/components/Tag'
 import Markdown from '@/components/Markdown'
 import { groupDataByType } from '../constant'
-import type { AnyObject } from 'antd/es/_util/type';
 
+/** Result metric mapping */
 const resultObj = {
   extractTheNumberOfEntities: 'entities.extracted_count',
   numberOfEntityDisambiguation: 'disambiguation.block_count',
   memoryFragments: 'memory.chunks',
   numberOfRelationalTriples: 'triplets.count'
 }
+/**
+ * Component props
+ */
 interface ResultProps {
   loading: boolean;
   handleSave: () => void;
 }
+/**
+ * Module processing item
+ */
 interface ModuleItem {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   data: any[],
@@ -32,6 +52,7 @@ interface ModuleItem {
   start_at?: number;
   end_at?: number;
 }
+/** Tag color mapping by status */
 const tagColors: {
   [key: string]:  TagProps['color']
 } = {
@@ -40,6 +61,7 @@ const tagColors: {
   completed: 'success',
   failed: 'error'
 }
+/** Initial module state */
 const initObj = {
   data: [],
   status: 'pending',
@@ -57,6 +79,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
   const [creatingNodesEdges, setCreatingNodesEdges] = useState<ModuleItem>(initObj as ModuleItem)
   const [deduplication, setDeduplication] = useState<ModuleItem>(initObj as ModuleItem)
 
+  /** Run pilot test */
   const handleRun = () => {
     if(!id) return
     setTextPreprocessing({...initObj} as ModuleItem)
@@ -68,20 +91,20 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
     
       list.forEach((data: AnyObject) => {
         switch(data.event) {
-          case 'text_preprocessing': // 开始预处理文本
+          case 'text_preprocessing': // Start text preprocessing
             setTextPreprocessing(prev => ({
               ...prev,
               status: 'processing',
               start_at: data.data.time
             }))
             break
-          case 'text_preprocessing_result': // 预处理文本分块中
+          case 'text_preprocessing_result': // Text preprocessing in progress
             setTextPreprocessing(prev => ({
               ...prev,
               data: [...prev.data, data.data?.data]
             }))
             break
-          case 'text_preprocessing_complete': // 预处理文本完成
+          case 'text_preprocessing_complete': // Text preprocessing complete
             setTextPreprocessing(prev => ({
               ...prev,
               result: data.data?.data,
@@ -89,20 +112,20 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               end_at: data.data.time
             }))
             break
-          case 'knowledge_extraction': // 开始知识抽取
+          case 'knowledge_extraction': // Start knowledge extraction
             setKnowledgeExtraction(prev => ({
               ...prev,
               status: 'processing',
               start_at: data.data.time
             }))
             break
-          case 'knowledge_extraction_result': // 知识抽取中
+          case 'knowledge_extraction_result': // Knowledge extraction in progress
             setKnowledgeExtraction(prev => ({
               ...prev,
               data: [...prev.data, data.data?.data]
             }))
             break
-          case 'knowledge_extraction_complete': // 知识抽取完成
+          case 'knowledge_extraction_complete': // Knowledge extraction complete
             setKnowledgeExtraction(prev => ({
               ...prev,
               result: data.data?.data,
@@ -110,20 +133,20 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               end_at: data.data.time
             }))
             break
-          case 'creating_nodes_edges': // 开始创建节点和边
+          case 'creating_nodes_edges': // Start creating nodes and edges
             setCreatingNodesEdges(prev => ({
               ...prev,
               status: 'processing',
               start_at: data.data.time
             }))
             break
-          case 'creating_nodes_edges_result': // 创建节点和边中
+          case 'creating_nodes_edges_result': // Creating nodes and edges in progress
             setCreatingNodesEdges(prev => ({
               ...prev,
               data: [...prev.data, data.data?.data]
             }))
             break
-          case 'creating_nodes_edges_complete': // 创建节点和边完成
+          case 'creating_nodes_edges_complete': // Creating nodes and edges complete
             setCreatingNodesEdges(prev => ({
               ...prev,
               result: data.data?.data,
@@ -131,20 +154,20 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               end_at: data.data.time
             }))
             break
-          case 'deduplication': // 开始去重消歧
+          case 'deduplication': // Start deduplication and disambiguation
             setDeduplication(prev => ({
               ...prev,
               status: 'processing',
               start_at: data.data.time
             }))
             break
-          case 'dedup_disambiguation_result': // 去重消歧中
+          case 'dedup_disambiguation_result': // Deduplication and disambiguation in progress
             setDeduplication(prev => ({
               ...prev,
               data: [...prev.data, data.data.data]
             }))
             break
-          case 'dedup_disambiguation_complete': // 去重消歧完成
+          case 'dedup_disambiguation_complete': // Deduplication and disambiguation complete
             setDeduplication(prev => ({
               ...prev,
               result: data.data?.data,
@@ -152,9 +175,9 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               end_at: data.data.time
             }))
             break
-          case 'generating_results': // 开始生成结果
+          case 'generating_results': // Generating results
             break
-          case 'result': // 结果
+          case 'result': // Result
             setTestResult(data.data?.extracted_result)
             break
         }
@@ -172,6 +195,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
   const completedNum = [textPreprocessing, knowledgeExtraction, creatingNodesEdges, deduplication].filter(item => item.status === 'completed').length
   const deduplicationData = groupDataByType(deduplication.data, 'result_type')
 
+  /** Format status tag */
   const formatTag = (status: string) => {
     return (
       <Tag color={tagColors[status]}>
@@ -181,12 +205,14 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
       </Tag>
     )
   }
+  /** Format processing time */
   const formatTime = (data: ModuleItem, color?: string) => {
     if (typeof data.end_at === 'number' && typeof data.start_at === 'number') {
       return <div className={`rb:mt-3 rb:text-[${color ?? '#155EEF'}]`}>{t('memoryExtractionEngine.time')}{data.end_at - data.start_at}ms</div>
     }
     return null
   }
+  /** Convert first character to lowercase */
   const lowercaseFirst = (str: string) => str.charAt(0).toLowerCase() + str.slice(1)
   return (
     <Card
@@ -202,7 +228,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
             <RbAlert color="blue" icon={<ExclamationCircleFilled />} className="rb:mb-3.5">
               {t('memoryExtractionEngine.processing')}
             </RbAlert>
-            {/* 整体进度 */}
+            {/* Overall Progress */}
             <div className="rb:mb-2">
               <div className="rb:flex rb:items-center rb:justify-between rb:text-[12px] rb:leading-4 rb:font-regular">
                 {t('memoryExtractionEngine.overallProgress')}
@@ -220,7 +246,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
             </RbAlert>
         }
         <Space size={16} direction="vertical" style={{ width: '100%' }}>
-          {/* 文本预处理 */}
+          {/* Text Preprocessing */}
           <RbCard
             title={t(`memoryExtractionEngine.text_preprocessing`)}
             extra={formatTag(textPreprocessing.status)}
@@ -240,7 +266,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               </RbAlert>
             }
           </RbCard>
-          {/* 知识抽取 */}
+          {/* Knowledge Extraction */}
           <RbCard
             title={t(`memoryExtractionEngine.knowledge_extraction`)}
             extra={formatTag(knowledgeExtraction.status)}
@@ -260,7 +286,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               })}
             </RbAlert>}
           </RbCard>
-          {/* 创建实体关系 */}
+          {/* Creating Entity Relationships */}
           <RbCard
             title={t(`memoryExtractionEngine.creating_nodes_edges`)}
             extra={formatTag(creatingNodesEdges.status)}
@@ -280,7 +306,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               {t('memoryExtractionEngine.creating_nodes_edges_desc', {num: creatingNodesEdges.result.entity_entity_edges_count})}
             </RbAlert>}
           </RbCard>
-          {/* 去重消歧 */}
+          {/* Deduplication and Disambiguation */}
           <RbCard
             title={t(`memoryExtractionEngine.deduplication`)}
             extra={formatTag(deduplication.status)}
@@ -307,7 +333,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
                   const keys = (resultObj as Record<string, string>)[key].split('.')
                   return (
                   <div key={index}>
-                    <div className="rb:text-[24px] rb:leading-[30px] rb:font-extrabold">{(testResult?.[keys[0] as keyof TestResult] as any)?.[keys[1]]}</div>
+                    <div className="rb:text-[24px] rb:leading-7.5 rb:font-extrabold">{(testResult?.[keys[0] as keyof TestResult] as any)?.[keys[1]]}</div>
                     <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">{t(`memoryExtractionEngine.${key}`)}</div>
                     <div className="rb:mt-1 rb:text-[12px] rb:text-[#369F21] rb:leading-3.5 rb:font-regular">
                       {}

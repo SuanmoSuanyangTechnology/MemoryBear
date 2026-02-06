@@ -15,6 +15,8 @@ from app.core.exceptions import BusinessException
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.llm.config import LLMNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 from app.db import get_db_context
 from app.models import ModelType
 from app.services.model_service import ModelConfigService
@@ -66,59 +68,34 @@ class LLMNode(BaseNode):
     - ai/assistant: AI 消息（AIMessage）
     """
 
+    def _output_types(self) -> dict[str, VariableType]:
+        return {"output": VariableType.STRING}
+
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
         self.typed_config: LLMNodeConfig | None = None
 
-    def _render_context(self, message, state):
-        context = f"<context>{self._render_template(self.typed_config.context, state)}</context>"
+    def _render_context(self, message: str, variable_pool: VariablePool):
+        context = f"<context>{self._render_template(self.typed_config.context, variable_pool)}</context>"
         return re.sub(r"{{context}}", context, message)
 
-    def _prepare_llm(self, state: WorkflowState, stream: bool = False) -> tuple[RedBearLLM, list | str]:
+    async def _prepare_llm(
+            self,
+            state: WorkflowState,
+            variable_pool: VariablePool,
+            stream: bool = False
+    ) -> RedBearLLM:
         """准备 LLM 实例（公共逻辑）
         
         Args:
-            state: 工作流状态
+            variable_pool: 变量池
         
         Returns:
             (llm, messages_or_prompt): LLM 实例和消息列表或 prompt 字符串
         """
-
-        # 1. 处理消息格式（优先使用 messages）
         self.typed_config = LLMNodeConfig(**self.config)
-        messages_config = self.typed_config.messages
 
-        if messages_config:
-            # 使用 LangChain 消息格式
-            messages = []
-            for msg_config in messages_config:
-                role = msg_config.role.lower()
-                content_template = msg_config.content
-                content_template = self._render_context(content_template, state)
-                content = self._render_template(content_template, state)
-
-                # 根据角色创建对应的消息对象
-                if role == "system":
-                    messages.append({"role": "system", "content": content})
-                elif role in ["user", "human"]:
-                    messages.append({"role": "user", "content": content})
-                elif role in ["ai", "assistant"]:
-                    messages.append({"role": "assistant", "content": content})
-                else:
-                    logger.warning(f"未知的消息角色: {role}，默认使用 user")
-                    messages.append({"role": "user", "content": content})
-
-            if self.typed_config.memory.enable:
-                # if self.typed_config.memory.enable_window:
-                messages = messages[:-1] + state["messages"][-self.typed_config.memory.window_size:] + messages[-1:]
-            prompt_or_messages = messages
-        else:
-            # 使用简单的 prompt 格式（向后兼容）
-            prompt_template = self.config.get("prompt", "")
-            prompt_or_messages = self._render_template(prompt_template, state)
-
-        # 2. 获取模型配置
-        model_id = self.config.get("model_id")
+        model_id = self.typed_config.model_id
         if not model_id:
             raise ValueError(f"节点 {self.node_id} 缺少 model_id 配置")
 
@@ -157,27 +134,82 @@ class LLMNode(BaseNode):
 
         logger.debug(f"创建 LLM 实例: provider={provider}, model={model_name}, streaming={stream}")
 
-        return llm, prompt_or_messages
+        messages_config = self.typed_config.messages
 
-    async def execute(self, state: WorkflowState) -> AIMessage:
+        if messages_config:
+            # 使用 LangChain 消息格式
+            messages = []
+            for msg_config in messages_config:
+                role = msg_config.role.lower()
+                content_template = msg_config.content
+                content_template = self._render_context(content_template, variable_pool)
+                content = self._render_template(content_template, variable_pool)
+
+                # 根据角色创建对应的消息对象
+                if role == "system":
+                    messages.append({
+                        "role": "system",
+                        "content": content
+                    })
+                elif role in ["user", "human"]:
+                    messages.append({
+                        "role": "user",
+                        "content": content
+                    })
+                elif role in ["ai", "assistant"]:
+                    messages.append({
+                        "role": "assistant",
+                        "content": content
+                    })
+                else:
+                    logger.warning(f"未知的消息角色: {role}，默认使用 user")
+                    messages.append({
+                        "role": "user",
+                        "content": content
+                    })
+
+            if self.typed_config.vision_input and self.typed_config.vision:
+                file_content = []
+                files = variable_pool.get_value(self.typed_config.vision_input)
+                for file in files:
+                    content = await self.process_message(provider, file, self.typed_config.vision)
+                    if content:
+                        file_content.append(content)
+                if messages and messages[-1]["role"] == 'user':
+                    messages[-1]['content'] = [messages[-1]["content"]] + file_content
+                else:
+                    messages.append({"role": "user", "content": file_content})
+
+            if self.typed_config.memory.enable:
+                messages = messages[:-1] + state["messages"][-self.typed_config.memory.window_size:] + messages[-1:]
+            self.messages = messages
+        else:
+            # 使用简单的 prompt 格式（向后兼容）
+            prompt_template = self.config.get("prompt", "")
+            self.messages = self._render_template(prompt_template, variable_pool)
+
+        return llm
+
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> AIMessage:
         """非流式执行 LLM 调用
         
         Args:
             state: 工作流状态
+            variable_pool: 变量池
         
         Returns:
             LLM 响应消息
         """
         # self.typed_config = LLMNodeConfig(**self.config)
-        llm, prompt_or_messages = self._prepare_llm(state, True)
+        llm = await self._prepare_llm(state, variable_pool, False)
 
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（非流式）")
 
         # 调用 LLM（支持字符串或消息列表）
-        response = await llm.ainvoke(prompt_or_messages)
+        response = await llm.ainvoke(self.messages)
         # 提取内容
         if hasattr(response, 'content'):
-            content = response.content
+            content = self.process_model_output(response.content)
         else:
             content = str(response)
 
@@ -186,16 +218,15 @@ class LLMNode(BaseNode):
         # 返回 AIMessage（包含响应元数据）
         return response if isinstance(response, AIMessage) else AIMessage(content=content)
 
-    def _extract_input(self, state: WorkflowState) -> dict[str, Any]:
+    def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """提取输入数据（用于记录）"""
-        _, prompt_or_messages = self._prepare_llm(state)
 
         return {
-            "prompt": prompt_or_messages if isinstance(prompt_or_messages, str) else None,
+            "prompt": self.messages if isinstance(self.messages, str) else None,
             "messages": [
                 {"role": msg.get("role"), "content": msg.get("content", "")}
-                for msg in prompt_or_messages
-            ] if isinstance(prompt_or_messages, list) else None,
+                for msg in self.messages
+            ] if isinstance(self.messages, list) else None,
             "config": {
                 "model_id": self.config.get("model_id"),
                 "temperature": self.config.get("temperature"),
@@ -215,24 +246,25 @@ class LLMNode(BaseNode):
             usage = business_result.response_metadata.get('token_usage')
             if usage:
                 return {
-                    "prompt_tokens": usage.get('prompt_tokens', 0),
-                    "completion_tokens": usage.get('completion_tokens', 0),
+                    "prompt_tokens": usage.get('input_tokens', 0),
+                    "completion_tokens": usage.get('output_tokens', 0),
                     "total_tokens": usage.get('total_tokens', 0)
                 }
         return None
 
-    async def execute_stream(self, state: WorkflowState):
+    async def execute_stream(self, state: WorkflowState, variable_pool: VariablePool):
         """流式执行 LLM 调用
         
         Args:
             state: 工作流状态
+            variable_pool: 变量池
         
         Yields:
             文本片段（chunk）或完成标记
         """
         self.typed_config = LLMNodeConfig(**self.config)
 
-        llm, prompt_or_messages = self._prepare_llm(state, True)
+        llm = await self._prepare_llm(state, variable_pool, True)
 
         logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式）")
         logger.debug(f"LLM 配置: streaming={getattr(llm._model, 'streaming', 'unknown')}")
@@ -243,10 +275,10 @@ class LLMNode(BaseNode):
 
         # 调用 LLM（流式，支持字符串或消息列表）
         last_meta_data = {}
-        async for chunk in llm.astream(prompt_or_messages, stream_usage=True):
+        async for chunk in llm.astream(self.messages, stream_usage=True):
             # 提取内容
             if hasattr(chunk, 'content'):
-                content = chunk.content
+                content = self.process_model_output(chunk.content)
             else:
                 content = str(chunk)
             if hasattr(chunk, 'response_metadata'):

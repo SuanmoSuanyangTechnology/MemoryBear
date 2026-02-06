@@ -6,9 +6,12 @@ from langgraph.graph.state import CompiledStateGraph
 
 from app.core.workflow.nodes import WorkflowState
 from app.core.workflow.nodes.base_node import BaseNode
+from app.core.workflow.nodes.cycle_graph import LoopNodeConfig, IterationNodeConfig
 from app.core.workflow.nodes.cycle_graph.iteration import IterationRuntime
 from app.core.workflow.nodes.cycle_graph.loop import LoopRuntime
 from app.core.workflow.nodes.enums import NodeType
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +38,40 @@ class CycleGraphNode(BaseNode):
         self.start_node_id = None  # ID of the start node within the cycle
 
         self.graph: StateGraph | CompiledStateGraph | None = None
+        self.child_variable_pool: VariablePool | None = None
         self.build_graph()
         self.iteration_flag = True
+
+    def _output_types(self) -> dict[str, VariableType]:
+        outputs = {"__child_state": VariableType.ARRAY_OBJECT}
+        if self.node_type == NodeType.LOOP:
+            # Loop node outputs the final state of the loop
+            config = LoopNodeConfig(**self.config)
+            for var_def in config.cycle_vars:
+                outputs[var_def.name] = var_def.type
+            return outputs
+        elif self.node_type == NodeType.ITERATION:
+            # Iteration node outputs the processed collection
+            config = IterationNodeConfig(**self.config)
+            if not config.output_type:
+                outputs['output'] = VariableType.ANY
+                return outputs
+            if config.output_type in [
+                VariableType.ARRAY_FILE,
+                VariableType.ARRAY_STRING,
+                VariableType.NUMBER,
+                VariableType.ARRAY_OBJECT,
+                VariableType.BOOLEAN
+            ]:
+                if config.flatten:
+                    outputs['output'] = config.output_type
+                else:
+                    outputs['output'] = VariableType.ARRAY_STRING
+            else:
+                outputs['output'] = VariableType(f"array[{config.output_type}]")
+            return outputs
+        else:
+            raise KeyError(f"Valid Cycle Node Type - {self.node_type}")
 
     def pure_cycle_graph(self) -> tuple[list, list]:
         """
@@ -103,17 +138,20 @@ class CycleGraphNode(BaseNode):
         """
         from app.core.workflow.graph_builder import GraphBuilder
         self.cycle_nodes, self.cycle_edges = self.pure_cycle_graph()
+        self.child_variable_pool = VariablePool()
         builder = GraphBuilder(
             {
                 "nodes": self.cycle_nodes,
                 "edges": self.cycle_edges,
             },
-            subgraph=True
+            subgraph=True,
+            variable_pool=self.child_variable_pool
         )
         self.start_node_id = builder.start_node_id
         self.graph = builder.build()
+        self.child_variable_pool = builder.variable_pool
 
-    async def execute(self, state: WorkflowState) -> Any:
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
         Execute the cycle node at runtime.
 
@@ -123,6 +161,7 @@ class CycleGraphNode(BaseNode):
 
         Args:
             state: The current workflow state when entering the cycle node.
+            variable_pool: Variable Pool
 
         Returns:
             Any: The runtime result produced by the loop or iteration executor.
@@ -137,6 +176,8 @@ class CycleGraphNode(BaseNode):
                 node_id=self.node_id,
                 config=self.config,
                 state=state,
+                variable_pool=variable_pool,
+                child_variable_pool=self.child_variable_pool,
             ).run()
         if self.node_type == NodeType.ITERATION:
             return await IterationRuntime(
@@ -145,5 +186,7 @@ class CycleGraphNode(BaseNode):
                 node_id=self.node_id,
                 config=self.config,
                 state=state,
+                variable_pool=variable_pool,
+                child_variable_pool=self.child_variable_pool
             ).run()
         raise RuntimeError("Unknown cycle node type")
