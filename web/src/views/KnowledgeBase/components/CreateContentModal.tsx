@@ -41,7 +41,7 @@ const CreateContentModal = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
         const values = await form.validateFields();
         setLoading(true);
 
-        // TODO: 这里需要调用相应的API来保存内容
+        // TODO: Call appropriate API to save content
         const params = {
           // ...values,
           kb_id: kbId,
@@ -55,7 +55,7 @@ const CreateContentModal = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
         }
         handleClose();
       } catch (err) {
-        console.error('创建内容失败:', err);
+        console.error('Failed to create content:', err);
       } finally {
         setLoading(false);
       }

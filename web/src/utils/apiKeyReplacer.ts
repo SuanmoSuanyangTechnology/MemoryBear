@@ -1,13 +1,27 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 16:34:04 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 16:34:04 
+ */
 /**
- * API密钥替换工具
+ * API Key Replacer Utility
+ * 
+ * Provides functions to mask and detect API keys in text for security purposes.
+ * Supports multiple API key formats (service, agent, multi-agent, workflow).
+ * 
+ * @module apiKeyReplacer
  */
 
+/** API key pattern definitions for different types */
 const API_KEY_PATTERNS = {
   service: /sk-service-[A-Za-z0-9_-]+/g,
   agent: /sk-agent-[A-Za-z0-9_-]+/g,
   multiAgent: /sk-multi_agent-[A-Za-z0-9_-]+/g,
   workflow: /sk-workflow-[A-Za-z0-9_-]+/g
 }
+
+/** API key prefix definitions */
 const API_KEY_PREFIX = {
   service: 'sk-service-',
   agent: 'sk-agent-',
@@ -16,9 +30,9 @@ const API_KEY_PREFIX = {
 }
 
 /**
- * 替换文本中的API密钥为*号
- * @param text 原始文本
- * @returns 替换后的文本
+ * Replace API keys in text with asterisks
+ * @param text - Original text
+ * @returns Text with masked API keys
  */
 export const maskApiKeys = (text: string): string => {
   if (!text) return text
@@ -37,9 +51,9 @@ export const maskApiKeys = (text: string): string => {
 }
 
 /**
- * 检测文本中是否包含API密钥
- * @param text 待检测文本
- * @returns 是否包含API密钥
+ * Detect if text contains API keys
+ * @param text - Text to check
+ * @returns Whether text contains API keys
  */
 export const hasApiKeys = (text: string): boolean => {
   return Object.values(API_KEY_PATTERNS).some(pattern => pattern.test(text))

@@ -1,5 +1,4 @@
 provider: openai
-enabled: true
 models:
 - name: chatgpt-4o-latest
   type: llm

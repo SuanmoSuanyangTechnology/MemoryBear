@@ -1,3 +1,12 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:29:55 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:29:55 
+ */
+/**
+ * Memory Extraction Engine Configuration Form Types
+ */
 export interface ConfigForm {
   llm_id: string;
   config_id?: number | string;
@@ -19,6 +28,9 @@ export interface ConfigForm {
   baseline: string;
   
 }
+/**
+ * Configuration variable definition
+ */
 export interface Variable {
   label: string;
   variableName: string;
@@ -33,6 +45,9 @@ export interface Variable {
   max?: number;
   step?: number;
 }
+/**
+ * Configuration section structure
+ */
 export interface ConfigVo {
   type: string;
   data: {
@@ -41,6 +56,9 @@ export interface ConfigVo {
   }[]
 }
 
+/**
+ * Test result data structure
+ */
 export interface TestResult {
   generated_at: string;
   entities: Record<string, number>;

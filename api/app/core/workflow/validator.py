@@ -5,9 +5,12 @@
 """
 
 import logging
-from typing import Any, Union
+from typing import Any, Union, TYPE_CHECKING
 
 from app.core.workflow.nodes.enums import NodeType
+
+if TYPE_CHECKING:
+    from app.schemas.workflow_schema import WorkflowConfig
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +67,7 @@ class WorkflowValidator:
         return cycle_nodes, cycle_edges
 
     @classmethod
-    def get_subgraph(cls, workflow_config: Union[dict[str, Any], Any]) -> list:
+    def get_subgraph(cls, workflow_config: Union[dict[str, Any], "WorkflowConfig"]) -> list:
         if not isinstance(workflow_config, dict):
             workflow_config = {
                 "nodes": workflow_config.nodes,
@@ -331,7 +334,7 @@ class WorkflowValidator:
 
 
 def validate_workflow_config(
-        workflow_config: dict[str, Any],
+        workflow_config: Union[dict[str, Any], 'WorkflowConfig'],
         for_publish: bool = False
 ) -> tuple[bool, list[str]]:
     """验证工作流配置（便捷函数）

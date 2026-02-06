@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:37:31 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 10:16:42
+ */
+/**
+ * Order Payment Page
+ * Displays order details and payment voucher submission form
+ * Supports corporate transfer payment method
+ */
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Button, Input, App, Form, DatePicker } from 'antd';
@@ -12,6 +24,7 @@ import type { PriceItem, VoucherForm } from './types'
 
 const { TextArea } = Input;
 
+/** Payment information */
 const paymentInfo = {
   payee: '上海算模算样科技有限公司',
   bankName: '交通银行上海同济支行',
@@ -27,6 +40,7 @@ const OrderPayment: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedType, setSelectedType] = useState('biz');
 
+  /** Price plan list */
   const PRICE_LIST: PriceItem[] = [
     {
       type: 'personal',
@@ -127,6 +141,7 @@ const OrderPayment: React.FC = () => {
     getTypeSupportService: (type: string, key: string) => t(`pricing.${type}.${key}`),
   }), [t]);
 
+  /** Map product type to API value */
   const getProductType = (type: string) => {
     const typeMap: Record<string, string> = {
       'personal': 'FREE',
@@ -137,6 +152,7 @@ const OrderPayment: React.FC = () => {
     return typeMap[type] || 'ENTERPRISE';
   };
 
+  /** Generate unique order number */
   const generateOrderNumber = () => {
     const date = new Date();
     const dateStr = date.getFullYear().toString() + 
@@ -165,11 +181,13 @@ const OrderPayment: React.FC = () => {
     };
   }, [selectedPlan, t]);
 
+  /** Copy text to clipboard */
   const copyText = (text: string) => {
     copy(text)
     message.success(t('common.copySuccess'))
   };
 
+  /** Submit payment voucher */
   const submitPayment = (values: VoucherForm) => {
     if (isSubmitting) return;
     
@@ -182,7 +200,7 @@ const OrderPayment: React.FC = () => {
         pay_time: values.transferDate.valueOf(),
       };
       submitPaymentVoucherAPI(submitData)
-        .then(res => {
+        .then(() => {
           form.resetFields()
 
           modal.confirm({
@@ -209,7 +227,7 @@ const OrderPayment: React.FC = () => {
 
   return (
     <div className="rb:w-full rb:pb-20">
-      {/* 订单信息 */}
+      {/* Order Information */}
       <div className="rb:mb-6">
         <h2 className="rb:text-[16px] rb:text-lg rb:font-semibold rb:mb-4">{t('pricing.orderInformation')}</h2>
         
@@ -220,9 +238,9 @@ const OrderPayment: React.FC = () => {
           </div>
         </div>
 
-        {/* 订单详情表格 */}
+        {/* Order Details Table */}
         <div className="rb:border rb:border-[#DFE4ED] rb:rounded-2xl rb:overflow-hidden">
-          {/* 桌面端表头 */}
+          {/* Desktop Table Header */}
           <div className="rb:flex rb:gap-4 rb:p-4 rb:bg-[rgba(255,255,255,0.03)] rb:border-b rb:border-b-[rgba(255,255,255,0.1)]">
             <div className="rb:flex-1">{t('pricing.comboName')}</div>
             <div className="rb:flex-2">{t('pricing.spAndTa')}</div>
@@ -230,15 +248,15 @@ const OrderPayment: React.FC = () => {
             <div className="rb:w-32">{t('pricing.orderCycle')}</div>
             <div className="rb:w-32 rb:text-right">{t('pricing.orderAmount')}</div>
           </div>
-          {/* 表格内容 */}
+          {/* Table Content */}
           <div className="rb:flex rb:p-4 rb:flex-row rb:gap-4">
-            {/* 套餐名称 */}
+            {/* Package Name */}
             <div className="rb:flex-1">
               <div className="rb:hidden rb:text-[12px] rb:text-[#5B6167] rb:mb-1">{t('pricing.comboName')}</div>
               <div className="rb:text-[18px] rb:text-xl rb:font-bold  rb:mb-1">{orderInfo.comboName}</div>
               <div className="rb:text-[12px]  rb:text-[#5B6167]">{orderInfo.comboEdition}</div>
             </div>
-            {/* 解决方案和目标受众 */}
+            {/* Solutions and Target Audience */}
             <div className="rb:flex-2 rb:text-[12px] ">
               <div className="rb:hidden rb:text-[12px] rb:text-[#5B6167] rb:mb-2">{t('pricing.spAndTa')}</div>
               <div className="rb:mb-4">
@@ -250,7 +268,7 @@ const OrderPayment: React.FC = () => {
                 <div className="rb:text-[#5B6167]">{orderInfo.targetAudience}</div>
               </div>
             </div>
-            {/* 版本信息 */}
+            {/* Version Information */}
             <div className="rb:flex-2 rb:text-[12px]  rb:space-y-2">
               <div className="rb:hidden rb:text-[12px] rb:text-[#5B6167] rb:mb-2">{t('pricing.versionInformation')}</div>
               <div className="rb:flex rb:items-center rb:gap-2">
@@ -278,7 +296,7 @@ const OrderPayment: React.FC = () => {
                 </>
               )}
             </div>
-            {/* 订购周期和金额 */}
+            {/* Subscription Period and Amount */}
             <div className="rb:w-32 rb:text-[12px]  rb:text-[#5B6167]">
               {orderInfo.orderingCycle}
             </div>
@@ -290,9 +308,9 @@ const OrderPayment: React.FC = () => {
         </div>
       </div>
 
-      {/* 支付方式和支付凭证 */}
+      {/* Payment Method and Payment Voucher */}
       <div className="rb:grid rb:grid-cols-2 rb:gap-6">
-        {/* 支付方式 */}
+        {/* Payment Method */}
         <div className="rb:border rb:border-[#DFE4ED] rb:rounded-2xl rb:p-4">
           <h2 className="rb:text-[16px] rb:text-lg rb:font-semibold rb:mb-4">{t('pricing.paymentMethod')}</h2>
           
@@ -334,7 +352,7 @@ const OrderPayment: React.FC = () => {
           </div>
         </div>
 
-        {/* 支付凭证 */}
+        {/* Payment Voucher */}
         <div className="rb:border rb:border-[#DFE4ED] rb:rounded-2xl rb:p-4">
           <h2 className="rb:text-[16px] rb:text-lg rb:font-semibold rb:mb-4">{t('pricing.paymentVoucher')}</h2>
           

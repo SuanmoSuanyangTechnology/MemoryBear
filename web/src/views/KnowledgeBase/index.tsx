@@ -12,7 +12,7 @@ import webIcon from '@/assets/images/knowledgeBase/general.png';
 import tpIcon from '@/assets/images/knowledgeBase/text.png';
 import type { KnowledgeBaseListItem, CreateModalRef, KnowledgeBaseListResponse, ListQuery } from '@/views/KnowledgeBase/types'
 import CreateModal from './components/CreateModal'
-import RbCard from '@/components/RbCard'
+import RbCard from '@/components/RbCard/Card'
 import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
 import { getKnowledgeBaseList, getModelList, getModelTypeList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
@@ -388,7 +388,7 @@ const KnowledgeBaseManagement: FC = () => {
         });
       },
       onCancel: () => {
-        console.log('取消删除');
+        console.log('Cancel delete');
       },
     });
   };

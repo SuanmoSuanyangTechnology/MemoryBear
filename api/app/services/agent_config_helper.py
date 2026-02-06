@@ -26,6 +26,7 @@ def enrich_agent_config(agent_cfg: AgentConfig) -> AgentConfig:
         memory=agent_cfg.memory,
         variables=agent_cfg.variables,
         tools=agent_cfg.tools,
+        skills=agent_cfg.skills
     )
     
     # 将解析后的字段添加到对象上（用于序列化）
@@ -34,5 +35,6 @@ def enrich_agent_config(agent_cfg: AgentConfig) -> AgentConfig:
     agent_cfg.memory = parsed["memory"]
     agent_cfg.variables = parsed["variables"]
     agent_cfg.tools = parsed["tools"]
+    agent_cfg.skills = parsed["skills"]
     
     return agent_cfg

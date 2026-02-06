@@ -12,6 +12,8 @@ from app.core.models import RedBearLLM, RedBearModelConfig
 from app.core.workflow.nodes import WorkflowState
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.parameter_extractor.config import ParameterExtractorNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 from app.db import get_db_read
 from app.models import ModelType
 from app.services.model_service import ModelConfigService
@@ -23,6 +25,12 @@ class ParameterExtractorNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
         self.typed_config: ParameterExtractorNodeConfig | None = None
+
+    def _output_types(self) -> dict[str, VariableType]:
+        outputs = {}
+        for param in self.typed_config.params:
+            outputs[param.name] = param.type
+        return outputs
 
     @staticmethod
     def _get_prompt():
@@ -120,7 +128,7 @@ class ParameterExtractorNode(BaseNode):
             field_type[param.name] = f'{param.type}, required:{str(param.required)}'
         return field_type
 
-    async def execute(self, state: WorkflowState) -> Any:
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
         Main execution function for this node.
 
@@ -138,6 +146,7 @@ class ParameterExtractorNode(BaseNode):
 
         Args:
             state (WorkflowState): Current state of the workflow, used for template rendering.
+            variable_pool (VariablePool): Used for accessing and setting variables during execution.
 
         Returns:
             dict[str, Any]: Dictionary containing extracted parameters under the "output" key.
@@ -153,7 +162,7 @@ class ParameterExtractorNode(BaseNode):
         rendered_user_prompt = user_prompt_teplate.render(
             field_descriptions=str(self._get_field_desc()),
             field_type=str(self._get_field_type()),
-            text_input=self._render_template(self.typed_config.text, state)
+            text_input=self._render_template(self.typed_config.text, variable_pool)
         )
 
         messages = [
@@ -162,7 +171,7 @@ class ParameterExtractorNode(BaseNode):
         ]
         if self.typed_config.prompt:
             messages.extend([
-                ("user", self._render_template(self.typed_config.prompt, state)),
+                ("user", self._render_template(self.typed_config.prompt, variable_pool)),
                 ("user", rendered_user_prompt),
             ])
         else:

@@ -1,3 +1,28 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 15:17:31 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 15:17:31 
+ */
+/**
+ * RbMarkdown Component
+ * 
+ * A comprehensive markdown renderer with support for:
+ * - Standard markdown syntax (headings, lists, tables, etc.)
+ * - Code syntax highlighting
+ * - Math equations (KaTeX)
+ * - Mermaid diagrams
+ * - ECharts visualizations
+ * - SVG rendering
+ * - Audio/video embedding
+ * - Interactive form elements
+ * - HTML comments visibility toggle
+ * - Editable mode with live preview
+ * 
+ * @component
+ */
+
+import { useState, useRef, useEffect, type FC } from 'react'
 import { Image, Input, Select, Form, Checkbox, Radio, ColorPicker, DatePicker, TimePicker, InputNumber, Slider } from 'antd'
 import ReactMarkdown from 'react-markdown'
 import RemarkGfm from 'remark-gfm'
@@ -5,8 +30,6 @@ import RemarkMath from 'remark-math'
 import RemarkBreaks from 'remark-breaks'
 import RehypeKatex from 'rehype-katex'
 import RehypeRaw from 'rehype-raw'
-import type { FC } from 'react'
-import { useState, useRef, useEffect } from 'react'
 
 import Code from './Code'
 import VideoBlock from './VideoBlock'
@@ -14,14 +37,21 @@ import AudioBlock from './AudioBlock'
 import Link from './Link'
 import RbButton from './RbButton'
 
+/** Props interface for RbMarkdown component */
 interface RbMarkdownProps {
+  /** Markdown content to render */
   content: string;
-  showHtmlComments?: boolean; // 是否显示 HTML 注释，默认为 false（隐藏）
-  editable?: boolean; // 是否可编辑，默认为 false
-  onContentChange?: (content: string) => void; // 内容变化回调
+  /** Whether to display HTML comments (default: false) */
+  showHtmlComments?: boolean;
+  /** Whether the content is editable (default: false) */
+  editable?: boolean;
+  /** Callback fired when content changes in edit mode */
+  onContentChange?: (content: string) => void;
+  /** Additional CSS classes */
   className?: string;
 }
 
+/** Custom component mappings for markdown elements */
 const components = {
   h1: ({ children, ...props }: any) => <h1 className="rb:text-2xl rb:font-bold rb:mb-2" {...props}>{children}</h1>,
   h2: ({ children, ...props }: any) => <h2 className="rb:text-xl rb:font-bold rb:mb-2" {...props}>{children}</h2>,
@@ -38,7 +68,7 @@ const components = {
   em: ({ children, ...props }: any) => <em className="rb:italic" {...props}>{children}</em>,
   del: ({ children, ...props }: any) => <del className="rb:line-through" {...props}>{children}</del>,
   span: ({ children, style, ...restProps }: any) => {
-    // 如果是 HTML 注释的 span，应用特殊样式
+    // Apply special styling for HTML comment spans
     if (style?.color === '#999') {
       return <span style={{ color: '#999', fontSize: '0.9em' }}>{children}</span>
     }
@@ -104,30 +134,33 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
   const [editContent, setEditContent] = useState(content)
   const textareaRef = useRef<any>(null)
 
-  // 当外部 content 变化时，同步更新编辑内容
+  /** Sync edit content when external content changes */
   useEffect(() => {
     setEditContent(content)
   }, [content])
 
-  // 处理 textarea 内容变化
+  /** Handle textarea content changes and trigger callback */
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newContent = e.target.value
     setEditContent(newContent)
-    // 实时回调内容变化
+    /** Trigger real-time content change callback */
     onContentChange?.(newContent)
   }
 
-  // 根据参数决定是否将 HTML 注释转换为可见文本
-  // 使用特殊的 markdown 语法来显示注释，避免被 rehype-raw 过滤
+  /**
+   * Process content based on showHtmlComments flag
+   * Converts HTML comments to visible text when showHtmlComments is true
+   * Uses special span markup to display comments with styling
+   */
   const processedContent = showHtmlComments
     ? (editable ? editContent : content).replace(/<!--([\s\S]*?)-->/g, (_match, commentContent) => {
-        // 转换为带样式的文本，使用 <span class="html-comment"> 标记
+        /** Convert to styled text using span with html-comment class */
         const escaped = commentContent.trim().replace(/</g, '&lt;').replace(/>/g, '&gt;')
         return `<span class="html-comment">&lt;!-- ${escaped} --&gt;</span>`
       })
     : (editable ? editContent : content)
 
-  // 如果是编辑模式，显示 textarea
+  /** Render textarea in edit mode */
   if (editable) {
     return (
       <div className="rb:relative">
@@ -138,21 +171,21 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
           }
         `}</style>
 
-        {/* 编辑区域 */}
+        {/* Edit area with textarea */}
         <Input.TextArea
           ref={textareaRef}
           value={editContent}
           onChange={handleTextareaChange}
           rows={10}
           className="rb:font-mono rb:text-sm"
-          placeholder="请输入 Markdown 内容..."
+          placeholder="Enter Markdown content..."
           style={{ resize: 'vertical' }}
         />
       </div>
     )
   }
 
-  // 处理键盘快捷键
+  /** Handle keyboard shortcuts (e.g., Ctrl+C for copy) */
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
       const selection = window.getSelection()
@@ -162,7 +195,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
     }
   }
 
-  // 预览模式
+  /** Render markdown preview mode */
   return (
     <div className={`rb:relative ${className || ''}`} onKeyDown={handleKeyDown} tabIndex={0}>
       <style>{`

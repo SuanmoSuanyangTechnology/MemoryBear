@@ -11,19 +11,20 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
-from app.core.workflow.expression_evaluator import evaluate_expression
 from app.core.workflow.graph_builder import GraphBuilder, StreamOutputConfig
 from app.core.workflow.nodes import WorkflowState
-from app.core.workflow.nodes.base_config import VariableType
 from app.core.workflow.nodes.enums import NodeType
+from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
+from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 
 
 class WorkflowExecutor:
-    """工作流执行器
+    """Workflow Executor.
 
-    负责将工作流配置转换为 LangGraph 并执行。
+    Converts workflow configuration into a LangGraph and executes it,
+    supporting both synchronous and streaming execution modes.
     """
 
     def __init__(
@@ -31,15 +32,29 @@ class WorkflowExecutor:
             workflow_config: dict[str, Any],
             execution_id: str,
             workspace_id: str,
-            user_id: str
+            user_id: str,
     ):
-        """初始化执行器
+        """Initialize Workflow Executor.
+
+        Converts a workflow configuration into an executor instance that can
+        run the workflow in both streaming and non-streaming modes.
 
         Args:
-            workflow_config: 工作流配置
-            execution_id: 执行 ID
-            workspace_id: 工作空间 ID
-            user_id: 用户 ID
+            workflow_config (dict): The workflow configuration dictionary.
+            execution_id (str): Unique identifier for this workflow execution.
+            workspace_id (str): Workspace or project ID.
+            user_id (str): User ID executing the workflow.
+
+        Attributes:
+            self.nodes (list): List of node definitions from workflow_config.
+            self.edges (list): List of edge definitions from workflow_config.
+            self.execution_config (dict): Optional execution parameters from workflow_config.
+            self.start_node_id (str | None): ID of the Start node, set after graph build.
+            self.end_outputs (dict[str, StreamOutputConfig]): End node output configs.
+            self.activate_end (str | None): Currently active End node ID for streaming outputs.
+            self.variable_pool (VariablePool | None): Variable pool instance.
+            self.graph (CompiledStateGraph | None): Compiled workflow graph.
+            self.checkpoint_config (RunnableConfig): Config for LangGraph checkpointing.
         """
         self.workflow_config = workflow_config
         self.execution_id = execution_id
@@ -52,73 +67,108 @@ class WorkflowExecutor:
         self.start_node_id = None
         self.end_outputs: dict[str, StreamOutputConfig] = {}
         self.activate_end: str | None = None
+        self.variable_pool: VariablePool | None = None
 
+        self.graph: CompiledStateGraph | None = None
         self.checkpoint_config = RunnableConfig(
             configurable={
                 "thread_id": uuid.uuid4(),
             }
         )
 
-    def _prepare_initial_state(self, input_data: dict[str, Any]) -> WorkflowState:
-        """准备初始状态（注入系统变量和会话变量）
+    async def __init_variable_pool(self, input_data: dict[str, Any]):
+        """Initialize the variable pool with system, conversation, and input variables.
 
-        变量命名空间：
-        - sys.xxx - 系统变量（execution_id, workspace_id, user_id, message, input_variables 等）
-        - conv.xxx - 会话变量（跨多轮对话保持）
-        - node_id.xxx - 节点输出（执行时动态生成）
+        This method populates the VariablePool instance with:
+          - Conversation-level variables (`conv` namespace) from workflow config or provided values.
+          - System variables (`sys` namespace) such as message, files, conversation_id, execution_id, workspace_id, user_id, and input_variables.
 
         Args:
-            input_data: 输入数据
-
-        Returns:
-            初始化的工作流状态
+            input_data (dict): Input data for workflow execution, may contain:
+                - "message": user message (str)
+                - "file": list of user-uploaded files
+                - "conv": existing conversation variables (dict)
+                - "variables": custom variables for the Start node (dict)
+                - "conversation_id": conversation identifier
         """
         user_message = input_data.get("message") or ""
-        conversation_messages = input_data.get("conv_messages") or []
+        user_files = input_data.get("files") or []
 
-        # 会话变量处理：从配置文件获取变量定义列表，转换为字典（name -> default value）
         config_variables_list = self.workflow_config.get("variables") or []
-        conversation_vars = {}
+        conv_vars = input_data.get("conv", {})
+
+        # Initialize conversation variables (conv namespace)
         for var_def in config_variables_list:
-            if isinstance(var_def, dict):
-                var_name = var_def.get("name")
-                var_default = var_def.get("default")
-                if var_name:
-                    if var_default:
-                        conversation_vars[var_name] = var_default
-                    else:
-                        var_type = var_def.get("type")
-                        match var_type:
-                            case VariableType.STRING:
-                                conversation_vars[var_name] = ""
-                            case VariableType.NUMBER:
-                                conversation_vars[var_name] = 0
-                            case VariableType.OBJECT:
-                                conversation_vars[var_name] = {}
-                            case VariableType.BOOLEAN:
-                                conversation_vars[var_name] = False
-                            case VariableType.ARRAY_NUMBER | VariableType.ARRAY_OBJECT | VariableType.ARRAY_BOOLEAN | VariableType.ARRAY_STRING:
-                                conversation_vars[var_name] = []
-        input_variables = input_data.get("variables") or {}  # Start 节点的自定义变量
-        conversation_vars = conversation_vars | input_data.get("conv", {})
-        # 构建分层的变量结构
-        variables = {
-            "sys": {
-                "message": user_message,  # 用户消息
-                "conversation_id": input_data.get("conversation_id"),  # 会话 ID
-                "execution_id": self.execution_id,  # 执行 ID
-                "workspace_id": self.workspace_id,  # 工作空间 ID
-                "user_id": self.user_id,  # 用户 ID
-                "input_variables": input_variables,  # 自定义输入变量（给 Start 节点使用）
-            },
-            "conv": conversation_vars  # 会话级变量（跨多轮对话保持）
+            var_name = var_def.get("name")
+            var_default = conv_vars.get(var_name, var_def.get("default"))
+            var_type = var_def.get("type")
+            if var_name:
+                if var_default:
+                    var_value = var_default
+                else:
+                    var_value = DEFAULT_VALUE(var_type)
+                await self.variable_pool.new(
+                    namespace="conv",
+                    key=var_name,
+                    value=var_value,
+                    var_type=var_type,
+                    mut=True
+                )
+
+        # Initialize system variables (sys namespace)
+        input_variables = input_data.get("variables") or {}
+        sys_vars = {
+            "message": (user_message, VariableType.STRING),
+            "conversation_id": (input_data.get("conversation_id"), VariableType.STRING),
+            "execution_id": (self.execution_id, VariableType.STRING),
+            "workspace_id": (self.workspace_id, VariableType.STRING),
+            "user_id": (self.user_id, VariableType.STRING),
+            "input_variables": (input_variables, VariableType.OBJECT),
+            "files": (user_files, VariableType.ARRAY_FILE)
         }
+        for key, var_def in sys_vars.items():
+            value = var_def[0]
+            var_type = var_def[1]
+            await self.variable_pool.new(
+                namespace='sys',
+                key=key,
+                value=value,
+                var_type=var_type,
+                mut=False
+            )
+
+    def _prepare_initial_state(self, input_data: dict[str, Any]) -> WorkflowState:
+        """Generate the initial workflow state for execution.
+
+        This method prepares the runtime state dictionary with system variables,
+        conversation variables, node outputs, loop tracking, and activation flags.
+
+        Args:
+            input_data (dict): The input payload for workflow execution.
+                Expected keys:
+                    - "conv_messages" (list, optional): Historical conversation messages
+                      to include in the workflow state.
+
+        Returns:
+            WorkflowState: A dictionary representing the initialized workflow state
+            with the following keys:
+                - "messages": List of conversation messages
+                - "node_outputs": Empty dict to store outputs of executed nodes
+                - "execution_id": Current workflow execution ID
+                - "workspace_id": Current workspace ID
+                - "user_id": ID of the user triggering execution
+                - "error": None initially, will store error message if a node fails
+                - "error_node": None initially, will store ID of node that caused error
+                - "cycle_nodes": List of node IDs that are of type LOOP or ITERATION
+                - "looping": Integer flag indicating loop execution state (0 = not looping)
+                - "activate": Dict mapping node IDs to activation status; initially
+                  only the start node is active
+        """
+        conversation_messages = input_data.get("conv_messages") or []
 
         return {
             "messages": conversation_messages,
-            "variables": variables,
             "node_outputs": {},
-            "runtime_vars": {},  # 运行时节点变量（简化版，供快速访问）
             "execution_id": self.execution_id,
             "workspace_id": self.workspace_id,
             "user_id": self.user_id,
@@ -136,18 +186,47 @@ class WorkflowExecutor:
         }
 
     def _build_final_output(self, result, elapsed_time, final_output):
+        """Construct the final standardized output of the workflow execution.
+
+        This method aggregates node outputs, token usage, conversation and system
+        variables, messages, and other metadata into a consistent dictionary
+        structure suitable for returning from workflow execution.
+
+        Args:
+            result (dict): The runtime state returned by the workflow graph execution.
+                Expected keys include:
+                    - "node_outputs" (dict): Outputs of executed nodes.
+                    - "messages" (list): Conversation messages exchanged during execution.
+                    - "error" (str, optional): Error message if any node failed.
+            elapsed_time (float): Total execution time in seconds.
+            final_output (Any): The aggregated or final output content of the workflow
+                (e.g., combined messages from all End nodes).
+
+        Returns:
+            dict: A dictionary containing the final workflow execution result with keys:
+                - "status": Execution status ("completed")
+                - "output": Aggregated final output content
+                - "variables": Namespace dictionary with:
+                    - "conv": Conversation variables
+                    - "sys": System variables
+                - "node_outputs": Outputs from all executed nodes
+                - "messages": Conversation messages exchanged
+                - "conversation_id": ID of the current conversation
+                - "elapsed_time": Total execution time in seconds
+                - "token_usage": Aggregated token usage across nodes (if available)
+                - "error": Error message if any occurred during execution
+        """
         node_outputs = result.get("node_outputs", {})
         token_usage = self._aggregate_token_usage(node_outputs)
-        conversation_id = None
-        for node_id, node_output in node_outputs.items():
-            if node_output.get("node_type") == "start":
-                conversation_id = node_output.get("output", {}).get("conversation_id")
-                break
+        conversation_id = self.variable_pool.get_value("sys.conversation_id")
 
         return {
             "status": "completed",
             "output": final_output,
-            "variables": result.get("variables", {}),
+            "variables": {
+                "conv": self.variable_pool.get_all_conversation_vars(),
+                "sys": self.variable_pool.get_all_system_vars()
+            },
             "node_outputs": node_outputs,
             "messages": result.get("messages", []),
             "conversation_id": conversation_id,
@@ -163,7 +242,7 @@ class WorkflowExecutor:
         Iterates over all End nodes in `self.end_outputs` and calls
         `update_activate` on each, which may:
           - Activate variable segments that depend on the completed node/scope.
-          - Activate the entire End node output if all control conditions are met.
+          - Activate the entire End node output if any control conditions are met.
 
         If any End node becomes active and `self.activate_end` is not yet set,
         this node will be marked as the currently active End node.
@@ -197,18 +276,11 @@ class WorkflowExecutor:
         """
         for node_id in data.keys():
             if activate.get(node_id):
-                node_output_status = (
-                    data[node_id]
-                    .get('runtime_vars', {})
-                    .get(node_id)
-                    .get("output")
-                )
+                node_output_status = self.variable_pool.get_value(f"{node_id}.output", default=None, strict=False)
                 self._update_scope_activate(node_id, status=node_output_status)
 
     async def _emit_active_chunks(
             self,
-            node_outputs: dict,
-            variables: dict,
             force=False
     ):
         """
@@ -231,8 +303,6 @@ class WorkflowExecutor:
            and reset `activate_end` to None.
 
         Args:
-            node_outputs (dict): Current runtime node outputs, used for variable evaluation.
-            variables (dict): Current runtime variables, used for variable evaluation.
             force (bool, default=False): If True, process segments even if `activate=False`.
 
         Yields:
@@ -260,14 +330,9 @@ class WorkflowExecutor:
             else:
                 # Variable segment: evaluate and transform
                 try:
-                    chunk = evaluate_expression(
-                        current_segment.literal,
-                        variables=variables,
-                        node_outputs=node_outputs
-                    )
-                    chunk = self._trans_output_string(chunk)
+                    chunk = self.variable_pool.get_literal(current_segment.literal)
                     final_chunk += chunk
-                except ValueError:
+                except KeyError:
                     # Log failed evaluation but continue streaming
                     logger.warning(f"[STREAM] Failed to evaluate segment: {current_segment.literal}")
 
@@ -287,63 +352,339 @@ class WorkflowExecutor:
             self.end_outputs.pop(self.activate_end)
             self.activate_end = None
 
-    @staticmethod
-    def _trans_output_string(content):
-        if isinstance(content, str):
-            return content
-        elif isinstance(content, list):
-            return "\n".join(content)
-        else:
-            return str(content)
+    async def _handle_updates_event(self, data):
+        """
+        Handle workflow state update events ("updates") and stream active End node outputs.
+
+        Steps:
+        1. Retrieve the current graph state.
+        2. Extract node activation information from the state.
+        3. Update the activation status of all End nodes.
+        4. While there is an active End node:
+           - Call _emit_active_chunks() to yield all currently active output segments.
+           - After all segments are processed, update activate_end if there are remaining End nodes.
+        5. Log a debug message indicating state update received.
+
+        Args:
+            data (dict): The latest node state updates.
+
+        Yields:
+            dict: Streamed output event, each chunk in the format:
+                  {"event": "message", "data": {"chunk": ...}}
+        """
+        # Get the latest workflow state
+        state = self.graph.get_state(config=self.checkpoint_config).values
+        activate = state.get("activate", {})
+
+        # Update End node activation based on the new state
+        self._update_stream_output_status(activate, data)
+        wait = False
+        while self.activate_end and not wait:
+            async for msg_event in self._emit_active_chunks():
+                yield msg_event
+
+            if self.activate_end:
+                wait = True
+            else:
+                self._update_stream_output_status(activate, data)
+
+        logger.debug(f"[UPDATES] Received state update from nodes: {list(data.keys())} "
+                     f"- execution_id: {self.execution_id}")
+
+    async def _handle_node_chunk_event(self, data):
+        """
+        Handle streaming chunk events from individual nodes ("node_chunk").
+
+        This method processes output segments for the currently active End node.
+        If the segment depends on the provided node_id:
+          - If the node has finished execution (`done=True`), advance the cursor.
+          - If all segments are processed, deactivate the End node.
+          - Otherwise, yield the current chunk as a streaming message.
+
+        Args:
+            data (dict): Node chunk event data, expected keys:
+                         - "node_id": ID of the node producing this chunk
+                         - "chunk": Chunk of output text
+                         - "done": Boolean indicating whether the node finished producing output
+
+        Yields:
+            dict: Streaming message event in the format:
+                  {"event": "message", "data": {"chunk": ...}}
+        """
+        node_id = data.get("node_id")
+        if self.activate_end:
+            end_info = self.end_outputs.get(self.activate_end)
+            if not end_info or end_info.cursor >= len(end_info.outputs):
+                return
+            current_output = end_info.outputs[end_info.cursor]
+            if current_output.is_variable and current_output.depends_on_scope(node_id):
+                if data.get("done"):
+                    end_info.cursor += 1
+                    if end_info.cursor >= len(end_info.outputs):
+                        self.end_outputs.pop(self.activate_end)
+                        self.activate_end = None
+                else:
+                    yield {
+                        "event": "message",
+                        "data": {
+                            "chunk": data.get("chunk")
+                        }
+                    }
+
+    async def _handle_node_error_event(self, data):
+        """
+        Handle node error events ("node_error") during workflow execution.
+
+        This method streams an error event for a node that has failed. The event
+        contains the node ID, status, input data, elapsed time, and error message.
+
+        Args:
+            data (dict): Node error event data, expected keys:
+                         - "node_id": ID of the node that failed
+                         - "input_data": The input data that caused the error
+                         - "elapsed_time": Execution time before the error occurred
+                         - "error": Error message or exception string
+
+        Yields:
+            dict: Node error event in the format:
+                  {
+                      "event": "node_error",
+                      "data": {
+                          "node_id": str,
+                          "status": "failed",
+                          "input": ...,
+                          "elapsed_time": float,
+                          "output": None,
+                          "error": str
+                      }
+                  }
+        """
+        node_id = data.get("node_id")
+        yield {
+            "event": "node_error",
+            "data": {
+                "node_id": node_id,
+                "status": "failed",
+                "input": data.get("input_data"),
+                "elapsed_time": data.get("elapsed_time"),
+                "output": None,
+                "error": data.get("error")
+            }
+        }
+
+    async def _handle_debug_event(self, data, input_data):
+        """
+        Handle debug events ("debug") related to node execution status.
+
+        This method streams debug events for nodes, including when a node starts
+        execution ("node_start") and when it completes execution ("node_end").
+        It filters out nodes with names starting with "nop" as no-operation nodes.
+
+        Args:
+            data (dict): Debug event data, expected keys:
+                         - "type": Event type ("task" for start, "task_result" for completion)
+                         - "payload": Node-related information, including:
+                             - "name": Node name / ID
+                             - "input": Node input data (for "task" type)
+                             - "result": Node execution result (for "task_result" type)
+                         - "timestamp": ISO timestamp string of the event
+            input_data (dict): Original workflow input data (used to get conversation_id)
+
+        Yields:
+            dict: Node debug event in one of the following formats:
+                  1. Node start:
+                     {
+                         "event": "node_start",
+                         "data": {
+                             "node_id": str,
+                             "conversation_id": str,
+                             "execution_id": str,
+                             "timestamp": int (ms)
+                         }
+                     }
+                  2. Node end:
+                     {
+                         "event": "node_end",
+                         "data": {
+                             "node_id": str,
+                             "conversation_id": str,
+                             "execution_id": str,
+                             "timestamp": int (ms),
+                             "input": dict,
+                             "output": Any,
+                             "elapsed_time": float
+                         }
+                     }
+        """
+        event_type = data.get("type")
+        payload = data.get("payload", {})
+        node_name = payload.get("name")
+
+        # Skip no-operation nodes
+        if node_name and node_name.startswith("nop"):
+            return
+
+        if event_type == "task":
+            # Node starts execution
+            inputv = payload.get("input", {})
+            if not inputv.get("activate", {}).get(node_name):
+                return
+            conversation_id = input_data.get("conversation_id")
+            logger.info(f"[NODE-START] Node '{node_name}' execution started - execution_id: {self.execution_id}")
+
+            yield {
+                "event": "node_start",
+                "data": {
+                    "node_id": node_name,
+                    "conversation_id": conversation_id,
+                    "execution_id": self.execution_id,
+                    "timestamp": int(datetime.datetime.fromisoformat(
+                        data.get("timestamp")
+                    ).timestamp() * 1000),
+                }
+            }
+        elif event_type == "task_result":
+            # Node execution completed
+            result = payload.get("result", {})
+            if not result.get("activate", {}).get(node_name):
+                return
+
+            conversation_id = input_data.get("conversation_id")
+            logger.info(f"[NODE-END] Node '{node_name}' execution completed - execution_id: {self.execution_id}")
+
+            yield {
+                "event": "node_end",
+                "data": {
+                    "node_id": node_name,
+                    "conversation_id": conversation_id,
+                    "execution_id": self.execution_id,
+                    "timestamp": int(datetime.datetime.fromisoformat(
+                        data.get("timestamp")
+                    ).timestamp() * 1000),
+                    "input": result.get("node_outputs", {}).get(node_name, {}).get("input"),
+                    "output": result.get("node_outputs", {}).get(node_name, {}).get("output"),
+                    "elapsed_time": result.get("node_outputs", {}).get(node_name, {}).get("elapsed_time"),
+                    "token_usage": result.get("node_outputs", {}).get(node_name, {}).get("token_usage")
+                }
+            }
+
+    async def _flush_remaining_chunk(self):
+        """
+        Flush and yield all remaining output segments from active End nodes.
+
+        This method ensures that any remaining chunks of output, which may not have
+        been emitted during normal streaming due to activation conditions, are fully
+        processed. It is typically called at the end of a workflow to guarantee
+        that all output is delivered.
+
+        Behavior:
+        1. Filter `end_outputs` to only keep End nodes that are still active.
+        2. While there is an active End node (`self.activate_end`):
+           - Call `_emit_active_chunks(force=True)` to emit all segments regardless
+             of their activation state.
+           - If the current End node finishes, move to the next active End node
+             if any remain.
+
+        Yields:
+            dict: Streamed output events in the format:
+                  {"event": "message", "data": {"chunk": ...}}
+        """
+        # Keep only active End nodes
+        self.end_outputs = {
+            node_id: node_info
+            for node_id, node_info in self.end_outputs.items()
+            if node_info.activate
+        }
+
+        if self.end_outputs or self.activate_end:
+            while self.activate_end:
+                # Force emit all remaining chunks of the active End node
+                async for msg_event in self._emit_active_chunks(force=True):
+                    yield msg_event
+
+                # Move to next active End node if current one is done
+                if not self.activate_end and self.end_outputs:
+                    self.activate_end = list(self.end_outputs.keys())[0]
 
     def build_graph(self, stream=False) -> CompiledStateGraph:
-        """构建 LangGraph
+        """
+        Build the workflow graph using LangGraph.
+
+        This method initializes a GraphBuilder with the workflow configuration,
+        builds the compiled state graph, and sets up the executor's key attributes:
+          - `start_node_id`: the ID of the start node in the workflow
+          - `end_outputs`: mapping of End nodes and their output configurations
+          - `variable_pool`: pool containing workflow variables
+          - `graph`: the compiled state graph ready for execution
+
+        Args:
+            stream (bool, optional): Whether to enable streaming mode. Defaults to False.
 
         Returns:
-            编译后的状态图
+            CompiledStateGraph: The compiled and ready-to-run state graph.
         """
-        logger.info(f"开始构建工作流图: execution_id={self.execution_id}")
+        logger.info(f"Starting workflow graph build: execution_id={self.execution_id}")
         builder = GraphBuilder(
             self.workflow_config,
             stream=stream,
         )
         self.start_node_id = builder.start_node_id
         self.end_outputs = builder.end_node_map
-        graph = builder.build()
-        logger.info(f"工作流图构建完成: execution_id={self.execution_id}")
+        self.variable_pool = builder.variable_pool
+        self.graph = builder.build()
+        logger.info(f"Workflow graph build completed: execution_id={self.execution_id}")
 
-        return graph
+        return self.graph
 
     async def execute(
             self,
             input_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """执行工作流（非流式）
+        """
+        Execute the workflow in non-streaming (batch) mode.
+
+        Steps:
+        1. Build the workflow graph.
+        2. Initialize the variable pool and inject system variables.
+        3. Prepare the initial workflow state.
+        4. Invoke the compiled graph and collect outputs.
+        5. Aggregate outputs, messages, and token usage.
 
         Args:
-            input_data: 输入数据，包含 message 和 variables
+            input_data (dict): Input data including 'message' and 'variables'.
 
         Returns:
-            执行结果，包含 status, output, node_outputs, elapsed_time, token_usage
+            dict: Execution result containing:
+                  - status: "completed" or "failed"
+                  - output: aggregated output string from all End nodes
+                  - variables: current conversation and system variables
+                  - node_outputs: all node outputs
+                  - messages: list of messages including user and assistant content
+                  - elapsed_time: workflow execution time in seconds
+                  - token_usage: aggregated token usage if available
+                  - error: error message if any
         """
-        logger.info(f"开始执行工作流: execution_id={self.execution_id}")
+        logger.info(f"Starting workflow execution: execution_id={self.execution_id}")
 
-        # 记录开始时间
         start_time = datetime.datetime.now()
 
-        # 1. 构建图
+        # Build the workflow graph
         graph = self.build_graph()
 
-        # 2. 初始化状态（自动注入系统变量）
+        # Initialize the variable pool with input data
+        await self.__init_variable_pool(input_data)
         initial_state = self._prepare_initial_state(input_data)
 
-        # 3. 执行工作流
+        # Execute the workflow
         try:
-
             result = await graph.ainvoke(initial_state, config=self.checkpoint_config)
+
+            # Aggregate output from all End nodes
             full_content = ''
             for end_id in self.end_outputs.keys():
-                full_content += result.get('runtime_vars', {}).get(end_id, {}).get('output', '')
+                full_content += self.variable_pool.get_value(f"{end_id}.output", default="", strict=False)
+
+            # Append messages for user and assistant
             result["messages"].extend(
                 [
                     {
@@ -356,20 +697,19 @@ class WorkflowExecutor:
                     }
                 ]
             )
-            # 计算耗时
+            # Calculate elapsed time
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
 
-            logger.info(f"工作流执行完成: execution_id={self.execution_id}, elapsed_time={elapsed_time:.2f}s")
+            logger.info(f"Workflow execution completed: execution_id={self.execution_id}, elapsed_time={elapsed_time:.2f}s")
 
             return self._build_final_output(result, elapsed_time, full_content)
 
         except Exception as e:
-            # 计算耗时（即使失败也记录）
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
 
-            logger.error(f"工作流执行失败: execution_id={self.execution_id}, error={e}", exc_info=True)
+            logger.error(f"Workflow execution failed: execution_id={self.execution_id}, error={e}", exc_info=True)
             return {
                 "status": "failed",
                 "error": str(e),
@@ -383,48 +723,52 @@ class WorkflowExecutor:
             self,
             input_data: dict[str, Any]
     ):
-        """执行工作流（流式）
+        """
+        Execute the workflow in streaming mode.
 
-        使用多个 stream_mode 来获取：
-        1. "updates" - 节点的 state 更新和流式 chunk
-        2. "debug" - 节点执行的详细信息（开始/完成时间）
-        3. "custom" - 自定义流式数据（chunks）
+        Supports multiple streaming modes:
+        1. "updates" - Node state updates and streaming chunks.
+        2. "debug" - Detailed node execution info (start/end).
+        3. "custom" - Custom streaming chunks from nodes.
 
         Args:
-            input_data: 输入数据
+            input_data (dict): Input data including 'message', 'variables', etc.
 
         Yields:
-            流式事件，格式：
-            {
-                "event": "workflow_start" | "workflow_end" | "node_start" | "node_end" | "node_chunk" | "message",
-                "data": {...}
-            }
+            dict: Streaming events in the format:
+                  {
+                      "event": "workflow_start" | "workflow_end" | "node_start" |
+                               "node_end" | "node_chunk" | "message",
+                      "data": {...}
+                  }
         """
-        logger.info(f"开始执行工作流（流式）: execution_id={self.execution_id}")
+        logger.info(f"Starting workflow execution (streaming): execution_id={self.execution_id}")
 
-        # 记录开始时间
         start_time = datetime.datetime.now()
 
-        # 发送 workflow_start 事件
         yield {
             "event": "workflow_start",
             "data": {
                 "execution_id": self.execution_id,
                 "workspace_id": self.workspace_id,
+                "conversation_id": input_data.get("conversation_id"),
                 "timestamp": int(start_time.timestamp() * 1000)
             }
         }
 
-        # 1. 构建图
+        # Build the workflow graph in streaming mode
         graph = self.build_graph(stream=True)
 
-        # 2. 初始化状态（自动注入系统变量）
+        # Initialize the variable pool and system variables
+        await self.__init_variable_pool(input_data)
         initial_state = self._prepare_initial_state(input_data)
-        # 3. Execute workflow
+
+
         try:
-            chunk_count = 0
             full_content = ''
             self._update_scope_activate("sys")
+
+            # Execute the workflow with streaming
             async for event in graph.astream(
                     initial_state,
                     stream_mode=["updates", "debug", "custom"],  # Use updates + debug + custom mode
@@ -442,153 +786,37 @@ class WorkflowExecutor:
 
                 if mode == "custom":
                     # Handle custom streaming events (chunks from nodes via stream writer)
-                    chunk_count += 1
                     event_type = data.get("type", "node_chunk")  # "message" or "node_chunk"
                     if event_type == "node_chunk":
-                        node_id = data.get("node_id")
-                        if self.activate_end:
-                            end_info = self.end_outputs.get(self.activate_end)
-                            if not end_info or end_info.cursor >= len(end_info.outputs):
-                                continue
-                            current_output = end_info.outputs[end_info.cursor]
-                            if current_output.is_variable and current_output.depends_on_scope(node_id):
-                                if data.get("done"):
-                                    end_info.cursor += 1
-                                    if end_info.cursor >= len(end_info.outputs):
-                                        self.end_outputs.pop(self.activate_end)
-                                        self.activate_end = None
-                                else:
-                                    full_content += data.get("chunk")
-                                    yield {
-                                        "event": "message",
-                                        "data": {
-                                            "chunk": data.get("chunk")
-                                        }
-                                    }
-                        logger.info(f"[CUSTOM] ✅ 收到 {event_type} #{chunk_count} from {data.get('node_id')}"
-                                    f"- execution_id: {self.execution_id}")
-
-                    elif event_type == "node_error":
-                        yield {
-                            "event": event_type,  # "message" or "node_chunk"
-                            "data": {
-                                "node_id": data.get("node_id"),
-                                "status": "failed",
-                                "input": data.get("input_data"),
-                                "elapsed_time": data.get("elapsed_time"),
-                                "output": None,
-                                "error": data.get("error")
-                            }
-                        }
-
-                elif mode == "debug":
-                    # Handle debug information (node execution status)
-                    event_type = data.get("type")
-                    payload = data.get("payload", {})
-                    node_name = payload.get("name")
-
-                    if node_name and node_name.startswith("nop"):
-                        continue
-
-                    if event_type == "task":
-                        # Node starts execution
-                        inputv = payload.get("input", {})
-                        if not inputv.get("activate", {}).get(node_name):
-                            continue
-                        conversation_id = input_data.get("conversation_id")
-                        logger.info(f"[NODE-START] Node starts execution: {node_name} "
-                                    f"- execution_id: {self.execution_id}")
-                        yield {
-                            "event": "node_start",
-                            "data": {
-                                "node_id": node_name,
-                                "conversation_id": conversation_id,
-                                "execution_id": self.execution_id,
-                                "timestamp": int(datetime.datetime.fromisoformat(
-                                    data.get("timestamp")
-                                ).timestamp() * 1000),
-                            }
-                        }
-                    elif event_type == "task_result":
-                        # Node execution completed
-                        result = payload.get("result", {})
-                        if not result.get("activate", {}).get(node_name):
-                            continue
-
-                        conversation_id = input_data.get("conversation_id")
-                        logger.info(f"[NODE-END] Node execution completed: {node_name} "
-                                    f"- execution_id: {self.execution_id}")
-
-                        yield {
-                            "event": "node_end",
-                            "data": {
-                                "node_id": node_name,
-                                "conversation_id": conversation_id,
-                                "execution_id": self.execution_id,
-                                "timestamp": int(datetime.datetime.fromisoformat(
-                                    data.get("timestamp")
-                                ).timestamp() * 1000),
-                                "input": result.get("node_outputs", {}).get(node_name, {}).get("input"),
-                                "output": result.get("node_outputs", {}).get(node_name, {}).get("output"),
-                                "elapsed_time": result.get("node_outputs", {}).get(node_name, {}).get("elapsed_time"),
-                            }
-                        }
-
-                elif mode == "updates":
-                    # Handle state updates - store final state
-                    state = graph.get_state(config=self.checkpoint_config).values
-                    node_outputs = state.get("runtime_vars", {})
-                    variables = state.get("variables", {})
-                    activate = state.get("activate", {})
-                    for _, node_data in data.items():
-                        node_outputs |= node_data.get("runtime_vars", {})
-                        variables |= node_data.get("variables", {})
-
-                    self._update_stream_output_status(activate, data)
-                    wait = False
-                    while self.activate_end and not wait:
-                        async for msg_event in self._emit_active_chunks(
-                                node_outputs=node_outputs,
-                                variables=variables
-                        ):
-                            full_content += msg_event["data"]['chunk']
+                        async for msg_event in self._handle_node_chunk_event(data):
+                            full_content += data.get("chunk")
                             yield msg_event
 
-                        if self.activate_end:
-                            wait = True
-                        else:
-                            self._update_stream_output_status(activate, data)
+                    elif event_type == "node_error":
+                        async for error_event in self._handle_node_error_event(data):
+                            yield error_event
 
+                elif mode == "debug":
+                    async for debug_event in self._handle_debug_event(data, input_data):
+                        yield debug_event
+
+                elif mode == "updates":
                     logger.debug(f"[UPDATES] 收到 state 更新 from {list(data.keys())} "
                                  f"- execution_id: {self.execution_id}")
-
-            result = graph.get_state(self.checkpoint_config).values
-            node_outputs = result.get("runtime_vars", {})
-            variables = result.get("variables", {})
-            self.end_outputs = {
-                node_id: node_info
-                for node_id, node_info in self.end_outputs.items()
-                if node_info.activate
-            }
-
-            if self.end_outputs or self.activate_end:
-                while self.activate_end:
-                    async for msg_event in self._emit_active_chunks(
-                            node_outputs=node_outputs,
-                            variables=variables,
-                            force=True
-                    ):
+                    async for msg_event in self._handle_updates_event(data):
                         full_content += msg_event["data"]['chunk']
                         yield msg_event
 
-                    if not self.activate_end and self.end_outputs:
-                        self.activate_end = list(self.end_outputs.keys())[0]
+            # Flush any remaining chunks
+            async for msg_event in self._flush_remaining_chunk():
+                full_content += msg_event["data"]['chunk']
+                yield msg_event
 
-            # 计算耗时
+            result = graph.get_state(self.checkpoint_config).values
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
-            result = graph.get_state(self.checkpoint_config).values
-            logger.info(result)
+
+            # Append messages for user and assistant
             result["messages"].extend(
                 [
                     {
@@ -603,23 +831,20 @@ class WorkflowExecutor:
             )
             logger.info(
                 f"Workflow execution completed (streaming), "
-                f"total chunks: {chunk_count}, elapsed: {elapsed_time:.2f}s, execution_id: {self.execution_id}"
+                f"elapsed: {elapsed_time:.2f}s, execution_id: {self.execution_id}"
             )
 
-            # 发送 workflow_end 事件
             yield {
                 "event": "workflow_end",
                 "data": self._build_final_output(result, elapsed_time, full_content)
             }
 
         except Exception as e:
-            # 计算耗时（即使失败也记录）
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
 
-            logger.error(f"工作流执行失败: execution_id={self.execution_id}, error={e}", exc_info=True)
+            logger.error(f"Workflow execution failed: execution_id={self.execution_id}, error={e}", exc_info=True)
 
-            # 发送 workflow_end 事件（失败）
             yield {
                 "event": "workflow_end",
                 "data": {
@@ -633,14 +858,20 @@ class WorkflowExecutor:
 
     @staticmethod
     def _aggregate_token_usage(node_outputs: dict[str, Any]) -> dict[str, int] | None:
-        """聚合所有节点的 token 使用情况
+        """
+        Aggregate token usage statistics across all nodes.
 
         Args:
-            node_outputs: 所有节点的输出
+            node_outputs (dict): A dictionary of all node outputs.
 
         Returns:
-            聚合的 token 使用情况 {"prompt_tokens": x, "completion_tokens": y, "total_tokens": z}
-            如果没有 token 使用信息，返回 None
+            dict | None: Aggregated token usage in the format:
+                         {
+                             "prompt_tokens": int,
+                             "completion_tokens": int,
+                             "total_tokens": int
+                         }
+                         Returns None if no token usage information is available.
         """
         total_prompt_tokens = 0
         total_completion_tokens = 0
@@ -673,17 +904,18 @@ async def execute_workflow(
         workspace_id: str,
         user_id: str
 ) -> dict[str, Any]:
-    """执行工作流（便捷函数）
+    """
+    Execute a workflow (convenience function, non-streaming).
 
     Args:
-        workflow_config: 工作流配置
-        input_data: 输入数据
-        execution_id: 执行 ID
-        workspace_id: 工作空间 ID
-        user_id: 用户 ID
+        workflow_config (dict): The workflow configuration.
+        input_data (dict): Input data for the workflow.
+        execution_id (str): Execution ID.
+        workspace_id (str): Workspace ID.
+        user_id (str): User ID.
 
     Returns:
-        执行结果
+        dict: Workflow execution result.
     """
     executor = WorkflowExecutor(
         workflow_config=workflow_config,
@@ -701,17 +933,18 @@ async def execute_workflow_stream(
         workspace_id: str,
         user_id: str
 ):
-    """执行工作流（流式，便捷函数）
+    """
+    Execute a workflow in streaming mode (convenience function).
 
     Args:
-        workflow_config: 工作流配置
-        input_data: 输入数据
-        execution_id: 执行 ID
-        workspace_id: 工作空间 ID
-        user_id: 用户 ID
+        workflow_config (dict): The workflow configuration.
+        input_data (dict): Input data for the workflow.
+        execution_id (str): Execution ID.
+        workspace_id (str): Workspace ID.
+        user_id (str): User ID.
 
     Yields:
-        流式事件
+        dict: Streaming workflow events, e.g. node start, node end, chunk messages, workflow end.
     """
     executor = WorkflowExecutor(
         workflow_config=workflow_config,

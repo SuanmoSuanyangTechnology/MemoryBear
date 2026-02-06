@@ -10,6 +10,7 @@ from app.services.memory_konwledges_server import write_rag
 from app.models import ReleaseShare, AppRelease, Conversation
 from app.services.conversation_service import ConversationService
 from app.services.draft_run_service import create_web_search_tool
+from app.services.model_service import ModelApiKeyService
 from app.services.release_share_service import ReleaseShareService
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.error_codes import BizCode
@@ -178,8 +179,9 @@ class SharedChatService:
         #     .limit(1)
         # )
         # api_key_obj = self.db.scalars(stmt).first()
-        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
-        api_key_obj = api_keys[0] if api_keys else None
+        # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
+        # api_key_obj = api_keys[0] if api_keys else None
+        api_key_obj = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
         if not api_key_obj:
             raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
         
@@ -309,6 +311,8 @@ class SharedChatService:
         
         elapsed_time = time.time() - start_time
 
+        ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
+
         
         return {
             "conversation_id": conversation.id,
@@ -383,8 +387,9 @@ class SharedChatService:
             #     .limit(1)
             # )
             # api_key_obj = self.db.scalars(stmt).first()
-            api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
-            api_key_obj = api_keys[0] if api_keys else None
+            # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
+            # api_key_obj = api_keys[0] if api_keys else None
+            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
             if not api_key_obj:
                 raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
             
@@ -513,7 +518,8 @@ class SharedChatService:
                 }
             )
 
-            
+            ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
+
             # 发送结束事件
             end_data = {"elapsed_time": elapsed_time, "message_length": len(full_content)}
             yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"

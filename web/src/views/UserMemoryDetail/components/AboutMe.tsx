@@ -1,4 +1,15 @@
-import { type FC, useEffect, useState, forwardRef, useImperativeHandle } from 'react'
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:34:23 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:34:23 
+ */
+/**
+ * About Me Component
+ * Displays user summary, personality, and core values
+ */
+
+import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton } from 'antd';
@@ -12,6 +23,9 @@ import {
 import type { AboutMeRef } from '../types'
 
 
+/**
+ * User summary data
+ */
 interface Data {
   user_summary: string;
   personality: string;
@@ -30,6 +44,7 @@ const AboutMe = forwardRef<AboutMeRef>((_props, ref) => {
     getData()
   }, [id])
   
+  /** Fetch user summary data */
   const getData = () => {
     if (!id) return
     setLoading(true)
@@ -41,7 +56,7 @@ const AboutMe = forwardRef<AboutMeRef>((_props, ref) => {
         setLoading(false)
       })
   }
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     getData,
   }));

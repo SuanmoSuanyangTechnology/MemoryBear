@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 14:10:42 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 14:10:42 
+ */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Transfer, type TransferProps, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -12,24 +18,37 @@ import Tag from '@/components/Tag';
 
 const FormItem = Form.Item;
 
+/**
+ * Props for OntologyClassExtractModal component
+ */
 interface OntologyClassExtractModalProps {
+  /** Callback function to refresh parent list after extraction */
   refresh: () => void;
 }
 
+/**
+ * Modal component for extracting ontology classes using LLM
+ * Two-step process: 1) Extract classes from scenario 2) Select and confirm classes to add
+ */
 const OntologyClassExtractModal = forwardRef<OntologyClassExtractModalRef, OntologyClassExtractModalProps>(({
   refresh
 }, ref) => {
+  // Hooks
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<OntologyClassExtractModalData>();
+  
+  // State
+  const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<OntologyClassData | null>(null)
   const [extractData, setExtractData] = useState<ExtractData | null>(null)
   const [targetKeys, setTargetKeys] = useState<TransferProps['targetKeys']>([]);
   const [selectedKeys, setSelectedKeys] = useState<TransferProps['selectedKeys']>([]);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /**
+   * Close modal and reset all state
+   */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
@@ -38,12 +57,19 @@ const OntologyClassExtractModal = forwardRef<OntologyClassExtractModalRef, Ontol
     setExtractData(null)
   };
 
+  /**
+   * Open modal with scene data
+   * @param vo - Ontology class data containing scene information
+   */
   const handleOpen = (vo: OntologyClassData) => {
     form.resetFields();
     setVisible(true);
     setData(vo)
   };
-  // 封装保存方法，添加提交逻辑
+  
+  /**
+   * Execute LLM extraction to get class suggestions
+   */
   const handleSave = () => {
     if (!data?.scene_id) return;
     form
@@ -69,6 +95,10 @@ const OntologyClassExtractModal = forwardRef<OntologyClassExtractModalRef, Ontol
       });
   }
 
+  /**
+   * Confirm and create selected classes
+   * First click runs extraction, second click creates classes
+   */
   const handleConfirm = () => {
     if (!extractData) {
       handleSave()
@@ -92,11 +122,19 @@ const OntologyClassExtractModal = forwardRef<OntologyClassExtractModalRef, Ontol
     }
   }
 
-
+  /**
+   * Handle transfer component target keys change
+   * @param nextTargetKeys - New target keys after transfer
+   */
   const onChange: TransferProps['onChange'] = (nextTargetKeys) => {
     setTargetKeys(nextTargetKeys.filter(Boolean));
   };
 
+  /**
+   * Handle transfer component selection change
+   * @param sourceSelectedKeys - Selected keys in source list
+   * @param targetSelectedKeys - Selected keys in target list
+   */
   const onSelectChange: TransferProps['onSelectChange'] = (
     sourceSelectedKeys,
     targetSelectedKeys,
@@ -104,7 +142,9 @@ const OntologyClassExtractModal = forwardRef<OntologyClassExtractModalRef, Ontol
     setSelectedKeys([...sourceSelectedKeys, ...targetSelectedKeys].filter(Boolean));
   };
 
-  // 暴露给父组件的方法
+  /**
+   * Expose methods to parent component via ref
+   */
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));

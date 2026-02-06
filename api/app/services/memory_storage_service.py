@@ -129,6 +129,12 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             if not params.rerank_id:
                 params.rerank_id = configs.get('rerank')
 
+        # reflection_model_id 和 emotion_model_id 默认与 llm_id 一致
+        if not params.reflection_model_id:
+            params.reflection_model_id = params.llm_id
+        if not params.emotion_model_id:
+            params.emotion_model_id = params.llm_id
+
         config = MemoryConfigRepository.create(self.db, params)
         self.db.commit()
         return {"affected": 1, "config_id": config.config_id}
@@ -203,6 +209,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "end_user_id": config.end_user_id,
                 "config_id_old": config_id_old,
                 "apply_id": config.apply_id,
+                "scene_id": config.scene_id,
                 "llm_id": config.llm_id,
                 "embedding_id": config.embedding_id,
                 "rerank_id": config.rerank_id,
@@ -236,12 +243,13 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
         return self._convert_timestamps_to_format(data_list)
 
 
-    async def pilot_run_stream(self, payload: ConfigPilotRun) -> AsyncGenerator[str, None]:
+    async def pilot_run_stream(self, payload: ConfigPilotRun, language: str = "zh") -> AsyncGenerator[str, None]:
         """
         流式执行试运行，产生 SSE 格式的进度事件
         
         Args:
             payload: 试运行配置和对话文本
+            language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
             
         Yields:
             SSE 格式的字符串，包含以下事件类型：
@@ -315,6 +323,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                         dialogue_text=dialogue_text,
                         db=self.db,
                         progress_callback=progress_callback,
+                        language=language,
                     )
                     logger.info("[PILOT_RUN_STREAM] pipeline_main completed")
                     

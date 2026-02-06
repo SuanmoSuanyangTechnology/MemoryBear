@@ -64,6 +64,7 @@ class OntologyExtractor:
         llm_max_tokens: int = 2000,
         max_description_length: int = 500,
         timeout: Optional[float] = None,
+        language: str = "zh",
     ) -> OntologyExtractionResponse:
         """Extract ontology classes from a scenario description.
         
@@ -84,6 +85,7 @@ class OntologyExtractor:
             llm_max_tokens: LLM max tokens parameter (default: 2000)
             max_description_length: Maximum description length (default: 500)
             timeout: Optional timeout in seconds for LLM call (default: None, no timeout)
+            language: Language for output ("zh" for Chinese, "en" for English)
             
         Returns:
             OntologyExtractionResponse containing validated ontology classes
@@ -134,6 +136,7 @@ class OntologyExtractor:
                             max_classes=max_classes,
                             llm_temperature=llm_temperature,
                             llm_max_tokens=llm_max_tokens,
+                            language=language,
                         ),
                         timeout=timeout
                     )
@@ -156,6 +159,7 @@ class OntologyExtractor:
                     max_classes=max_classes,
                     llm_temperature=llm_temperature,
                     llm_max_tokens=llm_max_tokens,
+                    language=language,
                 )
             
             llm_duration = time.time() - llm_start_time
@@ -260,6 +264,7 @@ class OntologyExtractor:
         max_classes: int,
         llm_temperature: float,
         llm_max_tokens: int,
+        language: str = "zh",
     ) -> OntologyExtractionResponse:
         """Call LLM to extract ontology classes from scenario.
         
@@ -272,6 +277,7 @@ class OntologyExtractor:
             max_classes: Maximum number of classes to extract
             llm_temperature: LLM temperature parameter
             llm_max_tokens: LLM max tokens parameter
+            language: Language for output ("zh" for Chinese, "en" for English)
             
         Returns:
             OntologyExtractionResponse from LLM
@@ -286,6 +292,7 @@ class OntologyExtractor:
                 domain=domain,
                 max_classes=max_classes,
                 json_schema=OntologyExtractionResponse.model_json_schema(),
+                language=language,
             )
             
             logger.debug(f"Rendered prompt length: {len(prompt_content)}")

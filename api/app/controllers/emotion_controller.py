@@ -11,6 +11,7 @@ Routes:
 """
 
 from app.core.error_codes import BizCode
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.dependencies import get_current_user, get_db
@@ -45,11 +46,14 @@ emotion_service = EmotionAnalyticsService()
 @router.post("/tags", response_model=ApiResponse)
 async def get_emotion_tags(
     request: EmotionTagsRequest,
-    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
 ):
 
     try:
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
+        
         api_logger.info(
             f"用户 {current_user.username} 请求获取情绪标签统计",
             extra={
@@ -57,7 +61,8 @@ async def get_emotion_tags(
                 "emotion_type": request.emotion_type,
                 "start_date": request.start_date,
                 "end_date": request.end_date,
-                "limit": request.limit
+                "limit": request.limit,
+                "language_type": language
             }
         )
 
@@ -67,7 +72,8 @@ async def get_emotion_tags(
             emotion_type=request.emotion_type,
             start_date=request.start_date,
             end_date=request.end_date,
-            limit=request.limit
+            limit=request.limit,
+            language=language
         )
 
         api_logger.info(
@@ -97,11 +103,14 @@ async def get_emotion_tags(
 @router.post("/wordcloud", response_model=ApiResponse)
 async def get_emotion_wordcloud(
     request: EmotionWordcloudRequest,
-    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
 ):
 
     try:
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
+        
         api_logger.info(
             f"用户 {current_user.username} 请求获取情绪词云数据",
             extra={
@@ -144,11 +153,14 @@ async def get_emotion_wordcloud(
 @router.post("/health", response_model=ApiResponse)
 async def get_emotion_health(
     request: EmotionHealthRequest,
-    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
 ):
 
     try:
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
+        
         # 验证时间范围参数
         if request.time_range not in ["7d", "30d", "90d"]:
             raise HTTPException(
@@ -199,7 +211,7 @@ async def get_emotion_health(
 @router.post("/suggestions", response_model=ApiResponse)
 async def get_emotion_suggestions(
     request: EmotionSuggestionsRequest,
-    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -214,6 +226,9 @@ async def get_emotion_suggestions(
         缓存的个性化情绪建议响应
     """
     try:
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
+        
         api_logger.info(
             f"用户 {current_user.username} 请求获取个性化情绪建议（缓存）",
             extra={
@@ -265,7 +280,7 @@ async def get_emotion_suggestions(
 @router.post("/generate_suggestions", response_model=ApiResponse)
 async def generate_emotion_suggestions(
     request: EmotionGenerateSuggestionsRequest,
-    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -280,6 +295,9 @@ async def generate_emotion_suggestions(
         新生成的个性化情绪建议响应
     """
     try:
+        # 使用集中化的语言校验
+        language = get_language_from_header(language_type)
+        
         api_logger.info(
             f"用户 {current_user.username} 请求生成个性化情绪建议",
             extra={
@@ -290,7 +308,8 @@ async def generate_emotion_suggestions(
         # 调用服务层生成建议
         data = await emotion_service.generate_emotion_suggestions(
             end_user_id=request.end_user_id,
-            db=db
+            db=db,
+            language=language
         )
 
         # 保存到缓存

@@ -81,6 +81,8 @@ class RedBearModelFactory:
             # api_key 格式: "access_key_id:secret_access_key" 或只是 access_key_id
             # region 从 base_url 或 extra_params 获取
             from botocore.config import Config as BotoConfig
+            from app.core.models.bedrock_model_mapper import normalize_bedrock_model_id
+            
             max_pool_connections = int(os.getenv("BEDROCK_MAX_POOL_CONNECTIONS", "50"))
             max_retries = int(os.getenv("BEDROCK_MAX_RETRIES", "2"))
             # Configure with increased connection pool
@@ -89,8 +91,11 @@ class RedBearModelFactory:
                 retries={'max_attempts': max_retries, 'mode': 'adaptive'}
             )
             
+            # 标准化模型 ID（自动转换简化名称为完整 Bedrock Model ID）
+            model_id = normalize_bedrock_model_id(config.model_name)
+            
             params = {
-                "model_id": config.model_name,
+                "model_id": model_id,
                 "config": boto_config,
                 **config.extra_params
             }

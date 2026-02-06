@@ -1,33 +1,39 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 13:59:41 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 13:59:41 
+ */
 import { request } from '@/utils/request'
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
 
-// API Key列表
+// API Key list
 export const getApiKeyListUrl = '/apikeys'
 export const getApiKeyList = (data: Record<string, unknown>) => {
   return request.get(getApiKeyListUrl, data)
 }
 
-// API Key详情
+// API Key details
 export const getApiKey = (id: string) => {
   return request.get(`/apikeys/${id}`)
 }
 
-// 创建API Key
+// Create API Key
 export const createApiKey = (values: ApiKey) => {
   return request.post('/apikeys', values)
 }
 
-// 更新API Key
+// Update API Key
 export const updateApiKey = (id: string, values: ApiKey) => {
   return request.put(`/apikeys/${id}`, values)
 }
 
-// 删除 API Key
+// Delete API Key
 export const deleteApiKey = (id: string) => {
   return request.delete(`/apikeys/${id}`)
 }
 
-// 使用统计
+// Usage statistics
 export const getApiKeyStats = (app_key_id: string) => {
   return request.get(`/apikeys/${app_key_id}/stats`)
 }

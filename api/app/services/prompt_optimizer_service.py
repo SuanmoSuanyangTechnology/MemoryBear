@@ -1,3 +1,4 @@
+import os
 import re
 import uuid
 from typing import Any, AsyncGenerator
@@ -22,6 +23,7 @@ from app.repositories.prompt_optimizer_repository import (
     PromptReleaseRepository
 )
 from app.schemas.prompt_optimizer_schema import OptimizePromptResult
+from app.services.model_service import ModelApiKeyService
 
 logger = get_business_logger()
 
@@ -127,7 +129,8 @@ class PromptOptimizerService:
             session_id: uuid.UUID,
             user_id: uuid.UUID,
             current_prompt: str,
-            user_require: str
+            user_require: str,
+            skill: bool = False
     ) -> AsyncGenerator[dict[str, str | Any], Any]:
         """
         Optimize a user-provided prompt using a configured prompt optimizer LLM.
@@ -156,6 +159,7 @@ class PromptOptimizerService:
             user_id (uuid.UUID): Identifier of the user associated with the session.
             current_prompt (str): Original prompt to optimize.
             user_require (str): User's requirements or instructions for optimization.
+            skill(bool): Is skill required
 
         Returns:
             OptimizePromptResult: An object containing:
@@ -173,8 +177,9 @@ class PromptOptimizerService:
         logger.info(f"Prompt optimization started, user_id={user_id}, session_id={session_id}")
 
         # Create LLM instance
-        api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config.id)
-        api_config: ModelApiKey = api_keys[0] if api_keys else None
+        # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config.id)
+        # api_config: ModelApiKey = api_keys[0] if api_keys else None
+        api_config: ModelApiKey = ModelApiKeyService.get_available_api_key(self.db, model_config.id)
         llm = RedBearLLM(RedBearModelConfig(
             model_name=api_config.model_name,
             provider=api_config.provider,
@@ -182,11 +187,12 @@ class PromptOptimizerService:
             base_url=api_config.api_base
         ), type=ModelType(model_config.type))
         try:
-            with open('app/services/prompt/prompt_optimizer_system.jinja2', 'r', encoding='utf-8') as f:
+            prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
+            with open(os.path.join(prompt_path, 'prompt_optimizer_system.jinja2'), 'r', encoding='utf-8') as f:
                 opt_system_prompt = f.read()
-            rendered_system_message = Template(opt_system_prompt).render()
+            rendered_system_message = Template(opt_system_prompt).render(skill=skill)
 
-            with open('app/services/prompt/prompt_optimizer_user.jinja2', 'r', encoding='utf-8') as f:
+            with open(os.path.join(prompt_path, 'prompt_optimizer_user.jinja2'), 'r', encoding='utf-8') as f:
                 opt_user_prompt = f.read()
         except FileNotFoundError:
             raise BusinessException(message="System prompt template not found", code=BizCode.NOT_FOUND)
@@ -248,6 +254,7 @@ class PromptOptimizerService:
         optim_result = json_repair.repair_json(buffer, return_objects=True)
         # prompt = optim_result.get("prompt")
         desc = optim_result.get("desc")
+        ModelApiKeyService.record_api_key_usage(self.db, api_config.id)
         self.create_message(
             tenant_id=tenant_id,
             session_id=session_id,

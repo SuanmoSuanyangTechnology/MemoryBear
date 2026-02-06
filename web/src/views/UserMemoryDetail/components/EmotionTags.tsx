@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:33:39 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:33:39 
+ */
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -8,10 +14,22 @@ import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
 import { getWordCloud } from '@/api/memory'
 
+/**
+ * Tag list data structure
+ * @property {Array} keywords - List of keywords with emotion data
+ * @property {number} total_keywords - Total number of keywords
+ */
 interface TagList {
   keywords: Array<{ keyword: string; frequency: number; emotion_type: string; avg_intensity: number; }>;
   total_keywords: number;
 }
+
+/**
+ * EmotionTags Component
+ * Displays emotion-tagged keywords as a word cloud
+ * Each keyword is colored based on its associated emotion type
+ * Shows emotion statistics summary at the bottom
+ */
 const EmotionTags: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
@@ -32,6 +50,11 @@ const EmotionTags: FC = () => {
       })
   }
 
+  /**
+   * Get color for emotion type
+   * @param {string} emotionType - Emotion type (joy, anger, sadness, etc.)
+   * @returns {string} Color hex code
+   */
   const getEmotionColor = (emotionType: string) => {
     const colors: Record<string, string> = {
       joy: '#52c41a',
@@ -111,11 +134,10 @@ const EmotionTags: FC = () => {
           <div ref={chartRef} className="rb:mt-6 rb:px-6" style={{ height: '320px', width: '100%' }} />
           <div className="rb:flex rb:flex-wrap rb:items-center rb:justify-center rb:gap-10 rb:text-sm rb:mt-3 rb:p-3 rb:bg-[#F0F3F8] rb:rounded-[0_0_8px_8px]">
             {Object.entries(emotionStats).map(([type, count]) => {
-              console.log(type)
               return (
                 <div key={type} className="rb:flex rb:items-center rb:gap-2">
                   <div className="rb:w-3 rb:h-3 rb:rounded-full" style={{ backgroundColor: getEmotionColor(type) }}></div>
-                  <span className="rb:leading-5">{t(`statementDetail.${type || 'neutral'}`)} ({count}个)</span>
+                  <span className="rb:leading-5">{t(`statementDetail.${type || 'neutral'}`)} ({count}{t('statementDetail.item')})</span>
                 </div>
               )
             })}

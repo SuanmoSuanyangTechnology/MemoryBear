@@ -1,16 +1,36 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 15:07:49 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 15:07:49 
+ */
+/**
+ * AppHeader Component
+ * 
+ * The main application header that displays breadcrumb navigation and user menu.
+ * Supports different breadcrumb sources based on the current route.
+ * 
+ * @component
+ */
+
 import { type FC, useRef } from 'react';
-import { Layout, Dropdown, Space, Breadcrumb } from 'antd';
+import { Layout, Dropdown, Breadcrumb } from 'antd';
 import type { MenuProps, BreadcrumbProps } from 'antd';
 import { UserOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
+
 import { useUser } from '@/store/user';
 import { useMenu } from '@/store/menu';
 import styles from './index.module.css'
 import SettingModal, { type SettingModalRef } from './SettingModal'
 import UserInfoModal, { type UserInfoModalRef } from './UserInfoModal'
+
 const { Header } = Layout;
 
+/**
+ * @param source - Breadcrumb source type ('space' or 'manage'), defaults to 'manage'
+ */
 const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
   const { t } = useTranslation();
   const location = useLocation();
@@ -20,21 +40,26 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
   const { user, logout } = useUser();
   const { allBreadcrumbs } = useMenu();
   
-  // 根据当前路由动态选择面包屑源
+  /**
+   * Dynamically select breadcrumb source based on current route
+   * - Knowledge base list: uses 'space' breadcrumb
+   * - Knowledge base detail: uses 'space-detail' breadcrumb
+   * - Other pages: uses the passed source prop
+   */
   const getBreadcrumbSource = () => {
     const pathname = location.pathname;
     
-    // 知识库列表页面使用默认的 space 面包屑
+    // Knowledge base list page uses default space breadcrumb
     if (pathname === '/knowledge-base') {
       return 'space';
     }
     
-    // 知识库详情相关页面使用独立的面包屑
+    // Knowledge base detail pages use independent breadcrumb
     if (pathname.includes('/knowledge-base/') && pathname !== '/knowledge-base') {
       return 'space-detail';
     }
     
-    // 其他页面使用传入的 source
+    // Other pages use the passed source
     return source;
   };
   
@@ -42,13 +67,12 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
   const breadcrumbs = allBreadcrumbs[breadcrumbSource] || [];
   
 
-
-  // 处理退出登录
+  /** Handle user logout */
   const handleLogout = () => {
     logout()
   };
 
-  // 用户下拉菜单配置
+  /** User dropdown menu configuration with profile, settings, and logout options */
   const userMenuItems: MenuProps['items'] = [
     {
       key: '1',
@@ -89,18 +113,25 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
       onClick: handleLogout,
     },
   ];
+  
+  /**
+   * Format breadcrumb items with proper titles, paths, and click handlers
+   * - Translates i18n keys to display text
+   * - Handles custom onClick events
+   * - Disables navigation for the last breadcrumb item
+   */
   const formatBreadcrumbNames = () => {
     return breadcrumbs.map((menu, index) => {
       const item: any = {
         title: menu.i18nKey ? t(menu.i18nKey) : menu.label,
       };
       
-      // 如果是最后一项，不设置 path
+      // If it's the last item, don't set path
       if (index === breadcrumbs.length - 1) {
         return item;
       }
       
-      // 如果有自定义 onClick，使用 onClick 并设置 href 为 '#' 以显示手型光标
+      // If has custom onClick, use onClick and set href to '#' to show pointer cursor
       if ((menu as any).onClick) {
         item.onClick = (e: React.MouseEvent) => {
           e.preventDefault();
@@ -108,35 +139,26 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
         };
         item.href = '#';
       } else if (menu.path && menu.path !== '#') {
-        // 只有当 path 不是 '#' 时才设置 path
+        // Only set path when path is not '#'
         item.path = menu.path;
       }
       
       return item;
     });
   }
+  
   return (
     <Header className={styles.header}>
+      {/* Breadcrumb navigation */}
       <Breadcrumb separator=">" items={formatBreadcrumbNames() as BreadcrumbProps['items']} />
-      {/* 语言切换和主题切换按钮 */}
-      <Space>
-        {/* <Button
-          size="small" 
-          type="default"
-          onClick={handleLanguageChange}
-        >
-          {t(`language.${language === 'en' ? 'zh' : 'en'}`)}
-        </Button> */}
-      
-        {/* 用户信息下拉菜单 */}
-        <Dropdown
-          menu={{ 
-            items: userMenuItems
-          }}
-        >
-          <div className="rb:cursor-pointer">{user.username}</div>
-        </Dropdown>
-      </Space>
+      {/* User info dropdown menu */}
+      <Dropdown
+        menu={{
+          items: userMenuItems
+        }}
+      >
+        <div className="rb:cursor-pointer">{user.username}</div>
+      </Dropdown>
       <SettingModal
         ref={settingModalRef}
       />

@@ -18,7 +18,7 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
 from app.services.implicit_memory_service import ImplicitMemoryService
-from app.services.memory_base_service import MemoryBaseService, MemoryTransService, Translation_English
+from app.services.memory_base_service import MemoryBaseService, MemoryTransService
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_perceptual_service import MemoryPerceptualService
 from app.services.memory_short_service import ShortService
@@ -455,9 +455,7 @@ class UserMemoryService:
     async def get_cached_memory_insight(
         self, 
         db: Session, 
-        end_user_id: str,
-        model_id: str,
-        language_type: str
+        end_user_id: str
     ) -> Dict[str, Any]:
         """
         从数据库获取缓存的记忆洞察（四个维度）
@@ -465,7 +463,7 @@ class UserMemoryService:
         Args:
             db: 数据库会话
             end_user_id: 终端用户ID (UUID)
-            
+        
         Returns:
             {
                 "memory_insight": str,           # 总体概述
@@ -519,10 +517,6 @@ class UserMemoryService:
                 memory_insight=end_user.memory_insight
                 behavior_pattern=end_user.behavior_pattern
                 growth_trajectory=end_user.growth_trajectory
-                if language_type!='zh':
-                    memory_insight=await Translation_English(model_id,memory_insight)
-                    behavior_pattern=await Translation_English(model_id,behavior_pattern)
-                    growth_trajectory=await Translation_English(model_id,growth_trajectory)
                 return {
                     "memory_insight":memory_insight,  # 总体概述存储在 memory_insight
                     "behavior_pattern":behavior_pattern,
@@ -571,6 +565,8 @@ class UserMemoryService:
         Args:
             db: 数据库会话
             end_user_id: 终端用户ID (UUID)
+            model_id: 模型ID（用于翻译）
+            language_type: 语言类型 ("zh" 中文, "en" 英文)
             
         Returns:
             {
@@ -604,11 +600,10 @@ class UserMemoryService:
             personality_traits=end_user.personality_traits
             core_values=end_user.core_values
             one_sentence_summary=end_user.one_sentence_summary
-            if language_type!='zh':
-                user_summary=await Translation_English(model_id, user_summary)
-                personality_traits = await Translation_English(model_id, personality_traits)
-                core_values = await Translation_English(model_id, core_values)
-                one_sentence_summary = await Translation_English(model_id, one_sentence_summary)
+            
+            # 直接返回数据库中的数据，不进行二次翻译
+            # 语言由生成时的 X-Language-Type 决定
+            
             has_cache = any([
                 user_summary,
                 personality_traits,
@@ -658,7 +653,8 @@ class UserMemoryService:
         self, 
         db: Session, 
         end_user_id: str,
-        workspace_id: Optional[uuid.UUID] = None
+        workspace_id: Optional[uuid.UUID] = None,
+        language: str = "zh"
     ) -> Dict[str, Any]:
         """
         生成并缓存记忆洞察
@@ -667,6 +663,7 @@ class UserMemoryService:
             db: 数据库会话
             end_user_id: 终端用户ID (UUID)
             workspace_id: 工作空间ID (可选)
+            language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
             
         Returns:
             {
@@ -679,7 +676,7 @@ class UserMemoryService:
             }
         """
         try:
-            logger.info(f"开始为 end_user_id {end_user_id} 生成记忆洞察")
+            logger.info(f"开始为 end_user_id {end_user_id} 生成记忆洞察, language={language}")
             
             # 转换为UUID并查询用户
             user_uuid = uuid.UUID(end_user_id)
@@ -700,7 +697,7 @@ class UserMemoryService:
             # 使用 end_user_id 调用分析函数
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成记忆洞察")
-                result = await analytics_memory_insight_report(end_user_id)
+                result = await analytics_memory_insight_report(end_user_id, language=language)
                 
                 memory_insight = result.get("memory_insight", "")
                 behavior_pattern = result.get("behavior_pattern", "")
@@ -789,7 +786,8 @@ class UserMemoryService:
         self, 
         db: Session, 
         end_user_id: str,
-        workspace_id: Optional[uuid.UUID] = None
+        workspace_id: Optional[uuid.UUID] = None,
+        language: str = "zh"
     ) -> Dict[str, Any]:
         """
         生成并缓存用户摘要（四个部分）
@@ -798,6 +796,7 @@ class UserMemoryService:
             db: 数据库会话
             end_user_id: 终端用户ID (UUID)
             workspace_id: 工作空间ID (可选)
+            language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
             
         Returns:
             {
@@ -810,7 +809,7 @@ class UserMemoryService:
             }
         """
         try:
-            logger.info(f"开始为 end_user_id {end_user_id} 生成用户摘要")
+            logger.info(f"开始为 end_user_id {end_user_id} 生成用户摘要, language={language}")
             
             # 转换为UUID并查询用户
             user_uuid = uuid.UUID(end_user_id)
@@ -831,7 +830,7 @@ class UserMemoryService:
             # 使用 end_user_id 调用分析函数
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成用户摘要")
-                result = await analytics_user_summary(end_user_id)
+                result = await analytics_user_summary(end_user_id, language=language)
                 
                 user_summary = result.get("user_summary", "")
                 personality = result.get("personality", "")
@@ -915,7 +914,8 @@ class UserMemoryService:
     async def generate_cache_for_workspace(
         self, 
         db: Session, 
-        workspace_id: uuid.UUID
+        workspace_id: uuid.UUID,
+        language: str = "zh"
     ) -> Dict[str, Any]:
         """
         为整个工作空间生成缓存
@@ -923,6 +923,7 @@ class UserMemoryService:
         Args:
             db: 数据库会话
             workspace_id: 工作空间ID
+            language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
             
         Returns:
             {
@@ -932,7 +933,7 @@ class UserMemoryService:
                 "errors": List[Dict]
             }
         """
-        logger.info(f"开始为工作空间 {workspace_id} 批量生成缓存")
+        logger.info(f"开始为工作空间 {workspace_id} 批量生成缓存, language={language}")
         
         total_users = 0
         successful = 0
@@ -953,10 +954,10 @@ class UserMemoryService:
                 
                 try:
                     # 生成记忆洞察
-                    insight_result = await self.generate_and_cache_insight(db, end_user_id)
+                    insight_result = await self.generate_and_cache_insight(db, end_user_id, language=language)
                     
                     # 生成用户摘要
-                    summary_result = await self.generate_and_cache_summary(db, end_user_id)
+                    summary_result = await self.generate_and_cache_summary(db, end_user_id, language=language)
                     
                     # 检查是否都成功
                     if insight_result["success"] and summary_result["success"]:
@@ -1007,7 +1008,7 @@ class UserMemoryService:
 
 # 独立的分析函数
 
-async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> Dict[str, Any]:
+async def analytics_memory_insight_report(end_user_id: Optional[str] = None, language: str = "zh") -> Dict[str, Any]:
     """
     生成记忆洞察报告（四个维度）
     
@@ -1019,6 +1020,7 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
     
     Args:
         end_user_id: 可选的终端用户ID
+        language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
         
     Returns:
         包含四个维度报告的字典: {
@@ -1029,7 +1031,11 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
         }
     """
     from app.core.memory.utils.prompt.prompt_utils import render_memory_insight_prompt
+    from app.core.language_utils import validate_language
     import re
+    
+    # 验证语言参数
+    language = validate_language(language)
     
     insight = MemoryInsightHelper(end_user_id)     
     
@@ -1070,7 +1076,8 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
         user_prompt = await render_memory_insight_prompt(
             domain_distribution=domain_distribution_str,
             active_periods=active_periods_str,
-            social_connections=social_connections_str
+            social_connections=social_connections_str,
+            language=language
         )
         
         messages = [
@@ -1097,11 +1104,11 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
             full_response = str(content) if content is not None else ""
         
         # 7. 解析四个部分
-        # 使用正则表达式提取四个部分
-        memory_insight_match = re.search(r'【总体概述】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
-        behavior_match = re.search(r'【行为模式】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
-        findings_match = re.search(r'【关键发现】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
-        trajectory_match = re.search(r'【成长轨迹】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        # 使用正则表达式提取四个部分（支持中英文双语标题）
+        memory_insight_match = re.search(r'【(?:总体概述|Overview)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        behavior_match = re.search(r'【(?:行为模式|Behavior Pattern)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        findings_match = re.search(r'【(?:关键发现|Key Findings)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        trajectory_match = re.search(r'【(?:成长轨迹|Growth Trajectory)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
         
         memory_insight = memory_insight_match.group(1).strip() if memory_insight_match else ""
         behavior_pattern = behavior_match.group(1).strip() if behavior_match else ""
@@ -1128,7 +1135,7 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None) -> 
         await insight.close()
 
 
-async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str, Any]:
+async def analytics_user_summary(end_user_id: Optional[str] = None, language: str = "zh") -> Dict[str, Any]:
     """
     生成用户摘要（包含四个部分）
     
@@ -1139,6 +1146,7 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
     
     Args:
         end_user_id: 可选的终端用户ID
+        language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
         
     Returns:
         包含四部分摘要的字典: {
@@ -1149,7 +1157,11 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         }
     """
     from app.core.memory.utils.prompt.prompt_utils import render_user_summary_prompt
+    from app.core.language_utils import validate_language
     import re
+    
+    # 验证语言参数
+    language = validate_language(language)
     
     # 创建 UserSummaryHelper 实例
     user_summary_tool = UserSummaryHelper(end_user_id or os.getenv("SELECTED_end_user_id", "group_123"))
@@ -1165,8 +1177,9 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
         # 2) 使用 prompt_utils 渲染提示词
         user_prompt = await render_user_summary_prompt(
             user_id=user_summary_tool.user_id,
-            entities=", ".join(entity_lines) if entity_lines else "(空)",
-            statements=" | ".join(statement_samples) if statement_samples else "(空)"
+            entities=", ".join(entity_lines) if entity_lines else "(空)" if language == "zh" else "(empty)",
+            statements=" | ".join(statement_samples) if statement_samples else "(空)" if language == "zh" else "(empty)",
+            language=language
         )
 
         messages = [
@@ -1193,11 +1206,11 @@ async def analytics_user_summary(end_user_id: Optional[str] = None) -> Dict[str,
             full_response = str(content) if content is not None else ""
         
         # 5) 解析四个部分
-        # 使用正则表达式提取四个部分
-        user_summary_match = re.search(r'【基本介绍】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
-        personality_match = re.search(r'【性格特点】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
-        core_values_match = re.search(r'【核心价值观】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
-        one_sentence_match = re.search(r'【一句话总结】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        # 使用正则表达式提取四个部分（支持中英文标题）
+        user_summary_match = re.search(r'【(?:基本介绍|Basic Introduction)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        personality_match = re.search(r'【(?:性格特点|Personality Traits)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        core_values_match = re.search(r'【(?:核心价值观|Core Values)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
+        one_sentence_match = re.search(r'【(?:一句话总结|One-Sentence Summary)】\s*\n(.*?)(?=\n【|$)', full_response, re.DOTALL)
         
         user_summary = user_summary_match.group(1).strip() if user_summary_match else ""
         personality = personality_match.group(1).strip() if personality_match else ""

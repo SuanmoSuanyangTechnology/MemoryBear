@@ -2,6 +2,8 @@ import logging
 from typing import Any
 
 from app.core.workflow.nodes import BaseNode, WorkflowState
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 
@@ -14,15 +16,19 @@ class BreakNode(BaseNode):
     to False, signaling the outer loop runtime to terminate further iterations.
     """
 
-    async def execute(self, state: WorkflowState) -> Any:
+    def _output_types(self) -> dict[str, VariableType]:
+        return {}
+
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
         Execute the break node.
 
         Args:
             state: Current workflow state, including loop control flags.
+            variable_pool: Pool of variables for the workflow.
 
         Effects:
-            - Sets 'looping' in the state to False to stop the loop.
+            - Sets 'looping' in the state too False to stop the loop.
             - Logs the action for debugging purposes.
 
         Returns:

@@ -1,13 +1,26 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:28:07 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:28:07 
+ */
+/**
+ * Top Card List Component
+ * Displays dashboard summary cards for key metrics
+ * Shows total memory capacity, applications, knowledge bases, and API calls
+ */
+
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import totalMemoryCapacity from '@/assets/images/home/totalMemoryCapacity.svg';
 import userMemory from '@/assets/images/home/userMemory.svg';
 import knowledgeBaseCount from '@/assets/images/home/knowledgeBaseCount.svg';
 import apiCallCount from '@/assets/images/home/apiCallCount.svg';
 import styles from './index.module.css'
-import clsx from 'clsx';
 import type { DashboardData } from '../../index'
 
+/** Card configuration with styling */
 const list = [
   {
     key: 'totalMemoryCapacity',
@@ -46,10 +59,14 @@ const list = [
     background: 'linear-gradient( 180deg, #F8F6F5 0%, #FAFDFF 100%)',
   },
 ]
+/**
+ * Component props
+ * @param data - Dashboard statistics data
+ */
 const TopCardList: FC<{data?: DashboardData}> = ({ data }) => {
   const { t } = useTranslation()
   return (
-    <div className="rb:grid rb:grid-cols-4 rb:gap-[16px]">
+    <div className="rb:grid rb:grid-cols-4 rb:gap-4">
       {list.map((item) => {
         return (
           <div 
@@ -65,11 +82,7 @@ const TopCardList: FC<{data?: DashboardData}> = ({ data }) => {
           </div>
 
           <div className={styles.content}>
-            {data?.[item.key] || item.value || 0}
-            <div className={styles.contentRight}>
-              {item.trendValue && <div className={clsx(styles.trend, styles[item.trend])}>{item.trendValue}</div>}
-              {item.trendDesc && <div>{t(`dashboard.${item.trendDesc}`)}</div>}
-            </div>
+            {data?.[item.key as keyof DashboardData] || 0}
           </div>
           </div>
         )

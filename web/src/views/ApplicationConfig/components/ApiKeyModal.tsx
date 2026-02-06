@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:27:25 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:27:25 
+ */
+/**
+ * API Key Creation Modal
+ * Allows creating new API keys for application access
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -9,11 +20,19 @@ import RbModal from '@/components/RbModal'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface ApiKeyModalProps {
+  /** Callback to refresh API key list */
   refresh: () => void;
+  /** Application data */
   application?: Application | null;
 }
 
+/**
+ * Modal for creating new API keys
+ */
 const ApiKeyModal = forwardRef<ApiKeyModalRef, ApiKeyModalProps>(({
   refresh,
   application
@@ -24,18 +43,19 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, ApiKeyModalProps>(({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setLoading(false)
   };
 
+  /** Open modal */
   const handleOpen = () => {
     setVisible(true);
       form.resetFields();
   };
-  // 封装保存方法，添加提交逻辑
+  /** Create new API key */
   const handleSave = () => {
     if (!application) return
     form.validateFields()
@@ -58,7 +78,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, ApiKeyModalProps>(({
       })
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -78,7 +98,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, ApiKeyModalProps>(({
         layout="vertical"
         scrollToFirstError={{ behavior: 'instant', block: 'end', focus: true }}
       >
-        {/* Key 名称 */}
+        {/* Key name */}
         <FormItem
           name="name"
           label={t('application.apiKeyName')}
@@ -89,7 +109,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, ApiKeyModalProps>(({
         >
           <Input placeholder={t('application.apiKeyNamePlaceholder')} />
         </FormItem>
-        {/* 描述 */}
+        {/* Description */}
         <FormItem
           name="description"
           label={t('application.description')}

@@ -1,9 +1,21 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:51:08 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:51:08 
+ */
+/**
+ * User Management Page
+ * Manages users with create, enable/disable, and password reset capabilities
+ */
+
 import React, { useRef } from 'react';
 import { Button, Space, App } from 'antd';
 import { useTranslation } from 'react-i18next';
+import type { ColumnsType } from 'antd/es/table';
+
 import CreateModal from './components/CreateModal';
 import type { CreateModalRef, User, ResetPasswordModalRef } from './types'
-import type { ColumnsType } from 'antd/es/table';
 import Table, { type TableRef } from '@/components/Table'
 import StatusTag from '@/components/StatusTag'
 import { deleteUser, enableUser, getUserListUrl } from '@/api/user'
@@ -18,21 +30,21 @@ const UserManagement: React.FC = () => {
   const resetPasswordModalRef = useRef<ResetPasswordModalRef>(null);
   const tableRef = useRef<TableRef>(null);
 
-  // 打开新增用户弹窗
+  /** Open create user modal */
   const handleCreate = () => {
     userFormRef.current?.handleOpen();
   }
-  // 重置密码
+  /** Reset user password */
   const handleResetPassword = (user: User) => {
     resetPasswordModalRef.current?.handleOpen(user);
   };
 
-  // 刷新列表数据
+  /** Refresh table data */
   const refreshTable = () => {
     tableRef.current?.loadData()
   }
 
-  // 启用/停用
+  /** Enable/disable user */
   const handleChangeStatus = async (record: User) => {
     modal.confirm({
       title: t(`user.${record.is_active ? 'disabled' : 'enabled'}Confirm`),
@@ -50,7 +62,7 @@ const UserManagement: React.FC = () => {
     })
   };
 
-  // 表格列配置
+  /** Table column configuration */
   const columns: ColumnsType = [
     {
       title: t('user.userId'),
@@ -124,7 +136,7 @@ const UserManagement: React.FC = () => {
 
   return (
     <div className="rb:h-[calc(100vh-80px)] rb:overflow-hidden">
-      <div className="rb:flex rb:justify-end rb:mb-[12px]">
+      <div className="rb:flex rb:justify-end rb:mb-3">
         <Button type="primary" onClick={handleCreate}>
           {t('user.createUser')}
         </Button>

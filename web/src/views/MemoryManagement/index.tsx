@@ -1,15 +1,27 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:33:15 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:33:15 
+ */
+/**
+ * Memory Management Page
+ * Manages memory configurations with extraction, forgetting, emotion, and reflection engines
+ * Displays configuration cards with navigation to engine settings
+ */
+
 import React, { useState, useEffect, useRef } from 'react';
 import { List, Button, Space, App, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import clsx from 'clsx'
+
 import MemoryForm from './components/MemoryForm';
 import type { Memory, MemoryFormRef } from '@/views/MemoryManagement/types'
 import RbCard from '@/components/RbCard/Card'
-// import StatusTag from '@/components/StatusTag'
 import { getMemoryConfigList, deleteMemoryConfig } from '@/api/memory'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import { formatDateTime } from '@/utils/format';
-import clsx from 'clsx'
 import RbAlert from '@/components/RbAlert'
 
 const MemoryManagement: React.FC = () => {
@@ -25,6 +37,7 @@ const MemoryManagement: React.FC = () => {
     loadMoreData()
   }, []);
   
+  /** Load configuration list */
   const loadMoreData = () => {
     setLoading(true);
     getMemoryConfigList()
@@ -41,10 +54,11 @@ const MemoryManagement: React.FC = () => {
       });
   };
 
-  // 打开新增标签弹窗
+  /** Open create/edit modal */
   const handleEdit = (config?: Memory) => {
     memoryFormRef.current?.handleOpen(config);
   }
+  /** Delete configuration */
   const handleDelete = (item: Memory) => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: item.config_name }),
@@ -61,6 +75,7 @@ const MemoryManagement: React.FC = () => {
     })
   };
 
+  /** Navigate to engine configuration page */
   const handleClick = (id: number, type: string) => {
     switch (type) {
       case 'memoryExtractionEngine':

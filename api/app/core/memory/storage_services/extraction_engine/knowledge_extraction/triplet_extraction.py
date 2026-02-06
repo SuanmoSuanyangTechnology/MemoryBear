@@ -17,13 +17,15 @@ logger = get_memory_logger(__name__)
 class TripletExtractor:
     """Extracts knowledge triplets and entities from statements using LLM"""
 
-    def __init__(self, llm_client: OpenAIClient):
+    def __init__(self, llm_client: OpenAIClient, language: str = "zh"):
         """Initialize the TripletExtractor with an LLM client
 
         Args:
             llm_client: OpenAIClient instance for processing
+            language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
         """
         self.llm_client = llm_client
+        self.language = language
 
     def _get_language(self) -> str:
         """Get the configured language for entity descriptions
@@ -31,8 +33,7 @@ class TripletExtractor:
         Returns:
             Language code ("zh" or "en")
         """
-        from app.core.config import settings
-        return settings.DEFAULT_LANGUAGE
+        return self.language
 
     async def _extract_triplets(self, statement: Statement, chunk_content: str) -> TripletExtractionResponse:
         """Process a single statement and return extracted triplets and entities"""

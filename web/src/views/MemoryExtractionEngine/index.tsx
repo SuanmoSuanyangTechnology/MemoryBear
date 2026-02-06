@@ -1,24 +1,40 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:30:02 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:30:02 
+ */
+/**
+ * Memory Extraction Engine Configuration Page
+ * Configures entity deduplication, disambiguation, semantic anchoring, and pruning
+ * Supports real-time testing with example data
+ */
+
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Row, Col, Space, Select, InputNumber, Slider, App, Form } from 'antd'
 import clsx from 'clsx'
+
 import Card from './components/Card'
 import type { ConfigForm, Variable } from './types'
 import { getMemoryExtractionConfig, updateMemoryExtractionConfig } from '@/api/memory'
 import Markdown from '@/components/Markdown'
-import { getModelList } from '@/api/models';
-import type { ModelListItem } from '@/views/ModelManagement/types'
+import { getModelListUrl } from '@/api/models';
 import { configList } from './constant'
 import Result from './components/Result'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
+import CustomSelect from '@/components/CustomSelect'
 
+/** Available configuration section keys */
 const keys = [
-  // 'example', 
   'storageLayerModule', 
   'arrangementLayerModule'
 ]
 
+/**
+ * Configuration description component
+ */
 const ConfigDesc: FC<{ config: Variable, className?: string }> = ({config, className}) => {
   const { t } = useTranslation();
   return (
@@ -43,7 +59,6 @@ const MemoryExtractionEngine: FC = () => {
   const values = Form.useWatch<ConfigForm>([], form)
   const [loading, setLoading] = useState(false)
   const [iterationPeriodDisabled, setIterationPeriodDisabled] = useState(false)
-  const [modelList, setModelList] = useState<ModelListItem[]>([])
 
   useEffect(() => {
     if (values?.reflexion_range === 'database') {
@@ -54,14 +69,7 @@ const MemoryExtractionEngine: FC = () => {
     }
   }, [values])
 
-  const getModels = () => {
-    getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
-      .then(res => {
-        const response = res as { items: ModelListItem[] }
-        setModelList(response.items)
-      })
-  }
-
+  /** Fetch configuration data */
   const getConfig = () => {
     if (!id) {
       return
@@ -84,15 +92,16 @@ const MemoryExtractionEngine: FC = () => {
   useEffect(() => {
     if (id) {
       getConfig()
-      getModels()
     }
   }, [id])
 
+  /** Toggle section expansion */
   const handleExpand = (key: string) => {
     const newKeys = expandedKeys.includes(key) ? expandedKeys.filter(item => item !== key) : [...expandedKeys, key]
 
     setExpandedKeys(newKeys)
   }
+  /** Save configuration */
   const handleSave = () => {
     if (!id) {
       return
@@ -123,13 +132,13 @@ const MemoryExtractionEngine: FC = () => {
               label={t('memoryExtractionEngine.model')} 
               name="llm_id"
             >
-              <Select
-                placeholder={t('common.pleaseSelect')}
-                fieldNames={{
-                  label: 'name',
-                  value: 'id',
-                }}
-                options={modelList}
+              <CustomSelect
+                url={getModelListUrl}
+                params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
+                valueKey="id"
+                labelKey="name"
+                hasAll={false}
+                style={{ width: '100%' }}
               />
             </Form.Item>
           </Form>
@@ -222,7 +231,7 @@ const MemoryExtractionEngine: FC = () => {
                                       step={config.step || 0.01}
                                     />
                                   </Form.Item>
-                                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:mt-[-26px]">
+                                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
                                     {config.min || 0}
                                     <span>{t('memoryExtractionEngine.CurrentValue')}: {values?.[config.variableName as keyof ConfigForm]}</span>
                                   </div>

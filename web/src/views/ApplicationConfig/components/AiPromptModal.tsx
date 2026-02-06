@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:26:44 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-05 10:31:12
+ */
+/**
+ * AI Prompt Assistant Modal
+ * Provides an interactive chat interface to help users optimize their prompts using AI
+ * Features model selection, chat history, and variable insertion
+ */
+
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Button, Form, Input, App, Row, Col } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -19,14 +31,25 @@ import AiPromptVariableModal from './AiPromptVariableModal'
 import { type SSEMessage } from '@/utils/stream'
 import Editor from './Editor'
 
+/**
+ * Component props
+ */
 interface AiPromptModalProps {
+  /** Callback to refresh prompt with optimized value */
   refresh: (value: string) => void;
-  defaultModel: ModelListItem | null;
+  /** Default model to pre-select */
+  defaultModel?: ModelListItem | null;
+  source?: 'app' | 'skills'
 }
 
+/**
+ * AI Prompt Assistant Modal Component
+ * Helps users create and optimize prompts through AI-powered conversation
+ */
 const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
   refresh,
   defaultModel,
+  source = 'application'
 }, ref) => {
   const { t } = useTranslation();
   const { message } = App.useApp()
@@ -42,7 +65,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
 
   const values = Form.useWatch([], form)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset state */
   const handleClose = () => {
     setVisible(false);
     setLoading(false)
@@ -54,6 +77,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
     })
   };
 
+  /** Open modal and create new prompt session */
   const handleOpen = () => {
     createPromptSessions()
       .then(res => {
@@ -66,14 +90,15 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
         setVisible(true);
       })
   };
+  /** Send user message and get AI response */
   const handleSend = () => {
     if (!promptSession) return
     if (!values.model_id) {
-      message.warning(t('common.selectPlaceholder', { title: t('application.model') }))
+      message.warning(t('common.selectPlaceholder', { title: t(`${source}.model`) }))
       return
     }
     if (!values.message) {
-      message.warning(t('application.promptChatPlaceholder'))
+      message.warning(t(`${source}.promptChatPlaceholder`))
       return
     }
     const messageContent = values.message
@@ -115,33 +140,31 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
             break;
           case 'end':
             setLoading(false)
-            // 流结束时同步表单值
+            // Sync form value when stream ends
             form.setFieldsValue({ current_prompt: currentPromptValueRef.current })
             break
         }
       })
     };
-    updatePromptMessages(promptSession, values, handleStreamMessage)
-      // .then(res => {
-      //   const response = res as { prompt: string; desc: string; variables: string[] }
-      //   form.setFieldsValue({ current_prompt: response.prompt })
-      //   setChatList(prev => {
-      //     return [...prev, { role: 'assistant', content: response.desc }]
-      //   })
-      //   setVariables(response.variables)
-      // })
+    updatePromptMessages(promptSession, {
+      ...values,
+      skill: source === 'skills'
+    }, handleStreamMessage)
       .finally(() => {
         setLoading(false)
       })
   }
+  /** Copy current prompt to clipboard */
   const handleCopy = () => {
     if (!values.current_prompt || values?.current_prompt?.trim() === '') return
     copy(values.current_prompt)
     message.success(t('common.copySuccess'))
   }
+  /** Open variable selection modal */
   const handleAdd = () => {
     aiPromptVariableModalRef.current?.handleOpen()
   }
+  /** Insert variable into prompt editor */
   const handleVariableApply = (value: string) => {
     if (editorRef.current?.insertText) {
       editorRef.current.insertText(value)
@@ -149,6 +172,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
       form.setFieldValue('current_prompt', (values.current_prompt || '') + value)
     }
   }
+  /** Apply optimized prompt and close modal */
   const handleApply = () => {
     if (!values.current_prompt) {
       return
@@ -157,7 +181,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
     handleClose()
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));
@@ -165,7 +189,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
   console.log(values)
   return (
     <RbModal
-      title={t('application.AIPromptAssistant')}
+      title={t(`${source}.AIPromptAssistant`)}
       open={visible}
       onCancel={handleClose}
       footer={null}
@@ -175,7 +199,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
         <div className="rb:grid rb:grid-cols-2 rb:border-t rb:border-t-[#EBEBEB]">
           <div className="rb:border-r rb:border-r-[#EBEBEB] rb:pr-6 rb:pt-3">
             <Form.Item
-              label={t('application.model')}
+              label={t(`${source}.model`)}
               name="model_id"
               rules={[{ required: true, message: t('common.pleaseSelect') }]}
             >
@@ -192,18 +216,18 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
             <ChatContent
               classNames="rb:h-100.5 rb:px-[16px] rb:py-[20px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-[8px]"
               contentClassNames="rb:max-w-[260px]!"
-              empty={<Empty url={ConversationEmptyIcon} title={t('application.promptChatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
+              empty={<Empty url={ConversationEmptyIcon} title={t(`${source}.promptChatEmpty`)} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
               data={chatList || []}
               streamLoading={false}
               labelPosition="top"
-              labelFormat={(item) => item.role === 'user' ? t('application.you') : t('application.ai')}
+              labelFormat={(item) => item.role === 'user' ? t(`${source}.you`) : t(`${source}.ai`)}
             />
 
             <div className="rb:flex rb:items-center rb:gap-2.5 rb:py-4">
               <Form.Item name="message" className="rb:mb-0!" style={{ width: 'calc(100% - 54px)' }}>
                 <Input
                   className="rb:h-11 rb:shadow-[0px_2px_8px_0px_rgba(33,35,50,0.1)]"
-                  placeholder={t('application.promptChatPlaceholder')}
+                  placeholder={t(`${source}.promptChatPlaceholder`)}
                   onPressEnter={handleSend}
                 />
               </Form.Item>
@@ -215,12 +239,12 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
 
           <div className="rb:pl-6 rb:pt-3">
             <Row>
-              <Col span={12}>
-                <Form.Item label={t('application.conversationOptimizationPrompt')}></Form.Item>
+              <Col span={source === 'application' ? 12 : 24}>
+                <Form.Item label={t(`${source}.conversationOptimizationPrompt`)}></Form.Item>
               </Col>
-              <Col span={12} className="rb:text-right">
-                <Button onClick={handleAdd}>+ {t('application.addVariable')}</Button>
-              </Col>
+              {source === 'application' && <Col span={12} className="rb:text-right">
+                <Button onClick={handleAdd}>+ {t(`${source}.addVariable`)}</Button>
+              </Col>}
             </Row>
             <Form.Item name="current_prompt">
               <Editor 
@@ -231,7 +255,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
             </Form.Item>
             <div className="rb:grid rb:grid-cols-2 rb:gap-4 rb:mt-6">
               <Button block disabled={!values?.current_prompt} onClick={handleCopy}>{t('common.copy')}</Button>
-              <Button type="primary" block disabled={!values?.current_prompt} onClick={handleApply}>{t('application.apply')}</Button>
+              <Button type="primary" block disabled={!values?.current_prompt} onClick={handleApply}>{t(`${source}.apply`)}</Button>
             </div>
           </div>
         </div>

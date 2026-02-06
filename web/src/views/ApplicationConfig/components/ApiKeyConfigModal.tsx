@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:27:22 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:27:22 
+ */
+/**
+ * API Key Configuration Modal
+ * Allows configuring rate limits and daily usage limits for API keys
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Slider } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -7,10 +18,17 @@ import RbModal from '@/components/RbModal'
 import { updateApiKey } from '@/api/apiKey';
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
 
+/**
+ * Component props
+ */
 interface ApiKeyConfigModalProps {
+  /** Callback to refresh API key list */
   refresh: () => void;
 }
-const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProps>(({
+
+/**
+ * Modal for configuring API key limits
+ */const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProps>(({
   refresh
 }, ref) => {
   const { t } = useTranslation();
@@ -20,7 +38,7 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
   const values = Form.useWatch<ApiKey>([], form)
   const [editVo, setEditVo] = useState<ApiKey | null>(null)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset state */
   const handleClose = () => {
     form.resetFields();
     setLoading(false)
@@ -28,6 +46,7 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
     setVisible(false);
   };
 
+  /** Open modal with API key data */
   const handleOpen = (apiKey: ApiKey) => {
     setVisible(true);
     setEditVo(apiKey)
@@ -36,7 +55,7 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
       rate_limit: apiKey.rate_limit
     });
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save API key configuration */
   const handleSave = () => {
     if (!editVo?.id) return
     form.validateFields()
@@ -52,7 +71,7 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
       })
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -73,7 +92,7 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
         className="rb:px-2.5!"
         scrollToFirstError={{ behavior: 'instant', block: 'end', focus: true }}
       >
-        {/* QPS 限制（每秒请求数） */}
+        {/* QPS limit (requests per second) */}
         <>
           <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mb-2">
             {t(`application.qpsLimit`)}({t('application.qpsLimitTip')})
@@ -98,7 +117,7 @@ const ApiKeyConfigModal = forwardRef<ApiKeyConfigModalRef, ApiKeyConfigModalProp
             </div>
           </div>
         </>
-        {/* 日调用量限制 */}
+        {/* Daily usage limit */}
         <>
           <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mt-6 rb:mb-2">
             {t(`application.dailyUsageLimit`)}

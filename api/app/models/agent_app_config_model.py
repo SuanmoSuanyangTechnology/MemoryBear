@@ -29,7 +29,8 @@ class AgentConfig(Base):
     knowledge_retrieval = Column(JSON, nullable=True, comment="知识库检索配置")
     memory = Column(JSON, nullable=True, comment="记忆配置")
     variables = Column(JSON, default=list, nullable=True, comment="变量配置")
-    tools = Column(JSON, default=dict, nullable=True, comment="工具配置")
+    tools = Column(JSON, default=list, nullable=True, comment="工具配置")
+    skills = Column(JSON, default=dict, nullable=True, comment="技能配置")
 
     # 多 Agent 相关字段
     agent_role = Column(String(20), comment="Agent 角色: master|sub|standalone")
