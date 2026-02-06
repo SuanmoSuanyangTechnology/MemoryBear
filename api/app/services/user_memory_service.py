@@ -62,10 +62,14 @@ def _get_llm_client_for_user(user_id: str):
             from app.services.memory_agent_service import get_end_user_connected_config
             connected_config = get_end_user_connected_config(user_id, db)
             config_id = connected_config.get("memory_config_id")
+            workspace_id = connected_config.get("workspace_id")
             
-            if config_id:
+            if config_id or workspace_id:
                 config_service = MemoryConfigService(db)
-                memory_config = config_service.load_memory_config(config_id)
+                memory_config = config_service.load_memory_config(
+                    config_id=config_id,
+                    workspace_id=workspace_id
+                )
                 factory = MemoryClientFactory(db)
                 return factory.get_llm_client(memory_config.llm_model_id)
             else:

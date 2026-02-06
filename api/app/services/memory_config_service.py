@@ -131,21 +131,27 @@ class MemoryConfigService:
 
     def load_memory_config(
         self,
-        config_id: UUID,
+        config_id: Optional[UUID] = None,
+        workspace_id: Optional[UUID] = None,
         service_name: str = "MemoryConfigService",
     ) -> MemoryConfig:
         """
-        Load memory configuration from database by config_id.
+        Load memory configuration from database with optional fallback.
+
+        If config_id is provided, attempts to load that config directly.
+        If config_id is None or not found and workspace_id is provided,
+        falls back to the workspace's default configuration.
 
         Args:
-            config_id: Configuration ID (UUID) from database
+            config_id: Configuration ID (UUID) from database (optional)
+            workspace_id: Workspace ID for fallback lookup (optional)
             service_name: Name of the calling service (for logging purposes)
 
         Returns:
             MemoryConfig: Immutable configuration object
 
         Raises:
-            ConfigurationError: If validation fails
+            ConfigurationError: If no valid configuration can be found
         """
         start_time = time.time()
 
@@ -154,34 +160,59 @@ class MemoryConfigService:
             extra={
                 "operation": "load_memory_config",
                 "service": service_name,
-                "config_id": str(config_id),
+                "config_id": str(config_id) if config_id else None,
+                "workspace_id": str(workspace_id) if workspace_id else None,
             },
         )
 
-        logger.info(f"Loading memory configuration from database: config_id={config_id}")
+        logger.info(f"Loading memory configuration from database: config_id={config_id}, workspace_id={workspace_id}")
 
         try:
-            validated_config_id = _validate_config_id(config_id, self.db)
-
-            # Step 1: Get config and workspace
-            db_query_start = time.time()
-            result = MemoryConfigRepository.get_config_with_workspace(self.db, validated_config_id)
-            db_query_time = time.time() - db_query_start
-            logger.info(f"[PERF] Config+Workspace query: {db_query_time:.4f}s")
-            if not result:
+            # Use get_config_with_fallback if workspace_id is provided
+            memory_config = None
+            if workspace_id:
+                validated_config_id = None
+                if config_id:
+                    try:
+                        validated_config_id = _validate_config_id(config_id, self.db)
+                    except Exception:
+                        validated_config_id = None
+                
+                memory_config = self.get_config_with_fallback(
+                    memory_config_id=validated_config_id,
+                    workspace_id=workspace_id
+                )
+            elif config_id:
+                validated_config_id = _validate_config_id(config_id, self.db)
+                from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+                memory_config = self.db.get(MemoryConfigModel, validated_config_id)
+            
+            if not memory_config:
                 elapsed_ms = (time.time() - start_time) * 1000
                 config_logger.error(
                     "Configuration not found in database",
                     extra={
                         "operation": "load_memory_config",
-                        "config_id": str(config_id),
+                        "config_id": str(config_id) if config_id else None,
+                        "workspace_id": str(workspace_id) if workspace_id else None,
                         "load_result": "not_found",
                         "elapsed_ms": elapsed_ms,
                         "service": service_name,
                     },
                 )
                 raise ConfigurationError(
-                    f"Configuration {config_id} not found in database"
+                    f"Configuration not found: config_id={config_id}, workspace_id={workspace_id}"
+                )
+
+            # Get workspace for the config
+            db_query_start = time.time()
+            result = MemoryConfigRepository.get_config_with_workspace(self.db, memory_config.config_id)
+            db_query_time = time.time() - db_query_start
+            logger.info(f"[PERF] Config+Workspace query: {db_query_time:.4f}s")
+            
+            if not result:
+                raise ConfigurationError(
+                    f"Workspace not found for config {memory_config.config_id}"
                 )
 
             memory_config, workspace = result

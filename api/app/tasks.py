@@ -1253,10 +1253,22 @@ def long_term_storage_window_task(
             # Save to Redis buffer first
             write_store.save_session_write(end_user_id, await chat_data_format(langchain_messages))
             
-            # Load memory config
+            # Get workspace_id from end_user for fallback
+            from app.models.app_model import App
+            from app.models.end_user_model import EndUser
+            
+            workspace_id = None
+            end_user = db.query(EndUser).filter(EndUser.id == end_user_id).first()
+            if end_user:
+                app = db.query(App).filter(App.id == end_user.app_id).first()
+                if app:
+                    workspace_id = app.workspace_id
+            
+            # Load memory config with workspace fallback
             config_service = MemoryConfigService(db)
             memory_config = config_service.load_memory_config(
                 config_id=config_id,
+                workspace_id=workspace_id,
                 service_name="LongTermStorageTask"
             )
             
