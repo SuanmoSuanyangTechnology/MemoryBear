@@ -7,30 +7,21 @@ LangChain Agent 封装
 - 支持流式输出
 - 使用 RedBearLLM 支持多提供商
 """
-import os
+
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
-from app.core.memory.agent.langgraph_graph.tools.write_tool import agent_chat_messages, format_parsing, messages_parse
-from app.core.memory.agent.langgraph_graph.write_graph import long_term_storage
+from app.core.memory.agent.langgraph_graph.write_graph import  write_long_term
 from app.db import get_db
 from app.core.logging_config import get_business_logger
-from app.core.memory.agent.utils.redis_tool import store
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.models.models_model import ModelType
-from app.repositories.memory_short_repository import LongTermMemoryRepository
 from app.services.memory_agent_service import (
     get_end_user_connected_config,
 )
-from app.services.memory_konwledges_server import write_rag
-from app.services.task_service import get_task_memory_write_result
-from app.tasks import write_message_task
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
-
-from app.utils.config_utils import resolve_config_id
-
 logger = get_business_logger()
 
 
@@ -289,105 +280,6 @@ class LangChainAgent:
         
         return content_parts
 
-    async def term_memory_save(self,long_term_messages,actual_config_id,end_user_id,type):
-        db = next(get_db())
-        #TODO: 魔法数字
-        scope=6
-
-        try:
-            repo = LongTermMemoryRepository(db)
-            await long_term_storage(long_term_type="chunk", langchain_messages=long_term_messages,
-                                    memory_config=actual_config_id, end_user_id=end_user_id, scope=scope)
-
-            from app.core.memory.agent.utils.redis_tool import write_store
-            result = write_store.get_session_by_userid(end_user_id)
-            
-            # Handle case where no session exists in Redis (returns False)
-            if not result or result is False:
-                logger.debug(f"No existing session in Redis for user {end_user_id}, skipping short-term memory update")
-                return
-                
-            if type=="chunk" or type=="aggregate":
-                data = await format_parsing(result, "dict")
-                chunk_data = data[:scope]
-                if len(chunk_data)==scope:
-                    repo.upsert(end_user_id, chunk_data)
-                    logger.info(f'写入短长期：')
-            else:
-                # TODO: This branch handles type="time" strategy, currently unused.
-                # Will be activated when time-based long-term storage is implemented.
-                # TODO: 魔法数字 - extract 5 to a constant
-                long_time_data = write_store.find_user_recent_sessions(end_user_id, 5)
-                # Handle case where no session exists in Redis (returns False or empty)
-                if not long_time_data or long_time_data is False:
-                    logger.debug(f"No recent sessions in Redis for user {end_user_id}")
-                    return
-                long_messages = await messages_parse(long_time_data)
-                repo.upsert(end_user_id, long_messages)
-                logger.info(f'写入短长期：')
-        finally:
-            db.close()
-
-    async def write(self, storage_type, end_user_id, user_message, ai_message, user_rag_memory_id, actual_end_user_id, actual_config_id):
-        """
-        写入记忆（支持结构化消息）
-
-        Args:
-            storage_type: 存储类型 (neo4j/rag)
-            end_user_id: 终端用户ID
-            user_message: 用户消息内容
-            ai_message: AI 回复内容
-            user_rag_memory_id: RAG 记忆ID
-            actual_end_user_id: 实际用户ID
-            actual_config_id: 配置ID
-
-        逻辑说明：
-        - RAG 模式：组合 user_message 和 ai_message 为字符串格式，保持原有逻辑不变
-        - Neo4j 模式：使用结构化消息列表
-          1. 如果 user_message 和 ai_message 都不为空：创建配对消息 [user, assistant]
-          2. 如果只有 user_message：创建单条用户消息 [user]（用于历史记忆场景）
-          3. 每条消息会被转换为独立的 Chunk，保留 speaker 字段
-        """
-
-        db = next(get_db())
-        try:
-            actual_config_id=resolve_config_id(actual_config_id, db)
-
-            if storage_type == "rag":
-                # RAG 模式：组合消息为字符串格式（保持原有逻辑）
-                combined_message = f"user: {user_message}\nassistant: {ai_message}"
-                await write_rag(end_user_id, combined_message, user_rag_memory_id)
-                logger.info(f'RAG_Agent:{end_user_id};{user_rag_memory_id}')
-            else:
-                # Neo4j 模式：使用结构化消息列表
-                structured_messages = []
-
-                # 始终添加用户消息（如果不为空）
-                if user_message:
-                    structured_messages.append({"role": "user", "content": user_message})
-
-                # 只有当 AI 回复不为空时才添加 assistant 消息
-                if ai_message:
-                    structured_messages.append({"role": "assistant", "content": ai_message})
-
-                # 如果没有消息，直接返回
-                if not structured_messages:
-                    logger.warning(f"No messages to write for user {actual_end_user_id}")
-                    return
-
-                logger.info(f"[WRITE] Submitting Celery task - user={actual_end_user_id}, messages={len(structured_messages)}, config={actual_config_id}")
-                write_id = write_message_task.delay(
-                    actual_end_user_id,  # end_user_id: 用户ID
-                    structured_messages,  # message: 结构化消息列表 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
-                    actual_config_id,    # config_id: 配置ID
-                    storage_type,        # storage_type: "neo4j"
-                    user_rag_memory_id   # user_rag_memory_id: RAG记忆ID（Neo4j模式下不使用）
-                )
-                logger.info(f"[WRITE] Celery task submitted - task_id={write_id}")
-                write_status = get_task_memory_write_result(str(write_id))
-                logger.info(f'[WRITE] Task result - user={actual_end_user_id}, status={write_status}')
-        finally:
-            db.close()
     async def chat(
             self,
             message: str,
@@ -520,14 +412,7 @@ class LangChainAgent:
 
             elapsed_time = time.time() - start_time
             if memory_flag:
-                long_term_messages=await agent_chat_messages(message_chat,content)
-                # TODO: DUPLICATE WRITE - Remove this immediate write once batched write (term_memory_save) is verified stable.
-                # This writes to Neo4j immediately via Celery task, but term_memory_save also writes to Neo4j
-                # when the window buffer reaches scope (6 messages). This causes duplicate entities in the graph.
-                # Recommended: Keep only term_memory_save for batched efficiency, or only self.write for real-time.
-                await self.write(storage_type, actual_end_user_id, message_chat, content, user_rag_memory_id, actual_end_user_id, actual_config_id)
-                # Batched long-term memory storage (Redis buffer + Neo4j when window full)
-                await self.term_memory_save(long_term_messages,actual_config_id,end_user_id,"chunk")
+                await write_long_term(storage_type, end_user_id, message_chat, content, user_rag_memory_id, actual_config_id)
             response = {
                 "content": content,
                 "model": self.model_name,
@@ -710,15 +595,7 @@ class LangChainAgent:
                         yield total_tokens
                         break
                 if memory_flag:
-                    # TODO: DUPLICATE WRITE - Remove this immediate write once batched write (term_memory_save) is verified stable.
-                    # This writes to Neo4j immediately via Celery task, but term_memory_save also writes to Neo4j
-                    # when the window buffer reaches scope (6 messages). This causes duplicate entities in the graph.
-                    # Recommended: Keep only term_memory_save for batched efficiency, or only self.write for real-time.
-                    long_term_messages = await agent_chat_messages(message_chat, full_content)
-                    await self.write(storage_type, end_user_id, message_chat, full_content, user_rag_memory_id, end_user_id, actual_config_id)
-                    # Batched long-term memory storage (Redis buffer + Neo4j when window full)
-                    await self.term_memory_save(long_term_messages, actual_config_id, end_user_id, "chunk")
-                
+                    await write_long_term(storage_type, end_user_id, message_chat, full_content, user_rag_memory_id, actual_config_id)
             except Exception as e:
                 logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)
                 raise

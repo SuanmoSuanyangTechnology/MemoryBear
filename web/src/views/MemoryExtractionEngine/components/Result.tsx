@@ -13,7 +13,7 @@
 import { type FC, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Space, Button, Progress } from 'antd'
+import { Space, Button, Progress, Form, Input } from 'antd'
 import { ExclamationCircleFilled, CheckCircleFilled, ClockCircleOutlined, LoadingOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
 import type { AnyObject } from 'antd/es/_util/type';
@@ -78,6 +78,8 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
   const [knowledgeExtraction, setKnowledgeExtraction] = useState<ModuleItem>(initObj as ModuleItem)
   const [creatingNodesEdges, setCreatingNodesEdges] = useState<ModuleItem>(initObj as ModuleItem)
   const [deduplication, setDeduplication] = useState<ModuleItem>(initObj as ModuleItem)
+
+  const [runForm] = Form.useForm()
 
   /** Run pilot test */
   const handleRun = () => {
@@ -187,6 +189,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
     pilotRunMemoryExtractionConfig({
       config_id: id,
       dialogue_text: t('memoryExtractionEngine.exampleText'),
+      custom_text: runForm.getFieldValue('custom_text')
     }, handleStreamMessage)
     .finally(() => {
       setRunLoading(false)
@@ -222,6 +225,14 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
       headerClassName="rb:pb-0! rb:pt-4!"
       bodyClassName="rb:min-h-[calc(100vh-388px)] rb:p-[16px_20px]!"
     >
+      <Form form={runForm} layout="vertical">
+        <Form.Item
+          name="custom_text"
+          label={t('memoryExtractionEngine.custom_text')}
+        >
+          <Input.TextArea placeholder={t('common.pleaseEnter')} />
+        </Form.Item>
+      </Form>
       <div className="rb:min-h-[calc(100vh-480px)] rb:overflow-y-auto">
         {runLoading
           ? <>

@@ -964,8 +964,15 @@ class AppService:
         ).order_by(
             AgentConfig.updated_at.desc()
         )
+
         config = self.db.scalars(stmt).first()
 
+        try:
+            config_memory=config.memory
+            if 'memory_content' in config_memory:
+                config.memory['memory_config_id'] = config.memory.pop('memory_content')
+        except:
+            logger.debug("记忆配置不存在")
         if config:
             return config
 

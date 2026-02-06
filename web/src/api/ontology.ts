@@ -8,6 +8,7 @@ import { request } from '@/utils/request'
 import type { Query, OntologyModalData, OntologyClassModalData, OntologyClassExtractModalData, OntologyExportModalData } from '@/views/Ontology/types'
 
 // Scene list
+export const getOntologyScenesSimpleUrl = '/memory/ontology/scenes/simple'
 export const getOntologyScenesUrl = '/memory/ontology/scenes'
 export const getOntologyScenesList = (data: Query) => {
   return request.get(getOntologyScenesUrl, data)

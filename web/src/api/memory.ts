@@ -256,7 +256,7 @@ export const updateMemoryExtractionConfig = (values: ExtractionConfigForm) => {
   return request.post('/memory-storage/update_config_extracted', values)
 }
 // Memory Extraction Engine - Pilot run
-export const pilotRunMemoryExtractionConfig = (values: { config_id: number | string; dialogue_text: string; }, onMessage?: (data: SSEMessage[]) => void) => {
+export const pilotRunMemoryExtractionConfig = (values: { config_id: number | string; dialogue_text: string; custom_text?: string; }, onMessage?: (data: SSEMessage[]) => void) => {
   return handleSSE('/memory-storage/pilot_run', values, onMessage)
 }
 // Emotion Engine - Get configuration

@@ -14,4 +14,5 @@ class File(Base):
     file_name = Column(String, index=True, nullable=False, comment="file name or folder name,default folder name is /")
     file_ext = Column(String, index=True, nullable=False, comment="file extension:folder|pdf")
     file_size = Column(Integer, default=0, comment="file size(byte)")
+    file_url = Column(String, index=True, nullable=True, comment="file comes from a website url")
     created_at = Column(DateTime, default=datetime.datetime.now)
