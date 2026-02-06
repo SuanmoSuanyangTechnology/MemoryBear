@@ -965,6 +965,7 @@ class AppService:
             logger.debug("记忆配置不存在")
         if config:
             return config
+
         # 返回默认配置模板（不保存到数据库）
         logger.debug("配置不存在，返回默认模板", extra={"app_id": str(app_id)})
         return self._create_default_agent_config(app_id)
