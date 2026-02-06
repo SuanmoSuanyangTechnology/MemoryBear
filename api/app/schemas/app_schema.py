@@ -488,7 +488,7 @@ class DraftRunCompareRequest(BaseModel):
         max_length=5,
         description="要对比的模型列表（1-5个）"
     )
-
+    files: Optional[List[FileInput]] = Field(default=None, description="附件列表（支持多文件）")
     parallel: bool = Field(True, description="是否并行执行")
     stream: bool = Field(False, description="是否流式返回")
     timeout: Optional[int] = Field(60, ge=10, le=300, description="超时时间（秒）")
