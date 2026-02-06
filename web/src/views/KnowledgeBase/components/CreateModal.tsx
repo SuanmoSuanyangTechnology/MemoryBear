@@ -656,7 +656,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       {currentType !== 'Folder' && dynamicTypeList.map((tp) => {
         const fieldKey = typeToFieldKey(tp);
         // When tp is 'llm', merge llm and chat options
-        const options = tp.toLowerCase() === 'llm' 
+        const options = tp.toLowerCase() === 'llm' || tp.toLowerCase() === 'image2text'
           ? [...(modelOptionsByType['llm'] || []), ...(modelOptionsByType['chat'] || [])]
           : modelOptionsByType[tp] || [];
         return (
