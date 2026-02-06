@@ -524,7 +524,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                 }}
               >
                 <div
-                  className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('src/assets/images/conversation/link.svg')] rb:hover:bg-[url('src/assets/images/conversation/link_hover.svg')]"
+                  className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')] rb:hover:bg-[url('@/assets/images/conversation/link_hover.svg')]"
                 ></div>
               </Dropdown>
             </Flex>
