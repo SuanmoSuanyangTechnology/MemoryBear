@@ -717,7 +717,7 @@ models:
   - video
   logo: dashscope
 - name: qwq-32b
-  type: chat
+  type: llm
   provider: dashscope
   description: qwq-32b大语言模型，支持智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
