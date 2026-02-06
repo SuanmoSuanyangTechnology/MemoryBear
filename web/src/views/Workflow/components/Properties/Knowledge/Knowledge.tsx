@@ -126,7 +126,7 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
           <div
             className="rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/recall.svg')] rb:group-hover:bg-[url('@/assets/images/workflow/recall_hover.svg')]"
           ></div>
-          {t('workflow.config.knowledge-retrieval.recallConfig')}
+          {t('application.globalConfig')}
         </Button>
       </div>
 
