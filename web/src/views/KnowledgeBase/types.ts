@@ -95,8 +95,24 @@ export interface ParserConfig {
   auto_keywords?: number; // 自动关键词
   auto_questions?: number; // 自动问题
   html4excel?: boolean; // 是否为Excel文件
-  graphrag:GraphragConfig; // 知识图谱生成
-
+  graphrag: GraphragConfig; // 知识图谱生成
+  
+  // Web 类型特有字段
+  entry_url?: string; // 入口网址
+  max_pages?: number; // 最大页面数 (10-200)
+  delay_seconds?: number; // 延迟秒数 (1-3)
+  timeout_seconds?: number; // 超时秒数 (5-15)
+  user_agent?: string; // 用户代理
+  
+  // Third-party 类型特有字段
+  third_party_platform?: 'yuque' | 'feishu'; // 第三方平台类型
+  // 语雀字段
+  yuque_user_id?: string; // 语雀用户ID
+  yuque_token?: string; // 语雀Token
+  // 飞书字段
+  app_id?: string; // 飞书应用ID
+  app_secret?: string; // 飞书应用密钥
+  folder_token?: string; // 飞书文件夹Token
 }
 // 文件数据
 export interface KnowledgeBaseDocumentData { // 知识库文档数据

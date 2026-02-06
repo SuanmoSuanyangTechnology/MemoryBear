@@ -14,7 +14,7 @@ import textIcon from '@/assets/images/knowledgeBase/text.png';
 import editIcon from '@/assets/images/knowledgeBase/edit.png';
 // import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
 // import imageIcon from '@/assets/images/knowledgeBase/image.png'
-import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase } from '@/api/knowledgeBase';
+import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase, createSync } from '@/api/knowledgeBase';
 import { 
   type CreateModalRef, 
   type KnowledgeBaseListItem, 
@@ -71,6 +71,9 @@ const Private: FC = () => {
   const [folderTreeRefreshKey, setFolderTreeRefreshKey] = useState(0);
   const [autoExpandPath, setAutoExpandPath] = useState<Array<{ id: string; name: string }>>([]);
   const [isGraph, setIsGraph] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const syncStartTimeRef = useRef<number | null>(null);
   const { updateBreadcrumbs } = useBreadcrumbManager({
     breadcrumbType: 'detail',
     // Don't provide onKnowledgeBaseMenuClick, let it use default navigation behavior (return to list page)
@@ -111,6 +114,7 @@ const Private: FC = () => {
       // Convert KnowledgeBase to KnowledgeBaseListItem
       const listItem = res as unknown as KnowledgeBaseListItem;
       setKnowledgeBase(listItem);
+      return listItem;
     } finally {
       setLoading(false);
     }
@@ -256,6 +260,15 @@ const Private: FC = () => {
       }, 2000);
     }
   }, [location.state, knowledgeBaseId, navigate, location.pathname]);
+
+  // Cleanup sync interval on unmount
+  useEffect(() => {
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+      }
+    };
+  }, []);
 
   // Handle tree node selection
   const onSelect = (keys: React.Key[]) => {
@@ -686,11 +699,69 @@ const Private: FC = () => {
     createFolderModalRef?.current?.handleOpen(f,'edit');
   }
 
-  const handleRefreshTable = () => {
-    // Refresh table data
-    fetchKnowledgeBaseDetail(knowledgeBase.id)
+  const handleRefreshTable = async () => {
+    // Check if sync has timed out (1 minute = 60000ms)
+    if (syncStartTimeRef.current) {
+      const elapsedTime = Date.now() - syncStartTimeRef.current;
+      if (elapsedTime > 60000) {
+        stopSyncing();
+        messageApi.warning(t('knowledgeBase.syncTimeout'));
+        return;
+      }
+    }
+    
+    // Refresh table data and get updated knowledge base info
+    const updatedKnowledgeBase = await fetchKnowledgeBaseDetail(knowledgeBase.id);
     tableRef.current?.loadData();
+    
+    // Check if there are documents and stop syncing if so
+    if (syncStartTimeRef.current && updatedKnowledgeBase?.doc_num && updatedKnowledgeBase.doc_num > 0) {
+      stopSyncing();
+      messageApi.success(t('knowledgeBase.syncCompleted'));
+    }
   }
+
+  // Handle sync for Web and Third-party knowledge bases
+  const handleSync = async () => {
+    if (!knowledgeBase?.id) {
+      messageApi.error(t('knowledgeBase.syncError'));
+      return;
+    }
+
+    try {
+      setIsSyncing(true);
+      syncStartTimeRef.current = Date.now(); // Record start time
+      await createSync(knowledgeBase.id);
+      messageApi.success(t('knowledgeBase.syncSuccess'));
+      
+      // Start polling: refresh table every 5 seconds and check for data
+      syncIntervalRef.current = setInterval(async () => {
+        await handleRefreshTable();
+      }, 5000);
+      
+      // Initial refresh after 1 second
+      setTimeout(async () => {
+        await handleRefreshTable();
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Sync failed:', error);
+      messageApi.error(t('knowledgeBase.syncFailed'));
+      setIsSyncing(false);
+      syncStartTimeRef.current = null;
+    }
+  };
+
+  // Stop syncing and clear interval
+  const stopSyncing = () => {
+    if (syncIntervalRef.current) {
+      clearInterval(syncIntervalRef.current);
+      syncIntervalRef.current = null;
+    }
+    syncStartTimeRef.current = null;
+    setIsSyncing(false);
+  };
+
   return (
     <>
     {contextHolder}
@@ -749,9 +820,20 @@ const Private: FC = () => {
             <Button onClick={handleShare}>{t('knowledgeBase.share')}</Button>
             <Button onClick={handleRecallTest}>{t('knowledgeBase.recallTest')}</Button>
             <Button onClick={handleSetting}>{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.setting')}</Button>
-            <Dropdown menu={{ items: createItems }} trigger={['click']}>
+            {(knowledgeBase?.type === 'Web' || knowledgeBase?.type === 'Third-party') && (
+              <Button 
+                type="primary" 
+                onClick={isSyncing ? stopSyncing : handleSync}
+                loading={isSyncing}
+              >
+                {isSyncing ? t('knowledgeBase.syncing') : t('knowledgeBase.syncNow')}
+              </Button>
+            )}
+            {knowledgeBase?.type !== 'Web' && knowledgeBase?.type !== 'Third-party' && (
+              <Dropdown menu={{ items: createItems }} trigger={['click']}>
                 <Button type="primary" onClick={handelCreateOrImport} >+ {t('knowledgeBase.createImport')}</Button>
-            </Dropdown>
+              </Dropdown>
+            )}
             
           </div>
         </div>

@@ -223,8 +223,6 @@ const KnowledgeBaseManagement: FC = () => {
   const fetchKnowledgeBaseTypes = async () => {
     try {
       let types = await getKnowledgeBaseTypeList();
-      types = types.filter(type => (type === 'General' || type === 'Folder' )); //
-      //暂时未实现 ，过滤掉未实现
       setKnowledgeBaseTypes(types);
     } catch (error) {
       console.error('Failed to fetch knowledge base types:', error);
