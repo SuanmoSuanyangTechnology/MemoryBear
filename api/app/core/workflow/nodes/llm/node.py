@@ -216,7 +216,7 @@ class LLMNode(BaseNode):
         logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(content)}")
 
         # 返回 AIMessage（包含响应元数据）
-        return response if isinstance(response, AIMessage) else AIMessage(content=content)
+        return AIMessage(content=content, response_metadata=response.response_metadata)
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """提取输入数据（用于记录）"""

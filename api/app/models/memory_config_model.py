@@ -1,6 +1,8 @@
 import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float
+
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
+
 from app.db import Base
 
 
@@ -41,6 +43,7 @@ class MemoryConfig(Base):
 
     # 状态配置
     state = Column(Boolean, default=False, comment="配置使用状态")
+    is_default = Column(Boolean, default=False, comment="是否为工作空间默认配置")
 
     # 分块策略
     chunker_strategy = Column(String, default="RecursiveChunker", comment="分块策略")

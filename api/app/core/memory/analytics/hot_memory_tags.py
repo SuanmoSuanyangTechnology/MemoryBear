@@ -39,16 +39,20 @@ async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
             
             connected_config = get_end_user_connected_config(end_user_id, db)
             config_id = connected_config.get("memory_config_id")
+            workspace_id = connected_config.get("workspace_id")
             
-            if not config_id:
+            if not config_id and not workspace_id:
                 raise ValueError(
                     f"No memory_config_id found for end_user_id: {end_user_id}. "
                     "Please ensure the user has a valid memory configuration."
                 )
             
-            # Use the config_id to get the proper LLM client
+            # Use the config_id to get the proper LLM client with workspace fallback
             config_service = MemoryConfigService(db)
-            memory_config = config_service.load_memory_config(config_id)
+            memory_config = config_service.load_memory_config(
+                config_id=config_id,
+                workspace_id=workspace_id
+            )
             
             if not memory_config.llm_model_id:
                 raise ValueError(

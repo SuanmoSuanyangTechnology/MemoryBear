@@ -24,9 +24,11 @@ from . import (
     memory_episodic_controller,
     memory_explicit_controller,
     memory_forget_controller,
+    memory_perceptual_controller,
     memory_reflection_controller,
     memory_short_term_controller,
     memory_storage_controller,
+    memory_working_controller,
     model_controller,
     multi_agent_controller,
     prompt_optimizer_controller,
@@ -40,10 +42,6 @@ from . import (
     user_controller,
     user_memory_controllers,
     workspace_controller,
-    memory_forget_controller,
-    home_page_controller,
-    memory_perceptual_controller,
-    memory_working_controller,
     ontology_controller,
     skill_controller
 )

@@ -7,7 +7,7 @@ providing percentage distribution that totals 100%.
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from app.core.memory.analytics.implicit_memory.llm_client import ImplicitMemoryLLMClient
 from app.core.memory.llm_tools.llm_client import LLMClientException
@@ -133,7 +133,6 @@ class InterestAnalyzer:
             
             # Create interest area distribution
             distribution = InterestAreaDistribution(
-                user_id=user_id,
                 tech=interest_categories["tech"],
                 lifestyle=interest_categories["lifestyle"],
                 music=interest_categories["music"],
@@ -251,7 +250,7 @@ class InterestAnalyzer:
         """Create an empty interest distribution when no data is available.
         
         Args:
-            user_id: Target user ID
+            user_id: Target user ID (used for logging only)
             
         Returns:
             Empty InterestAreaDistribution with equal percentages
@@ -259,15 +258,15 @@ class InterestAnalyzer:
         current_time = datetime.now()
         equal_percentage = 25.0  # 100% / 4 categories
         
-        default_category = lambda name: InterestCategory(
-            category_name=name,
-            percentage=equal_percentage,
-            evidence=["Insufficient data for analysis"],
-            trending_direction=None
-        )
+        def default_category(name: str) -> InterestCategory:
+            return InterestCategory(
+                category_name=name,
+                percentage=equal_percentage,
+                evidence=["Insufficient data for analysis"],
+                trending_direction=None
+            )
         
         return InterestAreaDistribution(
-            user_id=user_id,
             tech=default_category("tech"),
             lifestyle=default_category("lifestyle"),
             music=default_category("music"),

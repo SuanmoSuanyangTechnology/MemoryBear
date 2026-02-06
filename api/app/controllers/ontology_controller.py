@@ -4,13 +4,14 @@
 
 Endpoints:
     POST /api/memory/ontology/extract - 提取本体类
-    POST /api/memory/ontology/export - 导出OWL文件
+    POST /api/memory/ontology/export - 按场景导出OWL文件
+    POST /api/memory/ontology/import - 导入OWL文件到指定场景
     POST /api/memory/ontology/scene - 创建本体场景
     PUT /api/memory/ontology/scene/{scene_id} - 更新本体场景
     DELETE /api/memory/ontology/scene/{scene_id} - 删除本体场景
     GET /api/memory/ontology/scene/{scene_id} - 获取单个场景
     GET /api/memory/ontology/scenes - 获取场景列表
-    POST /api/memory/ontology/class - 创建本体类型
+    POST /api/memory/ontology/class - 创建本体类型（支持批量）
     PUT /api/memory/ontology/class/{class_id} - 更新本体类型
     DELETE /api/memory/ontology/class/{class_id} - 删除本体类型
     GET /api/memory/ontology/class/{class_id} - 获取单个类型
@@ -19,11 +20,15 @@ Endpoints:
 
 import logging
 import tempfile
-from typing import Dict, Optional
+import io
+from typing import Dict, Optional, List
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Header
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
@@ -31,11 +36,10 @@ from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
-from app.core.memory.models.ontology_models import OntologyClass
-from typing import List
+from app.core.memory.models.ontology_scenario_models import OntologyClass
 from app.schemas.ontology_schemas import (
-    ExportRequest,
-    ExportResponse,
+    ExportBySceneRequest,
+    ExportBySceneResponse,
     ExtractionRequest,
     ExtractionResponse,
     SceneCreateRequest,
@@ -46,6 +50,7 @@ from app.schemas.ontology_schemas import (
     ClassUpdateRequest,
     ClassResponse,
     ClassListResponse,
+    ImportOwlResponse,
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.ontology_service import OntologyService
@@ -187,22 +192,19 @@ async def extract_ontology(
     从场景描述中提取符合OWL规范的本体类。
     提取结果仅返回给前端，不会自动保存到数据库。
     前端可以从返回结果中选择需要的类型，然后调用 /class 接口创建类型。
-    支持中英文切换，通过 X-Language-Type Header 指定语言。
     
     Args:
         request: 提取请求,包含scenario、domain、llm_id和scene_id
-        language_type: 语言类型，'zh'（中文）或 'en'（英文），默认 'zh'
+        language_type: 语言类型 Header (zh/en)
         db: 数据库会话
         current_user: 当前用户
-        
     """
     api_logger.info(
         f"Ontology extraction requested by user {current_user.id}, "
         f"scenario_length={len(request.scenario)}, "
         f"domain={request.domain}, "
         f"llm_id={request.llm_id}, "
-        f"scene_id={request.scene_id}, "
-        f"language_type={language_type}"
+        f"scene_id={request.scene_id}"
     )
     
     try:
@@ -222,7 +224,7 @@ async def extract_ontology(
             llm_id=request.llm_id
         )
         
-        # 调用服务层执行提取，传入scene_id和workspace_id
+        # 调用服务层执行提取
         result = await service.extract_ontology(
             scenario=request.scenario,
             domain=request.domain,
@@ -231,7 +233,7 @@ async def extract_ontology(
             language=language
         )
         
-        # 构建响应（语言已在提取时通过模板控制，无需二次翻译）
+        # 构建响应
         response = ExtractionResponse(
             classes=result.classes,
             domain=result.domain,
@@ -240,7 +242,7 @@ async def extract_ontology(
         
         api_logger.info(
             f"Ontology extraction completed, extracted {len(result.classes)} classes, "
-            f"saved to scene {request.scene_id}, language={language_type}"
+            f"scene_id={request.scene_id}, language={language}"
         )
         
         return success(data=response.model_dump(), msg="本体提取成功")
@@ -261,146 +263,6 @@ async def extract_ontology(
         return fail(BizCode.INTERNAL_ERROR, "本体提取失败", str(e))
 
 
-@router.post("/export", response_model=ApiResponse)
-async def export_owl(
-    request: ExportRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """导出OWL文件
-    
-    将提取的本体类导出为OWL文件,支持多种格式。
-    导出操作不需要LLM,只使用OWL验证器和Owlready2库。
-    
-    Args:
-        request: 导出请求,包含classes、format和include_metadata
-        db: 数据库会话
-        current_user: 当前用户
-        
-    Returns:
-        ApiResponse: 包含OWL文件内容的响应
-        
-    Supported formats:
-        - rdfxml: 标准OWL RDF/XML格式(完整)
-        - turtle: Turtle格式(可读性好)
-        - ntriples: N-Triples格式(简单)
-        - json: JSON格式(简化,只包含类信息)
-        
-    Response format:
-        {
-            "code": 200,
-            "msg": "OWL文件导出成功",
-            "data": {
-                "owl_content": "...",
-                "format": "rdfxml",
-                "classes_count": 7
-            }
-        }
-    """
-    api_logger.info(
-        f"OWL export requested by user {current_user.id}, "
-        f"classes_count={len(request.classes)}, "
-        f"format={request.format}, "
-        f"include_metadata={request.include_metadata}"
-    )
-    
-    try:
-        # 验证格式
-        valid_formats = ["rdfxml", "turtle", "ntriples", "json"]
-        if request.format not in valid_formats:
-            api_logger.warning(f"Invalid export format: {request.format}")
-            return fail(
-                BizCode.BAD_REQUEST,
-                "不支持的导出格式",
-                f"format必须是以下之一: {', '.join(valid_formats)}"
-            )
-        
-        # JSON格式直接导出,不需要OWL验证
-        if request.format == "json":
-            owl_validator = OWLValidator()
-            owl_content = owl_validator.export_to_owl(
-                world=None,
-                format="json",
-                classes=request.classes
-            )
-            
-            response = ExportResponse(
-                owl_content=owl_content,
-                format=request.format,
-                classes_count=len(request.classes)
-            )
-            
-            api_logger.info(
-                f"JSON export completed, content_length={len(owl_content)}"
-            )
-            
-            return success(data=response.model_dump(), msg="OWL文件导出成功")
-        
-        # 创建临时文件路径
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.owl',
-            delete=False
-        ) as tmp_file:
-            output_path = tmp_file.name
-        
-        # 导出操作不需要LLM,直接使用OWL验证器
-        owl_validator = OWLValidator()
-        
-        # 验证本体类
-        logger.debug("Validating ontology classes")
-        is_valid, errors, world = owl_validator.validate_ontology_classes(
-            classes=request.classes,
-        )
-        
-        if not is_valid:
-            logger.warning(
-                f"OWL validation found {len(errors)} issues during export: {errors}"
-            )
-            # 继续导出,但记录警告
-        
-        if not world:
-            error_msg = "Failed to create OWL world for export"
-            logger.error(error_msg)
-            return fail(BizCode.INTERNAL_ERROR, "创建OWL世界失败", error_msg)
-        
-        # 导出OWL文件
-        logger.info(f"Exporting to {request.format} format")
-        owl_content = owl_validator.export_to_owl(
-            world=world,
-            output_path=output_path,
-            format=request.format,
-            classes=request.classes
-        )
-        
-        # 构建响应
-        response = ExportResponse(
-            owl_content=owl_content,
-            format=request.format,
-            classes_count=len(request.classes)
-        )
-        
-        api_logger.info(
-            f"OWL export completed, format={request.format}, "
-            f"content_length={len(owl_content)}"
-        )
-        
-        return success(data=response.model_dump(), msg="OWL文件导出成功")
-        
-    except ValueError as e:
-        # 验证错误 (400)
-        api_logger.warning(f"Validation error in export: {str(e)}")
-        return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
-        
-    except RuntimeError as e:
-        # 运行时错误 (500)
-        api_logger.error(f"Runtime error in export: {str(e)}", exc_info=True)
-        return fail(BizCode.INTERNAL_ERROR, "OWL文件导出失败", str(e))
-        
-    except Exception as e:
-        # 未知错误 (500)
-        api_logger.error(f"Unexpected error in export: {str(e)}", exc_info=True)
-        return fail(BizCode.INTERNAL_ERROR, "OWL文件导出失败", str(e))
 
 
 # ==================== 本体场景管理接口 ====================
@@ -893,3 +755,370 @@ async def get_class(
     """
     from app.controllers.ontology_secondary_routes import get_class_handler
     return await get_class_handler(class_id, db, current_user)
+
+
+# ==================== OWL 导入接口 ====================
+
+@router.post("/import", response_model=ApiResponse)
+async def import_owl_file(
+    scene_name: str = Form(..., description="场景名称"),
+    scene_description: Optional[str] = Form(None, description="场景描述（可选）"),
+    file: UploadFile = File(..., description="OWL/TTL文件"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """导入 OWL/TTL 文件并创建新场景
+    
+    上传 OWL 或 TTL 文件，解析其中定义的本体类型（owl:Class），
+    解析成功后创建新场景，并将类型保存到该场景的 ontology_class 表中。
+    
+    文件格式根据文件扩展名自动识别：
+    - .owl, .rdf, .xml -> rdfxml 格式
+    - .ttl -> turtle 格式
+    
+    Args:
+        scene_name: 场景名称（表单字段）
+        scene_description: 场景描述（表单字段，可选）
+        file: 上传的文件（支持 .owl, .ttl, .rdf, .xml）
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含导入结果
+    """
+    from app.repositories.ontology_scene_repository import OntologySceneRepository
+    from app.repositories.ontology_class_repository import OntologyClassRepository
+    
+    # 根据文件扩展名确定格式
+    filename = file.filename.lower() if file.filename else ""
+    if filename.endswith('.ttl'):
+        owl_format = "turtle"
+        file_type = "ttl"
+    elif filename.endswith(('.owl', '.rdf', '.xml')):
+        owl_format = "rdfxml"
+        file_type = "owl"
+    else:
+        return fail(
+            BizCode.BAD_REQUEST,
+            "文件格式不支持",
+            f"不支持的文件格式: {filename}，支持的格式: .owl, .ttl, .rdf, .xml"
+        )
+    
+    api_logger.info(
+        f"OWL import requested by user {current_user.id}, "
+        f"scene_name={scene_name}, "
+        f"filename={file.filename}, "
+        f"format={owl_format}"
+    )
+    
+    try:
+        # 获取当前工作空间ID
+        workspace_id = current_user.current_workspace_id
+        if not workspace_id:
+            api_logger.warning(f"User {current_user.id} has no current workspace")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        # 1. 验证场景名称不为空
+        if not scene_name or not scene_name.strip():
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "场景名称不能为空")
+        
+        scene_name = scene_name.strip()
+        
+        # 2. 检查场景名称是否已存在
+        scene_repo = OntologySceneRepository(db)
+        existing_scene = scene_repo.get_by_name(scene_name, workspace_id)
+        if existing_scene:
+            api_logger.warning(f"Scene name already exists: {scene_name}")
+            return fail(
+                BizCode.BAD_REQUEST,
+                "场景名称已存在",
+                f"工作空间下已存在名为 '{scene_name}' 的场景"
+            )
+        
+        # 3. 读取文件内容
+        try:
+            content = await file.read()
+            owl_content = content.decode('utf-8')
+        except UnicodeDecodeError:
+            return fail(
+                BizCode.BAD_REQUEST,
+                f"{file_type}文件导入失败",
+                "文件编码错误，请确保文件使用 UTF-8 编码"
+            )
+        
+        # 4. 解析 OWL 内容（先解析，成功后再创建场景）
+        owl_validator = OWLValidator()
+        parsed_classes = owl_validator.parse_owl_content(
+            owl_content=owl_content,
+            format=owl_format
+        )
+        
+        if not parsed_classes:
+            api_logger.warning("No classes found in OWL content")
+            return fail(
+                BizCode.BAD_REQUEST,
+                "未找到本体类型",
+                "文件中没有定义任何本体类型（owl:Class）"
+            )
+        
+        # 5. 文件解析成功，创建场景
+        scene = scene_repo.create(
+            scene_data={
+                "scene_name": scene_name,
+                "scene_description": scene_description
+            },
+            workspace_id=workspace_id
+        )
+        scene_uuid = scene.scene_id
+        
+        api_logger.info(f"Scene created for import: {scene_uuid}")
+        
+        # 6. 批量创建类型（去重同一批次内的重复类型）
+        class_repo = OntologyClassRepository(db)
+        created_items = []
+        existing_names = set()
+        skipped_count = 0
+        
+        for cls in parsed_classes:
+            class_name = cls["name"]
+            class_description = cls.get("description")
+            
+            # 检查同一批次内是否重复
+            if class_name in existing_names:
+                skipped_count += 1
+                api_logger.debug(f"Skipping duplicate class in batch: {class_name}")
+                continue
+            
+            # 创建类型
+            ontology_class = class_repo.create(
+                class_data={
+                    "class_name": class_name,
+                    "class_description": class_description
+                },
+                scene_id=scene_uuid
+            )
+            
+            # 添加到已存在集合，防止同一批次内重复
+            existing_names.add(class_name)
+            
+            created_items.append(ClassResponse(
+                class_id=ontology_class.class_id,
+                class_name=ontology_class.class_name,
+                class_description=ontology_class.class_description,
+                scene_id=ontology_class.scene_id,
+                created_at=ontology_class.created_at,
+                updated_at=ontology_class.updated_at
+            ))
+        
+        # 7. 提交事务
+        db.commit()
+        
+        # 8. 构建响应
+        response = ImportOwlResponse(
+            scene_id=scene_uuid,
+            scene_name=scene.scene_name,
+            imported_count=len(created_items),
+            skipped_count=skipped_count,
+            items=created_items
+        )
+        
+        api_logger.info(
+            f"{file_type} import completed, "
+            f"scene_id={scene_uuid}, "
+            f"scene_name={scene_name}, "
+            f"format={owl_format}, "
+            f"imported={len(created_items)}, "
+            f"skipped={skipped_count}"
+        )
+        
+        return success(data=response.model_dump(), msg=f"{file_type}文件导入成功")
+        
+    except ValueError as e:
+        db.rollback()
+        api_logger.warning(f"Validation error in import: {str(e)}")
+        return fail(BizCode.BAD_REQUEST, f"{file_type}文件导入失败", str(e))
+        
+    except Exception as e:
+        db.rollback()
+        api_logger.error(f"Unexpected error in import: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, f"{file_type}文件导入失败", str(e))
+
+# ==================== OWL 导出接口 ====================        
+@router.post("/export")
+async def export_owl_by_scene(
+    request: ExportBySceneRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """按场景导出OWL/TTL文件
+    
+    根据scene_id从数据库查询该场景下的所有本体类型，并导出为文件下载。
+    
+    Args:
+        request: 导出请求，包含 scene_id 和 format
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        StreamingResponse: 文件流响应，浏览器会直接下载文件
+    """
+    from uuid import UUID
+    from app.repositories.ontology_scene_repository import OntologySceneRepository
+    from app.repositories.ontology_class_repository import OntologyClassRepository
+    
+    api_logger.info(
+        f"OWL export by scene requested by user {current_user.id}, "
+        f"scene_id={request.scene_id}, "
+        f"format={request.format}"
+    )
+    
+    try:
+        # 验证格式参数
+        valid_formats = ["rdfxml", "turtle"]
+        owl_format = request.format.lower() if request.format else "rdfxml"
+        if owl_format not in valid_formats:
+            api_logger.warning(f"Invalid format: {request.format}")
+            return fail(
+                BizCode.BAD_REQUEST,
+                "格式参数无效",
+                f"不支持的格式: {request.format}，支持的格式: rdfxml, turtle"
+            )
+        
+        # 获取当前工作空间ID
+        workspace_id = current_user.current_workspace_id
+        if not workspace_id:
+            api_logger.warning(f"User {current_user.id} has no current workspace")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        # 1. 查询场景信息
+        scene_repo = OntologySceneRepository(db)
+        scene = scene_repo.get_by_id(request.scene_id)
+        
+        if not scene:
+            api_logger.warning(f"Scene not found: {request.scene_id}")
+            return fail(BizCode.NOT_FOUND, "场景不存在", f"找不到场景: {request.scene_id}")
+        
+        # 验证场景属于当前工作空间
+        if scene.workspace_id != workspace_id:
+            api_logger.warning(
+                f"Scene {request.scene_id} does not belong to workspace {workspace_id}"
+            )
+            return fail(BizCode.FORBIDDEN, "无权访问", "该场景不属于当前工作空间")
+        
+        # 2. 查询场景下的所有本体类型
+        class_repo = OntologyClassRepository(db)
+        ontology_classes_db = class_repo.get_by_scene(request.scene_id)
+        
+        if not ontology_classes_db:
+            api_logger.warning(f"No classes found in scene: {request.scene_id}")
+            return fail(BizCode.BAD_REQUEST, "场景为空", "该场景下没有定义任何本体类型")
+        
+        # 3. 将数据库模型转换为OWL导出所需的OntologyClass格式
+        ontology_classes: List[OntologyClass] = []
+        for db_class in ontology_classes_db:
+            owl_class = OntologyClass(
+                id=str(db_class.class_id),
+                name=db_class.class_name,
+                name_chinese=db_class.class_name if _is_chinese(db_class.class_name) else None,
+                description=db_class.class_description or "",
+                examples=[],
+                parent_class=None,
+                entity_type="Concept",
+                domain=scene.scene_name
+            )
+            ontology_classes.append(owl_class)
+        
+        # 4. 确定文件名、扩展名和 MIME 类型
+        file_ext = ".ttl" if owl_format == "turtle" else ".owl"
+        filename = _sanitize_filename(scene.scene_name) + file_ext
+        media_type = "text/turtle" if owl_format == "turtle" else "application/rdf+xml"
+        file_type = "ttl" if owl_format == "turtle" else "owl"
+        
+        # 5. 导出OWL文件
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            suffix='.owl',
+            delete=False
+        ) as tmp_file:
+            output_path = tmp_file.name
+        
+        owl_validator = OWLValidator()
+        
+        # 验证本体类
+        is_valid, errors, world = owl_validator.validate_ontology_classes(
+            classes=ontology_classes,
+        )
+        
+        if not is_valid:
+            logger.warning(
+                f"OWL validation found {len(errors)} issues during export: {errors}"
+            )
+        
+        if not world:
+            error_msg = "Failed to create OWL world for export"
+            logger.error(error_msg)
+            return fail(BizCode.INTERNAL_ERROR, "创建OWL世界失败", error_msg)
+        
+        # 导出OWL文件（使用请求指定的格式）
+        owl_content = owl_validator.export_to_owl(
+            world=world,
+            output_path=output_path,
+            format=owl_format,
+            classes=ontology_classes
+        )
+        
+        api_logger.info(
+            f"{file_type} export by scene completed, "
+            f"scene={scene.scene_name}, "
+            f"filename={filename}, "
+            f"format={owl_format}, "
+            f"classes_count={len(ontology_classes)}"
+        )
+        
+        # 6. 返回文件流响应
+        # filename 使用 ASCII 安全的默认名，filename* 使用 UTF-8 编码的实际名称
+        ascii_filename = f"ontology{file_ext}"
+        encoded_filename = quote(filename)
+        return StreamingResponse(
+            io.BytesIO(owl_content.encode('utf-8')),
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{encoded_filename}"
+            }
+        )
+        
+    except ValueError as e:
+        api_logger.warning(f"Validation error in export by scene: {str(e)}")
+        file_type = "ttl" if (request.format and request.format.lower() == "turtle") else "owl"
+        return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
+        
+    except RuntimeError as e:
+        api_logger.error(f"Runtime error in export by scene: {str(e)}", exc_info=True)
+        file_type = "ttl" if (request.format and request.format.lower() == "turtle") else "owl"
+        return fail(BizCode.INTERNAL_ERROR, f"{file_type}文件导出失败", str(e))
+        
+    except Exception as e:
+        api_logger.error(f"Unexpected error in export by scene: {str(e)}", exc_info=True)
+        file_type = "ttl" if (request.format and request.format.lower() == "turtle") else "owl"
+        return fail(BizCode.INTERNAL_ERROR, f"{file_type}文件导出失败", str(e))
+
+
+def _is_chinese(text: str) -> bool:
+    """检查文本是否包含中文字符"""
+    for char in text:
+        if '\u4e00' <= char <= '\u9fff':
+            return True
+    return False
+
+
+def _sanitize_filename(name: str) -> str:
+    """清理文件名，移除不合法字符"""
+    import re
+    # 移除或替换不合法的文件名字符
+    sanitized = re.sub(r'[<>:"/\\|?*]', '_', name)
+    # 移除前后空格
+    sanitized = sanitized.strip()
+    # 如果为空，使用默认名称
+    if not sanitized:
+        sanitized = "ontology_export"
+    return sanitized

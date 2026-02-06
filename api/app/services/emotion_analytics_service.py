@@ -538,14 +538,16 @@ class EmotionAnalyticsService:
 
                 connected_config = get_end_user_connected_config(end_user_id, db)
                 config_id = connected_config.get("memory_config_id")
-                config_id = resolve_config_id(config_id, db)
-                if config_id is not None:
+                workspace_id = connected_config.get("workspace_id")
+                config_id = resolve_config_id(config_id, db) if config_id else None
+                if config_id is not None or workspace_id is not None:
                     from app.services.memory_config_service import (
                         MemoryConfigService,
                     )
                     config_service = MemoryConfigService(db)
                     memory_config = config_service.load_memory_config(
-                        config_id=(config_id),
+                        config_id=config_id,
+                        workspace_id=workspace_id,
                         service_name="EmotionAnalyticsService.generate_emotion_suggestions"
                     )
                     from app.core.memory.utils.llm.llm_utils import MemoryClientFactory

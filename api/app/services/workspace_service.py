@@ -5,32 +5,36 @@ import uuid
 from os import getenv
 from typing import List, Optional
 
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, PermissionDeniedException
 from app.core.logging_config import get_business_logger
 from app.models.user_model import User
-
-from app.schemas.workspace_schema import (
-    WorkspaceModelsUpdate,
+from app.models.workspace_model import (
+    InviteStatus,
+    Workspace,
+    WorkspaceMember,
+    WorkspaceRole,
 )
-from sqlalchemy.orm import Session
-from app.models.workspace_model import Workspace, WorkspaceRole, InviteStatus, WorkspaceMember
 from app.repositories import workspace_repository
 from app.repositories.workspace_invite_repository import WorkspaceInviteRepository
 from app.schemas.workspace_schema import (
+    InviteAcceptRequest,
+    InviteValidateResponse,
     WorkspaceCreate,
-    WorkspaceUpdate,
     WorkspaceInviteCreate,
     WorkspaceInviteResponse,
-    InviteValidateResponse,
-    InviteAcceptRequest,
-    WorkspaceMemberUpdate
+    WorkspaceMemberUpdate,
+    WorkspaceModelsUpdate,
+    WorkspaceUpdate,
 )
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
 from dotenv import load_dotenv
+
 load_dotenv()
 def switch_workspace(
     db: Session,
@@ -83,9 +87,26 @@ def  delete_workspace_member(
 
 
 def get_user_workspaces(db: Session, user: User) -> List[Workspace]:
-    """获取当前用户参与的所有工作空间"""
+    """获取当前用户参与的所有工作空间
+    
+    For neo4j storage type workspaces, ensures each has a default memory config.
+    If a workspace is missing a default config, one will be created automatically.
+    
+    Args:
+        db: Database session
+        user: Current user
+        
+    Returns:
+        List[Workspace]: List of workspaces the user belongs to
+    """
     business_logger.debug(f"获取用户工作空间列表: {user.username} (ID: {user.id})")
     workspaces = workspace_repository.get_workspaces_by_user(db=db, user_id=user.id)
+    
+    # Ensure each neo4j workspace has a default memory config
+    for workspace in workspaces:
+        if workspace.storage_type == 'neo4j':
+            _ensure_default_memory_config(db, workspace)
+    
     business_logger.info(f"用户 {user.username} 的工作空间数量: {len(workspaces)}")
     return workspaces
 
@@ -126,6 +147,27 @@ def create_workspace(
         business_logger.info(f"工作空间创建成功: {db_workspace.name} (ID: {db_workspace.id}), 创建者: {user.username}")
         db.commit()
         db.refresh(db_workspace)
+
+        # Create default memory config for the workspace (only for neo4j storage types)
+        if workspace.storage_type == 'neo4j':
+            try:
+                _create_default_memory_config(
+                    db=db,
+                    workspace_id=db_workspace.id,
+                    workspace_name=db_workspace.name,
+                    llm_id=llm,
+                    embedding_id=embedding,
+                    rerank_id=rerank,
+                )
+                business_logger.info(
+                    f"为工作空间 {db_workspace.id} 创建默认记忆配置成功"
+                )
+            except Exception as mc_error:
+                business_logger.error(
+                    f"为工作空间 {db_workspace.id} 创建默认记忆配置失败: {str(mc_error)}"
+                )
+                # Don't fail workspace creation if memory config creation fails
+                # The workspace can still function without a default memory config
 
         # 如果 storage_type 是 "rag"，自动创建知识库
         if workspace.storage_type == "rag":
@@ -286,7 +328,7 @@ def _check_workspace_member_permission(db: Session, workspace_id: uuid.UUID, use
         )
 
     # 使用统一权限服务检查访问权限
-    from app.core.permissions import permission_service, Subject, Resource, Action
+    from app.core.permissions import Action, Resource, Subject, permission_service
 
     # 获取用户的工作空间成员关系
     member = workspace_repository.get_member_in_workspace(
@@ -324,7 +366,7 @@ def _check_workspace_admin_permission(db: Session, workspace_id: uuid.UUID, user
         )
 
     # 使用统一权限服务检查管理权限
-    from app.core.permissions import permission_service, Subject, Resource, Action
+    from app.core.permissions import Action, Resource, Subject, permission_service
 
     # 获取用户的工作空间成员关系
     member = workspace_repository.get_member_in_workspace(
@@ -852,3 +894,89 @@ def update_workspace_models_configs(
         business_logger.error(f"工作空间模型配置更新失败: workspace_id={workspace_id} - {str(e)}")
         db.rollback()
         raise BusinessException(f"更新模型配置失败: {str(e)}", BizCode.INTERNAL_ERROR)
+
+
+def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
+    """Ensure a workspace has a default memory config, creating one if missing.
+    
+    Args:
+        db: Database session
+        workspace: The workspace to check
+    """
+    from app.models.memory_config_model import MemoryConfig
+    
+    # Check if default config exists for this workspace
+    existing_default = db.query(MemoryConfig).filter(
+        MemoryConfig.workspace_id == workspace.id,
+        MemoryConfig.is_default == True
+    ).first()
+    
+    if existing_default:
+        return
+    
+    # No default config exists, create one
+    business_logger.info(
+        f"Workspace {workspace.id} missing default memory config, creating one"
+    )
+    
+    try:
+        _create_default_memory_config(
+            db=db,
+            workspace_id=workspace.id,
+            workspace_name=workspace.name,
+            llm_id=uuid.UUID(workspace.llm) if workspace.llm else None,
+            embedding_id=uuid.UUID(workspace.embedding) if workspace.embedding else None,
+            rerank_id=uuid.UUID(workspace.rerank) if workspace.rerank else None,
+        )
+    except Exception as e:
+        business_logger.error(
+            f"Failed to create default memory config for workspace {workspace.id}: {str(e)}"
+        )
+        # Don't fail the workspace list operation if config creation fails
+
+
+def _create_default_memory_config(
+    db: Session,
+    workspace_id: uuid.UUID,
+    workspace_name: str,
+    llm_id: Optional[uuid.UUID] = None,
+    embedding_id: Optional[uuid.UUID] = None,
+    rerank_id: Optional[uuid.UUID] = None,
+) -> None:
+    """Create a default memory config for a newly created workspace.
+    
+    Args:
+        db: Database session
+        workspace_id: The workspace ID
+        workspace_name: The workspace name (used for config naming)
+        llm_id: Optional LLM model ID
+        embedding_id: Optional embedding model ID
+        rerank_id: Optional rerank model ID
+    """
+    from app.models.memory_config_model import MemoryConfig
+    
+    config_id = uuid.uuid4()
+    
+    default_config = MemoryConfig(
+        config_id=config_id,
+        config_name=f"{workspace_name} 默认配置",
+        config_desc="工作空间创建时自动生成的默认记忆配置",
+        workspace_id=workspace_id,
+        llm_id=str(llm_id) if llm_id else None,
+        embedding_id=str(embedding_id) if embedding_id else None,
+        rerank_id=str(rerank_id) if rerank_id else None,
+        state=True,  # Active by default
+        is_default=True,  # Mark as workspace default
+    )
+    
+    db.add(default_config)
+    db.commit()
+    
+    business_logger.info(
+        "Created default memory config for workspace",
+        extra={
+            "workspace_id": str(workspace_id),
+            "config_id": str(config_id),
+            "config_name": default_config.config_name,
+        }
+    )

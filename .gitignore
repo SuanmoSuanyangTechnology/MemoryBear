@@ -21,6 +21,7 @@ examples/
 
 # Temporary outputs
 .DS_Store
+.hypothesis/
 time.log
 celerybeat-schedule.db
 search_results.json
