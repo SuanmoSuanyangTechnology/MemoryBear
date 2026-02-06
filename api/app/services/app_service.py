@@ -957,6 +957,7 @@ class AppService:
         )
 
         config = self.db.scalars(stmt).first()
+
         try:
             config_memory=config.memory
             if 'memory_content' in config_memory:
