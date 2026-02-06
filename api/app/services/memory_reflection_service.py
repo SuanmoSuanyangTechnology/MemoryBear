@@ -364,7 +364,8 @@ class MemoryReflectionService:
         reflexion_range_value = config_data.get("reflexion_range")
         if reflexion_range_value is None or reflexion_range_value == "":
             reflexion_range_value = "partial"
-            # Map legacy/invalid values to valid enum values
+        
+        # Map legacy/invalid values to valid enum values
         reflexion_range_mapping = {
             "retrieval": "partial",  # Map old 'retrieval' to 'partial'
             "partial": "partial",
@@ -378,13 +379,19 @@ class MemoryReflectionService:
             baseline_value = "TIME"
         baseline = ReflectionBaseline(baseline_value)
 
-        # iteration_period =
+        # iteration_period
         iteration_period = config_data.get("iteration_period", 24)
         if isinstance(iteration_period, str):
             try:
                 iteration_period = int(iteration_period)
             except (ValueError, TypeError):
                 iteration_period = 24  # 默认24小时
+        
+        # 获取 model_id 并转换为字符串（如果是 UUID 对象）
+        reflection_model_id = config_data.get("reflection_model_id", "")
+        if reflection_model_id:
+            reflection_model_id = str(reflection_model_id)
+        
         return ReflectionConfig(
             enabled=config_data.get("enable_self_reflexion", False),
             iteration_period=str(iteration_period),  # ReflectionConfig期望字符串
@@ -392,7 +399,7 @@ class MemoryReflectionService:
             baseline=baseline,
             memory_verify=config_data.get("memory_verify", False),
             quality_assessment=config_data.get("quality_assessment", False),
-            model_id=config_data.get("reflection_model_id", "")
+            model_id=reflection_model_id
         )
     
     async def _execute_reflection_engine(

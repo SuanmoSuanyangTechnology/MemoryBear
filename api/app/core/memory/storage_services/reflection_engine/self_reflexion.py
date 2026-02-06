@@ -462,8 +462,8 @@ class ReflectionEngine:
             List[Any]: 反思数据列表
         """
 
-
-
+        print("=== 获取反思数据 ===")
+        print(f"  主机ID: {host_id}")
         if self.config.reflexion_range == ReflectionRange.PARTIAL:
             neo4j_query = neo4j_query_part.format(host_id)
             neo4j_statement = neo4j_statement_part.format(host_id)
