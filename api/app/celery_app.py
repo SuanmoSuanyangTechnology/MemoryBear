@@ -76,6 +76,7 @@ celery_app.conf.update(
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'document_tasks'},
+        'app.core.rag.tasks.sync_knowledge_for_kb': {'queue': 'document_tasks'},
         
         # Beat/periodic tasks → periodic_tasks queue (dedicated periodic worker)
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},

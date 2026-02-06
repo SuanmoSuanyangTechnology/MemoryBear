@@ -353,7 +353,8 @@ class SharedChatService:
         
         if variables is None:
             variables = {}
-        memory_config = {"enabled": memory, "memory_content": "17", "max_history": 10}
+        # 兼容新旧字段名：使用 memory_config_id
+        memory_config = {"enabled": memory, "memory_config_id": "17", "max_history": 10}
         
         try:
             # 获取发布版本和配置

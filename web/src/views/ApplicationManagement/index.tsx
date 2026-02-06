@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-04 18:57:35
+ * @Last Modified time: 2026-02-06 11:10:16
  */
 /**
  * Application Management Page
@@ -10,11 +10,12 @@
  * Supports creating, editing, and deleting applications
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Row, Col, App, Select } from 'antd';
 import clsx from 'clsx';
 import { DeleteOutlined } from '@ant-design/icons';
+import { useSearchParams } from 'react-router-dom'
 
 import type { Application, ApplicationModalRef, Query } from './types';
 import ApplicationModal, { types } from './components/ApplicationModal';
@@ -30,9 +31,20 @@ import { formatDateTime } from '@/utils/format';
 const ApplicationManagement: React.FC = () => {
   const { t } = useTranslation();
   const { modal } = App.useApp();
+  const [searchParams] = useSearchParams()
   const [query, setQuery] = useState<Query>({} as Query);
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const scrollListRef = useRef<PageScrollListRef>(null)
+
+  useEffect(() => {
+    // Convert URLSearchParams to a plain object for easier access
+    const data = Object.fromEntries(searchParams)
+    const { type } = data
+    setQuery(prev => ({
+      ...prev,
+      type: type || undefined
+    }))
+  }, [searchParams])
 
   /** Refresh application list */
   const refresh = () => {
@@ -71,8 +83,9 @@ const ApplicationManagement: React.FC = () => {
   return (
     <>
       <Row gutter={16} className="rb:mb-4">
-        <Col span={3}>
+        <Col span={4}>
           <Select
+            value={query.type}
             placeholder={t('application.applicationType')}
             options={types.map((type) => ({
               value: type,
@@ -83,7 +96,7 @@ const ApplicationManagement: React.FC = () => {
             onChange={handleChangeType}
           />
         </Col>
-        <Col span={9}>
+        <Col span={8}>
           <SearchInput
             placeholder={t('application.searchPlaceholder')}
             onSearch={(value) => setQuery({ search: value })}

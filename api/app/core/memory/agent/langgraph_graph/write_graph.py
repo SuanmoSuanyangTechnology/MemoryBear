@@ -1,4 +1,3 @@
-
 import asyncio
 import sys
 import warnings
@@ -15,6 +14,8 @@ logger = get_agent_logger(__name__)
 
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
 @asynccontextmanager
 async def make_write_graph():
     """
@@ -35,9 +36,12 @@ async def make_write_graph():
     graph = workflow.compile()
 
     yield graph
-async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[],memory_config:str='',end_user_id:str='',scope:int=6):
+
+
+async def long_term_storage(long_term_type: str = "chunk", langchain_messages: list = [], memory_config: str = '',
+                            end_user_id: str = '', scope: int = 6):
     """Dispatch long-term memory storage to Celery background tasks.
-    
+
     Args:
         long_term_type: Storage strategy - 'chunk' (window), 'time', or 'aggregate'
         langchain_messages: List of messages to store
@@ -52,12 +56,12 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
         # long_term_storage_aggregate_task,
     )
     from app.core.logging_config import get_logger
-    
+
     logger = get_logger(__name__)
-    
+
     # Convert config to string if needed
     config_id = str(memory_config) if memory_config else ''
-    
+
     if long_term_type == 'chunk':
         # Strategy 1: Window-based batching (6 rounds of dialogue)
         logger.info(f"[LONG_TERM] Dispatching window task - end_user_id={end_user_id}, scope={scope}")
@@ -85,7 +89,6 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
     #         langchain_messages=langchain_messages,
     #         config_id=config_id
     #     )
-
 
 # async def main():
 #     """主函数 - 运行工作流"""

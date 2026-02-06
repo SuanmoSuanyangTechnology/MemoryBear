@@ -996,7 +996,7 @@ class AppService:
             },
             memory={
                 "enabled": True,
-                "memory_content": None,
+                "memory_config_id": None,
                 "max_history": 10
             },
             variables=[],
