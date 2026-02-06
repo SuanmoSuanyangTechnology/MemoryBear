@@ -957,9 +957,12 @@ class AppService:
         )
 
         config = self.db.scalars(stmt).first()
-        config_memory=config.memory
-        if 'memory_content' in config_memory:
-            config.memory['memory_config_id'] = config.memory.pop('memory_content')
+        try:
+            config_memory=config.memory
+            if 'memory_content' in config_memory:
+                config.memory['memory_config_id'] = config.memory.pop('memory_content')
+        except:
+            logger.debug("记忆配置不存在")
         if config:
             return config
         # 返回默认配置模板（不保存到数据库）
