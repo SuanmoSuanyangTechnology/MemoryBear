@@ -15,6 +15,13 @@ class FileType(StrEnum):
     AUDIO = "audio"
     VIDEO = "video"
 
+    @classmethod
+    def trans(cls, value: str) -> 'FileType':
+        if value.startswith("image"):
+            return cls.IMAGE
+        # TODO: other file type support
+        raise RuntimeError("Unsupport file type")
+
 
 class TransferMethod(str, Enum):
     """文件传输方式枚举"""
@@ -28,7 +35,16 @@ class FileInput(BaseModel):
     transfer_method: TransferMethod = Field(..., description="传输方式: local_file/remote_url")
     upload_file_id: Optional[uuid.UUID] = Field(None, description="已上传文件ID（local_file时必填）")
     url: Optional[str] = Field(None, description="远程URL（remote_url时必填）")
-    
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def validate_type(cls, v):
+        """验证文件类型"""
+        try:
+            return FileType.trans(v)
+        except ValueError:
+            raise ValueError(f"无效的文件类型: {v}")
+
     @field_validator("upload_file_id")
     @classmethod
     def validate_local_file(cls, v, info):
@@ -36,7 +52,7 @@ class FileInput(BaseModel):
         if info.data.get("transfer_method") == TransferMethod.LOCAL_FILE and not v:
             raise ValueError("transfer_method 为 local_file 时，upload_file_id 不能为空")
         return v
-    
+
     @field_validator("url")
     @classmethod
     def validate_remote_url(cls, v, info):
@@ -81,6 +97,7 @@ class ToolConfig(BaseModel):
     enabled: bool = Field(default=False, description="是否启用该工具")
     tool_id: Optional[str] = Field(default=None, description="工具ID")
     operation: Optional[str] = Field(default=None, description="工具特定配置")
+
 
 class SkillConfig(BaseModel):
     """技能配置"""
@@ -216,7 +233,7 @@ class AgentConfigUpdate(BaseModel):
 
     # 工具配置
     tools: Optional[List[ToolConfig]] = Field(default_factory=list, description="工具列表")
-    
+
     # 技能配置
     skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
 

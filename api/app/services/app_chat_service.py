@@ -655,6 +655,7 @@ class AppChatService:
             workspace_id: uuid.UUID,
             user_id: str = None,
             variables: Optional[Dict[str, Any]] = None,
+            files: Optional[List[FileInput]] = None,
             web_search: bool = False,
             memory: bool = True,
             storage_type: Optional[str] = None,
@@ -669,7 +670,8 @@ class AppChatService:
             variables=variables,
             conversation_id=str(conversation_id),
             stream=True,
-            user_id=user_id
+            user_id=user_id,
+            files=files
         )
         async for event in workflow_service.run_stream(
                 app_id=app_id,
