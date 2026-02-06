@@ -955,6 +955,7 @@ class AppService:
         ).order_by(
             AgentConfig.updated_at.desc()
         )
+
         config = self.db.scalars(stmt).first()
         config_memory=config.memory
         if 'memory_content' in config_memory:
