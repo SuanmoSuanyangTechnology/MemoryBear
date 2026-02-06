@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-06 21:05:09 
+ * @Last Modified time: 2026-02-06 21:23:37
  */
 import { type FC, useEffect, useMemo } from 'react'
 import { Flex, Input, Form } from 'antd'
@@ -73,7 +73,7 @@ const ChatInput: FC<ChatInputProps> = ({
                 <div key={file.uid} className="rb:inline-block rb:group rb:relative rb:rounded-lg">
                   <img src={file.url} alt={file.name} className="rb:size-12! rb:rounded-lg rb:object-cover rb:cursor-pointer" />
                   <div
-                    className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('src/assets/images/conversation/delete.svg')] rb:hover:bg-[url('src/assets/images/conversation/delete_hover.svg')]"
+                    className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
                     onClick={() => handleDelete(file)}
                   ></div>
                 </div>
@@ -82,20 +82,20 @@ const ChatInput: FC<ChatInputProps> = ({
             return (
               <div key={file.uid} className="rb:w-45 rb:text-[12px] rb:gap-2.5 rb:flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5">
                 {(file.type.includes('word') || file.type.includes('wordprocessingml.document')) && <div
-                  className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('src/assets/images/conversation/word_disabled.svg')] rb:hover:bg-[url('src/assets/images/conversation/word.svg')]"
+                  className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/word_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/word.svg')]"
                 ></div>}
                 {(file.type.includes('pdf')) && <div
-                  className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('src/assets/images/conversation/pdf_disabled.svg')] rb:hover:bg-[url('src/assets/images/conversation/pdf.svg')]"
+                  className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/pdf.svg')]"
                 ></div>}
                 {(file.type.includes('excel') || file.type.includes('spreadsheetml.sheet') || file.type.includes('csv')) && <div
-                  className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('src/assets/images/conversation/excel_disabled.svg')] rb:hover:bg-[url('src/assets/images/conversation/excel.svg')]"
+                  className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/excel_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/excel.svg')]"
                 ></div>}
                 <div className="rb:flex-1 rb:w-32.5">
                   <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
                   <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.type} · {file.size}</div>
                 </div>
                 <div
-                  className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('src/assets/images/conversation/delete.svg')] rb:hover:bg-[url('src/assets/images/conversation/delete_hover.svg')]"
+                  className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
                   onClick={() => handleDelete(file)}
                 ></div>
               </div>
