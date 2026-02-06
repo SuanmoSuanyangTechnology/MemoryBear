@@ -12,7 +12,6 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_db
-from app.dependencies import get_app_or_workspace
 from app.models.app_model import App
 from app.models.app_model import AppType
 from app.repositories import knowledge_repository
@@ -21,9 +20,10 @@ from app.schemas import AppChatRequest, conversation_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.services import workspace_service
 from app.services.app_chat_service import AppChatService, get_app_chat_service
-from app.services.conversation_service import ConversationService, get_conversation_service
-from app.utils.app_config_utils import dict_to_multi_agent_config, workflow_config_4_app_release, agent_config_4_app_release, multi_agent_config_4_app_release
 from app.services.app_service import get_app_service, AppService
+from app.services.conversation_service import ConversationService, get_conversation_service
+from app.utils.app_config_utils import workflow_config_4_app_release, \
+    agent_config_4_app_release, multi_agent_config_4_app_release
 
 router = APIRouter(prefix="/app", tags=["V1 - App API"])
 logger = get_business_logger()
@@ -33,6 +33,7 @@ logger = get_business_logger()
 async def list_apps():
     """列出可访问的应用（占位）"""
     return success(data=[], msg="App API - Coming Soon")
+
 
 # /v1/app/chat
 
@@ -73,16 +74,17 @@ def _checkAppConfig(app: App):
     else:
         raise BusinessException("不支持的应用类型", BizCode.AGENT_CONFIG_MISSING)
 
+
 @router.post("/chat")
 @require_api_key(scopes=["app"])
 async def chat(
-    request:Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
-    conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
-    app_chat_service: Annotated[AppChatService, Depends(get_app_chat_service)] = None,
-    app_service: Annotated[AppService, Depends(get_app_service)] = None,
-    message: str = Body(..., description="聊天消息内容"),
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
+        app_chat_service: Annotated[AppChatService, Depends(get_app_chat_service)] = None,
+        app_service: Annotated[AppService, Depends(get_app_service)] = None,
+        message: str = Body(..., description="聊天消息内容"),
 ):
     body = await request.json()
     payload = AppChatRequest(**body)
@@ -98,8 +100,8 @@ async def chat(
         original_user_id=other_id  # Save original user_id to other_id
     )
     end_user_id = str(new_end_user.id)
-    web_search=True
-    memory=True
+    web_search = True
+    memory = True
     # 提前验证和准备（在流式响应开始前完成）
     storage_type = workspace_service.get_workspace_storage_type_without_auth(
         db=db,
@@ -146,17 +148,17 @@ async def chat(
         if payload.stream:
             async def event_generator():
                 async for event in app_chat_service.agnet_chat_stream(
-                    message=payload.message,
-                    conversation_id=conversation.id,  # 使用已创建的会话 ID
-                    user_id= end_user_id,  # 转换为字符串
-                    variables=payload.variables,
-                    web_search=web_search,
-                    config=agent_config,
-                    memory=memory,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    workspace_id=workspace_id,
-                    files=payload.files  # 传递多模态文件
+                        message=payload.message,
+                        conversation_id=conversation.id,  # 使用已创建的会话 ID
+                        user_id=end_user_id,  # 转换为字符串
+                        variables=payload.variables,
+                        web_search=web_search,
+                        config=agent_config,
+                        memory=memory,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        workspace_id=workspace_id,
+                        files=payload.files  # 传递多模态文件
                 ):
                     yield event
 
@@ -176,7 +178,7 @@ async def chat(
             conversation_id=conversation.id,  # 使用已创建的会话 ID
             user_id=end_user_id,  # 转换为字符串
             variables=payload.variables,
-            config= agent_config,
+            config=agent_config,
             web_search=web_search,
             memory=memory,
             storage_type=storage_type,
@@ -192,15 +194,15 @@ async def chat(
             async def event_generator():
                 async for event in app_chat_service.multi_agent_chat_stream(
 
-                    message=payload.message,
-                    conversation_id=conversation.id,  # 使用已创建的会话 ID
-                    user_id=end_user_id,  # 转换为字符串
-                    variables=payload.variables,
-                    config=config,
-                    web_search=web_search,
-                    memory=memory,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+                        message=payload.message,
+                        conversation_id=conversation.id,  # 使用已创建的会话 ID
+                        user_id=end_user_id,  # 转换为字符串
+                        variables=payload.variables,
+                        config=config,
+                        web_search=web_search,
+                        memory=memory,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id
                 ):
                     yield event
 
@@ -234,19 +236,19 @@ async def chat(
         if payload.stream:
             async def event_generator():
                 async for event in app_chat_service.workflow_chat_stream(
-
-                    message=payload.message,
-                    conversation_id=conversation.id,  # 使用已创建的会话 ID
-                    user_id=end_user_id,  # 转换为字符串
-                    variables=payload.variables,
-                    config=config,
-                    web_search=web_search,
-                    memory=memory,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    app_id=app.id,
-                    workspace_id=workspace_id,
-                    release_id=app.current_release.id,
+                        message=payload.message,
+                        conversation_id=conversation.id,  # 使用已创建的会话 ID
+                        user_id=end_user_id,  # 转换为字符串
+                        variables=payload.variables,
+                        files=payload.files,
+                        config=config,
+                        web_search=web_search,
+                        memory=memory,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        app_id=app.id,
+                        workspace_id=workspace_id,
+                        release_id=app.current_release.id,
                 ):
                     event_type = event.get("event", "message")
                     event_data = event.get("data", {})
@@ -296,4 +298,3 @@ async def chat(
         from app.core.exceptions import BusinessException
         from app.core.error_codes import BizCode
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
-

@@ -284,7 +284,7 @@ models:
   - stream-tool-call
   logo: dashscope
 - name: qwen-vl-max
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen-vl-max多模态大模型，支持视觉理解、智能体思考、视频理解，131072上下文窗口，对话模式，未废弃
   is_deprecated: false
@@ -297,7 +297,7 @@ models:
   - video
   logo: dashscope
 - name: qwen-vl-plus-0809
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen-vl-plus-0809多模态大模型，支持视觉理解、智能体思考、视频理解，32768上下文窗口，对话模式，已废弃
   is_deprecated: true
@@ -310,7 +310,7 @@ models:
   - video
   logo: dashscope
 - name: qwen-vl-plus-2025-01-02
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen-vl-plus-2025-01-02多模态大模型，支持视觉理解、智能体思考、视频理解，32768上下文窗口，对话模式，未废弃
   is_deprecated: false
@@ -323,7 +323,7 @@ models:
   - video
   logo: dashscope
 - name: qwen-vl-plus-2025-01-25
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen-vl-plus-2025-01-25多模态大模型，支持视觉理解、智能体思考、视频理解，131072上下文窗口，对话模式，未废弃
   is_deprecated: false
@@ -336,7 +336,7 @@ models:
   - video
   logo: dashscope
 - name: qwen-vl-plus-latest
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen-vl-plus-latest多模态大模型，支持视觉理解、智能体思考、视频理解，131072上下文窗口，对话模式，未废弃
   is_deprecated: false
@@ -349,7 +349,7 @@ models:
   - video
   logo: dashscope
 - name: qwen-vl-plus
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen-vl-plus多模态大模型，支持视觉理解、智能体思考、视频理解，131072上下文窗口，对话模式，未废弃
   is_deprecated: false
@@ -615,7 +615,7 @@ models:
   - audio
   logo: dashscope
 - name: qwen3-vl-235b-a22b-instruct
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen3-vl-235b-a22b-instruct多模态大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉、视频能力，131072上下文窗口，对话模式
   is_deprecated: false
@@ -630,7 +630,7 @@ models:
   - video
   logo: dashscope
 - name: qwen3-vl-235b-a22b-thinking
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen3-vl-235b-a22b-thinking多模态大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉、视频能力，131072上下文窗口，对话模式
   is_deprecated: false
@@ -645,7 +645,7 @@ models:
   - video
   logo: dashscope
 - name: qwen3-vl-30b-a3b-instruct
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen3-vl-30b-a3b-instruct多模态大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉、视频能力，131072上下文窗口，对话模式
   is_deprecated: false
@@ -660,7 +660,7 @@ models:
   - video
   logo: dashscope
 - name: qwen3-vl-30b-a3b-thinking
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen3-vl-30b-a3b-thinking多模态大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉、视频能力，131072上下文窗口，对话模式
   is_deprecated: false
@@ -675,7 +675,7 @@ models:
   - video
   logo: dashscope
 - name: qwen3-vl-flash
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen3-vl-flash多模态大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉、视频能力，131072上下文窗口，对话模式
   is_deprecated: false
@@ -690,7 +690,7 @@ models:
   - video
   logo: dashscope
 - name: qwen3-vl-plus-2025-09-23
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen3-vl-plus-2025-09-23多模态大语言模型，支持视觉、智能体思考、视频能力，262144上下文窗口，对话模式
   is_deprecated: false
@@ -703,7 +703,7 @@ models:
   - video
   logo: dashscope
 - name: qwen3-vl-plus
-  type: llm
+  type: chat
   provider: dashscope
   description: qwen3-vl-plus多模态大语言模型，支持视觉、智能体思考、视频能力，262144上下文窗口，对话模式
   is_deprecated: false

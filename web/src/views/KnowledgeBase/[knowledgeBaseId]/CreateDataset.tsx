@@ -613,8 +613,8 @@ const CreateDataset = () => {
                         {t('knowledgeBase.webLink')}
                     </div>
                     <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} />
-                    <div className='rb:text-sm rb:text-gray-500 rb:mt-3 rb:max-w-[558px]'>
-                        {t('knowledgeBase.webLinkDesc')}
+                    <div className='rb:text-sm rb:text-gray-500 rb:mt-3'>
+                        {t('knowledgeBase.webLinkDesc',{count: 5})}
                     </div>
                     <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
                         {t('knowledgeBase.selectorTutorial')}

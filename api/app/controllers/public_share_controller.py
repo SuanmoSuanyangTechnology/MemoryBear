@@ -580,6 +580,7 @@ async def chat(
                         conversation_id=conversation.id,  # 使用已创建的会话 ID
                         user_id=end_user_id,  # 转换为字符串
                         variables=payload.variables,
+                        files=payload.files,
                         config=config,
                         web_search=payload.web_search,
                         memory=payload.memory,
