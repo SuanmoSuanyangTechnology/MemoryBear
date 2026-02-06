@@ -12,18 +12,19 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Row, Col, App, Select } from 'antd';
+import { Button, Row, Col, App, Select, Space } from 'antd';
 import clsx from 'clsx';
 import { DeleteOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom'
 
-import type { Application, ApplicationModalRef, Query } from './types';
 import ApplicationModal, { types } from './components/ApplicationModal';
+import type { Application, ApplicationModalRef, Query, UploadWorkflowModalRef } from './types';
 import SearchInput from '@/components/SearchInput'
 import RbCard from '@/components/RbCard/Card'
 import { getApplicationListUrl, deleteApplication } from '@/api/application'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { formatDateTime } from '@/utils/format';
+import UploadWorkflowModal from './components/UploadWorkflowModal'
 
 /**
  * Application management main component
@@ -35,6 +36,7 @@ const ApplicationManagement: React.FC = () => {
   const [query, setQuery] = useState<Query>({} as Query);
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const scrollListRef = useRef<PageScrollListRef>(null)
+  const uploadWorkflowModalRef = useRef<UploadWorkflowModalRef>(null);
 
   useEffect(() => {
     // Convert URLSearchParams to a plain object for easier access
@@ -80,6 +82,10 @@ const ApplicationManagement: React.FC = () => {
   const handleChangeType = (value?: string) => {
     setQuery(prev => ({...prev, type: value}))
   }
+
+  const handleImport = () => {
+    uploadWorkflowModalRef.current?.handleOpen()
+  }
   return (
     <>
       <Row gutter={16} className="rb:mb-4">
@@ -104,9 +110,14 @@ const ApplicationManagement: React.FC = () => {
           />
         </Col>
         <Col span={12} className="rb:text-right">
-          <Button type="primary" onClick={handleCreate}>
-            {t('application.createApplication')}
-          </Button>
+          <Space size={12}>
+            <Button onClick={handleImport}>
+              {t('application.importWorkflow')}
+            </Button>
+            <Button type="primary" onClick={handleCreate}>
+              {t('application.createApplication')}
+            </Button>
+          </Space>
         </Col>
       </Row>
 
@@ -156,8 +167,13 @@ const ApplicationManagement: React.FC = () => {
         ref={applicationModalRef}
         refresh={refresh}
       />
+
+      <UploadWorkflowModal
+        ref={uploadWorkflowModalRef}
+        refresh={refresh}
+      />
     </>
   );
 };
 
-export default ApplicationManagement;
+export default ApplicationManagement

@@ -29,3 +29,5 @@ export const deleteFileUrl = (file_id: string) => `/storage/files/${file_id}`
 export const deleteFile = (fileId: string) => {
   return request.delete(deleteFileUrl(fileId))
 }
+
+export const shareFileUploadUrl = `${API_PREFIX}/storage/share/files`

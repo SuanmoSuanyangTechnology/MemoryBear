@@ -1,12 +1,14 @@
-import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, forwardRef, useImperativeHandle, useRef } from 'react';
 import { Upload, Button, Modal, Progress, App } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import type { UploadProps, UploadFile } from 'antd';
+import type { UploadRequestOption } from 'rc-upload/lib/interface';
 // import { request } from '@/utils/request';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import CloudUploadOutlined from '@/assets/images/CloudUploadOutlined.png'
 import { useTranslation } from 'react-i18next';
 import { cookieUtils } from '@/utils/request'
+import { fileUpload } from '@/api/fileStorage'
 
 const { confirm } = Modal;
 const { Dragger } = Upload;
@@ -61,6 +63,8 @@ const ALL_FILE_TYPE: {
   ttl: 'text/turtle',
   rdf: 'application/rdf+xml',
   xml: 'application/rdf+xml',
+  yaml: 'application/x-yaml',
+  yml: 'application/x-yaml',
 }
 export interface UploadFilesRef {
   fileList: UploadFile[];
@@ -157,45 +161,6 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
 
     return isAutoUpload;
   };
-
-  // 自定义上传方法
-  /*
-    const customRequest: RcUploadProps['customRequest'] = ({ file, onSuccess, onError, onProgress }) => {
-      setLoading(true);
-      
-      const formData = new FormData();
-      formData.append('file', file as RcFile);
-      
-      // 添加额外的请求参数
-      const requestData = requestConfig.data;
-      if (requestData) {
-        Object.keys(requestData).forEach(key => {
-          const value = requestData[key];
-          formData.append(key, String(value));
-        });
-      }
-
-      request.post(action, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          ...requestConfig.headers,
-        },
-        ...requestConfig,
-      })
-        .then((response) => {
-          if (onSuccess) onSuccess(response);
-        })
-        .catch((error) => {
-          message.error('上传失败，请重试');
-          if (onError) onError(error);
-          // setFileList(fileList.filter((item) => item.uid !== (file as UploadFile).uid));
-        })
-        .finally(() => {
-          setLoading(false);
-        });
-    };
-  */
-
   // 处理上传状态变化
   const handleChange: UploadProps['onChange'] = ({ fileList: newFileList, event }) => {
     console.log('event', event)
@@ -240,7 +205,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     fileList,
     beforeUpload,
     headers: {
-      authorization: `Bearer ${cookieUtils.get('authToken')}`,
+      authorization: `Bearer ${cookieUtils.get('authToken') || ''}`,
     },
     onRemove: handleRemove,
     onChange: handleChange,

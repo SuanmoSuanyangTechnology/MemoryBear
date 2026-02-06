@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>链接</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="红熊空间-记忆对话-默认对话" transform="translate(-284, -726)">
+            <g id="聊天页面" transform="translate(258, 128)">
+                <g id="输入框" transform="translate(16, 512)">
+                    <g id="链接" transform="translate(10, 86)">
+                        <rect id="矩形" stroke="#155EEF" x="0.5" y="0.5" width="23" height="23" rx="6"></rect>
+                        <g id="编组-6" transform="translate(5, 5)" stroke="#155EEF" stroke-linecap="round" stroke-linejoin="round">
+                            <g transform="translate(7.1064, 7.1064) rotate(45) translate(-7.1064, -7.1064)translate(3.9564, 1.8564)" id="路径">
+                                <path d="M4.14483263e-14,7.00494523 L4.14483263e-14,2.33333333 C4.14483263e-14,1.04466892 0.992435471,0 2.21666667,0 C3.44089786,0 4.43333333,1.04466892 4.43333333,2.33333333 L4.43333333,5.85907842"></path>
+                                <path d="M6.3,2.518727 L6.3,7.175 C6.3,9.01134679 4.88969696,10.5 3.15,10.5 C1.41030304,10.5 0,9.01134679 0,7.175 L0,2.33333333"></path>
+                                <path d="M4.43333333,2.33333333 L4.43333333,7 C4.43333333,7.64433221 3.91099887,8.16666667 3.26666667,8.16666667 C2.62233446,8.16666667 2.1,7.64433221 2.1,7 L2.1,3.5201611"></path>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
