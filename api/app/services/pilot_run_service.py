@@ -142,6 +142,20 @@ async def run_pilot_extraction(
             f"enable_llm_disambiguation={config.deduplication.enable_llm_disambiguation}"
         )
 
+        # 加载本体类型（如果配置了 scene_id），支持通用类型回退
+        ontology_types = None
+        try:
+            from app.core.memory.ontology_services.ontology_type_loader import load_ontology_types_with_fallback
+            
+            ontology_types = load_ontology_types_with_fallback(
+                scene_id=memory_config.scene_id,
+                workspace_id=memory_config.workspace_id,
+                db=db,
+                enable_general_fallback=True
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load ontology types: {e}", exc_info=True)
+
         orchestrator = ExtractionOrchestrator(
             llm_client=llm_client,
             embedder_client=embedder_client,
@@ -150,6 +164,7 @@ async def run_pilot_extraction(
             progress_callback=progress_callback,
             embedding_id=str(memory_config.embedding_model_id),
             language=language,
+            ontology_types=ontology_types,
         )
 
         log_time("Orchestrator Initialization", time.time() - step_start, log_file)

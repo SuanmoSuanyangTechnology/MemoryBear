@@ -1,5 +1,13 @@
+{% if language == "zh" %}
+给定一个对话上下文和一个当前消息。
+你的任务是提取在当前消息中**明确或隐含**提到的用户名称和年龄。
+代词引用（如 he/she/they 或 this/that/those）应消歧为引用实体的名称。
+
+{{ message }}
+{% else %}
 You are given a conversation context and a CURRENT MESSAGE.
 Your task is to extract user name and age mentioned **explicitly or implicitly** in the CURRENT MESSAGE. 
 Pronoun references such as he/she/they or this/that/those should be disambiguated to the names of the reference entities.
 
 {{ message }}
+{% endif %}

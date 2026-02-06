@@ -1,4 +1,32 @@
 {
+  "v0.2.3": {
+    "introduction": {
+      "codeName": "归墟",
+      "releaseDate": "2026-2-6",
+      "upgradePosition": "🐻 稳定性与细节打磨版本，万流归墟，静水流深",
+      "coreUpgrades": [
+        "1. 智能与记忆 🧠<br>* 提示词工程模块：新增专用提示词工程能力<br>* 长短期记忆整合：增强短期与长期记忆生命周期管理<br>* 双语记忆支持：解决情景记忆、显性记忆的双语问题",
+        "2. 系统架构 ⚙️<br>* 反思任务调度器：新增 worker-periodic 容器<br>* 模型配置降级：记忆管理正确降级使用空间模型",
+        "3. 问题修复 🔧<br>* 工作流分享：修复多轮对话产生多个conversation<br>* 流式输出：修复chat结尾缺少end标记<br>* 实体详情：移除未知类型记忆<br>* 提示词模板路径：修复jinja2路径解析错误<br>* 知识库字段：strategy更名为retrieve_type<br>* 空间头像：优化频繁调用模型接口<br>* 记忆仪表盘：修复end_users接口无返回",
+        "<br>",
+        "v0.2.4 将继续完善工作流代码执行功能，并推出本体工程+记忆配置入口。",
+        "记忆熊，记得更牢，用得更好。🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "Settle",
+      "releaseDate": "2026-2-6",
+      "upgradePosition": "🐻 Stability and refinement release — still waters run deep",
+      "coreUpgrades": [
+        "1. Intelligence & Memory 🧠<br>* Prompt Engineering Module: New dedicated prompt engineering capabilities<br>* Long-term & Short-term Memory Integration: Enhanced memory lifecycle management<br>* Bilingual Memory Support: Resolved dual-language issues in episodic and explicit memory",
+        "2. System Architecture ⚙️<br>* Reflection Task Worker: Added worker-periodic container for scheduled tasks<br>* Model Configuration Fallback: Memory management properly falls back to workspace model",
+        "3. Bug Fixes 🔧<br>* Workflow Sharing: Fixed multiple conversations created during multi-turn dialogues<br>* Streaming Output: Resolved missing end marker in chat streaming<br>* Entity Details: Removed unknown type memories from All view<br>* Prompt Template Paths: Fixed jinja2 path resolution errors<br>* Knowledge Base Schema: Renamed strategy to retrieve_type<br>* Workspace Avatar: Optimized frequent model API calls<br>* Memory Dashboard: Fixed end_users endpoint empty responses",
+        "<br>",
+        "v0.2.4 will continue with workflow code execution enhancements and the ontology engineering + memory configuration portal.",
+        "MemoryBear — remember better, work smarter. 🐻✨"
+      ]
+    }
+  },
   "v0.2.2": {
     "introduction": {
       "codeName": "淬锋（Temper）",

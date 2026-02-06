@@ -193,7 +193,8 @@ class ParameterExtractorNode(BaseNode):
 
         model_resp = await llm.ainvoke(messages)
         self.response_metadata = model_resp.response_metadata
-        result = json_repair.repair_json(model_resp.content, return_objects=True)
+        model_message = self.process_model_output(model_resp.content)
+        result = json_repair.repair_json(model_message, return_objects=True)
         logger.info(f"node: {self.node_id} get params:{result}")
 
         return result

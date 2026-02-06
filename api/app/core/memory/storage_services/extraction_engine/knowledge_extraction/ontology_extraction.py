@@ -14,7 +14,7 @@ import time
 from typing import List, Optional
 
 from app.core.memory.llm_tools.openai_client import OpenAIClient
-from app.core.memory.models.ontology_models import (
+from app.core.memory.models.ontology_scenario_models import (
     OntologyClass,
     OntologyExtractionResponse,
 )
@@ -118,7 +118,7 @@ class OntologyExtractor:
         logger.info(
             f"Starting ontology extraction - scenario_length={len(scenario)}, "
             f"domain={domain}, max_classes={max_classes}, min_classes={min_classes}, "
-            f"timeout={timeout}"
+            f"timeout={timeout}, language={language}"
         )
         
         try:

@@ -18,6 +18,8 @@ from app.core.workflow.nodes.start import StartNode
 from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNode
 from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
 from app.core.workflow.nodes.tool import ToolNode
+from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
+from app.core.workflow.nodes.code import CodeNode
 
 __all__ = [
     "BaseNode",
@@ -35,5 +37,7 @@ __all__ = [
     "JinjaRenderNode",
     "ParameterExtractorNode",
     "QuestionClassifierNode",
-    "ToolNode"
+    "ToolNode",
+    "CodeNode",
+    "VariableAggregatorNode"
 ]

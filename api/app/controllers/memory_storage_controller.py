@@ -290,7 +290,8 @@ async def pilot_run(
     
     api_logger.info(
         f"Pilot run requested: config_id={payload.config_id}, "
-        f"dialogue_text_length={len(payload.dialogue_text)}, language={language}"
+        f"dialogue_text_length={len(payload.dialogue_text)}, "
+        f"custom_text_length={len(payload.custom_text) if payload.custom_text else 0}"
     )
     payload.config_id = resolve_config_id(payload.config_id, db)
     svc = DataConfigService(db)
