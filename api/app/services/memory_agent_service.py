@@ -1199,7 +1199,8 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
             config = {}
 
     memory_obj = config.get('memory', {})
-    memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
+    # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
+    memory_config_id = memory_obj.get('memory_config_id') or memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
 
     result = {
         "end_user_id": str(end_user_id),
@@ -1289,7 +1290,8 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
         if release:
             config = release.config or {}
             memory_obj = config.get('memory', {})
-            memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
+            # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
+            memory_config_id = memory_obj.get('memory_config_id') or memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
             if memory_config_id:
                 # 判断是否为UUID格式
                 if len(str(memory_config_id))>=5:
@@ -1335,7 +1337,8 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
         # 从 config 中提取 memory_config_id
         config = release.config or {}
         memory_obj = config.get('memory', {})
-        memory_config_id = memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
+        # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
+        memory_config_id = memory_obj.get('memory_config_id') or memory_obj.get('memory_content') if isinstance(memory_obj, dict) else None
         
         # 获取配置名称（使用字符串形式的ID进行查找，兼容新旧格式）
         memory_config_name = config_id_to_name.get(str(memory_config_id)) if memory_config_id else None
