@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import { Form, Input, Select, Modal, Tabs, Switch, Radio, Button,message } from 'antd';
+import { Form, Input, Select, Modal, Tabs, Switch, Radio, Button, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { KnowledgeBaseListItem, KnowledgeBaseFormData, CreateModalRef, CreateModalRefProps } from '@/views/KnowledgeBase/types';
 import { 
@@ -9,9 +9,12 @@ import {
   updateKnowledgeBase,
   getKnowledgeGraphEntityTypes,
   deleteKnowledgeGraph,
-  rebuildKnowledgeGraph
+  rebuildKnowledgeGraph,
+  checkFeishuSync,
+  checkYuqueSync
 } from '@/api/knowledgeBase'
 import RbModal from '@/components/RbModal'
+import SliderInput from '@/components/SliderInput'
 const { TextArea } = Input;
 const { confirm } = Modal
 
@@ -28,6 +31,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const [modelOptionsByType, setModelOptionsByType] = useState<Record<string, { label: string; value: string }[]>>({});
   const [datasets, setDatasets] = useState<KnowledgeBaseListItem | null>(null);
   const [currentType, setCurrentType] = useState<'General' | 'Web' | 'Third-party' | 'Folder'>('General');
+  const [thirdPartyPlatform, setThirdPartyPlatform] = useState<'yuque' | 'feishu'>('yuque');
   const [form] = Form.useForm<KnowledgeBaseFormData>();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('basic');
@@ -51,6 +55,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     setActiveTab('basic');
     setIsRebuildMode(false); // Reset rebuild mode flag
     setOriginalType(''); // Reset original type
+    setThirdPartyPlatform('yuque'); // Reset third party platform
     setVisible(false);
   };
 
@@ -175,13 +180,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           : next[tp] || [];
         
         // If there are options and current field has no value, set first option as default
-        if (options.length > 0 && !form.getFieldValue(fieldKey)) {
+        if (options.length > 0 && !form.getFieldValue(fieldKey as any)) {
           defaultValues[fieldKey] = options[0].value;
         }
       });
       
       if (Object.keys(defaultValues).length > 0) {
-        form.setFieldsValue(defaultValues as Partial<KnowledgeBaseFormData>);
+        form.setFieldsValue(defaultValues as any);
       }
     }
   };
@@ -205,6 +210,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     };
 
     // Process parser_config data, set default values if not present
+    const recordAny = record as any;
     baseValues.parser_config = record.parser_config || {
       graphrag: {
         use_graphrag: false,
@@ -215,6 +221,43 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         community: false,
       }
     };
+
+    // Add Third-party specific fields to parser_config if exists
+    if (recordAny.parser_config?.third_party_platform) {
+      baseValues.parser_config.third_party_platform = recordAny.parser_config.third_party_platform;
+    }
+    if (recordAny.parser_config?.yuque_user_id) {
+      baseValues.parser_config.yuque_user_id = recordAny.parser_config.yuque_user_id;
+    }
+    if (recordAny.parser_config?.yuque_token) {
+      baseValues.parser_config.yuque_token = recordAny.parser_config.yuque_token;
+    }
+    if (recordAny.parser_config?.app_id) {
+      baseValues.parser_config.app_id = recordAny.parser_config.app_id;
+    }
+    if (recordAny.parser_config?.app_secret) {
+      baseValues.parser_config.app_secret = recordAny.parser_config.app_secret;
+    }
+    if (recordAny.parser_config?.folder_token) {
+      baseValues.parser_config.folder_token = recordAny.parser_config.folder_token;
+    }
+
+    // Add Web specific fields to parser_config if exists
+    if (recordAny.parser_config?.entry_url) {
+      baseValues.parser_config.entry_url = recordAny.parser_config.entry_url;
+    }
+    if (recordAny.parser_config?.max_pages) {
+      baseValues.parser_config.max_pages = recordAny.parser_config.max_pages;
+    }
+    if (recordAny.parser_config?.delay_seconds) {
+      baseValues.parser_config.delay_seconds = recordAny.parser_config.delay_seconds;
+    }
+    if (recordAny.parser_config?.timeout_seconds) {
+      baseValues.parser_config.timeout_seconds = recordAny.parser_config.timeout_seconds;
+    }
+    if (recordAny.parser_config?.user_agent) {
+      baseValues.parser_config.user_agent = recordAny.parser_config.user_agent;
+    }
 
     // If entity_types exists, convert to newline-separated format for TextArea display
     if (baseValues.parser_config.graphrag.entity_types) {
@@ -254,6 +297,16 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     setCurrentType(actualType as any);
     setIsRebuildMode(type === 'rebuild'); // Set rebuild mode flag
     setOriginalType(type || ''); // Save original type parameter
+    
+    // Set third party platform if editing Third-party type
+    if (actualType === 'Third-party' && record) {
+      const platform = (record as any).parser_config?.third_party_platform;
+      if (platform === 'yuque' || platform === 'feishu') {
+        setThirdPartyPlatform(platform);
+      }
+    } else {
+      setThirdPartyPlatform('yuque'); // Reset to default
+    }
     
     // If rebuild mode, default to knowledge graph tab
     if (type === 'rebuild') {
@@ -319,52 +372,95 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
      }
   };
   // Actual save logic
-  const performSave = () => {
-    form
-      .validateFields()
-      .then(() => {
-        setLoading(true)
-        const formValues = form.getFieldsValue();
+  const performSave = async () => {
+    try {
+      await form.validateFields();
+      setLoading(true);
+      const formValues = form.getFieldsValue();
+      
+      // Check Third-party authentication before saving
+      if (formValues.type === 'Third-party' || currentType === 'Third-party') {
+        const platform = formValues.parser_config?.third_party_platform || thirdPartyPlatform;
         
-        // Process entity_types format conversion: from newline-separated string to string array
-        if (formValues.parser_config && formValues.parser_config.graphrag && formValues.parser_config.graphrag.entity_types) {
-          const entityTypesString = formValues.parser_config.graphrag.entity_types as any as string;
-          const entityTypesArray = entityTypesString
-            .split('\n')
-            .map((item: string) => item.trim())
-            .filter((item: string) => item.length > 0);
-          formValues.parser_config.graphrag.entity_types = entityTypesArray;
-        }
-        
-        // Ensure correct type is used when saving (not 'rebuild')
-        const saveType = originalType === 'rebuild' ? currentType : (formValues.type || currentType);
-        
-        const payload: KnowledgeBaseFormData = {
-          ...formValues,
-          type: saveType,
-          permission_id: formValues.permission_id || 'Private',
-          parent_id: datasets?.parent_id || undefined,
-        };
-        
-        console.log('Saving payload:', payload); // Debug log
-        
-        const submit = datasets?.id
-          ? updateKnowledgeBase(datasets.id, payload)
-          : createKnowledgeBase(payload);
-        submit
-          .then(() => {
-            if (refreshTable) {
-              refreshTable();
+        try {
+          if (platform === 'yuque') {
+            // Validate Yuque credentials
+            const yuqueParams = {
+              yuque_user_id: formValues.parser_config?.yuque_user_id,
+              yuque_token: formValues.parser_config?.yuque_token
+            };
+            
+            if (!yuqueParams.yuque_user_id || !yuqueParams.yuque_token) {
+              messageApi.error(t('knowledgeBase.yuqueAuthRequired'));
+              setLoading(false);
+              return;
             }
-            handleClose();
-          })
-          .catch(() => {
-            setLoading(false);
-          });
-
-      }).catch((err) => {
-        console.log('Validation failed:', err)
-      });
+            
+            await checkYuqueSync(yuqueParams);
+            messageApi.success(t('knowledgeBase.yuqueAuthSuccess'));
+            
+          } else if (platform === 'feishu') {
+            // Validate Feishu credentials
+            const feishuParams = {
+              app_id: formValues.parser_config?.app_id,
+              app_secret: formValues.parser_config?.app_secret,
+              folder_token: formValues.parser_config?.folder_token
+            };
+            
+            if (!feishuParams.app_id || !feishuParams.app_secret || !feishuParams.folder_token) {
+              messageApi.error(t('knowledgeBase.feishuAuthRequired'));
+              setLoading(false);
+              return;
+            }
+            
+            await checkFeishuSync(feishuParams);
+            messageApi.success(t('knowledgeBase.feishuAuthSuccess'));
+          }
+        } catch (error) {
+          console.error('Authentication failed:', error);
+          messageApi.error(t('knowledgeBase.authFailed'));
+          setLoading(false);
+          return;
+        }
+      }
+      
+      // Process entity_types format conversion: from newline-separated string to string array
+      if (formValues.parser_config && formValues.parser_config.graphrag && formValues.parser_config.graphrag.entity_types) {
+        const entityTypesString = formValues.parser_config.graphrag.entity_types as any as string;
+        const entityTypesArray = entityTypesString
+          .split('\n')
+          .map((item: string) => item.trim())
+          .filter((item: string) => item.length > 0);
+        formValues.parser_config.graphrag.entity_types = entityTypesArray;
+      }
+      
+      // Ensure correct type is used when saving (not 'rebuild')
+      const saveType = originalType === 'rebuild' ? currentType : (formValues.type || currentType);
+      
+      const payload: KnowledgeBaseFormData = {
+        ...formValues,
+        type: saveType,
+        permission_id: formValues.permission_id || 'Private',
+        parent_id: datasets?.parent_id || undefined,
+      };
+      
+      console.log('Saving payload:', payload); // Debug log
+      
+      const submit = datasets?.id
+        ? updateKnowledgeBase(datasets.id, payload)
+        : createKnowledgeBase(payload);
+      
+      await submit;
+      
+      if (refreshTable) {
+        refreshTable();
+      }
+      handleClose();
+      
+    } catch (err) {
+      console.log('Validation or save failed:', err);
+      setLoading(false);
+    }
   }
   const handleChange = (_value: string, tp: string) => {
     // Only trigger prompt in edit mode and when type is embedding
@@ -423,6 +519,139 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       <Form.Item name="description" label={t('knowledgeBase.createForm.description')}>
         <TextArea rows={2} placeholder={t('knowledgeBase.createForm.description')} />
       </Form.Item>
+
+      {/* Web type specific fields */}
+      {currentType === 'Web' && (
+        <>
+          <Form.Item
+            name={['parser_config', 'entry_url']}
+            label={t('knowledgeBase.createForm.entryUrl')}
+            rules={[
+              { required: true, message: t('knowledgeBase.createForm.entryUrlRequired') },
+              { type: 'url', message: t('knowledgeBase.createForm.entryUrlInvalid') }
+            ]}
+          >
+            <Input placeholder="https://ai.redbearai.com" />
+          </Form.Item>
+
+          <Form.Item
+            name={['parser_config', 'max_pages']}
+            label={t('knowledgeBase.createForm.maxPages')}
+            rules={[{ required: true, message: t('knowledgeBase.createForm.maxPagesRequired') }]}
+            initialValue={20}
+          >
+            <SliderInput
+              min={10}
+              max={200}
+              step={1}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name={['parser_config', 'delay_seconds']}
+            label={t('knowledgeBase.createForm.delaySeconds')}
+            rules={[{ required: true, message: t('knowledgeBase.createForm.delaySecondsRequired') }]}
+            initialValue={1.0}
+          >
+            <SliderInput
+              min={1}
+              max={3}
+              step={0.1}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name={['parser_config', 'timeout_seconds']}
+            label={t('knowledgeBase.createForm.timeoutSeconds')}
+            rules={[{ required: true, message: t('knowledgeBase.createForm.timeoutSecondsRequired') }]}
+            initialValue={10}
+          >
+            <SliderInput
+              min={5}
+              max={15}
+              step={1}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name={['parser_config', 'user_agent']}
+            label={t('knowledgeBase.createForm.userAgent')}
+            rules={[{ required: true, message: t('knowledgeBase.createForm.userAgentRequired') }]}
+            initialValue="KnowledgeBaseCrawler/1.0"
+          >
+            <Input placeholder="KnowledgeBaseCrawler/1.0" />
+          </Form.Item>
+        </>
+      )}
+
+      {/* Third-party type specific fields */}
+      {currentType === 'Third-party' && (
+        <>
+          <Form.Item
+            name={['parser_config', 'third_party_platform']}
+            label={t('knowledgeBase.createForm.platform')}
+            rules={[{ required: true, message: t('knowledgeBase.createForm.platformRequired') }]}
+            initialValue="yuque"
+          >
+            <Select
+              value={thirdPartyPlatform}
+              onChange={(value) => setThirdPartyPlatform(value)}
+              options={[
+                { value: 'yuque', label: t('knowledgeBase.createForm.yuque') },
+                { value: 'feishu', label: t('knowledgeBase.createForm.feishu') }
+              ]}
+            />
+          </Form.Item>
+
+          {thirdPartyPlatform === 'yuque' && (
+            <>
+              <Form.Item
+                name={['parser_config', 'yuque_user_id']}
+                label={t('knowledgeBase.createForm.yuqueUserId')}
+                rules={[{ required: true, message: t('knowledgeBase.createForm.yuqueUserIdRequired') }]}
+              >
+                <Input placeholder={t('knowledgeBase.createForm.yuqueUserIdPlaceholder')} />
+              </Form.Item>
+
+              <Form.Item
+                name={['parser_config', 'yuque_token']}
+                label={t('knowledgeBase.createForm.yuqueToken')}
+                rules={[{ required: true, message: t('knowledgeBase.createForm.yuqueTokenRequired') }]}
+              >
+                <Input.Password placeholder={t('knowledgeBase.createForm.yuqueTokenPlaceholder')} />
+              </Form.Item>
+            </>
+          )}
+
+          {thirdPartyPlatform === 'feishu' && (
+            <>
+              <Form.Item
+                name={['parser_config', 'app_id']}
+                label={t('knowledgeBase.createForm.feishuAppId')}
+                rules={[{ required: true, message: t('knowledgeBase.createForm.feishuAppIdRequired') }]}
+              >
+                <Input placeholder={t('knowledgeBase.createForm.feishuAppIdPlaceholder')} />
+              </Form.Item>
+
+              <Form.Item
+                name={['parser_config', 'app_secret']}
+                label={t('knowledgeBase.createForm.feishuAppSecret')}
+                rules={[{ required: true, message: t('knowledgeBase.createForm.feishuAppSecretRequired') }]}
+              >
+                <Input.Password placeholder={t('knowledgeBase.createForm.feishuAppSecretPlaceholder')} />
+              </Form.Item>
+
+              <Form.Item
+                name={['parser_config', 'folder_token']}
+                label={t('knowledgeBase.createForm.feishuFolderToken')}
+                rules={[{ required: true, message: t('knowledgeBase.createForm.feishuFolderTokenRequired') }]}
+              >
+                <Input placeholder={t('knowledgeBase.createForm.feishuFolderTokenPlaceholder')} />
+              </Form.Item>
+            </>
+          )}
+        </>
+      )}
 
       {currentType !== 'Folder' && dynamicTypeList.map((tp) => {
         const fieldKey = typeToFieldKey(tp);
