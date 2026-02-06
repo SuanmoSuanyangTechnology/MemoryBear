@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:15 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:34:15 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-06 11:08:37
  */
 /**
  * Type definitions for Application Management
@@ -14,6 +14,7 @@
 export interface Query {
   /** Search keyword */
   search: string;
+  type?: string;
 }
 
 /**
