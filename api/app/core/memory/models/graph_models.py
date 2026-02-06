@@ -413,7 +413,8 @@ class ExtractedEntityNode(Node):
         description="Entity aliases - alternative names for this entity"
     )
     name_embedding: Optional[List[float]] = Field(default_factory=list, description="Name embedding vector")
-    fact_summary: str = Field(default="", description="Summary of the fact about this entity")
+    # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+    # fact_summary: str = Field(default="", description="Summary of the fact about this entity")
     connect_strength: str = Field(..., description="Strong VS Weak about this entity")
     config_id: Optional[int | str] = Field(None, description="Configuration ID used to process this entity (integer or string)")
     

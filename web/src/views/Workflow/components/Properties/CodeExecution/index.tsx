@@ -5,8 +5,8 @@ import { Node } from '@antv/x6'
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import MappingList from '../MappingList'
-import Editor from '../../Editor'
 import OutputList from './OutputList'
+import CodeMirrorEditor from '@/components/CodeMirrorEditor';
 
 interface MappingItem {
   name?: string
@@ -110,7 +110,10 @@ const CodeExecution: FC<CodeExecutionProps> = ({ options }) => {
         <Form.Item noStyle shouldUpdate={(prev, curr) => prev.language !== curr.language}>
           {() => (
             <Form.Item name="code" noStyle>
-              <Editor size="small" language={form.getFieldValue('language')} />
+              <CodeMirrorEditor
+                language={form.getFieldValue('language')}
+                size="small"
+              />
             </Form.Item>
           )}
         </Form.Item>

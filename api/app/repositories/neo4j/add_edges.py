@@ -79,7 +79,8 @@ async def add_memory_summary_statement_edges(summaries: List[MemorySummaryNode],
     try:
         edges: List[dict] = []
         for s in summaries:
-            for chunk_id in getattr(s, "chunk_ids", []) or []:
+            chunk_ids = getattr(s, "chunk_ids", []) or []
+            for chunk_id in chunk_ids:
                 edges.append({
                     "summary_id": s.id,
                     "chunk_id": chunk_id,
@@ -91,12 +92,11 @@ async def add_memory_summary_statement_edges(summaries: List[MemorySummaryNode],
 
         if not edges:
             return []
-
         result = await connector.execute_query(
             MEMORY_SUMMARY_STATEMENT_EDGE_SAVE,
             edges=edges
         )
         created = [record.get("uuid") for record in result] if result else []
         return created
-    except Exception:
+    except Exception as e:
         return None

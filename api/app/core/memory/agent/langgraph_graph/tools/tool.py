@@ -186,10 +186,11 @@ def create_hybrid_retrieval_tool_async(memory_config, **search_params):
             清理后的数据
         """
         # 需要过滤的字段列表
+        # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
         fields_to_remove = {
             'invalid_at', 'valid_at', 'chunk_id_from_rel', 'entity_ids', 
             'expired_at', 'created_at', 'chunk_id', 'id', 'apply_id', 
-            'user_id', 'statement_ids', 'updated_at',"chunk_ids","fact_summary"
+            'user_id', 'statement_ids', 'updated_at',"chunk_ids"  ,"fact_summary"
         }
         
         if isinstance(data, dict):

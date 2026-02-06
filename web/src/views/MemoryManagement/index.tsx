@@ -112,7 +112,7 @@ const MemoryManagement: React.FC = () => {
                 title={item.config_name}
               >
                 <Tooltip title={item.config_desc}>
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1">{item.config_desc}</div>
+                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1 rb:h-[17px]">{item.config_desc}</div>
                 </Tooltip>
                 <RbAlert className="rb:mt-3 ">
                   <div className={clsx("rb:flex rb:gap-5 rb:font-regular rb:text-[14px]")}>

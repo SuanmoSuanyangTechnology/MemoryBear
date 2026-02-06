@@ -114,6 +114,8 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                 result = task_service.get_task_memory_read_result(task.id)
                 status = result.get("status")
                 logger.info(f"读取任务状态：{status}")
+                if memory_content:
+                    memory_content = memory_content['answer']
 
             finally:
                 db.close()
@@ -127,11 +129,6 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
                     "content_length": len(str(memory_content))
                 }
             )
-
-            # 检查是否有有效内容
-            if not memory_content or str(memory_content).strip() == "" or "answer" in str(memory_content) and str(memory_content).count("''") > 0:
-                return "未找到相关的历史记忆。请直接回答用户的问题，不要再次调用此工具。"
-            
             return f"检索到以下历史记忆：\n\n{memory_content}"
         except Exception as e:
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})

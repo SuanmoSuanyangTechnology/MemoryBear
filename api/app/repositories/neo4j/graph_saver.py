@@ -21,7 +21,8 @@ from app.core.memory.models.graph_models import (
     ExtractedEntityNode,
     EntityEntityEdge,
 )
-
+import logging
+logger = logging.getLogger(__name__)
 async def save_entities_and_relationships(
     entity_nodes: List[ExtractedEntityNode],
     entity_entity_edges: List[EntityEntityEdge],
@@ -41,8 +42,8 @@ async def save_entities_and_relationships(
             'statement': edge.statement,
             'valid_at': edge.valid_at.isoformat() if edge.valid_at else None,
             'invalid_at': edge.invalid_at.isoformat() if edge.invalid_at else None,
-            'created_at': edge.created_at.isoformat(),
-            'expired_at': edge.expired_at.isoformat(),
+            'created_at': edge.created_at.isoformat() if edge.created_at else None,
+            'expired_at': edge.expired_at.isoformat() if edge.expired_at else None,
             'run_id': edge.run_id,
             'end_user_id': edge.end_user_id,
         }
@@ -147,14 +148,14 @@ async def save_statement_entity_edges(
 
 
 async def save_dialog_and_statements_to_neo4j(
-    dialogue_nodes: List[DialogueNode],
-    chunk_nodes: List[ChunkNode],
-    statement_nodes: List[StatementNode],
-    entity_nodes: List[ExtractedEntityNode],
-    entity_edges: List[EntityEntityEdge],
-    statement_chunk_edges: List[StatementChunkEdge],
-    statement_entity_edges: List[StatementEntityEdge],
-    connector: Neo4jConnector
+        dialogue_nodes: List[DialogueNode],
+        chunk_nodes: List[ChunkNode],
+        statement_nodes: List[StatementNode],
+        entity_nodes: List[ExtractedEntityNode],
+        entity_edges: List[EntityEntityEdge],
+        statement_chunk_edges: List[StatementChunkEdge],
+        statement_entity_edges: List[StatementEntityEdge],
+        connector: Neo4jConnector
 ) -> bool:
     """Save dialogue nodes, chunk nodes, statement nodes, entities, and all relationships to Neo4j using graph models.
 
@@ -171,40 +172,126 @@ async def save_dialog_and_statements_to_neo4j(
     Returns:
         bool: True if successful, False otherwise
     """
-    try:
-        # Save all dialogue nodes in batch
-        dialogue_uuids = await add_dialogue_nodes(dialogue_nodes, connector)
-        if dialogue_uuids:
+
+    # 定义事务函数，将所有写操作放在一个事务中
+    async def _save_all_in_transaction(tx):
+        """在单个事务中执行所有保存操作，避免死锁"""
+        results = {}
+
+        # 1. Save all dialogue nodes in batch
+        if dialogue_nodes:
+            from app.repositories.neo4j.cypher_queries import DIALOGUE_NODE_SAVE
+            dialogue_data = [node.model_dump() for node in dialogue_nodes]
+            result = await tx.run(DIALOGUE_NODE_SAVE, dialogues=dialogue_data)
+            dialogue_uuids = [record["uuid"] async for record in result]
+            results['dialogues'] = dialogue_uuids
             print(f"Dialogues saved to Neo4j with UUIDs: {dialogue_uuids}")
-        else:
-            print("Failed to save dialogues to Neo4j")
-            return False
 
-        # Save all chunk nodes in batch
-        await save_chunk_nodes(chunk_nodes, connector)
+        # 2. Save all chunk nodes in batch
+        if chunk_nodes:
+            from app.repositories.neo4j.cypher_queries import CHUNK_NODE_SAVE
+            chunk_data = [node.model_dump() for node in chunk_nodes]
+            result = await tx.run(CHUNK_NODE_SAVE, chunks=chunk_data)
+            chunk_uuids = [record["uuid"] async for record in result]
+            results['chunks'] = chunk_uuids
+            logger.info(f"Successfully saved {len(chunk_uuids)} chunk nodes to Neo4j")
 
-        # Save all statement nodes in batch
+        # 3. Save all statement nodes in batch
         if statement_nodes:
-            statement_uuids = await add_statement_nodes(statement_nodes, connector)
-            if statement_uuids:
-                print(f"Successfully saved {len(statement_uuids)} statement nodes to Neo4j")
-            else:
-                print("Failed to save statement nodes to Neo4j")
-                return False
-        else:
-            print("No statement nodes to save")
+            from app.repositories.neo4j.cypher_queries import STATEMENT_NODE_SAVE
+            statement_data = [node.model_dump() for node in statement_nodes]
+            result = await tx.run(STATEMENT_NODE_SAVE, statements=statement_data)
+            statement_uuids = [record["uuid"] async for record in result]
+            results['statements'] = statement_uuids
+            logger.info(f"Successfully saved {len(statement_uuids)} statement nodes to Neo4j")
 
-        # Save entities and relationships
-        await save_entities_and_relationships(entity_nodes, entity_edges, connector)
-        print("Successfully saved entities and relationships to Neo4j")
+        # 4. Save entities
+        if entity_nodes:
+            from app.repositories.neo4j.cypher_queries import EXTRACTED_ENTITY_NODE_SAVE
+            entity_data = [entity.model_dump() for entity in entity_nodes]
+            result = await tx.run(EXTRACTED_ENTITY_NODE_SAVE, entities=entity_data)
+            entity_uuids = [record["uuid"] async for record in result]
+            results['entities'] = entity_uuids
+            logger.info(f"Successfully saved {len(entity_uuids)} entity nodes to Neo4j")
 
-        # Save new edges
-        await save_statement_chunk_edges(statement_chunk_edges, connector)
-        await save_statement_entity_edges(statement_entity_edges, connector)
+        # 5. Create entity relationships
+        if entity_edges:
+            from app.repositories.neo4j.cypher_queries import ENTITY_RELATIONSHIP_SAVE
+            relationship_data = []
+            for edge in entity_edges:
+                relationship_data.append({
+                    'source_id': edge.source,
+                    'target_id': edge.target,
+                    'predicate': edge.relation_type,
+                    'statement_id': edge.source_statement_id,
+                    'value': edge.relation_value,
+                    'statement': edge.statement,
+                    'valid_at': edge.valid_at.isoformat() if edge.valid_at else None,
+                    'invalid_at': edge.invalid_at.isoformat() if edge.invalid_at else None,
+                    'created_at': edge.created_at.isoformat() if edge.created_at else None,
+                    'expired_at': edge.expired_at.isoformat() if edge.expired_at else None,
+                    'run_id': edge.run_id,
+                    'end_user_id': edge.end_user_id,
+                })
+            result = await tx.run(ENTITY_RELATIONSHIP_SAVE, relationships=relationship_data)
+            rel_uuids = [record["uuid"] async for record in result]
+            results['entity_relationships'] = rel_uuids
+            logger.info(f"Successfully saved {len(rel_uuids)} entity relationships to Neo4j")
 
+        # 6. Save statement-chunk edges
+        if statement_chunk_edges:
+            from app.repositories.neo4j.cypher_queries import CHUNK_STATEMENT_EDGE_SAVE
+            sc_edge_data = []
+            for edge in statement_chunk_edges:
+                sc_edge_data.append({
+                    "id": edge.id,
+                    "source": edge.source,
+                    "target": edge.target,
+                    "created_at": edge.created_at.isoformat() if edge.created_at else None,
+                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
+                    "run_id": edge.run_id,
+                    "end_user_id": edge.end_user_id,
+                })
+            result = await tx.run(CHUNK_STATEMENT_EDGE_SAVE, chunk_statement_edges=sc_edge_data)
+            sc_uuids = [record["uuid"] async for record in result]
+            results['statement_chunk_edges'] = sc_uuids
+            logger.info(f"Successfully saved {len(sc_uuids)} statement-chunk edges to Neo4j")
+
+        # 7. Save statement-entity edges
+        if statement_entity_edges:
+            from app.repositories.neo4j.cypher_queries import STATEMENT_ENTITY_EDGE_SAVE
+            se_edge_data = []
+            for edge in statement_entity_edges:
+                se_edge_data.append({
+                    "source": edge.source,
+                    "target": edge.target,
+                    "created_at": edge.created_at.isoformat() if edge.created_at else None,
+                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
+                    "run_id": edge.run_id,
+                    "end_user_id": edge.end_user_id,
+                    "connect_strength": getattr(edge, "connect_strength", "strong"),
+                })
+            result = await tx.run(STATEMENT_ENTITY_EDGE_SAVE, relationships=se_edge_data)
+            se_uuids = [record["uuid"] async for record in result]
+            results['statement_entity_edges'] = se_uuids
+            logger.info(f"Successfully saved {len(se_uuids)} statement-entity edges to Neo4j")
+
+        return results
+
+    try:
+        # 使用显式写事务执行所有操作，避免死锁
+        results = await connector.execute_write_transaction(_save_all_in_transaction)
+        summary = {
+            key: len(value)
+            for key, value in results.items()
+            if isinstance(value, (list, tuple, set))
+        }
+        logger.info("Transaction completed. Summary: %s", summary)
+        logger.debug("Full transaction results: %r", results)
         return True
 
     except Exception as e:
+        logger.error(f"Neo4j integration error: {e}", exc_info=True)
         print(f"Neo4j integration error: {e}")
         print("Continuing without database storage...")
         return False
