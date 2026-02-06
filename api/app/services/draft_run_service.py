@@ -63,7 +63,8 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
         长期记忆工具
     """
     # search_switch = memory_config.get("search_switch", "2")
-    config_id= memory_config.get("memory_content") or memory_config.get("memory_config",None)
+    # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
+    config_id = memory_config.get("memory_config_id") or memory_config.get("memory_content", None)
     logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
     @tool(args_schema=LongTermMemoryInput)
     def long_term_memory(question: str) -> str:
@@ -455,7 +456,8 @@ class DraftRunService:
             )
 
             memory_config_= agent_config.memory
-            config_id = memory_config_.get("memory_content") or memory_config_.get("memory_config",None)
+            # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
+            config_id = memory_config_.get("memory_config_id") or memory_config_.get("memory_content", None)
 
             # 8. 调用 Agent（支持多模态）
             result = await agent.chat(
@@ -718,7 +720,8 @@ class DraftRunService:
             })
 
             memory_config_ = agent_config.memory
-            config_id = memory_config_.get("memory_content") or memory_config_.get("memory_config",None)
+            # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
+            config_id = memory_config_.get("memory_config_id") or memory_config_.get("memory_content", None)
 
             # 9. 流式调用 Agent（支持多模态）
             full_content = ""
