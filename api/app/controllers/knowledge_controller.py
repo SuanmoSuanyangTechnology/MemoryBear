@@ -509,7 +509,7 @@ async def check_yuque_auth(
         async with api_client as client:
             repos = await client.get_user_repos()
             if repos:
-                return success(data=repos, msg="Successfully auth yuque info")
+                return success(msg="Successfully auth yuque info")
         return fail(BizCode.UNAUTHORIZED, msg="auth yuque info failed", error="user_id or token is incorrect")
     except HTTPException:
         raise
@@ -519,7 +519,7 @@ async def check_yuque_auth(
 
 
 @router.get("/check/feishu/auth", response_model=ApiResponse)
-async def check_yuque_auth(
+async def check_feishu_auth(
         feishu_app_id: str,
         feishu_app_secret: str,
         feishu_folder_token: str,
@@ -539,7 +539,7 @@ async def check_yuque_auth(
         async with api_client as client:
             files = await client.list_all_folder_files(feishu_folder_token, recursive=True)
             if files:
-                return success(data=files, msg="Successfully auth feishu info")
+                return success(msg="Successfully auth feishu info")
         return fail(BizCode.UNAUTHORIZED, msg="auth feishu info failed", error="app_id or app_secret or feishu_folder_token is incorrect")
     except HTTPException:
         raise
