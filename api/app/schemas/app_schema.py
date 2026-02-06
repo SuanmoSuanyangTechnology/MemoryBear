@@ -40,10 +40,7 @@ class FileInput(BaseModel):
     @classmethod
     def validate_type(cls, v):
         """验证文件类型"""
-        try:
-            return FileType.trans(v)
-        except ValueError:
-            raise ValueError(f"无效的文件类型: {v}")
+        return FileType.trans(v)
 
     @field_validator("upload_file_id")
     @classmethod

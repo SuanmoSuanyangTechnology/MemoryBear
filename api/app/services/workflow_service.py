@@ -446,19 +446,9 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
-        files = []
-        if payload.files:
-            for file in payload.files:
-                files.append(
-                    {
-                        "type": file.type,
-                        "url": await self.multimodal_service.get_file_url(file),
-                        "__file": True
-                    }
-                )
 
         input_data = {"message": payload.message, "variables": payload.variables,
-                      "conversation_id": payload.conversation_id, "files": files}
+                      "conversation_id": payload.conversation_id, "files": [file.model_dump() for file in payload.files]}
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
@@ -488,6 +478,17 @@ class WorkflowService:
         from app.core.workflow.executor import execute_workflow
 
         try:
+            files = []
+            if payload.files:
+                for file in payload.files:
+                    files.append(
+                        {
+                            "type": file.type,
+                            "url": await self.multimodal_service.get_file_url(file),
+                            "__file": True
+                        }
+                    )
+            input_data["files"] = files
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
 
@@ -634,19 +635,8 @@ class WorkflowService:
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
-        files = []
-        if payload.files:
-            for file in payload.files:
-                files.append(
-                    {
-                        "type": file.type,
-                        "url": await self.multimodal_service.get_file_url(file),
-                        "__file": True
-                    }
-                )
-
         input_data = {"message": payload.message, "variables": payload.variables,
-                      "conversation_id": payload.conversation_id, "files": files}
+                      "conversation_id": payload.conversation_id, "files": [file.model_dump() for file in payload.files]}
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
@@ -670,12 +660,18 @@ class WorkflowService:
             "execution_config": config.execution_config
         }
 
-        # 4. 获取工作空间 ID（从 app 获取）
-
-        # 5. 流式执行工作流
-
         try:
-            # 更新状态为运行中
+            files = []
+            if payload.files:
+                for file in payload.files:
+                    files.append(
+                        {
+                            "type": file.type,
+                            "url": await self.multimodal_service.get_file_url(file),
+                            "__file": True
+                        }
+                    )
+            input_data["files"] = files
             self.update_execution_status(execution.execution_id, "running")
             executions = self.execution_repo.get_by_conversation_id(conversation_id=conversation_id_uuid)
 
