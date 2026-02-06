@@ -291,19 +291,23 @@ class MemoryAgentService:
             ValueError: If config loading fails or write operation fails
         """
         # Resolve config_id and workspace_id
+        # Always get workspace_id from end_user for fallback, even if config_id is provided
         workspace_id = None
-        if config_id is None:
-            try:
-                connected_config = get_end_user_connected_config(end_user_id, db)
+        try:
+            connected_config = get_end_user_connected_config(end_user_id, db)
+            workspace_id = connected_config.get("workspace_id")
+            if config_id is None:
                 config_id = connected_config.get("memory_config_id")
-                workspace_id = connected_config.get("workspace_id")
-                if config_id is None and workspace_id is None:
-                    raise ValueError(f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
-            except Exception as e:
-                if "No memory configuration found" in str(e):
-                    raise  # Re-raise our specific error
-                logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+            logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
+            if config_id is None and workspace_id is None:
+                raise ValueError(f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
+        except Exception as e:
+            if "No memory configuration found" in str(e):
+                raise  # Re-raise our specific error
+            logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+            if config_id is None:
                 raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
+            # If config_id was provided, continue without workspace_id fallback
 
         import time
         start_time = time.time()
@@ -421,19 +425,23 @@ class MemoryAgentService:
         ori_message= message
 
         # Resolve config_id and workspace_id
+        # Always get workspace_id from end_user for fallback, even if config_id is provided
         workspace_id = None
-        if config_id is None:
-            try:
-                connected_config = get_end_user_connected_config(end_user_id, db)
+        try:
+            connected_config = get_end_user_connected_config(end_user_id, db)
+            workspace_id = connected_config.get("workspace_id")
+            if config_id is None:
                 config_id = connected_config.get("memory_config_id")
-                workspace_id = connected_config.get("workspace_id")
-                if config_id is None and workspace_id is None:
-                    raise ValueError(f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
-            except Exception as e:
-                if "No memory configuration found" in str(e):
-                    raise  # Re-raise our specific error
-                logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+            logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
+            if config_id is None and workspace_id is None:
+                raise ValueError(f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
+        except Exception as e:
+            if "No memory configuration found" in str(e):
+                raise  # Re-raise our specific error
+            logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+            if config_id is None:
                 raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
+            # If config_id was provided, continue without workspace_id fallback
 
         logger.info(f"Read operation for group {end_user_id} with config_id {config_id}")
 
@@ -729,21 +737,24 @@ class MemoryAgentService:
         Returns:
             生成的答案文本
         """
-        if config_id is None:
-            try:
-                connected_config = get_end_user_connected_config(end_user_id, db)
+        # Always get workspace_id from end_user for fallback, even if config_id is provided
+        workspace_id = None
+        try:
+            connected_config = get_end_user_connected_config(end_user_id, db)
+            workspace_id = connected_config.get('workspace_id')
+            if config_id is None:
                 config_id = connected_config.get('memory_config_id')
-                workspace_id = connected_config.get('workspace_id')
-                if config_id is None and workspace_id is None:
-                    raise ValueError(
-                        f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
-            except Exception as e:
-                if "No memory configuration found" in str(e):
-                    raise  # Re-raise our specific error
-                logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+            logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
+            if config_id is None and workspace_id is None:
+                raise ValueError(
+                    f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
+        except Exception as e:
+            if "No memory configuration found" in str(e):
+                raise  # Re-raise our specific error
+            logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+            if config_id is None:
                 raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
-        else:
-            workspace_id = None
+            # If config_id was provided, continue without workspace_id fallback
             
         logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
         
