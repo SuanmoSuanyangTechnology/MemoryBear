@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Dict
 
 from app.config import get_config
+from app.core.runners.nodejs.env import prepare_nodejs_dependencies_env
 from app.core.runners.python.env import prepare_python_dependencies_env
 from app.logger import get_logger
 
@@ -19,7 +20,10 @@ async def setup_dependencies():
 
         logger.info("Preparing Python dependencies environment...")
         await prepare_python_dependencies_env()
-        logger.info("Python dependencies environment ready")
+        logger.info("Python Environment Ready ....")
+        logger.info("Preparing Nodejs dependencies environment...")
+        await prepare_nodejs_dependencies_env()
+        logger.info("Nodejs Environment Ready ...")
 
     except Exception as e:
         logger.error(f"Failed to setup dependencies: {e}")
@@ -36,7 +40,7 @@ async def install_python_dependencies():
     config = get_config()
 
     # Check if requirements file exists
-    req_file = Path("dependencies/python-requirements.txt")
+    req_file = Path("dependencies/python/python-requirements.txt")
     if not req_file.exists():
         logger.warning("Python requirements file not found, skipping installation")
         return

@@ -101,10 +101,11 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.name_embedding = CASE
         WHEN entity.name_embedding IS NOT NULL AND size(entity.name_embedding) > 0 THEN entity.name_embedding
         ELSE e.name_embedding END,
-    e.fact_summary = CASE
-        WHEN entity.fact_summary IS NOT NULL AND entity.fact_summary <> ''
-         AND (e.fact_summary IS NULL OR size(e.fact_summary) = 0 OR size(entity.fact_summary) > size(e.fact_summary))
-        THEN entity.fact_summary ELSE e.fact_summary END,
+    // TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+    // e.fact_summary = CASE
+    //     WHEN entity.fact_summary IS NOT NULL AND entity.fact_summary <> ''
+    //      AND (e.fact_summary IS NULL OR size(e.fact_summary) = 0 OR size(entity.fact_summary) > size(e.fact_summary))
+    //     THEN entity.fact_summary ELSE e.fact_summary END,
     e.connect_strength = CASE
         WHEN entity.connect_strength IS NULL OR entity.connect_strength = '' THEN e.connect_strength
         ELSE CASE
@@ -321,7 +322,8 @@ RETURN e.id AS id,
        e.description AS description,
        e.aliases AS aliases,
        e.name_embedding AS name_embedding,
-       COALESCE(e.fact_summary, '') AS fact_summary,
+       // TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+       // COALESCE(e.fact_summary, '') AS fact_summary,
        e.connect_strength AS connect_strength,
        collect(DISTINCT s.id) AS statement_ids,
        collect(DISTINCT c.id) AS chunk_ids,
@@ -877,7 +879,8 @@ RETURN
     CASE
       WHEN ms:ExtractedEntity THEN {
         text: ms.name,
-        created_at: ms.created_at
+        created_at: ms.created_at,
+        type: "情景记忆" 
       }
     END
   ) AS ExtractedEntity,
@@ -887,7 +890,8 @@ RETURN
     CASE
       WHEN n:MemorySummary THEN {
         text: n.content,
-        created_at: n.created_at
+        created_at: n.created_at,
+        type: "长期沉淀" 
       }
     END
   ) AS MemorySummary,
@@ -895,7 +899,8 @@ RETURN
   collect(
     DISTINCT {
       text: e.statement,
-      created_at: e.created_at
+      created_at: e.created_at,
+      type: "情绪记忆" 
     }
   ) AS statement;
 """
@@ -999,3 +1004,58 @@ RETURN DISTINCT
  x.statement as statement,x.created_at as created_at
 """
 
+Graph_Node_query = """
+            MATCH (n:MemorySummary)
+                WHERE n.end_user_id = $end_user_id
+                RETURN
+                  elementId(n) AS id,
+                  labels(n) AS labels,
+                  properties(n) AS properties,
+                  0 AS priority
+                LIMIT $limit
+                
+                UNION ALL
+
+                    MATCH (n:Dialogue)
+                    WHERE n.end_user_id =  $end_user_id
+                    RETURN
+                      elementId(n) AS id,
+                      labels(n) AS labels,
+                      properties(n) AS properties,
+                      1 AS priority
+                    LIMIT 1
+
+                UNION ALL
+
+                MATCH (n:Statement)
+                WHERE n.end_user_id =  $end_user_id
+                RETURN
+                  elementId(n) AS id,
+                  labels(n) AS labels,
+                  properties(n) AS properties,
+                  1 AS priority
+                LIMIT $limit
+
+                UNION ALL
+
+                MATCH (n:ExtractedEntity)
+                WHERE n.end_user_id =  $end_user_id
+                RETURN
+                  elementId(n) AS id,
+                  labels(n) AS labels,
+                  properties(n) AS properties,
+                  2 AS priority
+                LIMIT $limit
+
+                UNION ALL
+
+                MATCH (n:Chunk)
+                WHERE n.end_user_id =  $end_user_id
+                RETURN
+                  elementId(n) AS id,
+                  labels(n) AS labels,
+                  properties(n) AS properties,
+                  3 AS priority
+                LIMIT $limit
+
+            """

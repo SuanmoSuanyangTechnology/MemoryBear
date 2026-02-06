@@ -45,6 +45,7 @@ from . import (
     home_page_controller,
     memory_perceptual_controller,
     memory_working_controller,
+    ontology_controller,
 )
 
 # 创建管理端 API 路由器
@@ -90,5 +91,6 @@ manager_router.include_router(implicit_memory_controller.router)
 manager_router.include_router(memory_perceptual_controller.router)
 manager_router.include_router(memory_working_controller.router)
 manager_router.include_router(file_storage_controller.router)
+manager_router.include_router(ontology_controller.router)
 
 __all__ = ["manager_router"]

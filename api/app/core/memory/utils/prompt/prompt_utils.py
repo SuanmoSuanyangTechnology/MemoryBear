@@ -177,7 +177,7 @@ def render_entity_dedup_prompt(
 
 #     Args:
 #         entity_a: Dict of entity A attributes
-async def render_triplet_extraction_prompt(statement: str, chunk_content: str, json_schema: dict, predicate_instructions: dict = None) -> str:
+async def render_triplet_extraction_prompt(statement: str, chunk_content: str, json_schema: dict, predicate_instructions: dict = None, language: str = "zh") -> str:
     """
     Renders the triplet extraction prompt using the extract_triplet.jinja2 template.
 
@@ -186,6 +186,7 @@ async def render_triplet_extraction_prompt(statement: str, chunk_content: str, j
         chunk_content: The content of the chunk to process
         json_schema: JSON schema for the expected output format
         predicate_instructions: Optional predicate instructions
+        language: The language to use for entity descriptions ("zh" for Chinese, "en" for English)
 
     Returns:
         Rendered prompt content as string
@@ -195,7 +196,8 @@ async def render_triplet_extraction_prompt(statement: str, chunk_content: str, j
         statement=statement,
         chunk_content=chunk_content,
         json_schema=json_schema,
-        predicate_instructions=predicate_instructions
+        predicate_instructions=predicate_instructions,
+        language=language
     )
     # 记录渲染结果到提示日志（与示例日志结构一致）
     log_prompt_rendering('triplet extraction', rendered_prompt)
@@ -204,7 +206,8 @@ async def render_triplet_extraction_prompt(statement: str, chunk_content: str, j
         'statement': 'str',
         'chunk_content': 'str',
         'json_schema': 'TripletExtractionResponse.schema',
-        'predicate_instructions': 'PREDICATE_DEFINITIONS'
+        'predicate_instructions': 'PREDICATE_DEFINITIONS',
+        'language': language
     })
 
     return rendered_prompt
@@ -213,6 +216,7 @@ async def render_memory_summary_prompt(
     chunk_texts: str,
     json_schema: dict,
     max_words: int = 200,
+    language: str = "zh",
 ) -> str:
     """
     Renders the memory summary prompt using the memory_summary.jinja2 template.
@@ -221,6 +225,7 @@ async def render_memory_summary_prompt(
         chunk_texts: Concatenated text of conversation chunks
         json_schema: JSON schema for the expected output format
         max_words: Maximum words for the summary
+        language: The language to use for summary generation ("zh" for Chinese, "en" for English)
 
     Returns:
         Rendered prompt content as string.
@@ -230,12 +235,14 @@ async def render_memory_summary_prompt(
         chunk_texts=chunk_texts,
         json_schema=json_schema,
         max_words=max_words,
+        language=language,
     )
     log_prompt_rendering('memory summary', rendered_prompt)
     log_template_rendering('memory_summary.jinja2', {
         'chunk_texts_len': len(chunk_texts or ""),
         'max_words': max_words,
-        'json_schema': 'MemorySummaryResponse.schema'
+        'json_schema': 'MemorySummaryResponse.schema',
+        'language': language
     })
     return rendered_prompt
 
@@ -388,24 +395,65 @@ async def render_memory_insight_prompt(
     return rendered_prompt
 
 
-async def render_episodic_title_and_type_prompt(content: str) -> str:
+async def render_episodic_title_and_type_prompt(content: str, language: str = "zh") -> str:
     """
     Renders the episodic title and type classification prompt using the episodic_type_classification.jinja2 template.
 
     Args:
         content: The content of the episodic memory summary to analyze
+        language: The language to use for title generation ("zh" for Chinese, "en" for English)
 
     Returns:
         Rendered prompt content as string
     """
     template = prompt_env.get_template("episodic_type_classification.jinja2")
-    rendered_prompt = template.render(content=content)
+    rendered_prompt = template.render(content=content, language=language)
     
     # 记录渲染结果到提示日志
     log_prompt_rendering('episodic title and type classification', rendered_prompt)
     # 可选：记录模板渲染信息
     log_template_rendering('episodic_type_classification.jinja2', {
-        'content_len': len(content) if content else 0
+        'content_len': len(content) if content else 0,
+        'language': language
+    })
+    
+    return rendered_prompt
+
+
+async def render_ontology_extraction_prompt(
+    scenario: str,
+    domain: str | None = None,
+    max_classes: int = 15,
+    json_schema: dict | None = None
+) -> str:
+    """
+    Renders the ontology extraction prompt using the extract_ontology.jinja2 template.
+
+    Args:
+        scenario: The scenario description text to extract ontology classes from
+        domain: Optional domain hint for the scenario (e.g., "Healthcare", "Education")
+        max_classes: Maximum number of classes to extract (default: 15)
+        json_schema: JSON schema for the expected output format
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("extract_ontology.jinja2")
+    rendered_prompt = template.render(
+        scenario=scenario,
+        domain=domain,
+        max_classes=max_classes,
+        json_schema=json_schema
+    )
+    
+    # 记录渲染结果到提示日志
+    log_prompt_rendering('ontology extraction', rendered_prompt)
+    # 可选：记录模板渲染信息
+    log_template_rendering('extract_ontology.jinja2', {
+        'scenario_len': len(scenario) if scenario else 0,
+        'domain': domain,
+        'max_classes': max_classes,
+        'json_schema': 'OntologyExtractionResponse.schema'
     })
     
     return rendered_prompt

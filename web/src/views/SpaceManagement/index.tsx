@@ -50,7 +50,7 @@ const SpaceManagement: React.FC = () => {
   }
   return (
     <>
-      <Button type="primary" className="rb:mb-[16px]" onClick={handleCreate}>
+      <Button type="primary" className="rb:mb-4" onClick={handleCreate}>
         {t('space.createSpace')}
       </Button>
       <BodyWrapper loading={loading} empty={data.length === 0}>
@@ -60,18 +60,19 @@ const SpaceManagement: React.FC = () => {
           renderItem={(item) => (
             <List.Item key={item.id}>
               <RbCard
-                avatar={<div className="rb:w-[48px] rb:h-[48px] rb:rounded-[8px] rb:mr-[12px] rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
+                avatarUrl={item.icon}
+                avatar={<div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
                   {item.name[0]}
                 </div>}
                 title={item.name}
-                subTitle={<Tag className="rb:mt-[4px] rb:font-regular!" color={item.storage_type === 'rag' ? 'processing' : 'warning'}>{t(`space.${item.storage_type || 'neo4j'}`)}</Tag>}
+                subTitle={<Tag className="rb:mt-1 rb:font-regular!" color={item.storage_type === 'rag' ? 'processing' : 'warning'}>{t(`space.${item.storage_type || 'neo4j'}`)}</Tag>}
               >
-                <div className={clsx("rb:absolute rb:top-[-1px] rb:right-[-1px] rb:p-[2px_9px] rb:text-[#FFFFFF] rb:leading-[16px] rb:text-[12px] rb:font-regular rb:rounded-[0px_12px_0px_12px]", {
+                <div className={clsx("rb:absolute rb:-top-px rb:-right-px rb:p-[2px_9px] rb:text-[#FFFFFF] rb:leading-4 rb:text-[12px] rb:font-regular rb:rounded-[0px_12px_0px_12px]", {
                   'rb:bg-[#369F21]': item.is_active,
                   'rb:bg-[#A8A9AA]': !item.is_active,
                 })}>{item.is_active ? t('space.associated') : t('space.notAssociated')}</div>
                 
-                <Button type="primary" ghost block className="rb:mt-[40px]" onClick={() => handleJump(item.id)}>
+                <Button type="primary" ghost block className="rb:mt-10" onClick={() => handleJump(item.id)}>
                   {t('space.enterSpace')}
                 </Button>
               </RbCard>

@@ -15,6 +15,7 @@ from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.end_user_repository import EndUserRepository
+from app.repositories.neo4j.cypher_queries import Graph_Node_query
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
 from app.services.implicit_memory_service import ImplicitMemoryService
@@ -1508,7 +1509,6 @@ async def analytics_graph_data(
         user_uuid = uuid.UUID(end_user_id)
         repo = EndUserRepository(db)
         end_user = repo.get_by_id(user_uuid)
-        
         if not end_user:
             logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
             return {
@@ -1562,21 +1562,11 @@ async def analytics_graph_data(
             }
         else:
             # 查询所有节点
-            node_query = """
-            MATCH (n)
-            WHERE n.end_user_id = $end_user_id
-            RETURN 
-                elementId(n) as id,
-                labels(n)[0] as label,
-                properties(n) as properties
-            LIMIT $limit
-            """
+            node_query=Graph_Node_query
             node_params = {
                 "end_user_id": end_user_id,
                 "limit": limit
             }
-
-
         # 执行节点查询
         node_results = await _neo4j_connector.execute_query(node_query, **node_params)
         
@@ -1587,9 +1577,9 @@ async def analytics_graph_data(
         
         for record in node_results:
             node_id = record["id"]
-            node_label = record["label"]
+            node_labels = record.get("labels", [])
+            node_label = node_labels[0] if node_labels else "Unknown"
             node_props = record["properties"]
-            
             # 根据节点类型提取需要的属性字段
             filtered_props = await _extract_node_properties(node_label, node_props,node_id)
             

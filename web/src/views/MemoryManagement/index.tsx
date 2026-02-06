@@ -10,6 +10,7 @@ import { getMemoryConfigList, deleteMemoryConfig } from '@/api/memory'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import { formatDateTime } from '@/utils/format';
 import clsx from 'clsx'
+import RbAlert from '@/components/RbAlert'
 
 const MemoryManagement: React.FC = () => {
   const { t } = useTranslation();
@@ -96,12 +97,20 @@ const MemoryManagement: React.FC = () => {
                 title={item.config_name}
               >
                 <Tooltip title={item.config_desc}>
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1">{item.config_desc}</div>
+                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1 rb:h-[17px]">{item.config_desc}</div>
                 </Tooltip>
+                <RbAlert className="rb:mt-3 ">
+                  <div className={clsx("rb:flex rb:gap-5 rb:font-regular rb:text-[14px]")}>
+                    <span className="rb:text-[#5B6167]">{t('memory.scene_id')}: </span>
+                    <span className="rb:font-medium">
+                      {item.scene_name || '-'}
+                    </span>
+                  </div>
+                </RbAlert>
 
-                <div className="rb:grid rb:grid-cols-2 rb:gap-4 rb:mt-3">
+                <div className="rb:grid rb:grid-cols-2 rb:gap-x-4 rb:gap-y-3 rb:mt-3">
                   {['memoryExtractionEngine', 'forgottenEngine', 'emotionEngine', 'reflectionEngine'].map((key) => (
-                    <div key={key} className="rb:group rb:cursor-pointer rb:bg-[#F0F3F8] rb:h-10 rb:rounded-md rb:flex rb:items-center rb:justify-between rb:p-[0_8px_0_12px] rb:mt-3 rb:text-[#5B6167] rb:font-medium"
+                    <div key={key} className="rb:group rb:cursor-pointer rb:bg-[#F0F3F8] rb:h-10 rb:rounded-md rb:flex rb:items-center rb:justify-between rb:p-[0_8px_0_12px] rb:text-[#5B6167] rb:font-medium"
                       onClick={() => handleClick(item.config_id, key)}
                     >
                       {t(`memory.${key}`)}

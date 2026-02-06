@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import re
+import urllib.parse
 from string import Template
 from textwrap import dedent
 from typing import Any
@@ -14,7 +15,7 @@ from app.core.workflow.nodes.code.config import CodeNodeConfig
 
 logger = logging.getLogger(__name__)
 
-SCRIPT_TEMPLATE = Template(dedent("""
+PYTHON_SCRIPT_TEMPLATE = Template(dedent("""
 $code
 
 import json
@@ -30,6 +31,20 @@ output_obj = main(**inputs_obj)
 output_json = json.dumps(output_obj, indent=4)
 result = "<<RESULT>>" + output_json + "<<RESULT>>"
 print(result)
+"""))
+
+NODEJS_SCRIPT_TEMPLATE = Template(dedent("""
+$code
+// decode and prepare input object
+var inputs_obj = JSON.parse(Buffer.from('$inputs_variable', 'base64').toString('utf-8'))
+
+// execute main function
+var output_obj = main(inputs_obj)
+
+// convert output to json and print
+var output_json = JSON.stringify(output_obj)
+var result = `<<RESULT>>$${output_json}<<RESULT>>`
+console.log(result)
 """))
 
 
@@ -83,18 +98,27 @@ class CodeNode(BaseNode):
         input_variable_dict = {}
         for input_variable in self.typed_config.input_variables:
             input_variable_dict[input_variable.name] = self.get_variable(input_variable.variable, state)
+
         code = base64.b64decode(
             self.typed_config.code
         ).decode("utf-8")
+        code = urllib.parse.unquote(code, encoding='utf-8')
 
         input_variable_dict = base64.b64encode(
             json.dumps(input_variable_dict).encode("utf-8")
         ).decode("utf-8")
-
-        final_script = SCRIPT_TEMPLATE.substitute(
-            code=code,
-            inputs_variable=input_variable_dict,
-        )
+        if self.typed_config.language == "python3":
+            final_script = PYTHON_SCRIPT_TEMPLATE.substitute(
+                code=code,
+                inputs_variable=input_variable_dict,
+            )
+        elif self.typed_config.language == 'javascript':
+            final_script = NODEJS_SCRIPT_TEMPLATE.substitute(
+                code=code,
+                inputs_variable=input_variable_dict,
+            )
+        else:
+            raise ValueError(f"Unsupported language: {self.typed_config.language}")
 
         async with httpx.AsyncClient() as client:
             response = await client.post(

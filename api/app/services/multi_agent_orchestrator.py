@@ -280,14 +280,22 @@ class MultiAgentOrchestrator:
 
             # 4. 提取子 Agent 的 conversation_id（用于多轮对话）
             sub_conversation_id = None
+            total_tokens = 0
+            
             if isinstance(results, dict):
                 sub_conversation_id = results.get("conversation_id") or results.get("result", {}).get("conversation_id")
+                # 提取 token 信息
+                usage = results.get("usage", {}) or results.get("result", {}).get("usage", {})
+                total_tokens += usage.get("total_tokens", 0)
             elif isinstance(results, list) and results:
                 for item in results:
                     if "result" in item:
                         sub_conversation_id = item["result"].get("conversation_id")
                         if sub_conversation_id:
                             break
+                    # 累加每个子 Agent 的 token
+                    usage = item.get("usage", {}) or item.get("result", {}).get("usage", {})
+                    total_tokens += usage.get("total_tokens", 0)
 
             logger.info(
                 "多 Agent 任务完成",
@@ -301,9 +309,15 @@ class MultiAgentOrchestrator:
             return {
                 "message": final_result,
                 "conversation_id": sub_conversation_id,
+                "mode": OrchestrationMode.SUPERVISOR,
                 "elapsed_time": elapsed_time,
                 "strategy": routing_decision.get("collaboration_strategy", "single"),
-                "sub_results": results
+                "sub_results": results,
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": total_tokens
+                }
             }
 
         except Exception as e:
@@ -1552,10 +1566,12 @@ class MultiAgentOrchestrator:
             return {
                 "message": result.get("response", ""),
                 "conversation_id": result.get("conversation_id"),
+                "mode": OrchestrationMode.COLLABORATION,
                 "elapsed_time": elapsed_time,
                 "strategy": "collaboration",
                 "active_agent": result.get("active_agent"),
-                "sub_results": result
+                "sub_results": result,
+                "usage": result.get("usage")
             }
 
         except Exception as e:

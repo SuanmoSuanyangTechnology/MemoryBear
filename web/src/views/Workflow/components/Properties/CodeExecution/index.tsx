@@ -5,8 +5,8 @@ import { Node } from '@antv/x6'
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import MappingList from '../MappingList'
-import Editor from '../../Editor'
 import OutputList from './OutputList'
+import CodeMirrorEditor from '@/components/CodeMirrorEditor';
 
 interface MappingItem {
   name?: string
@@ -33,7 +33,6 @@ const codeTemplate = {
 const CodeExecution: FC<CodeExecutionProps> = ({ options }) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance()
-  const values = Form.useWatch([], form) || {}
 
   const handleRefresh = () => {
     const code = form.getFieldValue('code') || ''
@@ -66,7 +65,6 @@ const CodeExecution: FC<CodeExecutionProps> = ({ options }) => {
     form.setFieldValue('code', newTemplate)
   }
   const handleChangeLanguage = (value: string) => {
-    form.setFieldValue('code', codeTemplate[value as keyof typeof codeTemplate])
     form.setFieldsValue({
       input_variables: [{ name: 'arg1' }, { name: 'arg2' }],
       code: codeTemplate[value as keyof typeof codeTemplate]
@@ -109,8 +107,15 @@ const CodeExecution: FC<CodeExecutionProps> = ({ options }) => {
             </Form.Item>
           </Col>
         </Row>
-        <Form.Item name="code" noStyle>
-          <Editor size="small" language={values.language} />
+        <Form.Item noStyle shouldUpdate={(prev, curr) => prev.language !== curr.language}>
+          {() => (
+            <Form.Item name="code" noStyle>
+              <CodeMirrorEditor
+                language={form.getFieldValue('language')}
+                size="small"
+              />
+            </Form.Item>
+          )}
         </Form.Item>
       </Space>
       

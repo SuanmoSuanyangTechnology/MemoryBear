@@ -86,7 +86,8 @@ class MemoryConfigRepository:
         n.description AS description, 
         n.entity_type AS entity_type, 
         n.name AS name,
-        COALESCE(n.fact_summary, '') AS fact_summary,
+        // TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+        // COALESCE(n.fact_summary, '') AS fact_summary,
         n.end_user_id AS end_user_id,
         n.apply_id AS apply_id,
         n.user_id AS user_id,
@@ -156,7 +157,7 @@ class MemoryConfigRepository:
         return memory_config_obj
 
     @staticmethod
-    def query_reflection_config_by_id(db: Session, config_id: uuid.UUID) -> MemoryConfig:
+    def query_reflection_config_by_id(db: Session, config_id: uuid.UUID|int|str) -> MemoryConfig:
         """构建反思配置查询语句，通过config_id查询反思配置（SQLAlchemy text() 命名参数）
 
         Args:
@@ -230,9 +231,12 @@ class MemoryConfigRepository:
                 config_name=params.config_name,
                 config_desc=params.config_desc,
                 workspace_id=params.workspace_id,
+                scene_id=params.scene_id,
                 llm_id=params.llm_id,
                 embedding_id=params.embedding_id,
                 rerank_id=params.rerank_id,
+                reflection_model_id=params.reflection_model_id,
+                emotion_model_id=params.emotion_model_id,
             )
             db.add(db_config)
             db.flush()  # 获取自增ID但不提交事务
@@ -274,6 +278,9 @@ class MemoryConfigRepository:
                 has_update = True
             if update.config_desc is not None:
                 db_config.config_desc = update.config_desc
+                has_update = True
+            if update.scene_id is not None:
+                db_config.scene_id = update.scene_id
                 has_update = True
 
             if not has_update:
@@ -643,28 +650,32 @@ class MemoryConfigRepository:
             raise
 
     @staticmethod
-    def get_all(db: Session, workspace_id: Optional[uuid.UUID] = None) -> List[MemoryConfig]:
-        """获取所有配置参数
+    def get_all(db: Session, workspace_id: Optional[uuid.UUID] = None) -> List[Tuple[MemoryConfig, Optional[str]]]:
+        """获取所有配置参数，包含关联的场景名称
 
         Args:
             db: 数据库会话
             workspace_id: 工作空间ID，用于过滤查询结果
 
         Returns:
-            List[MemoryConfig]: 配置列表
+            List[Tuple[MemoryConfig, Optional[str]]]: 配置列表，每项为 (配置对象, 场景名称)
         """
+        from app.models.ontology_scene import OntologyScene
+        
         db_logger.debug(f"查询所有配置: workspace_id={workspace_id}")
 
         try:
-            query = db.query(MemoryConfig)
+            query = db.query(MemoryConfig, OntologyScene.scene_name).outerjoin(
+                OntologyScene, MemoryConfig.scene_id == OntologyScene.scene_id
+            )
 
             if workspace_id:
                 query = query.filter(MemoryConfig.workspace_id == workspace_id)
 
-            configs = query.order_by(desc(MemoryConfig.updated_at)).all()
+            results = query.order_by(desc(MemoryConfig.updated_at)).all()
 
-            db_logger.debug(f"配置列表查询成功: 数量={len(configs)}")
-            return configs
+            db_logger.debug(f"配置列表查询成功: 数量={len(results)}")
+            return results
 
         except Exception as e:
             db_logger.error(f"查询所有配置失败: workspace_id={workspace_id} - {str(e)}")

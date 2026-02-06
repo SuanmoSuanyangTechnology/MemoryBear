@@ -23,6 +23,18 @@ class ParameterExtractorNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
         self.typed_config: ParameterExtractorNodeConfig | None = None
+        self.response_metadata = {}
+
+    def _extract_token_usage(self, business_result: Any) -> dict[str, int] | None:
+        if self.response_metadata:
+            usage = self.response_metadata.get('token_usage')
+            if usage:
+                return {
+                    "prompt_tokens": usage.get('prompt_tokens', 0),
+                    "completion_tokens": usage.get('completion_tokens', 0),
+                    "total_tokens": usage.get('total_tokens', 0)
+                }
+        return None
 
     @staticmethod
     def _get_prompt():
@@ -171,6 +183,7 @@ class ParameterExtractorNode(BaseNode):
             ])
 
         model_resp = await llm.ainvoke(messages)
+        self.response_metadata = model_resp.response_metadata
         result = json_repair.repair_json(model_resp.content, return_objects=True)
         logger.info(f"node: {self.node_id} get params:{result}")
 

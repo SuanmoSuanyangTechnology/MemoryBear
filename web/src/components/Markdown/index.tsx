@@ -19,6 +19,7 @@ interface RbMarkdownProps {
   showHtmlComments?: boolean; // 是否显示 HTML 注释，默认为 false（隐藏）
   editable?: boolean; // 是否可编辑，默认为 false
   onContentChange?: (content: string) => void; // 内容变化回调
+  className?: string;
 }
 
 const components = {
@@ -50,7 +51,7 @@ const components = {
   audio: ({ src, ...props }: any) => <AudioBlock node={{ children: [{ properties: { src: src || '' } }] }} {...props} />,
   a: ({ href, children, ...props }: any) => <Link href={href || '#'} {...props}>{children}</Link>,
   button: ({ children }: any) => <RbButton node={{ children }}>{[children]}</RbButton>,
-  table: ({ children, ...props }: any) => <table className="rb:border rb:border-[#D9D9D9] rb:mb-2" {...props}>{children}</table>,
+  table: ({ children, ...props }: any) => <div className="rb:overflow-x-auto rb:max-w-full"><table className="rb:border rb:border-[#D9D9D9] rb:mb-2" {...props}>{children}</table></div>,
   tr: ({ children, ...props }: any) => <tr className="rb:border rb:border-[#D9D9D9]" {...props}>{children}</tr>,
   th: ({ children, ...props }: any) => <th className="rb:border rb:border-[#D9D9D9] rb:px-2 rb:py-1 rb:text-left rb:font-bold" {...props}>{children}</th>,
   td: ({ children, ...props }: any) => <td className="rb:border rb:border-[#D9D9D9] rb:px-2 rb:py-1 rb:text-left" {...props}>{children}</td>,
@@ -98,6 +99,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
   showHtmlComments = false,
   editable = false,
   onContentChange,
+  className
 }) => {
   const [editContent, setEditContent] = useState(content)
   const textareaRef = useRef<any>(null)
@@ -162,7 +164,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
 
   // 预览模式
   return (
-    <div className="rb:relative" onKeyDown={handleKeyDown} tabIndex={0}>
+    <div className={`rb:relative ${className || ''}`} onKeyDown={handleKeyDown} tabIndex={0}>
       <style>{`
         .html-comment {
           color: #999;

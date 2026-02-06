@@ -145,10 +145,13 @@ def _choose_canonical(a: ExtractedEntityNode, b: ExtractedEntityNode) -> int: # 
      # 2. 第二优先级：按“描述+事实摘要”的总长度排序（内容越长，信息越完整）
     desc_a = (getattr(a, "description", "") or "")
     desc_b = (getattr(b, "description", "") or "")
-    fact_a = (getattr(a, "fact_summary", "") or "")
-    fact_b = (getattr(b, "fact_summary", "") or "")
-    score_a = len(desc_a) + len(fact_a)
-    score_b = len(desc_b) + len(fact_b)
+    # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+    # fact_a = (getattr(a, "fact_summary", "") or "")
+    # fact_b = (getattr(b, "fact_summary", "") or "")
+    # score_a = len(desc_a) + len(fact_a)
+    # score_b = len(desc_b) + len(fact_b)
+    score_a = len(desc_a)
+    score_b = len(desc_b)
     if score_a != score_b:
         return 0 if score_a >= score_b else 1
     return 0
@@ -189,7 +192,8 @@ async def _judge_pair(
         "entity_type": getattr(a, "entity_type", None),
         "description": getattr(a, "description", None),
         "aliases": getattr(a, "aliases", None) or [],
-        "fact_summary": getattr(a, "fact_summary", None),
+        # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+        # "fact_summary": getattr(a, "fact_summary", None),
         "connect_strength": getattr(a, "connect_strength", None),
     }
     entity_b = {
@@ -197,7 +201,8 @@ async def _judge_pair(
         "entity_type": getattr(b, "entity_type", None),
         "description": getattr(b, "description", None),
         "aliases": getattr(b, "aliases", None) or [],
-        "fact_summary": getattr(b, "fact_summary", None),
+        # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+        # "fact_summary": getattr(b, "fact_summary", None),
         "connect_strength": getattr(b, "connect_strength", None),
     }
  # 5. 渲染LLM提示词（用工具函数填充模板，包含实体信息、上下文、输出格式）
@@ -248,7 +253,8 @@ async def _judge_pair_disamb(
         "entity_type": getattr(a, "entity_type", None),
         "description": getattr(a, "description", None),
         "aliases": getattr(a, "aliases", None) or [],
-        "fact_summary": getattr(a, "fact_summary", None),
+        # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+        # "fact_summary": getattr(a, "fact_summary", None),
         "connect_strength": getattr(a, "connect_strength", None),
     }
     entity_b = {
@@ -256,7 +262,8 @@ async def _judge_pair_disamb(
         "entity_type": getattr(b, "entity_type", None),
         "description": getattr(b, "description", None),
         "aliases": getattr(b, "aliases", None) or [],
-        "fact_summary": getattr(b, "fact_summary", None),
+        # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+        # "fact_summary": getattr(b, "fact_summary", None),
         "connect_strength": getattr(b, "connect_strength", None),
     }
     prompt = render_entity_dedup_prompt(

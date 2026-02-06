@@ -17,7 +17,7 @@ sys.excepthook = excepthook
 # Load security library if available
 lib = ctypes.CDLL("./libpython.so")
 lib.init_seccomp.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool]
-lib.init_seccomp.restype = None  # TODO: raise error info
+lib.init_seccomp.restype = ctypes.c_int
 
 # Get running path
 running_path = sys.argv[1]
@@ -37,7 +37,10 @@ os.chdir(running_path)
 {{preload}}
 
 # Apply security if library is available
-lib.init_seccomp({{uid}}, {{gid}}, {{enable_network}})
+init_status = lib.init_seccomp({{uid}}, {{gid}}, {{enable_network}})
+if init_status != 0:
+    raise Exception(f"code executor err - {str(init_status)}")
+del lib
 
 # Decrypt and execute code
 code = b64decode("{{code}}")

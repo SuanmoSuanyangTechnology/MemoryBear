@@ -140,6 +140,7 @@ dependencies = [
     "oss2>=2.19.1",
     "flower>=2.0.1",
     "aiofiles>=23.0.0",
+    "owlready2>=0.46",
 ]
 
 [tool.pytest.ini_options]

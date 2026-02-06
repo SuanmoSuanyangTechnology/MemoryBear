@@ -1,8 +1,19 @@
 === Task ===
 Generate a concise title and classify the episodic memory into the most appropriate category.
 
+{% if language == "zh" %}
+**重要：请使用中文生成标题和分类。**
+{% else %}
+**Important: Please generate the title and classification in English.**
+{% endif %}
+
 === Requirements ===
 - Extract a clear, concise title (10-20 characters) that captures the core content
+{% if language == "zh" %}
+- 标题必须使用中文
+{% else %}
+- Title must be in English
+{% endif %}
 - Classify into exactly one category based on the primary theme
 - Be specific and avoid ambiguity
 - Output must be valid JSON conforming to the schema below

@@ -112,7 +112,9 @@ export const en = {
       pricing: 'Pricing Management',
       orderPayment: 'Order Payment',
       orderHistory: 'Order History',
-      spaceConfig: 'Space Configuration'
+      spaceConfig: 'Space Configuration',
+      ontology: 'Ontology Engineering',
+      prompt: 'Prompt Engineering',
     },
     dashboard: {
       total_models: 'Available Models',
@@ -421,7 +423,9 @@ export const en = {
       remove: 'Remove',
 
       fileSizeTip: 'File size cannot exceed {{size}}MB',
-      fileAcceptTip: 'Unsupported file type:'
+      fileAcceptTip: 'Unsupported file type:',
+      nextStep: 'Next Step',
+      prevStep: 'Previous Step',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -868,7 +872,8 @@ export const en = {
       inactive: 'Inactive',
       configurationName: 'Configuration Name',
       emotionEngine: 'Emotion Engine',
-      reflectionEngine: 'Self-Reflection Engine'
+      reflectionEngine: 'Self-Reflection Engine',
+      scene_id: 'Ontology Scenario',
     },
     member: {
       username: 'Username',
@@ -1370,6 +1375,9 @@ export const en = {
       embeddingModel: 'Embedding Model',
       rerankModel: 'Rerank Model',
       configAlert: 'Space model configuration ensures that the space can correctly call the corresponding models to process business data during runtime.',
+
+      basic: 'Basic Config',
+      models: 'Model Selection',
     },
     memoryExtractionEngine: {
       title: 'Memory Engine Module Configuration Center',
@@ -2036,7 +2044,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'code': {
           input_variables: 'Input Variables',
           output_variables: 'Output Variables',
-          refreshTip: '同步函数签名至代码',
+          refreshTip: 'Sync function signature to code',
         },
         name: 'Key',
         type: 'Type',
@@ -2435,6 +2443,49 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       question: 'Lessons Learned',
       summary: 'Core Insights',
       none: 'None'
-    }
+    },
+    ontology: {
+      searchPlaceholder: 'Search scenarios',
+      create: 'Create Project',
+      edit: 'Edit Project',
+      scene_name: 'Scenario Name',
+      scene_description: 'Scenario Description',
+      descriptionPlaceholder: 'Describe the purpose of this scenario and the entity types to extract',
+      typeCount: 'types',
+      created_at: 'Created At',
+      updated_at: 'Updated At',
+      entityTypes: 'Entity Types',
+
+      addClass: 'Add Type',
+      class_name: 'Type Name',
+      class_description: 'Type Definition',
+      classDescriptionPlaceholder: 'Describe the meaning and purpose of this type',
+
+      llm_id: 'Select Model',
+      scenario: 'Scenario Description',
+      scenarioPlaceholder: 'Please describe your business requirements',
+      run: 'Inference',
+      loadingConfirm: 'Inferring',
+      extractConfirm: 'Add Selected Types',
+      classType: 'Project Type',
+      extract: 'Project Inference',
+      source: 'Not Added',
+      target: 'Added',
+    },
+    prompt: {
+      editor: 'Prompt Generator',
+      history: 'My History',
+      historySearchPlaceholder: 'Search by name',
+      model: 'Model',
+      you: 'You',
+      ai: 'AI Assistant',
+      promptPlaceholder: 'Conversation optimization prompt will be displayed here',
+      promptChatEmpty: 'No conversation content available',
+      promptChatPlaceholder: 'Describe the prompt you need, e.g.: I need a customer service assistant',
+      conversationOptimizationPrompt: 'Conversation Optimization Prompt',
+      addVariable: 'Insert Variable',
+      initialInput: 'Original Input',
+      saveTitle: 'Title',
+    },
   },
 };

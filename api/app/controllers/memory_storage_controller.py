@@ -195,6 +195,11 @@ def update_config(
         api_logger.warning(f"用户 {current_user.username} 尝试更新配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
     
+    # 校验至少有一个字段需要更新
+    if payload.config_name is None and payload.config_desc is None and payload.scene_id is None:
+        api_logger.warning(f"用户 {current_user.username} 尝试更新配置但未提供任何更新字段")
+        return fail(BizCode.INVALID_PARAMETER, "请至少提供一个需要更新的字段", "config_name, config_desc, scene_id 均为空")
+    
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新配置: {payload.config_id}")
     try:
         svc = DataConfigService(db)

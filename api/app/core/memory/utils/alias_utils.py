@@ -296,7 +296,9 @@ def resolve_alias_cycles(entities: List[Any], cycles: Dict[str, Set[str]]) -> Li
             key=lambda eid: (
                 _strength_rank(eid),
                 len(getattr(entity_by_id.get(eid), 'description', '') or ''),
-                len(getattr(entity_by_id.get(eid), 'fact_summary', '') or '')
+                # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+                # len(getattr(entity_by_id.get(eid), 'fact_summary', '') or '')
+                0  # 临时占位
             ),
             reverse=True
         )
