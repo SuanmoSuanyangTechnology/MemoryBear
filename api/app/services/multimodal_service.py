@@ -328,7 +328,7 @@ class MultimodalService:
             file: File Input Struct
             
         Returns:
-            str: 文件访问 URL
+            str: 文件访问 URL（永久URL）
             
         Raises:
             BusinessException: 文件不存在
@@ -336,27 +336,29 @@ class MultimodalService:
         if file.transfer_method == TransferMethod.REMOTE_URL:
             return file.url
         else:
-            # 本地文件，获取访问 URL
+            # 本地文件，通过 file_storage 系统获取永久访问 URL
+            from app.models.file_metadata_model import FileMetadata
+            from app.core.config import settings
+            
             file_id = file.upload_file_id
-            generic_file = self.db.query(GenericFile).filter(
-                GenericFile.id == file.upload_file_id,
-                GenericFile.status == "active"
+            print("="*50)
+            print("file_id",file_id)
+            
+            # 查询 FileMetadata
+            file_metadata = self.db.query(FileMetadata).filter(
+                FileMetadata.id == file_id,
+                FileMetadata.status == "completed"
             ).first()
-
-            if not generic_file:
+            
+            if not file_metadata:
                 raise BusinessException(
-                    f"文件不存在或已删除: {file.upload_file_id}",
+                    f"文件不存在或已删除: {file_id}",
                     BizCode.NOT_FOUND
                 )
-
-            # 如果有 access_url，直接返回
-            if generic_file.access_url:
-                return generic_file.access_url
-
-            # 否则，根据 storage_path 生成 URL
-            # TODO: 根据实际存储方式生成 URL（本地存储、OSS 等）
-            # 这里暂时返回一个占位 URL
-            return f"/api/files/{file_id}/download"
+            
+            # 返回永久URL
+            server_url = settings.FILE_LOCAL_SERVER_URL
+            return f"{server_url}/storage/permanent/{file_id}"
 
     async def _extract_document_text(self, file_id: uuid.UUID) -> str:
         """
