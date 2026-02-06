@@ -1617,6 +1617,12 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       memory: 'Memory',
       memoryConversationAnalysisEmpty: 'No conversation analysis available.',
       memoryConversationAnalysisEmptySubTitle: 'Conversation analysis will appear here.',
+
+      uploadFile: 'Upload File',
+      fileType: 'File Type',
+      image: 'Image',
+      fileUrl: 'File URL',
+      addRemoteFile: 'Add Remote File'
     },
     login: {
       title: 'Red Bear Memory Science',

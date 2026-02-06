@@ -173,3 +173,10 @@ export interface ApiExtensionModalRef {
   /** Open API extension modal */
   handleOpen: () => void;
 }
+
+
+export interface UploadWorkflowModalData {
+}
+export interface UploadWorkflowModalRef {
+  handleOpen: () => void;
+}
