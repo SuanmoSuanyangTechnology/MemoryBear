@@ -1548,7 +1548,6 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
                             releases = data['releases']
                             memory_configs = data['memory_configs']
                             end_users = data['end_users']
-
                             for base, config, user in zip(releases, memory_configs, end_users):
                                 if str(base['config']) == str(config['config_id']) and str(base['app_id']) == str(
                                         user['app_id']):
