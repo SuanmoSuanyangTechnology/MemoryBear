@@ -131,7 +131,7 @@ class QuestionClassifierNode(BaseNode):
             ]
 
             response = await llm.ainvoke(messages)
-            result = response.content.strip()
+            result = self.process_model_output(response.content)
             self.response_metadata = response.response_metadata
 
             if result in category_names:
