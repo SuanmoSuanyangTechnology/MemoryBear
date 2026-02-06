@@ -192,24 +192,19 @@ async def extract_ontology(
     从场景描述中提取符合OWL规范的本体类。
     提取结果仅返回给前端，不会自动保存到数据库。
     前端可以从返回结果中选择需要的类型，然后调用 /class 接口创建类型。
-    输出语言由环境变量 DEFAULT_LANGUAGE 控制（"zh" 或 "en"）。
-    输出语言由环境变量 DEFAULT_LANGUAGE 控制（"zh" 或 "en"）。
     
     Args:
         request: 提取请求,包含scenario、domain、llm_id和scene_id
+        language_type: 语言类型 Header (zh/en)
         db: 数据库会话
         current_user: 当前用户
-        
-
     """
     api_logger.info(
         f"Ontology extraction requested by user {current_user.id}, "
         f"scenario_length={len(request.scenario)}, "
         f"domain={request.domain}, "
         f"llm_id={request.llm_id}, "
-        f"scene_id={request.scene_id}, "
-        f"language={settings.DEFAULT_LANGUAGE}"
-        f"language={settings.DEFAULT_LANGUAGE}"
+        f"scene_id={request.scene_id}"
     )
     
     try:
@@ -229,8 +224,7 @@ async def extract_ontology(
             llm_id=request.llm_id
         )
         
-        # 调用服务层执行提取，传入scene_id和workspace_id
-        # 语言由环境变量 DEFAULT_LANGUAGE 控制，在 OntologyService 中读取
+        # 调用服务层执行提取
         result = await service.extract_ontology(
             scenario=request.scenario,
             domain=request.domain,
@@ -239,7 +233,7 @@ async def extract_ontology(
             language=language
         )
         
-        # 构建响应（语言已在提取时通过模板控制，无需二次翻译）
+        # 构建响应
         response = ExtractionResponse(
             classes=result.classes,
             domain=result.domain,
@@ -248,7 +242,7 @@ async def extract_ontology(
         
         api_logger.info(
             f"Ontology extraction completed, extracted {len(result.classes)} classes, "
-            f"scene_id={request.scene_id}, language={settings.DEFAULT_LANGUAGE}"
+            f"scene_id={request.scene_id}, language={language}"
         )
         
         return success(data=response.model_dump(), msg="本体提取成功")

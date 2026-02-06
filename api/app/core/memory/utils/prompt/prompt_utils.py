@@ -225,9 +225,11 @@ async def render_triplet_extraction_prompt(
     # 准备本体类型数据
     ontology_type_section = ""
     ontology_type_names = []
+    type_hierarchy_hints = []
     if ontology_types and ontology_types.types:
         ontology_type_section = ontology_types.to_prompt_section()
         ontology_type_names = ontology_types.get_type_names()
+        type_hierarchy_hints = ontology_types.get_type_hierarchy_hints()
     
     rendered_prompt = template.render(
         statement=statement,
@@ -237,6 +239,7 @@ async def render_triplet_extraction_prompt(
         language=language,
         ontology_types=ontology_type_section,
         ontology_type_names=ontology_type_names,
+        type_hierarchy_hints=type_hierarchy_hints,
     )
     # 记录渲染结果到提示日志（与示例日志结构一致）
     log_prompt_rendering('triplet extraction', rendered_prompt)
@@ -249,6 +252,7 @@ async def render_triplet_extraction_prompt(
         'language': language,
         'ontology_types': bool(ontology_type_section),
         'ontology_type_count': len(ontology_type_names),
+        'type_hierarchy_hints_count': len(type_hierarchy_hints),
     })
 
     return rendered_prompt

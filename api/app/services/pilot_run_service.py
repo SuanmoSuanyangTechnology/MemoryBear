@@ -142,40 +142,19 @@ async def run_pilot_extraction(
             f"enable_llm_disambiguation={config.deduplication.enable_llm_disambiguation}"
         )
 
-        # Fetch ontology types if scene_id is configured
+        # 加载本体类型（如果配置了 scene_id），支持通用类型回退
         ontology_types = None
-        if memory_config.scene_id:
-            try:
-                from app.core.memory.models.ontology_extraction_models import OntologyTypeList
-                from app.repositories.ontology_class_repository import OntologyClassRepository
-                
-                ontology_repo = OntologyClassRepository(db)
-                ontology_classes = ontology_repo.get_by_scene(memory_config.scene_id)
-                
-                if ontology_classes:
-                    ontology_types = OntologyTypeList.from_db_models(ontology_classes)
-                    logger.info(
-                        f"Loaded {len(ontology_types.types)} ontology types for scene_id: {memory_config.scene_id}"
-                    )
-                else:
-                    logger.info(f"No ontology classes found for scene_id: {memory_config.scene_id}")
-            except Exception as e:
-                logger.warning(
-                    f"Failed to fetch ontology types for scene_id {memory_config.scene_id}: {e}",
-                    exc_info=True
-                )
-        
-        # 如果没有场景类型，创建空的 OntologyTypeList 以便启用通用类型融合
-        if ontology_types is None:
-            try:
-                from app.core.memory.models.ontology_extraction_models import OntologyTypeList
-                from app.core.memory.ontology_services.ontology_type_loader import is_general_ontology_enabled
-                
-                if is_general_ontology_enabled():
-                    ontology_types = OntologyTypeList(types=[])
-                    logger.info("No scene ontology types, will use general ontology types only")
-            except Exception as e:
-                logger.warning(f"Failed to initialize empty OntologyTypeList: {e}")
+        try:
+            from app.core.memory.ontology_services.ontology_type_loader import load_ontology_types_with_fallback
+            
+            ontology_types = load_ontology_types_with_fallback(
+                scene_id=memory_config.scene_id,
+                workspace_id=memory_config.workspace_id,
+                db=db,
+                enable_general_fallback=True
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load ontology types: {e}", exc_info=True)
 
         orchestrator = ExtractionOrchestrator(
             llm_client=llm_client,

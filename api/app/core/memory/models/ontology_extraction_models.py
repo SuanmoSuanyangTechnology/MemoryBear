@@ -80,3 +80,26 @@ class OntologyTypeList:
             类型名称字符串列表
         """
         return [t.class_name for t in self.types]
+    
+    def get_type_hierarchy_hints(self) -> List[str]:
+        """获取类型层次结构提示列表。
+        
+        尝试从通用本体注册表中获取每个类型的继承链信息。
+        
+        Returns:
+            层次提示字符串列表，格式为 "类型名 → 父类1 → 父类2"
+        """
+        hints = []
+        try:
+            from app.core.memory.ontology_services.ontology_type_merger import OntologyTypeMerger
+            
+            merger = OntologyTypeMerger()
+            for type_info in self.types:
+                hint = merger.get_type_hierarchy_hint(type_info.class_name)
+                if hint:
+                    hints.append(hint)
+        except Exception:
+            # 如果无法获取层次信息，返回空列表
+            pass
+        
+        return hints

@@ -124,28 +124,9 @@ class ExtractionOrchestrator:
         self.embedding_id = embedding_id  # 保存嵌入模型ID
         self.language = language  # 保存语言配置
     
-        # 处理本体类型：根据 enable_general_types 决定是否合并通用类型
-        if enable_general_types and ontology_types:
-            from app.core.memory.ontology_services.ontology_type_loader import (
-                get_ontology_type_merger,
-                is_general_ontology_enabled,
-            )
-            if is_general_ontology_enabled():
-                merger = get_ontology_type_merger()
-                self.ontology_types = merger.merge(ontology_types)
-                logger.info(
-                    f"已启用通用本体类型融合: 场景类型 {len(ontology_types.types) if ontology_types.types else 0} 个 -> "
-                    f"合并后 {len(self.ontology_types.types) if self.ontology_types.types else 0} 个"
-                )
-            else:
-                self.ontology_types = ontology_types
-                logger.info("通用本体类型功能已在配置中禁用，仅使用场景类型")
-        else:
-            self.ontology_types = ontology_types
-            if not enable_general_types and ontology_types:
-                logger.info("enable_general_types=False，仅使用场景类型")
-        
-        # 处理本体类型：根据 enable_general_types 决定是否合并通用类型
+        # 处理本体类型配置
+        # 根据 enable_general_types 参数决定是否将通用本体类型与场景特定类型合并
+        # 如果启用合并且配置中开启了通用本体功能，则使用 OntologyTypeMerger 进行融合
         if enable_general_types and ontology_types:
             from app.core.memory.ontology_services.ontology_type_loader import (
                 get_ontology_type_merger,
