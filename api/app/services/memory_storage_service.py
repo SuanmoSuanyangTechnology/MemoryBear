@@ -183,11 +183,11 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
 
     # --- Read All ---
     def get_all(self, workspace_id = None) -> List[Dict[str, Any]]: # 获取所有配置参数
-        configs = MemoryConfigRepository.get_all(self.db, workspace_id)
+        results = MemoryConfigRepository.get_all(self.db, workspace_id)
 
         # 将 ORM 对象转换为字典列表
         data_list = []
-        for config in configs:
+        for config, scene_name in results:
             # 安全地转换 user_id 为 int
             config_id_old = None
             if config.config_id_old:
@@ -209,7 +209,8 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "end_user_id": config.end_user_id,
                 "config_id_old": config_id_old,
                 "apply_id": config.apply_id,
-                "scene_id": config.scene_id,
+                "scene_id": str(config.scene_id) if config.scene_id else None,
+                "scene_name": scene_name,  # 新增：场景名称
                 "llm_id": config.llm_id,
                 "embedding_id": config.embedding_id,
                 "rerank_id": config.rerank_id,
@@ -637,10 +638,9 @@ async def analytics_recent_activity_stats() -> Dict[str, Any]:
                 if m < 1:
                     latest_relative = "刚刚"
                 elif m < 60:
-                    latest_relative = f"{m}分钟前"
+                    latest_relative = "一会前"
                 else:
-                    h = int(m // 60)
-                    latest_relative = f"{h}小时前" if h < 24 else f"{int(h // 24)}天前"
+                    latest_relative = "较早前"
     except Exception:
         pass
 

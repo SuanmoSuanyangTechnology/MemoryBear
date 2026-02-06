@@ -52,6 +52,7 @@ from app.services.ontology_service import OntologyService
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.validation.owl_validator import OWLValidator
 from app.services.model_service import ModelConfigService
+from app.repositories.ontology_scene_repository import OntologySceneRepository
 
 
 api_logger = get_api_logger()
@@ -116,27 +117,35 @@ def _get_ontology_service(
                 detail=f"找不到指定的LLM模型: {llm_id}"
             )
         
-        # 验证模型配置了API密钥
-        if not model_config.api_keys:
-            logger.error(f"Model {llm_id} has no API key configuration")
+        # 通过 Repository 获取可用的 API Key（负载均衡逻辑由 Repository 处理）
+        from app.repositories.model_repository import ModelApiKeyRepository
+        api_keys = ModelApiKeyRepository.get_by_model_config(db, model_config.id)
+        if not api_keys:
+            logger.error(f"Model {llm_id} has no active API key")
             raise HTTPException(
                 status_code=400,
-                detail="指定的LLM模型没有配置API密钥"
+                detail="指定的LLM模型没有可用的API密钥"
             )
+        api_key_config = api_keys[0]
         
-        api_key_config = model_config.api_keys[0]
-        
+        is_composite = getattr(model_config, 'is_composite', False)
         logger.info(
             f"Using specified model - user: {current_user.id}, "
-            f"model_id: {llm_id}, model_name: {api_key_config.model_name}"
+            f"model_id: {llm_id}, model_name: {api_key_config.model_name}, "
+            f"is_composite: {is_composite}, api_key_id: {api_key_config.id}"
         )
         
         # 创建模型配置对象
         from app.core.models.base import RedBearModelConfig
         
+        # 对于组合模型，使用 API Key 的 provider；否则使用 model_config 的 provider
+        actual_provider = api_key_config.provider if is_composite else (
+            getattr(model_config, 'provider', None) or "openai"
+        )
+        
         llm_model_config = RedBearModelConfig(
             model_name=api_key_config.model_name,
-            provider=model_config.provider if hasattr(model_config, 'provider') else "openai",
+            provider=actual_provider,
             api_key=api_key_config.api_key,
             base_url=api_key_config.api_base,
             max_retries=3,
@@ -646,6 +655,46 @@ async def delete_scene(
     except Exception as e:
         api_logger.error(f"Unexpected error in scene deletion: {str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "场景删除失败", str(e))
+
+
+@router.get("/scenes/simple", response_model=ApiResponse)
+async def get_scenes_simple(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取场景简单列表（轻量级，用于下拉选择）
+    
+    仅返回 scene_id 和 scene_name，不加载关联数据，响应速度快。
+    适用于前端下拉选择场景的场景。
+    
+    Args:
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        ApiResponse: 包含场景简单列表
+        
+    Examples:
+        GET /scenes/simple
+        返回: {"data": [{"scene_id": "xxx", "scene_name": "场景1"}, ...]}
+    """
+    api_logger.info(f"Simple scene list requested by user {current_user.id}")
+    
+    try:
+        workspace_id = current_user.current_workspace_id
+        if not workspace_id:
+            api_logger.warning(f"User {current_user.id} has no current workspace")
+            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        repo = OntologySceneRepository(db)
+        scenes = repo.get_simple_list(workspace_id)
+        
+        api_logger.info(f"Simple scene list retrieved: {len(scenes)} scenes")
+        return success(data=scenes, msg="查询成功")
+        
+    except Exception as e:
+        api_logger.error(f"Failed to get simple scene list: {str(e)}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
 
 
 @router.get("/scenes", response_model=ApiResponse)

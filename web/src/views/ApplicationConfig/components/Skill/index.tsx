@@ -39,7 +39,7 @@ const processObj = [
  * @param value - Current skill configuration values
  * @param onChange - Callback function when configuration changes
  */
-const Skill: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigForm) => void}> = () => {
+const SkillList: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigForm) => void}> = () => {
   const { t } = useTranslation()
   const form = Form.useFormInstance()
   const skillConfig = Form.useWatch(['skills'], form)
@@ -148,4 +148,4 @@ const Skill: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigForm) =
     </Card>
   )
 }
-export default Skill
+export default SkillList

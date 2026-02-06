@@ -140,7 +140,7 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
       title={t('application.knowledgeBaseAssociation')}
       extra={
         <Space>
-          <Button style={{ padding: '0 8px', height: '24px' }} onClick={handleKnowledgeConfig}>{t('workflow.config.knowledge-retrieval.recallConfig')}</Button>
+          <Button style={{ padding: '0 8px', height: '24px' }} onClick={handleKnowledgeConfig}>{t('application.globalConfig')}</Button>
           <Button style={{ padding: '0 8px', height: '24px' }} onClick={handleAddKnowledge}>+</Button>
         </Space>
       }

@@ -9,7 +9,8 @@
 - 类型: "{{ entity_a.entity_type | default('') }}"
 - 描述: "{{ entity_a.description | default('') }}"
 - 别名: {{ entity_a.aliases | default([]) }}
-- 摘要: "{{ entity_a.fact_summary | default('') }}"
+{# TODO: fact_summary 功能暂时禁用，待后续开发完善后启用 #}
+{# - 摘要: "{{ entity_a.fact_summary | default('') }}" #}
 - 连接强弱: "{{ entity_a.connect_strength | default('') }}"
 
 实体B:
@@ -17,7 +18,8 @@
 - 类型: "{{ entity_b.entity_type | default('') }}"
 - 描述: "{{ entity_b.description | default('') }}"
 - 别名: {{ entity_b.aliases | default([]) }}
-- 摘要: "{{ entity_b.fact_summary | default('') }}"
+{# TODO: fact_summary 功能暂时禁用，待后续开发完善后启用 #}
+{# - 摘要: "{{ entity_b.fact_summary | default('') }}" #}
 - 连接强弱: "{{ entity_b.connect_strength | default('') }}"
 
 上下文：

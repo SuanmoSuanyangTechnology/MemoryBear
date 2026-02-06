@@ -134,42 +134,45 @@ def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
         if len(desc_b) > len(desc_a):
             canonical.description = desc_b
         # 合并事实摘要：统一保留一个“实体: name”行，来源行去重保序
-        fact_a = getattr(canonical, "fact_summary", "") or ""
-        fact_b = getattr(ent, "fact_summary", "") or ""
-        def _extract_sources(txt: str) -> List[str]:
-            sources: List[str] = []
-            if not txt:
-                return sources
-            for line in str(txt).splitlines():
-                ln = line.strip()
+        # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
+        # fact_a = getattr(canonical, "fact_summary", "") or ""
+        # fact_b = getattr(ent, "fact_summary", "") or ""
+        # def _extract_sources(txt: str) -> List[str]:
+            # sources: List[str] = []
+            # if not txt:
+                # return sources
+            # for line in str(txt).splitlines():
+                # ln = line.strip()
                 # 支持“来源:”或“来源：”前缀
-                m = re.match(r"^来源[:：]\s*(.+)$", ln)
-                if m:
-                    content = m.group(1).strip()
-                    if content:
-                        sources.append(content)
+                # m = re.match(r"^来源[:：]\s*(.+)$", ln)
+                # if m:
+                    # content = m.group(1).strip()
+                    # if content:
+                        # sources.append(content)
             # 如果不存在“来源”前缀，则将整体文本视为一个来源片段，避免信息丢失
-            if not sources and txt.strip():
-                sources.append(txt.strip())
-            return sources
+            # if not sources and txt.strip():
+                # sources.append(txt.strip())
+            # return sources
         try:
-            src_a = _extract_sources(fact_a)
-            src_b = _extract_sources(fact_b)
-            seen = set()
-            merged_sources: List[str] = []
-            for s in src_a + src_b:
-                if s and s not in seen:
-                    seen.add(s)
-                    merged_sources.append(s)
-            if merged_sources:
-                name_line = f"实体: {getattr(canonical, 'name', '')}".strip()
-                canonical.fact_summary = "\n".join([name_line] + [f"来源: {s}" for s in merged_sources])
-            elif fact_b and not fact_a:
-                canonical.fact_summary = fact_b
+            #     src_a = _extract_sources(fact_a)
+            #     src_b = _extract_sources(fact_b)
+            #     seen = set()
+            #     merged_sources: List[str] = []
+            #     for s in src_a + src_b:
+            #         if s and s not in seen:
+            #             seen.add(s)
+            #             merged_sources.append(s)
+            #     if merged_sources:
+            #         name_line = f"实体: {getattr(canonical, 'name', '')}".strip()
+            #         canonical.fact_summary = "\n".join([name_line] + [f"来源: {s}" for s in merged_sources])
+            #     elif fact_b and not fact_a:
+            #         canonical.fact_summary = fact_b
+            pass
         except Exception:
             # 兜底：若解析失败，保留较长文本
-            if len(fact_b) > len(fact_a):
-                canonical.fact_summary = fact_b
+            # if len(fact_b) > len(fact_a):
+            #     canonical.fact_summary = fact_b
+            pass
     except Exception:
         pass
 
