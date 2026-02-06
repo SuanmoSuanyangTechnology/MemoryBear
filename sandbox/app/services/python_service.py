@@ -47,7 +47,7 @@ async def run_python_code(code: str, preload: str, options: RunnerOptions):
         
     except Exception as e:
         logger.error(f"Python execution failed: {e}", exc_info=True)
-        return error_response(-500, str(e))
+        return error_response(500, str(e))
 
 
 async def list_python_dependencies():

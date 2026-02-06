@@ -36,7 +36,7 @@ async def run_code(request: RunCodeRequest):
     elif request.language == "javascript":
         return await run_nodejs_code(request.code, request.preload, request.options)
     else:
-        return error_response(-400, "unsupported language")
+        return error_response(400, "unsupported language")
 
 
 @router.get("/dependencies", response_model=ApiResponse)
@@ -45,7 +45,7 @@ async def get_dependencies(language: str):
     if language == "python3":
         return await list_python_dependencies()
     else:
-        return error_response(-400, "unsupported language")
+        return error_response(400, "unsupported language")
 
 
 @router.post("/dependencies/update", response_model=ApiResponse)
@@ -54,4 +54,4 @@ async def update_dependencies(request: UpdateDependencyRequest):
     if request.language == "python3":
         return await update_python_dependencies()
     else:
-        return error_response(-400, "unsupported language")
+        return error_response(400, "unsupported language")
