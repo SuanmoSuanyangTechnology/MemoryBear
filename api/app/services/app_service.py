@@ -956,7 +956,9 @@ class AppService:
             AgentConfig.updated_at.desc()
         )
         config = self.db.scalars(stmt).first()
-
+        config_memory=config.memory
+        if 'memory_content' in config_memory:
+            config.memory['memory_config_id'] = config.memory.pop('memory_content')
         if config:
             return config
 
