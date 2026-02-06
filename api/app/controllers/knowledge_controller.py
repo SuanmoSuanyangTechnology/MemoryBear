@@ -9,13 +9,16 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
+from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
 from app.core.rag.common import settings
+from app.core.rag.integrations.feishu.client import FeishuAPIClient
+from app.core.rag.integrations.yuque.client import YuqueAPIClient
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.nlp import rag_tokenizer, search
 from app.core.rag.prompts.generator import graph_entity_types
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
-from app.core.response_utils import success
+from app.core.response_utils import success, fail
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models import knowledge_model
@@ -483,4 +486,100 @@ async def rebuild_knowledge_graph(
         return success(data=result, msg="Task accepted. rebuild knowledge graph is being processed in the background.")
     except Exception as e:
         api_logger.error(f"Failed to rebuild knowledge graph: knowledge_id={knowledge_id} - {str(e)}")
+        raise
+
+
+@router.get("/check/yuque/auth", response_model=ApiResponse)
+async def check_yuque_auth(
+        yuque_user_id: str,
+        yuque_token: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    check yuque auth info
+    """
+    api_logger.info(f"check yuque auth info, username: {current_user.username}")
+
+    try:
+        api_client = YuqueAPIClient(
+            user_id=yuque_user_id,
+            token=yuque_token
+        )
+        async with api_client as client:
+            repos = await client.get_user_repos()
+            if repos:
+                return success(data=repos, msg="Successfully auth yuque info")
+        return fail(BizCode.UNAUTHORIZED, msg="auth yuque info failed", error="user_id or token is incorrect")
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"auth yuque info failed: {str(e)}")
+        raise
+
+
+@router.get("/check/feishu/auth", response_model=ApiResponse)
+async def check_yuque_auth(
+        feishu_app_id: str,
+        feishu_app_secret: str,
+        feishu_folder_token: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    check feishu auth info
+    """
+    api_logger.info(f"check feishu auth info, username: {current_user.username}")
+
+    try:
+        api_client = FeishuAPIClient(
+            app_id=feishu_app_id,
+            app_secret=feishu_app_secret
+        )
+        async with api_client as client:
+            files = await client.list_all_folder_files(feishu_folder_token, recursive=True)
+            if files:
+                return success(data=files, msg="Successfully auth feishu info")
+        return fail(BizCode.UNAUTHORIZED, msg="auth feishu info failed", error="app_id or app_secret or feishu_folder_token is incorrect")
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"auth feishu info failed: {str(e)}")
+        raise
+
+
+@router.post("/{knowledge_id}/sync", response_model=ApiResponse)
+async def sync_knowledge(
+        knowledge_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    sync knowledge base information based on knowledge_id
+    """
+    api_logger.info(f"Obtain details of the knowledge base: knowledge_id={knowledge_id}, username: {current_user.username}")
+
+    try:
+        # 1. Query knowledge base information from the database
+        api_logger.debug(f"Query knowledge base: {knowledge_id}")
+        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+        if not db_knowledge:
+            api_logger.warning(f"The knowledge base does not exist or access is denied: knowledge_id={knowledge_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The knowledge base does not exist or access is denied"
+            )
+
+        # 2. sync knowledge
+        # from app.tasks import sync_knowledge_for_kb
+        # sync_knowledge_for_kb(kb_id)
+        task = celery_app.send_task("app.core.rag.tasks.sync_knowledge_for_kb", args=[knowledge_id])
+        result = {
+             "task_id": task.id
+        }
+        return success(data=result, msg="Task accepted. sync knowledge is being processed in the background.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"Failed to sync knowledge: knowledge_id={knowledge_id} - {str(e)}")
         raise
