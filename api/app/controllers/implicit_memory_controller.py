@@ -192,8 +192,14 @@ async def get_preference_tags(
             
             filtered_preferences.append(pref)
         
+        # Add end_user_id to response data
+        response_data = {
+            "end_user_id": end_user_id,
+            "preferences": filtered_preferences
+        }
+        
         api_logger.info(f"Retrieved {len(filtered_preferences)} preference tags for user: {end_user_id} (from cache)")
-        return success(data=filtered_preferences, msg="偏好标签获取成功（缓存）")
+        return success(data=response_data, msg="偏好标签获取成功（缓存）")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "偏好标签获取", end_user_id)
@@ -240,8 +246,14 @@ async def get_dimension_portrait(
         # Extract portrait from cache
         portrait = cached_profile.get("portrait", {})
         
+        # Add end_user_id to response data
+        response_data = {
+            "end_user_id": end_user_id,
+            **portrait
+        }
+        
         api_logger.info(f"Dimension portrait retrieved for user: {end_user_id} (from cache)")
-        return success(data=portrait, msg="四维画像获取成功（缓存）")
+        return success(data=response_data, msg="四维画像获取成功（缓存）")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "四维画像获取", end_user_id)
@@ -288,8 +300,14 @@ async def get_interest_area_distribution(
         # Extract interest areas from cache
         interest_areas = cached_profile.get("interest_areas", {})
         
+        # Add end_user_id to response data
+        response_data = {
+            "end_user_id": end_user_id,
+            **interest_areas
+        }
+        
         api_logger.info(f"Interest area distribution retrieved for user: {end_user_id} (from cache)")
-        return success(data=interest_areas, msg="兴趣领域分布获取成功（缓存）")
+        return success(data=response_data, msg="兴趣领域分布获取成功（缓存）")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "兴趣领域分布获取", end_user_id)
@@ -368,8 +386,14 @@ async def get_behavior_habits(
             
             filtered_habits.append(habit)
         
+        # Add end_user_id to response data
+        response_data = {
+            "end_user_id": end_user_id,
+            "habits": filtered_habits
+        }
+        
         api_logger.info(f"Retrieved {len(filtered_habits)} behavior habits for user: {end_user_id} (from cache)")
-        return success(data=filtered_habits, msg="行为习惯获取成功（缓存）")
+        return success(data=response_data, msg="行为习惯获取成功（缓存）")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "行为习惯获取", end_user_id)
