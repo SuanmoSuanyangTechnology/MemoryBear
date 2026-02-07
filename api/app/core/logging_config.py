@@ -38,6 +38,40 @@ class SensitiveDataLoggingFilter(logging.Filter):
         return True
 
 
+class Neo4jSuccessNotificationFilter(logging.Filter):
+    """Neo4j 日志过滤器：过滤成功状态的通知，保留真正的警告和错误
+    
+    Neo4j 驱动会以 WARNING 级别记录所有数据库通知，包括成功的操作。
+    这个过滤器会过滤掉状态码为 '00000' (成功) 的通知，只保留真正的警告和错误。
+    """
+    
+    def filter(self, record: logging.LogRecord) -> bool:
+        """
+        过滤 Neo4j 成功通知
+        
+        Args:
+            record: 日志记录
+            
+        Returns:
+            True表示允许记录，False表示拒绝（过滤掉）
+        """
+        # 只处理 WARNING 级别的日志
+        if record.levelno != logging.WARNING:
+            return True
+        
+        # 检查是否是 Neo4j 的成功通知
+        message = str(record.msg)
+        
+        # 过滤包含成功状态码的通知
+        # gql_status='00000' 表示成功完成
+        # status_description='note: successful completion' 也表示成功
+        if "gql_status='00000'" in message or "successful completion" in message:
+            return False  # 过滤掉这条日志
+        
+        # 保留其他所有日志（包括真正的警告和错误）
+        return True
+
+
 class LoggingConfig:
     """全局日志配置类"""
     
@@ -61,6 +95,14 @@ class LoggingConfig:
         # 配置根日志器
         root_logger = logging.getLogger()
         root_logger.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
+        
+        # 为 Neo4j 驱动添加过滤器，过滤成功通知但保留真正的警告
+        # Neo4j 驱动会以 WARNING 级别记录所有数据库通知，包括成功的操作（status='00000'）
+        # 使用过滤器而不是改变日志级别，这样可以保留真正的警告和错误
+        neo4j_filter = Neo4jSuccessNotificationFilter()
+        for neo4j_logger_name in ["neo4j", "neo4j.io", "neo4j.pool"]:
+            neo4j_logger = logging.getLogger(neo4j_logger_name)
+            neo4j_logger.addFilter(neo4j_filter)
         
         # 清除现有处理器
         root_logger.handlers.clear()
