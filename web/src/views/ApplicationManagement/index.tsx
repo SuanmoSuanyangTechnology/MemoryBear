@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-06 11:10:16
+ * @Last Modified time: 2026-02-09 13:52:22
  */
 /**
  * Application Management Page
@@ -83,9 +83,9 @@ const ApplicationManagement: React.FC = () => {
     setQuery(prev => ({...prev, type: value}))
   }
 
-  const handleImport = () => {
-    uploadWorkflowModalRef.current?.handleOpen()
-  }
+  // const handleImport = () => {
+  //   uploadWorkflowModalRef.current?.handleOpen()
+  // }
   return (
     <>
       <Row gutter={16} className="rb:mb-4">
@@ -111,9 +111,9 @@ const ApplicationManagement: React.FC = () => {
         </Col>
         <Col span={12} className="rb:text-right">
           <Space size={12}>
-            <Button onClick={handleImport}>
+            {/* <Button onClick={handleImport}>
               {t('application.importWorkflow')}
-            </Button>
+            </Button> */}
             <Button type="primary" onClick={handleCreate}>
               {t('application.createApplication')}
             </Button>
