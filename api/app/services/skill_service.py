@@ -48,11 +48,13 @@ class SkillService:
                 if tool_id:
                     tool_info = tool_service.get_tool_info(tool_id, tenant_id)
                     if tool_info:
-                        enriched_tools.append({
+                        enriched_tool = {
                             "tool_id": tool_id,
-                            "operation": tool_config.get("operation"),
                             "tool_info": tool_info
-                        })
+                        }
+                        if "operation" in tool_config:
+                            enriched_tool["operation"] = tool_config["operation"]
+                        enriched_tools.append(enriched_tool)
             skill.tools = enriched_tools
             
             return skill
