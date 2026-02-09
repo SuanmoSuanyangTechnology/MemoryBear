@@ -904,11 +904,10 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 
     # Convert config_id string to UUID
     actual_config_id = None
-    with get_db_context() as db:
-        actual_config_id = resolve_config_id(config_id, db)
     if config_id:
         try:
-            actual_config_id = uuid.UUID(config_id) if isinstance(config_id, str) else config_id
+            with get_db_context() as db:
+                actual_config_id = resolve_config_id(config_id, db)
         except (ValueError, AttributeError):
             # If conversion fails, leave as None and try to resolve
             pass
@@ -987,7 +986,6 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 def write_message_task(self, end_user_id: str, message: list[dict], config_id: str, storage_type: str, user_rag_memory_id: str,
                        language: str = "zh") -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
-
     Args:
         end_user_id: Group ID for the memory agent (also used as end_user_id)
         message: Message to write
@@ -1004,10 +1002,8 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
     """
     from app.core.logging_config import get_logger
     logger = get_logger(__name__)
-    with get_db_context() as db:
-        config_id=resolve_config_id(config_id,db)
-    logger.info(
-        f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}, language={language}")
+
+    logger.info(f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}, language={language}")
     start_time = time.time()
 
     # Convert config_id string to UUID
@@ -1015,7 +1011,8 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
 
     if config_id:
         try:
-            actual_config_id = uuid.UUID(config_id) if isinstance(config_id, str) else config_id
+            with get_db_context() as db:
+                actual_config_id = resolve_config_id(config_id, db)
             logger.info(
                 f"[CELERY WRITE] Converted config_id to UUID: {actual_config_id} (type: {type(actual_config_id).__name__})")
         except (ValueError, AttributeError) as e:
