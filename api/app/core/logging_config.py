@@ -39,10 +39,13 @@ class SensitiveDataLoggingFilter(logging.Filter):
 
 
 class Neo4jSuccessNotificationFilter(logging.Filter):
-    """Neo4j 日志过滤器：过滤成功状态的通知，保留真正的警告和错误
+    """Neo4j 日志过滤器：过滤成功/信息性状态的通知，保留真正的警告和错误
     
     Neo4j 驱动会以 WARNING 级别记录所有数据库通知，包括成功的操作。
-    这个过滤器会过滤掉状态码为 '00000' (成功) 的通知，只保留真正的警告和错误。
+    这个过滤器会过滤掉以下 GQL 状态码的通知，只保留真正的警告和错误：
+      - 00000: 成功完成 (successful completion)
+      - 00N00: 无数据 (no data)
+      - 00NA0: 无数据，信息性通知 (no data, informational notification)
     
     使用正则表达式进行更严格的匹配，避免误过滤无关的警告。
     """
@@ -50,12 +53,12 @@ class Neo4jSuccessNotificationFilter(logging.Filter):
     import re
     
     # 编译正则表达式以提高性能
-    # 匹配 gql_status='00000' 或 gql_status="00000"，确保是完整的状态码
-    GQL_STATUS_PATTERN = re.compile(r"gql_status=['\"]00000['\"]")
+    # 匹配所有"成功/信息性"的 GQL 状态码：
+    # 00000 = 成功完成, 00N00 = 无数据, 00NA0 = 无数据信息性通知
+    GQL_STATUS_PATTERN = re.compile(r"gql_status=['\"](00000|00N00|00NA0)['\"]")
     
-    # 匹配 status_description 中的成功完成消息
-    # 使用单词边界确保精确匹配
-    SUCCESS_DESC_PATTERN = re.compile(r"status_description=['\"]note:\s*successful\s+completion['\"]", re.IGNORECASE)
+    # 匹配 status_description 中的成功完成或信息性通知消息
+    SUCCESS_DESC_PATTERN = re.compile(r"status_description=['\"]note:\s*(successful\s+completion|no\s+data)['\"]", re.IGNORECASE)
     
     def filter(self, record: logging.LogRecord) -> bool:
         """
@@ -107,8 +110,8 @@ class LoggingConfig:
         root_logger = logging.getLogger()
         root_logger.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
         
-        # 为 Neo4j 驱动添加过滤器，过滤成功通知但保留真正的警告
-        # Neo4j 驱动会以 WARNING 级别记录所有数据库通知，包括成功的操作（status='00000'）
+        # 为 Neo4j 驱动添加过滤器，过滤成功/信息性通知但保留真正的警告
+        # Neo4j 驱动会以 WARNING 级别记录所有数据库通知，包括成功(00000)和信息性(00NA0)通知
         # 使用过滤器而不是改变日志级别，这样可以保留真正的警告和错误
         neo4j_filter = Neo4jSuccessNotificationFilter()
         for neo4j_logger_name in ["neo4j", "neo4j.io", "neo4j.pool"]:
