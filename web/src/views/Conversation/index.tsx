@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 16:37:49
+ * @Last Modified time: 2026-02-09 20:20:01
  */
 /**
  * Conversation Page
@@ -358,7 +358,7 @@ const Conversation: FC = () => {
                               requestConfig={{
                                 headers: {
                                   'Content-Type': 'multipart/form-data',
-                                  authorization: `Bearer ${shareToken || ''}`,
+                                  Authorization: `Bearer ${shareToken || ''}`,
                               } }}
                             />
                           )
