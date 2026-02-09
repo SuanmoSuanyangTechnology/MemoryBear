@@ -25,9 +25,9 @@ class ModelConfigBase(BaseModel):
 
 class ApiKeyCreateNested(BaseModel):
     """用于在创建模型时内嵌创建API Key的Schema"""
-    model_name: str = Field(..., description="模型实际名称", max_length=255)
+    model_name: Optional[str] = Field(None, description="模型实际名称", max_length=255)
     description: Optional[str] = Field(None, description="备注")
-    provider: ModelProvider = Field(..., description="API Key提供商")
+    provider: Optional[str] = Field(None, description="API Key提供商")
     api_key: str = Field(..., description="API密钥", max_length=500)
     api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
     config: Optional[Dict[str, Any]] = Field({}, description="API Key特定配置")
@@ -57,6 +57,8 @@ class ModelConfigUpdate(BaseModel):
     """更新模型配置Schema"""
     name: Optional[str] = Field(None, description="模型显示名称", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")
+    provider: Optional[str] = Field(None, description="供应商")
+    logo: Optional[str] = Field(None, description="模型logo图片URL", max_length=255)
     description: Optional[str] = Field(None, description="模型描述")
     config: Optional[Dict[str, Any]] = Field(None, description="模型配置参数")
     is_active: Optional[bool] = Field(None, description="是否激活")

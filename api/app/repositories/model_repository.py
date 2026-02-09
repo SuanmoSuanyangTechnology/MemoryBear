@@ -48,12 +48,16 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def get_by_name(db: Session, name: str, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
-        """根据名称获取模型配置"""
-        db_logger.debug(f"根据名称查询模型配置: name={name}, tenant_id={tenant_id}")
+    def get_by_name(db: Session, name: str, provider: str | None = None, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
+        """根据名称和供应商获取模型配置"""
+        db_logger.debug(f"根据名称查询模型配置: name={name}, provider={provider}, tenant_id={tenant_id}")
         
         try:
             query = db.query(ModelConfig).filter(ModelConfig.name == name)
+            
+            # 添加供应商过滤
+            if provider:
+                query = query.filter(ModelConfig.provider == provider)
             
             # 添加租户过滤
             if tenant_id:
@@ -69,7 +73,7 @@ class ModelConfigRepository:
                 db_logger.debug(f"模型配置查询成功: {model.name}")
             return model
         except Exception as e:
-            db_logger.error(f"根据名称查询模型配置失败: name={name} - {str(e)}")
+            db_logger.error(f"根据名称查询模型配置失败: name={name}, provider={provider} - {str(e)}")
             raise
 
     @staticmethod
