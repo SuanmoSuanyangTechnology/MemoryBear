@@ -407,6 +407,17 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             }
             yield format_sse_message("result", result_data)
             
+            # 步骤 6.5: 计算本体覆盖率统计并发出
+            try:
+                ontology_coverage = await self._compute_ontology_coverage(
+                    extracted_result=extracted_result,
+                    memory_config=memory_config,
+                )
+                if ontology_coverage:
+                    yield format_sse_message("ontology_coverage", ontology_coverage)
+            except Exception as cov_err:
+                logger.warning(f"[PILOT_RUN_STREAM] Ontology coverage computation failed: {cov_err}", exc_info=True)
+            
             # 步骤 7: 发出完成事件
             yield format_sse_message("done", {
                 "message": "试运行完成",
@@ -426,6 +437,100 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "error": str(e),
                 "time": int(time.time() * 1000)
             })
+
+
+    async def _compute_ontology_coverage(
+        self,
+        extracted_result: Dict[str, Any],
+        memory_config,
+    ) -> Optional[Dict[str, Any]]:
+        """根据提取结果中的实体类型，与场景/通用本体类型做互斥分类统计。
+
+        分类规则（互斥）：场景类型优先 > 通用类型 > 未匹配
+        确保: 场景实体数 + 通用实体数 + 未匹配数 = 总实体数
+
+        Returns:
+            包含三部分统计的字典，或 None（无实体数据时）
+        """
+        core_entities = extracted_result.get("core_entities", [])
+        if not core_entities:
+            return None
+
+        # 1. 加载场景本体类型集合
+        scene_ontology_types: set = set()
+        try:
+            from app.repositories.ontology_class_repository import OntologyClassRepository
+
+            if memory_config.scene_id:
+                class_repo = OntologyClassRepository(self.db)
+                ontology_classes = class_repo.get_classes_by_scene(memory_config.scene_id)
+                scene_ontology_types = {oc.class_name for oc in ontology_classes}
+        except Exception as e:
+            logger.warning(f"Failed to load scene ontology types: {e}")
+
+        # 2. 加载通用本体类型集合
+        general_ontology_types: set = set()
+        try:
+            from app.core.memory.ontology_services.ontology_type_loader import (
+                get_general_ontology_registry,
+                is_general_ontology_enabled,
+            )
+
+            if is_general_ontology_enabled():
+                registry = get_general_ontology_registry()
+                if registry:
+                    general_ontology_types = set(registry.types.keys())
+        except Exception as e:
+            logger.warning(f"Failed to load general ontology types: {e}")
+
+        # 3. 互斥分类：场景优先 > 通用 > 未匹配
+        scene_distribution: list = []
+        general_distribution: list = []
+        unmatched_distribution: list = []
+        scene_total = 0
+        general_total = 0
+        unmatched_total = 0
+
+        for item in core_entities:
+            entity_type = item.get("type", "")
+            count = item.get("count", 0)
+
+            if entity_type in scene_ontology_types:
+                scene_distribution.append({"type": entity_type, "count": count})
+                scene_total += count
+            elif entity_type in general_ontology_types:
+                general_distribution.append({"type": entity_type, "count": count})
+                general_total += count
+            else:
+                unmatched_distribution.append({"type": entity_type, "count": count})
+                unmatched_total += count
+
+        # 按数量降序排列
+        scene_distribution.sort(key=lambda x: x["count"], reverse=True)
+        general_distribution.sort(key=lambda x: x["count"], reverse=True)
+        unmatched_distribution.sort(key=lambda x: x["count"], reverse=True)
+
+        total_entities = scene_total + general_total + unmatched_total
+
+        return {
+            "scene_type_distribution": {
+                "type_count": len(scene_distribution),
+                "entity_total": scene_total,
+                "types": scene_distribution,
+            },
+            "general_type_distribution": {
+                "type_count": len(general_distribution),
+                "entity_total": general_total,
+                "types": general_distribution,
+            },
+            "unmatched": {
+                "type_count": len(unmatched_distribution),
+                "entity_total": unmatched_total,
+                "types": unmatched_distribution,
+            },
+            "total_entities": total_entities,
+            "time": int(time.time() * 1000),
+        }
 
 
 # -------------------- Neo4j Search & Analytics (fused from data_search_service.py) --------------------
