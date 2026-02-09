@@ -2200,7 +2200,7 @@ export const zh = {
           search_switch: '检索模式',
         },
         'memory-write': {
-          message: '消息',
+          messages: '消息',
           config_id: '记忆配置',
           search_switch: '检索模式',
         },

@@ -2105,7 +2105,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           search_switch: 'Search Mode',
         },
         'memory-write': {
-          message: 'Message',
+          messages: 'Message',
           config_id: 'Memory Configuration',
           search_switch: 'Search Mode',
         },
