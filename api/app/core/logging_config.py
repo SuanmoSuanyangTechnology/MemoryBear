@@ -70,8 +70,10 @@ class Neo4jSuccessNotificationFilter(logging.Filter):
         Returns:
             True表示允许记录，False表示拒绝（过滤掉）
         """
-        # 只处理 WARNING 级别的日志
-        if record.levelno != logging.WARNING:
+        # 只处理 INFO 和 WARNING 级别的日志
+        # Neo4j 驱动对 severity='INFORMATION' 的通知使用 INFO 级别，
+        # 对 severity='WARNING' 的通知使用 WARNING 级别
+        if record.levelno not in (logging.INFO, logging.WARNING):
             return True
         
         # 检查是否是 Neo4j 的成功通知
@@ -110,16 +112,24 @@ class LoggingConfig:
         root_logger = logging.getLogger()
         root_logger.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
         
-        # 为 Neo4j 驱动添加过滤器，过滤成功/信息性通知但保留真正的警告
-        # Neo4j 驱动会以 WARNING 级别记录所有数据库通知，包括成功(00000)和信息性(00NA0)通知
-        # 使用过滤器而不是改变日志级别，这样可以保留真正的警告和错误
-        neo4j_filter = Neo4jSuccessNotificationFilter()
-        for neo4j_logger_name in ["neo4j", "neo4j.io", "neo4j.pool"]:
-            neo4j_logger = logging.getLogger(neo4j_logger_name)
-            neo4j_logger.addFilter(neo4j_filter)
-        
         # 清除现有处理器
         root_logger.handlers.clear()
+        
+        # Neo4j 通知过滤器 - 挂在 handler 上确保所有传播上来的日志都能被过滤
+        neo4j_filter = Neo4jSuccessNotificationFilter()
+        
+        # 抑制 Neo4j 通知日志
+        # Neo4j 驱动内部会给 neo4j.notifications logger 配置自己的 handler，
+        # 导致日志绕过根 logger 的 filter 直接输出。
+        # 多管齐下确保过滤生效：
+        # 1. 设置 neo4j.notifications 级别为 WARNING（过滤 INFO 级别的 00NA0 通知）
+        # 2. 在所有 neo4j logger 上添加 filter（过滤 WARNING 级别的成功通知）
+        # 3. 在根 handler 上也添加 filter（兜底）
+        neo4j_notifications_logger = logging.getLogger("neo4j.notifications")
+        neo4j_notifications_logger.setLevel(logging.WARNING)
+        for neo4j_logger_name in ["neo4j", "neo4j.io", "neo4j.pool", "neo4j.notifications"]:
+            neo4j_logger = logging.getLogger(neo4j_logger_name)
+            neo4j_logger.addFilter(neo4j_filter)
         
         # 创建格式化器
         formatter = logging.Formatter(
@@ -136,6 +146,7 @@ class LoggingConfig:
             console_handler.setFormatter(formatter)
             console_handler.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
             console_handler.addFilter(sensitive_filter)
+            console_handler.addFilter(neo4j_filter)
             root_logger.addHandler(console_handler)
         
         # 文件处理器（带轮转）
@@ -149,6 +160,7 @@ class LoggingConfig:
             file_handler.setFormatter(formatter)
             file_handler.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
             file_handler.addFilter(sensitive_filter)
+            file_handler.addFilter(neo4j_filter)
             root_logger.addHandler(file_handler)
         
         cls._initialized = True
