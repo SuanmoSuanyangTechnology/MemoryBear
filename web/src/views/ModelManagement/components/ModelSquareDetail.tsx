@@ -29,14 +29,12 @@ import { getLogoUrl } from '../utils'
 interface ModelSquareDetailProps {
   /** Callback to refresh parent list */
   refresh: () => void;
-  /** Callback to edit model */
-  handleEdit: (vo: ModelPlazaItem) => void;
 }
 
 /**
  * Model square detail drawer component
  */
-const ModelSquareDetail = forwardRef<ModelSquareDetailRef, ModelSquareDetailProps>(({ refresh, handleEdit }, ref) => {
+const ModelSquareDetail = forwardRef<ModelSquareDetailRef, ModelSquareDetailProps>(({ refresh }, ref) => {
   const { t } = useTranslation();
   const { message } = App.useApp()
   const [model, setModel] = useState<ModelPlaza>({} as ModelPlaza)
@@ -112,7 +110,6 @@ const ModelSquareDetail = forwardRef<ModelSquareDetailRef, ModelSquareDetailProp
                   <Flex justify="space-between">
                     <Space size={8}><UsergroupAddOutlined /> {item.add_count}</Space>
                     <Space>
-                      {!item.is_official && <Button type="primary" disabled={item.is_deprecated} onClick={() => handleEdit(item)}>{t('modelNew.edit')}</Button>}
                       {item.is_added
                         ? <Button type="primary" disabled>{t('modelNew.added')}</Button>
                         : <Button type="primary" ghost disabled={item.is_deprecated} onClick={() => handleAdd(item)}>{item.is_deprecated ? t('modelNew.deprecated') : `+ ${t('common.add')}`}</Button>

@@ -93,7 +93,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
   onChange,
   disabled = false,
   fileSize,
-  fileType = ['png', 'jpg', 'gif'],
+  fileType = ['png', 'jpg', 'gif', 'svg'],
   isAutoUpload = true,
   maxCount = 1,
   className = 'rb:size-24! rb:leading-1!',

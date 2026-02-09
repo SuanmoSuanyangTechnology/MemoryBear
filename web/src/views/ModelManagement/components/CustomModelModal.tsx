@@ -11,10 +11,10 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Select } from 'antd';
+import { Form, Input, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { CustomModelForm, ModelPlazaItem, CustomModelModalRef, CustomModelModalProps } from '../types';
+import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps } from '../types';
 import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect'
 import UploadImages from '@/components/Upload/UploadImages'
@@ -30,22 +30,21 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [visible, setVisible] = useState(false);
-  const [model, setModel] = useState<ModelPlazaItem>({} as ModelPlazaItem);
+  const [model, setModel] = useState<ModelListItem>({} as ModelListItem);
   const [isEdit, setIsEdit] = useState(false);
   const [form] = Form.useForm<CustomModelForm>();
   const [loading, setLoading] = useState(false)
-  const formValues = Form.useWatch([], form)
 
   /** Close modal and reset state */
   const handleClose = () => {
-    setModel({} as ModelPlazaItem);
+    setModel({} as ModelListItem);
     form.resetFields();
     setLoading(false)
     setVisible(false);
   };
 
   /** Open modal with optional model data for editing */
-  const handleOpen = (model?: ModelPlazaItem) => {
+  const handleOpen = (model?: ModelListItem) => {
     if (model) {
       setIsEdit(true);
       setModel(model);
@@ -66,7 +65,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     const res = isEdit ? updateCustomModel(model.id, rest) : addCustomModel(data)
 
     res.then(() => {
-      refresh && refresh()
+      refresh && refresh(isEdit)
       handleClose()
       message.success(isEdit ? t('common.updateSuccess') : t('common.createSuccess'))
     })
@@ -79,12 +78,10 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     form
       .validateFields()
       .then((values) => {
-        setLoading(true)
         const { logo, ...rest } = values;
         let formData: CustomModelForm = {
           ...rest
         }
-        formData.is_official = false;
 
         if (typeof logo === 'object' && logo?.response?.data.file_id) {
           getFileLink(logo?.response?.data.file_id)
@@ -110,8 +107,6 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));
-
-  console.log('formValues', formValues)
 
   return (
     <RbModal
@@ -174,11 +169,22 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </Form.Item>
+
+
         <Form.Item
-          name="tags"
-          label={t('modelNew.tags')}
+          name={["api_keys", 0, "api_key"]}
+          label={t('modelNew.api_key')}
+          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_key') }) }]}
         >
-          <Select mode="tags" placeholder={t('common.pleaseEnter')} />
+          <Input.Password placeholder={t('common.pleaseEnter')} />
+        </Form.Item>
+
+        <Form.Item
+          name={["api_keys", 0, "api_base"]}
+          label={t('modelNew.api_base')}
+          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_base') }) }]}
+        >
+          <Input placeholder="https://api.example.com/v1" />
         </Form.Item>
       </Form>
     </RbModal>
