@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-06 11:20:14
+ * @Last Modified time: 2026-02-09 10:33:21
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -284,11 +284,19 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
           ...(item.config || {})
         }))
       } as KnowledgeConfig : null,
-      tools: tools.map(vo => ({
-        tool_id: vo.tool_id,
-        operation: vo.operation,
-        enabled: vo.enabled
-      })),
+      tools: tools.map(vo => {
+        if (!vo.operation) {
+          return {
+            tool_id: vo.tool_id,
+            enabled: vo.enabled
+          }
+        }
+        return {
+          tool_id: vo.tool_id,
+          operation: vo.operation,
+          enabled: vo.enabled
+        }
+      }),
       skills: {
         ...skills,
         skill_ids: (skills?.skill_ids as Skill[])?.map(vo => vo.id)
