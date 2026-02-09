@@ -192,16 +192,8 @@ async def get_preference_tags(
             
             filtered_preferences.append(pref)
         
-        # 统一响应结构：将领域数据嵌套在 data 键下
-        response_data = {
-            "end_user_id": end_user_id,
-            "data": {
-                "preferences": filtered_preferences
-            }
-        }
-        
         api_logger.info(f"Retrieved {len(filtered_preferences)} preference tags for user: {end_user_id} (from cache)")
-        return success(data=response_data, msg="偏好标签获取成功（缓存）")
+        return success(data=filtered_preferences, msg="偏好标签获取成功（缓存）")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "偏好标签获取", end_user_id)
@@ -248,14 +240,8 @@ async def get_dimension_portrait(
         # Extract portrait from cache
         portrait = cached_profile.get("portrait", {})
         
-        # 统一响应结构：将领域数据嵌套在 data 键下
-        response_data = {
-            "end_user_id": end_user_id,
-            "data": portrait
-        }
-        
         api_logger.info(f"Dimension portrait retrieved for user: {end_user_id} (from cache)")
-        return success(data=response_data, msg="四维画像获取成功（缓存）")
+        return success(data=portrait, msg="四维画像获取成功（缓存）")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "四维画像获取", end_user_id)
@@ -302,14 +288,8 @@ async def get_interest_area_distribution(
         # Extract interest areas from cache
         interest_areas = cached_profile.get("interest_areas", {})
         
-        # 统一响应结构：将领域数据嵌套在 data 键下
-        response_data = {
-            "end_user_id": end_user_id,
-            "data": interest_areas
-        }
-        
         api_logger.info(f"Interest area distribution retrieved for user: {end_user_id} (from cache)")
-        return success(data=response_data, msg="兴趣领域分布获取成功（缓存）")
+        return success(data=interest_areas, msg="兴趣领域分布获取成功（缓存）")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "兴趣领域分布获取", end_user_id)
@@ -388,16 +368,8 @@ async def get_behavior_habits(
             
             filtered_habits.append(habit)
         
-        # 统一响应结构：将领域数据嵌套在 data 键下
-        response_data = {
-            "end_user_id": end_user_id,
-            "data": {
-                "habits": filtered_habits
-            }
-        }
-        
         api_logger.info(f"Retrieved {len(filtered_habits)} behavior habits for user: {end_user_id} (from cache)")
-        return success(data=response_data, msg="行为习惯获取成功（缓存）")
+        return success(data=filtered_habits, msg="行为习惯获取成功（缓存）")
         
     except Exception as e:
         return handle_implicit_memory_error(e, "行为习惯获取", end_user_id)
@@ -448,14 +420,11 @@ async def generate_implicit_memory_profile(
         
         api_logger.info(f"用户画像生成并缓存成功: user={end_user_id}")
         
-        # 统一响应结构：将完整画像数据嵌套在 data 键下
-        response_data = {
-            "end_user_id": end_user_id,
-            "cached": False,
-            "data": profile_data
-        }
+        # Add metadata
+        profile_data["end_user_id"] = end_user_id
+        profile_data["cached"] = False
         
-        return success(data=response_data, msg="用户画像生成成功")
+        return success(data=profile_data, msg="用户画像生成成功")
         
     except Exception as e:
         api_logger.error(f"生成用户画像失败: user={end_user_id}, error={str(e)}", exc_info=True)
