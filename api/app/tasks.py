@@ -40,6 +40,7 @@ from app.models.file_model import File
 from app.models.knowledge_model import Knowledge
 from app.schemas import file_schema, document_schema
 from app.services.memory_agent_service import MemoryAgentService
+from app.utils.config_utils import resolve_config_id
 
 
 @celery_app.task(name="tasks.process_item")
@@ -905,7 +906,8 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
     actual_config_id = None
     if config_id:
         try:
-            actual_config_id = uuid.UUID(config_id) if isinstance(config_id, str) else config_id
+            with get_db_context() as db:
+                actual_config_id = resolve_config_id(config_id, db)
         except (ValueError, AttributeError):
             # If conversion fails, leave as None and try to resolve
             pass
@@ -981,14 +983,13 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True)
-def write_message_task(self, end_user_id: str, message: list[dict], config_id: str, storage_type: str, user_rag_memory_id: str,
+def write_message_task(self, end_user_id: str, message: list[dict], config_id: str | int, storage_type: str, user_rag_memory_id: str,
                        language: str = "zh") -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
-
     Args:
         end_user_id: Group ID for the memory agent (also used as end_user_id)
         message: Message to write
-        config_id: Configuration ID as string (will be converted to UUID)
+        config_id: Configuration ID (can be UUID string, integer, or config_id_old)
         storage_type: Storage type (neo4j or rag)
         user_rag_memory_id: User RAG memory ID
         language: 语言类型 ("zh" 中文, "en" 英文)
@@ -1002,24 +1003,28 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
     from app.core.logging_config import get_logger
     logger = get_logger(__name__)
 
-    logger.info(
-        f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}, language={language}")
+    logger.info(f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, config_id={config_id} (type: {type(config_id).__name__}), storage_type={storage_type}, language={language}")
     start_time = time.time()
 
-    # Convert config_id string to UUID
+    # Convert config_id to UUID
     actual_config_id = None
+
     if config_id:
         try:
-            actual_config_id = uuid.UUID(config_id) if isinstance(config_id, str) else config_id
+            with get_db_context() as db:
+                actual_config_id = resolve_config_id(config_id, db)
+            print(100*'-')
+            print(actual_config_id)
+            print(100*'-')
             logger.info(
                 f"[CELERY WRITE] Converted config_id to UUID: {actual_config_id} (type: {type(actual_config_id).__name__})")
         except (ValueError, AttributeError) as e:
-            logger.error(f"[CELERY WRITE] Invalid config_id format: {config_id}, error: {e}")
+            logger.error(f"[CELERY WRITE] Invalid config_id format: {config_id} (type: {type(config_id).__name__}), error: {e}")
             return {
                 "status": "FAILURE",
-                "error": f"Invalid config_id format: {config_id}",
+                "error": f"Invalid config_id format: {config_id} - {str(e)}",
                 "end_user_id": end_user_id,
-                "config_id": config_id,
+                "config_id": str(config_id),
                 "elapsed_time": 0.0,
                 "task_id": self.request.id
             }
