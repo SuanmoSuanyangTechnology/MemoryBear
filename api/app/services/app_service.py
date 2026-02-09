@@ -1488,7 +1488,7 @@ class AppService:
 
             is_valid, errors = WorkflowValidator.validate_for_publish(config)
             if not is_valid:
-                raise BusinessException("应用缺少有效配置，无法发布", BizCode.CONFIG_MISSING)
+                raise BusinessException(f"应用缺少有效配置，无法发布, errors:{','.join(errors)}", BizCode.CONFIG_MISSING)
             logger.info(
                 "应用发布配置准备完成"
             )
