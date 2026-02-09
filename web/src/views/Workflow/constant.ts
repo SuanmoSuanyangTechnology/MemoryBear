@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 14:15:13
+ * @Last Modified time: 2026-02-09 17:48:46
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -518,6 +518,7 @@ export const nodeLibrary: NodeLibrary[] = [
   // },
 ];
 
+export const nodeWidth = 240;
 /**
  * Node registration library for X6 graph
  * Maps node shapes to their React components
@@ -525,13 +526,13 @@ export const nodeLibrary: NodeLibrary[] = [
 export const nodeRegisterLibrary: ReactShapeConfig[] = [
   {
     shape: 'loop-node',
-    width: 240,
+    width: nodeWidth,
     height: 120,
     component: LoopNode,
   },
   {
     shape: 'iteration-node',
-    width: 240,
+    width: nodeWidth,
     height: 120,
     component: LoopNode,
   },
@@ -543,7 +544,7 @@ export const nodeRegisterLibrary: ReactShapeConfig[] = [
   },
   {
     shape: 'condition-node',
-    width: 240,
+    width: nodeWidth,
     height: 88,
     component: ConditionNode,
   },
@@ -625,8 +626,9 @@ export const portAttrs = {
     textAnchor: 'middle',
     textVerticalAnchor: 'middle',
     pointerEvents: 'none',
-  }
+  },
 }
+export const portTextAttrs = { fontSize: 12, fill: '#5B6167' }
 
 /**
  * Unified port group configuration
@@ -635,6 +637,12 @@ export const portAttrs = {
 const defaultPortGroups = {
   // top: { position: 'top', markup: portMarkup, attrs: portAttrs },
   right: { position: 'right', markup: portMarkup, attrs: portAttrs },
+  // bottom: { position: 'bottom', markup: portMarkup, attrs: portAttrs },
+  left: { position: 'left', markup: portMarkup, attrs: portAttrs },
+}
+export const defaultAbsolutePortGroups = {
+  // top: { position: 'top', markup: portMarkup, attrs: portAttrs },
+  right: { position: { name: 'absolute' }, markup: portMarkup, attrs: portAttrs },
   // bottom: { position: 'bottom', markup: portMarkup, attrs: portAttrs },
   left: { position: 'left', markup: portMarkup, attrs: portAttrs },
 }
@@ -650,7 +658,7 @@ const defaultPortItems = [
 /**
  * Port position arguments
  */
-export const portArgs = { dy: 18 }
+export const portArgs = { x: nodeWidth, y: 42 }
 
 /**
  * Graph node library configuration
@@ -658,7 +666,7 @@ export const portArgs = { dy: 18 }
  */
 export const graphNodeLibrary: Record<string, NodeConfig> = {
   iteration: {
-    width: 240,
+    width: nodeWidth,
     height: 120,
     shape: 'iteration-node',
     ports: {
@@ -667,7 +675,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     },
   },
   loop: {
-    width: 240,
+    width: nodeWidth,
     height: 120,
     shape: 'loop-node',
     ports: {
@@ -676,33 +684,47 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     },
   },
   'if-else': {
-    width: 240,
+    width: nodeWidth,
     height: 88,
     shape: 'condition-node',
     ports: {
-      groups: defaultPortGroups,
+      groups: defaultAbsolutePortGroups,
       items: [
         { group: 'left' },
-        { group: 'right', id: 'CASE1', args: portArgs, attrs: { text: { text: 'IF', fontSize: 12, color: '#5B6167' }} },
-        { group: 'right', id: 'CASE2', args: portArgs, attrs: { text: { text: 'ELSE', fontSize: 12, color: '#5B6167' }} }
+        ...(['IF', 'ELSE'].map((text, index) => ({
+          group: 'right',
+          id: `CASE${index}`,
+          args: {
+            ...portArgs,
+            y: 30 * index + 42,
+          },
+          attrs: { text: { text: text, ...portTextAttrs } }
+        }))),
       ],
     },
   },
   'question-classifier': {
-    width: 240,
+    width: nodeWidth,
     height: 88,
     shape: 'condition-node',
     ports: {
-      groups: defaultPortGroups,
+      groups: defaultAbsolutePortGroups,
       items: [
         { group: 'left' },
-        { group: 'right', id: 'CASE1', args: portArgs, attrs: { text: { text: '分类1', fontSize: 12, color: '#5B6167' } } },
-        { group: 'right', id: 'CASE2', args: portArgs, attrs: { text: { text: '分类2', fontSize: 12, color: '#5B6167' } } }
+        ...(['分类1', '分类2'].map((text, index) => ({
+          group: 'right',
+          id: `CASE${index}`,
+          args: {
+            ...portArgs,
+            y: 30 * index + 42,
+          },
+          attrs: { text: { text: text, ...portTextAttrs } }
+        }))),
       ],
     },
   },
   start: {
-    width: 240,
+    width: nodeWidth,
     height: 64,
     shape: 'normal-node',
     ports: {
@@ -711,7 +733,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     },
   },
   end: {
-    width: 240,
+    width: nodeWidth,
     height: 64,
     shape: 'normal-node',
     ports: {
@@ -738,7 +760,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     },
   },
   default: {
-    width: 240,
+    width: nodeWidth,
     height: 64,
     shape: 'normal-node',
     ports: {
