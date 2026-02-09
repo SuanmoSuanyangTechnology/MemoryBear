@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:47 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-06 21:09:47 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-09 10:17:54
  */
 /**
  * Upload File List Modal Component
@@ -19,8 +19,7 @@
  * @component
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, Select, Button, Space } from 'antd';
-import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { Form, Input, Select, Button, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { UploadFileListModalRef } from '../types'
@@ -95,11 +94,12 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
             <>
               {/* Render each file entry with type selector and URL input */}
               {fields.map(({ key, name, ...restField }) => (
-                <Space key={key} style={{ display: 'flex' }} align="baseline">
+                <Flex key={key} gap={8} align="center" className="rb:mb-3!">
                   <FormItem
                     {...restField}
                     name={[name, 'type']}
                     initialValue="image"
+                    className="rb:mb-0!"
                   >
                     <Select
                       placeholder={t('memoryConversation.fileType')}
@@ -113,15 +113,19 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
                     {...restField}
                     name={[name, 'url']}
                     rules={[{ required: true, message: t('common.pleaseEnter') }]}
+                    className="rb:mb-0!"
                   >
-                    <Input placeholder={t('memoryConversation.fileUrl')} className="rb:w-82.5" />
+                    <Input placeholder={t('memoryConversation.fileUrl')} className="rb:w-82.5!" />
                   </FormItem>
-                  <MinusCircleOutlined onClick={() => remove(name)} style={{ marginTop: 30 }} />
-                </Space>
+                  <div
+                    className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]"
+                    onClick={() => remove(name)}
+                  ></div>
+                </Flex>
               ))}
-              <Form.Item>
-                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                  {t('common.add')}
+              <Form.Item noStyle>
+                <Button type="dashed" onClick={() => add()} block>
+                  + {t('common.add')}
                 </Button>
               </Form.Item>
             </>
