@@ -1,6 +1,6 @@
 import { useEffect, useState, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getSelection, $isRangeSelection, $isTextNode } from 'lexical';
+import { $getSelection, $isRangeSelection, $isTextNode, COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND, KEY_ARROW_DOWN_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ESCAPE_COMMAND } from 'lexical';
 
 import { INSERT_VARIABLE_COMMAND } from '../commands';
 import type { NodeProperties } from '../../../types'
@@ -45,6 +45,9 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
                           (textBeforeCursor === '/' && anchorOffset === 1);
         
         setShowSuggestions(shouldShow);
+        if (!shouldShow) {
+          setSelectedIndex(0);
+        }
 
         if (shouldShow) {
           const domSelection = window.getSelection();
@@ -113,9 +116,6 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
     setShowSuggestions(false);
   };
 
-  if (!showSuggestions) return null;
-
-  // Group options by node id
   const groupedSuggestions = options.reduce((groups: Record<string, any[]>, suggestion) => {
     const { nodeData } = suggestion
     const nodeId = nodeData.id as string;
@@ -125,6 +125,93 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
     groups[nodeId].push(suggestion);
     return groups;
   }, {});
+
+  useEffect(() => {
+    if (!showSuggestions) return;
+
+    const allOptions = Object.values(groupedSuggestions).flat();
+
+    return editor.registerCommand(
+      KEY_ENTER_COMMAND,
+      (event) => {
+        if (showSuggestions && allOptions.length > 0) {
+          const selectedOption = allOptions[selectedIndex];
+          if (selectedOption && !selectedOption.disabled) {
+            event?.preventDefault();
+            insertMention(selectedOption);
+            return true;
+          }
+        }
+        return false;
+      },
+      COMMAND_PRIORITY_HIGH
+    );
+  }, [showSuggestions, selectedIndex, groupedSuggestions, insertMention, editor]);
+
+  useEffect(() => {
+    if (!showSuggestions) return;
+
+    const allOptions = Object.values(groupedSuggestions).flat();
+
+    const unregisterArrowDown = editor.registerCommand(
+      KEY_ARROW_DOWN_COMMAND,
+      (event) => {
+        if (showSuggestions && allOptions.length > 0) {
+          event?.preventDefault();
+          setSelectedIndex(prev => {
+            let nextIndex = prev + 1;
+            while (nextIndex < allOptions.length && allOptions[nextIndex].disabled) {
+              nextIndex++;
+            }
+            return nextIndex >= allOptions.length ? prev : nextIndex;
+          });
+          return true;
+        }
+        return false;
+      },
+      COMMAND_PRIORITY_HIGH
+    );
+
+    const unregisterArrowUp = editor.registerCommand(
+      KEY_ARROW_UP_COMMAND,
+      (event) => {
+        if (showSuggestions && allOptions.length > 0) {
+          event?.preventDefault();
+          setSelectedIndex(prev => {
+            let prevIndex = prev - 1;
+            while (prevIndex >= 0 && allOptions[prevIndex].disabled) {
+              prevIndex--;
+            }
+            return prevIndex < 0 ? prev : prevIndex;
+          });
+          return true;
+        }
+        return false;
+      },
+      COMMAND_PRIORITY_HIGH
+    );
+
+    const unregisterEscape = editor.registerCommand(
+      KEY_ESCAPE_COMMAND,
+      (event) => {
+        if (showSuggestions) {
+          event?.preventDefault();
+          setShowSuggestions(false);
+          return true;
+        }
+        return false;
+      },
+      COMMAND_PRIORITY_HIGH
+    );
+
+    return () => {
+      unregisterArrowDown();
+      unregisterArrowUp();
+      unregisterEscape();
+    };
+  }, [showSuggestions, selectedIndex, groupedSuggestions, editor]);
+
+  if (!showSuggestions) return null;
 
   if (Object.entries(groupedSuggestions).length === 0) {
     return null
