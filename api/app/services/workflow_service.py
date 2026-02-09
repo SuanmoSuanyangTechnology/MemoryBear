@@ -2,7 +2,6 @@
 工作流服务层
 """
 import datetime
-import json
 import logging
 import uuid
 from typing import Any, Annotated, Optional
@@ -448,13 +447,9 @@ class WorkflowService:
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
-        json_files = []
-        for file in payload.files:
-            file_json = json.loads(file.model_dump_json())
-            json_files.append(file_json)
         input_data = {"message": payload.message, "variables": payload.variables,
                       "conversation_id": payload.conversation_id,
-                      "files": json_files
+                      "files": [file.model_dump(mode='json') for file in payload.files]
                       }
 
         # 转换 conversation_id 为 UUID
@@ -642,13 +637,9 @@ class WorkflowService:
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
-        json_files = []
-        for file in payload.files:
-            file_json = json.loads(file.model_dump_json())
-            json_files.append(file_json)
         input_data = {"message": payload.message, "variables": payload.variables,
                       "conversation_id": payload.conversation_id,
-                      "files": json_files
+                      "files": [file.model_dump(mode='json') for file in payload.files]
                       }
 
         # 转换 conversation_id 为 UUID
