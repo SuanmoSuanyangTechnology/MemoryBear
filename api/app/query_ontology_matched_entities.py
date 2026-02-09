@@ -9,7 +9,7 @@ api\scripts\query_ontology_matched_entities.py
 
 用法: python scripts/query_ontology_matched_entities.py <end_user_id> [config_id]
 示例: python scripts/query_ontology_matched_entities.py 075660cf-08e6-40a6-a76e-308b6f52fbf1
-      python scripts/query_ontology_matched_entities.py 075660cf-08e6-40a6-a76e-308b6f52fbf1 fd547bb9-7b9e-47ea-ae53-242d208a31a2
+     python scripts/query_ontology_matched_entities.py 075660cf-08e6-40a6-a76e-308b6f52fbf1 fd547bb9-7b9e-47ea-ae53-242d208a31a2
 """
 
 import sys
@@ -59,7 +59,7 @@ async def get_entities_by_end_user_id(connector: Neo4jConnector, end_user_id: st
 def get_ontology_types_from_scene(db, scene_id: UUID) -> Set[str]:
     """获取场景下所有本体类型名称"""
     class_repo = OntologyClassRepository(db)
-    ontology_classes = class_repo.get_by_scene(scene_id)
+    ontology_classes = class_repo.get_classes_by_scene(scene_id)
     return {oc.class_name for oc in ontology_classes}
 
 
@@ -80,7 +80,7 @@ def get_all_ontology_types(db) -> Dict[str, Set[str]]:
     
     for scene in scenes:
         class_repo = OntologyClassRepository(db)
-        ontology_classes = class_repo.get_by_scene(scene.scene_id)
+        ontology_classes = class_repo.get_classes_by_scene(scene.scene_id)
         for oc in ontology_classes:
             if oc.class_name not in all_types:
                 all_types[oc.class_name] = set()

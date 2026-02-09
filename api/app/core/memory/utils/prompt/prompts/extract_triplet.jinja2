@@ -18,18 +18,21 @@ Extract entities and knowledge triplets from the given statement.
 {% if ontology_types %}
 ===Ontology Type Guidance===
 
-**CRITICAL: Use predefined ontology types for entity classification with the following priority:**
+**CRITICAL RULE: You MUST ONLY use the predefined ontology type names listed below for the entity "type" field. Do NOT use any other type names, even if they seem reasonable.**
+
+**If no predefined type fits an entity, use the CLOSEST matching predefined type. NEVER invent new type names.**
 
 **Type Priority (from highest to lowest):**
-1. **[场景类型] Scene Types** - Domain-specific types, use these first if applicable
+1. **[场景类型] Scene Types** - Domain-specific types, ALWAYS prefer these first
 2. **[通用类型] General Types** - Common types from standard ontologies (DBpedia)
 3. **[通用父类] Parent Types** - Provide type hierarchy context
 
 **Type Matching Rules:**
-- Entity type MUST exactly match one of the predefined type names
-- Do NOT modify, translate, or use variations of type names
-- Prefer scene types over general types when both could apply
-- If uncertain between types, check the type description for guidance
+- Entity type MUST exactly match one of the predefined type names below
+- Do NOT use types like "Equipment", "Component", "Concept", "Action", "Condition", "Data", "Duration" unless they appear in the predefined list
+- Do NOT modify, translate, abbreviate, or create variations of type names
+- Prefer scene types (marked [场景类型]) over general types when both could apply
+- If uncertain, check the type description to find the best match
 
 **Predefined Ontology Types:**
 {{ ontology_types }}
@@ -42,7 +45,7 @@ The following shows type inheritance relationships (Child → Parent → Grandpa
 {% endfor %}
 {% endif %}
 
-**Available Type Names (use EXACTLY as shown):**
+**ALLOWED Type Names (use EXACTLY one of these, no exceptions):**
 {{ ontology_type_names | join(', ') }}
 
 {% endif %}
@@ -206,6 +209,10 @@ Output:
 }
 {% endif %}
 ===End of Examples===
+
+{% if ontology_types %}
+**⚠️ REMINDER: The examples above use generic type names for illustration only. You MUST use ONLY the predefined ontology type names from the "ALLOWED Type Names" list above. For example, use "PredictiveMaintenance" instead of "Concept", use "ProductionLine" instead of "Equipment", etc. Map each entity to the closest matching predefined type.**
+{% endif %}
 
 ===Output Format===
 

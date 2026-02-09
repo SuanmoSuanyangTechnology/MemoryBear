@@ -1007,7 +1007,7 @@ async def export_owl_by_scene(
         
         # 2. 查询场景下的所有本体类型
         class_repo = OntologyClassRepository(db)
-        ontology_classes_db = class_repo.get_by_scene(request.scene_id)
+        ontology_classes_db = class_repo.get_classes_by_scene(request.scene_id)
         
         if not ontology_classes_db:
             api_logger.warning(f"No classes found in scene: {request.scene_id}")
