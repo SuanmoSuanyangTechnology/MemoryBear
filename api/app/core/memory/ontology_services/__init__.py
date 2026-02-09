@@ -8,6 +8,9 @@
 - reload_ontology_registry: 重新加载本体注册表（实验模式）
 - clear_ontology_cache: 清除本体缓存
 - is_general_ontology_enabled: 检查通用本体类型功能是否启用
+- load_ontology_types_for_scene: 从数据库加载场景的本体类型
+- create_empty_ontology_type_list: 创建空的本体类型列表
+- load_ontology_types_with_fallback: 加载本体类型（带通用类型回退）
 """
 
 from .ontology_type_merger import OntologyTypeMerger, DEFAULT_CORE_GENERAL_TYPES
@@ -17,6 +20,9 @@ from .ontology_type_loader import (
     reload_ontology_registry,
     clear_ontology_cache,
     is_general_ontology_enabled,
+    load_ontology_types_for_scene,
+    create_empty_ontology_type_list,
+    load_ontology_types_with_fallback,
 )
 
 __all__ = [
@@ -27,4 +33,7 @@ __all__ = [
     "reload_ontology_registry",
     "clear_ontology_cache",
     "is_general_ontology_enabled",
+    "load_ontology_types_for_scene",
+    "create_empty_ontology_type_list",
+    "load_ontology_types_with_fallback",
 ]

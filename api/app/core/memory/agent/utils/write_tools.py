@@ -126,6 +126,7 @@ async def write(
         config=pipeline_config,
         embedding_id=embedding_model_id,
         language=language,
+        ontology_types=ontology_types,
     )
 
     # Run the complete extraction pipeline

@@ -550,7 +550,7 @@ class MemoryConfigService:
         
         try:
             ontology_repo = OntologyClassRepository(self.db)
-            ontology_classes = ontology_repo.get_by_scene(memory_config.scene_id)
+            ontology_classes = ontology_repo.get_classes_by_scene(memory_config.scene_id)
             
             if not ontology_classes:
                 logger.info(f"No ontology classes found for scene_id: {memory_config.scene_id}")
