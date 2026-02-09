@@ -399,24 +399,23 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             with open(result_path, "r", encoding="utf-8") as rf:
                 extracted_result = json.load(rf)
             
-            # 步骤 6: 发出结果事件
+            # 步骤 6: 计算本体覆盖率并合并到结果中
             result_data = {
                 "config_id": cid,
                 "time_log": os.path.join(project_root, "logs", "time.log"),
                 "extracted_result": extracted_result,
             }
-            yield format_sse_message("result", result_data)
-            
-            # 步骤 6.5: 计算本体覆盖率统计并发出
             try:
                 ontology_coverage = await self._compute_ontology_coverage(
                     extracted_result=extracted_result,
                     memory_config=memory_config,
                 )
                 if ontology_coverage:
-                    yield format_sse_message("ontology_coverage", ontology_coverage)
+                    result_data["ontology_coverage"] = ontology_coverage
             except Exception as cov_err:
                 logger.warning(f"[PILOT_RUN_STREAM] Ontology coverage computation failed: {cov_err}", exc_info=True)
+            
+            yield format_sse_message("result", result_data)
             
             # 步骤 7: 发出完成事件
             yield format_sse_message("done", {
