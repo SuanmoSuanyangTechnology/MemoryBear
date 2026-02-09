@@ -39,18 +39,17 @@ class VariableType(StrEnum):
         Raises:
             TypeError: If the type of the input value is not supported.
         """
-        var_type = type(var)
-        if isinstance(var_type, str):
+        if isinstance(var, str):
             return cls.STRING
-        elif isinstance(var_type, (int, float)):
+        elif isinstance(var, (int, float)):
             return cls.NUMBER
-        elif isinstance(var_type, bool):
+        elif isinstance(var, bool):
             return cls.BOOLEAN
-        elif isinstance(var_type, FileObject) or (isinstance(var, dict) and var.get('__file')):
+        elif isinstance(var, FileObject) or (isinstance(var, dict) and var.get('__file')):
             return cls.FILE
-        elif isinstance(var_type, dict):
+        elif isinstance(var, dict):
             return cls.OBJECT
-        elif isinstance(var_type, list):
+        elif isinstance(var, list):
             if len(var) == 0:
                 return cls.ARRAY_STRING
             else:
@@ -67,7 +66,7 @@ class VariableType(StrEnum):
                     return cls.NESTED_ARRAY
                 else:
                     raise TypeError(f"Unsupported array child type - {child_type}")
-        raise TypeError(f"Unsupported type - {var_type}")
+        raise TypeError(f"Unsupported type - {type(var)}")
 
 
 def DEFAULT_VALUE(var_type: VariableType) -> Any:

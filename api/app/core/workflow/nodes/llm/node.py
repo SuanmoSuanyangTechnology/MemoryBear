@@ -68,12 +68,13 @@ class LLMNode(BaseNode):
     - ai/assistant: AI 消息（AIMessage）
     """
 
-    def _output_types(self) -> dict[str, VariableType]:
-        return {"output": VariableType.STRING}
-
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
         self.typed_config: LLMNodeConfig | None = None
+        self.messages = []
+
+    def _output_types(self) -> dict[str, VariableType]:
+        return {"output": VariableType.STRING}
 
     def _render_context(self, message: str, variable_pool: VariablePool):
         context = f"<context>{self._render_template(self.typed_config.context, variable_pool)}</context>"
