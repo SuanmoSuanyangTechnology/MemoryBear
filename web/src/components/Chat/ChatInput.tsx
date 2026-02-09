@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-06 21:23:37
+ * @Last Modified time: 2026-02-09 10:26:38
  */
 import { type FC, useEffect, useMemo } from 'react'
 import { Flex, Input, Form } from 'antd'
@@ -66,7 +66,7 @@ const ChatInput: FC<ChatInputProps> = ({
   return (
     <div className={`rb:absolute rb:bottom-3 rb:left-0 rb:right-0 rb:w-full ${className}`}>
       <Flex vertical justify="space-between" className="rb:border rb:border-[#DFE4ED] rb:rounded-xl rb:min-h-30">
-        {previewFileList.length > 0 && <Flex gap={14} className="rb:mx-3! rb:mt-3!">
+        {previewFileList.length > 0 && <div className="rb:overflow-x-auto rb:max-w-full"><Flex gap={14} className="rb:mx-3! rb:mt-3! rb:w-max!">
           {previewFileList.map((file) => {
             if (file.type.includes('image')) {
               return (
@@ -101,7 +101,7 @@ const ChatInput: FC<ChatInputProps> = ({
               </div>
             )
           })}
-        </Flex>}
+        </Flex></div>}
         {/* Message input form */}
         <Form form={form} layout="vertical">
           <Form.Item name="message" noStyle>
