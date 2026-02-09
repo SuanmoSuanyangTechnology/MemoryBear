@@ -40,6 +40,7 @@ from app.models.file_model import File
 from app.models.knowledge_model import Knowledge
 from app.schemas import file_schema, document_schema
 from app.services.memory_agent_service import MemoryAgentService
+from app.utils.config_utils import resolve_config_id
 
 
 @celery_app.task(name="tasks.process_item")
@@ -903,6 +904,8 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 
     # Convert config_id string to UUID
     actual_config_id = None
+    with get_db_context() as db:
+        actual_config_id = resolve_config_id(config_id, db)
     if config_id:
         try:
             actual_config_id = uuid.UUID(config_id) if isinstance(config_id, str) else config_id
@@ -1001,13 +1004,15 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
     """
     from app.core.logging_config import get_logger
     logger = get_logger(__name__)
-
+    with get_db_context() as db:
+        config_id=resolve_config_id(config_id,db)
     logger.info(
         f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}, language={language}")
     start_time = time.time()
 
     # Convert config_id string to UUID
     actual_config_id = None
+
     if config_id:
         try:
             actual_config_id = uuid.UUID(config_id) if isinstance(config_id, str) else config_id
