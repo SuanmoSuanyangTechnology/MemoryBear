@@ -404,12 +404,12 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           } else if (platform === 'feishu') {
             // Validate Feishu credentials
             const feishuParams = {
-              app_id: formValues.parser_config?.app_id,
-              app_secret: formValues.parser_config?.app_secret,
-              folder_token: formValues.parser_config?.folder_token
+              feishu_app_id: formValues.parser_config?.app_id,
+              feishu_app_secret: formValues.parser_config?.app_secret,
+              feishu_folder_token: formValues.parser_config?.folder_token
             };
             
-            if (!feishuParams.app_id || !feishuParams.app_secret || !feishuParams.folder_token) {
+            if (!feishuParams.feishu_app_id || !feishuParams.feishu_app_secret || !feishuParams.feishu_folder_token) {
               messageApi.error(t('knowledgeBase.feishuAuthRequired'));
               setLoading(false);
               return;
