@@ -45,7 +45,7 @@ class MemoryReadNodeConfig(BaseNodeConfig):
 
 class MemoryWriteNodeConfig(BaseNodeConfig):
     message: str = Field(
-        ...
+        default=""
     )
 
     messages: list[MessageConfig] = Field(
