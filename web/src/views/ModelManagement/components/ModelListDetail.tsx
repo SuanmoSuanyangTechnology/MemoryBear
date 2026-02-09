@@ -30,12 +30,13 @@ import CustomSelect from '@/components/CustomSelect'
 interface ModelListDetailProps {
   /** Callback to refresh parent list */
   refresh?: () => void;
+  handleEdit: (vo?: ModelListItem) => void;
 }
 
 /**
  * Model list detail drawer component
  */
-const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh }, ref) => {
+const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh, handleEdit }, ref) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<ProviderModelItem>({} as ProviderModelItem)
@@ -95,7 +96,8 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
 
   /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
-      handleOpen,
+    handleOpen,
+    handleRefresh,
   }));
 
   /** Filter models by selected type */
@@ -149,7 +151,10 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               </Tooltip>
               <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
                 <Row gutter={12}>
-                  <Col span={24}>
+                  <Col span={12}>
+                    <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>
+                  </Col>
+                  <Col span={12}>
                     <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
                   </Col>
                 </Row>

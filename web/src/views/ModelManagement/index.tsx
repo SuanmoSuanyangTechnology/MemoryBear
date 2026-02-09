@@ -15,7 +15,7 @@ import { Button, Flex, Space, type SegmentedProps, Form } from 'antd'
 import { useTranslation } from 'react-i18next';
 
 import GroupModelModal from './components/GroupModelModal'
-import type { ModelListItem, GroupModelModalRef, CustomModelModalRef, ModelPlazaItem, BaseRef, Query } from './types'
+import type { ModelListItem, GroupModelModalRef, CustomModelModalRef, BaseRef, Query } from './types'
 import SearchInput from '@/components/SearchInput'
 import PageTabs from '@/components/PageTabs'
 import GroupModel from './Group'
@@ -38,7 +38,7 @@ const tabKeys = ['group', 'list', 'square']
   const configModalRef = useRef<GroupModelModalRef>(null)
   const customModelModalRef = useRef<CustomModelModalRef>(null)
   const groupRef = useRef<BaseRef>(null)
-  const squareRef = useRef<BaseRef>(null)
+  const modelListRef = useRef<BaseRef>(null)
   const [form] = Form.useForm<Query>()
   const query = Form.useWatch([], form)
 
@@ -56,24 +56,29 @@ const tabKeys = ['group', 'list', 'square']
   }
 
   /** Open edit modal based on active tab */
-  const handleEdit = (vo?: ModelListItem | ModelPlazaItem) => {
+  const handleEdit = (vo?: ModelListItem | ModelListItem) => {
     switch(activeTab) {
       case 'group':
         configModalRef?.current?.handleOpen(vo as ModelListItem)
         break
-      case 'square':
-        customModelModalRef?.current?.handleOpen(vo as ModelPlazaItem)
+      case 'list':
+        customModelModalRef?.current?.handleOpen(vo as ModelListItem)
         break
     }
   }
   /** Refresh list based on active tab */
-  const handleRefresh = () => {
+  const handleRefresh = (isEdit?: boolean) => {
     switch (activeTab) {
       case 'group':
         groupRef.current?.getList()
         break
-      case 'square':
-        squareRef.current?.getList()
+      case 'list':
+        console.log('isEdit', isEdit)
+        if (isEdit) {
+          modelListRef.current?.modelListDetailRefresh?.()
+        } else {
+          modelListRef.current?.getList()
+        }
         break
     }
   }
@@ -122,15 +127,15 @@ const tabKeys = ['group', 'list', 'square']
               </Form.Item>
             }
             {activeTab === 'group' && <Button type="primary" onClick={() => handleEdit()}>+ {t('modelNew.createGroupModel')}</Button>}
-            {activeTab === 'square' && <Button type="primary" onClick={() => handleEdit()}>+ {t('modelNew.createCustomModel')}</Button>}
+            {activeTab === 'list' && <Button type="primary" onClick={() => handleEdit()}>+ {t('modelNew.createCustomModel')}</Button>}
           </Space>
         </Form>
       </Flex>
 
       <div className="rb:w-full rb:h-[calc(100%-48px)] rb:my-4">
         {activeTab === 'group' && <GroupModel ref={groupRef} query={query} handleEdit={handleEdit} />}
-        {activeTab === 'list' && <ModelList query={query} />}
-        {activeTab === 'square' && <ModelSquare ref={squareRef} query={query} handleEdit={handleEdit} />}
+        {activeTab === 'list' && <ModelList ref={modelListRef} query={query} handleEdit={handleEdit} />}
+        {activeTab === 'square' && <ModelSquare query={query} />}
       </div>
       <GroupModelModal
         ref={configModalRef}

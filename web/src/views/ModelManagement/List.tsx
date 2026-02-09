@@ -10,11 +10,11 @@
  * Shows model tags and allows viewing model details
  */
 
-import { useRef, useState, useEffect, type FC } from 'react';
+import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Button, Flex, Row, Col } from 'antd'
 import { useTranslation } from 'react-i18next';
 
-import type { ProviderModelItem, KeyConfigModalRef, ModelListDetailRef } from './types'
+import type { ProviderModelItem, KeyConfigModalRef, ModelListDetailRef, ModelListItem, BaseRef } from './types'
 import RbCard from '@/components/RbCard/Card'
 import { getModelNewList } from '@/api/models'
 import PageEmpty from '@/components/Empty/PageEmpty';
@@ -26,11 +26,12 @@ import { getLogoUrl } from './utils'
 /**
  * Model list component
  */
-const ModelList: FC<{ query: any }> = ({ query }) => {
+const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListItem) => void; }> (({ query, handleEdit }, ref) => {
   const { t } = useTranslation();
   const keyConfigModalRef = useRef<KeyConfigModalRef>(null)
   const modelListDetailRef = useRef<ModelListDetailRef>(null)
   const [list, setList] = useState<ProviderModelItem[]>([])
+
   useEffect(() => {
     getList()
   }, [query])
@@ -54,6 +55,11 @@ const ModelList: FC<{ query: any }> = ({ query }) => {
     keyConfigModalRef.current?.handleOpen(vo)
   }
 
+  /** Expose methods to parent component */
+  useImperativeHandle(ref, () => ({
+    getList,
+    modelListDetailRefresh: () => modelListDetailRef.current?.handleRefresh()
+  }));
   return (
     <>
       {list.length === 0
@@ -96,9 +102,10 @@ const ModelList: FC<{ query: any }> = ({ query }) => {
       <ModelListDetail
         ref={modelListDetailRef}
         refresh={getList}
+        handleEdit={handleEdit}
       />
     </>
   )
-}
+})
 
 export default ModelList

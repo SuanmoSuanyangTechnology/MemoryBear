@@ -80,6 +80,7 @@ export interface GroupModelModalProps {
 export interface ModelListDetailRef {
   /** Open detail drawer with provider model data */
   handleOpen: (vo: ProviderModelItem) => void;
+  handleRefresh: () => void;
 }
 
 /**
@@ -284,10 +285,12 @@ export interface CustomModelForm {
   logo?: any;
   /** Model description */
   description: string;
-  /** Whether model is official */
-  is_official: boolean;
-  /** Model tags */
-  tags: string[];
+  api_keys: Array<{
+    /** API key value */
+    api_key: string;
+    /** API base URL */
+    api_base: string;
+  }>
 }
 
 /**
@@ -295,7 +298,7 @@ export interface CustomModelForm {
  */
 export interface CustomModelModalRef {
   /** Open modal with optional model plaza item */
-  handleOpen: (vo?: ModelPlazaItem) => void;
+  handleOpen: (vo?: ModelListItem) => void;
 }
 
 /**
@@ -303,7 +306,7 @@ export interface CustomModelModalRef {
  */
 export interface CustomModelModalProps {
   /** Callback to refresh model list */
-  refresh?: () => void;
+  refresh?: (flag?: boolean) => void;
 }
 
 /**
@@ -312,4 +315,5 @@ export interface CustomModelModalProps {
 export interface BaseRef {
   /** Refresh list data */
   getList: () => void;
+  modelListDetailRefresh?: () => void;
 }
