@@ -2,12 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-04 18:34:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-04 18:49:59
+ * @Last Modified time: 2026-02-09 15:46:07
  */
 import { useEffect, type FC } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { cookieUtils } from '@/utils/request'
+import { useI18n } from '@/store/locale'
 
 /**
  * JumpPage Component
@@ -26,11 +27,17 @@ import { cookieUtils } from '@/utils/request'
 const JumpPage: FC = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const { changeLanguage } = useI18n()
 
   useEffect(() => {
     // Convert URLSearchParams to a plain object for easier access
     const data = Object.fromEntries(searchParams)
-    const { access_token, refresh_token, target } = data
+    const { access_token, refresh_token, target, language } = data
+
+    if (language) {
+      changeLanguage(language)
+      cookieUtils.set('language', language)
+    }
 
     // Store authentication tokens in cookies for API authorization
     cookieUtils.set('authToken', access_token)
