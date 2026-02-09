@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 15:17:48 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-09 20:05:04
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -135,7 +135,10 @@ export const useWorkflowGraph = ({
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
-            if (key === 'memory' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+            if (type === 'memory-write' && key === 'message' && nodeLibraryConfig.config) {
+              nodeLibraryConfig.config['messages'].defaultValue = [{ role: 'USER', content: config[key] }]
+              delete nodeLibraryConfig.config[key]
+            } else if (key === 'memory' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
               const { memory, messages } = config as any;
               if (memory?.enable && messages && messages.length > 0) {
                 const lastMessage = messages[messages.length - 1]
