@@ -1,7 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-09 18:35:43 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-09 18:35:43 
+ */
 import { type FC, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
 import { Form, Row, Col, Select, Button, Divider, InputNumber, Switch, Input } from 'antd'
 import { CaretDownOutlined, CaretRightOutlined, SettingOutlined } from '@ant-design/icons';
+
 import Editor from '../../Editor'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import AuthConfigModal from './AuthConfigModal'
@@ -9,6 +16,7 @@ import type { AuthConfigModalRef, HttpRequestConfigForm } from './types'
 import VariableSelect from "../VariableSelect";
 import MessageEditor from '../MessageEditor'
 import EditableTable from './EditableTable'
+import { portTextAttrs } from '../../../constant'
 
 const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: any; }> = ({
   options,
@@ -32,6 +40,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
     form.setFieldValue(['body', 'data'], undefined)
   }
 
+  // Handle error handling method change and update node ports accordingly
   const handleChangeErrorHandleMethod = (method: string) => {
     form.setFieldsValue({
       error_handle: {
@@ -42,21 +51,21 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
       }
     })
     
-    // 更新节点连接桩
+    // Update node ports
     console.log('handleChangeErrorHandleMethod', selectedNode, graphRef?.current)
     if (selectedNode && graphRef?.current) {
       const existingPorts = selectedNode.getPorts();
       const errorPort = existingPorts.find((port: any) => port.id === 'ERROR');
       
       if (method === 'branch' && !errorPort) {
-        // 添加异常节点连接桩
+        // Add error branch port
         selectedNode.addPort({
           id: 'ERROR',
           group: 'right',
-          attrs: { text: { text: t('workflow.config.http-request.errorBranch'), fontSize: 12, fill: '#5B6167' }}
+          attrs: { text: { text: t('workflow.config.http-request.errorBranch'), ...portTextAttrs }}
         });
       } else if (method !== 'branch' && errorPort) {
-        // 移除异常节点连接桩和相关连线
+        // Remove error branch port and related edges
         const edges = graphRef.current.getEdges().filter((edge: any) => 
           edge.getSourceCellId() === selectedNode.id && edge.getSourcePortId() === 'ERROR'
         );

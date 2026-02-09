@@ -1,7 +1,13 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-09 18:30:28 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-09 18:30:28 
+ */
 import { useEffect, useState } from 'react';
 import { Popover } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { nodeLibrary, graphNodeLibrary, edgeAttrs } from '../constant';
+import { nodeLibrary, graphNodeLibrary, edgeAttrs, nodeWidth } from '../constant';
 
 interface PortClickHandlerProps {
   graph: any;
@@ -32,13 +38,14 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     };
   }, []);
 
+  // Handle node selection from popover menu and create new node with edge connection
   const handleNodeSelect = (selectedNodeType: any) => {
     if (!sourceNode || !graph) return;
 
     const sourceNodeData = sourceNode.getData();
     const sourceNodeType = sourceNodeData?.type;
     
-    // 如果是cycle-start节点，需要处理add-node节点
+    // If it's a cycle-start node, handle the add-node placeholder
     let addNodePosition = null;
     if (sourceNodeType === 'cycle-start' && sourceNodeData.cycle) {
       const cycleId = sourceNodeData.cycle;
@@ -53,38 +60,38 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       }
     }
     
-    // 计算新节点位置，避免重叠
+    // Calculate new node position to avoid overlapping
     const sourceBBox = sourceNode.getBBox();
     const nodeWidth = graphNodeLibrary[selectedNodeType.type]?.width || 120;
     const nodeHeight = graphNodeLibrary[selectedNodeType.type]?.height || 88;
     const horizontalSpacing = sourceNodeType === 'cycle-start' ? 40 : 80;
     const verticalSpacing = 10;
     
-    // 获取源连接桩的group信息
+    // Get source port group information
     const sourcePortInfo = sourceNode.getPorts().find((p: any) => p.id === sourcePort);
     const sourcePortGroup = sourcePortInfo?.group || sourcePort;
     console.log('sourcePortGroup', sourcePortGroup, sourcePortInfo)
     
-    // 如果有add-node位置，使用该位置，否则计算新位置
+    // If add-node position exists, use it; otherwise calculate new position
     let newX, newY;
     if (addNodePosition) {
       newX = addNodePosition.x;
       newY = addNodePosition.y;
     } else {
-      // 根据连接桩位置决定节点放置方向
+      // Determine node placement direction based on port position
       if (sourcePortGroup === 'left') {
-        // 左侧连接桩，在左侧添加节点
+        // Left port: add node to the left
         newX = sourceBBox.x - nodeWidth*2 - horizontalSpacing;
         newY = sourceBBox.y;
       } else {
-        // 右侧连接桩，在右侧添加节点
+        // Right port: add node to the right
         newX = sourceBBox.x + sourceBBox.width + horizontalSpacing;
         newY = sourceBBox.y;
       }
       
-      // 检查位置是否与现有节点重叠（只考虑与当前节点相连的节点）
+      // Check if position overlaps with existing nodes (only consider connected nodes)
       const checkOverlap = (x: number, y: number) => {
-        // 获取与源节点相连的节点
+        // Get nodes connected to the source node
         const connectedNodes = new Set();
         graph.getConnectedEdges(sourceNode).forEach((edge: any) => {
           const sourceId = edge.getSourceCellId();
@@ -95,20 +102,20 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
         
         return graph.getNodes().some((node: any) => {
           if (node.id === sourceNode.id) return false;
-          if (!connectedNodes.has(node.id)) return false; // 只考虑相连的节点
+          if (!connectedNodes.has(node.id)) return false; // Only consider connected nodes
           const bbox = node.getBBox();
           return !(x + nodeWidth < bbox.x || x > bbox.x + bbox.width || 
                   y + nodeHeight < bbox.y || y > bbox.y + bbox.height);
         });
       };
       
-      // 如果位置被占用，向下寻找空位
+      // If position is occupied, search downward for empty space
       while (checkOverlap(newX, newY)) {
         newY += nodeHeight + verticalSpacing;
       }
     }
     
-    // 创建新节点
+    // Create new node
     const id = `${selectedNodeType.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const newNode = graph.addNode({
       ...(graphNodeLibrary[selectedNodeType.type] || graphNodeLibrary.default),
@@ -120,12 +127,12 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
         type: selectedNodeType.type,
         icon: selectedNodeType.icon,
         name: t(`workflow.${selectedNodeType.type}`),
-        cycle: sourceNodeData.cycle, // 继承源节点的cycle
+        cycle: sourceNodeData.cycle, // Inherit cycle from source node
         config: selectedNodeType.config || {}
       },
     });
 
-    // 将新节点添加为父节点的子节点
+    // Add new node as child of parent node
     if (sourceNodeData.cycle) {
       const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle);
       if (parentNode) {
@@ -133,16 +140,16 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       }
     }
 
-    // 创建连线
+    // Create edge connection
     setTimeout(() => {
       const targetPorts = newNode.getPorts();
       let targetPort;
       
       if (sourcePortGroup === 'left') {
-        // 从左侧连接桩连出，连接到新节点的右侧
+        // Connect from left port to new node's right side
         targetPort = targetPorts.find((port: any) => port.group === 'right')?.id || 'right';
       } else {
-        // 从右侧连接桩连出，连接到新节点的左侧
+        // Connect from right port to new node's left side
         targetPort = targetPorts.find((port: any) => port.group === 'left')?.id || 'left';
       }
       
@@ -153,7 +160,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
         // zIndex: sourceNodeData.cycle && sourceNodeType == 'cycle-start' ? 1 : sourceNodeData.cycle ? 2 : 0
       });
       
-      // 循环节点内子节点通过连接桩添加时，调整循环节点大小
+      // Adjust loop node size when child node is added via port within loop node
       const cycleId = sourceNodeData.cycle;
       if (cycleId) {
         const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
@@ -174,7 +181,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
               
               const padding = 20;
               const bottomPadding = 50;
-              const newWidth = Math.max(240, bounds.maxX - bounds.minX + padding * 2);
+              const newWidth = Math.max(nodeWidth, bounds.maxX - bounds.minX + padding * 2);
               const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding + bottomPadding);
 
               parentNode.prop('size', { width: newWidth, height: newHeight });
@@ -183,7 +190,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
           
           adjustLoopSize();
           
-          // 监听子节点移动事件
+          // Listen to child node movement events
           const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
           childNodes.forEach((childNode: any) => {
             childNode.on('change:position', adjustLoopSize);
@@ -192,7 +199,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       }
     }, 50);
 
-    // 清理临时元素
+    // Clean up temporary element
     if (tempElement) {
       document.body.removeChild(tempElement);
       setTempElement(null);
@@ -210,7 +217,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
   };
 
   const content = (
-    <div style={{ maxHeight: '300px', overflowY: 'auto', minWidth: '240px' }}>
+    <div style={{ maxHeight: '300px', overflowY: 'auto', minWidth: `${nodeWidth}px` }}>
       {nodeLibrary.map((category, categoryIndex) => {
         const sourceNodeData = sourceNode?.getData();
         const isChildOfLoop = sourceNodeData?.cycle && graph?.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle && n.getData()?.type === 'loop');
