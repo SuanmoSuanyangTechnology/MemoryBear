@@ -645,9 +645,25 @@ class ExtractionOrchestrator:
         logger.info(f"总陈述句: {total_statements}, 用户陈述句: {filtered_statements}, 开始全局并行提取情绪")
 
         # 初始化情绪提取服务
+        # 如果 emotion_model_id 为空，回退到工作空间默认 LLM
         from app.services.emotion_extraction_service import EmotionExtractionService
+        
+        emotion_model_id = memory_config.emotion_model_id
+        if not emotion_model_id and memory_config.workspace_id:
+            from app.repositories.workspace_repository import get_workspace_models_configs
+            from app.db import SessionLocal
+            
+            db = SessionLocal()
+            try:
+                workspace_models = get_workspace_models_configs(db, memory_config.workspace_id)
+                if workspace_models and workspace_models.get("llm"):
+                    emotion_model_id = workspace_models["llm"]
+                    logger.info(f"emotion_model_id 为空，使用工作空间默认 LLM: {emotion_model_id}")
+            finally:
+                db.close()
+        
         emotion_service = EmotionExtractionService(
-            llm_id=memory_config.emotion_model_id if memory_config.emotion_model_id else None
+            llm_id=emotion_model_id if emotion_model_id else None
         )
 
         # 全局并行处理所有陈述句
