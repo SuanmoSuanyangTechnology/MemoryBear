@@ -337,6 +337,7 @@ class WorkflowExecutor:
                     logger.warning(f"[STREAM] Failed to evaluate segment: {current_segment.literal}")
 
             if final_chunk:
+                logger.info(f"[STREAM] StreamOutput Node:{self.activate_end}, chunk:{final_chunk}")
                 yield {
                     "event": "message",
                     "data": {
@@ -701,7 +702,8 @@ class WorkflowExecutor:
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
 
-            logger.info(f"Workflow execution completed: execution_id={self.execution_id}, elapsed_time={elapsed_time:.2f}s")
+            logger.info(
+                f"Workflow execution completed: execution_id={self.execution_id}, elapsed_time={elapsed_time:.2f}s")
 
             return self._build_final_output(result, elapsed_time, full_content)
 
@@ -763,7 +765,6 @@ class WorkflowExecutor:
         await self.__init_variable_pool(input_data)
         initial_state = self._prepare_initial_state(input_data)
 
-
         try:
             full_content = ''
             self._update_scope_activate("sys")
@@ -789,7 +790,7 @@ class WorkflowExecutor:
                     event_type = data.get("type", "node_chunk")  # "message" or "node_chunk"
                     if event_type == "node_chunk":
                         async for msg_event in self._handle_node_chunk_event(data):
-                            full_content += data.get("chunk")
+                            full_content += msg_event["data"]["chunk"]
                             yield msg_event
 
                     elif event_type == "node_error":

@@ -119,7 +119,7 @@ class VariablePool:
                 Storage for all variables managed by the pool.
         """
         self.locks = defaultdict(Lock)
-        self.variables: dict[str, dict[str, VariableStruct[Any]]] = {}
+        self.variables: dict[str, dict[str, VariableStruct[Any]]] = {"sys": {}, "conv": {}}
 
     @staticmethod
     def transform_selector(selector):

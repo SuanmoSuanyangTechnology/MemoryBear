@@ -100,7 +100,7 @@ class StreamOutputConfig(BaseModel):
         )
     )
 
-    control_nodes: dict[str, str] = Field(
+    control_nodes: dict[str, list[str]] = Field(
         ...,
         description=(
             "Control branch conditions for this End node output.\n"
@@ -161,7 +161,7 @@ class StreamOutputConfig(BaseModel):
         if scope in self.control_nodes.keys():
             if status is None:
                 raise RuntimeError("[Stream Output] Control node activation status not provided")
-            if status == self.control_nodes[scope]:
+            if status in self.control_nodes[scope]:
                 self.activate = True
 
         # Case 2: activate variable segments related to this node
@@ -228,6 +228,13 @@ class GraphBuilder:
             return self.node_map[node_id]["type"]
         except KeyError:
             raise RuntimeError(f"Node not found: Id={node_id}")
+
+    @staticmethod
+    def _merge_control_nodes(control_nodes: list[tuple[str, str]]) -> dict[str, list]:
+        result = defaultdict(list)
+        for node in control_nodes:
+            result[node[0]].append(node[1])
+        return result
 
     def _find_upstream_branch_node(self, target_node: str) -> tuple[bool, tuple[tuple[str, str]]]:
         """
@@ -372,7 +379,7 @@ class GraphBuilder:
                     activate=not has_branch,
 
                     # Branch nodes that control activation of this End node
-                    control_nodes=dict(control_nodes),
+                    control_nodes=self._merge_control_nodes(control_nodes),
 
                     # Convert output segments into OutputContent objects
                     outputs=list(
