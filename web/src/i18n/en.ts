@@ -1588,6 +1588,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       creating_nodes_edges_desc: 'Entity relationship creation completed, {{num}} relationships in total',
       deduplication_desc: 'Deduplication and disambiguation completed, {{count}} unique entities in total',
       custom_text: 'Debug Text',
+      ontologyCoverage: 'Ontology Type',
+      entity_total: 'Total {{num}} entities',
+      scene_type_distribution: 'Scene Type Distribution',
+      general_type_distribution: 'General Type Distribution',
+      unmatched: 'Unmatched',
     },
     memoryConversation: {
       searchPlaceholder: 'Enter user ID...',
