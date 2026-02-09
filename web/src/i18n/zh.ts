@@ -1668,6 +1668,11 @@ export const zh = {
       creating_nodes_edges_desc: '实体关系创建完成，共{{num}}条关系',
       deduplication_desc: '去重消歧完成，最终{{count}}个唯一实体',
       custom_text: '调试文本',
+      ontologyCoverage: '本体类型',
+      entity_total: '一共{{num}}个实体',
+      scene_type_distribution: '场景类型',
+      general_type_distribution: '通用类型',
+      unmatched: '未匹配',
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',
