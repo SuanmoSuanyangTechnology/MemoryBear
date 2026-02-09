@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 10:33:21
+ * @Last Modified time: 2026-02-09 16:56:27
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -210,7 +210,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
       })
       if (default_model_config_id === values?.default_model_config_id) {
         setChatList([{
-          label: vo.label || '',
+          label: defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name :  vo.label || '',
           model_config_id: default_model_config_id || '',
           model_parameters: {...rest},
           list: []
