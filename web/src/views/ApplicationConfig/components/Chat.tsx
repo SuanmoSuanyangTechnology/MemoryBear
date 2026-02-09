@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:27:39 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-09 10:52:55
  */
 /**
  * Chat debugging component for application testing
@@ -424,9 +424,9 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
               }
               <ChatContent
                 classNames={{
-                  'rb:mx-[16px] rb:pt-[24px]': true,
-                  'rb:h-[calc(100vh-258px)]': isCluster,
-                  'rb:h-[calc(100vh-356px)]': !isCluster,
+                  'rb:mx-[16px] rb:mt-6': true,
+                  'rb:h-[calc(100vh-282px)]': isCluster,
+                  'rb:h-[calc(100vh-380px)]': !isCluster,
                 }} 
                 contentClassNames={{
                   'rb:max-w-[400px]!': chatList.length === 1,
