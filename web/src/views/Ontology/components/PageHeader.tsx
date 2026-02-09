@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:24 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 14:10:56
+ * @Last Modified time: 2026-02-09 18:02:13
  */
 import { type FC, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -45,7 +45,7 @@ const PageHeader: FC<ConfigHeaderProps> = ({
   }
   return (
     <Header className="rb:w-full rb:h-16 rb:flex rb:justify-between rb:p-[0_16px_0_24px]! rb:border-b rb:border-[#EAECEE] rb:leading-8">
-      <div className="rb:flex rb:flex-col rb:justify-center rb:gap-1 rb:mr-4">
+      <div className="rb:flex rb:flex-col rb:justify-center rb:gap-1 rb:mr-4 rb:max-w-[calc(100%-300px)]">
         <div className="rb:text-[16px] rb:leading-6 rb:font-medium">
           {name}
         </div>
