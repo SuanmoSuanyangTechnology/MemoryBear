@@ -981,7 +981,7 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True)
-def write_message_task(self, end_user_id: str, message: str, config_id: str, storage_type: str, user_rag_memory_id: str,
+def write_message_task(self, end_user_id: str, message: list[dict], config_id: str, storage_type: str, user_rag_memory_id: str,
                        language: str = "zh") -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
 
