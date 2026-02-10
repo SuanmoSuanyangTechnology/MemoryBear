@@ -6,8 +6,8 @@ import os
 
 import pytest
 
-from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
-from app.core.workflow.variable_pool import VariablePool
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.variable.base_variable import VariableType
 
 TEST_WORKSPACE_ID = "test_workspace_id"
 TEST_USER_ID = "test_user_id"

@@ -6,13 +6,14 @@ import urllib.parse
 from string import Template
 from textwrap import dedent
 from typing import Any
-import urllib.parse
+
 import httpx
 
-from app.core.workflow.nodes import BaseNode, WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes import BaseNode
 from app.core.workflow.nodes.code.config import CodeNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 

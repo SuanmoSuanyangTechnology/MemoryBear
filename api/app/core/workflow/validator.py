@@ -187,7 +187,7 @@ class WorkflowValidator:
                     )
 
             # 8. 验证变量名
-            from app.core.workflow.expression_evaluator import ExpressionEvaluator
+            from app.core.workflow.utils.expression_evaluator import ExpressionEvaluator
             var_errors = ExpressionEvaluator.validate_variable_names(variables)
             errors.extend(var_errors)
 

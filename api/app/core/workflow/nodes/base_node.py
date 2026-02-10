@@ -5,55 +5,15 @@ from functools import cached_property
 from typing import Any, AsyncGenerator
 
 from langgraph.config import get_stream_writer
-from typing_extensions import TypedDict, Annotated
 
 from app.core.config import settings
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.enums import BRANCH_NODES
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
 from app.services.multimodal_service import PROVIDER_STRATEGIES
 
 logger = logging.getLogger(__name__)
-
-
-def merge_activate_state(x, y):
-    return {
-        k: x.get(k, False) or y.get(k, False)
-        for k in set(x) | set(y)
-    }
-
-
-def merge_looping_state(x, y):
-    return y if y > x else x
-
-
-class WorkflowState(TypedDict):
-    """Workflow state
-
-    The state object passed between nodes in a workflow, containing messages, variables, node outputs, etc.
-    """
-    # List of messages (append mode)
-    messages: Annotated[list[dict[str, str]], lambda x, y: y]
-
-    # Set of loop node IDs, used for assigning values in loop nodes
-    cycle_nodes: list
-    looping: Annotated[int, merge_looping_state]
-
-    # Node outputs (stores execution results of each node for variable references)
-    # Uses a custom merge function to combine new node outputs into the existing dictionary
-    node_outputs: Annotated[dict[str, Any], lambda x, y: {**x, **y}]
-
-    # Execution context
-    execution_id: str
-    workspace_id: str
-    user_id: str
-
-    # Error information (for error edges)
-    error: str | None
-    error_node: str | None
-
-    # node activate status
-    activate: Annotated[dict[str, bool], merge_activate_state]
 
 
 class BaseNode(ABC):
@@ -584,7 +544,7 @@ class BaseNode(ABC):
         Returns:
             The rendered string with all variables substituted.
         """
-        from app.core.workflow.template_renderer import render_template
+        from app.core.workflow.utils.template_renderer import render_template
 
         return render_template(
             template=template,
@@ -611,7 +571,7 @@ class BaseNode(ABC):
         Returns:
             The boolean result of evaluating the expression.
         """
-        from app.core.workflow.expression_evaluator import evaluate_condition
+        from app.core.workflow.utils.expression_evaluator import evaluate_condition
 
         return evaluate_condition(
             expression=expression,

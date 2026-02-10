@@ -33,8 +33,6 @@ key = b64decode(key)
 
 os.chdir(running_path)
 
-# Preload code
-{{preload}}
 
 # Apply security if library is available
 init_status = lib.init_seccomp({{uid}}, {{gid}}, {{enable_network}})
@@ -42,6 +40,8 @@ if init_status != 0:
     raise Exception(f"code executor err - {str(init_status)}")
 del lib
 
+# Preload code
+{{preload}}
 # Decrypt and execute code
 code = b64decode("{{code}}")
 

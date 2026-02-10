@@ -1,12 +1,12 @@
 import logging
 from typing import Any
 
-from app.core.workflow.nodes import WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.jinja_render.config import JinjaRenderNodeConfig
-from app.core.workflow.template_renderer import TemplateRenderer
+from app.core.workflow.utils.template_renderer import TemplateRenderer
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 
