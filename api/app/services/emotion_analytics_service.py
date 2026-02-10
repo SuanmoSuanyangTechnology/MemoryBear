@@ -220,7 +220,8 @@ class EmotionAnalyticsService:
         """计算积极率
 
         根据情绪类型分类正面、负面和中性情绪，计算积极率。
-        公式：(正面数 / (正面数 + 负面数)) * 100
+        当存在非中性情绪时：(正面数 / (正面数 + 负面数)) * 100
+        当只有中性情绪时：基于中性情绪的存在给出基准分数
 
         Args:
             emotions: 情绪数据列表，每个包含 emotion_type 字段
@@ -245,8 +246,11 @@ class EmotionAnalyticsService:
         total_non_neutral = positive_count + negative_count
         if total_non_neutral > 0:
             score = (positive_count / total_non_neutral) * 100
+        elif neutral_count > 0:
+            # 只有中性情绪，说明情绪状态平稳，给予基准分 50
+            score = 50.0
         else:
-            score = 50.0  # 如果没有非中性情绪，默认为50
+            score = 0.0  # 完全没有情绪数据
 
         logger.debug(f"积极率计算: positive={positive_count}, negative={negative_count}, "
                      f"neutral={neutral_count}, score={score:.2f}")

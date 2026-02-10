@@ -349,11 +349,30 @@ async def render_emotion_suggestions_prompt(
     import json
     
     # 预处理 emotion_distribution 为 JSON 字符串
+    # 如果是中文，将 emotion_distribution 的 key 翻译为中文
+    emotion_distribution = health_data.get('emotion_distribution', {})
+    if language == "zh":
+        emotion_type_zh = {
+            'joy': '喜悦', 'sadness': '悲伤', 'anger': '愤怒',
+            'fear': '恐惧', 'surprise': '惊讶', 'neutral': '中性'
+        }
+        emotion_distribution = {
+            emotion_type_zh.get(k, k): v for k, v in emotion_distribution.items()
+        }
     emotion_distribution_json = json.dumps(
-        health_data.get('emotion_distribution', {}), 
+        emotion_distribution, 
         ensure_ascii=False, 
         indent=2
     )
+    
+    # 翻译 dominant_negative_emotion
+    dominant_negative_translated = None
+    dominant_neg = patterns.get('dominant_negative_emotion')
+    if dominant_neg and language == "zh":
+        emotion_type_zh_map = {
+            'sadness': '悲伤', 'anger': '愤怒', 'fear': '恐惧'
+        }
+        dominant_negative_translated = emotion_type_zh_map.get(dominant_neg, dominant_neg)
     
     template = prompt_env.get_template("generate_emotion_suggestions.jinja2")
     rendered_prompt = template.render(
@@ -361,7 +380,8 @@ async def render_emotion_suggestions_prompt(
         patterns=patterns,
         user_profile=user_profile,
         emotion_distribution_json=emotion_distribution_json,
-        language=language
+        language=language,
+        dominant_negative_translated=dominant_negative_translated
     )
     
     # 记录渲染结果到提示日志

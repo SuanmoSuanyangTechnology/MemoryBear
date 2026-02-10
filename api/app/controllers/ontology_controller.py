@@ -233,6 +233,14 @@ async def extract_ontology(
             language=language
         )
         
+        # 根据语言类型统一 name 字段
+        # zh: name 使用 name_chinese（中文名）
+        # en: name 保持原值（英文 PascalCase）
+        if language == "zh":
+            for cls in result.classes:
+                if cls.name_chinese:
+                    cls.name = cls.name_chinese
+        
         # 构建响应
         response = ExtractionResponse(
             classes=result.classes,
