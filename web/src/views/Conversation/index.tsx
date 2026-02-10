@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 20:20:01
+ * @Last Modified time: 2026-02-10 17:41:05
  */
 /**
  * Conversation Page
@@ -254,10 +254,8 @@ const Conversation: FC = () => {
       })
   }
 
-  const [update, setUpdate] = useState(false)
   const fileChange = (file?: any) => {
     form.setFieldValue('files', [...(queryValues.files || []), file])
-    setUpdate(prev => !prev)
   }
   // const handleRecordingComplete = async (file: any) => {
   //   console.log('file', file)
@@ -353,8 +351,6 @@ const Conversation: FC = () => {
                               action={shareFileUploadUrlWithoutApiPrefix}
                               fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']}
                               onChange={fileChange}
-                              fileList={[]}
-                              update={update}
                               requestConfig={{
                                 headers: {
                                   'Content-Type': 'multipart/form-data',

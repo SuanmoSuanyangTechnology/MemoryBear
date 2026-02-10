@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 16:41:31
+ * @Last Modified time: 2026-02-10 17:40:08
  */
 /**
  * File Upload Component
@@ -55,8 +55,6 @@ interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
   maxCount?: number;
   /** Custom file removal callback */
   onRemove?: (file: UploadFile) => boolean | void | Promise<boolean | void>;
-  /** Trigger to reset file list */
-  update?: boolean;
 }
 // Mapping of file extensions to MIME types
 const ALL_FILE_TYPE: {
@@ -109,7 +107,6 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   isAutoUpload = true,
   maxCount = 1,
   onRemove: customOnRemove,
-  update,
   requestConfig,
   ...props
 }, ref) => {
@@ -117,11 +114,6 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   const { message } = App.useApp()
   const [fileList, setFileList] = useState<UploadFile[]>(propFileList);
   const [accept, setAccept] = useState<string | undefined>();
-
-  // Reset file list when update prop changes
-  useEffect(() => {
-    setFileList([])
-  }, [update])
 
   /**
    * Validates file type and size before upload
@@ -185,9 +177,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   /**
    * Handles upload state changes
    */
-  const handleChange: UploadProps['onChange'] = ({ fileList: newFileList, event }) => {
-    console.log('event', event)
-    setFileList(newFileList);
+  const handleChange: UploadProps['onChange'] = ({ fileList: newFileList }) => {
     if (onChange) {
       onChange(maxCount === 1 ? newFileList[0] : newFileList);
     }
