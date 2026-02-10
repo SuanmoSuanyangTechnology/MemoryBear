@@ -1359,7 +1359,7 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     logger.info(f"Successfully retrieved {len(result)} connected configs")
     return result
 async def agent_read(end_user_id,question,config_id,db,storage_type,user_rag_memory_id):
-    memory_content = asyncio.run(
+    memory_content = await (
         MemoryAgentService().read_memory(
             end_user_id=end_user_id,
             message=question,

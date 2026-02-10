@@ -70,7 +70,7 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
     logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
 
     @tool(args_schema=LongTermMemoryInput)
-    def long_term_memory(question: str) -> str:
+    async def long_term_memory(question: str) -> str:
         """
         从用户的历史记忆中检索相关信息。用于了解用户的背景、偏好和历史对话内容。
 
@@ -97,12 +97,9 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
         from app.db import get_db_context
         try:
             with get_db_context() as db:
-                memory_content = asyncio.run(
-                    agent_read(end_user_id, question, config_id, db, storage_type, user_rag_memory_id)
-                )
+                memory_content = await agent_read(end_user_id, question, config_id, db, storage_type, user_rag_memory_id)
             logger.info(f'用户ID：Agent:{end_user_id}')
             logger.debug("调用长期记忆 API", extra={"question": question, "end_user_id": end_user_id})
-
             logger.info(
                 "长期记忆检索成功",
                 extra={
