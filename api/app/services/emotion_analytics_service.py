@@ -388,6 +388,16 @@ class EmotionAnalyticsService:
                 time_range=time_range
             )
 
+            # 如果指定时间范围内没有数据，尝试更大的时间范围
+            if not emotions and time_range != "90d":
+                logger.info(f"用户 {end_user_id} 在 {time_range} 内无数据，尝试90天范围")
+                emotions = await self.emotion_repo.get_emotions_in_range(
+                    end_user_id=end_user_id,
+                    time_range="90d"
+                )
+                if emotions:
+                    time_range = "90d"
+
             # 如果没有数据，返回默认值
             if not emotions:
                 logger.warning(f"用户 {end_user_id} 在时间范围 {time_range} 内没有情绪数据")
@@ -573,6 +583,27 @@ class EmotionAnalyticsService:
                 end_user_id=end_user_id,
                 time_range="30d"
             )
+
+            # 3.1 如果30天内没有数据，尝试获取90天的数据
+            if not emotions:
+                logger.info(f"用户 {end_user_id} 30天内无情绪数据，尝试获取90天数据")
+                emotions = await self.emotion_repo.get_emotions_in_range(
+                    end_user_id=end_user_id,
+                    time_range="90d"
+                )
+                health_data = await self.calculate_emotion_health_index(end_user_id, time_range="90d")
+
+            # 3.2 如果仍然没有时间范围内的数据，从情绪标签统计获取（无时间过滤）
+            if not emotions:
+                logger.info(f"用户 {end_user_id} 90天内也无情绪数据，从标签统计获取全量数据")
+                tags_data = await self.get_emotion_tags(end_user_id=end_user_id)
+                if tags_data.get("total_count", 0) > 0:
+                    # 用标签统计数据构建简化的 health_data
+                    health_data["emotion_distribution"] = {
+                        tag["emotion_type"]: tag["count"]
+                        for tag in tags_data.get("tags", [])
+                    }
+                    health_data["total_emotion_count"] = tags_data["total_count"]
 
             # 4. 分析情绪模式
             patterns = self._analyze_emotion_patterns(emotions)

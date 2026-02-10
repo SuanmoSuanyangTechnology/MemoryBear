@@ -244,16 +244,34 @@ async def get_emotion_suggestions(
         )
 
         if data is None:
-            # 缓存不存在或已过期
+            # 缓存不存在或已过期，自动触发生成
             api_logger.info(
-                f"用户 {request.end_user_id} 的建议缓存不存在或已过期",
+                f"用户 {request.end_user_id} 的建议缓存不存在或已过期，自动生成新建议",
                 extra={"end_user_id": request.end_user_id}
             )
-            return fail(
-                BizCode.NOT_FOUND,
-                "建议缓存不存在或已过期，请右上角刷新生成新建议",
-                ""
-            )
+            try:
+                data = await emotion_service.generate_emotion_suggestions(
+                    end_user_id=request.end_user_id,
+                    db=db,
+                    language=language
+                )
+                # 保存到缓存
+                await emotion_service.save_suggestions_cache(
+                    end_user_id=request.end_user_id,
+                    suggestions_data=data,
+                    db=db,
+                    expires_hours=24
+                )
+            except Exception as gen_e:
+                api_logger.warning(
+                    f"自动生成建议失败: {str(gen_e)}",
+                    extra={"end_user_id": request.end_user_id}
+                )
+                return fail(
+                    BizCode.NOT_FOUND,
+                    "建议缓存不存在或已过期，自动生成失败，请稍后重试",
+                    ""
+                )
 
         api_logger.info(
             "个性化建议获取成功（缓存）",
