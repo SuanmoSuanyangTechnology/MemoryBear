@@ -15,7 +15,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.celery_app import celery_app
 from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -27,7 +26,7 @@ from app.schemas.app_schema import FileInput
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services import task_service
 from app.services.langchain_tool_server import Search
-from app.services.memory_agent_service import MemoryAgentService
+from app.services.memory_agent_service import MemoryAgentService, agent_read
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
@@ -95,34 +94,12 @@ def create_long_term_memory_tool(memory_config: Dict[str, Any], end_user_id: str
             检索到的历史记忆内容
         """
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
+        from app.db import get_db_context
         try:
-            from app.db import get_db
-            db = next(get_db())
-            try:
+            with get_db_context() as db:
                 memory_content = asyncio.run(
-                    MemoryAgentService().read_memory(
-                        end_user_id=end_user_id,
-                        message=question,
-                        history=[],
-                        search_switch="2",
-                        config_id=config_id,
-                        db=db,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
-                    )
+                    agent_read(end_user_id, question, config_id, db, storage_type, user_rag_memory_id)
                 )
-                task = celery_app.send_task(
-                    "app.core.memory.agent.read_message",
-                    args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
-                )
-                result = task_service.get_task_memory_read_result(task.id)
-                status = result.get("status")
-                logger.info(f"读取任务状态：{status}")
-                if memory_content:
-                    memory_content = memory_content['answer']
-
-            finally:
-                db.close()
             logger.info(f'用户ID：Agent:{end_user_id}')
             logger.debug("调用长期记忆 API", extra={"question": question, "end_user_id": end_user_id})
 

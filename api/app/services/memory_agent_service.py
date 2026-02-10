@@ -11,6 +11,7 @@ TODO: Refactor get_end_user_connected_config
 3. This will eliminate the need for callers to call load_memory_config separately
 4. Update all callers to use the new unified function
 """
+import asyncio
 import json
 import os
 import re
@@ -24,7 +25,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
+from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.agent.langgraph_graph.read_graph import make_read_graph
@@ -44,6 +45,7 @@ from app.repositories.memory_short_repository import ShortTermMemoryRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.memory_config_schema import ConfigurationError
+from app.services import task_service
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
@@ -1356,3 +1358,26 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
 
     logger.info(f"Successfully retrieved {len(result)} connected configs")
     return result
+async def agent_read(end_user_id,question,config_id,db,storage_type,user_rag_memory_id):
+    memory_content = asyncio.run(
+        MemoryAgentService().read_memory(
+            end_user_id=end_user_id,
+            message=question,
+            history=[],
+            search_switch="2",
+            config_id=config_id,
+            db=db,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id
+        )
+    )
+    task = celery_app.send_task(
+        "app.core.memory.agent.read_message",
+        args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
+    )
+    result = task_service.get_task_memory_read_result(task.id)
+    status = result.get("status")
+    logger.info(f"读取任务状态：{status}")
+    if memory_content:
+        memory_content = memory_content['answer']
+        return memory_content
