@@ -22,7 +22,7 @@ class ExtractedStatement(BaseModel):
     statement: str = Field(..., description="The extracted statement text")
     statement_type: str = Field(..., description="FACT, OPINION, SUGGESTION or PREDICTION")
     temporal_type: str = Field(..., description="STATIC, DYNAMIC, ATEMPORAL")
-    relevence: str = Field(..., description="RELEVANT or IRRELEVANT")
+    relevance: str = Field(..., description="RELEVANT or IRRELEVANT")
 
 class StatementExtractionResponse(BaseModel):
     statements: List[ExtractedStatement] = Field(default_factory=list, description="List of extracted statements")
@@ -132,7 +132,7 @@ class StatementExtractor:
                 # Normalize and correct enums defensively
                 stmt_type_str = str(extracted_stmt.statement_type).strip().upper()
                 temporal_type_str = str(extracted_stmt.temporal_type).strip().upper()
-                relevence_str = str(extracted_stmt.relevence).strip().upper()
+                relevence_str = str(extracted_stmt.relevance).strip().upper()
 
                 # Convert strings to enum types with fallback defaults
                 try:

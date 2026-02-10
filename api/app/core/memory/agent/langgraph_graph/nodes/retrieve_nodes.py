@@ -279,15 +279,27 @@ async def retrieve(state: ReadState) -> ReadState:
     logger.info(f"Retrieve: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     databases_anser = []
 
-    async def get_llm_info():
-        with get_db_context() as db:  # 使用同步数据库上下文管理器
-            config_service = MemoryConfigService(db)
-            return await llm_infomation(state)
-    llm_config = await get_llm_info()
-    api_key_obj = llm_config.api_keys[0]
-    api_key = api_key_obj.api_key
-    api_base = api_key_obj.api_base
-    model_name = api_key_obj.model_name
+    # Build LLM client: Gemini mode (from llm_params) or database mode
+    gemini_mode = memory_config.llm_params.get("_gemini_mode", False) if memory_config and memory_config.llm_params else False
+
+    if gemini_mode:
+        # Gemini mode: use connection info from llm_params directly, skip DB lookup
+        api_key = memory_config.llm_params["_gemini_api_key"]
+        api_base = memory_config.llm_params["_gemini_api_base"]
+        model_name = memory_config.llm_params["_gemini_model_name"]
+        logger.info(f"Retrieve: using Gemini mode (model={model_name})")
+    else:
+        # Database mode: query model_configs table by llm_model_id
+        async def get_llm_info():
+            with get_db_context() as db:
+                config_service = MemoryConfigService(db)
+                return await llm_infomation(state)
+        llm_config = await get_llm_info()
+        api_key_obj = llm_config.api_keys[0]
+        api_key = api_key_obj.api_key
+        api_base = api_key_obj.api_base
+        model_name = api_key_obj.model_name
+
     llm = ChatOpenAI(
         model=model_name,
         api_key=api_key,

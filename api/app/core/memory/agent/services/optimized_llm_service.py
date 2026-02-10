@@ -32,11 +32,33 @@ class OptimizedLLMService:
         self.client_factory = MemoryClientFactory(db_session)
         self._client_cache: Dict[str, OpenAIClient] = {}
         
-    def _get_cached_client(self, llm_model_id: str) -> OpenAIClient:
-        """获取缓存的LLM客户端，避免重复创建"""
-        if llm_model_id not in self._client_cache:
-            self._client_cache[llm_model_id] = self.client_factory.get_llm_client(llm_model_id)
-        return self._client_cache[llm_model_id]
+    def _get_cached_client(self, llm_model_id: str, llm_params: dict = None) -> OpenAIClient:
+        """获取缓存的LLM客户端，避免重复创建。
+        
+        支持 Gemini 模式：当 llm_params 包含 _gemini_mode=True 时，
+        直接使用 llm_params 中的连接信息构建客户端，跳过数据库查询。
+        """
+        cache_key = str(llm_model_id)
+
+        if cache_key not in self._client_cache:
+            # Gemini 模式：直接用 llm_params 中的连接信息
+            if llm_params and llm_params.get("_gemini_mode"):
+                from app.core.models.base import RedBearModelConfig as _RBConfig
+                self._client_cache[cache_key] = OpenAIClient(
+                    _RBConfig(
+                        model_name=llm_params["_gemini_model_name"],
+                        provider="openai",
+                        api_key=llm_params["_gemini_api_key"],
+                        base_url=llm_params["_gemini_api_base"],
+                    ),
+                    type_="chat",
+                )
+                logger.info(f"Created Gemini LLM client: {llm_params['_gemini_model_name']}")
+            else:
+                # 数据库模式：通过 MemoryClientFactory 查询 model_configs
+                self._client_cache[cache_key] = self.client_factory.get_llm_client(llm_model_id)
+
+        return self._client_cache[cache_key]
     
     async def structured_response(
         self,
@@ -44,7 +66,8 @@ class OptimizedLLMService:
         system_prompt: str,
         response_model: Type[T],
         user_message: Optional[str] = None,
-        fallback_value: Optional[Any] = None
+        fallback_value: Optional[Any] = None,
+        llm_params: dict = None,
     ) -> T:
         """
         统一的结构化响应接口
@@ -55,12 +78,13 @@ class OptimizedLLMService:
             response_model: 响应模型类
             user_message: 用户消息（可选）
             fallback_value: 失败时的降级值
+            llm_params: LLM参数（Gemini模式时包含连接信息）
             
         Returns:
             结构化响应对象
         """
         try:
-            llm_client = self._get_cached_client(llm_model_id)
+            llm_client = self._get_cached_client(llm_model_id, llm_params)
             
             messages = [{"role": "system", "content": system_prompt}]
             if user_message:
@@ -122,7 +146,8 @@ class OptimizedLLMService:
         llm_model_id: str,
         system_prompt: str,
         user_message: Optional[str] = None,
-        fallback_message: str = "信息不足，无法回答"
+        fallback_message: str = "信息不足，无法回答",
+        llm_params: dict = None,
     ) -> str:
         """
         简单的文本响应接口
@@ -132,12 +157,13 @@ class OptimizedLLMService:
             system_prompt: 系统提示词
             user_message: 用户消息（可选）
             fallback_message: 失败时的降级消息
+            llm_params: LLM参数（Gemini模式时包含连接信息）
             
         Returns:
             响应文本
         """
         try:
-            llm_client = self._get_cached_client(llm_model_id)
+            llm_client = self._get_cached_client(llm_model_id, llm_params)
             
             messages = [{"role": "system", "content": system_prompt}]
             if user_message:
@@ -236,7 +262,8 @@ class LLMServiceMixin:
             system_prompt=system_prompt,
             response_model=response_model,
             user_message=user_message,
-            fallback_value=fallback_value
+            fallback_value=fallback_value,
+            llm_params=getattr(memory_config, 'llm_params', None),
         )
     
     async def call_llm_simple(
@@ -273,5 +300,6 @@ class LLMServiceMixin:
             llm_model_id=llm_model_id,
             system_prompt=system_prompt,
             user_message=user_message,
-            fallback_message=fallback_message
+            fallback_message=fallback_message,
+            llm_params=getattr(memory_config, 'llm_params', None),
         )
