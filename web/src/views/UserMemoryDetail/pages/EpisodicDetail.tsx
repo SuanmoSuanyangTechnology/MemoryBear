@@ -242,7 +242,7 @@ const EpisodicDetail: FC = () => {
                       {detail.content_records.map((vo, index) => <div key={index} className="rb:text-[#5B6167] rb:leading-5">- {vo}</div>)}
                     </div>
                     <RbAlert>
-                      {t('episodicDetail.emotion')}: {t(`statementDetail.${detail.emotion}`)}
+                      {t('episodicDetail.emotion')}: {t(`episodicDetail.${detail.emotion || 'none'}`)}
                     </RbAlert>
                   </Space>
                 )
