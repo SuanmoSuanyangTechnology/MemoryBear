@@ -33,8 +33,8 @@ const DocumentDetails: FC = () => {
     documentId, 
     parentId: locationParentId, 
     breadcrumbPath 
-  } = location.state as { 
-    documentId: string; 
+  } = (location.state || {}) as { 
+    documentId?: string; 
     parentId?: string; 
     breadcrumbPath?: BreadcrumbPath;
   };
@@ -50,6 +50,18 @@ const DocumentDetails: FC = () => {
   const [parserMode, setParserMode] = useState(0);
   const insertModalRef = useRef<InsertModalRef>(null);
   const isManualRefreshRef = useRef(false);
+  
+  // Early return if no documentId
+  if (!documentId) {
+    return (
+      <div className="rb:flex rb:items-center rb:justify-center rb:h-full rb:flex-col rb:gap-4">
+        <div className="rb:text-gray-500">{t('knowledgeBase.documentIdRequired') || '文档ID不能为空'}</div>
+        <Button type="primary" onClick={() => navigate(-1)}>
+          {t('common.back') || '返回'}
+        </Button>
+      </div>
+    );
+  }
   
   useEffect(() => {
     if (documentId) {

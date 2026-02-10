@@ -617,7 +617,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           {thirdPartyPlatform === 'feishu' && (
             <>
               <Form.Item
-                name={['parser_config', 'app_id']}
+                name={['parser_config', 'feishu_app_id']}
                 label={t('knowledgeBase.createForm.feishuAppId')}
                 rules={[{ required: true, message: t('knowledgeBase.createForm.feishuAppIdRequired') }]}
               >
