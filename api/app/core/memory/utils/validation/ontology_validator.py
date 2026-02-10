@@ -88,8 +88,10 @@ class OntologyValidator:
             logger.warning(f"Validation failed: {error_msg}")
             return False, error_msg
         
-        # Check if starts with uppercase letter
-        if not name[0].isupper():
+        # Check if starts with uppercase letter (only for ASCII letters)
+        # For Chinese/Unicode characters, skip this check
+        first_char = name[0]
+        if first_char.isascii() and first_char.isalpha() and not first_char.isupper():
             error_msg = f"Class name '{name}' must start with an uppercase letter (PascalCase)"
             logger.warning(f"Validation failed: {error_msg}")
             return False, error_msg
@@ -100,9 +102,9 @@ class OntologyValidator:
             logger.warning(f"Validation failed: {error_msg}")
             return False, error_msg
         
-        # Check for invalid characters (only alphanumeric and underscore allowed)
-        if not re.match(r'^[A-Za-z0-9_]+$', name):
-            error_msg = f"Class name '{name}' contains invalid characters. Only alphanumeric characters and underscores are allowed"
+        # Check for invalid characters (allow alphanumeric, underscore, and Unicode characters)
+        if not re.match(r'^[A-Za-z0-9_\u4e00-\u9fff]+$', name):
+            error_msg = f"Class name '{name}' contains invalid characters. Only alphanumeric characters, underscores, and Chinese characters are allowed"
             logger.warning(f"Validation failed: {error_msg}")
             return False, error_msg
         
