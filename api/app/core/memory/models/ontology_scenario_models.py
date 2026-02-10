@@ -74,7 +74,7 @@ class OntologyClass(BaseModel):
         """Validate that the class name follows PascalCase convention.
 
         PascalCase rules:
-        - Must start with an uppercase letter
+        - Must start with an uppercase letter (for English) or any character (for Chinese/Unicode)
         - Cannot contain spaces
         - Should not contain special characters except underscores
 
@@ -90,7 +90,10 @@ class OntologyClass(BaseModel):
         if not v:
             raise ValueError("Class name cannot be empty")
         
-        if not v[0].isupper():
+        # For Chinese/Unicode characters, skip the uppercase check
+        # Only check uppercase for ASCII letters
+        first_char = v[0]
+        if first_char.isascii() and first_char.isalpha() and not first_char.isupper():
             raise ValueError(
                 f"Class name '{v}' must start with an uppercase letter (PascalCase)"
             )
@@ -100,11 +103,11 @@ class OntologyClass(BaseModel):
                 f"Class name '{v}' cannot contain spaces (PascalCase)"
             )
         
-        # Check for invalid characters (allow alphanumeric and underscore only)
-        if not all(c.isalnum() or c == '_' for c in v):
+        # Check for invalid characters (allow alphanumeric, underscore, and Unicode characters)
+        if not all(c.isalnum() or c == '_' or ord(c) > 127 for c in v):
             raise ValueError(
                 f"Class name '{v}' contains invalid characters. "
-                "Only alphanumeric characters and underscores are allowed"
+                "Only alphanumeric characters, underscores, and Unicode characters are allowed"
             )
         
         return v
