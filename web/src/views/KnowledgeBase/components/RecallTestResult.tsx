@@ -100,6 +100,20 @@ const RecallTestResult = ({
     }
   };
 
+  // Show skeleton when initial loading
+  if (loading && data.length === 0) {
+    return (
+      <div className='rb:flex rb:flex-col'>
+        <div className='rb:flex rb:items-center rb:justify-start rb:gap-2 rb:mb-4'>
+          <span className='rb:text-lg rb:font-medium'>{t('knowledgeBase.recallResult')}</span>
+        </div>
+        <Skeleton active paragraph={{ rows: 3 }} />
+        <Skeleton active paragraph={{ rows: 3 }} className='rb:mt-4' />
+        <Skeleton active paragraph={{ rows: 3 }} className='rb:mt-4' />
+      </div>
+    );
+  }
+
   if (data.length === 0 && showEmpty) {
     return (
       <NoData
