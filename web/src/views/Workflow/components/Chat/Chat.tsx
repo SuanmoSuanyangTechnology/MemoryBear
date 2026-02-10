@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-06 21:10:56 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-10 12:17:41
  */
 /**
  * Workflow Chat Component
@@ -99,6 +99,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     setChatList([])
     setVariables([])
     setConversationId(null)
+    setMessage(undefined)
+    setFileList([])
   }
   /**
    * Opens the variable configuration modal
@@ -148,7 +150,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
       return
     }
 
-    // setLoading(true)
+    setLoading(true)
     const message = msg
     setChatList(prev => [...prev, {
       role: 'user',
@@ -284,6 +286,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
               return newList
             })
             setStreamLoading(false)
+            setLoading(false)
             break
         }
 

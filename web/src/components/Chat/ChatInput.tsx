@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 10:26:38
+ * @Last Modified time: 2026-02-10 12:13:52
  */
 import { type FC, useEffect, useMemo } from 'react'
 import { Flex, Input, Form } from 'antd'
@@ -60,6 +60,7 @@ const ChatInput: FC<ChatInputProps> = ({
   }, [fileList])
 
   const handleSend = () => {
+    if (loading || !values || !values?.message || values?.message?.trim() === '') return
     onSend(values.message)
   }
 
