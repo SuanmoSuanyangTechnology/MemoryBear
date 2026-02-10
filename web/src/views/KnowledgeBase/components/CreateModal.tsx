@@ -579,7 +579,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       {currentType === 'Third-party' && (
         <>
           <Form.Item
-            name={['parser_config', 'third_party_platform']}
+            name={['parser_config', '_third_party_platform']}
             label={t('knowledgeBase.createForm.platform')}
             rules={[{ required: true, message: t('knowledgeBase.createForm.platformRequired') }]}
             initialValue="yuque"
