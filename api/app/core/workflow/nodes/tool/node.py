@@ -4,16 +4,17 @@ import re
 import uuid
 from typing import Any
 
-from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.tool.config import ToolNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
-from app.services.tool_service import ToolService
 from app.db import get_db_read
+from app.services.tool_service import ToolService
 
 logger = logging.getLogger(__name__)
 
-TEMPLATE_PATTERN = re.compile(r"\{\{.*?\}\}")
+TEMPLATE_PATTERN = re.compile(r"\{\{.*?}}")
 
 
 class ToolNode(BaseNode):

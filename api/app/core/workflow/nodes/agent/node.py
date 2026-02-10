@@ -7,14 +7,16 @@ Agent 节点实现
 
 import logging
 from typing import Any
+
 from langchain_core.messages import AIMessage
 
-from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
-from app.services.draft_run_service import DraftRunService
-from app.models import AppRelease
 from app.db import get_db
+from app.models import AppRelease
+from app.services.draft_run_service import DraftRunService
 
 logger = logging.getLogger(__name__)
 

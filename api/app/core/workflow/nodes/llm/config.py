@@ -1,6 +1,7 @@
 """LLM 节点配置"""
 
 from typing import Any
+import uuid
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -56,7 +57,7 @@ class LLMNodeConfig(BaseNodeConfig):
     2. 消息模式：使用 messages 字段（推荐）
     """
 
-    model_id: str = Field(
+    model_id: uuid.UUID = Field(
         ...,
         description="模型配置 ID"
     )
@@ -148,7 +149,7 @@ class LLMNodeConfig(BaseNodeConfig):
 
     @field_validator("messages", "prompt")
     @classmethod
-    def validate_input_mode(cls, v, info):
+    def validate_input_mode(cls, v):
         """验证输入模式：prompt 和 messages 至少有一个"""
         # 这个验证在 model_validator 中更合适
         return v

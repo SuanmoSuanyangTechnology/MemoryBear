@@ -4,8 +4,8 @@
 # @Time : 2026/2/6
 import pytest
 
+from app.core.workflow.engine.variable_pool import VariablePool, VariableSelector
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool, VariableSelector
 
 
 # ==================== VariableSelector 测试 ====================

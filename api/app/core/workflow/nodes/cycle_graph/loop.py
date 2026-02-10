@@ -3,12 +3,12 @@ from typing import Any
 
 from langgraph.graph.state import CompiledStateGraph
 
-from app.core.workflow.expression_evaluator import evaluate_expression
-from app.core.workflow.nodes import WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.cycle_graph import LoopNodeConfig
 from app.core.workflow.nodes.enums import ValueInputType, ComparisonOperator, LogicOperator
 from app.core.workflow.nodes.operators import TypeTransformer, ConditionExpressionResolver, CompareOperatorInstance
-from app.core.workflow.variable_pool import VariablePool
+from app.core.workflow.utils.expression_evaluator import evaluate_expression
 
 logger = logging.getLogger(__name__)
 

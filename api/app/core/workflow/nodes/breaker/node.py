@@ -1,9 +1,10 @@
 import logging
 from typing import Any
 
-from app.core.workflow.nodes import BaseNode, WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes import BaseNode
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 

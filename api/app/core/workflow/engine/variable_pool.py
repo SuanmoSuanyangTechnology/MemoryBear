@@ -1,14 +1,7 @@
-"""
-变量池 (Variable Pool)
-
-工作流执行的数据中心，管理所有变量的存储和访问。
-
-变量类型：
-1. 系统变量 (sys.*) - 系统内置变量（execution_id, workspace_id, user_id, message 等）
-2. 节点输出 (node_id.*) - 节点执行结果
-3. 会话变量 (conv.*) - 会话级变量（跨多轮对话保持）
-"""
-
+# -*- coding: UTF-8 -*-
+# Author: Eternity
+# @Email: 1533512157@qq.com
+# @Time : 2025/12/15 19:50
 import logging
 import re
 from asyncio import Lock
@@ -18,7 +11,8 @@ from typing import Any, Generic
 
 from pydantic import BaseModel
 
-from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.engine.runtime_schema import ExecutionContext
+from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.workflow.variable.variable_objects import T, create_variable_instance
 
 logger = logging.getLogger(__name__)
@@ -359,3 +353,74 @@ class VariablePool:
             f"  runtime_vars={len(runtime_vars)}\n"
             f")"
         )
+
+
+class VariablePoolInitializer:
+    def __init__(self, workflow_config: dict):
+        self.workflow_config = workflow_config
+
+    async def initialize(
+            self,
+            variable_pool: VariablePool,
+            input_data: dict,
+            execution_context: ExecutionContext
+    ) -> None:
+        await self._init_conversation_vars(variable_pool, input_data)
+        await self._init_system_vars(variable_pool, input_data, execution_context)
+
+    async def _init_conversation_vars(
+            self,
+            variable_pool: VariablePool,
+            input_data: dict
+    ):
+        init_conv_vars: list[dict] = self.workflow_config.get("variables") or []
+        runtime_conv_vars: dict[str, Any] = input_data.get("conv", {})
+
+        for var_def in init_conv_vars:
+            var_name = var_def.get("name")
+            var_default = runtime_conv_vars.get(var_name, var_def.get("default"))
+            var_type = var_def.get("type")
+            if var_name:
+                if var_default:
+                    var_value = var_default
+                else:
+                    var_value = DEFAULT_VALUE(var_type)
+                await variable_pool.new(
+                    namespace="conv",
+                    key=var_name,
+                    value=var_value,
+                    var_type=var_type,
+                    mut=True
+                )
+
+    @staticmethod
+    async def _init_system_vars(
+            variable_pool: VariablePool,
+            input_data: dict,
+            context: ExecutionContext
+    ):
+        user_message = input_data.get("message") or ""
+        user_files = input_data.get("files") or []
+
+        input_variables = input_data.get("variables") or {}
+        sys_vars = {
+            "message": (user_message, VariableType.STRING),
+            "conversation_id": (input_data.get("conversation_id"), VariableType.STRING),
+            "execution_id": (context.execution_id, VariableType.STRING),
+            "workspace_id": (context.workspace_id, VariableType.STRING),
+            "user_id": (context.user_id, VariableType.STRING),
+            "input_variables": (input_variables, VariableType.OBJECT),
+            "files": (user_files, VariableType.ARRAY_FILE)
+        }
+        for key, var_def in sys_vars.items():
+            value = var_def[0]
+            var_type = var_def[1]
+            await variable_pool.new(
+                namespace='sys',
+                key=key,
+                value=value,
+                var_type=var_type,
+                mut=False
+            )
+
+

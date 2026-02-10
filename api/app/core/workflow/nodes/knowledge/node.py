@@ -6,10 +6,11 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.models import RedBearRerank, RedBearModelConfig
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
-from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
 from app.db import get_db_read
 from app.models import knowledge_model, knowledgeshare_model, ModelType
 from app.repositories import knowledge_repository, knowledgeshare_repository

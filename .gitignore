@@ -37,5 +37,4 @@ tika-server*.jar*
 cl100k_base.tiktoken
 libssl*.deb
 
-sandbox/lib/seccomp_python/target
-sandbox/lib/seccomp_nodejs/target
+sandbox/lib/seccomp_redbear/target

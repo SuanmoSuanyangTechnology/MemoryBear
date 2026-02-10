@@ -60,7 +60,7 @@ class IfElseNodeConfig(BaseNodeConfig):
 
     @field_validator("cases")
     @classmethod
-    def validate_case_number(cls, v, info):
+    def validate_case_number(cls, v):
         if len(v) < 1:
             raise ValueError("At least one cases are required")
         return v
