@@ -73,11 +73,11 @@ class EmotionRepository:
             params["emotion_type"] = emotion_type
         
         if start_date:
-            where_clauses.append("s.created_at >= $start_date")
+            where_clauses.append("s.created_at IS NOT NULL AND datetime(s.created_at) >= datetime($start_date)")
             params["start_date"] = start_date
         
         if end_date:
-            where_clauses.append("s.created_at <= $end_date")
+            where_clauses.append("s.created_at IS NOT NULL AND datetime(s.created_at) <= datetime($end_date)")
             params["end_date"] = end_date
         
         where_str = " AND ".join(where_clauses)
@@ -211,17 +211,18 @@ class EmotionRepository:
         # 计算起始日期（使用字符串比较，避免时区问题）
         start_date = (datetime.now() - timedelta(days=days)).isoformat()
         
-        # 优化的 Cypher 查询：使用字符串比较避免时区问题
+        # 使用 datetime() 函数进行时间比较，与其他查询保持一致
         query = """
         MATCH (s:Statement)
         WHERE s.end_user_id = $end_user_id
           AND s.emotion_type IS NOT NULL
-          AND s.created_at >= $start_date
+          AND s.created_at IS NOT NULL
+          AND datetime(s.created_at) >= datetime($start_date)
         RETURN s.id as statement_id,
                s.emotion_type as emotion_type,
                s.emotion_intensity as emotion_intensity,
                s.created_at as created_at
-        ORDER BY s.created_at ASC
+        ORDER BY datetime(s.created_at) ASC
         """
         
         try:
