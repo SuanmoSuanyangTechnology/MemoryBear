@@ -2451,6 +2451,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       involved_objects: 'Involved Objects',
       content_records: 'Episode Content Records',
       emotion: 'Emotion and State Records',
+      none: 'None',
     },
     implicitDetail: {
       title: 'The invisible forces that shaped me',

@@ -2546,6 +2546,7 @@ export const zh = {
       involved_objects: '涉及对象',
       content_records: '情景内容记录',
       emotion: '情绪与状态记录',
+      none: '无',
     },
     implicitDetail: {
       title: '那些塑造了我的无形力量',
