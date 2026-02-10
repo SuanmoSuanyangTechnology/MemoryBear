@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 10:52:55
+ * @Last Modified time: 2026-02-10 12:18:23
  */
 /**
  * Chat debugging component for application testing
@@ -61,6 +61,8 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
 
   useEffect(() => {
     setIsCluster(source === 'multi_agent')
+    setFileList([])
+    setMessage(undefined)
   }, [source])
 
   /** Add user message to all chat lists */
@@ -388,7 +390,6 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
     setFileList([...list || []])
   }
 
-  console.log('chatList', chatList, fileList)
   return (
     <div className="rb:relative rb:h-full rb:flex rb:flex-col">
       {chatList.length === 0
