@@ -46,6 +46,16 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const entityTypes = graphragConfig?.entity_types || '';
   const entityNormalization = graphragConfig?.resolution || false;
   const communityReportGeneration = graphragConfig?.community || false;
+  
+  // Watch for changes to _third_party_platform field directly
+  const formThirdPartyPlatform = Form.useWatch(['parser_config', '_third_party_platform'], form);
+  
+  // Sync form value to state when form value changes
+  useEffect(() => {
+    if (formThirdPartyPlatform && (formThirdPartyPlatform === 'yuque' || formThirdPartyPlatform === 'feishu')) {
+      setThirdPartyPlatform(formThirdPartyPlatform);
+    }
+  }, [formThirdPartyPlatform]);
 
   // Encapsulate cancel method, add close modal logic
   const handleClose = () => {
@@ -199,6 +209,8 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         type: type || currentType,
       };
       form.setFieldsValue(defaults);
+      // Reset third party platform to default when creating new
+      setThirdPartyPlatform('yuque');
       return;
     }
     const baseValues: Partial<KnowledgeBaseFormData> = {
@@ -210,7 +222,6 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     };
 
     // Process parser_config data, set default values if not present
-    const recordAny = record as any;
     baseValues.parser_config = {
       ...record.parser_config,
       graphrag: {
@@ -224,43 +235,6 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       }
     };
 
-    // Add Third-party specific fields to parser_config if exists
-    if (recordAny.parser_config?.third_party_platform) {
-      baseValues.parser_config.third_party_platform = recordAny.parser_config.third_party_platform;
-    }
-    if (recordAny.parser_config?.yuque_user_id) {
-      baseValues.parser_config.yuque_user_id = recordAny.parser_config.yuque_user_id;
-    }
-    if (recordAny.parser_config?.yuque_token) {
-      baseValues.parser_config.yuque_token = recordAny.parser_config.yuque_token;
-    }
-    if (recordAny.parser_config?.app_id) {
-      baseValues.parser_config.app_id = recordAny.parser_config.app_id;
-    }
-    if (recordAny.parser_config?.app_secret) {
-      baseValues.parser_config.app_secret = recordAny.parser_config.app_secret;
-    }
-    if (recordAny.parser_config?.folder_token) {
-      baseValues.parser_config.folder_token = recordAny.parser_config.folder_token;
-    }
-
-    // Add Web specific fields to parser_config if exists
-    if (recordAny.parser_config?.entry_url) {
-      baseValues.parser_config.entry_url = recordAny.parser_config.entry_url;
-    }
-    if (recordAny.parser_config?.max_pages) {
-      baseValues.parser_config.max_pages = recordAny.parser_config.max_pages;
-    }
-    if (recordAny.parser_config?.delay_seconds) {
-      baseValues.parser_config.delay_seconds = recordAny.parser_config.delay_seconds;
-    }
-    if (recordAny.parser_config?.timeout_seconds) {
-      baseValues.parser_config.timeout_seconds = recordAny.parser_config.timeout_seconds;
-    }
-    if (recordAny.parser_config?.user_agent) {
-      baseValues.parser_config.user_agent = recordAny.parser_config.user_agent;
-    }
-
     // If entity_types exists, convert to newline-separated format for TextArea display
     if (baseValues.parser_config.graphrag.entity_types) {
       if (Array.isArray(baseValues.parser_config.graphrag.entity_types)) {
@@ -272,7 +246,18 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       }
     }
 
+    // Set form values first
     form.setFieldsValue(baseValues);
+    
+    // Then sync third party platform state from form value
+    // This ensures the state matches what's actually in the form
+    const platform = baseValues.parser_config?._third_party_platform;
+    if (platform === 'yuque' || platform === 'feishu') {
+      setThirdPartyPlatform(platform);
+    } else {
+      // Reset to default if no platform specified
+      setThirdPartyPlatform('yuque');
+    }
   };
 
   const setDynamicModelFields = (record: KnowledgeBaseListItem | null, types: string[]) => {
@@ -295,20 +280,17 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     setDatasets(record || null);
     
     // If rebuild mode, use record's actual type, otherwise use passed type
-    const actualType = type === 'rebuild' ? (record?.type || 'General') : (type || currentType);
+    // If editing (record exists but no type passed), use record's type
+    const actualType = type === 'rebuild' 
+      ? (record?.type || 'General') 
+      : (type || record?.type || currentType);
+    
     setCurrentType(actualType as any);
     setIsRebuildMode(type === 'rebuild'); // Set rebuild mode flag
     setOriginalType(type || ''); // Save original type parameter
     
-    // Set third party platform if editing Third-party type
-    if (actualType === 'Third-party' && record) {
-      const platform = (record as any).parser_config?.third_party_platform;
-      if (platform === 'yuque' || platform === 'feishu') {
-        setThirdPartyPlatform(platform);
-      }
-    } else {
-      setThirdPartyPlatform('yuque'); // Reset to default
-    }
+    // Note: third party platform state will be set in setBaseFields function
+    // No need to set it here separately to avoid inconsistency
     
     // If rebuild mode, default to knowledge graph tab
     if (type === 'rebuild') {
@@ -336,9 +318,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
 
   useEffect(() => {
     if (!visible) return;
-    setBaseFields(datasets, currentType);
-    setDynamicModelFields(datasets, modelTypeList);
-  }, [visible, datasets, currentType, modelTypeList]);
+    // Only set fields when modal becomes visible, not on every state change
+    // setBaseFields is already called in handleOpen
+    // This useEffect is mainly for syncing dynamic model fields
+    if (datasets && modelTypeList.length > 0) {
+      setDynamicModelFields(datasets, modelTypeList);
+    }
+  }, [visible, modelTypeList]);
 
   // Encapsulate save method, add submit logic
   const handleSave = () => {
@@ -382,7 +368,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       
       // Check Third-party authentication before saving
       if (formValues.type === 'Third-party' || currentType === 'Third-party') {
-        const platform = formValues.parser_config?.third_party_platform || thirdPartyPlatform;
+        const platform = formValues.parser_config?._third_party_platform || thirdPartyPlatform;
         
         try {
           if (platform === 'yuque') {
@@ -404,9 +390,9 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           } else if (platform === 'feishu') {
             // Validate Feishu credentials
             const feishuParams = {
-              feishu_app_id: formValues.parser_config?.app_id,
-              feishu_app_secret: formValues.parser_config?.app_secret,
-              feishu_folder_token: formValues.parser_config?.folder_token
+              feishu_app_id: formValues.parser_config?.feishu_app_id,
+              feishu_app_secret: formValues.parser_config?.feishu_app_secret,
+              feishu_folder_token: formValues.parser_config?.feishu_folder_token
             };
             
             if (!feishuParams.feishu_app_id || !feishuParams.feishu_app_secret || !feishuParams.feishu_folder_token) {
@@ -533,7 +519,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
               { type: 'url', message: t('knowledgeBase.createForm.entryUrlInvalid') }
             ]}
           >
-            <Input placeholder="https://ai.redbearai.com" />
+            <Input placeholder="https://ai.redbearai.com" disabled={!!datasets?.id} />
           </Form.Item>
 
           <Form.Item
@@ -545,7 +531,8 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             <SliderInput
               min={10}
               max={200}
-              step={1}
+              step={10}
+              disabled={!!datasets?.id}
             />
           </Form.Item>
 
@@ -553,12 +540,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             name={['parser_config', 'delay_seconds']}
             label={t('knowledgeBase.createForm.delaySeconds')}
             rules={[{ required: true, message: t('knowledgeBase.createForm.delaySecondsRequired') }]}
-            initialValue={1.0}
+            initialValue={2}
           >
             <SliderInput
               min={1}
               max={3}
-              step={0.1}
+              step={1}
+              disabled={!!datasets?.id}
             />
           </Form.Item>
 
@@ -572,6 +560,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
               min={5}
               max={15}
               step={1}
+              disabled={!!datasets?.id}
             />
           </Form.Item>
 
@@ -581,7 +570,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             rules={[{ required: true, message: t('knowledgeBase.createForm.userAgentRequired') }]}
             initialValue="KnowledgeBaseCrawler/1.0"
           >
-            <Input placeholder="KnowledgeBaseCrawler/1.0" />
+            <Input placeholder="KnowledgeBaseCrawler/1.0" disabled={!!datasets?.id} />
           </Form.Item>
         </>
       )}
@@ -596,8 +585,8 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             initialValue="yuque"
           >
             <Select
-              value={thirdPartyPlatform}
               onChange={(value) => setThirdPartyPlatform(value)}
+              disabled={!!datasets?.id}
               options={[
                 { value: 'yuque', label: t('knowledgeBase.createForm.yuque') },
                 { value: 'feishu', label: t('knowledgeBase.createForm.feishu') }
@@ -612,7 +601,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
                 label={t('knowledgeBase.createForm.yuqueUserId')}
                 rules={[{ required: true, message: t('knowledgeBase.createForm.yuqueUserIdRequired') }]}
               >
-                <Input placeholder={t('knowledgeBase.createForm.yuqueUserIdPlaceholder')} />
+                <Input placeholder={t('knowledgeBase.createForm.yuqueUserIdPlaceholder')} disabled={!!datasets?.id} />
               </Form.Item>
 
               <Form.Item
@@ -620,7 +609,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
                 label={t('knowledgeBase.createForm.yuqueToken')}
                 rules={[{ required: true, message: t('knowledgeBase.createForm.yuqueTokenRequired') }]}
               >
-                <Input.Password placeholder={t('knowledgeBase.createForm.yuqueTokenPlaceholder')} />
+                <Input.Password placeholder={t('knowledgeBase.createForm.yuqueTokenPlaceholder')} disabled={!!datasets?.id} />
               </Form.Item>
             </>
           )}
@@ -632,23 +621,23 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
                 label={t('knowledgeBase.createForm.feishuAppId')}
                 rules={[{ required: true, message: t('knowledgeBase.createForm.feishuAppIdRequired') }]}
               >
-                <Input placeholder={t('knowledgeBase.createForm.feishuAppIdPlaceholder')} />
+                <Input placeholder={t('knowledgeBase.createForm.feishuAppIdPlaceholder')} disabled={!!datasets?.id} />
               </Form.Item>
 
               <Form.Item
-                name={['parser_config', 'app_secret']}
+                name={['parser_config', 'feishu_app_secret']}
                 label={t('knowledgeBase.createForm.feishuAppSecret')}
                 rules={[{ required: true, message: t('knowledgeBase.createForm.feishuAppSecretRequired') }]}
               >
-                <Input.Password placeholder={t('knowledgeBase.createForm.feishuAppSecretPlaceholder')} />
+                <Input.Password placeholder={t('knowledgeBase.createForm.feishuAppSecretPlaceholder')} disabled={!!datasets?.id} />
               </Form.Item>
 
               <Form.Item
-                name={['parser_config', 'folder_token']}
+                name={['parser_config', 'feishu_folder_token']}
                 label={t('knowledgeBase.createForm.feishuFolderToken')}
                 rules={[{ required: true, message: t('knowledgeBase.createForm.feishuFolderTokenRequired') }]}
               >
-                <Input placeholder={t('knowledgeBase.createForm.feishuFolderTokenPlaceholder')} />
+                <Input placeholder={t('knowledgeBase.createForm.feishuFolderTokenPlaceholder')} disabled={!!datasets?.id} />
               </Form.Item>
             </>
           )}

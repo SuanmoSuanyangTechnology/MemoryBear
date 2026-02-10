@@ -105,14 +105,14 @@ export interface ParserConfig {
   user_agent?: string; // 用户代理
   
   // Third-party 类型特有字段
-  third_party_platform?: 'yuque' | 'feishu'; // 第三方平台类型
+  _third_party_platform?: 'yuque' | 'feishu'; // 第三方平台类型
   // 语雀字段
   yuque_user_id?: string; // 语雀用户ID
   yuque_token?: string; // 语雀Token
   // 飞书字段
-  app_id?: string; // 飞书应用ID
-  app_secret?: string; // 飞书应用密钥
-  folder_token?: string; // 飞书文件夹Token
+  feishu_app_id?: string; // 飞书应用ID
+  feishu_app_secret?: string; // 飞书应用密钥
+  feishu_folder_token?: string; // 飞书文件夹Token
 }
 // 文件数据
 export interface KnowledgeBaseDocumentData { // 知识库文档数据
