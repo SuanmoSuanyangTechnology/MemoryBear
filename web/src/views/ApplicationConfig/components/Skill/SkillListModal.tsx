@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-05 10:45:08 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-05 10:45:08 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-10 17:59:37
  */
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { Space, List, Flex, Tooltip } from 'antd';
@@ -31,7 +31,7 @@ interface SkillModalProps {
  * 
  * A modal dialog for selecting skills from a searchable list.
  * Features:
- * - Search functionality to filter skills by keywords
+ * - Search functionality to filter skills by search
  * - Grid layout displaying skill cards with icons and descriptions
  * - Multi-select capability with visual feedback
  * - Excludes already selected skills from the list
@@ -49,7 +49,7 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
   const [visible, setVisible] = useState(false);
   const [list, setList] = useState<Skill[]>([])
   const [filterList, setFilterList] = useState<Skill[]>([])
-  const [query, setQuery] = useState<{keywords?: string}>({})
+  const [query, setQuery] = useState<{search?: string}>({})
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedRows, setSelectedRows] = useState<Skill[]>([])
 
@@ -82,7 +82,7 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
     if (visible) {
       getList()
     }
-  }, [query.keywords, visible])
+  }, [query.search, visible])
   
   /**
    * Fetches the skill list from API with current search parameters
@@ -123,7 +123,7 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
    * @param value - Search keyword
    */
   const handleSearch = (value?: string) => {
-    setQuery({keywords: value})
+    setQuery({search: value})
     setSelectedIds([])
     setSelectedRows([])
   }
