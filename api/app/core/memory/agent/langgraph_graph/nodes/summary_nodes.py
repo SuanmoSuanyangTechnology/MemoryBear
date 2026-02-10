@@ -218,9 +218,6 @@ async def Input_Summary(state: ReadState) -> ReadState:
 async def Retrieve_Summary(state: ReadState)-> ReadState:
     retrieve=state.get("retrieve", '')
     history = await summary_history( state)
-    import json
-    with open("检索.json","w",encoding='utf-8') as f:
-        f.write(json.dumps(retrieve, indent=4, ensure_ascii=False))
     retrieve=retrieve.get("Expansion_issue", [])
     start=time.time()
     retrieve_info_str=[]
