@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 16:56:27
+ * @Last Modified time: 2026-02-10 18:46:40
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -480,9 +480,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
             {t('application.debuggingAndPreview')}
 
             <Space size={10}>
-              <Button type="primary" ghost onClick={handleOpenVariableConfig}>
-                {t('application.variableConfig')}
-              </Button>
+              {chatVariables.length > 0 &&
+                <Button type="primary" ghost onClick={handleOpenVariableConfig}>
+                  {t('application.variableConfig')}
+                </Button>
+              }
               <Button type="primary" ghost onClick={handleAddModel}>
                 + {t('application.addModel')}
               </Button>
