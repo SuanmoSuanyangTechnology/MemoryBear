@@ -186,7 +186,7 @@ async def get_emotion_health(
             "情绪健康指数获取成功",
             extra={
                 "end_user_id": request.end_user_id,
-                "health_score": data.get("health_score", 0),
+                "health_score": data.get("health_score") or 0,
                 "level": data.get("level", "未知")
             }
         )
