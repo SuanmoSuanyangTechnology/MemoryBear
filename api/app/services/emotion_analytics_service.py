@@ -222,13 +222,14 @@ class EmotionAnalyticsService:
         根据情绪类型分类正面、负面和中性情绪，计算积极率。
         当存在非中性情绪时：(正面数 / (正面数 + 负面数)) * 100
         当只有中性情绪时：基于中性情绪的存在给出基准分数
+        当完全没有情绪数据时：score 为 None，表示无法计算
 
         Args:
             emotions: 情绪数据列表，每个包含 emotion_type 字段
 
         Returns:
             Dict: 包含积极率计算结果：
-                - score: 积极率分数（0-100）
+                - score: 积极率分数（0-100），无数据时为 None
                 - positive_count: 正面情绪数量
                 - negative_count: 负面情绪数量
                 - neutral_count: 中性情绪数量
@@ -250,13 +251,15 @@ class EmotionAnalyticsService:
             # 只有中性情绪，说明情绪状态平稳，给予基准分 50
             score = 50.0
         else:
-            score = 0.0  # 完全没有情绪数据
+            # 完全没有情绪数据，无法计算积极率
+            score = None
 
+        score_display = f"{score:.2f}" if score is not None else "N/A"
         logger.debug(f"积极率计算: positive={positive_count}, negative={negative_count}, "
-                     f"neutral={neutral_count}, score={score:.2f}")
+                     f"neutral={neutral_count}, score={score_display}")
 
         return {
-            "score": round(score, 2),
+            "score": round(score, 2) if score is not None else None,
             "positive_count": positive_count,
             "negative_count": negative_count,
             "neutral_count": neutral_count
@@ -389,12 +392,12 @@ class EmotionAnalyticsService:
             if not emotions:
                 logger.warning(f"用户 {end_user_id} 在时间范围 {time_range} 内没有情绪数据")
                 return {
-                    "health_score": 0.0,
+                    "health_score": None,
                     "level": "无数据",
                     "dimensions": {
-                        "positivity_rate": {"score": 0.0, "positive_count": 0, "negative_count": 0, "neutral_count": 0},
-                        "stability": {"score": 0.0, "std_deviation": 0.0},
-                        "resilience": {"score": 0.0, "recovery_rate": 0.0}
+                        "positivity_rate": {"score": None, "positive_count": 0, "negative_count": 0, "neutral_count": 0},
+                        "stability": {"score": None, "std_deviation": 0.0},
+                        "resilience": {"score": None, "recovery_rate": 0.0}
                     },
                     "emotion_distribution": {},
                     "time_range": time_range
@@ -407,8 +410,10 @@ class EmotionAnalyticsService:
 
             # 计算综合健康分数
             # 公式：positivity_rate * 0.4 + stability * 0.3 + resilience * 0.3
+            # 如果积极率无法计算（无数据），视为 0 参与加权
+            positivity_score = positivity_rate["score"] if positivity_rate["score"] is not None else 0.0
             health_score = (
-                    positivity_rate["score"] * 0.4 +
+                    positivity_score * 0.4 +
                     stability["score"] * 0.3 +
                     resilience["score"] * 0.3
             )
@@ -704,7 +709,7 @@ class EmotionAnalyticsService:
         Returns:
             EmotionSuggestionsResponse: 默认建议
         """
-        health_score = health_data.get('health_score', 0)
+        health_score = health_data.get('health_score') or 0
 
         if language == "en":
             if health_score >= 80:
