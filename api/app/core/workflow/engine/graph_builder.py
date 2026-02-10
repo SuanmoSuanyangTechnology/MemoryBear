@@ -7,7 +7,7 @@ import re
 import uuid
 from collections import defaultdict
 from functools import lru_cache
-from typing import Any
+from typing import Any, Iterable
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import START, END
@@ -81,7 +81,7 @@ class GraphBuilder:
             raise RuntimeError(f"Node not found: Id={node_id}")
 
     @staticmethod
-    def _merge_control_nodes(control_nodes: tuple[tuple[str, str]]) -> dict[str, list]:
+    def _merge_control_nodes(control_nodes: Iterable[tuple[str, str]]) -> dict[str, list]:
         result = defaultdict(list)
         for node in control_nodes:
             result[node[0]].append(node[1])

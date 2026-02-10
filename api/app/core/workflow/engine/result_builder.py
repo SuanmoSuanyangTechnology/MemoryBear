@@ -5,7 +5,7 @@
 from app.core.workflow.engine.variable_pool import VariablePool
 
 
-class WorkflowResultBuiler:
+class WorkflowResultBuilder:
     def build_final_output(
             self,
             result: dict,

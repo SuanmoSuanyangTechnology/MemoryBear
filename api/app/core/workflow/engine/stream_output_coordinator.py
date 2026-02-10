@@ -263,7 +263,6 @@ class StreamOutputCoordinator:
             else:
                 # Variable segment: evaluate and transform
                 try:
-                    # Simulate evaluation (replace with actual logic)
                     chunk = variable_pool.get_literal(current_segment.literal)
                     final_chunk += chunk
                 except Exception as e:
@@ -271,7 +270,7 @@ class StreamOutputCoordinator:
                     logger.warning(f"[STREAM] Failed to evaluate segment: {current_segment.literal}, error: {e}")
 
             if final_chunk:
-                logger.warning(f"[STREAM] StreamOutput Node:{self.activate_end}, chunk:{final_chunk}")
+                logger.info(f"[STREAM] StreamOutput Node:{self.activate_end}, chunk:{final_chunk}")
                 yield {
                     "event": "message",
                     "data": {
@@ -317,7 +316,7 @@ class StreamOutputCoordinator:
             if node_info.activate
         }
 
-        if self.activate_end or self.activate_end:
+        if self.end_outputs or self.activate_end:
             while self.activate_end:
                 # Force emit all remaining chunks of the active End node
                 async for msg_event in self.emit_activate_chunk(variable_pool, force=True):

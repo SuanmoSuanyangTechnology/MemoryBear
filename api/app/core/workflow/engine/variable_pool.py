@@ -401,10 +401,13 @@ class VariablePoolInitializer:
     ):
         user_message = input_data.get("message") or ""
         user_files = input_data.get("files") or []
+        conversations = input_data.get("conv_messages", [])
+        conversation_index = len(conversations) // 2
 
         input_variables = input_data.get("variables") or {}
         sys_vars = {
             "message": (user_message, VariableType.STRING),
+            "conversation_index": (conversation_index, VariableType.NUMBER),
             "conversation_id": (input_data.get("conversation_id"), VariableType.STRING),
             "execution_id": (context.execution_id, VariableType.STRING),
             "workspace_id": (context.workspace_id, VariableType.STRING),

@@ -10,7 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from app.core.workflow.engine.event_stream_handler import EventStreamHandler
 from app.core.workflow.engine.graph_builder import GraphBuilder
-from app.core.workflow.engine.result_builder import WorkflowResultBuiler
+from app.core.workflow.engine.result_builder import WorkflowResultBuilder
 from app.core.workflow.engine.runtime_schema import ExecutionContext
 from app.core.workflow.engine.state_manager import WorkflowStateManager
 from app.core.workflow.engine.stream_output_coordinator import StreamOutputCoordinator
@@ -60,7 +60,7 @@ class WorkflowExecutor:
 
         self.variable_initializer = VariablePoolInitializer(workflow_config)
         self.state_manager = WorkflowStateManager()
-        self.result_builder = WorkflowResultBuiler()
+        self.result_builder = WorkflowResultBuilder()
         self.stream_coordinator = StreamOutputCoordinator()
         self.event_handler: EventStreamHandler | None = None
 
