@@ -2,13 +2,14 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-04 18:34:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 15:46:07
+ * @Last Modified time: 2026-02-10 15:49:29
  */
 import { useEffect, type FC } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { cookieUtils } from '@/utils/request'
 import { useI18n } from '@/store/locale'
+import { clearAuthData } from '@/utils/auth'
 
 /**
  * JumpPage Component
@@ -30,6 +31,7 @@ const JumpPage: FC = () => {
   const { changeLanguage } = useI18n()
 
   useEffect(() => {
+    clearAuthData()
     // Convert URLSearchParams to a plain object for easier access
     const data = Object.fromEntries(searchParams)
     const { access_token, refresh_token, target, language } = data
