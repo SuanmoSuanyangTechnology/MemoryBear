@@ -246,3 +246,73 @@ async def rebuild_knowledge_graph(
                                                               db=db,
                                                               current_user=current_user)
 
+
+@router.get("/check/yuque/auth", response_model=ApiResponse)
+@require_api_key(scopes=["rag"])
+async def check_yuque_auth(
+    yuque_user_id: str,
+    yuque_token: str,
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+):
+    """
+    check yuque auth info
+    """
+    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    current_user = api_key.creator
+    current_user.current_workspace_id = api_key_auth.workspace_id
+
+    api_logger.info(f"check yuque auth info, username: {current_user.username}")
+
+    return await knowledge_controller.check_yuque_auth(yuque_user_id=yuque_user_id,
+                                                       yuque_token=yuque_token,
+                                                       db=db,
+                                                       current_user=current_user)
+
+
+@router.get("/check/feishu/auth", response_model=ApiResponse)
+@require_api_key(scopes=["rag"])
+async def check_feishu_auth(
+    feishu_app_id: str,
+    feishu_app_secret: str,
+    feishu_folder_token: str,
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+):
+    """
+    check feishu auth info
+    """
+    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    current_user = api_key.creator
+    current_user.current_workspace_id = api_key_auth.workspace_id
+
+    api_logger.info(f"check feishu auth info, username: {current_user.username}")
+
+    return await knowledge_controller.check_feishu_auth(feishu_app_id=feishu_app_id,
+                                                        feishu_app_secret=feishu_app_secret,
+                                                        feishu_folder_token=feishu_folder_token,
+                                                        db=db,
+                                                        current_user=current_user)
+
+
+@router.post("/{knowledge_id}/sync", response_model=ApiResponse)
+@require_api_key(scopes=["rag"])
+async def sync_knowledge(
+    knowledge_id: uuid.UUID,
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+):
+    """
+    sync knowledge base information based on knowledge_id
+    """
+    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    current_user = api_key.creator
+    current_user.current_workspace_id = api_key_auth.workspace_id
+
+    return await knowledge_controller.sync_knowledge(knowledge_id=knowledge_id,
+                                                     db=db,
+                                                     current_user=current_user)
+

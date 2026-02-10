@@ -670,7 +670,7 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
             with open(filename, "rb") as f:
                 binary = f.read()
         excel_parser = ExcelParser()
-        if parser_config.get("html4excel"):
+        if parser_config.get("html4excel") and parser_config.get("html4excel").lower() == "true":
             sections = [(_, "") for _ in excel_parser.html(binary, 12) if _]
             parser_config["chunk_token_num"] = 0
         else:

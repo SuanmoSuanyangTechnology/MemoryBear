@@ -441,7 +441,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     db.refresh(db_file)
                                     # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
                                     save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                            str(db_knowledge.parent_id))
+                                                            str(db_knowledge.id))
                                     Path(save_dir).mkdir(parents=True,
                                                          exist_ok=True)  # Ensure that the directory exists
                                     save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
@@ -498,7 +498,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     parser_id="naive",
                                     parser_config={
                                         "layout_recognize": "DeepDOC",
-                                        "chunk_token_num": 128,
+                                        "chunk_token_num": 130,
                                         "delimiter": "\n",
                                         "auto_keywords": 0,
                                         "auto_questions": 0,
@@ -576,7 +576,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     # 1. update file
                                     # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
                                     save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                            str(db_knowledge.parent_id))
+                                                            str(db_knowledge.id))
                                     Path(save_dir).mkdir(parents=True,
                                                          exist_ok=True)  # Ensure that the directory exists
 
@@ -621,7 +621,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                 # 1. update file
                                 # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
                                 save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                        str(db_knowledge.parent_id))
+                                                        str(db_knowledge.id))
                                 Path(save_dir).mkdir(parents=True, exist_ok=True)  # Ensure that the directory exists
 
                                 # download document from Feishu FileInfo
@@ -667,7 +667,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     parser_id="naive",
                                     parser_config={
                                         "layout_recognize": "DeepDOC",
-                                        "chunk_token_num": 128,
+                                        "chunk_token_num": 130,
                                         "delimiter": "\n",
                                         "auto_keywords": 0,
                                         "auto_questions": 0,
@@ -738,7 +738,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     # 1. update file
                                     # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
                                     save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                            str(db_knowledge.parent_id))
+                                                            str(db_knowledge.id))
                                     Path(save_dir).mkdir(parents=True,
                                                          exist_ok=True)  # Ensure that the directory exists
 
@@ -783,7 +783,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                 # 1. update file
                                 # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
                                 save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                        str(db_knowledge.parent_id))
+                                                        str(db_knowledge.id))
                                 Path(save_dir).mkdir(parents=True, exist_ok=True)  # Ensure that the directory exists
 
                                 # download document from Feishu FileInfo
@@ -829,7 +829,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     parser_id="naive",
                                     parser_config={
                                         "layout_recognize": "DeepDOC",
-                                        "chunk_token_num": 128,
+                                        "chunk_token_num": 130,
                                         "delimiter": "\n",
                                         "auto_keywords": 0,
                                         "auto_questions": 0,
