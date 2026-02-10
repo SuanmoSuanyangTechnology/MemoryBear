@@ -899,6 +899,8 @@ def update_workspace_models_configs(
 def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
     """Ensure a workspace has a default memory config, creating one if missing.
     
+    Also fills empty model fields for all configs in this workspace.
+    
     Args:
         db: Database session
         workspace: The workspace to check
@@ -911,28 +913,92 @@ def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
         MemoryConfig.is_default == True
     ).first()
     
-    if existing_default:
+    if not existing_default:
+        # No default config exists, create one
+        business_logger.info(
+            f"Workspace {workspace.id} missing default memory config, creating one"
+        )
+        
+        try:
+            _create_default_memory_config(
+                db=db,
+                workspace_id=workspace.id,
+                workspace_name=workspace.name,
+                llm_id=uuid.UUID(workspace.llm) if workspace.llm else None,
+                embedding_id=uuid.UUID(workspace.embedding) if workspace.embedding else None,
+                rerank_id=uuid.UUID(workspace.rerank) if workspace.rerank else None,
+            )
+        except Exception as e:
+            business_logger.error(
+                f"Failed to create default memory config for workspace {workspace.id}: {str(e)}"
+            )
+    
+    # Fill empty model fields for ALL configs in this workspace
+    _fill_workspace_configs_model_defaults(db, workspace)
+
+
+def _fill_workspace_configs_model_defaults(
+    db: Session,
+    workspace: Workspace
+) -> None:
+    """Fill empty model fields for all memory configs in a workspace.
+    
+    Updates llm_id, embedding_id, rerank_id, reflection_model_id, and emotion_model_id
+    if they are None, using the corresponding workspace default models.
+    
+    Args:
+        db: Database session
+        workspace: The workspace containing default model settings
+    """
+    from app.models.memory_config_model import MemoryConfig
+    
+    # Get all configs for this workspace
+    configs = db.query(MemoryConfig).filter(
+        MemoryConfig.workspace_id == workspace.id
+    ).all()
+    
+    if not configs:
         return
     
-    # No default config exists, create one
-    business_logger.info(
-        f"Workspace {workspace.id} missing default memory config, creating one"
-    )
+    # Map of memory_config field -> workspace field
+    model_field_mappings = [
+        ("llm_id", "llm"),
+        ("embedding_id", "embedding"),
+        ("rerank_id", "rerank"),
+        ("reflection_model_id", "llm"),  # reflection uses LLM
+        ("emotion_model_id", "llm"),     # emotion uses LLM
+    ]
     
-    try:
-        _create_default_memory_config(
-            db=db,
-            workspace_id=workspace.id,
-            workspace_name=workspace.name,
-            llm_id=uuid.UUID(workspace.llm) if workspace.llm else None,
-            embedding_id=uuid.UUID(workspace.embedding) if workspace.embedding else None,
-            rerank_id=uuid.UUID(workspace.rerank) if workspace.rerank else None,
-        )
-    except Exception as e:
-        business_logger.error(
-            f"Failed to create default memory config for workspace {workspace.id}: {str(e)}"
-        )
-        # Don't fail the workspace list operation if config creation fails
+    configs_updated = 0
+    
+    for memory_config in configs:
+        updated_fields = []
+        
+        for config_field, workspace_field in model_field_mappings:
+            config_value = getattr(memory_config, config_field, None)
+            workspace_value = getattr(workspace, workspace_field, None)
+            
+            if not config_value and workspace_value:
+                setattr(memory_config, config_field, workspace_value)
+                updated_fields.append(config_field)
+        
+        if updated_fields:
+            configs_updated += 1
+            business_logger.debug(
+                f"Updated memory config {memory_config.config_id} fields: {updated_fields}"
+            )
+    
+    if configs_updated > 0:
+        try:
+            db.commit()
+            business_logger.info(
+                f"Updated {configs_updated} memory configs in workspace {workspace.id} with default models"
+            )
+        except Exception as e:
+            db.rollback()
+            business_logger.error(
+                f"Failed to update memory configs in workspace {workspace.id}: {str(e)}"
+            )
 
 
 def _create_default_memory_config(

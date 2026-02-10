@@ -305,6 +305,9 @@ export const zh = {
       toWorkspace: '授权到工作空间',
       shareTitle: '请选择要分享的工作空间',
       shareNote: '注意：工作空间应用关闭时无法分享',
+      shareSpace:'管理共享',
+      shareSpaceTitle:'已共享至以下工作空间',
+      shareSpaceNote: '注意：关闭共享后对方将无法访问',
       authorizedPerson: '授权人',
       chunkList: '分块列表',
       delimiter: '文本段落分隔符',
@@ -1668,6 +1671,11 @@ export const zh = {
       creating_nodes_edges_desc: '实体关系创建完成，共{{num}}条关系',
       deduplication_desc: '去重消歧完成，最终{{count}}个唯一实体',
       custom_text: '调试文本',
+      ontologyCoverage: '本体类型',
+      entity_total: '一共{{num}}个实体',
+      scene_type_distribution: '场景类型',
+      general_type_distribution: '通用类型',
+      unmatched: '未匹配',
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',
@@ -2200,7 +2208,7 @@ export const zh = {
           search_switch: '检索模式',
         },
         'memory-write': {
-          message: '消息',
+          messages: '消息',
           config_id: '记忆配置',
           search_switch: '检索模式',
         },
@@ -2541,6 +2549,7 @@ export const zh = {
       involved_objects: '涉及对象',
       content_records: '情景内容记录',
       emotion: '情绪与状态记录',
+      none: '无',
     },
     implicitDetail: {
       title: '那些塑造了我的无形力量',

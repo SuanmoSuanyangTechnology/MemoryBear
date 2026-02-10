@@ -25,6 +25,31 @@ type_mapping = {
             "Condition": "条件实体节点",
             "Numeric": "数值实体节点"
         }
+EPISODIC_TYPE_MAPPING = {
+    "conversation": "对话",
+    "project_work": "项目/工作",
+    "learning": "学习",
+    "decision": "决策",
+    "important_event": "重要事件",
+}
+
+
+def translate_episodic_type(episodic_type: str, language: str = "zh") -> str:
+    """
+    根据语言参数翻译情景类型
+    
+    Args:
+        episodic_type: 英文枚举值 (conversation, project_work, etc.)
+        language: 语言类型 ("zh" 中文, "en" 英文)
+        
+    Returns:
+        翻译后的类型字符串
+    """
+    if language == "en":
+        return episodic_type
+    return EPISODIC_TYPE_MAPPING.get(episodic_type, episodic_type)
+
+
 class EmotionType(ABC):
     JOY_TYPE = "joy"
     SURPRISE_TYPE = "surprise"
@@ -51,7 +76,6 @@ class EpisodicMemoryOverviewRequest(BaseModel):
     """情景记忆总览查询请求"""
     
     end_user_id: str = Field(..., description="终端用户ID")
-    language_type: Optional[str] = Field("zh", description="语言类型（zh/en）")
     time_range: str = Field(
         default="all",
         description="时间范围筛选，可选值：all, today, this_week, this_month"
@@ -71,4 +95,3 @@ class EpisodicMemoryDetailsRequest(BaseModel):
     
     end_user_id: str = Field(..., description="终端用户ID")
     summary_id: str = Field(..., description="情景记忆摘要ID")
-    language_type: Optional[str] = Field("zh", description="语言类型（zh/en）")

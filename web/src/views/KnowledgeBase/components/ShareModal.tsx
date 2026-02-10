@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2025-11-10 18:52:55
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-02-03 17:08:00
+ * @LastEditTime: 2026-02-10 15:18:32
  */
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Switch } from 'antd';
@@ -93,7 +93,7 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
     <>
     {contextHolder}
     <RbModal
-      title={t('knowledgeBase.toWorkspace')}
+      title={t('knowledgeBase.shareSpace')}
       open={visible}
       onCancel={handleClose}
       okText={t('knowledgeBase.share')}
@@ -101,8 +101,8 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
       confirmLoading={loading}
     >
         <div className='rb:flex rb:flex-col rb:text-left'>
-            <h4 className='rb:text-sm rb:font-medium rb:text-gray-800'>{t('knowledgeBase.shareTitle')}</h4>
-            <span className='rb:text-xs rb:text-gray-500'>{t('knowledgeBase.shareNote')}</span>
+            <h4 className='rb:text-sm rb:font-medium rb:text-gray-800'>{t('knowledgeBase.shareSpaceTitle')}</h4>
+            <span className='rb:text-xs rb:text-gray-500'>{t('knowledgeBase.shareSpaceNote')}</span>
             <div className='rb:flex rb:flex-col rb:text-left rb:gap-4 rb:mt-4 '>
               {spaceList.length === 0 && (
                 <NoData />

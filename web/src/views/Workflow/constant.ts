@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 17:48:46
+ * @Last Modified time: 2026-02-09 20:08:03
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -241,6 +241,12 @@ export const nodeLibrary: NodeLibrary[] = [
           message: {
             type: 'editor',
             isArray: false
+          },
+          messages: {
+            type: 'messageEditor',
+            defaultValue: [],
+            placeholder: 'workflow.config.llm.messagesPlaceholder',
+            isArray: true
           },
           config_id: {
             type: 'customSelect',

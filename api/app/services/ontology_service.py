@@ -1155,7 +1155,7 @@ class OntologyService:
                 raise ValueError("无权限访问该场景的类型")
             
             # 获取类型列表
-            classes = self.class_repo.get_by_scene(scene_id)
+            classes = self.class_repo.get_classes_by_scene(scene_id)
             
             logger.info(f"Found {len(classes)} classes in scene {scene_id}")
             

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:29:55 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:29:55 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-09 20:56:31
  */
 /**
  * Memory Extraction Engine Configuration Form Types
@@ -106,4 +106,17 @@ export interface TestResult {
     predicate: string;
     object: string;
   }[];
+}
+
+interface OntologyCoverageItem {
+  type_count: number;
+  entity_total: number;
+  types: Array<{ type: string; count: number; }>
+}
+export interface OntologyCoverage {
+  scene_type_distribution: OntologyCoverageItem;
+  general_type_distribution: OntologyCoverageItem;
+  unmatched: OntologyCoverageItem;
+  total_entities: number;
+  time: number;
 }

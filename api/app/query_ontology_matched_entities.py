@@ -9,7 +9,7 @@ api\scripts\query_ontology_matched_entities.py
 
 用法: python scripts/query_ontology_matched_entities.py <end_user_id> [config_id]
 示例: python scripts/query_ontology_matched_entities.py 075660cf-08e6-40a6-a76e-308b6f52fbf1
-      python scripts/query_ontology_matched_entities.py 075660cf-08e6-40a6-a76e-308b6f52fbf1 fd547bb9-7b9e-47ea-ae53-242d208a31a2
+     python scripts/query_ontology_matched_entities.py 075660cf-08e6-40a6-a76e-308b6f52fbf1 fd547bb9-7b9e-47ea-ae53-242d208a31a2
 """
 
 import sys
@@ -59,7 +59,7 @@ async def get_entities_by_end_user_id(connector: Neo4jConnector, end_user_id: st
 def get_ontology_types_from_scene(db, scene_id: UUID) -> Set[str]:
     """获取场景下所有本体类型名称"""
     class_repo = OntologyClassRepository(db)
-    ontology_classes = class_repo.get_by_scene(scene_id)
+    ontology_classes = class_repo.get_classes_by_scene(scene_id)
     return {oc.class_name for oc in ontology_classes}
 
 
@@ -80,7 +80,7 @@ def get_all_ontology_types(db) -> Dict[str, Set[str]]:
     
     for scene in scenes:
         class_repo = OntologyClassRepository(db)
-        ontology_classes = class_repo.get_by_scene(scene.scene_id)
+        ontology_classes = class_repo.get_classes_by_scene(scene.scene_id)
         for oc in ontology_classes:
             if oc.class_name not in all_types:
                 all_types[oc.class_name] = set()
@@ -169,10 +169,10 @@ async def query_ontology_matched_entities(end_user_id: str, config_id: Optional[
         
         print(f"   找到 {len(entities)} 个实体")
         
-        # 4. 分类实体（场景类型、通用类型、未匹配）
-        scene_matched_entities = []
-        general_matched_entities = []
-        both_matched_entities = []  # 同时匹配场景和通用类型
+        # 4. 互斥分类实体：场景类型优先 > 通用类型 > 未匹配
+        #    确保: 场景实体数 + 通用实体数 + 未匹配数 = 总实体数
+        scene_matched_entities = []   # 匹配场景类型（含同时匹配两者的）
+        general_matched_entities = [] # 仅匹配通用类型（不含已归入场景的）
         unmatched_entities = []
         
         scene_type_distribution = defaultdict(list)
@@ -183,11 +183,8 @@ async def query_ontology_matched_entities(end_user_id: str, config_id: Optional[
             in_scene = entity_type in scene_ontology_types
             in_general = entity_type in general_ontology_types
             
-            if in_scene and in_general:
-                both_matched_entities.append(entity)
-                scene_type_distribution[entity_type].append(entity)
-                general_type_distribution[entity_type].append(entity)
-            elif in_scene:
+            if in_scene:
+                # 场景类型优先，同时匹配两者的也归入场景
                 scene_matched_entities.append(entity)
                 scene_type_distribution[entity_type].append(entity)
             elif in_general:
@@ -197,9 +194,8 @@ async def query_ontology_matched_entities(end_user_id: str, config_id: Optional[
                 unmatched_entities.append(entity)
         
         # 5. 输出匹配场景类型的实体
-        total_scene_matched = len(scene_matched_entities) + len(both_matched_entities)
         print(f"\n{'='*70}")
-        print(f"✅ 匹配场景本体类型的实体 (共 {total_scene_matched} 个)")
+        print(f"✅ 匹配场景本体类型的实体 (共 {len(scene_matched_entities)} 个)")
         print(f"{'='*70}")
         
         if scene_type_distribution:
@@ -219,9 +215,8 @@ async def query_ontology_matched_entities(end_user_id: str, config_id: Optional[
             print(f"\n   (无匹配场景类型的实体)")
         
         # 6. 输出匹配通用类型的实体
-        total_general_matched = len(general_matched_entities) + len(both_matched_entities)
         print(f"\n{'='*70}")
-        print(f"✅ 匹配通用本体类型的实体 (共 {total_general_matched} 个)")
+        print(f"✅ 匹配通用本体类型的实体 (共 {len(general_matched_entities)} 个)")
         print(f"{'='*70}")
         
         if general_type_distribution:
@@ -265,7 +260,6 @@ async def query_ontology_matched_entities(end_user_id: str, config_id: Optional[
         
         # 8. 统计摘要
         total_entities = len(entities)
-        any_matched = total_entities - len(unmatched_entities)
         
         print(f"\n{'='*70}")
         print(f"📊 统计摘要")
@@ -276,35 +270,35 @@ async def query_ontology_matched_entities(end_user_id: str, config_id: Optional[
         print(f"   场景本体类型数: {len(scene_ontology_types)}")
         print(f"   通用本体类型数: {len(general_ontology_types)}")
         
-        print(f"\n   匹配率统计:")
+        print(f"\n   互斥分类统计 (三者之和 = 总实体数):")
         print(f"   {'-'*50}")
-        scene_rate = total_scene_matched / total_entities * 100 if total_entities > 0 else 0
-        general_rate = total_general_matched / total_entities * 100 if total_entities > 0 else 0
-        any_rate = any_matched / total_entities * 100 if total_entities > 0 else 0
+        scene_rate = len(scene_matched_entities) / total_entities * 100 if total_entities > 0 else 0
+        general_rate = len(general_matched_entities) / total_entities * 100 if total_entities > 0 else 0
         unmatched_rate = len(unmatched_entities) / total_entities * 100 if total_entities > 0 else 0
         
-        print(f"   匹配场景类型: {total_scene_matched} 个 ({scene_rate:.1f}%)")
-        print(f"   匹配通用类型: {total_general_matched} 个 ({general_rate:.1f}%)")
-        print(f"   同时匹配两者: {len(both_matched_entities)} 个 ({len(both_matched_entities)/total_entities*100:.1f}%)")
-        print(f"   仅匹配场景类型: {len(scene_matched_entities)} 个 ({len(scene_matched_entities)/total_entities*100:.1f}%)")
-        print(f"   仅匹配通用类型: {len(general_matched_entities)} 个 ({len(general_matched_entities)/total_entities*100:.1f}%)")
-        print(f"   匹配任一类型: {any_matched} 个 ({any_rate:.1f}%)")
+        print(f"   匹配场景类型: {len(scene_matched_entities)} 个 ({scene_rate:.1f}%)")
+        print(f"   匹配通用类型: {len(general_matched_entities)} 个 ({general_rate:.1f}%)")
         print(f"   未匹配任何类型: {len(unmatched_entities)} 个 ({unmatched_rate:.1f}%)")
+        print(f"   ─────────────────────────────")
+        print(f"   合计: {len(scene_matched_entities)} + {len(general_matched_entities)} + {len(unmatched_entities)} = {len(scene_matched_entities) + len(general_matched_entities) + len(unmatched_entities)}")
         
-        # 9. 类型分布详情
+        # 9. 场景类型分布详情（全部）
         if scene_type_distribution:
-            print(f"\n   场景类型分布 (Top 10):")
+            print(f"\n   场景类型分布 (全部 {len(scene_type_distribution)} 种):")
             print(f"   {'-'*50}")
             sorted_scene_types = sorted(scene_type_distribution.items(), key=lambda x: len(x[1]), reverse=True)
-            for type_name, entities_list in sorted_scene_types[:10]:
+            for type_name, entities_list in sorted_scene_types:
                 print(f"   - {type_name}: {len(entities_list)} 个")
+            print(f"   场景类型实体总数: {len(scene_matched_entities)} 个")
         
+        # 10. 通用类型分布详情（全部）
         if general_type_distribution:
-            print(f"\n   通用类型分布 (Top 10):")
+            print(f"\n   通用类型分布 (全部 {len(general_type_distribution)} 种):")
             print(f"   {'-'*50}")
             sorted_general_types = sorted(general_type_distribution.items(), key=lambda x: len(x[1]), reverse=True)
-            for type_name, entities_list in sorted_general_types[:10]:
+            for type_name, entities_list in sorted_general_types:
                 print(f"   - {type_name}: {len(entities_list)} 个")
+            print(f"   通用类型实体总数: {len(general_matched_entities)} 个")
         
     except Exception as e:
         print(f"\n❌ 查询出错: {str(e)}")

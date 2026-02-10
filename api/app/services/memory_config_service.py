@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
-    validate_embedding_model,
 )
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 from app.repositories.memory_config_repository import MemoryConfigRepository
@@ -217,52 +216,107 @@ class MemoryConfigService:
 
             memory_config, workspace = result
 
-            # Step 2: Validate embedding model (returns both UUID and name)
+            # Helper function to validate model with workspace fallback
+            def _validate_model_with_fallback(
+                model_id: str,
+                model_type: str,
+                workspace_default: str,
+                required: bool = False
+            ) -> tuple:
+                """Validate model ID, falling back to workspace default if invalid.
+                
+                Args:
+                    model_id: The model ID to validate
+                    model_type: Type of model (llm, embedding, rerank)
+                    workspace_default: Workspace default model ID to use as fallback
+                    required: Whether the model is required
+                    
+                Returns:
+                    Tuple of (model_uuid, model_name) or (None, None)
+                """
+                # Try the configured model first
+                if model_id:
+                    try:
+                        return validate_and_resolve_model_id(
+                            model_id,
+                            model_type,
+                            self.db,
+                            workspace.tenant_id,
+                            required=False,
+                            config_id=validated_config_id,
+                            workspace_id=workspace.id,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"{model_type} model validation failed, trying workspace default: {e}"
+                        )
+                
+                # Fallback to workspace default
+                if workspace_default:
+                    try:
+                        result = validate_and_resolve_model_id(
+                            workspace_default,
+                            model_type,
+                            self.db,
+                            workspace.tenant_id,
+                            required=required,
+                            config_id=validated_config_id,
+                            workspace_id=workspace.id,
+                        )
+                        if result[0]:
+                            logger.info(
+                                f"Using workspace default {model_type} model: {workspace_default}"
+                            )
+                        return result
+                    except Exception as e:
+                        logger.error(f"Workspace default {model_type} model also invalid: {e}")
+                        if required:
+                            raise
+                
+                if required:
+                    raise InvalidConfigError(
+                        f"{model_type.title()} model is required but not configured",
+                        field_name=f"{model_type}_model_id",
+                        invalid_value=model_id,
+                        config_id=validated_config_id,
+                        workspace_id=workspace.id
+                    )
+                
+                return None, None
+
+            # Step 2: Validate embedding model with workspace fallback
             embed_start = time.time()
-            embedding_uuid, embedding_name = validate_embedding_model(
-                validated_config_id,
+            embedding_uuid, embedding_name = _validate_model_with_fallback(
                 memory_config.embedding_id,
-                self.db,
-                workspace.tenant_id,
-                workspace.id,
+                "embedding",
+                workspace.embedding,
+                required=True
             )
             embed_time = time.time() - embed_start
             logger.info(f"[PERF] Embedding validation: {embed_time:.4f}s")
 
-            # Step 3: Resolve LLM model
+            # Step 3: Resolve LLM model with workspace fallback
             llm_start = time.time()
-            llm_uuid, llm_name = validate_and_resolve_model_id(
+            llm_uuid, llm_name = _validate_model_with_fallback(
                 memory_config.llm_id,
                 "llm",
-                self.db,
-                workspace.tenant_id,
-                required=True,
-                config_id=validated_config_id,
-                workspace_id=workspace.id,
+                workspace.llm,
+                required=True
             )
             llm_time = time.time() - llm_start
             logger.info(f"[PERF] LLM validation: {llm_time:.4f}s")
 
-            # Step 4: Resolve optional rerank model
+            # Step 4: Resolve optional rerank model with workspace fallback
             rerank_start = time.time()
-            rerank_uuid = None
-            rerank_name = None
-            if memory_config.rerank_id:
-                rerank_uuid, rerank_name = validate_and_resolve_model_id(
-                    memory_config.rerank_id,
-                    "rerank",
-                    self.db,
-                    workspace.tenant_id,
-                    required=False,
-                    config_id=validated_config_id,
-                    workspace_id=workspace.id,
-                )
+            rerank_uuid, rerank_name = _validate_model_with_fallback(
+                memory_config.rerank_id,
+                "rerank",
+                workspace.rerank,
+                required=False
+            )
             rerank_time = time.time() - rerank_start
-            if memory_config.rerank_id:
+            if memory_config.rerank_id or workspace.rerank:
                 logger.info(f"[PERF] Rerank validation: {rerank_time:.4f}s")
-
-            # Note: embedding_name is now returned from validate_embedding_model above
-            # No need for redundant query!
 
             # Create immutable MemoryConfig object
             config = MemoryConfig(
@@ -496,7 +550,7 @@ class MemoryConfigService:
         
         try:
             ontology_repo = OntologyClassRepository(self.db)
-            ontology_classes = ontology_repo.get_by_scene(memory_config.scene_id)
+            ontology_classes = ontology_repo.get_classes_by_scene(memory_config.scene_id)
             
             if not ontology_classes:
                 logger.info(f"No ontology classes found for scene_id: {memory_config.scene_id}")
@@ -530,38 +584,7 @@ class MemoryConfigService:
         Returns:
             Optional[MemoryConfigModel]: Default config or None if no configs exist
         """
-        from sqlalchemy import select
-
-        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
-        
-        # First, try to find the explicitly marked default config
-        stmt = (
-            select(MemoryConfigModel)
-            .where(
-                MemoryConfigModel.workspace_id == workspace_id,
-                MemoryConfigModel.is_default.is_(True),
-                MemoryConfigModel.state.is_(True),
-            )
-            .limit(1)
-        )
-        
-        config = self.db.scalars(stmt).first()
-        
-        if config:
-            return config
-        
-        # Fallback: get the oldest active config if no explicit default
-        stmt = (
-            select(MemoryConfigModel)
-            .where(
-                MemoryConfigModel.workspace_id == workspace_id,
-                MemoryConfigModel.state.is_(True),
-            )
-            .order_by(MemoryConfigModel.created_at.asc())
-            .limit(1)
-        )
-        
-        config = self.db.scalars(stmt).first()
+        config = MemoryConfigRepository.get_workspace_default(self.db, workspace_id)
         
         if not config:
             logger.warning(
@@ -588,29 +611,28 @@ class MemoryConfigService:
         Returns:
             Optional[MemoryConfigModel]: Memory config or None if no fallback available
         """
-        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
-        
         if not memory_config_id:
             logger.debug(
                 "No memory config ID provided, using workspace default",
                 extra={"workspace_id": str(workspace_id)}
             )
-            return self.get_workspace_default_config(workspace_id)
         
-        config = self.db.get(MemoryConfigModel, memory_config_id)
-        
-        if config:
-            return config
-        
-        logger.warning(
-            "Memory config not found, falling back to workspace default",
-            extra={
-                "missing_config_id": str(memory_config_id),
-                "workspace_id": str(workspace_id)
-            }
+        config = MemoryConfigRepository.get_with_fallback(
+            self.db,
+            memory_config_id,
+            workspace_id
         )
         
-        return self.get_workspace_default_config(workspace_id)
+        if not config and memory_config_id:
+            logger.warning(
+                "Memory config not found, falling back to workspace default",
+                extra={
+                    "missing_config_id": str(memory_config_id),
+                    "workspace_id": str(workspace_id)
+                }
+            )
+        
+        return config
 
     def delete_config(
         self,
@@ -624,7 +646,7 @@ class MemoryConfigService:
         
         Args:
             config_id: Memory config ID to delete (UUID or legacy int)
-            force: If True, delete even if end users are connected
+            force: If True, clear end user references before deleting
             
         Returns:
             Dict with status, message, and affected_users count
@@ -632,8 +654,11 @@ class MemoryConfigService:
         Raises:
             ResourceNotFoundException: If config doesn't exist
         """
+        from sqlalchemy.exc import IntegrityError
+
         from app.core.exceptions import ResourceNotFoundException
         from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+        from app.repositories.end_user_repository import EndUserRepository
         
         # 处理旧格式 int 类型的 config_id
         if isinstance(config_id, int):
@@ -663,54 +688,227 @@ class MemoryConfigService:
                 "is_default": True
             }
         
-        # TODO: add back delete warning
-        # # Count connected end users
-        # end_user_repo = EndUserRepository(self.db)
-        # connected_count = end_user_repo.count_by_memory_config_id(config_id)
+        # Use repository to count connected end users
+        end_user_repo = EndUserRepository(self.db)
+        connected_count = end_user_repo.count_by_memory_config_id(config_id)
         
-        # if connected_count > 0 and not force:
-        #     logger.warning(
-        #         "Attempted to delete memory config with connected end users",
-        #         extra={
-        #             "config_id": str(config_id),
-        #             "connected_count": connected_count
-        #         }
-        #     )
+        if connected_count > 0 and not force:
+            logger.warning(
+                "Attempted to delete memory config with connected end users",
+                extra={
+                    "config_id": str(config_id),
+                    "connected_count": connected_count
+                }
+            )
             
-        #     return {
-        #         "status": "warning",
-        #         "message": f"Cannot delete memory config: {connected_count} end users are using it",
-        #         "connected_count": connected_count,
-        #         "force_required": True
-        #     }
+            return {
+                "status": "warning",
+                "message": f"无法删除记忆配置：{connected_count} 个终端用户正在使用此配置",
+                "connected_count": connected_count,
+                "force_required": True
+            }
         
-        # # Force delete: clear end user references first
-        # if connected_count > 0 and force:
-        #     cleared_count = end_user_repo.clear_memory_config_id(config_id)
+        # Force delete: use repository to clear end user references first
+        if connected_count > 0 and force:
+            cleared_count = end_user_repo.clear_memory_config_id(config_id)
             
-        #     logger.warning(
-        #         "Force deleting memory config",
-        #         extra={
-        #             "config_id": str(config_id),
-        #             "cleared_end_users": cleared_count
-        #         }
-        #     )
-        connected_count = 0
+            logger.warning(
+                "Force deleting memory config, clearing end user references",
+                extra={
+                    "config_id": str(config_id),
+                    "cleared_end_users": cleared_count
+                }
+            )
         
-        self.db.delete(config)
-        self.db.commit()
-        
-        logger.info(
-            "Memory config deleted",
-            extra={
-                "config_id": str(config_id),
-                "force": force,
+        try:
+            self.db.delete(config)
+            self.db.commit()
+            
+            logger.info(
+                "Memory config deleted",
+                extra={
+                    "config_id": str(config_id),
+                    "force": force,
+                    "affected_users": connected_count
+                }
+            )
+            
+            return {
+                "status": "success",
+                "message": "记忆配置删除成功",
                 "affected_users": connected_count
             }
-        )
+            
+        except IntegrityError as e:
+            self.db.rollback()
+            
+            # Handle foreign key violation gracefully
+            error_str = str(e.orig) if e.orig else str(e)
+            if "ForeignKeyViolation" in error_str or "foreign key constraint" in error_str.lower():
+                logger.warning(
+                    "Delete failed due to foreign key constraint",
+                    extra={
+                        "config_id": str(config_id),
+                        "error": error_str
+                    }
+                )
+                return {
+                    "status": "error",
+                    "message": "无法删除记忆配置：仍有终端用户引用此配置，请使用 force=true 强制删除",
+                    "force_required": True
+                }
+            
+            # Re-raise other integrity errors
+            logger.error(
+                "Delete failed due to integrity error",
+                extra={
+                    "config_id": str(config_id),
+                    "error": error_str
+                },
+                exc_info=True
+            )
+            raise
+
+    # ==================== 记忆配置提取方法 ====================
+
+    def extract_memory_config_id(
+        self,
+        app_type: str,
+        config: dict
+    ) -> tuple[Optional[uuid.UUID], bool]:
+        """从发布配置中提取 memory_config_id（根据应用类型分发）
         
-        return {
-            "status": "success",
-            "message": "Memory config deleted successfully",
-            "affected_users": connected_count
-        }
+        Args:
+            app_type: 应用类型 (agent, workflow, multi_agent)
+            config: 发布配置字典
+            
+        Returns:
+            Tuple[Optional[uuid.UUID], bool]: (memory_config_id, is_legacy_int)
+                - memory_config_id: 提取的配置ID，如果不存在或为旧格式则返回 None
+                - is_legacy_int: 是否检测到旧格式 int 数据，需要回退到工作空间默认配置
+        """
+        if app_type == "agent":
+            return self._extract_memory_config_id_from_agent(config)
+        elif app_type == "workflow":
+            return self._extract_memory_config_id_from_workflow(config)
+        elif app_type == "multi_agent":
+            # Multi-agent 暂不支持记忆配置提取
+            logger.debug(f"多智能体应用暂不支持记忆配置提取: app_type={app_type}")
+            return None, False
+        else:
+            logger.warning(f"不支持的应用类型，无法提取记忆配置: app_type={app_type}")
+            return None, False
+
+    def _extract_memory_config_id_from_agent(
+        self,
+        config: dict
+    ) -> tuple[Optional[uuid.UUID], bool]:
+        """从 Agent 应用配置中提取 memory_config_id
+        
+        路径: config.memory.memory_content 或 config.memory.memory_config_id
+        
+        Args:
+            config: Agent 配置字典
+            
+        Returns:
+            Tuple[Optional[uuid.UUID], bool]: (memory_config_id, is_legacy_int)
+                - memory_config_id: 记忆配置ID，如果不存在或为旧格式则返回 None
+                - is_legacy_int: 是否检测到旧格式 int 数据
+        """
+        try:
+            memory_dict = config.get("memory", {})
+            # Support both field names: memory_config_id (new) and memory_content (legacy)
+            memory_value = memory_dict.get("memory_config_id") or memory_dict.get("memory_content")
+            logger.info(
+                f"Extracting memory_config_id: memory_value={memory_value}, "
+                f"type={type(memory_value).__name__ if memory_value else 'None'}"
+            )
+            if memory_value:
+                # 处理字符串、UUID 和 int（旧数据兼容）三种情况
+                if isinstance(memory_value, uuid.UUID):
+                    return memory_value, False
+                elif isinstance(memory_value, str):
+                    # Check if it's a numeric string (legacy int format)
+                    if memory_value.isdigit():
+                        logger.warning(
+                            f"Agent 配置中 memory_config_id 为旧格式 int 字符串，将使用工作空间默认配置: "
+                            f"value={memory_value}"
+                        )
+                        return None, True
+                    try:
+                        return uuid.UUID(memory_value), False
+                    except ValueError:
+                        logger.warning(f"Invalid UUID string: {memory_value}")
+                        return None, False
+                elif isinstance(memory_value, int):
+                    # 旧数据存储为 int，需要回退到工作空间默认配置
+                    logger.warning(
+                        f"Agent 配置中 memory_config_id 为旧格式 int，将使用工作空间默认配置: "
+                        f"value={memory_value}"
+                    )
+                    return None, True
+                else:
+                    logger.warning(
+                        f"Agent 配置中 memory_config_id 格式无效: type={type(memory_value)}, "
+                        f"value={memory_value}"
+                    )
+            return None, False
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                f"Agent 配置中 memory_config_id 格式无效: error={str(e)}"
+            )
+            return None, False
+
+    def _extract_memory_config_id_from_workflow(
+        self,
+        config: dict
+    ) -> tuple[Optional[uuid.UUID], bool]:
+        """从 Workflow 应用配置中提取 memory_config_id
+        
+        扫描工作流节点，查找 MemoryRead 或 MemoryWrite 节点。
+        返回第一个找到的记忆节点的 config_id。
+        
+        Args:
+            config: Workflow 配置字典
+            
+        Returns:
+            Tuple[Optional[uuid.UUID], bool]: (memory_config_id, is_legacy_int)
+                - memory_config_id: 记忆配置ID，如果不存在或为旧格式则返回 None
+                - is_legacy_int: 是否检测到旧格式 int 数据
+        """
+        nodes = config.get("nodes", [])
+        
+        for node in nodes:
+            node_type = node.get("type", "")
+            
+            # 检查是否为记忆节点 (support both formats: memory-read/memory-write and MemoryRead/MemoryWrite)
+            if node_type.lower() in ["memoryread", "memorywrite", "memory-read", "memory-write"]:
+                config_id = node.get("config", {}).get("config_id")
+                
+                if config_id:
+                    try:
+                        # 处理字符串、UUID 和 int（旧数据兼容）三种情况
+                        if isinstance(config_id, uuid.UUID):
+                            return config_id, False
+                        elif isinstance(config_id, str):
+                            return uuid.UUID(config_id), False
+                        elif isinstance(config_id, int):
+                            # 旧数据存储为 int，需要回退到工作空间默认配置
+                            logger.warning(
+                                f"工作流记忆节点 config_id 为旧格式 int，将使用工作空间默认配置: "
+                                f"node_id={node.get('id')}, node_type={node_type}, value={config_id}"
+                            )
+                            return None, True
+                        else:
+                            logger.warning(
+                                f"工作流记忆节点 config_id 格式无效: node_id={node.get('id')}, "
+                                f"node_type={node_type}, type={type(config_id)}"
+                            )
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"工作流记忆节点 config_id 格式无效: node_id={node.get('id')}, "
+                            f"node_type={node_type}, error={str(e)}"
+                        )
+        
+        logger.debug("工作流配置中未找到记忆节点")
+        return None, False

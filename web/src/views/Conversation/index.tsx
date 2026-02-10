@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-06 21:11:23
+ * @Last Modified time: 2026-02-09 20:20:01
  */
 /**
  * Conversation Page
@@ -35,7 +35,7 @@ import MemoryFunctionCheckedIcon from '@/assets/images/conversation/memoryFuncti
 import { type SSEMessage } from '@/utils/stream'
 import UploadFiles from './components/FileUpload'
 // import AudioRecorder from '@/components/AudioRecorder'
-import { shareFileUploadUrl } from '@/api/fileStorage'
+import { shareFileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 import UploadFileListModal from './components/UploadFileListModal'
 
 /**
@@ -350,11 +350,16 @@ const Conversation: FC = () => {
                         {
                           key: 'upload', label: (
                             <UploadFiles
-                              action={shareFileUploadUrl}
+                              action={shareFileUploadUrlWithoutApiPrefix}
                               fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']}
                               onChange={fileChange}
                               fileList={[]}
                               update={update}
+                              requestConfig={{
+                                headers: {
+                                  'Content-Type': 'multipart/form-data',
+                                  Authorization: `Bearer ${shareToken || ''}`,
+                              } }}
                             />
                           )
                         },

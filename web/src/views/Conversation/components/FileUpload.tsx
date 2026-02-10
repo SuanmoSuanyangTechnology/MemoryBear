@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-06 21:09:42 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-09 16:41:31
  */
 /**
  * File Upload Component
@@ -25,8 +25,8 @@ import { Upload, Progress, App } from 'antd';
 import type { UploadProps, UploadFile } from 'antd';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
-import { cookieUtils } from '@/utils/request'
-import { fileUploadUrl } from '@/api/fileStorage'
+import { request } from '@/utils/request'
+import { fileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 
 interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
   /** Upload API endpoint */
@@ -99,7 +99,7 @@ export interface UploadFilesRef {
  * Supports single/multiple file uploads, drag-and-drop, file validation, and preview
  */
 const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
-  action = fileUploadUrl,
+  action = fileUploadUrlWithoutApiPrefix,
   multiple = false,
   fileList: propFileList = [],
   onChange,
@@ -110,6 +110,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   maxCount = 1,
   onRemove: customOnRemove,
   update,
+  requestConfig,
   ...props
 }, ref) => {
   const { t } = useTranslation();
@@ -164,6 +165,24 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   };
 
   /**
+   * Custom upload request handler
+   */
+  const handleCustomRequest: RcUploadProps['customRequest'] = async (options) => {
+    const { file, onSuccess, onError } = options;
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await request.uploadFile(action, formData, requestConfig);
+      
+      onSuccess?.({data: response});
+    } catch (error) {
+      onError?.(error as Error);
+    }
+  };
+
+  /**
    * Handles upload state changes
    */
   const handleChange: UploadProps['onChange'] = ({ fileList: newFileList, event }) => {
@@ -207,13 +226,10 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
 
   // Generate upload component configuration
   const uploadProps: UploadProps = {
-    action,
+    customRequest: handleCustomRequest,
     multiple: multiple && maxCount > 1,
     fileList,
     beforeUpload,
-    headers: {
-      authorization: `Bearer ${cookieUtils.get('authToken')}`,
-    },
     onChange: handleChange,
     accept,
     disabled,

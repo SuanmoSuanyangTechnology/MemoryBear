@@ -6,7 +6,6 @@ This module provides validation functions for memory configuration models.
 Functions:
     validate_model_exists_and_active: Validate model exists and is active
     validate_and_resolve_model_id: Validate and resolve model ID with DB lookup
-    validate_embedding_model: Validate embedding model availability
     validate_llm_model: Validate LLM model availability
 """
 
@@ -201,58 +200,6 @@ def validate_and_resolve_model_id(
         model_uuid, model_type, db, tenant_id, config_id, workspace_id
     )
     return model_uuid, model_name
-
-
-def validate_embedding_model(
-    config_id: UUID,
-    embedding_id: Union[str, UUID, None],
-    db: Session,
-    tenant_id: Optional[UUID] = None,
-    workspace_id: Optional[UUID] = None
-) -> tuple[UUID, str]:
-    """Validate that embedding model is available and return its UUID and name.
-    
-    Returns:
-        Tuple of (embedding_uuid, embedding_name)
-    
-    Raises:
-        InvalidConfigError: If embedding_id is not provided or invalid
-        ModelNotFoundError: If embedding model does not exist
-        ModelInactiveError: If embedding model is inactive
-    """
-    if embedding_id is None or (isinstance(embedding_id, str) and not embedding_id.strip()):
-        raise InvalidConfigError(
-            f"Configuration {config_id} has no embedding model configured",
-            field_name="embedding_model_id",
-            invalid_value=embedding_id,
-            config_id=config_id,
-            workspace_id=workspace_id
-        )
-    
-    embedding_uuid, embedding_name = validate_and_resolve_model_id(
-        embedding_id, "embedding", db, tenant_id, required=True,
-        config_id=config_id, workspace_id=workspace_id
-    )
-    
-    logger.debug(
-        "Embedding model validated",
-        extra={
-            "embedding_uuid": str(embedding_uuid),
-            "embedding_name": embedding_name,
-            "config_id": config_id
-        }
-    )
-    
-    if embedding_uuid is None:
-        raise InvalidConfigError(
-            f"Configuration {config_id} has no embedding model configured",
-            field_name="embedding_model_id",
-            invalid_value=embedding_id,
-            config_id=config_id,
-            workspace_id=workspace_id
-        )
-    
-    return embedding_uuid, embedding_name
 
 
 def validate_llm_model(

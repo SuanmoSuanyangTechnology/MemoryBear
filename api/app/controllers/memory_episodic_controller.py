@@ -3,9 +3,10 @@
 包含情景记忆总览和详情查询接口
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 
 from app.core.error_codes import BizCode
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.dependencies import get_current_user
@@ -14,6 +15,7 @@ from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_episodic_schema import (
     EpisodicMemoryOverviewRequest,
     EpisodicMemoryDetailsRequest,
+    translate_episodic_type,
 )
 from app.services.memory_episodic_service import memory_episodic_service
 
@@ -84,6 +86,7 @@ async def get_episodic_memory_overview_api(
 @router.post("/details", response_model=ApiResponse)
 async def get_episodic_memory_details_api(
     request: EpisodicMemoryDetailsRequest,
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """
@@ -110,6 +113,11 @@ async def get_episodic_memory_details_api(
             end_user_id=request.end_user_id,
             summary_id=request.summary_id
         )
+        
+        # 根据语言参数翻译 episodic_type
+        language = get_language_from_header(language_type)
+        if "episodic_type" in result:
+            result["episodic_type"] = translate_episodic_type(result["episodic_type"], language)
         
         api_logger.info(
             f"成功获取情景记忆详情: end_user_id={request.end_user_id}, summary_id={request.summary_id}"

@@ -135,7 +135,10 @@ export const useWorkflowGraph = ({
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
-            if (key === 'memory' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+            if (type === 'memory-write' && key === 'message' && nodeLibraryConfig.config) {
+              nodeLibraryConfig.config['messages'].defaultValue = [{ role: 'USER', content: config[key] }]
+              delete nodeLibraryConfig.config[key]
+            } else if (key === 'memory' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
               const { memory, messages } = config as any;
               if (memory?.enable && messages && messages.length > 0) {
                 const lastMessage = messages[messages.length - 1]

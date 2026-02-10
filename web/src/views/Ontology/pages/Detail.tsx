@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:20 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 14:10:20 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-09 17:56:35
  */
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useParams } from 'react-router-dom';
@@ -100,7 +100,7 @@ const Detail: FC = () => {
     <>
       <PageHeader
         name={data.scene_name}
-        subTitle={<div>{data.scene_description}</div>}
+        subTitle={<Tooltip title={data.scene_description}><div className="rb:h-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{data.scene_description}</div></Tooltip>}
         extra={<Space>
           <Button type="primary" ghost className="rb:h-6! rb:px-2! rb:leading-5.5!" onClick={handleAdd}>+ {t('ontology.addClass')}</Button>
           <Button className="rb:h-6! rb:px-2! rb:leading-5.5!" type="primary" onClick={handleExtract}>+ {t('ontology.extract')}</Button>

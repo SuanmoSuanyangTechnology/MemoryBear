@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-04 10:08:49
+ * @Last Modified time: 2026-02-09 21:04:14
  */
 /**
  * Result Component
@@ -21,7 +21,7 @@ import type { AnyObject } from 'antd/es/_util/type';
 import Card from './Card'
 import RbCard from '@/components/RbCard/Card'
 import RbAlert from '@/components/RbAlert'
-import type { TestResult } from '../types'
+import type { TestResult, OntologyCoverage } from '../types'
 import { pilotRunMemoryExtractionConfig } from '@/api/memory'
 import { type SSEMessage } from '@/utils/stream'
 import Tag, { type TagProps } from '@/components/Tag'
@@ -78,6 +78,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
   const [knowledgeExtraction, setKnowledgeExtraction] = useState<ModuleItem>(initObj as ModuleItem)
   const [creatingNodesEdges, setCreatingNodesEdges] = useState<ModuleItem>(initObj as ModuleItem)
   const [deduplication, setDeduplication] = useState<ModuleItem>(initObj as ModuleItem)
+  const [ontologyCoverage, setOntologyCoverage] = useState<OntologyCoverage>({} as OntologyCoverage)
 
   const [runForm] = Form.useForm()
 
@@ -181,6 +182,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
             break
           case 'result': // Result
             setTestResult(data.data?.extracted_result)
+            setOntologyCoverage(data.data?.ontology_coverage)
             break
         }
       })
@@ -284,8 +286,8 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
             headerType="borderL"
             headerClassName="rb:before:bg-[#155EEF]!"
           >
-            {knowledgeExtraction.data.map(vo => 
-              <div key={vo.statement_index} className="rb:mb-3 rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">{vo.statement}</div>
+            {knowledgeExtraction.data.map((vo, index) => 
+              <div key={index} className="rb:mb-3 rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">{vo.statement}</div>
             )}
             {formatTime(knowledgeExtraction)}
             {knowledgeExtraction.result && <RbAlert color="blue" icon={<CheckCircleFilled />} className="rb:mt-3">
@@ -450,6 +452,36 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               </RbAlert>
             </RbCard>
           }
+          {ontologyCoverage && Object.keys(ontologyCoverage).length > 0 &&
+            <RbCard
+              title={<>{t('memoryExtractionEngine.ontologyCoverage')}({ontologyCoverage.total_entities})</>}
+              headerType="borderL"
+              headerClassName="rb:before:bg-[#369F21]!"
+            >
+              <div className="rb:grid rb:grid-cols-2 rb:gap-3">
+                {(['scene_type_distribution', 'general_type_distribution', 'unmatched'] as const).map((key, idx) => {
+                  if (!ontologyCoverage[key]) return null
+                  return (
+                    <div key={idx} className="rb:text-[12px]">
+                      <div className="rb:text-[#369F21] rb:font-medium">{t(`memoryExtractionEngine.${key}`)}({ontologyCoverage[key].type_count})</div>
+                      <div>{t('memoryExtractionEngine.entity_total', { num: ontologyCoverage[key].entity_total })}</div>
+                      <div>
+                        {ontologyCoverage[key].types.map((type, index) => {
+                          if (!type.type || type.type === '') return null
+                          return (
+                            <div key={index} className="rb:text-[#5B6167] rb:font-regular rb:leading-4">
+                              -{type.type}({type.count})
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </RbCard>
+          }
+
         </Space>
       </div>
 

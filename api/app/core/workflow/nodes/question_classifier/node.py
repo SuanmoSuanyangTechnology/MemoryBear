@@ -32,8 +32,8 @@ class QuestionClassifierNode(BaseNode):
             usage = self.response_metadata.get('token_usage')
             if usage:
                 return {
-                    "prompt_tokens": usage.get('prompt_tokens', 0),
-                    "completion_tokens": usage.get('completion_tokens', 0),
+                    "prompt_tokens": usage.get('input_tokens', 0),
+                    "completion_tokens": usage.get('output_tokens', 0),
                     "total_tokens": usage.get('total_tokens', 0)
                 }
         return None

@@ -4,6 +4,7 @@
 验证工作流配置的有效性，确保配置符合规范。
 """
 
+import copy
 import logging
 from typing import Any, Union, TYPE_CHECKING
 
@@ -114,6 +115,7 @@ class WorkflowValidator:
             >>> is_valid
             True
         """
+        workflow_config = copy.deepcopy(workflow_config)
         errors = []
 
         graphs = cls.get_subgraph(workflow_config)

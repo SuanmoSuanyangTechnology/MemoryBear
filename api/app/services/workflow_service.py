@@ -449,7 +449,7 @@ class WorkflowService:
 
         input_data = {"message": payload.message, "variables": payload.variables,
                       "conversation_id": payload.conversation_id,
-                      "files": [file.model_dump() for file in payload.files] if payload.files else []
+                      "files": [file.model_dump(mode='json') for file in payload.files]
                       }
 
         # 转换 conversation_id 为 UUID
@@ -636,9 +636,10 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
+
         input_data = {"message": payload.message, "variables": payload.variables,
                       "conversation_id": payload.conversation_id,
-                      "files": [file.model_dump() for file in payload.files] if payload.files else []
+                      "files": [file.model_dump(mode='json') for file in payload.files]
                       }
 
         # 转换 conversation_id 为 UUID

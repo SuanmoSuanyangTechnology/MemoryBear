@@ -14,6 +14,7 @@ import { NoData } from './noData';
 import { formatDateTime } from '@/utils/format';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import RbMarkdown from '@/components/Markdown';
+import { useMemo } from 'react';
 
 interface RecallTestResultProps {
   data: RecallTestData[];
@@ -61,6 +62,36 @@ const RecallTestResult = ({
     return `**${t('knowledgeBase.question')}:** ${question}\n**${t('knowledgeBase.answer')}:** ${answer}`;
   };
 
+  // Check if content is valid HTML
+  const isValidHTML = (content: string): boolean => {
+    if (!content) return false;
+    // Check if content contains HTML tags
+    const htmlTagPattern = /<[^>]+>/;
+    return htmlTagPattern.test(content);
+  };
+
+  // Render content with HTML or Markdown fallback
+  const renderTextContent = useMemo(() => {
+    return (content: string) => {
+      // Try to render as HTML first
+      if (isValidHTML(content)) {
+        try {
+          return (
+            <div 
+              className='rb:prose rb:prose-sm rb:max-w-none'
+              dangerouslySetInnerHTML={{ __html: content }}
+            />
+          );
+        } catch (error) {
+          console.warn('HTML parsing failed, falling back to Markdown:', error);
+        }
+      }
+      
+      // Fallback to Markdown rendering
+      return <RbMarkdown content={content} showHtmlComments={true} />;
+    };
+  }, []);
+
   const handleItemClick = (e: React.MouseEvent, item: RecallTestData, index: number) => {
     // Check if the click is on an image or image-related element
     const target = e.target as HTMLElement;
@@ -99,6 +130,20 @@ const RecallTestResult = ({
       return 'rb:text-[#FF5D34]';
     }
   };
+
+  // Show skeleton when initial loading
+  if (loading && data.length === 0) {
+    return (
+      <div className='rb:flex rb:flex-col'>
+        <div className='rb:flex rb:items-center rb:justify-start rb:gap-2 rb:mb-4'>
+          <span className='rb:text-lg rb:font-medium'>{t('knowledgeBase.recallResult')}</span>
+        </div>
+        <Skeleton active paragraph={{ rows: 3 }} />
+        <Skeleton active paragraph={{ rows: 3 }} className='rb:mt-4' />
+        <Skeleton active paragraph={{ rows: 3 }} className='rb:mt-4' />
+      </div>
+    );
+  }
 
   if (data.length === 0 && showEmpty) {
     return (
@@ -153,9 +198,9 @@ const RecallTestResult = ({
                   const qaContent = parseQAContent(item.page_content);
                   if (qaContent) {
                     const formattedContent = formatQAContent(qaContent.question, qaContent.answer);
-                    return <RbMarkdown content={formattedContent} showHtmlComments={true} />;
+                    return renderTextContent(formattedContent);
                   }
-                  return <RbMarkdown content={item.page_content} showHtmlComments={true} />;
+                  return renderTextContent(item.page_content);
                 })()}
               </div>
             </div>

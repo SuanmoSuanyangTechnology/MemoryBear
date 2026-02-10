@@ -220,14 +220,16 @@ class EmotionAnalyticsService:
         """计算积极率
 
         根据情绪类型分类正面、负面和中性情绪，计算积极率。
-        公式：(正面数 / (正面数 + 负面数)) * 100
+        当存在非中性情绪时：(正面数 / (正面数 + 负面数)) * 100
+        当只有中性情绪时：基于中性情绪的存在给出基准分数
+        当完全没有情绪数据时：score 为 None，表示无法计算
 
         Args:
             emotions: 情绪数据列表，每个包含 emotion_type 字段
 
         Returns:
             Dict: 包含积极率计算结果：
-                - score: 积极率分数（0-100）
+                - score: 积极率分数（0-100），无数据时为 None
                 - positive_count: 正面情绪数量
                 - negative_count: 负面情绪数量
                 - neutral_count: 中性情绪数量
@@ -245,14 +247,19 @@ class EmotionAnalyticsService:
         total_non_neutral = positive_count + negative_count
         if total_non_neutral > 0:
             score = (positive_count / total_non_neutral) * 100
+        elif neutral_count > 0:
+            # 只有中性情绪，说明情绪状态平稳，给予基准分 50
+            score = 50.0
         else:
-            score = 50.0  # 如果没有非中性情绪，默认为50
+            # 完全没有情绪数据，无法计算积极率
+            score = None
 
+        score_display = f"{score:.2f}" if score is not None else "N/A"
         logger.debug(f"积极率计算: positive={positive_count}, negative={negative_count}, "
-                     f"neutral={neutral_count}, score={score:.2f}")
+                     f"neutral={neutral_count}, score={score_display}")
 
         return {
-            "score": round(score, 2),
+            "score": round(score, 2) if score is not None else None,
             "positive_count": positive_count,
             "negative_count": negative_count,
             "neutral_count": neutral_count
@@ -381,16 +388,26 @@ class EmotionAnalyticsService:
                 time_range=time_range
             )
 
+            # 如果指定时间范围内没有数据，尝试更大的时间范围
+            if not emotions and time_range != "90d":
+                logger.info(f"用户 {end_user_id} 在 {time_range} 内无数据，尝试90天范围")
+                emotions = await self.emotion_repo.get_emotions_in_range(
+                    end_user_id=end_user_id,
+                    time_range="90d"
+                )
+                if emotions:
+                    time_range = "90d"
+
             # 如果没有数据，返回默认值
             if not emotions:
                 logger.warning(f"用户 {end_user_id} 在时间范围 {time_range} 内没有情绪数据")
                 return {
-                    "health_score": 0.0,
+                    "health_score": None,
                     "level": "无数据",
                     "dimensions": {
-                        "positivity_rate": {"score": 0.0, "positive_count": 0, "negative_count": 0, "neutral_count": 0},
-                        "stability": {"score": 0.0, "std_deviation": 0.0},
-                        "resilience": {"score": 0.0, "recovery_rate": 0.0}
+                        "positivity_rate": {"score": None, "positive_count": 0, "negative_count": 0, "neutral_count": 0},
+                        "stability": {"score": None, "std_deviation": 0.0},
+                        "resilience": {"score": None, "recovery_rate": 0.0}
                     },
                     "emotion_distribution": {},
                     "time_range": time_range
@@ -403,8 +420,10 @@ class EmotionAnalyticsService:
 
             # 计算综合健康分数
             # 公式：positivity_rate * 0.4 + stability * 0.3 + resilience * 0.3
+            # 如果积极率无法计算（无数据），视为 0 参与加权
+            positivity_score = positivity_rate["score"] if positivity_rate["score"] is not None else 0.0
             health_score = (
-                    positivity_rate["score"] * 0.4 +
+                    positivity_score * 0.4 +
                     stability["score"] * 0.3 +
                     resilience["score"] * 0.3
             )
@@ -565,6 +584,27 @@ class EmotionAnalyticsService:
                 time_range="30d"
             )
 
+            # 3.1 如果30天内没有数据，尝试获取90天的数据
+            if not emotions:
+                logger.info(f"用户 {end_user_id} 30天内无情绪数据，尝试获取90天数据")
+                emotions = await self.emotion_repo.get_emotions_in_range(
+                    end_user_id=end_user_id,
+                    time_range="90d"
+                )
+                health_data = await self.calculate_emotion_health_index(end_user_id, time_range="90d")
+
+            # 3.2 如果仍然没有时间范围内的数据，从情绪标签统计获取（无时间过滤）
+            if not emotions:
+                logger.info(f"用户 {end_user_id} 90天内也无情绪数据，从标签统计获取全量数据")
+                tags_data = await self.get_emotion_tags(end_user_id=end_user_id)
+                if tags_data.get("total_count", 0) > 0:
+                    # 用标签统计数据构建简化的 health_data
+                    health_data["emotion_distribution"] = {
+                        tag["emotion_type"]: tag["count"]
+                        for tag in tags_data.get("tags", [])
+                    }
+                    health_data["total_emotion_count"] = tags_data["total_count"]
+
             # 4. 分析情绪模式
             patterns = self._analyze_emotion_patterns(emotions)
 
@@ -700,7 +740,7 @@ class EmotionAnalyticsService:
         Returns:
             EmotionSuggestionsResponse: 默认建议
         """
-        health_score = health_data.get('health_score', 0)
+        health_score = health_data.get('health_score') or 0
 
         if language == "en":
             if health_score >= 80:

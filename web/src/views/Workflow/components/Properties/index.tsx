@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 14:21:45
+ * @Last Modified time: 2026-02-09 19:56:42
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -491,7 +491,7 @@ const Properties: FC<PropertiesProps> = ({
 
               if (config.type === 'messageEditor') {
                 return (
-                  <Form.Item key={key} name={key}>
+                  <Form.Item key={key} name={key} label={selectedNode?.data?.type === 'memory-write' ? t(`workflow.config.${selectedNode?.data?.type}.${key}`) : undefined }>
                     <MessageEditor 
                       title={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                       isArray={!!config.isArray} 

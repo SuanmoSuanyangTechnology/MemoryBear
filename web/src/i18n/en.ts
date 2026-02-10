@@ -766,6 +766,9 @@ export const en = {
       toWorkspace: 'Authorization to workspace',
       shareTitle:'Please select the workspace you want to share',
       shareNote:'Note: Sharing is not possible when workspace app is closed',
+      shareSpace:'Manage Sharing',
+      shareSpaceTitle:'Shared with the following workspaces',
+      shareSpaceNote: 'Note： sharing is turned off, others will no longer have access.',
       authorizedPerson:'Authorized person',
       chunkList:'Chunk List',
       delimiter:'Text paragraph delimiter',
@@ -1588,6 +1591,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       creating_nodes_edges_desc: 'Entity relationship creation completed, {{num}} relationships in total',
       deduplication_desc: 'Deduplication and disambiguation completed, {{count}} unique entities in total',
       custom_text: 'Debug Text',
+      ontologyCoverage: 'Ontology Type',
+      entity_total: 'Total {{num}} entities',
+      scene_type_distribution: 'Scene Type Distribution',
+      general_type_distribution: 'General Type Distribution',
+      unmatched: 'Unmatched',
     },
     memoryConversation: {
       searchPlaceholder: 'Enter user ID...',
@@ -2105,7 +2113,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           search_switch: 'Search Mode',
         },
         'memory-write': {
-          message: 'Message',
+          messages: 'Message',
           config_id: 'Memory Configuration',
           search_switch: 'Search Mode',
         },
@@ -2446,6 +2454,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       involved_objects: 'Involved Objects',
       content_records: 'Episode Content Records',
       emotion: 'Emotion and State Records',
+      none: 'None',
     },
     implicitDetail: {
       title: 'The invisible forces that shaped me',

@@ -55,10 +55,22 @@ class MemoryWriteNode(BaseNode):
 
         if not end_user_id:
             raise RuntimeError("End user id is required")
+        messages = []
+        if self.typed_config.message:
+            messages.append({
+                "role": "user",
+                "content": self._render_template(self.typed_config.message, variable_pool)
+            })
+
+        for message in self.typed_config.messages:
+            messages.append({
+                "role": message.role,
+                "content": self._render_template(message.content, variable_pool)
+            })
 
         write_message_task.delay(
             end_user_id,
-            self._render_template(self.typed_config.message, variable_pool),
+            messages,
             str(self.typed_config.config_id),
             "neo4j",
             ""
