@@ -19,7 +19,7 @@ class Document(Base):
     parser_config = Column(JSON, nullable=False,
                            default={
                                "layout_recognize": "DeepDOC",
-                               "chunk_token_num": 128,
+                               "chunk_token_num": 130,
                                "delimiter": "\n",
                                "auto_keywords": 0,
                                "auto_questions": 0,

@@ -497,7 +497,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     parser_id="naive",
                                     parser_config={
                                         "layout_recognize": "DeepDOC",
-                                        "chunk_token_num": 128,
+                                        "chunk_token_num": 130,
                                         "delimiter": "\n",
                                         "auto_keywords": 0,
                                         "auto_questions": 0,
@@ -666,7 +666,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     parser_id="naive",
                                     parser_config={
                                         "layout_recognize": "DeepDOC",
-                                        "chunk_token_num": 128,
+                                        "chunk_token_num": 130,
                                         "delimiter": "\n",
                                         "auto_keywords": 0,
                                         "auto_questions": 0,
@@ -828,7 +828,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     parser_id="naive",
                                     parser_config={
                                         "layout_recognize": "DeepDOC",
-                                        "chunk_token_num": 128,
+                                        "chunk_token_num": 130,
                                         "delimiter": "\n",
                                         "auto_keywords": 0,
                                         "auto_questions": 0,
