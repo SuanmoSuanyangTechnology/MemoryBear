@@ -59,8 +59,6 @@ async def summary_history(state: ReadState) -> ReadState:
     unique_df = df.drop_duplicates(subset=['Query', 'Answer'])
     # 转回字典格式
     unique_results = unique_df.to_dict(orient='records')
-    for i in unique_results:
-        print(i)
     return unique_results
 
 async def summary_llm(state: ReadState, history, retrieve_info, template_name, operation_name, response_model,search_mode) -> str:
