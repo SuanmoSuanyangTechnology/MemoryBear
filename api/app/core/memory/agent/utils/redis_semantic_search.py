@@ -143,7 +143,7 @@ class RedisSemanticSearch:
                                      session_type: str = "read",
                                      metadata: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        添加会话并自动生成向量
+        添加会话并自动生成向量（带去重检查）
         
         Args:
             end_user_id: 用户ID
@@ -153,33 +153,50 @@ class RedisSemanticSearch:
             metadata: 元数据
             
         Returns:
-            Dict: 包含 session_id 和 success 状态
+            Dict: 包含 session_id、success 状态和 is_duplicate 标志
         """
         try:
             # 检查 vector_search 是否可用
             if not REDISEARCH_AVAILABLE or vector_search is None:
                 logger.error("RediSearch 不可用，无法添加向量")
-                return {"success": False, "session_id": None, "error": "RediSearch 不可用"}
+                return {"success": False, "session_id": None, "error": "RediSearch 不可用", "is_duplicate": False}
             
-            # 1. 自动生成 session_id
+            # 1. 检查是否已存在相同的会话（去重）
+            existing_session = await self._find_duplicate_session(
+                end_user_id=end_user_id,
+                messages=messages,
+                aimessages=aimessages,
+                session_type=session_type
+            )
+            
+            if existing_session:
+                logger.info(f"会话已存在，跳过添加: {existing_session['session_id']}")
+                return {
+                    "success": True,
+                    "session_id": existing_session['session_id'],
+                    "is_duplicate": True,
+                    "message": "会话已存在，未重复添加"
+                }
+            
+            # 2. 自动生成 session_id
             import uuid
             session_id = str(uuid.uuid4())
             
-            # 2. 生成向量（使用消息和回复的组合）
+            # 3. 生成向量（使用消息和回复的组合）
             text = f"{messages} {aimessages}".strip()
             vector = await self.get_embedding(text)
 
             
             if not vector:
                 logger.error("生成向量失败")
-                return {"success": False, "session_id": session_id, "error": "生成向量失败"}
+                return {"success": False, "session_id": session_id, "error": "生成向量失败", "is_duplicate": False}
             
-            # 3. 自动调整 vector_search 的维度（如果需要）
+            # 4. 自动调整 vector_search 的维度（如果需要）
             if len(vector) != vector_search.VECTOR_DIM:
                 logger.info(f"自动调整向量维度: {vector_search.VECTOR_DIM} -> {len(vector)}")
                 vector_search.VECTOR_DIM = len(vector)
             
-            # 4. 添加到 Redis
+            # 5. 添加到 Redis
             result = vector_search.add_vector(
                 session_id=session_id,
                 vector=vector,
@@ -190,18 +207,113 @@ class RedisSemanticSearch:
                 metadata=metadata
             )
             
-            # 5. 同时建立关键词索引
+            # 6. 同时建立关键词索引
             if keyword_search:
                 keywords = keyword_search.extract_keywords(text)
                 if keywords:
                     keyword_search.add_keyword_index(session_id, keywords, session_type)
             
             logger.info(f"成功添加会话向量: {session_id}")
-            return {"success": True, "session_id": session_id}
+            return {"success": True, "session_id": session_id, "is_duplicate": False}
             
         except Exception as e:
             logger.error(f"添加会话向量失败: {e}")
-            return {"success": False, "session_id": None, "error": str(e)}
+            return {"success": False, "session_id": None, "error": str(e), "is_duplicate": False}
+    
+    async def _find_duplicate_session(self,
+                                     end_user_id: str,
+                                     messages: str,
+                                     aimessages: str,
+                                     session_type: str = "read") -> Optional[Dict[str, Any]]:
+        """
+        查找是否存在重复的会话
+        
+        Args:
+            end_user_id: 用户ID
+            messages: 用户消息
+            aimessages: AI回复
+            session_type: 会话类型
+            
+        Returns:
+            Dict: 如果找到重复会话，返回会话数据；否则返回 None
+        """
+        try:
+            # 确定索引名称和前缀
+            if session_type == "read":
+                index_name = vector_search.INDEX_NAME_READ
+                prefix = "vector:read:"
+            elif session_type == "write":
+                index_name = vector_search.INDEX_NAME_WRITE
+                prefix = "vector:write:"
+            elif session_type == "count":
+                index_name = vector_search.INDEX_NAME_COUNT
+                prefix = "vector:count:"
+            else:
+                return None
+            
+            # 检查索引是否存在
+            try:
+                vector_search.r.ft(index_name).info()
+            except:
+                # 索引不存在，说明没有任何数据
+                return None
+            
+            # 使用 Redis 搜索查找完全匹配的会话
+            # 转义特殊字符
+            def escape_redis_query(text: str) -> str:
+                """转义 Redis 查询中的特殊字符"""
+                special_chars = ['@', '-', '(', ')', '{', '}', '[', ']', '"', '~', '*', ':', '\\', '|', '!', '^']
+                for char in special_chars:
+                    text = text.replace(char, f'\\{char}')
+                return text
+            
+            escaped_end_user_id = escape_redis_query(end_user_id)
+            escaped_messages = escape_redis_query(messages)
+            escaped_aimessages = escape_redis_query(aimessages) if aimessages else ""
+            
+            # 构建查询
+            if aimessages:
+                query_str = f"@end_user_id:{escaped_end_user_id} @messages:{escaped_messages} @aimessages:{escaped_aimessages}"
+            else:
+                query_str = f"@end_user_id:{escaped_end_user_id} @messages:{escaped_messages}"
+            
+            from redis.commands.search.query import Query
+            query = Query(query_str).return_fields("end_user_id", "messages", "aimessages", "timestamp", "created_at")
+            
+            # 执行搜索
+            results = vector_search.r.ft(index_name).search(query)
+            
+            # 检查结果是否完全匹配
+            for doc in results.docs:
+                doc_end_user_id = doc.end_user_id if hasattr(doc, 'end_user_id') else ''
+                doc_messages = doc.messages if hasattr(doc, 'messages') else ''
+                doc_aimessages = doc.aimessages if hasattr(doc, 'aimessages') else ''
+                
+                # 完全匹配检查
+                if (doc_end_user_id == end_user_id and 
+                    doc_messages == messages and 
+                    doc_aimessages == aimessages):
+                    
+                    # 从 doc.id 中提取 session_id
+                    doc_id = doc.id if hasattr(doc, 'id') else ''
+                    session_id = doc_id.split(':')[-1] if ':' in doc_id else doc_id
+                    
+                    logger.info(f"找到重复会话: {session_id}")
+                    return {
+                        'session_id': session_id,
+                        'end_user_id': doc_end_user_id,
+                        'messages': doc_messages,
+                        'aimessages': doc_aimessages,
+                        'timestamp': int(doc.timestamp) if hasattr(doc, 'timestamp') else 0,
+                        'created_at': doc.created_at if hasattr(doc, 'created_at') else ''
+                    }
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"查找重复会话时出错: {e}")
+            # 出错时返回 None，允许继续添加
+            return None
     
     async def batch_add_sessions_with_vectors(self,
                                              sessions: List[Dict[str, Any]],
