@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 20:08:03
+ * @Last Modified time: 2026-02-11 12:07:20
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -240,7 +240,8 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           message: {
             type: 'editor',
-            isArray: false
+            isArray: false,
+            hidden: true,
           },
           messages: {
             type: 'messageEditor',
