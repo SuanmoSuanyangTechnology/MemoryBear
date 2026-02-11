@@ -1,4 +1,12 @@
-// 用户数据类型
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:50:56 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 17:51:17
+ */
+/**
+ * User data type
+ */
 export interface User {
   username: string;
   email: string;
@@ -13,23 +21,32 @@ export interface User {
   [key: string]: unknown;
 }
 
-// 用户表单数据类型
+/**
+ * User form data type
+ */
 export interface CreateModalData {
   email: string;
   username: string;
   password: string;
 }
 
-// 用户表单数据类型
+/**
+ * User form data type (duplicate definition)
+ */
 export interface CreateModalData {
   username: string;
   displayName: string;
   initialPassword?: string;
 }
-// 定义组件暴露的方法接口
+/**
+ * Component exposed methods interface
+ */
 export interface CreateModalRef {
   handleOpen: () => void;
 }
+/**
+ * Reset password modal ref interface
+ */
 export interface ResetPasswordModalRef {
   handleOpen: (user: User) => void;
 }

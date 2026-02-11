@@ -1,10 +1,21 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:34:04 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:34:04 
+ */
+/**
+ * Conversation Memory Component
+ * Displays RAG conversation memory content list
+ */
+
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton } from 'antd';
+import { Skeleton, List } from 'antd';
+
 import RbCard from '@/components/RbCard/Card'
 import Empty from '@/components/Empty';
-import { List } from 'antd';
 import Markdown from '@/components/Markdown'
 import {
   getRagContent
@@ -20,6 +31,7 @@ const ConversationMemory:FC = () => {
     if (!id) return
     getList()
   }, [id])
+  /** Fetch conversation memory list */
   const getList = () => {
     if (!id) return
     setLoading(true)

@@ -1,14 +1,28 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:33:21 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:33:21 
+ */
+/**
+ * End User Profile Modal
+ * Modal for editing end user profile information
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, DatePicker } from 'antd';
 import { useTranslation } from 'react-i18next';
+import dayjs from 'dayjs';
 
 import type { EndUser, EndUserProfileModalRef } from '../types'
 import RbModal from '@/components/RbModal'
 import { updatedEndUserProfile, } from '@/api/memory'
-import dayjs from 'dayjs';
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface EndUserProfileModalProps {
   refresh: () => void;
 }
@@ -24,13 +38,14 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
 
   const values = Form.useWatch([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setLoading(false)
   };
 
+  /** Open modal with user data */
   const handleOpen = (user: EndUser) => {
     form.setFieldsValue({
       ...user,
@@ -39,7 +54,7 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
     });
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save profile changes */
   const handleSave = () => {
     form
       .validateFields()
@@ -64,7 +79,7 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
       });
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

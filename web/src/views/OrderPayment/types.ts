@@ -1,3 +1,12 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:37:23 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:37:23 
+ */
+/**
+ * Price item configuration
+ */
 export interface PriceItem {
   type: string;
   label: string;
@@ -19,6 +28,9 @@ export interface PriceItem {
   reliableGuarantee?: boolean;
 }
 
+/**
+ * Payment voucher form data
+ */
 export interface VoucherForm {
   pay_txn_id: string;
   payer: string;

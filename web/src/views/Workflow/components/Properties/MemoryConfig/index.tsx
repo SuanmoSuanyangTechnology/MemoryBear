@@ -55,7 +55,7 @@ const MemoryConfig: FC<{ options: Suggestion[]; parentName: string; }> = ({
             <Form.Item layout="horizontal" name={[parentName, 'enable_window']} noStyle>
               <Switch />
             </Form.Item>
-            <span className="rb:ml-2">{t('workflow.config.llm.enable_window')}</span>
+            <span className="rb:ml-2 rb:text-[12px]">{t('workflow.config.llm.enable_window')}</span>
           </Col>
           <Col span={14}>
             <Form.Item layout="horizontal" name={[parentName, 'window_size']} noStyle>

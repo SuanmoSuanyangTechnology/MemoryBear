@@ -1,5 +1,5 @@
 import { request } from "@/utils/request";
-// 列表查询参数
+// List query parameters
 export interface Query {
   page?: number;
   pagesize?: number;
@@ -38,15 +38,15 @@ export interface versionResponse{
     codeName: string;
   };
 }
-// 首页数据统计
+// Dashboard data statistics
 export const getDashboardData = `/home-page/workspaces`
 
-// 首页数据看板统计
+// Dashboard statistics
 export const getDashboardStatistics = async () => {
     const response = await request.get(`/home-page/statistics`);
     return response as DataResponse;
 };
-// 获取版本号
+// Get version
 export const getVersion = async () => {
   const response = await request.get(`/home-page/version`);
   return response as versionResponse;

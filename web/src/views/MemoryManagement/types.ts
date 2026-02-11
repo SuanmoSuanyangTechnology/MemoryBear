@@ -1,4 +1,12 @@
-// 内存管理表单数据类型
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:33:01 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 17:33:24
+ */
+/**
+ * Memory management form data type
+ */
 export interface MemoryFormData {
   config_id?: number;
   config_name: string;
@@ -6,7 +14,9 @@ export interface MemoryFormData {
   scene_id?: string;
 }
 
-  // 内存数据类型
+/**
+ * Memory configuration data type
+ */
 export interface Memory {
   config_id: number;
   config_name: string;
@@ -34,7 +44,9 @@ export interface Memory {
   scene_name: string;
   [key: string]: string | number | boolean;
 }
-// 定义组件暴露的方法接口
+/**
+ * Component exposed methods interface
+ */
 export interface MemoryFormRef {
   handleOpen: (memory?: Memory | null) => void;
 }

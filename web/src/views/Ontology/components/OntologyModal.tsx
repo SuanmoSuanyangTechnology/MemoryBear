@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 14:10:28 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 14:10:28 
+ */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -8,21 +14,34 @@ import { createOntologyScene, updateOntologyScene } from '@/api/ontology'
 
 const FormItem = Form.Item;
 
+/**
+ * Props for OntologyModal component
+ */
 interface OntologyModalProps {
+  /** Callback function to refresh parent list after save */
   refresh: () => void;
 }
 
+/**
+ * Modal component for creating or editing ontology scenes
+ * Provides form interface for scene name and description
+ */
 const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
   refresh
 }, ref) => {
+  // Hooks
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const [form] = Form.useForm<OntologyModalData>();
+  
+  // State
   const [visible, setVisible] = useState(false);
   const [editVo, setEditVo] = useState<OntologyItem | null>(null)
-  const [form] = Form.useForm<OntologyModalData>();
   const [loading, setLoading] = useState(false)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /**
+   * Close modal and reset form state
+   */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
@@ -30,6 +49,10 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
     setEditVo(null)
   };
 
+  /**
+   * Open modal for creating or editing
+   * @param vo - Optional ontology item data for edit mode
+   */
   const handleOpen = (vo?: OntologyItem) => {
     if (vo) {
       setEditVo(vo);
@@ -39,7 +62,11 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
     }
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  
+  /**
+   * Validate and submit form data
+   * Creates new scene or updates existing one based on editVo
+   */
   const handleSave = () => {
     form
       .validateFields()
@@ -59,7 +86,9 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
       });
   }
 
-  // 暴露给父组件的方法
+  /**
+   * Expose methods to parent component via ref
+   */
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));

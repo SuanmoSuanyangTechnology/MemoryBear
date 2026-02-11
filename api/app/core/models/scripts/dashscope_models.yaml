@@ -1,5 +1,4 @@
 provider: dashscope
-enabled: true
 models:
 - name: deepseek-r1-distill-qwen-14b
   type: llm

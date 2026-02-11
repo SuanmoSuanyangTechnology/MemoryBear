@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:27:56 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:27:56 
+ */
+/**
+ * Copy Application Modal
+ * Allows users to duplicate an existing application with a new name
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -10,10 +21,17 @@ import type { Application } from '@/views/ApplicationManagement/types'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface CopyModalProps {
+  /** Application data to copy */
   data: Application
 }
 
+/**
+ * Modal for copying applications
+ */
 const CopyModal = forwardRef<CopyModalRef, CopyModalProps>(({
   data
 }, ref) => {
@@ -23,17 +41,18 @@ const CopyModal = forwardRef<CopyModalRef, CopyModalProps>(({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setLoading(false)
   };
 
+  /** Open modal */
   const handleOpen = () => {
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Copy application with new name */
   const handleSave = () => {
     setVisible(false);
     setLoading(true)
@@ -48,7 +67,7 @@ const CopyModal = forwardRef<CopyModalRef, CopyModalProps>(({
       })
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -68,7 +87,7 @@ const CopyModal = forwardRef<CopyModalRef, CopyModalProps>(({
           form={form}
           layout="vertical"
         >
-          {/* 应用名 */}
+          {/* Application name */}
           <FormItem
             name="new_name"
             label={t('application.applicationName')}

@@ -9,7 +9,7 @@ import pointer from '@/assets/images/userMemory/pointer.svg'
 import empty from '@/assets/images/userMemory/empty.svg'
 import Empty from '@/components/Empty'
 
-// 知识图谱数据类型定义
+// Knowledge graph data type definitions
 export interface KnowledgeNode {
   id: string
   entity_name: string
@@ -17,7 +17,7 @@ export interface KnowledgeNode {
   description: string
   pagerank: number
   source_id: string[]
-  // ECharts 需要的属性
+  // Properties required by ECharts
   name: string
   category: number
   symbolSize: number
@@ -35,7 +35,7 @@ export interface KnowledgeEdge {
   source_id: string[]
   source: string
   target: string
-  // ECharts 需要的属性
+  // Properties required by ECharts
   value: number
 }
 
@@ -65,7 +65,7 @@ const operations = [
   { name: 'zoom', icon: zoom },
 ]
 
-// 预定义的颜色调色板
+// Predefined color palette
 const colorPalette = [
   '#155EEF', '#4DA8FF', '#9C6FFF', '#8BAEF7', '#369F21', 
   '#FF5D34', '#FF8A4C', '#FFB048', '#E74C3C', '#9B59B6',
@@ -73,7 +73,7 @@ const colorPalette = [
   '#8E44AD', '#2980B9', '#16A085', '#F1C40F', '#E67E22'
 ]
 
-// 动态生成实体类型颜色映射
+// Dynamically generate entity type color mapping
 const generateEntityTypeColors = (entityTypes: string[]): Record<string, string> => {
   const colorMap: Record<string, string> = {}
   entityTypes.forEach((type, index) => {
@@ -93,12 +93,12 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
   const [selectedNode, setSelectedNode] = useState<KnowledgeNode | null>(null)
   const [entityTypeColors, setEntityTypeColors] = useState<Record<string, string>>({})
   
-  // 弹框拖动相关状态
+  // Modal drag-related state
   const [modalPosition, setModalPosition] = useState({ x: 20, y: 20 })
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
 
-  // 拖动处理函数
+  // Drag handling functions
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     setIsDragging(true)
     setDragStart({
@@ -113,7 +113,7 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
     const newX = e.clientX - dragStart.x
     const newY = e.clientY - dragStart.y
     
-    // 限制拖动范围，确保弹框不会超出容器
+    // Limit drag range to ensure modal doesn't exceed container bounds
     const container = chartRef.current?.getEchartsInstance().getDom().parentElement
     if (container && modalRef.current) {
       const containerRect = container.getBoundingClientRect()
@@ -133,7 +133,7 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
     setIsDragging(false)
   }, [])
 
-  // 添加全局鼠标事件监听
+  // Add global mouse event listeners
   useEffect(() => {
     if (isDragging) {
       document.addEventListener('mousemove', handleMouseMove)
@@ -145,12 +145,12 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
     }
   }, [isDragging, handleMouseMove, handleMouseUp])
 
-  // 关闭弹框
+  // Close modal
   const handleCloseModal = useCallback(() => {
     setSelectedNode(null)
   }, [])
 
-  // 处理知识图谱数据
+  // Process knowledge graph data
   const processGraphData = useCallback(() => {
     if (!data?.graph) {
       setNodes([])
@@ -164,31 +164,31 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
     const processedNodes: KnowledgeNode[] = []
     const processedEdges: KnowledgeEdge[] = []
 
-    // 获取所有实体类型
+    // Get all entity types
     const entityTypes = [...new Set(rawNodes.map(node => node.entity_type))]
     const categoryMap = entityTypes.reduce((acc, type, index) => {
       acc[type] = index
       return acc
     }, {} as Record<string, number>)
 
-    // 动态生成实体类型颜色映射
+    // Dynamically generate entity type color mapping
     const dynamicEntityTypeColors = generateEntityTypeColors(entityTypes)
     setEntityTypeColors(dynamicEntityTypeColors)
 
-    // 计算每个节点的连接数
+    // Calculate connection count for each node
     const connectionCount: Record<string, number> = {}
     rawEdges.forEach(edge => {
-      // 使用 src_id 和 tgt_id 计算连接数
+      // Use src_id and tgt_id to calculate connection count
       connectionCount[edge.src_id] = (connectionCount[edge.src_id] || 0) + 1
       connectionCount[edge.tgt_id] = (connectionCount[edge.tgt_id] || 0) + 1
     })
 
-    // 处理节点数据
+    // Process node data
     rawNodes.forEach(node => {
       const connections = connectionCount[node.id] || 0
       const categoryIndex = categoryMap[node.entity_type] || 0
       
-      // 根据 pagerank 和连接数计算节点大小
+      // Calculate node size based on pagerank and connection count
       let symbolSize = Math.max(10, Math.min(50, node.pagerank * 200 + connections * 2))
       
       processedNodes.push({
@@ -202,19 +202,19 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
       })
     })
 
-    // 处理边数据
+    // Process edge data
     rawEdges.forEach(edge => {
-      // 注意：根据数据结构，source 和 target 字段可能与 src_id 和 tgt_id 相反
-      // 我们使用 src_id 和 tgt_id 作为正确的连接关系
+      // Note: Based on data structure, source and target fields may be opposite to src_id and tgt_id
+      // We use src_id and tgt_id as the correct connection relationship
       processedEdges.push({
-        ...edge, // 保留所有原始字段
-        source: edge.src_id, // 使用 src_id 作为源节点
-        target: edge.tgt_id, // 使用 tgt_id 作为目标节点
+        ...edge, // Keep all original fields
+        source: edge.src_id, // Use src_id as source node
+        target: edge.tgt_id, // Use tgt_id as target node
         value: edge.weight || 1
       })
     })
 
-    // 验证节点ID和边的连接
+    // Verify node IDs and edge connections
     const nodeIds = new Set(processedNodes.map(n => n.id))
     const validEdges = processedEdges.filter(edge => {
       const sourceExists = nodeIds.has(edge.source)
@@ -225,18 +225,18 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
       return sourceExists && targetExists
     })
 
-    // 调试信息
+    // Debug information
     console.log('Total nodes:', processedNodes.length)
     console.log('Total edges:', processedEdges.length)
     console.log('Valid edges:', validEdges.length)
     console.log('Node IDs:', Array.from(nodeIds).slice(0, 5))
     console.log('Edge sample:', validEdges.slice(0, 3))
 
-    // 设置分类
+    // Set categories
     const processedCategories = entityTypes.map(type => ({ name: type }))
 
     setNodes(processedNodes)
-    setLinks(validEdges) // 只使用有效的边
+    setLinks(validEdges) // Only use valid edges
     setCategories(processedCategories)
   }, [data])
 
@@ -334,7 +334,7 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
                       lineStyle: {
                         color: '#5B6167',
                         curveness: 0.3,
-                        width: 2, // 固定线宽，避免函数问题
+                        width: 2, // Fixed line width to avoid function issues
                         opacity: 0.8
                       },
                       force: {
@@ -376,7 +376,7 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
                 }}
               />
               
-              {/* 实体详情弹框 */}
+              {/* Entity details modal */}
               {selectedNode && (
                 <div
                   ref={modalRef}
@@ -387,7 +387,7 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
                     cursor: isDragging ? 'grabbing' : 'grab'
                   }}
                 >
-                  {/* 弹框头部 - 可拖动区域 */}
+                  {/* Modal header - draggable area */}
                   <div
                     className="rb:flex rb:items-center rb:justify-between rb:mb-3 rb:pb-2 rb:border-b rb:border-[#EBEBEB] rb:cursor-grab"
                     onMouseDown={handleMouseDown}
@@ -404,7 +404,7 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
                     </button>
                   </div>
                   
-                  {/* 弹框内容 */}
+                  {/* Modal content */}
                   <div>
                     <div className="rb:font-medium rb:mb-4">
                       <div className="rb:text-[16px] rb:mb-2">{selectedNode.entity_name}</div>

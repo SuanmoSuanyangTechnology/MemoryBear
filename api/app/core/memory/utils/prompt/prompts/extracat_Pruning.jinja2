@@ -17,9 +17,18 @@
 #}
 
 {% set scene_instructions = {
-  'education': '教育场景：教学、课程、考试、作业、老师/学生互动、学习资源、学校管理等。',
-  'online_service': '在线客服场景：客户咨询、问题排查、服务工单、售后支持、订单/退款、工单升级等。',
-  'outbound': '外呼场景：电话外呼、邀约、调研问卷、线索跟进、对话脚本、回访记录等。'
+  'education': {
+    'zh': '教育场景：教学、课程、考试、作业、老师/学生互动、学习资源、学校管理等。',
+    'en': 'Education Scenario: Teaching, courses, exams, homework, teacher/student interaction, learning resources, school management, etc.'
+  },
+  'online_service': {
+    'zh': '在线客服场景：客户咨询、问题排查、服务工单、售后支持、订单/退款、工单升级等。',
+    'en': 'Online Service Scenario: Customer inquiries, troubleshooting, service tickets, after-sales support, orders/refunds, ticket escalation, etc.'
+  },
+  'outbound': {
+    'zh': '外呼场景：电话外呼、邀约、调研问卷、线索跟进、对话脚本、回访记录等。',
+    'en': 'Outbound Scenario: Outbound calls, invitations, survey questionnaires, lead follow-up, call scripts, follow-up records, etc.'
+  }
 } %}
 
 {% set scene_key = pruning_scene %}
@@ -27,8 +36,9 @@
 {% set scene_key = 'education' %}
 {% endif %}
 
-{% set instruction = scene_instructions[scene_key] %}
+{% set instruction = scene_instructions[scene_key][language] if language in ['zh', 'en'] else scene_instructions[scene_key]['zh'] %}
 
+{% if language == "zh" %}
 请在下方对话全文基础上，按该场景进行一次性抽取并判定相关性：
 场景说明：{{ instruction }}
 
@@ -47,3 +57,23 @@
   "addresses": [<string>...],
   "keywords": [<string>...]
 }
+{% else %}
+Based on the full dialogue below, perform one-time extraction and relevance determination according to this scenario:
+Scenario Description: {{ instruction }}
+
+Full Dialogue:
+"""
+{{ dialog_text }}
+"""
+
+Output strict JSON only (fixed keys, order doesn't matter):
+{
+  "is_related": <true or false>,
+  "times": [<string>...],
+  "ids": [<string>...],
+  "amounts": [<string>...],
+  "contacts": [<string>...],
+  "addresses": [<string>...],
+  "keywords": [<string>...]
+}
+{% endif %}

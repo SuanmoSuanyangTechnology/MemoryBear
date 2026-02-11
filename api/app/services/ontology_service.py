@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.core.memory.llm_tools.openai_client import OpenAIClient
-from app.core.memory.models.ontology_models import (
+from app.core.memory.models.ontology_scenario_models import (
     OntologyClass,
     OntologyExtractionResponse,
 )
@@ -49,6 +49,10 @@ class OntologyService:
     DEFAULT_LLM_TIMEOUT = 30.0
     DEFAULT_ENABLE_OWL_VALIDATION = True
     
+    # 从环境变量获取默认语言
+    from app.core.config import settings
+    DEFAULT_LANGUAGE = settings.DEFAULT_LANGUAGE
+    
     def __init__(
         self,
         llm_client: OpenAIClient,
@@ -78,7 +82,8 @@ class OntologyService:
         scenario: str,
         domain: Optional[str] = None,
         scene_id: Optional[Any] = None,
-        workspace_id: Optional[Any] = None
+        workspace_id: Optional[Any] = None,
+        language: str = "zh"
     ) -> OntologyExtractionResponse:
         """执行本体提取
         
@@ -91,6 +96,7 @@ class OntologyService:
             domain: 可选的领域提示
             scene_id: 可选的场景ID,用于权限验证（不再用于自动保存）
             workspace_id: 可选的工作空间ID,用于权限验证
+            language: 输出语言 ("zh" 中文, "en" 英文)
             
         Returns:
             OntologyExtractionResponse: 提取结果
@@ -155,6 +161,7 @@ class OntologyService:
                 llm_max_tokens=self.DEFAULT_LLM_MAX_TOKENS,
                 max_description_length=self.DEFAULT_MAX_DESCRIPTION_LENGTH,
                 timeout=self.DEFAULT_LLM_TIMEOUT,
+                language=language,
             )
             
             extraction_duration = time.time() - extraction_start_time
@@ -1148,7 +1155,7 @@ class OntologyService:
                 raise ValueError("无权限访问该场景的类型")
             
             # 获取类型列表
-            classes = self.class_repo.get_by_scene(scene_id)
+            classes = self.class_repo.get_classes_by_scene(scene_id)
             
             logger.info(f"Found {len(classes)} classes in scene {scene_id}")
             

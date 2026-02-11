@@ -21,6 +21,11 @@ class PromptOptMessage(BaseModel):
         description="currently optimized prompt"
     )
 
+    skill: bool = Field(
+        default=False,
+        description="Enable variable output"
+    )
+
 
 class PromptSaveRequest(BaseModel):
     session_id: UUID = Field(

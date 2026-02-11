@@ -1,11 +1,30 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 15:13:38 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 15:13:38 
+ */
+/**
+ * LoginLayout Component
+ * 
+ * A minimal layout wrapper for authentication pages (login, register, etc.).
+ * Provides a simple container without navigation UI or authentication checks.
+ * 
+ * @component
+ */
+
 import { Outlet } from 'react-router-dom';
 import { type FC } from 'react';
 
-// 基础布局组件，用于展示内容并保留用户信息获取功能
+/**
+ * Login layout component for unauthenticated pages.
+ * Renders child routes in a simple full-size container.
+ */
 const LoginLayout: FC = () => {
 
   return (
     <div className="rb:relative rb:h-full rb:w-full">
+      {/* Render authentication pages (login, register, etc.) */}
       <Outlet />
     </div>
   )

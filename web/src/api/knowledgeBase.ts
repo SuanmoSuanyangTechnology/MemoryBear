@@ -220,6 +220,21 @@ export const createDocumentAndUpload = async ( data: any, params: PathQuery) => 
   const response = await request.post(`${apiPrefix}/files/customtext`, data, { params } );
   return response as any;
 };
+// web feishu yuque
+export const createSync = async (knowledge_id: string) => {
+  const response = await request.post(`${apiPrefix}/knowledges/${knowledge_id}/sync`);
+  return response as any;
+};
+// check feishu
+export const checkFeishuSync = async (params: any) => {
+  const response = await request.get(`${apiPrefix}/knowledges/check/feishu/auth`, undefined, { params });
+  return response as any;
+};
+// check yuque
+export const checkYuqueSync = async (params: any) => {
+  const response = await request.get(`${apiPrefix}/knowledges/check/yuque/auth`, undefined, { params });
+  return response as any;
+};
 // 更新文档
 export const updateDocument = async (id: string, data: KnowledgeBaseDocumentData) => {
   const response = await request.put(`${apiPrefix}/documents/${id}`, data);

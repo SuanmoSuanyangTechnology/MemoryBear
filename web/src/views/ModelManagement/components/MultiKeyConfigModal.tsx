@@ -1,10 +1,26 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:49:55 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:49:55 
+ */
+/**
+ * Multi-Key Configuration Modal
+ * Modal for managing multiple API keys for a single model
+ * Allows adding and removing API keys
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
+
 import type { ModelListItem, MultiKeyForm, MultiKeyConfigModalRef, MultiKeyConfigModalProps } from '../types';
 import RbModal from '@/components/RbModal'
 import { addModelApiKey, deleteModelApiKey, getModelInfo } from '@/api/models'
 
+/**
+ * Multi-key configuration modal component
+ */
 const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigModalProps>(({ refresh }, ref) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -13,6 +29,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
   const [form] = Form.useForm<MultiKeyForm>();
   const [loading, setLoading] = useState(false)
 
+  /** Close modal and refresh parent */
   const handleClose = () => {
     setModel({} as ModelListItem);
     refresh?.()
@@ -22,11 +39,13 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
     setVisible(false);
   };
 
+  /** Open modal with model data */
   const handleOpen = (vo: ModelListItem) => {
     setVisible(true);
     getData(vo)
   };
 
+  /** Fetch model information */
   const getData = (vo: ModelListItem) => {
     if (!vo.id) return
 
@@ -35,6 +54,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
         setModel(res as ModelListItem)
       })
   }
+  /** Add new API key */
   const handleSave = () => {
     form
       .validateFields()
@@ -58,6 +78,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
         console.log('err', err)
       });
   }
+  /** Delete API key */
   const handleDelete = (api_key_id: string) => {
     deleteModelApiKey(api_key_id)
       .then(() => {
@@ -66,6 +87,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
       })
   }
 
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));

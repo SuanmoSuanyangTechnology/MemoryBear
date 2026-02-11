@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:12 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:12 
+ */
 import { useEffect, useState, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -10,6 +16,17 @@ import RbCard from '@/components/RbCard/Card'
 import { getImplicitPreferences } from '@/api/memory'
 import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
 
+/**
+ * Preference item structure
+ * @property {string} tag_name - Tag name
+ * @property {number} confidence_score - Confidence score (0-1)
+ * @property {string[]} supporting_evidence - Supporting evidence
+ * @property {string} context_details - Context details
+ * @property {number | string} created_at - Creation timestamp
+ * @property {number | string} updated_at - Update timestamp
+ * @property {string[]} conversation_references - Conversation references
+ * @property {string} category - Category
+ */
 interface PreferenceItem {
   tag_name: string;
   confidence_score: number;
@@ -21,8 +38,16 @@ interface PreferenceItem {
   category: string;
 }
 
+/**
+ * Default color palette for categories
+ */
 const DEFAULT_COLORS = ['#FF5D34', '#155EEF', '#9C6FFF', '#369F21', '#4DA8FF', '#FF8C00', '#32CD32', '#FF69B4', '#20B2AA', '#DDA0DD']
 
+/**
+ * Generate color mapping for categories
+ * @param {string[]} categories - List of categories
+ * @returns {Record<string, string>} Category to color mapping
+ */
 const generateCategoryColors = (categories: string[]) => {
   const colors: Record<string, string> = {}
   categories.forEach((category, index) => {
@@ -31,6 +56,11 @@ const generateCategoryColors = (categories: string[]) => {
   return colors
 }
 
+/**
+ * Preferences Component
+ * Displays user preferences as an interactive word cloud
+ * Shows detailed context and evidence when a word is selected
+ */
 const Preferences = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()

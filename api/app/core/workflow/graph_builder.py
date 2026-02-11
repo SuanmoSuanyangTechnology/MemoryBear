@@ -14,8 +14,13 @@ from pydantic import BaseModel, Field
 from app.core.workflow.expression_evaluator import evaluate_condition
 from app.core.workflow.nodes import WorkflowState, NodeFactory
 from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES
+from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
+
+SCOPE_PATTERN = re.compile(
+    r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\.[a-zA-Z0-9_]+\s*}}"
+)
 
 
 class OutputContent(BaseModel):
@@ -53,6 +58,12 @@ class OutputContent(BaseModel):
         )
     )
 
+    _SCOPE: str | None = None
+
+    def get_scope(self) -> str:
+        self._SCOPE = SCOPE_PATTERN.findall(self.literal)[0]
+        return self._SCOPE
+
     def depends_on_scope(self, scope: str) -> bool:
         """
         Check if this segment depends on a given scope.
@@ -63,8 +74,9 @@ class OutputContent(BaseModel):
         Returns:
             bool: True if this segment references the given scope.
         """
-        pattern = rf"\{{\{{\s*{re.escape(scope)}\.[a-zA-Z0-9_]+\s*\}}\}}"
-        return bool(re.search(pattern, self.literal))
+        if self._SCOPE:
+            return self._SCOPE == scope
+        return self.get_scope() == scope
 
 
 class StreamOutputConfig(BaseModel):
@@ -88,7 +100,7 @@ class StreamOutputConfig(BaseModel):
         )
     )
 
-    control_nodes: dict[str, str] = Field(
+    control_nodes: dict[str, list[str]] = Field(
         ...,
         description=(
             "Control branch conditions for this End node output.\n"
@@ -149,7 +161,7 @@ class StreamOutputConfig(BaseModel):
         if scope in self.control_nodes.keys():
             if status is None:
                 raise RuntimeError("[Stream Output] Control node activation status not provided")
-            if status == self.control_nodes[scope]:
+            if status in self.control_nodes[scope]:
                 self.activate = True
 
         # Case 2: activate variable segments related to this node
@@ -167,6 +179,7 @@ class GraphBuilder:
             workflow_config: dict[str, Any],
             stream: bool = False,
             subgraph: bool = False,
+            variable_pool: VariablePool | None = None
     ):
         self.workflow_config = workflow_config
 
@@ -180,6 +193,10 @@ class GraphBuilder:
         self._find_upstream_branch_node = lru_cache(
             maxsize=len(self.nodes) * 2
         )(self._find_upstream_branch_node)
+        if variable_pool:
+            self.variable_pool = variable_pool
+        else:
+            self.variable_pool = VariablePool()
 
         self.graph = StateGraph(WorkflowState)
         self.add_nodes()
@@ -211,6 +228,13 @@ class GraphBuilder:
             return self.node_map[node_id]["type"]
         except KeyError:
             raise RuntimeError(f"Node not found: Id={node_id}")
+
+    @staticmethod
+    def _merge_control_nodes(control_nodes: list[tuple[str, str]]) -> dict[str, list]:
+        result = defaultdict(list)
+        for node in control_nodes:
+            result[node[0]].append(node[1])
+        return result
 
     def _find_upstream_branch_node(self, target_node: str) -> tuple[bool, tuple[tuple[str, str]]]:
         """
@@ -355,7 +379,7 @@ class GraphBuilder:
                     activate=not has_branch,
 
                     # Branch nodes that control activation of this End node
-                    control_nodes=dict(control_nodes),
+                    control_nodes=self._merge_control_nodes(control_nodes),
 
                     # Convert output segments into OutputContent objects
                     outputs=list(
@@ -452,9 +476,9 @@ class GraphBuilder:
                 if self.stream:
                     # Stream mode: create an async generator function
                     # LangGraph collects all yielded values; the last yielded dictionary is merged into the state
-                    def make_stream_func(inst):
+                    def make_stream_func(inst, variable_pool=self.variable_pool):
                         async def node_func(state: WorkflowState):
-                            async for item in inst.run_stream(state):
+                            async for item in inst.run_stream(state, variable_pool):
                                 yield item
 
                         return node_func
@@ -462,9 +486,9 @@ class GraphBuilder:
                     self.graph.add_node(node_id, make_stream_func(node_instance))
                 else:
                     # Non-stream mode: create an async function
-                    def make_func(inst):
+                    def make_func(inst, variable_pool=self.variable_pool):
                         async def node_func(state: WorkflowState):
-                            return await inst.run(state)
+                            return await inst.run(state, variable_pool)
 
                         return node_func
 
@@ -567,27 +591,28 @@ class GraphBuilder:
                     for target in branch_info["target"]:
                         waiting_edges[target].append(branch_info["node"]["name"])
 
-                def router_fn(state: WorkflowState) -> list[Send]:
+                def router_fn(state: WorkflowState, variable_pool: VariablePool = self.variable_pool) -> list[Send]:
                     branch_activate = []
                     new_state = state.copy()
                     new_state["activate"] = dict(state.get("activate", {}))  # deep copy of activate
-
+                    node_output = variable_pool.get_node_output(src, defalut=dict(), strict=False)
                     for label, branch in unique_branch.items():
-                        if evaluate_condition(
+                        if node_output and evaluate_condition(
                                 branch["condition"],
-                                state.get("variables", {}),
-                                state.get("runtime_vars", {}),
-                                {
-                                    "execution_id": state.get("execution_id"),
-                                    "workspace_id": state.get("workspace_id"),
-                                    "user_id": state.get("user_id")
-                                }
+                                {},
+                                {src: node_output},
+                                {}
                         ):
                             logger.debug(f"Conditional routing {src}: selected branch {label}")
                             new_state["activate"][branch["node"]["name"]] = True
+                            branch_activate.append(
+                                Send(
+                                    branch['node']['name'],
+                                    new_state
+                                )
+                            )
                             continue
                         new_state["activate"][branch["node"]["name"]] = False
-                    for label, branch in unique_branch.items():
                         branch_activate.append(
                             Send(
                                 branch['node']['name'],

@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:49:28 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:49:28 
+ */
+/**
+ * Custom Model Modal
+ * Modal for creating and editing custom models in the model square
+ * Supports logo upload, type/provider selection, and tagging
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +21,9 @@ import UploadImages from '@/components/Upload/UploadImages'
 import { updateCustomModel, addCustomModel, modelTypeUrl, modelProviderUrl } from '@/api/models'
 import { getFileLink } from '@/api/fileStorage'
 
+/**
+ * Custom model modal component
+ */
 const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(({
   refresh
 }, ref) => {
@@ -21,6 +36,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const [loading, setLoading] = useState(false)
   const formValues = Form.useWatch([], form)
 
+  /** Close modal and reset state */
   const handleClose = () => {
     setModel({} as ModelPlazaItem);
     form.resetFields();
@@ -28,6 +44,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     setVisible(false);
   };
 
+  /** Open modal with optional model data for editing */
   const handleOpen = (model?: ModelPlazaItem) => {
     if (model) {
       setIsEdit(true);
@@ -42,6 +59,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     }
     setVisible(true);
   };
+  /** Update or create custom model */
   const handleUpdate = (data: CustomModelForm) => {
     setLoading(true)
     const { type, provider, ...rest} = data
@@ -56,6 +74,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         setLoading(false)
       });
   }
+  /** Validate and save custom model */
   const handleSave = () => {
     form
       .validateFields()
@@ -87,6 +106,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       });
   }
 
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));

@@ -112,7 +112,6 @@ class DimensionPortraitResponse(BaseModel):
     """Four-dimension personality portrait."""
     model_config = ConfigDict(from_attributes=True)
     
-    user_id: str
     creativity: DimensionScoreResponse
     aesthetic: DimensionScoreResponse
     technology: DimensionScoreResponse
@@ -140,7 +139,6 @@ class InterestAreaDistributionResponse(BaseModel):
     """Distribution of user interests across four areas."""
     model_config = ConfigDict(from_attributes=True)
     
-    user_id: str
     tech: InterestCategoryResponse
     lifestyle: InterestCategoryResponse
     music: InterestCategoryResponse
@@ -184,7 +182,6 @@ class UserProfileResponse(BaseModel):
     """Comprehensive user profile."""
     model_config = ConfigDict(from_attributes=True)
     
-    user_id: str
     preference_tags: List[PreferenceTagResponse]
     dimension_portrait: DimensionPortraitResponse
     interest_area_distribution: InterestAreaDistributionResponse
@@ -226,7 +223,6 @@ class UserMemorySummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     
     summary_id: str
-    user_id: str
     user_content: str
     timestamp: datetime.datetime
     confidence_score: float = Field(ge=0.0, le=1.0)
@@ -241,7 +237,6 @@ class SummaryAnalysisResult(BaseModel):
     """Result of analyzing memory summaries."""
     model_config = ConfigDict(from_attributes=True)
     
-    user_id: str
     preferences: List[PreferenceTagResponse]
     dimension_evidence: Dict[str, List[str]]
     interest_evidence: Dict[str, List[str]]
@@ -273,7 +268,6 @@ class GenerateProfileRequest(BaseModel):
 
 class CompleteProfileResponse(BaseModel):
     """完整用户画像响应（包含所有模块）"""
-    user_id: str
     preferences: List[PreferenceTagResponse]
     portrait: DimensionPortraitResponse
     interest_areas: InterestAreaDistributionResponse

@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:48:03 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:48:03 
+ */
+/**
+ * Space Configuration Page
+ * Configures default models for workspace (LLM, embedding, rerank)
+ */
+
 import { type FC, useEffect, useState } from 'react';
 import { Form, App, Button, Skeleton } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -31,7 +42,7 @@ const SpaceConfig: FC = () => {
       setPageLoding(false)
     })
   }, [])
-  // 封装保存方法，添加提交逻辑
+  /** Save configuration */
   const handleSave = () => {
     form
       .validateFields()

@@ -13,7 +13,7 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
   const [form] = Form.useForm<FolderFormData>();
   const [loading, setLoading] = useState(false)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  // Close modal and reset state
   const handleClose = () => {
     setFolder({} as FolderFormData);
     form.resetFields();
@@ -22,17 +22,16 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
   };
 
   const handleOpen = (folder?: FolderFormData | null) => {
-    debugger
     if (folder) {
       setFolder(folder);      
-      // 设置表单值
+      // Set form values
       form.setFieldsValue({
         folder_name: folder.folder_name,
         parent_id: folder.parent_id ?? '',
         kb_id: folder.kb_id ?? '',
       });
     } else {
-      // 新建时，重置表单并设置默认值
+      // Reset form and set default values for new folder
       form.resetFields();
       form.setFieldsValue({
         parent_id: '', 
@@ -41,7 +40,7 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
     }
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  // Save form data and submit
   const handleSave =  () => {
     form
       .validateFields({ validateOnly: true })
@@ -74,13 +73,13 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
       });
   }
 
-  // 暴露给父组件的方法
+  // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
   }));
 
-  // 根据 type 获取标题
+  // Get modal title based on folder state
   const getTitle = () => {
     if (folder.id) {
       return t('common.edit') + ' ' + (folder.folder_name || '');

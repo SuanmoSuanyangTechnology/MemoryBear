@@ -28,12 +28,12 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
     const [parentId, setParentId] = useState<string>('');
     const [hasFiles, setHasFiles] = useState(false);
     const uploadRef = useRef<{ fileList: UploadFile[]; clearFiles: () => void }>(null);
-    // 存储每个文件的 AbortController，用于取消上传
+    // Store AbortController for each file to cancel upload
     const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
     // const fileIds = [];
 
     const handleClose = () => {
-      // 取消所有正在进行的上传
+      // Cancel all ongoing uploads
       abortControllersRef.current.forEach((controller) => {
         controller.abort();
       });
@@ -69,7 +69,7 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
         }
         const ids = fileList.map((file) => file.response?.id);
         handleChunking(kbId, parentId, ids)
-        // // 上传所有图片
+        // // Upload all images
         // const uploadPromises = fileList.map(async (file) => {
         //   if (file.originFileObj) {
         //     const formData = new FormData();
@@ -91,7 +91,7 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
 
         handleClose();
       } catch (err) {
-        console.error('创建图片数据集失败:', err);
+        console.error('Failed to create image dataset:', err);
       } finally {
         setLoading(false);
       }
@@ -112,7 +112,7 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
     useImperativeHandle(ref, () => ({
       handleOpen,
     }));
-    // 检查媒体文件时长的辅助函数
+    // Helper function to check media file duration
     const checkMediaDuration = (file: File): Promise<number> => {
       return new Promise((resolve, reject) => {
         const url = URL.createObjectURL(file);
@@ -131,7 +131,7 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
         media.src = url;
       });
     };
-    // 删除已上传的文件
+    // Delete uploaded file
     const handleDeleteFile = async (fileId: string) => {
       try {
         await deleteDocument(fileId);
@@ -141,24 +141,24 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
       }
     };
 
-    // 上传文件
+    // Upload file
     const handleUpload = async (options: UploadRequestOption) => {
       const { file, onSuccess, onError, onProgress, filename = 'file' } = options;
       
-      // 创建 AbortController 用于取消上传
+      // Create AbortController to cancel upload
       const abortController = new AbortController();
       const fileUid = (file as any).uid;
       abortControllersRef.current.set(fileUid, abortController);
       
-      // 获取文件扩展名
+      // Get file extension
     const fileExtension = (file as File).name.split('.').pop()?.toLowerCase();
     const mediaExtensions = ['mp3', 'mp4', 'mov', 'wav'];
     
-    // 如果是媒体文件，进行大小和时长检查
+    // If it's a media file, check size and duration
     if (fileExtension && mediaExtensions.includes(fileExtension)) {
       const fileSizeInMB = (file as File).size / (50 * 1024);
       
-      // 检查文件大小（50MB限制）
+      // Check file size (50MB limit)
       if (fileSizeInMB > 50) {
         messageApi.error(`${t('knowledgeBase.sizeLimitError')}：${fileSizeInMB.toFixed(2)}MB`);
         onError?.(new Error(`${t('knowledgeBase.fileSizeExceeds')}`));
@@ -167,7 +167,7 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
       }
       
       try {
-        // 检查媒体时长（150秒限制）
+        // Check media duration (150 seconds limit)
         const duration = await checkMediaDuration(file as File);
         if (duration > 150) {
           messageApi.error(`${t('knowledgeBase.fileDurationLimitError')}：${Math.round(duration)}秒`);
@@ -204,21 +204,21 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
           },
         });
         
-        // 上传成功，移除 AbortController
+        // Upload successful, remove AbortController
         abortControllersRef.current.delete(fileUid);
         onSuccess?.(res, new XMLHttpRequest());
         
         if (res?.id) {
-          // 上传成功
+          // Upload successful
           // fileIds.push(res.id)
         }
       } catch (error: any) {
-        // 移除 AbortController
+        // Remove AbortController
         abortControllersRef.current.delete(fileUid);
         
-        // 如果是用户主动取消，不显示错误信息
+        // If user actively cancelled, don't show error message
         if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
-          console.log('上传已取消:', (file as File).name);
+          console.log('Upload cancelled:', (file as File).name);
           return;
         }
         
@@ -259,11 +259,11 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
               fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'mp3', 'mp4', 'mov', 'wav']} 
               customRequest={handleUpload}
               onChange={(fileList) => {
-                // 实时更新文件状态
+                // Update file status in real-time
                 setHasFiles(fileList.length > 0);
               }}
               onRemove={async (file) => {
-                // 如果文件正在上传，取消上传
+                // If file is uploading, cancel upload
                 const fileUid = file.uid;
                 const abortController = abortControllersRef.current.get(fileUid);
                 if (abortController) {
@@ -271,12 +271,12 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
                   abortControllersRef.current.delete(fileUid);
                 }
                 
-                // 如果文件已经上传成功，删除服务器上的文件
+                // If file is already uploaded successfully, delete file on server
                 if (file.response?.id) {
                   await handleDeleteFile(file.response.id);
                 }
                 
-                return true; // 允许移除文件
+                return true; // Allow file removal
               }}
             />
           </Form.Item>

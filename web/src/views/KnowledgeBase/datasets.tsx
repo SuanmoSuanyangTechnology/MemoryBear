@@ -36,11 +36,11 @@ const Datasets: FC = () => {
   };
 
   if (loading) {
-    return <div>加载中...</div>;
+    return <div>Loading...</div>;
   }
 
   if (!knowledgeBase) {
-    return <div>知识库不存在</div>;
+    return <div>Knowledge base not found</div>;
   }
 
   return (
@@ -50,7 +50,7 @@ const Datasets: FC = () => {
           icon={<ArrowLeftOutlined />} 
           onClick={handleBack}
         >
-          返回
+          {t('common.back')}
         </Button>
       </div>
       
@@ -61,7 +61,7 @@ const Datasets: FC = () => {
 
       <div className="rb:bg-white rb:p-4 rb:rounded">
         <h2 className="rb:text-lg rb:font-semibold rb:mb-4">{t('knowledgeBase.datasets')}</h2>
-        {/* TODO: 添加数据集列表 */}
+        {/* TODO: Add dataset list */}
         <div>{t('knowledgeBase.noDataSets')}</div>
       </div>
     </div>

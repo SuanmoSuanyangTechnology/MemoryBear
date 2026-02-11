@@ -1,3 +1,4 @@
+{% if language == "zh" %}
 你是一个专业的情绪分析专家。请分析以下陈述句的情绪信息。
 
 陈述句：{{ statement }}
@@ -55,3 +56,62 @@
 - 主体分类要准确，优先识别用户本人（self）
 
 请以 JSON 格式返回结果。
+{% else %}
+You are a professional emotion analysis expert. Please analyze the emotional information in the following statement.
+
+Statement: {{ statement }}
+
+Please extract the following information:
+
+1. emotion_type (Emotion Type):
+   - joy: happiness, delight, pleasure, satisfaction, cheerfulness
+   - sadness: sorrow, grief, disappointment, depression, regret
+   - anger: rage, irritation, dissatisfaction, annoyance, frustration
+   - fear: anxiety, worry, concern, nervousness, apprehension
+   - surprise: astonishment, amazement, shock, wonder
+   - neutral: neutral, objective statement, no obvious emotion
+
+2. emotion_intensity (Emotion Intensity):
+   - 0.0-0.3: weak emotion
+   - 0.3-0.7: moderate emotion
+   - 0.7-1.0: strong emotion
+
+{% if extract_keywords %}
+3. emotion_keywords (Emotion Keywords):
+   - Words directly expressing emotions in the original sentence
+   - Extract up to 3 keywords
+   - Return empty list if no obvious emotion words
+{% else %}
+3. emotion_keywords (Emotion Keywords):
+   - Return empty list
+{% endif %}
+
+{% if enable_subject %}
+4. emotion_subject (Emotion Subject):
+   - self: user's own emotions (includes "I", "we", "us" and other first-person pronouns)
+   - other: others' emotions (includes names, "he/she" and other third-person pronouns)
+   - object: evaluation of things (for products, places, events, etc.)
+   
+   Note:
+   - If multiple subjects are present, prioritize identifying the user (self)
+   - If the subject cannot be clearly determined, default to self
+
+5. emotion_target (Emotion Target):
+   - If there is a clear emotion target, extract its name
+   - If there is no clear target, return null
+{% else %}
+4. emotion_subject (Emotion Subject):
+   - Default to self
+
+5. emotion_target (Emotion Target):
+   - Return null
+{% endif %}
+
+Notes:
+- If the statement is an objective factual statement with no obvious emotion, mark as neutral
+- Emotion intensity should match the context, do not over-interpret
+- Emotion keywords should be accurate, do not add words not in the original sentence
+- Subject classification should be accurate, prioritize identifying the user (self)
+
+Please return the result in JSON format.
+{% endif %}

@@ -2,85 +2,95 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2025-12-11 13:43:52
+ * @Last Modified time: 2026-02-06 21:05:09 
  */
 import { type ReactNode } from 'react'
 
 /**
- * 聊天消息项接口
+ * Chat message item interface
  */
 export interface ChatItem {
-  /** 消息唯一标识 */
+  /** Message unique identifier */
   id?: string;
-  /** 会话ID */
+  /** Conversation ID */
   conversation_id?: string | null;
-  /** 消息角色：用户或助手 */
+  /** Message role: user or assistant */
   role?: 'user' | 'assistant';
-  /** 消息内容 */
+  /** Message content */
   content?: string | null;
-  /** 创建时间 */
+  /** Creation time */
   created_at?: number | string;
   status?: string;
-  subContent?: Record<string, any>[]
+  subContent?: Record<string, any>[];
+  files?: any[];
 }
 
 /**
- * 聊天组件主要属性接口
+ * Chat component main props interface
  */
 export interface ChatProps {
-  /** 空状态显示内容 */
+  /** Empty state display content */
   empty?: ReactNode;
-  /** 聊天数据列表 */
+  /** Chat data list */
   data: ChatItem[];
-  /** 输入内容变化回调 */
+  /** Input content change callback */
   onChange: (message: string) => void;
-  /** 发送消息回调 */
+  /** Send message callback */
   onSend: () => void;
-  /** 流式加载状态 */
+  /** Streaming loading state */
   streamLoading?: boolean;
-  /** 加载状态 */
+  /** Loading state */
   loading: boolean;
-  /** 内容区域自定义样式类名 */
+  /** Content area custom class name */
   contentClassName?: string;
-  /** 子组件内容 */
+  /** Child component content */
   children?: ReactNode;
-  /** 标签格式化函数 */
+  /** Label format function */
   labelFormat: (item: ChatItem) => any;
   errorDesc?: string;
+  /** Attachment list */
+  fileList?: any[];
+  /** Attachment update */
+  fileChange?: (fileList: any[]) => void;
 }
 
 /**
- * 聊天输入框组件属性接口
+ * Chat input component props interface
  */
 export interface ChatInputProps {
-  /** 当前输入消息 */
+  /** Current input message */
   message?: string;
-  /** 输入内容变化回调 */
-  onChange: (message: string) => void;
-  /** 发送消息回调 */
-  onSend: () => void;
-  /** 加载状态 */
+  /** Input content change callback */
+  onChange?: (message: string) => void;
+  /** Send message callback */
+  onSend: (message?: string) => void;
+  /** Loading state */
   loading: boolean;
-  /** 子组件内容 */
+  /** Child component content */
   children?: ReactNode;
+  /** Attachment list */
+  fileList?: any[];
+  /** Attachment update */
+  fileChange?: (fileList: any[]) => void;
+  className?: string;
 }
 
 /**
- * 聊天内容区域组件属性接口
+ * Chat content area component props interface
  */
 export interface ChatContentProps {
-  /** 自定义样式类名 */
+  /** Custom class name */
   classNames?: string | Record<string, boolean>;
   contentClassNames?: string | Record<string, boolean>;
-  /** 聊天数据列表 */
+  /** Chat data list */
   data: ChatItem[];
-  /** 流式加载状态 */
+  /** Streaming loading state */
   streamLoading: boolean;
-  /** 空状态显示内容 */
+  /** Empty state display content */
   empty?: ReactNode;
-  /** 标签位置：顶部或底部 */
+  /** Label position: top or bottom */
   labelPosition?: 'top' | 'bottom';
-  /** 标签格式化函数 */
+  /** Label format function */
   labelFormat: (item: ChatItem) => any;
   errorDesc?: string;
   renderRuntime?: (item: ChatItem, index: number) => ReactNode;

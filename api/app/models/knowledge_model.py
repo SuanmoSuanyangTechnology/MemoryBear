@@ -57,6 +57,17 @@ class Knowledge(Base):
     parser_id = Column(String, index=True, default="naive", comment="default parser ID")
     parser_config = Column(JSON, nullable=False,
                            default={
+                               "entry_url": "https://ai.redbearai.com",
+                               "max_pages": 20,
+                               "delay_seconds": 1.0,
+                               "timeout_seconds": 10,
+                               "user_agent": "KnowledgeBaseCrawler/1.0",
+                               "yuque_user_id": "User ID",
+                               "yuque_token": "Token",
+                               "feishu_app_id": "App ID",
+                               "feishu_app_secret": "App Secret",
+                               "feishu_folder_token": "Folder Token",
+                               "sync_cron": "30 7 * * 1-5",
                                "layout_recognize": "DeepDOC",
                                "chunk_token_num": 128,
                                "delimiter": "\n",

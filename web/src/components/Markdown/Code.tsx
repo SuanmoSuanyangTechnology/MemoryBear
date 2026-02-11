@@ -1,22 +1,45 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 15:15:05 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 15:15:05 
+ */
+/**
+ * Code Component
+ * 
+ * A versatile code rendering component that supports:
+ * - Syntax-highlighted code blocks
+ * - ECharts visualizations
+ * - SVG rendering
+ * - Mermaid diagrams
+ * - Inline code snippets
+ * 
+ * @component
+ */
+
 import { type FC, useMemo } from 'react'
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { atelierHeathLight } from 'react-syntax-highlighter/dist/esm/styles/hljs';
-import CopyBtn from './CopyBtn';
 import ReactEcharts from 'echarts-for-react';
+
+import CopyBtn from './CopyBtn';
 import Svg from './Svg'
 import MermaidChart from './MermaidChart'
 
-
+/** Props interface for Code component */
 type ICodeProps = {
   children: string;
   className: string;
 }
 
+/** Code block component that renders syntax-highlighted code or special visualizations */
 const Code: FC<ICodeProps> = (props) => {
   const { children, className } = props;
+  /** Extract language from className (e.g., 'language-javascript' -> 'javascript') */
   const language = className?.split('-')[1]
   console.log('Code', props)
 
+  // Parse ECharts configuration from code content
   const charData = useMemo(() => {
     if (language !== 'echarts') return null;
     try {
@@ -27,6 +50,7 @@ const Code: FC<ICodeProps> = (props) => {
     }
   }, [language, children])
 
+  // Render ECharts visualization
   if (language === 'echarts') {
     return (
       <ReactEcharts
@@ -39,6 +63,7 @@ const Code: FC<ICodeProps> = (props) => {
     )
   }
 
+  // Render SVG content
   if (language === 'svg') {
     return (
       <Svg
@@ -46,6 +71,7 @@ const Code: FC<ICodeProps> = (props) => {
       />
     )
   }
+  // Render Mermaid diagram
   if (language === 'mermaid') {
     return (
       <MermaidChart
@@ -54,6 +80,7 @@ const Code: FC<ICodeProps> = (props) => {
     )
   }
   
+  // Render syntax-highlighted code block with copy button
   if (className) {
     return (
       <div className="rb:relative">
@@ -81,6 +108,7 @@ const Code: FC<ICodeProps> = (props) => {
     </div>
     )
   }
+  // Render inline code
   return <code className="rb:bg-[#F0F3F8] rb:px-1 rb:py-0.5 rb:rounded rb:text-sm rb:font-mono rb:whitespace-break-spaces">{children}</code>
 }
 

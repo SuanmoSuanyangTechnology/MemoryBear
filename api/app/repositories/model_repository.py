@@ -583,7 +583,7 @@ class ModelApiKeyRepository:
             db_api_key.usage_count = str(current_count + 1)
             db_api_key.last_used_at = func.now()
             
-            db.commit()
+            db.flush()
             db_logger.debug(f"API Key使用统计更新成功: api_key_id={api_key_id}")
             return True
             

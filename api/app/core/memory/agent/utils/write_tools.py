@@ -34,17 +34,17 @@ async def write(
     memory_config: MemoryConfig,
     messages: list,
     ref_id: str = "wyl20251027",
+    language: str = "zh",
 ) -> None:
     """
     Execute the complete knowledge extraction pipeline.
 
     Args:
-        user_id: User identifier
-        apply_id: Application identifier
         end_user_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
         messages: Structured message list [{"role": "user", "content": "..."}, ...]
         ref_id: Reference ID, defaults to "wyl20251027"
+        language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
     """
     # Extract config values
     embedding_model_id = str(memory_config.embedding_model_id)
@@ -94,12 +94,39 @@ async def write(
     from app.core.memory.utils.config.config_utils import get_pipeline_config
     pipeline_config = get_pipeline_config(memory_config)
 
+    # Fetch ontology types if scene_id is configured
+    ontology_types = None
+    if memory_config.scene_id:
+        try:
+            from app.core.memory.ontology_services.ontology_type_loader import load_ontology_types_for_scene
+            
+            with get_db_context() as db:
+                ontology_types = load_ontology_types_for_scene(
+                    scene_id=memory_config.scene_id,
+                    workspace_id=memory_config.workspace_id,
+                    db=db
+                )
+                
+                if ontology_types:
+                    logger.info(
+                        f"Loaded {len(ontology_types.types)} ontology types for scene_id: {memory_config.scene_id}"
+                    )
+                else:
+                    logger.info(f"No ontology classes found for scene_id: {memory_config.scene_id}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch ontology types for scene_id {memory_config.scene_id}: {e}",
+                exc_info=True
+            )
+
     orchestrator = ExtractionOrchestrator(
         llm_client=llm_client,
         embedder_client=embedder_client,
         connector=neo4j_connector,
         config=pipeline_config,
         embedding_id=embedding_model_id,
+        language=language,
+        ontology_types=ontology_types,
     )
 
     # Run the complete extraction pipeline
@@ -173,7 +200,7 @@ async def write(
     step_start = time.time()
     try:
         summaries = await memory_summary_generation(
-            chunked_dialogs, llm_client=llm_client, embedder_client=embedder_client
+            chunked_dialogs, llm_client=llm_client, embedder_client=embedder_client, language=language
         )
 
         try:

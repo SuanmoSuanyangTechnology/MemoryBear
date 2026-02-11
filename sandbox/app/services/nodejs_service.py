@@ -27,11 +27,11 @@ async def run_nodejs_code(code: str, preload: str, options: RunnerOptions):
     try:
         runner = NodejsRunner()
         result = await runner.run(code, options, preload)
-        if result.exit_code == signal.SIGSYS + 0x80:
+        if result.exit_code in [signal.SIGSYS + 0x80, -signal.SIGSYS]:
             return error_response(31, "sandbox security policy violation")
 
         if result.exit_code != 0:
-            return error_response(500, result.stderr)
+            return error_response(result.exit_code, result.stderr)
 
         return success_response(RunCodeResponse(
             stdout=result.stdout,
@@ -39,5 +39,5 @@ async def run_nodejs_code(code: str, preload: str, options: RunnerOptions):
         ))
 
     except Exception as e:
-        logger.error(f"Python execution failed: {e}", exc_info=True)
-        return error_response(-500, str(e))
+        logger.error(f"JavaScript execution failed: {e}", exc_info=True)
+        return error_response(500, str(e))

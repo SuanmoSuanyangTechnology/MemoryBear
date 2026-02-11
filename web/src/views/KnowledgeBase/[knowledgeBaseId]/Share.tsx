@@ -38,7 +38,7 @@ const Share: FC = () => {
     
     if (knowledgeBaseId) {
       fetchKnowledgeBaseDetail(knowledgeBaseId);
-      // 打开召回测试组件
+      // Open recall test component
       setTimeout(() => {
         console.log('Share.tsx - calling handleOpen with:', knowledgeBaseId);
         recallTestRef.current?.handleOpen(knowledgeBaseId);
@@ -48,7 +48,7 @@ const Share: FC = () => {
     }
   }, [knowledgeBaseId]);
 
-  // 更新面包屑
+  // Update breadcrumbs
   useEffect(() => {
     if (knowledgeBase) {
       updateBreadcrumbs({
@@ -63,14 +63,14 @@ const Share: FC = () => {
     }
   }, [knowledgeBase, knowledgeBaseFolderPath, updateBreadcrumbs]);
 
-  // 监听 location state 变化
+  // Listen to location state changes
   useEffect(() => {
     const state = location.state as { 
       fromKnowledgeBaseList?: boolean;
       knowledgeBaseFolderPath?: BreadcrumbItem[];
     } | null;
     
-    // 如果是从知识库列表页跳转过来的，设置知识库文件夹路径
+    // If navigated from knowledge base list page, set knowledge base folder path
     if (state?.fromKnowledgeBaseList && state?.knowledgeBaseFolderPath) {
       setKnowledgeBaseFolderPath(state.knowledgeBaseFolderPath);
     }

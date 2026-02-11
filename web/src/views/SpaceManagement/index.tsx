@@ -1,8 +1,20 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:48:59 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:48:59 
+ */
+/**
+ * Space Management Page
+ * Displays workspace list with creation and navigation capabilities
+ */
+
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { List, Button } from 'antd';
+
 import type { Space, SpaceModalRef } from './types';
 import SpaceModal from './components/SpaceModal';
 import RbCard from '@/components/RbCard/Card'
@@ -17,6 +29,7 @@ const SpaceManagement: React.FC = () => {
   const [data, setData] = useState<Space[]>([]);
   const spaceModalRef = useRef<SpaceModalRef>(null);
 
+  /** Load workspace list */
   const loadMoreData = () => {
     setLoading(true);
     getWorkspaces()
@@ -37,10 +50,12 @@ const SpaceManagement: React.FC = () => {
     loadMoreData();
   }, []);
   
+  /** Open create space modal */
   const handleCreate = () => {
     spaceModalRef.current?.handleOpen();
   }
 
+  /** Switch to selected workspace */
   const handleJump = (id: string) => {
     switchWorkspace(id)
       .then(() => {

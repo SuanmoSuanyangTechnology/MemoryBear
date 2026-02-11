@@ -1,6 +1,19 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:26:03 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:26:03 
+ */
+/**
+ * Tool List Component
+ * Manages tool configurations for the application
+ * Allows adding, removing, and enabling/disabling tools
+ */
+
 import { type FC, useRef, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Space, Button, List, Switch } from 'antd'
+
 import Card from '../Card'
 import type {
   ToolModalRef,
@@ -10,6 +23,11 @@ import Empty from '@/components/Empty'
 import ToolModal from './ToolModal'
 import { getToolMethods, getToolDetail } from '@/api/tools'
 
+/**
+ * Tool list management component
+ * @param value - Current tool configurations
+ * @param onChange - Callback when tools change
+ */
 const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => void}> = ({value, onChange}) => {
   const { t } = useTranslation()
   const toolModalRef = useRef<ToolModalRef>(null)
@@ -79,19 +97,23 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
     }
   }, [value])
 
+  /** Open tool selection modal */
   const handleAddTool = () => {
     toolModalRef.current?.handleOpen()
   }
+  /** Add new tool to list */
   const updateTools = (tool: ToolOption) => {
     const list = [...toolList, tool]
     setToolList(list)
     onChange && onChange(list)
   }
+  /** Remove tool from list */
   const handleDeleteTool = (index: number) => {
     const list = toolList.filter((_item, idx) => idx !== index)
     setToolList([...list])
     onChange && onChange(list)
   }
+  /** Toggle tool enabled state */
   const handleChangeEnabled = (index: number) => {
     const list = toolList.map((item, idx) => {
       if (idx === index) {
@@ -109,7 +131,7 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
     <Card 
       title={t('application.toolConfiguration')}
       extra={
-        <Button style={{ padding: '0 8px', height: '24px' }} onClick={handleAddTool}>+{t('application.addTool')}</Button>
+        <Button style={{ padding: '0 8px', height: '24px' }} onClick={handleAddTool}>+ {t('application.addTool')}</Button>
       }
     >
       {toolList.length === 0

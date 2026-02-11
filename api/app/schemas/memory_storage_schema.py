@@ -330,6 +330,7 @@ class ConfigUpdateForget(BaseModel):  # 更新遗忘引擎配置参数时使用�
 class ConfigPilotRun(BaseModel):  # 试运行触发请求模型
     config_id:Union[uuid.UUID, int, str] = Field(..., description="配置ID（唯一，支持UUID、整数或字符串）")
     dialogue_text: str = Field(..., description="前端传入的对话文本，格式如 '用户: ...\nAI: ...' 可多行，试运行必填")
+    custom_text: Optional[str] = Field(None, description="自定义输入文本，当配置关联本体场景时使用此字段进行试运行")
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
 

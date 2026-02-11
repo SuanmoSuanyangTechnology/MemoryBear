@@ -53,6 +53,21 @@
       "subs": []
     },
     {
+      "id": 8,
+      "parent": 0,
+      "code": "skills",
+      "label": "技能库",
+      "i18nKey": "menu.skills",
+      "path": "/skills",
+      "enable": true,
+      "display": true,
+      "level": 1,
+      "sort": 0,
+      "icon": null,
+      "iconActive": null,
+      "subs": null
+    },
+    {
       "id": 6,
       "parent": 0,
       "code": "pricing",

@@ -1,12 +1,27 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:18 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:18 
+ */
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Progress } from 'antd';
+
 import RbCard from '@/components/RbCard/Card'
 import {
   getImplicitPortrait,
 } from '@/api/memory'
 
+/**
+ * Portrait dimension item structure
+ * @property {string} dimension_name - Dimension name
+ * @property {number} percentage - Percentage value
+ * @property {string[]} evidence - Supporting evidence
+ * @property {string} reasoning - Reasoning
+ * @property {string} confidence_level - Confidence level
+ */
 interface Item {
   dimension_name: string;
   percentage: number;
@@ -14,6 +29,18 @@ interface Item {
   reasoning: string;
   confidence_level: string;
 }
+
+/**
+ * Portrait data structure
+ * @property {string} user_id - User ID
+ * @property {number | string} analysis_timestamp - Analysis timestamp
+ * @property {number} total_summaries_analyzed - Total summaries analyzed
+ * @property {null} historical_trends - Historical trends
+ * @property {Item} creativity - Creativity dimension
+ * @property {Item} aesthetic - Aesthetic dimension
+ * @property {Item} technology - Technology dimension
+ * @property {Item} literature - Literature dimension
+ */
 interface PortraitItem {
   user_id: string;
   analysis_timestamp: number | string;
@@ -25,6 +52,11 @@ interface PortraitItem {
   literature: Item;
 }
 
+/**
+ * Portrait Component
+ * Displays user portrait analysis across multiple dimensions
+ * Shows aesthetic, creativity, literature, and technology percentages
+ */
 const Portrait = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()

@@ -6,6 +6,8 @@ from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator
 from app.core.workflow.nodes.if_else import IfElseNodeConfig
 from app.core.workflow.nodes.operators import ConditionExpressionResolver, CompareOperatorInstance
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,11 @@ class IfElseNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
         super().__init__(node_config, workflow_config)
         self.typed_config: IfElseNodeConfig | None = None
+
+    def _output_types(self) -> dict[str, VariableType]:
+        return {
+            "output": VariableType.STRING
+        }
 
     @staticmethod
     def _evaluate(operator, instance: CompareOperatorInstance) -> Any:
@@ -45,7 +52,7 @@ class IfElseNode(BaseNode):
             case _:
                 raise ValueError(f"Invalid condition: {operator}")
 
-    def evaluate_conditional_edge_expressions(self, state) -> list[bool]:
+    def evaluate_conditional_edge_expressions(self, variable_pool: VariablePool) -> list[bool]:
         """
         Build conditional edge expressions for the If-Else node.
 
@@ -72,11 +79,11 @@ class IfElseNode(BaseNode):
                 pattern = r"\{\{\s*(.*?)\s*\}\}"
                 left_string = re.sub(pattern, r"\1", expression.left).strip()
                 try:
-                    left_value = self.get_variable(left_string, state)
+                    left_value = self.get_variable(left_string, variable_pool)
                 except KeyError:
                     left_value = None
                 evaluator = ConditionExpressionResolver.resolve_by_value(left_value)(
-                    self.get_variable_pool(state),
+                    variable_pool,
                     expression.left,
                     expression.right,
                     expression.input_type
@@ -95,7 +102,7 @@ class IfElseNode(BaseNode):
 
         return conditions
 
-    async def execute(self, state: WorkflowState) -> Any:
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
         Execute the conditional branching logic of the node.
 
@@ -105,13 +112,13 @@ class IfElseNode(BaseNode):
 
         Args:
             state (WorkflowState): The current workflow state, containing variables, messages, node outputs, etc.
+            variable_pool: Variable Pool
 
         Returns:
             str: The matched branch identifier, e.g., 'CASE1', 'CASE2', ..., used for node transitions.
         """
         self.typed_config = IfElseNodeConfig(**self.config)
-        expressions = self.evaluate_conditional_edge_expressions(state)
-        # TODO: 变量类型及文本类型解析
+        expressions = self.evaluate_conditional_edge_expressions(variable_pool)
         for i in range(len(expressions)):
             if expressions[i]:
                 logger.info(f"Node {self.node_id}: switched to branch CASE {i + 1}")

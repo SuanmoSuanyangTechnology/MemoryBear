@@ -90,13 +90,17 @@ class ImplicitMemoryService:
             # Get user's connected config
             connected_config = get_end_user_connected_config(self.end_user_id, self.db)
             config_id = connected_config.get("memory_config_id")
+            workspace_id = connected_config.get("workspace_id")
             
-            if config_id is None:
+            if config_id is None and workspace_id is None:
                 raise ValueError(f"No memory configuration found for end_user: {self.end_user_id}")
             
-            # Load the memory configuration
+            # Load the memory configuration with workspace fallback
             config_service = MemoryConfigService(self.db)
-            memory_config = config_service.load_memory_config(config_id)
+            memory_config = config_service.load_memory_config(
+                config_id=config_id,
+                workspace_id=workspace_id
+            )
             
             logger.info(f"Loaded memory config {config_id} for end_user: {self.end_user_id}")
             return memory_config

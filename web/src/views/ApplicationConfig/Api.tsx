@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:29:29 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:29:29 
+ */
 import { type FC, useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
@@ -14,6 +20,11 @@ import Tag from '@/components/Tag'
 import { getApiKeyList, getApiKeyStats, deleteApiKey } from '@/api/apiKey';
 import { maskApiKeys } from '@/utils/apiKeyReplacer'
 
+/**
+ * API configuration page component
+ * Manages API endpoints and API keys for the application
+ * @param application - Current application data
+ */
 const Api: FC<{ application: Application | null }> = ({ application }) => {
   const { t } = useTranslation();
   const activeMethods = ['POST'];
@@ -23,6 +34,10 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
   const apiKeyConfigModalRef = useRef<ApiKeyConfigModalRef>(null);
   const [apiKeyList, setApiKeyList] = useState<ApiKey[]>([])
 
+  /**
+   * Copy content to clipboard
+   * @param content - Content to copy
+   */
   const handleCopy = (content: string) => {
     copy(content)
     message.success(t('common.copySuccess'))
@@ -31,6 +46,9 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
   useEffect(() => {
     getApiList()
   }, [])
+  /**
+   * Fetch API key list for the application
+   */
   const getApiList = () => {
     if (!application) {
       return
@@ -48,6 +66,10 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
       getAllStats([...list])
     })
   }
+  /**
+   * Fetch statistics for all API keys
+   * @param list - List of API keys
+   */
   const getAllStats = (list: ApiKey[]) => {
    const allList: ApiKey[] = []
    list.forEach(async item => {
@@ -66,12 +88,23 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
     })
 
   }
+  /**
+   * Open modal to add new API key
+   */
   const handleAdd = () => {
     apiKeyModalRef.current?.handleOpen()
   }
+  /**
+   * Open modal to edit API key
+   * @param vo - API key to edit
+   */
   const handleEdit = (vo: ApiKey) => {
     apiKeyConfigModalRef.current?.handleOpen(vo)
   }
+  /**
+   * Delete API key with confirmation
+   * @param vo - API key to delete
+   */
   const handleDelete = (vo: ApiKey) => {
       modal.confirm({
         title: t('common.confirmDeleteDesc', { name: vo.name }),
@@ -89,7 +122,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
       })
   }
 
-  // 计算total_requests总数
+  // Calculate total requests across all API keys
   const totalRequests = apiKeyList.reduce((total, item) => total + item.total_requests, 0);
   return (
     <div className="rb:w-250 rb:mt-5 rb:pb-5 rb:mx-auto">
@@ -129,7 +162,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
           }
         >
           <div className="rb:text-[#5B6167] rb:text-[12px] rb:mb-2">{t('application.apiKeySubTitle')}</div>
-          {/* 总览数据 */}
+          {/* Overview Data */}
           <Row>
             <Col span={6}>
               <Statistic title={t('application.apiKeyTotal')} value={apiKeyList.length} />
@@ -138,7 +171,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
               <Statistic title={t('application.apiKeyRequestTotal')} value={totalRequests} />
             </Col>
           </Row>
-          {/* API Key 列表 */}
+          {/* API Key List */}
           {apiKeyList.sort((a, b) => b.created_at - a.created_at).map(item => (
             <div key={item.id} className="rb:mt-4 rb:p-[10px_12px] rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
               <div className="rb:flex rb:items-center rb:justify-between">

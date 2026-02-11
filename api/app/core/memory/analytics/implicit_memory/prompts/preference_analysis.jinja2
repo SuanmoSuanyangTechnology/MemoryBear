@@ -16,6 +16,7 @@ Summary {{ loop.index }}:
 3. DO NOT use long phrases - use short nouns or noun phrases
 4. Only include preferences with confidence_score >= 0.3
 5. **IMPORTANT: Output language MUST match the input language. If summaries are in Chinese, output in Chinese. If in English, output in English.**
+6. **CRITICAL: supporting_evidence must be DIRECT QUOTES or paraphrases from the user's actual statements. DO NOT reference summary numbers (e.g., "Summary 1", "摘要1"). DO NOT describe what the summary contains. Extract the actual user behavior or statement as evidence.**
 
 ## Output Format
 {
@@ -37,6 +38,16 @@ Summary {{ loop.index }}:
     {"tag_name": "古典音乐", "confidence_score": 0.7, "supporting_evidence": ["喜欢听古典"], "context_details": "音乐偏好", "category": "music"}
   ]
 }
+
+## BAD supporting_evidence examples (DO NOT do this):
+- "Summary 1：西湖为核心景区" ❌
+- "摘要2中提到喜欢咖啡" ❌
+- "Based on Summary 3" ❌
+
+## GOOD supporting_evidence examples:
+- "去过西湖断桥、苏堤" ✓
+- "每天早上喝咖啡" ✓
+- "mentioned visiting the lake twice" ✓
 
 ## Example (English input → English output)
 {

@@ -28,6 +28,7 @@ from .tool_model import (
     ToolExecution, ToolType, ToolStatus, AuthType, ExecutionStatus
 )
 from .memory_perceptual_model import MemoryPerceptualModel
+from .skill_model import Skill
 from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
 from .ontology_scene import OntologyScene
@@ -84,5 +85,6 @@ __all__ = [
     "ExecutionStatus",
     "MemoryPerceptualModel",
     "ModelBase",
-    "LoadBalanceStrategy"
+    "LoadBalanceStrategy",
+    "Skill"
 ]

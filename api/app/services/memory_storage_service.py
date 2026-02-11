@@ -244,12 +244,13 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
         return self._convert_timestamps_to_format(data_list)
 
 
-    async def pilot_run_stream(self, payload: ConfigPilotRun) -> AsyncGenerator[str, None]:
+    async def pilot_run_stream(self, payload: ConfigPilotRun, language: str = "zh") -> AsyncGenerator[str, None]:
         """
         流式执行试运行，产生 SSE 格式的进度事件
         
         Args:
             payload: 试运行配置和对话文本
+            language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
             
         Yields:
             SSE 格式的字符串，包含以下事件类型：
@@ -279,12 +280,6 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             if not cid:
                 raise ValueError("未提供 payload.config_id，禁止启动试运行")
 
-            # 验证 dialogue_text 必须提供
-            dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
-            logger.info(f"[PILOT_RUN_STREAM] Received dialogue_text length: {len(dialogue_text)}, preview: {dialogue_text[:100]}")
-            if not dialogue_text:
-                raise ValueError("试运行模式必须提供 dialogue_text 参数")
-
             # Load configuration from database only using centralized manager
             try:
                 config_service = MemoryConfigService(self.db)
@@ -295,6 +290,30 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
             except ConfigurationError as e:
                 raise RuntimeError(f"Configuration loading failed: {e}")
+
+            # 根据是否关联本体场景选择使用的文本
+            # 如果配置关联了本体场景（scene_id 不为空），使用 custom_text（如果提供）
+            # 否则使用 dialogue_text
+            if memory_config.scene_id:
+                # 关联了本体场景，优先使用 custom_text
+                if hasattr(payload, 'custom_text') and payload.custom_text:
+                    dialogue_text = payload.custom_text.strip()
+                    logger.info(f"[PILOT_RUN_STREAM] Using custom_text for scene_id={memory_config.scene_id}, length: {len(dialogue_text)}")
+                else:
+                    # 如果没有提供 custom_text，回退到 dialogue_text
+                    dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
+                    logger.info(f"[PILOT_RUN_STREAM] No custom_text provided, using dialogue_text for scene_id={memory_config.scene_id}")
+            else:
+                # 没有关联本体场景，使用 dialogue_text
+                dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
+                logger.info(f"[PILOT_RUN_STREAM] No scene_id, using dialogue_text, length: {len(dialogue_text)}")
+            
+            # 验证最终使用的文本不为空
+            if not dialogue_text:
+                raise ValueError("试运行模式必须提供有效的文本内容（dialogue_text 或 custom_text）")
+            
+            logger.info(f"[PILOT_RUN_STREAM] Final text preview: {dialogue_text[:100]}")
+
 
             # 步骤 2: 创建进度回调函数捕获管线进度
             # 使用队列在回调和生成器之间传递进度事件
@@ -323,6 +342,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                         dialogue_text=dialogue_text,
                         db=self.db,
                         progress_callback=progress_callback,
+                        language=language,
                     )
                     logger.info("[PILOT_RUN_STREAM] pipeline_main completed")
                     
@@ -379,12 +399,22 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             with open(result_path, "r", encoding="utf-8") as rf:
                 extracted_result = json.load(rf)
             
-            # 步骤 6: 发出结果事件
+            # 步骤 6: 计算本体覆盖率并合并到结果中
             result_data = {
                 "config_id": cid,
                 "time_log": os.path.join(project_root, "logs", "time.log"),
                 "extracted_result": extracted_result,
             }
+            try:
+                ontology_coverage = await self._compute_ontology_coverage(
+                    extracted_result=extracted_result,
+                    memory_config=memory_config,
+                )
+                if ontology_coverage:
+                    result_data["ontology_coverage"] = ontology_coverage
+            except Exception as cov_err:
+                logger.warning(f"[PILOT_RUN_STREAM] Ontology coverage computation failed: {cov_err}", exc_info=True)
+            
             yield format_sse_message("result", result_data)
             
             # 步骤 7: 发出完成事件
@@ -406,6 +436,100 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "error": str(e),
                 "time": int(time.time() * 1000)
             })
+
+
+    async def _compute_ontology_coverage(
+        self,
+        extracted_result: Dict[str, Any],
+        memory_config,
+    ) -> Optional[Dict[str, Any]]:
+        """根据提取结果中的实体类型，与场景/通用本体类型做互斥分类统计。
+
+        分类规则（互斥）：场景类型优先 > 通用类型 > 未匹配
+        确保: 场景实体数 + 通用实体数 + 未匹配数 = 总实体数
+
+        Returns:
+            包含三部分统计的字典，或 None（无实体数据时）
+        """
+        core_entities = extracted_result.get("core_entities", [])
+        if not core_entities:
+            return None
+
+        # 1. 加载场景本体类型集合
+        scene_ontology_types: set = set()
+        try:
+            from app.repositories.ontology_class_repository import OntologyClassRepository
+
+            if memory_config.scene_id:
+                class_repo = OntologyClassRepository(self.db)
+                ontology_classes = class_repo.get_classes_by_scene(memory_config.scene_id)
+                scene_ontology_types = {oc.class_name for oc in ontology_classes}
+        except Exception as e:
+            logger.warning(f"Failed to load scene ontology types: {e}")
+
+        # 2. 加载通用本体类型集合
+        general_ontology_types: set = set()
+        try:
+            from app.core.memory.ontology_services.ontology_type_loader import (
+                get_general_ontology_registry,
+                is_general_ontology_enabled,
+            )
+
+            if is_general_ontology_enabled():
+                registry = get_general_ontology_registry()
+                if registry:
+                    general_ontology_types = set(registry.types.keys())
+        except Exception as e:
+            logger.warning(f"Failed to load general ontology types: {e}")
+
+        # 3. 互斥分类：场景优先 > 通用 > 未匹配
+        scene_distribution: list = []
+        general_distribution: list = []
+        unmatched_distribution: list = []
+        scene_total = 0
+        general_total = 0
+        unmatched_total = 0
+
+        for item in core_entities:
+            entity_type = item.get("type", "")
+            count = item.get("count", 0)
+
+            if entity_type in scene_ontology_types:
+                scene_distribution.append({"type": entity_type, "count": count})
+                scene_total += count
+            elif entity_type in general_ontology_types:
+                general_distribution.append({"type": entity_type, "count": count})
+                general_total += count
+            else:
+                unmatched_distribution.append({"type": entity_type, "count": count})
+                unmatched_total += count
+
+        # 按数量降序排列
+        scene_distribution.sort(key=lambda x: x["count"], reverse=True)
+        general_distribution.sort(key=lambda x: x["count"], reverse=True)
+        unmatched_distribution.sort(key=lambda x: x["count"], reverse=True)
+
+        total_entities = scene_total + general_total + unmatched_total
+
+        return {
+            "scene_type_distribution": {
+                "type_count": len(scene_distribution),
+                "entity_total": scene_total,
+                "types": scene_distribution,
+            },
+            "general_type_distribution": {
+                "type_count": len(general_distribution),
+                "entity_total": general_total,
+                "types": general_distribution,
+            },
+            "unmatched": {
+                "type_count": len(unmatched_distribution),
+                "entity_total": unmatched_total,
+                "types": unmatched_distribution,
+            },
+            "total_entities": total_entities,
+            "time": int(time.time() * 1000),
+        }
 
 
 # -------------------- Neo4j Search & Analytics (fused from data_search_service.py) --------------------

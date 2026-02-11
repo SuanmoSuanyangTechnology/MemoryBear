@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:29:45 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:29:45 
+ */
 import { type FC, useState, useEffect } from 'react';
 import { Row, Col, Flex, DatePicker } from 'antd';
 import type { Dayjs } from 'dayjs'
@@ -10,12 +16,21 @@ import { getAppStatistics } from '@/api/application';
 import LineCard from './components/LineCard'
 import type { StatisticsData, StatisticsItem } from './types'
 
+/**
+ * Mapping of daily statistics keys to total statistics keys
+ */
 const TotalObj: Record<string, keyof StatisticsData> = {
   daily_conversations: 'total_conversations',
   daily_new_users: 'total_new_users',
   daily_api_calls: 'total_api_calls',
   daily_tokens: 'total_tokens',
 }
+
+/**
+ * Statistics page component
+ * Displays application usage statistics with charts and date range filtering
+ * @param application - Application data
+ */
 const Statistics: FC<{ application: Application | null }> = ({ application }) => {
   const [data, setData] = useState<StatisticsData>({
     daily_conversations: [],
@@ -35,6 +50,9 @@ const Statistics: FC<{ application: Application | null }> = ({ application }) =>
   useEffect(() => {
     getData()
   }, [application, query])
+  /**
+   * Fetch statistics data
+   */
   const getData = () => {
     if (!application?.id) {
       return
@@ -49,6 +67,10 @@ const Statistics: FC<{ application: Application | null }> = ({ application }) =>
         setData(res as StatisticsData)
       })
   }
+  /**
+   * Handle date range change
+   * @param date - Selected date range
+   */
   const handleChange = (date: [Dayjs | null, Dayjs | null] | null) => {
     if (!date || !date[0] || !date[1]) return
     setQuery({

@@ -108,7 +108,6 @@ class DimensionAnalyzer:
             
             # Create dimension portrait
             portrait = DimensionPortrait(
-                user_id=user_id,
                 creativity=dimension_scores["creativity"],
                 aesthetic=dimension_scores["aesthetic"],
                 technology=dimension_scores["technology"],
@@ -220,7 +219,7 @@ class DimensionAnalyzer:
         """Create an empty dimension portrait when no data is available.
         
         Args:
-            user_id: Target user ID
+            user_id: Target user ID (used for logging only)
             
         Returns:
             Empty DimensionPortrait
@@ -228,7 +227,6 @@ class DimensionAnalyzer:
         current_time = datetime.now()
         
         return DimensionPortrait(
-            user_id=user_id,
             creativity=self._create_default_dimension_score("creativity"),
             aesthetic=self._create_default_dimension_score("aesthetic"),
             technology=self._create_default_dimension_score("technology"),

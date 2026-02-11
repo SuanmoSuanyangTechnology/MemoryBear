@@ -1,14 +1,30 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:16:45 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:16:45 
+ */
+/**
+ * Pie Chart Card Component
+ * Displays knowledge base type distribution with ECharts donut chart
+ */
+
 import { type FC, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react';
+
 import Card from './Card'
 import Loading from '@/components/Empty/Loading'
 import Empty from '@/components/Empty'
 
+/**
+ * Component props
+ */
 interface PieCardProps {
   chartData: Array<Record<string, string | number>>;
   loading: boolean;
 }
+/** Chart color palette */
 const Colors = ['#155EEF', '#31E8FF', '#AD88FF', '#FFB048', '#4DA8FF', '#03BDFF']
 
 const PieCard: FC<PieCardProps> = ({ chartData, loading }) => {
@@ -45,7 +61,7 @@ const PieCard: FC<PieCardProps> = ({ chartData, loading }) => {
       {loading
       ? <Loading size={249} />
       : !chartData || chartData.length === 0
-      ? <Empty size={120} className="rb:mt-[48px] rb:mb-[81px]" />
+      ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
       : <ReactEcharts
           option={{
             color: Colors,

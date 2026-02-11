@@ -1,28 +1,34 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 14:00:26 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 14:00:26 
+ */
 import { request } from '@/utils/request'
 import type { SpaceModalData } from '@/views/SpaceManagement/types'
-import type { ConfigModalData } from '@/views/UserMemory/types'
+import type { SpaceConfigData } from '@/views/SpaceConfig/types'
 
-// 空间列表
+// Workspace list
 export const getWorkspaces = () => {
   return request.get('/workspaces')
 }
-// 创建空间
+// Create workspace
 export const createWorkspace = (values: SpaceModalData) => {
   return request.post('/workspaces', values)
 }
-// 切换空间
+// Switch workspace
 export const switchWorkspace = (workspaceId: string) => {
   return request.put(`/workspaces/${workspaceId}/switch`)
 }
-// 获取空间存储类型
+// Get workspace storage type
 export const getWorkspaceStorageType = () => {
   return request.get(`/workspaces/storage`)
 }
-// 获取空间模型配置
+// Get workspace model config
 export const getWorkspaceModels = () => {
   return request.get(`/workspaces/workspace_models`)
 }
-// 更新空间模型配置
-export const updateWorkspaceModels = (data: ConfigModalData) => {
+// Update workspace model config
+export const updateWorkspaceModels = (data: SpaceConfigData) => {
   return request.put(`/workspaces/workspace_models`, data)
 }

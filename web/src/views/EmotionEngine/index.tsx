@@ -1,7 +1,20 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:56:54 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 16:57:17
+ */
+/**
+ * Emotion Engine Configuration Page
+ * Configures emotion analysis settings for memory system
+ * Includes model selection, intensity threshold, and feature toggles
+ */
+
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Form, Slider, Button, Alert, message, Space } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+
 import RbCard from '@/components/RbCard/Card';
 import strategyImpactSimulator from '@/assets/images/memory/strategyImpactSimulator.svg'
 import { getMemoryEmotionConfig, updateMemoryEmotionConfig } from '@/api/memory'
@@ -11,6 +24,9 @@ import { getModelListUrl } from '@/api/models'
 import Tag from '@/components/Tag'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 
+/**
+ * Configuration field definitions
+ */
 const configList = [
   {
     key: 'emotion_enabled',
@@ -41,6 +57,9 @@ const configList = [
   },
 ]
 
+/**
+ * Emotion engine configuration component
+ */
 const EmotionEngine: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams();
@@ -55,6 +74,7 @@ const EmotionEngine: React.FC = () => {
     getConfigData()
   }, [id])
 
+  /** Fetch emotion engine configuration */
   const getConfigData = () => {
     if (!id) {
       return
@@ -72,9 +92,11 @@ const EmotionEngine: React.FC = () => {
         console.error('Failed to load data');
       })
   }
+  /** Reset form to saved configuration */
   const handleReset = () => {
     form.setFieldsValue(configData);
   }
+  /** Save emotion engine configuration */
   const handleSave = () => {
     if (!id) {
       return

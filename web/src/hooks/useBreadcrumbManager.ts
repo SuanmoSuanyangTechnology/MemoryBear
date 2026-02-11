@@ -1,25 +1,52 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 16:24:44 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 16:24:44 
+ */
+/**
+ * useBreadcrumbManager Hook
+ * 
+ * Manages breadcrumb navigation for knowledge base pages with:
+ * - Dynamic breadcrumb generation based on folder/document paths
+ * - Separate breadcrumb handling for list and detail views
+ * - Click handlers for navigation between folders
+ * - Support for custom callbacks
+ * 
+ * @hook
+ */
+
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMenu } from '@/store/menu';
 import type { MenuItem } from '@/store/menu';
 
+/** Breadcrumb item interface */
 export interface BreadcrumbItem {
   id: string;
   name: string;
   type?: 'knowledgeBase' | 'folder' | 'document';
 }
 
+/** Breadcrumb path structure */
 export interface BreadcrumbPath {
-  knowledgeBaseFolderPath: BreadcrumbItem[]; // 知识库文件夹路径
-  knowledgeBase?: BreadcrumbItem; // 知识库信息
-  documentFolderPath: BreadcrumbItem[]; // 文档文件夹路径
-  document?: BreadcrumbItem; // 文档信息
+  /** Knowledge base folder path */
+  knowledgeBaseFolderPath: BreadcrumbItem[];
+  /** Knowledge base information */
+  knowledgeBase?: BreadcrumbItem;
+  /** Document folder path */
+  documentFolderPath: BreadcrumbItem[];
+  /** Document information */
+  document?: BreadcrumbItem;
 }
 
+/** Options for breadcrumb manager */
 export interface BreadcrumbOptions {
+  /** Callback when knowledge base menu is clicked */
   onKnowledgeBaseMenuClick?: () => void;
+  /** Callback when knowledge base folder is clicked */
   onKnowledgeBaseFolderClick?: (folderId: string, folderPath: BreadcrumbItem[]) => void;
-  // 新增：区分面包屑类型
+  /** Breadcrumb type: list or detail view */
   breadcrumbType?: 'list' | 'detail';
 }
 
@@ -27,14 +54,15 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
   const { allBreadcrumbs, setCustomBreadcrumbs } = useMenu();
   const navigate = useNavigate();
 
+  /** Update breadcrumbs based on current path and type */
   const updateBreadcrumbs = useCallback((breadcrumbPath: BreadcrumbPath) => {
     const breadcrumbType = options?.breadcrumbType || 'list';
     
-    // 对于详情页面，直接使用固定的知识库管理面包屑，不依赖可能被污染的 allBreadcrumbs
+    /** For detail pages, use fixed knowledge base breadcrumb */
     let baseBreadcrumbs: MenuItem[] = [];
     
     if (breadcrumbType === 'detail') {
-      // 详情页面：始终使用固定的知识库管理面包屑
+      /** Detail page: always use fixed knowledge base management breadcrumb */
       baseBreadcrumbs = [
         {
           id: 6,
@@ -61,14 +89,14 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
         }
       ];
     } else {
-      // 列表页面：从 space 获取基础面包屑，但确保包含知识库管理
+      /** List page: get base breadcrumbs from space, ensure knowledge base management is included */
       const spaceBreadcrumbs = allBreadcrumbs['space'] || [];
       const knowledgeBaseMenuIndex = spaceBreadcrumbs.findIndex(item => item.path === '/knowledge-base');
       
       if (knowledgeBaseMenuIndex >= 0) {
         baseBreadcrumbs = spaceBreadcrumbs.slice(0, knowledgeBaseMenuIndex + 1);
       } else {
-        // 如果没有找到知识库菜单，使用默认的知识库管理面包屑
+        /** If knowledge base menu not found, use default knowledge base management breadcrumb */
         baseBreadcrumbs = [
           {
             id: 6,
@@ -99,7 +127,7 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
     
     const filteredBaseBreadcrumbs = baseBreadcrumbs;
 
-    // 给"知识库管理"添加点击事件
+    /** Add click event to "Knowledge Base Management" */
     const breadcrumbsWithClick = filteredBaseBreadcrumbs.map((item) => {
       if (item.path === '/knowledge-base') {
         return {
@@ -109,10 +137,10 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
             e?.stopPropagation();
             
             if (options?.onKnowledgeBaseMenuClick) {
-              // 如果提供了回调函数，执行回调
+              /** If callback provided, execute callback */
               options.onKnowledgeBaseMenuClick();
             } else if (breadcrumbType === 'detail') {
-              // 知识库详情页面：没有回调函数时，返回到知识库列表页面
+              /** Knowledge base detail page: return to knowledge base list page when no callback */
               navigate('/knowledge-base', {
                 state: {
                   resetToRoot: true,
@@ -129,7 +157,7 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
     let customBreadcrumbs: MenuItem[] = [...breadcrumbsWithClick];
 
     if (breadcrumbType === 'list') {
-      // 知识库列表页面：只显示知识库文件夹路径
+      /** Knowledge base list page: only show knowledge base folder path */
       customBreadcrumbs = [
         ...breadcrumbsWithClick,
         ...breadcrumbPath.knowledgeBaseFolderPath.map((folder, index) => ({
@@ -158,11 +186,11 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
             e?.preventDefault();
             e?.stopPropagation();
             
-            // 如果有回调函数，直接调用回调函数来更新状态
+            /** If callback provided, call callback to update state */
             if (options?.onKnowledgeBaseFolderClick) {
               options.onKnowledgeBaseFolderClick(folder.id, breadcrumbPath.knowledgeBaseFolderPath.slice(0, index + 1));
             } else {
-              // 否则使用导航（兜底逻辑）
+              /** Otherwise use navigation (fallback logic) */
               navigate('/knowledge-base', { 
                 state: { 
                   navigateToFolder: folder.id,
@@ -175,11 +203,11 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
         })),
       ];
     } else {
-      // 知识库详情页面：显示知识库名称 + 文档文件夹路径 + 文档名称
+      /** Knowledge base detail page: show knowledge base name + document folder path + document name */
       customBreadcrumbs = [
         ...breadcrumbsWithClick,
         
-        // 添加知识库名称
+        /** Add knowledge base name */
         ...(breadcrumbPath.knowledgeBase ? [{
           id: 0,
           parent: 0,
@@ -205,27 +233,27 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
           onClick: (e?: React.MouseEvent) => {
             e?.preventDefault();
             e?.stopPropagation();
-            // 返回到知识库详情页的根目录
+            /** Return to knowledge base detail page root directory */
             const navigationState = {
               fromKnowledgeBaseList: true,
               knowledgeBaseFolderPath: breadcrumbPath.knowledgeBaseFolderPath,
-              resetToRoot: true, // 添加重置到根目录的标志
-              refresh: true, // 添加刷新标志
-              timestamp: Date.now(), // 添加时间戳确保状态变化
+              resetToRoot: true, /** Add flag to reset to root directory */
+              refresh: true, /** Add refresh flag */
+              timestamp: Date.now(), /** Add timestamp to ensure state change */
             };
             
-            // 使用当前页面路径进行导航，避免不必要的路由变化
+            /** Use current page path for navigation to avoid unnecessary route changes */
             const currentPath = window.location.pathname;
             const targetPath = `/knowledge-base/${breadcrumbPath.knowledgeBase!.id}/private`;
             
             if (currentPath === targetPath) {
-              // 如果已经在目标页面，直接更新状态而不导航
+              /** If already on target page, update state directly without navigation */
               navigate(targetPath, { 
                 state: navigationState,
-                replace: true // 使用 replace 避免历史记录堆积
+                replace: true /** Use replace to avoid history stack buildup */
               });
             } else {
-              // 如果不在目标页面，正常导航
+              /** If not on target page, navigate normally */
               navigate(targetPath, { 
                 state: navigationState
               });
@@ -234,7 +262,7 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
           },
         }] : []),
         
-        // 添加文档文件夹路径
+        /** Add document folder path */
         ...breadcrumbPath.documentFolderPath.map((folder, index) => ({
           id: 0,
           parent: 0,
@@ -260,24 +288,24 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
           onClick: (e?: React.MouseEvent) => {
             e?.preventDefault();
             e?.stopPropagation();
-            // 返回到知识库详情页的对应文件夹
+            /** Return to corresponding folder in knowledge base detail page */
             const navigationState = {
               fromKnowledgeBaseList: true,
               knowledgeBaseFolderPath: breadcrumbPath.knowledgeBaseFolderPath,
               navigateToDocumentFolder: folder.id,
               documentFolderPath: breadcrumbPath.documentFolderPath.slice(0, index + 1),
-              refresh: true, // 添加刷新标志
-              timestamp: Date.now(), // 添加时间戳确保状态变化
+              refresh: true, /** Add refresh flag */
+              timestamp: Date.now(), /** Add timestamp to ensure state change */
             };
             navigate(`/knowledge-base/${breadcrumbPath.knowledgeBase!.id}/private`, { 
               state: navigationState,
-              replace: true // 使用 replace 避免历史记录堆积
+              replace: true /** Use replace to avoid history stack buildup */
             });
             return false;
           },
         })),
         
-        // 添加文档名称（如果存在）
+        /** Add document name (if exists) */
         ...(breadcrumbPath.document ? [{
           id: 0,
           parent: 0,
@@ -300,12 +328,12 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
           disposable: false,
           appSystem: null,
           subs: [],
-          // 文档名称不可点击
+          /** Document name is not clickable */
         }] : []),
       ];
     }
 
-    // 根据面包屑类型使用不同的键，实现独立的面包屑路径
+    /** Use different keys based on breadcrumb type to implement independent breadcrumb paths */
     const breadcrumbKey = breadcrumbType === 'list' ? 'space' : 'space-detail';
     
 

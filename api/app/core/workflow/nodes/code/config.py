@@ -1,7 +1,8 @@
 from typing import Literal
 from pydantic import Field, BaseModel
 
-from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableType
+from app.core.workflow.nodes.base_config import BaseNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
 
 
 class InputVariable(BaseModel):

@@ -1,7 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 15:52:44 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 10:00:02
+ */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Switch, Button, Tooltip } from 'antd';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
+
 import type { ApiKey, ApiKeyModalRef } from '../types';
 import RbModal from '@/components/RbModal'
 import { getApiKey  } from '@/api/apiKey';
@@ -9,16 +16,29 @@ import { formatDateTime } from '@/utils/format'
 import Tag from '@/components/Tag'
 import { maskApiKeys } from '@/utils/apiKeyReplacer';
 
+/**
+ * Modal component for viewing API key details
+ * Displays read-only information about an API key
+ */
 const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: string) => void }>(({ handleCopy }, ref) => {
+  // Hooks
   const { t } = useTranslation();
+  
+  // State
   const [visible, setVisible] = useState(false);
   const [data, setData] = useState<ApiKey>({} as ApiKey)
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /**
+   * Close the modal
+   */
   const handleClose = () => {
     setVisible(false);
   };
 
+  /**
+   * Open modal and fetch API key details
+   * @param apiKey - API key item to view
+   */
   const handleOpen = (apiKey?: ApiKey) => {
     if (apiKey?.id) {
       getApiKey(apiKey.id)
@@ -29,7 +49,9 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
     }
   };
 
-  // 暴露给父组件的方法
+  /**
+   * Expose methods to parent component via ref
+   */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -84,7 +106,6 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
         </span>
       </div>
 
-      {/* 高级设置 */}
       {data.expires_at && <>
         <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:my-4">{t('apiKey.advancedSettings')}</div>
 

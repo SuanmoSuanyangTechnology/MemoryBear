@@ -1,9 +1,12 @@
 import datetime
 import uuid
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, BigInteger
+
+from sqlalchemy import Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+
 from app.db import Base
+
 
 class EndUser(Base):
     __tablename__ = "end_users"
@@ -17,6 +20,14 @@ class EndUser(Base):
     reflection_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.now)
     updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
+    
+    memory_config_id = Column(
+        UUID(as_uuid=True), 
+        ForeignKey("memory_config.config_id"), 
+        nullable=True, 
+        index=True, 
+        comment="关联的记忆配置ID"
+    )
     
     # 用户基本信息字段
     position = Column(String, nullable=True, comment="职位")

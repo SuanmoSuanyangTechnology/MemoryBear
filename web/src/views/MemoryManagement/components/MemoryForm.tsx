@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:33:22 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:33:22 
+ */
+/**
+ * Memory Form Component
+ * Modal form for creating and editing memory configurations
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +21,9 @@ import CustomSelect from '@/components/CustomSelect';
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface MemoryFormProps {
   refresh: () => void;
 }
@@ -26,7 +40,7 @@ const MemoryForm = forwardRef<MemoryFormRef, MemoryFormProps>(({
 
   const values = Form.useWatch([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     setEditingMemory(null);
@@ -34,10 +48,11 @@ const MemoryForm = forwardRef<MemoryFormRef, MemoryFormProps>(({
     setLoading(false);
   };
 
+  /** Open modal with optional data */
   const handleOpen = (memory?: Memory | null) => {
     if (memory) {
       setEditingMemory(memory);
-      // 设置表单值
+      /** Set form values */
       form.setFieldsValue({
         config_name: memory.config_name,
         config_desc: memory.config_desc,
@@ -48,7 +63,7 @@ const MemoryForm = forwardRef<MemoryFormRef, MemoryFormProps>(({
     }
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save configuration */
   const handleSave = () => {
     form
       .validateFields()
@@ -73,7 +88,7 @@ const MemoryForm = forwardRef<MemoryFormRef, MemoryFormProps>(({
       });
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

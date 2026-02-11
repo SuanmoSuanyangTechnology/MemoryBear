@@ -2,7 +2,8 @@ from typing import Any
 
 from pydantic import Field, BaseModel, field_validator
 
-from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableType
+from app.core.workflow.nodes.base_config import BaseNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType
 
 
@@ -125,6 +126,11 @@ class IterationNodeConfig(BaseNodeConfig):
     output: str = Field(
         ...,
         description="Output of the loop iteration"
+    )
+
+    output_type: VariableType = Field(
+        default=None,
+        description="Data type of the loop iteration output"
     )
 
 

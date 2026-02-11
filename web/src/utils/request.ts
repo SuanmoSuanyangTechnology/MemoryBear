@@ -1,3 +1,22 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 16:35:15 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 16:35:15 
+ */
+/**
+ * HTTP Request Utility Module
+ * 
+ * Provides axios-based HTTP client with:
+ * - Automatic token refresh on 401 errors
+ * - Request/response interceptors
+ * - Cookie-based authentication
+ * - Error handling and user notifications
+ * - File upload/download support
+ * 
+ * @module request
+ */
+
 import axios from 'axios';
 import type { AxiosRequestConfig } from 'axios';
 import { clearAuthData } from './auth';
@@ -5,6 +24,9 @@ import { message } from 'antd';
 import { refreshTokenUrl, refreshToken, loginUrl, logoutUrl } from '@/api/user'
 import i18n from '@/i18n'
 
+/**
+ * Standard API response structure
+ */
 export interface ResponseData {
   code: number;
   msg: string;
@@ -12,6 +34,10 @@ export interface ResponseData {
   error: string;
   time: number;
 }
+
+/**
+ * Paginated data structure
+ */
 interface data {
   "items": Record<string, string | number | boolean | object | null | undefined>[];
   "page": {
@@ -22,21 +48,22 @@ interface data {
   }
 }
 
-
 export const API_PREFIX = '/api'
-// 创建axios实例
+
+// Create axios instance
 const service = axios.create({
-  baseURL: API_PREFIX, // 与vite.config.ts中的代理配置对应
-  // timeout: 10000, // 请求超时时间
+  baseURL: API_PREFIX, // Corresponds to proxy config in vite.config.ts
+  // timeout: 10000, // Request timeout
   withCredentials: false,
   headers: {
     'Content-Type': 'application/json'
   },
 });
 
-// 是否正在刷新token
+// Token refresh state
 let isRefreshing = false;
-// 存储待重试的请求队列
+
+// Queue for pending requests during token refresh
 interface RequestQueueItem {
   config: AxiosRequestConfig;
   resolve: (token: string) => void;
@@ -44,7 +71,7 @@ interface RequestQueueItem {
 }
 let requests: RequestQueueItem[] = [];
 
-// 请求拦截器
+// Request interceptor
 service.interceptors.request.use(
   (config) => {
     if (!config.headers.Authorization) {
@@ -59,13 +86,16 @@ service.interceptors.request.use(
     return config;
   },
   (error) => {
-    // 对请求错误做些什么
-    console.error('请求错误:', error);
+    // Handle request errors
+    console.error('Request error:', error);
     return Promise.reject(error);
   }
 );
 
-// 刷新token的函数
+/**
+ * Refresh authentication token
+ * @returns New access token
+ */
 const tokenRefresh = async (): Promise<string> => {
   try {
     const refresh_token = cookieUtils.get('refreshToken');
@@ -75,16 +105,16 @@ const tokenRefresh = async (): Promise<string> => {
     if (!refresh_token) {
       throw new Error(i18n.t('common.refreshTokenNotExist'));
     }
-    // 使用原生axios调用refresh接口，避免触发拦截器导致的循环调用
+    // Use native axios to call refresh API, avoiding interceptor circular calls
     const response: any = await refreshToken();
     const newToken = response.access_token;
     cookieUtils.set('authToken', newToken);
     return newToken;
   } catch (error) {
-    // 如果refresh接口也返回401，则退出登录
+    // If refresh API also returns 401, logout
     clearAuthData();
     message.warning(i18n.t('common.loginExpired'));
-    // 这里可以添加重定向到登录页的逻辑
+    // Redirect to login page
     if (!window.location.hash.includes('#/login')) {
       window.location.href = `/#/login`;
     }
@@ -92,13 +122,13 @@ const tokenRefresh = async (): Promise<string> => {
   }
 };
 
-// 响应拦截器
+// Response interceptor
 service.interceptors.response.use(
   (response) => {
-    // 对响应数据做点什么
+    // Process response data
     const { data: responseData } = response;
 
-    // 如果响应数据不是对象，直接返回
+    // If response data is not an object, return directly
     if (!responseData || typeof responseData !== 'object') {
       return responseData;
     }
@@ -110,7 +140,7 @@ service.interceptors.response.use(
       case 200:
         return data !== undefined ? data : responseData;
       case 401:
-        // 处理未授权情况
+        // Handle unauthorized
         return handle401Error(response.config);
       default:
         if (code === undefined) {
@@ -123,18 +153,18 @@ service.interceptors.response.use(
     }
   },
   (error) => {
-    // 如果是取消请求，不显示错误提示
+    // If request was cancelled, don't show error message
     if (axios.isCancel(error) || error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
       return Promise.reject(error);
     }
 
-    // 处理网络错误、超时等
+    // Handle network errors, timeouts, etc.
     let msg = error.response?.data?.error || error.response?.error;
     const status = error?.response ? error.response.status : error;
-    // 服务器响应了但状态码不在2xx范围
+    // Server responded but status code is not in 2xx range
     switch (status) {
       case 401:
-        // 处理未授权情况
+        // Handle unauthorized
         return handle401Error(error.config);
       case 403:
         msg = i18n.t('common.permissionDenied');
@@ -165,9 +195,13 @@ service.interceptors.response.use(
   }
 );
 
-// 处理401错误的函数
+/**
+ * Handle 401 unauthorized errors with token refresh
+ * @param config - Original request configuration
+ * @returns Retried request with new token
+ */
 const handle401Error = async (config: AxiosRequestConfig): Promise<unknown> => {
-  // 如果是refresh接口本身返回401，则直接退出登录
+  // If refresh API itself returns 401, logout directly
   if (config.url === refreshTokenUrl) {
     clearAuthData();
     message.warning(i18n.t('common.loginExpired'));
@@ -184,39 +218,39 @@ const handle401Error = async (config: AxiosRequestConfig): Promise<unknown> => {
     return Promise.reject(new Error(i18n.t('common.publicApiCannotRefreshToken')));
   }
 
-  // 如果正在刷新token，则将当前请求加入队列
+  // If token refresh is in progress, queue the request
   if (isRefreshing) {
     return new Promise((resolve, reject) => {
       requests.push({ config, resolve, reject });
     }).then((token) => {
-      // 使用新token重新发送请求
+      // Retry request with new token
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${token}`;
       return service(config);
     });
   }
 
-  // 开始刷新token
+  // Start token refresh
   isRefreshing = true;
   try {
     const newToken = await tokenRefresh();
     
-    // 更新队列中所有请求的token并重新发送
+    // Update token for all queued requests and resolve them
     requests.forEach(({ config, resolve }) => {
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${newToken}`;
       resolve(newToken);
     });
     
-    // 清空队列
+    // Clear queue
     requests = [];
     
-    // 使用新token重新发送当前请求
+    // Retry current request with new token
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${newToken}`;
     return service(config);
   } catch (error) {
-    // 刷新token失败，清空队列并拒绝所有请求
+    // Token refresh failed, clear queue and reject all requests
     requests.forEach(({ reject }) => {
       reject(error as Error);
     });
@@ -232,6 +266,12 @@ interface ObjectWithPush {
   [key: string]: string | number | boolean | object | null | undefined;
 }
 
+/**
+ * Filter and clean request parameters
+ * - Removes null/undefined values
+ * - Trims string values
+ * - Handles objects with _push flag
+ */
 function paramFilter(params: Record<string, string | number | boolean | ObjectWithPush | null | undefined> = {}) {
 
   Object.keys(params).forEach(key => {
@@ -255,7 +295,9 @@ function paramFilter(params: Record<string, string | number | boolean | ObjectWi
   return params;
 }
 
-// 封装请求方法
+/**
+ * HTTP request methods wrapper
+ */
 export const request = {
   get<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
     return service.get(url, {
@@ -288,29 +330,33 @@ export const request = {
       ...config
     });
   },
-  downloadFile(url: string, fileName: string, data?: unknown) {
+  downloadFile(url: string, fileName: string, data?: unknown, callback?: () => void) {
     service.post(url, data, {
       responseType: "blob",
     })
     .then(res =>{
       const link = document.createElement("a");
-      const blob = new Blob([res.data], { type: "application/vnd.ms-excel" });
+      const blob = new Blob([res as unknown as BlobPart]);
       link.style.display = "none";
       link.href = URL.createObjectURL(blob);
-      link.setAttribute("download", decodeURI(res.headers['filename'] || fileName));
+      link.setAttribute("download", decodeURI(fileName || fileName));
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      callback?.()
     });
   }
 };
 
 
 
-// 获取父级域名
+/**
+ * Get parent domain for cookie setting
+ * @returns Parent domain or IP address
+ */
 const getParentDomain = () => {
   const hostname = window.location.hostname
-  // 检查是否为IP地址
+  // Check if it's an IP address
   if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
     return hostname
   }
@@ -318,7 +364,9 @@ const getParentDomain = () => {
   return parts.length > 2 ? `.${parts.slice(-2).join('.')}` : hostname
 }
 
-// Cookie操作工具
+/**
+ * Cookie utility functions
+ */
 export const cookieUtils = {
   set: (name: string, value: string, domain = getParentDomain()) => {
     document.cookie = `${name}=${value}; domain=${domain}; path=/; secure; samesite=strict`

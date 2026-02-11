@@ -7,6 +7,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from app.core.workflow.nodes import WorkflowState
 from app.core.workflow.nodes.cycle_graph import IterationNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,8 @@ class IterationRuntime:
             node_id: str,
             config: dict[str, Any],
             state: WorkflowState,
+            variable_pool: VariablePool,
+            child_variable_pool: VariablePool,
     ):
         """
         Initialize the iteration runtime.
@@ -44,11 +47,13 @@ class IterationRuntime:
         self.node_id = node_id
         self.typed_config = IterationNodeConfig(**config)
         self.looping = True
+        self.variable_pool = variable_pool
+        self.child_variable_pool = child_variable_pool
 
         self.output_value = None
         self.result: list = []
 
-    def _init_iteration_state(self, item, idx):
+    async def _init_iteration_state(self, item, idx):
         """
         Initialize a per-iteration copy of the workflow state.
 
@@ -62,10 +67,9 @@ class IterationRuntime:
         loopstate = WorkflowState(
             **self.state
         )
-        loopstate["runtime_vars"][self.node_id] = {
-            "item": item,
-            "index": idx,
-        }
+        self.child_variable_pool.copy(self.variable_pool)
+        await self.child_variable_pool.new(self.node_id, "item", item, VariableType.type_map(item), mut=True)
+        await self.child_variable_pool.new(self.node_id, "index", item, VariableType.type_map(item), mut=True)
         loopstate["node_outputs"][self.node_id] = {
             "item": item,
             "index": idx,
@@ -73,6 +77,11 @@ class IterationRuntime:
         loopstate["looping"] = 1
         loopstate["activate"][self.start_id] = True
         return loopstate
+
+    def merge_conv_vars(self):
+        self.variable_pool.get_all_conversation_vars().update(
+            self.child_variable_pool.get_all_conversation_vars()
+        )
 
     async def run_task(self, item, idx):
         """
@@ -82,8 +91,8 @@ class IterationRuntime:
             item: The input element for this iteration.
             idx: The index of this iteration.
         """
-        result = await self.graph.ainvoke(self._init_iteration_state(item, idx))
-        output = VariablePool(result).get(self.output_value)
+        result = await self.graph.ainvoke(await self._init_iteration_state(item, idx))
+        output = self.child_variable_pool.get_value(self.output_value)
         if isinstance(output, list) and self.typed_config.flatten:
             self.result.extend(output)
         else:
@@ -125,7 +134,7 @@ class IterationRuntime:
         input_expression = re.sub(pattern, r"\1", self.typed_config.input).strip()
         self.output_value = re.sub(pattern, r"\1", self.typed_config.output).strip()
 
-        array_obj = VariablePool(self.state).get(input_expression)
+        array_obj = self.variable_pool.get_value(input_expression)
         if not isinstance(array_obj, list):
             raise RuntimeError("Cannot iterate over a non-list variable")
         child_state = []
@@ -137,14 +146,16 @@ class IterationRuntime:
                 logger.info(f"Iteration node {self.node_id}: running, concurrency {len(tasks)}")
                 idx += self.typed_config.parallel_count
                 child_state.extend(await asyncio.gather(*tasks))
+                self.merge_conv_vars()
         else:
             # Execute iterations sequentially
             while idx < len(array_obj) and self.looping:
                 logger.info(f"Iteration node {self.node_id}: running")
                 item = array_obj[idx]
-                result = await self.graph.ainvoke(self._init_iteration_state(item, idx))
+                result = await self.graph.ainvoke(await self._init_iteration_state(item, idx))
                 child_state.append(result)
-                output = VariablePool(result).get(self.output_value)
+                output = self.child_variable_pool.get_value(self.output_value)
+                self.merge_conv_vars()
                 if isinstance(output, list) and self.typed_config.flatten:
                     self.result.extend(output)
                 else:

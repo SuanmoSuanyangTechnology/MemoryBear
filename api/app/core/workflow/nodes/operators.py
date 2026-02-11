@@ -1,9 +1,9 @@
 import json
 import re
 from abc import ABC
-from typing import Union, Type, NoReturn
+from typing import Union, Type, NoReturn, Any
 
-from app.core.workflow.nodes.base_config import VariableType
+from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.nodes.enums import ValueInputType
 from app.core.workflow.variable_pool import VariablePool
 
@@ -69,7 +69,7 @@ class TypeTransformer:
 
 
 class OperatorBase(ABC):
-    def __init__(self, pool: VariablePool, left_selector, right):
+    def __init__(self, pool: VariablePool, left_selector: str, right: Any):
         self.pool = pool
         self.left_selector = left_selector
         self.right = right
@@ -77,7 +77,7 @@ class OperatorBase(ABC):
         self.type_limit: type[str, int, dict, list] = None
 
     def check(self, no_right=False):
-        left = self.pool.get(self.left_selector)
+        left = self.pool.get_value(self.left_selector)
         if not isinstance(left, self.type_limit):
             raise TypeError(f"The variable to be operated on must be of {self.type_limit} type")
 
@@ -92,13 +92,13 @@ class StringOperator(OperatorBase):
         super().__init__(pool, left_selector, right)
         self.type_limit = str
 
-    def assign(self) -> None:
+    async def assign(self) -> None:
         self.check()
-        self.pool.set(self.left_selector, self.right)
+        await self.pool.set(self.left_selector, self.right)
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         self.check(no_right=True)
-        self.pool.set(self.left_selector, '')
+        await self.pool.set(self.left_selector, '')
 
 
 class NumberOperator(OperatorBase):
@@ -106,33 +106,33 @@ class NumberOperator(OperatorBase):
         super().__init__(pool, left_selector, right)
         self.type_limit = (float, int)
 
-    def assign(self) -> None:
+    async def assign(self) -> None:
         self.check()
-        self.pool.set(self.left_selector, self.right)
+        await self.pool.set(self.left_selector, self.right)
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         self.check(no_right=True)
-        self.pool.set(self.left_selector, 0)
+        await self.pool.set(self.left_selector, 0)
 
-    def add(self) -> None:
+    async def add(self) -> None:
         self.check()
-        origin = self.pool.get(self.left_selector)
-        self.pool.set(self.left_selector, origin + self.right)
+        origin = self.pool.get_value(self.left_selector)
+        await self.pool.set(self.left_selector, origin + self.right)
 
-    def subtract(self) -> None:
+    async def subtract(self) -> None:
         self.check()
-        origin = self.pool.get(self.left_selector)
-        self.pool.set(self.left_selector, origin - self.right)
+        origin = self.pool.get_value(self.left_selector)
+        await self.pool.set(self.left_selector, origin - self.right)
 
-    def multiply(self) -> None:
+    async def multiply(self) -> None:
         self.check()
-        origin = self.pool.get(self.left_selector)
-        self.pool.set(self.left_selector, origin * self.right)
+        origin = self.pool.get_value(self.left_selector)
+        await self.pool.set(self.left_selector, origin * self.right)
 
-    def divide(self) -> None:
+    async def divide(self) -> None:
         self.check()
-        origin = self.pool.get(self.left_selector)
-        self.pool.set(self.left_selector, origin / self.right)
+        origin = self.pool.get_value(self.left_selector)
+        await self.pool.set(self.left_selector, origin / self.right)
 
 
 class BooleanOperator(OperatorBase):
@@ -140,13 +140,13 @@ class BooleanOperator(OperatorBase):
         super().__init__(pool, left_selector, right)
         self.type_limit = bool
 
-    def assign(self) -> None:
+    async def assign(self) -> None:
         self.check()
-        self.pool.set(self.left_selector, self.right)
+        await self.pool.set(self.left_selector, self.right)
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         self.check(no_right=True)
-        self.pool.set(self.left_selector, False)
+        await self.pool.set(self.left_selector, False)
 
 
 class ArrayOperator(OperatorBase):
@@ -154,38 +154,37 @@ class ArrayOperator(OperatorBase):
         super().__init__(pool, left_selector, right)
         self.type_limit = list
 
-    def assign(self) -> None:
+    async def assign(self) -> None:
         self.check()
-        self.pool.set(self.left_selector, self.right)
+        await self.pool.set(self.left_selector, self.right)
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         self.check(no_right=True)
-        self.pool.set(self.left_selector, list())
+        await self.pool.set(self.left_selector, list())
 
-    def append(self) -> None:
+    async def append(self) -> None:
         self.check(no_right=True)
-        # TODO：require type limit in list
-        origin = self.pool.get(self.left_selector)
+        origin = self.pool.get_value(self.left_selector)
         origin.append(self.right)
-        self.pool.set(self.left_selector, origin)
+        await self.pool.set(self.left_selector, origin)
 
-    def extend(self) -> None:
+    async def extend(self) -> None:
         self.check(no_right=True)
-        origin = self.pool.get(self.left_selector)
+        origin = self.pool.get_value(self.left_selector)
         origin.extend(self.right)
-        self.pool.set(self.left_selector, origin)
+        await self.pool.set(self.left_selector, origin)
 
-    def remove_last(self) -> None:
+    async def remove_last(self) -> None:
         self.check(no_right=True)
-        origin = self.pool.get(self.left_selector)
+        origin = self.pool.get_value(self.left_selector)
         origin.pop()
-        self.pool.set(self.left_selector, origin)
+        await self.pool.set(self.left_selector, origin)
 
-    def remove_first(self) -> None:
+    async def remove_first(self) -> None:
         self.check(no_right=True)
-        origin = self.pool.get(self.left_selector)
+        origin = self.pool.get_value(self.left_selector)
         origin.pop(0)
-        self.pool.set(self.left_selector, origin)
+        await self.pool.set(self.left_selector, origin)
 
 
 class ObjectOperator(OperatorBase):
@@ -193,13 +192,13 @@ class ObjectOperator(OperatorBase):
         super().__init__(pool, left_selector, right)
         self.type_limit = dict
 
-    def assign(self) -> None:
+    async def assign(self) -> None:
         self.check()
-        self.pool.set(self.left_selector, self.right)
+        await self.pool.set(self.left_selector, self.right)
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         self.check(no_right=True)
-        self.pool.set(self.left_selector, dict())
+        await self.pool.set(self.left_selector, dict())
 
 
 class AssignmentOperatorResolver:
@@ -245,7 +244,7 @@ class ConditionBase(ABC):
         self.right_selector = right_selector
         self.input_type = input_type
 
-        self.left_value = self.pool.get(self.left_selector)
+        self.left_value = self.pool.get_value(self.left_selector)
         self.right_value = self.resolve_right_literal_value()
 
         self.type_limit = getattr(self, "type_limit", None)
@@ -254,7 +253,7 @@ class ConditionBase(ABC):
         if self.input_type == ValueInputType.VARIABLE:
             pattern = r"\{\{\s*(.*?)\s*\}\}"
             right_expression = re.sub(pattern, r"\1", self.right_selector).strip()
-            return self.pool.get(right_expression)
+            return self.pool.get_value(right_expression)
         elif self.input_type == ValueInputType.CONSTANT:
             return self.right_selector
         raise RuntimeError("Unsupported variable type")

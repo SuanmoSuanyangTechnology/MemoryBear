@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:47 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:47 
+ */
+/**
+ * Interest Distribution Component
+ * Displays user interest distribution as pie chart with tag list
+ */
+
 import { type FC, useRef, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -9,6 +20,7 @@ import Empty from '@/components/Empty';
 import Loading from '@/components/Empty/Loading';
 import RbCard from '@/components/RbCard/Card';
 
+/** Chart color palette */
 const Colors = ['#155EEF', '#4DA8FF', '#03BDFF', '#31E8FF', '#AD88FF', '#FFB048']
 
 const InterestDistribution: FC = () => {
@@ -23,6 +35,7 @@ const InterestDistribution: FC = () => {
   useEffect(() => {
     getData()
   }, [id])
+  /** Fetch interest distribution data */
   const getData = () => {
     setLoading(true)
     getHotMemoryTagsByUser(id as string).then(res => {

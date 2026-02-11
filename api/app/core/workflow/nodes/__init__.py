@@ -15,17 +15,17 @@ from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
 from app.core.workflow.nodes.llm import LLMNode
 from app.core.workflow.nodes.node_factory import NodeFactory, WorkflowNode
 from app.core.workflow.nodes.start import StartNode
-from app.core.workflow.nodes.transform import TransformNode
 from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNode
 from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
 from app.core.workflow.nodes.tool import ToolNode
+from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
+from app.core.workflow.nodes.code import CodeNode
 
 __all__ = [
     "BaseNode",
     "WorkflowState",
     "LLMNode",
     "AgentNode",
-    "TransformNode",
     "IfElseNode",
     "StartNode",
     "EndNode",
@@ -37,5 +37,7 @@ __all__ = [
     "JinjaRenderNode",
     "ParameterExtractorNode",
     "QuestionClassifierNode",
-    "ToolNode"
+    "ToolNode",
+    "CodeNode",
+    "VariableAggregatorNode"
 ]

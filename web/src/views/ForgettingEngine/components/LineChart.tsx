@@ -1,9 +1,24 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:00:20 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 10:03:35
+ */
+/**
+ * Line Chart Component
+ * Visualizes forgetting curves based on different configurations
+ * Compares current config with quick/slow forgetting presets
+ */
+
 import { type FC, useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react';
+
 import type { ConfigForm } from '../types'
 
-// 定义当前数据类型
+/**
+ * Current data item type
+ */
 type CurrentDataItem = {
   name: string;
   data: number[];
@@ -16,7 +31,9 @@ type CurrentDataItem = {
   emphasis: { focus: string };
 };
 
-// 定义图表系列数据类型
+/**
+ * Chart series data item type
+ */
 type SeriesDataItem = {
   name: string;
   data: number[];
@@ -29,17 +46,26 @@ type SeriesDataItem = {
   emphasis: { focus: string };
 };
 
-// 定义简化的配置类型，只包含图表计算需要的属性
+/**
+ * Simplified config type for chart calculations
+ */
 interface ChartConfig {
   lambda_mem: number;
   lambda_time: number;
   offset: number;
 }
 
+/**
+ * Component props
+ */
 interface LineCardProps {
+  /** Forgetting engine configuration */
   config: ConfigForm
 }
 
+/**
+ * ECharts series configuration
+ */
 const SeriesConfig = {
   type: 'line',
   smooth: true,
@@ -55,10 +81,18 @@ const SeriesConfig = {
     focus: 'series'
   },
 }
+/**
+ * Chart color palette
+ */
 const Colors = ['#155EEF', '#4DA8FF', '#FFB048']
 
 
-// 快速遗忘：lambda_mem=0.3，lambda_time=1，offset=0.05； 慢速遗忘：lambda_mem=1，lambda_time=0.3，offset=0.2
+/**
+ * Line chart component for forgetting curves
+ * Formula: R = offset + (1 - offset) × e^(-λ_time × t / λ_mem)
+ * Quick forgetting: λ_mem=0.3, λ_time=1, offset=0.05
+ * Slow forgetting: λ_mem=1, λ_time=0.3, offset=0.2
+ */
 const LineChart: FC<LineCardProps> = ({ config }) => {
   const { t } = useTranslation()
   const chartRef = useRef<ReactEcharts>(null);
@@ -92,7 +126,6 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
   }, [t])
 
   useEffect(() => {
-    // 语言切换时重新生成数据
     if (config) {
       getCaculateData(config)
     }
@@ -131,8 +164,7 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
     }
   }, [config])
 
-  // 快速遗忘：lambda_mem=0.3，lambda_time=1，offset=0.05； 
-  // 慢速遗忘：lambda_mem=1，lambda_time=0.3，offset=0.2
+  /** Initialize preset forgetting curves */
   const getInitData = useCallback(() => {
     const list = seriesData.map(item => ({
       ...item,
@@ -141,6 +173,7 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
     setInitialData(list)
   }, [seriesData])
   
+  /** Calculate retention rate for given days and config */
   const calculateSeriesData = useCallback((days: number, data: ChartConfig | ConfigForm) => {
     const offset = Number(data.offset)
     const lambda_time = Number(data.lambda_time)
@@ -148,10 +181,12 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
     // R = offset + (1 - offset) × e^(-λtime × t / (λmem × S))
     return +(offset + (1 - offset) * Math.exp(-lambda_time * days / lambda_mem)).toFixed(4)
   }, [])
+  /** Format data for all x-axis points */
   const formatData = useCallback((data: ChartConfig | ConfigForm) => {
     return xAxisData.map(days => Number(calculateSeriesData(days, data)))
   }, [calculateSeriesData])
 
+  /** Calculate current configuration curve data */
   const getCaculateData = useCallback((data: ConfigForm) => {
     if (!data) {
       return

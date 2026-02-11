@@ -1,35 +1,49 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:42:12 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:42:12 
+ */
+/**
+ * Member Management Page
+ * Manages workspace members with invite, edit, and delete functionality
+ */
+
 import React, { useRef } from 'react';
 import { App, Button, Space } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
 import type { AnyObject } from 'antd/es/_util/type';
-import { deleteMember, memberListUrl } from '@/api/member';
 
+import { deleteMember, memberListUrl } from '@/api/member';
 import MemberModal from './components/MemberModal';
 import type { Member, MemberModalRef } from './types'
 import Tag from '@/components/Tag';
 import Table, { type TableRef } from '@/components/Table'
 import { formatDateTime } from '@/utils/format';
 
+/**
+ * Member management main component
+ */
 const MemberManagement: React.FC = () => {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
   const memberFormRef = useRef<MemberModalRef>(null);
   const tableRef = useRef<TableRef>(null);
 
-  // 打开新增用户弹窗
+  /** Open member modal for create or edit */
   const handleEdit = (member?: Member) => {
     if (memberFormRef.current) {
       memberFormRef.current.handleOpen(member);   
     }
   }
 
-  // 刷新列表数据
+  /** Refresh member list */
   const refreshTable = () => {
     tableRef.current?.loadData()
   }
 
-  // 单个删除用户
+  /** Delete member with confirmation */
   const handleDelete = async (member: Member) => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: member.username }),
@@ -46,7 +60,7 @@ const MemberManagement: React.FC = () => {
     })
   };
 
-  // 表格列配置
+  /** Table column configuration */
   const columns: ColumnsType = [
     {
       title: t('member.username'),

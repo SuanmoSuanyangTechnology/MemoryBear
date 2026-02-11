@@ -1,3 +1,12 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:35:32 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:35:32 
+ */
+/**
+ * Order query parameters
+ */
 export interface Query {
   product_type?: string | null;
   status?: string | null;
@@ -8,6 +17,9 @@ export interface Query {
   end_time?: number | null;
   [key: string]: string | number | null | undefined;
 }
+/**
+ * Order data structure
+ */
 export interface Order {
   order_no: string;
   user_id: string;
@@ -38,6 +50,9 @@ export interface Order {
   deleted: number;
 }
 
+/**
+ * Order detail component ref interface
+ */
 export interface OrderDetailRef {
   handleOpen: (order: Order) => void;
 }

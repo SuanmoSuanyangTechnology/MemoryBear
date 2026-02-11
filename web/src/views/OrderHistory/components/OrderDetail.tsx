@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:35:49 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:35:49 
+ */
+/**
+ * Order Detail Component
+ * Modal displaying detailed order information including payment details
+ */
+
 import { forwardRef, useImperativeHandle, useState, useCallback } from 'react';
 import { Descriptions } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -14,11 +25,12 @@ const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) 
   const [visible, setVisible] = useState(false);
   const [data, setData] = useState({})
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal */
   const handleClose = () => {
     setVisible(false);
   };
 
+  /** Open modal and fetch order details */
   const handleOpen = (order: Order) => {
     setVisible(true);
     getOrderDetail(order.order_no)
@@ -26,6 +38,7 @@ const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) 
         setData(res as Order)
       })
   };
+  /** Format order information items */
   const formatItems = useCallback(() => {
     if (!data) return []
     return ['order_no', 'product_type', 'payable_amount', 'status', 'pay_time', 'create_time'].map(key => {
@@ -43,6 +56,7 @@ const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) 
       }
     })
   }, [data])
+  /** Format payment information items */
   const formatPayItems = useCallback(() => {
     if (!data) return []
     return ['pay_txn_id', 'payer'].map(key => ({
@@ -52,13 +66,12 @@ const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) 
     }))
   }, [data])
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
   }));
-  // ['pay_txn_id', 'payer']
-  // ['pay_txn_id', 'payer']
+
   return (
     <RbModal
       title={t('pricing.orderDetail')}

@@ -1,3 +1,23 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 16:37:10 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 16:37:10 
+ */
+/**
+ * Timezone Configuration Module
+ * 
+ * Provides:
+ * - Major world timezone list
+ * - Timezone to Ant Design locale mapping
+ * - Dayjs locale imports
+ * 
+ * Note: Timezone display names are in i18n translation files (zh.ts and en.ts)
+ * Use i18n.t('timezones.timezone_name') to get localized timezone display names
+ * 
+ * @module timezones
+ */
+
 import en_US from 'antd/locale/en_US';
 import en_GB from 'antd/locale/en_GB';
 import de_DE from 'antd/locale/de_DE';
@@ -12,157 +32,159 @@ import 'dayjs/locale/de'
 import 'dayjs/locale/en-gb'
 import 'dayjs/locale/en'
 
-// 全世界主要时区列表
+/**
+ * Major world timezones list
+ */
 export const timezones = [
 
-  'America/Los_Angeles', // 美国洛杉矶
-  'America/New_York', // 美国纽约
-  'Europe/London',    // 英国伦敦
-  'Europe/Berlin',    // 德国柏林
-  'Europe/Moscow',    // 俄罗斯莫斯科
-  'Asia/Kolkata',     // 印度加尔各答
-  'Asia/Shanghai',    // 中国上海
+  'America/Los_Angeles', // Los Angeles, USA
+  'America/New_York', // New York, USA
+  'Europe/London',    // London, UK
+  'Europe/Berlin',    // Berlin, Germany
+  'Europe/Moscow',    // Moscow, Russia
+  'Asia/Kolkata',     // Kolkata, India
+  'Asia/Shanghai',    // Shanghai, China
 
-  // 亚洲
-  // 'Asia/Tokyo',       // 日本东京
-  // 'Asia/Singapore',   // 新加坡
-  // 'Asia/Hong_Kong',   // 中国香港
-  // 'Asia/Taipei',      // 中国台北
-  // 'Asia/Seoul',       // 韩国首尔
-  // 'Asia/Bangkok',     // 泰国曼谷
-  // 'Asia/Jakarta',     // 印度尼西亚雅加达
-  // 'Asia/Manila',      // 菲律宾马尼拉
-  // 'Asia/Dubai',       // 阿联酋迪拜
-  // 'Asia/Tashkent',    // 乌兹别克斯坦塔什干
-  // 'Asia/Riyadh',      // 沙特阿拉伯利雅得
-  // 'Asia/Baku',        // 阿塞拜疆巴库
-  // 'Asia/Istanbul',    // 土耳其伊斯坦布尔
+  // Asia
+  // 'Asia/Tokyo',       // Tokyo, Japan
+  // 'Asia/Singapore',   // Singapore
+  // 'Asia/Hong_Kong',   // Hong Kong, China
+  // 'Asia/Taipei',      // Taipei, Taiwan
+  // 'Asia/Seoul',       // Seoul, South Korea
+  // 'Asia/Bangkok',     // Bangkok, Thailand
+  // 'Asia/Jakarta',     // Jakarta, Indonesia
+  // 'Asia/Manila',      // Manila, Philippines
+  // 'Asia/Dubai',       // Dubai, UAE
+  // 'Asia/Tashkent',    // Tashkent, Uzbekistan
+  // 'Asia/Riyadh',      // Riyadh, Saudi Arabia
+  // 'Asia/Baku',        // Baku, Azerbaijan
+  // 'Asia/Istanbul',    // Istanbul, Turkey
   
-  // 欧洲
-  // 'Europe/Paris',     // 法国巴黎
-  // 'Europe/Rome',      // 意大利罗马
-  // 'Europe/Madrid',    // 西班牙马德里
-  // 'Europe/Amsterdam', // 荷兰阿姆斯特丹
-  // 'Europe/Vienna',    // 奥地利维也纳
-  // 'Europe/Stockholm', // 瑞典斯德哥尔摩
-  // 'Europe/Oslo',      // 挪威奥斯陆
-  // 'Europe/Copenhagen', // 丹麦哥本哈根
-  // 'Europe/Zurich',    // 瑞士苏黎世
-  // 'Europe/Athens',    // 希腊雅典
-  // 'Europe/Warsaw',    // 波兰华沙
-  // 'Europe/Prague',    // 捷克布拉格
-  // 'Europe/Budapest',  // 匈牙利布达佩斯
-  // 'Europe/Belgrade',  // 塞尔维亚贝尔格莱德
+  // Europe
+  // 'Europe/Paris',     // Paris, France
+  // 'Europe/Rome',      // Rome, Italy
+  // 'Europe/Madrid',    // Madrid, Spain
+  // 'Europe/Amsterdam', // Amsterdam, Netherlands
+  // 'Europe/Vienna',    // Vienna, Austria
+  // 'Europe/Stockholm', // Stockholm, Sweden
+  // 'Europe/Oslo',      // Oslo, Norway
+  // 'Europe/Copenhagen', // Copenhagen, Denmark
+  // 'Europe/Zurich',    // Zurich, Switzerland
+  // 'Europe/Athens',    // Athens, Greece
+  // 'Europe/Warsaw',    // Warsaw, Poland
+  // 'Europe/Prague',    // Prague, Czech Republic
+  // 'Europe/Budapest',  // Budapest, Hungary
+  // 'Europe/Belgrade',  // Belgrade, Serbia
   
-  // 北美洲
-  // 'America/Chicago',  // 美国芝加哥
-  // 'America/Denver',   // 美国丹佛
-  // 'America/Toronto',  // 加拿大多伦多
-  // 'America/Vancouver', // 加拿大温哥华
-  // 'America/Mexico_City', // 墨西哥墨西哥城
+  // North America
+  // 'America/Chicago',  // Chicago, USA
+  // 'America/Denver',   // Denver, USA
+  // 'America/Toronto',  // Toronto, Canada
+  // 'America/Vancouver', // Vancouver, Canada
+  // 'America/Mexico_City', // Mexico City, Mexico
   
-  // 南美洲
-  // 'America/Sao_Paulo', // 巴西圣保罗
-  // 'America/Buenos_Aires', // 阿根廷布宜诺斯艾利斯
-  // 'America/Santiago', // 智利圣地亚哥
-  // 'America/Lima',     // 秘鲁利马
-  // 'America/Bogota',   // 哥伦比亚波哥大
-  // 'America/Caracas',  // 委内瑞拉加拉加斯
+  // South America
+  // 'America/Sao_Paulo', // São Paulo, Brazil
+  // 'America/Buenos_Aires', // Buenos Aires, Argentina
+  // 'America/Santiago', // Santiago, Chile
+  // 'America/Lima',     // Lima, Peru
+  // 'America/Bogota',   // Bogotá, Colombia
+  // 'America/Caracas',  // Caracas, Venezuela
   
-  // // 大洋洲
-  // 'Australia/Sydney', // 澳大利亚悉尼
-  // 'Australia/Melbourne', // 澳大利亚墨尔本
-  // 'Australia/Brisbane', // 澳大利亚布里斯班
-  // 'Australia/Perth',  // 澳大利亚珀斯
-  // 'New_Zealand/Auckland', // 新西兰奥克兰
+  // Oceania
+  // 'Australia/Sydney', // Sydney, Australia
+  // 'Australia/Melbourne', // Melbourne, Australia
+  // 'Australia/Brisbane', // Brisbane, Australia
+  // 'Australia/Perth',  // Perth, Australia
+  // 'New_Zealand/Auckland', // Auckland, New Zealand
   
-  // // 非洲
-  // 'Africa/Cairo',     // 埃及开罗
-  // 'Africa/Johannesburg', // 南非约翰内斯堡
-  // 'Africa/Lagos',     // 尼日利亚拉各斯
-  // 'Africa/Casablanca', // 摩洛哥卡萨布兰卡
-  // 'Africa/Nairobi',   // 肯尼亚内罗毕
-  // 'Africa/Addis_Ababa', // 埃塞俄比亚亚的斯亚贝巴
+  // Africa
+  // 'Africa/Cairo',     // Cairo, Egypt
+  // 'Africa/Johannesburg', // Johannesburg, South Africa
+  // 'Africa/Lagos',     // Lagos, Nigeria
+  // 'Africa/Casablanca', // Casablanca, Morocco
+  // 'Africa/Nairobi',   // Nairobi, Kenya
+  // 'Africa/Addis_Ababa', // Addis Ababa, Ethiopia
   
-  // // 其他
-  // 'UTC',              // 协调世界时
+  // Other
+  // 'UTC',              // Coordinated Universal Time
 ];
 
-// 注意：时区显示名称已移至i18n翻译文件中（zh.ts和en.ts）
-// 请使用i18n.t('timezones.时区名称')来获取本地化的时区显示名称
-
-// 时区与antd本地化文件的映射
-// 键为时区，值为antd本地化文件的名称
+/**
+ * Timezone to Ant Design locale mapping
+ * Key: timezone identifier
+ * Value: Ant Design locale object
+ */
 export const timezoneToAntdLocaleMap: Record<string, Locale> = {
-  // 亚洲
-  'Asia/Shanghai': zh_CN,     // 中国上海 - 中文(中国大陆)
-  'Asia/Kolkata': hi_IN,      // 印度加尔各答 - 印地语
-  'Europe/Moscow': ru_RU,     // 俄罗斯莫斯科 - 俄语
-  'Europe/Berlin': de_DE,     // 德国柏林 - 德语
-  'Europe/London': en_GB,     // 英国伦敦 - 英语(英国)
-  'America/New_York': en_US,  // 美国纽约 - 英语(美国)
-  'America/Los_Angeles': en_US, // 美国洛杉矶 - 英语(美国)
+  // Asia
+  'Asia/Shanghai': zh_CN,     // Shanghai, China - Chinese (Mainland)
+  'Asia/Kolkata': hi_IN,      // Kolkata, India - Hindi
+  'Europe/Moscow': ru_RU,     // Moscow, Russia - Russian
+  'Europe/Berlin': de_DE,     // Berlin, Germany - German
+  'Europe/London': en_GB,     // London, UK - English (UK)
+  'America/New_York': en_US,  // New York, USA - English (US)
+  'America/Los_Angeles': en_US, // Los Angeles, USA - English (US)
 
-  // 'Asia/Tokyo': 'ja_JP',        // 日本东京 - 日语
-  // 'Asia/Singapore': 'en_SG',    // 新加坡 - 英语(新加坡)
-  // 'Asia/Hong_Kong': 'zh_HK',    // 中国香港 - 中文(香港)
-  // 'Asia/Taipei': 'zh_TW',       // 中国台北 - 中文(台湾)
-  // 'Asia/Seoul': 'ko_KR',        // 韩国首尔 - 韩语
-  // 'Asia/Bangkok': 'th_TH',      // 泰国曼谷 - 泰语
-  // 'Asia/Jakarta': 'id_ID',      // 印度尼西亚雅加达 - 印尼语
-  // 'Asia/Manila': 'en_PH',       // 菲律宾马尼拉 - 英语(菲律宾)
-  // 'Asia/Dubai': 'ar_AE',        // 阿联酋迪拜 - 阿拉伯语
-  // 'Asia/Tashkent': 'uz_UZ',     // 乌兹别克斯坦塔什干 - 乌兹别克语
-  // 'Asia/Riyadh': 'ar_SA',       // 沙特阿拉伯利雅得 - 阿拉伯语
-  // 'Asia/Baku': 'az_AZ',         // 阿塞拜疆巴库 - 阿塞拜疆语
-  // 'Asia/Istanbul': 'tr_TR',     // 土耳其伊斯坦布尔 - 土耳其语
+  // 'Asia/Tokyo': 'ja_JP',        // Tokyo, Japan - Japanese
+  // 'Asia/Singapore': 'en_SG',    // Singapore - English (Singapore)
+  // 'Asia/Hong_Kong': 'zh_HK',    // Hong Kong, China - Chinese (Hong Kong)
+  // 'Asia/Taipei': 'zh_TW',       // Taipei, Taiwan - Chinese (Taiwan)
+  // 'Asia/Seoul': 'ko_KR',        // Seoul, South Korea - Korean
+  // 'Asia/Bangkok': 'th_TH',      // Bangkok, Thailand - Thai
+  // 'Asia/Jakarta': 'id_ID',      // Jakarta, Indonesia - Indonesian
+  // 'Asia/Manila': 'en_PH',       // Manila, Philippines - English (Philippines)
+  // 'Asia/Dubai': 'ar_AE',        // Dubai, UAE - Arabic
+  // 'Asia/Tashkent': 'uz_UZ',     // Tashkent, Uzbekistan - Uzbek
+  // 'Asia/Riyadh': 'ar_SA',       // Riyadh, Saudi Arabia - Arabic
+  // 'Asia/Baku': 'az_AZ',         // Baku, Azerbaijan - Azerbaijani
+  // 'Asia/Istanbul': 'tr_TR',     // Istanbul, Turkey - Turkish
   
-  // // 欧洲
-  // 'Europe/Paris': 'fr_FR',      // 法国巴黎 - 法语
-  // 'Europe/Rome': 'it_IT',       // 意大利罗马 - 意大利语
-  // 'Europe/Madrid': 'es_ES',     // 西班牙马德里 - 西班牙语
-  // 'Europe/Amsterdam': 'nl_NL',  // 荷兰阿姆斯特丹 - 荷兰语
-  // 'Europe/Vienna': 'de_AT',     // 奥地利维也纳 - 德语(奥地利)
-  // 'Europe/Stockholm': 'sv_SE',  // 瑞典斯德哥尔摩 - 瑞典语
-  // 'Europe/Oslo': 'nb_NO',       // 挪威奥斯陆 - 挪威语
-  // 'Europe/Copenhagen': 'da_DK', // 丹麦哥本哈根 - 丹麦语
-  // 'Europe/Zurich': 'de_CH',     // 瑞士苏黎世 - 德语(瑞士)
-  // 'Europe/Athens': 'el_GR',     // 希腊雅典 - 希腊语
-  // 'Europe/Warsaw': 'pl_PL',     // 波兰华沙 - 波兰语
-  // 'Europe/Prague': 'cs_CZ',     // 捷克布拉格 - 捷克语
-  // 'Europe/Budapest': 'hu_HU',   // 匈牙利布达佩斯 - 匈牙利语
-  // 'Europe/Belgrade': 'sr_RS',   // 塞尔维亚贝尔格莱德 - 塞尔维亚语
+  // Europe
+  // 'Europe/Paris': 'fr_FR',      // Paris, France - French
+  // 'Europe/Rome': 'it_IT',       // Rome, Italy - Italian
+  // 'Europe/Madrid': 'es_ES',     // Madrid, Spain - Spanish
+  // 'Europe/Amsterdam': 'nl_NL',  // Amsterdam, Netherlands - Dutch
+  // 'Europe/Vienna': 'de_AT',     // Vienna, Austria - German (Austria)
+  // 'Europe/Stockholm': 'sv_SE',  // Stockholm, Sweden - Swedish
+  // 'Europe/Oslo': 'nb_NO',       // Oslo, Norway - Norwegian
+  // 'Europe/Copenhagen': 'da_DK', // Copenhagen, Denmark - Danish
+  // 'Europe/Zurich': 'de_CH',     // Zurich, Switzerland - German (Switzerland)
+  // 'Europe/Athens': 'el_GR',     // Athens, Greece - Greek
+  // 'Europe/Warsaw': 'pl_PL',     // Warsaw, Poland - Polish
+  // 'Europe/Prague': 'cs_CZ',     // Prague, Czech Republic - Czech
+  // 'Europe/Budapest': 'hu_HU',   // Budapest, Hungary - Hungarian
+  // 'Europe/Belgrade': 'sr_RS',   // Belgrade, Serbia - Serbian
   
-  // // 北美洲
-  // 'America/Chicago': 'en_US',   // 美国芝加哥 - 英语(美国)
-  // 'America/Denver': 'en_US',    // 美国丹佛 - 英语(美国)
-  // 'America/Toronto': 'en_CA',   // 加拿大多伦多 - 英语(加拿大)
-  // 'America/Vancouver': 'en_CA', // 加拿大温哥华 - 英语(加拿大)
-  // 'America/Mexico_City': 'es_MX', // 墨西哥墨西哥城 - 西班牙语(墨西哥)
+  // North America
+  // 'America/Chicago': 'en_US',   // Chicago, USA - English (US)
+  // 'America/Denver': 'en_US',    // Denver, USA - English (US)
+  // 'America/Toronto': 'en_CA',   // Toronto, Canada - English (Canada)
+  // 'America/Vancouver': 'en_CA', // Vancouver, Canada - English (Canada)
+  // 'America/Mexico_City': 'es_MX', // Mexico City, Mexico - Spanish (Mexico)
   
-  // // 南美洲
-  // 'America/Sao_Paulo': 'pt_BR', // 巴西圣保罗 - 葡萄牙语(巴西)
-  // 'America/Buenos_Aires': 'es_AR', // 阿根廷布宜诺斯艾利斯 - 西班牙语(阿根廷)
-  // 'America/Santiago': 'es_CL',  // 智利圣地亚哥 - 西班牙语(智利)
-  // 'America/Lima': 'es_PE',      // 秘鲁利马 - 西班牙语(秘鲁)
-  // 'America/Bogota': 'es_CO',    // 哥伦比亚波哥大 - 西班牙语(哥伦比亚)
-  // 'America/Caracas': 'es_VE',   // 委内瑞拉加拉加斯 - 西班牙语(委内瑞拉)
+  // South America
+  // 'America/Sao_Paulo': 'pt_BR', // São Paulo, Brazil - Portuguese (Brazil)
+  // 'America/Buenos_Aires': 'es_AR', // Buenos Aires, Argentina - Spanish (Argentina)
+  // 'America/Santiago': 'es_CL',  // Santiago, Chile - Spanish (Chile)
+  // 'America/Lima': 'es_PE',      // Lima, Peru - Spanish (Peru)
+  // 'America/Bogota': 'es_CO',    // Bogotá, Colombia - Spanish (Colombia)
+  // 'America/Caracas': 'es_VE',   // Caracas, Venezuela - Spanish (Venezuela)
   
-  // // 大洋洲
-  // 'Australia/Sydney': 'en_AU',  // 澳大利亚悉尼 - 英语(澳大利亚)
-  // 'Australia/Melbourne': 'en_AU', // 澳大利亚墨尔本 - 英语(澳大利亚)
-  // 'Australia/Brisbane': 'en_AU', // 澳大利亚布里斯班 - 英语(澳大利亚)
-  // 'Australia/Perth': 'en_AU',   // 澳大利亚珀斯 - 英语(澳大利亚)
-  // 'New_Zealand/Auckland': 'en_NZ', // 新西兰奥克兰 - 英语(新西兰)
+  // Oceania
+  // 'Australia/Sydney': 'en_AU',  // Sydney, Australia - English (Australia)
+  // 'Australia/Melbourne': 'en_AU', // Melbourne, Australia - English (Australia)
+  // 'Australia/Brisbane': 'en_AU', // Brisbane, Australia - English (Australia)
+  // 'Australia/Perth': 'en_AU',   // Perth, Australia - English (Australia)
+  // 'New_Zealand/Auckland': 'en_NZ', // Auckland, New Zealand - English (New Zealand)
   
-  // // 非洲
-  // 'Africa/Cairo': 'ar_EG',      // 埃及开罗 - 阿拉伯语(埃及)
-  // 'Africa/Johannesburg': 'en_ZA', // 南非约翰内斯堡 - 英语(南非)
-  // 'Africa/Lagos': 'en_NG',      // 尼日利亚拉各斯 - 英语(尼日利亚)
-  // 'Africa/Casablanca': 'fr_MA', // 摩洛哥卡萨布兰卡 - 法语(摩洛哥)
-  // 'Africa/Nairobi': 'en_KE',    // 肯尼亚内罗毕 - 英语(肯尼亚)
-  // 'Africa/Addis_Ababa': 'am_ET', // 埃塞俄比亚亚的斯亚贝巴 - 阿姆哈拉语
+  // Africa
+  // 'Africa/Cairo': 'ar_EG',      // Cairo, Egypt - Arabic (Egypt)
+  // 'Africa/Johannesburg': 'en_ZA', // Johannesburg, South Africa - English (South Africa)
+  // 'Africa/Lagos': 'en_NG',      // Lagos, Nigeria - English (Nigeria)
+  // 'Africa/Casablanca': 'fr_MA', // Casablanca, Morocco - French (Morocco)
+  // 'Africa/Nairobi': 'en_KE',    // Nairobi, Kenya - English (Kenya)
+  // 'Africa/Addis_Ababa': 'am_ET', // Addis Ababa, Ethiopia - Amharic
   
-  // // 其他
-  // 'UTC': 'en_US',               // 协调世界时 - 默认英语(美国)
+  // Other
+  // 'UTC': 'en_US',               // Coordinated Universal Time - Default English (US)
 };

@@ -38,6 +38,56 @@ class SensitiveDataLoggingFilter(logging.Filter):
         return True
 
 
+class Neo4jSuccessNotificationFilter(logging.Filter):
+    """Neo4j 日志过滤器：过滤成功/信息性状态的通知，保留真正的警告和错误
+    
+    Neo4j 驱动会以 WARNING 级别记录所有数据库通知，包括成功的操作。
+    这个过滤器会过滤掉以下 GQL 状态码的通知，只保留真正的警告和错误：
+      - 00000: 成功完成 (successful completion)
+      - 00N00: 无数据 (no data)
+      - 00NA0: 无数据，信息性通知 (no data, informational notification)
+    
+    使用正则表达式进行更严格的匹配，避免误过滤无关的警告。
+    """
+    
+    import re
+    
+    # 编译正则表达式以提高性能
+    # 匹配所有"成功/信息性"的 GQL 状态码：
+    # 00000 = 成功完成, 00N00 = 无数据, 00NA0 = 无数据信息性通知
+    GQL_STATUS_PATTERN = re.compile(r"gql_status=['\"](00000|00N00|00NA0)['\"]")
+    
+    # 匹配 status_description 中的成功完成或信息性通知消息
+    SUCCESS_DESC_PATTERN = re.compile(r"status_description=['\"]note:\s*(successful\s+completion|no\s+data)['\"]", re.IGNORECASE)
+    
+    def filter(self, record: logging.LogRecord) -> bool:
+        """
+        过滤 Neo4j 成功通知
+        
+        Args:
+            record: 日志记录
+            
+        Returns:
+            True表示允许记录，False表示拒绝（过滤掉）
+        """
+        # 只处理 INFO 和 WARNING 级别的日志
+        # Neo4j 驱动对 severity='INFORMATION' 的通知使用 INFO 级别，
+        # 对 severity='WARNING' 的通知使用 WARNING 级别
+        if record.levelno not in (logging.INFO, logging.WARNING):
+            return True
+        
+        # 检查是否是 Neo4j 的成功通知
+        message = str(record.msg)
+        
+        # 使用正则表达式进行更严格的匹配
+        # 这样可以避免误过滤包含这些子字符串但不是 Neo4j 通知的日志
+        if self.GQL_STATUS_PATTERN.search(message) or self.SUCCESS_DESC_PATTERN.search(message):
+            return False  # 过滤掉这条日志
+        
+        # 保留其他所有日志（包括真正的警告和错误）
+        return True
+
+
 class LoggingConfig:
     """全局日志配置类"""
     
@@ -65,6 +115,22 @@ class LoggingConfig:
         # 清除现有处理器
         root_logger.handlers.clear()
         
+        # Neo4j 通知过滤器 - 挂在 handler 上确保所有传播上来的日志都能被过滤
+        neo4j_filter = Neo4jSuccessNotificationFilter()
+        
+        # 抑制 Neo4j 通知日志
+        # Neo4j 驱动内部会给 neo4j.notifications logger 配置自己的 handler，
+        # 导致日志绕过根 logger 的 filter 直接输出。
+        # 多管齐下确保过滤生效：
+        # 1. 设置 neo4j.notifications 级别为 WARNING（过滤 INFO 级别的 00NA0 通知）
+        # 2. 在所有 neo4j logger 上添加 filter（过滤 WARNING 级别的成功通知）
+        # 3. 在根 handler 上也添加 filter（兜底）
+        neo4j_notifications_logger = logging.getLogger("neo4j.notifications")
+        neo4j_notifications_logger.setLevel(logging.WARNING)
+        for neo4j_logger_name in ["neo4j", "neo4j.io", "neo4j.pool", "neo4j.notifications"]:
+            neo4j_logger = logging.getLogger(neo4j_logger_name)
+            neo4j_logger.addFilter(neo4j_filter)
+        
         # 创建格式化器
         formatter = logging.Formatter(
             fmt=settings.LOG_FORMAT,
@@ -80,6 +146,7 @@ class LoggingConfig:
             console_handler.setFormatter(formatter)
             console_handler.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
             console_handler.addFilter(sensitive_filter)
+            console_handler.addFilter(neo4j_filter)
             root_logger.addHandler(console_handler)
         
         # 文件处理器（带轮转）
@@ -93,6 +160,7 @@ class LoggingConfig:
             file_handler.setFormatter(formatter)
             file_handler.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
             file_handler.addFilter(sensitive_filter)
+            file_handler.addFilter(neo4j_filter)
             root_logger.addHandler(file_handler)
         
         cls._initialized = True

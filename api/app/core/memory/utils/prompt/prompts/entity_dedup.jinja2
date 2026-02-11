@@ -1,9 +1,16 @@
-===任务===
+===Task===
+{% if language == "zh" %}
 你是一个实体去重/消歧判断助手。你将被提供两个实体的详细信息和上下文，请严格根据指引判断它们是否是同一真实世界实体，并在需要时进行类型消歧。
 
 模式: {{ '消歧模式' if disambiguation_mode else '去重模式' }}
+{% else %}
+You are an entity deduplication/disambiguation assistant. You will be provided with detailed information and context for two entities. Please strictly follow the guidelines to determine whether they are the same real-world entity and perform type disambiguation when necessary.
 
-===输入===
+Mode: {{ 'Disambiguation Mode' if disambiguation_mode else 'Deduplication Mode' }}
+{% endif %}
+
+===Input===
+{% if language == "zh" %}
 实体A:
 - 名称: "{{ entity_a.name | default('') }}"
 - 类型: "{{ entity_a.entity_type | default('') }}"
@@ -34,8 +41,41 @@
 {% for s in relation_statements %}
   - {{ s }}
 {% endfor %}
+{% else %}
+Entity A:
+- Name: "{{ entity_a.name | default('') }}"
+- Type: "{{ entity_a.entity_type | default('') }}"
+- Description: "{{ entity_a.description | default('') }}"
+- Aliases: {{ entity_a.aliases | default([]) }}
+{# TODO: fact_summary feature temporarily disabled, to be enabled after future development #}
+{# - Summary: "{{ entity_a.fact_summary | default('') }}" #}
+- Connection Strength: "{{ entity_a.connect_strength | default('') }}"
 
-===判定指引===
+Entity B:
+- Name: "{{ entity_b.name | default('') }}"
+- Type: "{{ entity_b.entity_type | default('') }}"
+- Description: "{{ entity_b.description | default('') }}"
+- Aliases: {{ entity_b.aliases | default([]) }}
+{# TODO: fact_summary feature temporarily disabled, to be enabled after future development #}
+{# - Summary: "{{ entity_b.fact_summary | default('') }}" #}
+- Connection Strength: "{{ entity_b.connect_strength | default('') }}"
+
+Context:
+- Same Group: {{ same_group | default(false) }}
+- Type Consistent or Unknown: {{ type_ok | default(false) }}
+- Type Similarity (0-1): {{ type_similarity | default(0.0) }}
+- Name Text Similarity (0-1): {{ name_text_sim | default(0.0) }}
+- Name Embedding Similarity (0-1): {{ name_embed_sim | default(0.0) }}
+- Name Contains Relationship: {{ name_contains | default(false) }}
+- Context Co-occurrence (same statement refers to both): {{ co_occurrence | default(false) }}
+- Related Relationship Statements (from entity-entity edges):
+{% for s in relation_statements %}
+  - {{ s }}
+{% endfor %}
+{% endif %}
+
+===Guidelines===
+{% if language == "zh" %}
 {% if disambiguation_mode %}
 - 这是"同名但类型不同"的消歧场景。请判断两者是否指向同一真实世界实体。
 - 综合名称文本/向量相似度、别名、描述、摘要与上下文关系（同源与关系陈述）进行判断。
@@ -68,8 +108,43 @@
   - 优先保留连接强度更强(strong/both)者；其余相同则保留描述/摘要更丰富者；再相同时保留实体A（canonical_idx=0）。
 - **注意**：别名（aliases）已在三元组提取阶段获取，合并时会自动整合，无需在此阶段提取。
 {% endif %}
+{% else %}
+{% if disambiguation_mode %}
+- This is a disambiguation scenario for "same name but different types". Please determine whether they refer to the same real-world entity.
+- Make judgments based on name text/vector similarity, aliases, descriptions, summaries, and contextual relationships (co-occurrence and relationship statements).
+- **Alias Handling (High Priority)**: 
+  * If the alias lists of both entities have intersections, this is a strong signal of identity
+  * If one entity's name appears in another entity's aliases, it should be considered a high-confidence match
+  * If one entity's alias exactly matches another entity's name, it should be considered a high-confidence match
+  * Alias matching weight should be higher than pure name text similarity
+- If unable to determine with sufficient confidence, handle conservatively: do not merge, and suggest blocking this pair in other fuzzy/heuristic merges (block_pair=true).
+- If merging is needed (should_merge=true), select the "canonical entity" (canonical_idx) and **must** provide a suggested unified type (suggested_type).
+- **Type Unification Principles (Important)**:
+  * Prioritize more specific and accurate types (e.g., HistoricalPeriod over Organization, MilitaryCapability over Concept)
+  * If both types are specific but different, choose the type that best matches the entity's core semantics
+  * Generic types (Concept, Phenomenon, Condition, State, Attribute, Event) have lower priority than domain-specific types
+  * Suggested type must be consistent with context and entity description
+- Canonical entity priority: higher connection strength (strong/both); if equal, retain the one with richer description/summary; if still equal, retain Entity A (canonical_idx=0).
+- **Note**: Aliases are already obtained during triplet extraction and will be automatically integrated during merging; no need to extract at this stage.
+{% else %}
+- If entity types are the same or either is UNKNOWN/empty, can proceed as candidates; if types clearly conflict (e.g., person vs. item), unless aliases and descriptions are highly consistent, determine as different entities.
+- **Alias Matching Priority (Highest Priority)**: 
+  * If Entity A's name exactly matches any of Entity B's aliases, it should be considered a high-confidence match
+  * If Entity B's name exactly matches any of Entity A's aliases, it should be considered a high-confidence match
+  * If any alias of Entity A exactly matches any alias of Entity B, it should be considered a high-confidence match
+  * When aliases match exactly, merging should be considered even if name text similarity is low
+  * Alias matching confidence should be higher than pure name similarity matching
+- Make judgments based on name text/vector similarity, aliases, descriptions, summaries, and contextual relationships.
+- When context co-occurs or there are clear relationship statements supporting identity (e.g., the same object is repeatedly mentioned or aliases correspond), the judgment threshold can be moderately lowered.
+- Conservative decision: when unable to determine with sufficient confidence, do not merge (same_entity=false).
+- If merging is needed, select the "canonical entity to retain" (canonical_idx) as the more appropriate one:
+  - Prioritize retaining the one with stronger connection strength (strong/both); if equal, retain the one with richer description/summary; if still equal, retain Entity A (canonical_idx=0).
+- **Note**: Aliases are already obtained during triplet extraction and will be automatically integrated during merging; no need to extract at this stage.
+{% endif %}
+{% endif %}
 
 **Output format**
+{% if language == "zh" %}
 {% if disambiguation_mode %}
 返回JSON格式，必须包含以下字段：
 {
@@ -103,6 +178,41 @@
 - confidence: 决策的置信度，范围0.0-1.0
 - reason: 决策理由的简短说明
 {% endif %}
+{% else %}
+{% if disambiguation_mode %}
+Return JSON format with the following required fields:
+{
+  "should_merge": boolean,
+  "canonical_idx": 0 or 1,
+  "confidence": float (0.0-1.0),
+  "block_pair": boolean,
+  "suggested_type": "string or null",
+  "reason": "string"
+}
+
+**Field Descriptions**:
+- should_merge: Whether these two entities should be merged (true/false)
+- canonical_idx: Index of the canonical entity, 0 for Entity A, 1 for Entity B
+- confidence: Confidence level of the decision, range 0.0-1.0
+- block_pair: Whether to block this pair in other fuzzy/heuristic merges (true/false)
+- suggested_type: Suggested unified type (string or null)
+- reason: Brief explanation of the decision
+{% else %}
+Return JSON format with the following required fields:
+{
+  "same_entity": boolean,
+  "canonical_idx": 0 or 1,
+  "confidence": float (0.0-1.0),
+  "reason": "string"
+}
+
+**Field Descriptions**:
+- same_entity: Whether the two entities refer to the same real-world entity (true/false)
+- canonical_idx: Index of the canonical entity, 0 for Entity A, 1 for Entity B
+- confidence: Confidence level of the decision, range 0.0-1.0
+- reason: Brief explanation of the decision
+{% endif %}
+{% endif %}
 
 **CRITICAL JSON FORMATTING REQUIREMENTS:**
 1. Use only standard ASCII double quotes (") for JSON structure - never use Chinese quotation marks ("") or other Unicode quotes
@@ -110,5 +220,9 @@
 3. Do not include line breaks within JSON string values
 4. Test your JSON output mentally to ensure it can be parsed correctly
 
+{% if language == "zh" %}
+输出语言应始终与输入语言相同。
+{% else %}
 The output language should always be the same as the input language.
+{% endif %}
 {{ json_schema }}

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-01-12 20:41:27
+ * @Last Modified time: 2026-02-06 21:05:52
  */
 import { type FC, useRef, useEffect } from 'react'
 import clsx from 'clsx'
@@ -11,8 +11,8 @@ import type { ChatContentProps } from './types'
 import { Spin } from 'antd'
 
 /**
- * 聊天内容显示组件
- * 负责渲染聊天消息列表，支持不同角色的消息样式和自动滚动
+ * Chat Content Display Component
+ * Responsible for rendering chat message list, supports different role message styles and auto-scrolling
  */
 const ChatContent: FC<ChatContentProps> = ({
   classNames,
@@ -25,10 +25,10 @@ const ChatContent: FC<ChatContentProps> = ({
   errorDesc,
   renderRuntime
 }) => {
-  // 滚动容器引用，用于控制自动滚动到底部
+  // Scroll container reference for controlling auto-scroll to bottom
   const scrollContainerRef = useRef<(HTMLDivElement | null)>(null)
   
-  // 当数据变化时，自动滚动到底部显示最新消息
+  // Auto-scroll to bottom when data changes to show latest messages
   useEffect(() => {
     setTimeout(() => {
       if (scrollContainerRef.current) {
@@ -39,37 +39,37 @@ const ChatContent: FC<ChatContentProps> = ({
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
       {data.length === 0 
-        ? empty // 显示空状态
+        ? empty // Display empty state
         : data.map((item, index) => (
           <div key={index} className={clsx("rb:relative", {
-            'rb:mt-6': index !== 0, // 非第一条消息添加上边距
-            'rb:right-0 rb:text-right': item.role === 'user', // 用户消息右对齐
-            'rb:left-0 rb:text-left': item.role === 'assistant', // 助手消息左对齐
+            'rb:mt-6': index !== 0, // Add top margin for non-first messages
+            'rb:right-0 rb:text-right': item.role === 'user', // User messages right-aligned
+            'rb:left-0 rb:text-left': item.role === 'assistant', // Assistant messages left-aligned
           })}>
-            {/* 流式加载时且内容为空则不显示 */}
+            {/* Don't display if streaming and content is empty */}
             {streamLoading && item.content === '' && !renderRuntime
               ? <Spin />
               : <>
-                {/* 顶部标签（如时间戳、用户名等） */}
+                {/* Top label (such as timestamp, username, etc.) */}
                 {labelPosition === 'top' &&
                   <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
                     {labelFormat(item)}
                   </div>
                 }
-                {/* 消息气泡框 */}
+                {/* Message bubble */}
                 <div className={clsx('rb:border rb:text-left rb:rounded-lg rb:mt-1.5 rb:leading-4.5 rb:p-[10px_12px_2px_12px] rb:inline-block rb:max-w-130 rb:wrap-break-word', contentClassNames, {
-                  // 错误消息样式（内容为null且非助手消息）
+                  // Error message style (content is null and not assistant message)
                   'rb:border-[rgba(255,93,52,0.30)] rb:bg-[rgba(255,93,52,0.08)] rb:text-[#FF5D34]': errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime,
-                  // 助手消息样式
+                  // Assistant message style
                   'rb:bg-[rgba(21,94,239,0.08)] rb:border-[rgba(21,94,239,0.30)]': item.role === 'user',
-                  // 用户消息样式
+                  // User message style
                   'rb:bg-[#FFFFFF] rb:border-[#EBEBEB]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
                 })}>
                   {item.subContent && renderRuntime && renderRuntime(item, index)}
-                  {/* 使用Markdown组件渲染消息内容 */}
+                  {/* Render message content using Markdown component */}
                   <Markdown content={renderRuntime ? item.content ?? '' : item.content ?? errorDesc ?? ''} />
                 </div>
-                {/* 底部标签（如时间戳、用户名等） */}
+                {/* Bottom label (such as timestamp, username, etc.) */}
                 {labelPosition === 'bottom' &&
                   <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular rb:mt-2">
                     {labelFormat(item)}

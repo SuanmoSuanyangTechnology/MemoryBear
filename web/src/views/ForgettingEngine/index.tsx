@@ -1,7 +1,20 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:00:12 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:00:12 
+ */
+/**
+ * Forgetting Engine Configuration Page
+ * Configures memory forgetting curve parameters
+ * Uses Ebbinghaus forgetting curve formula: R = offset + (1 - offset) × e^(-λ_time × t / λ_mem)
+ */
+
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Form, Slider, Button, Space, message } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+
 import RbCard from '@/components/RbCard/Card';
 import strategyImpactSimulator from '@/assets/images/memory/strategyImpactSimulator.svg'
 import LineChart from './components/LineChart'
@@ -9,6 +22,9 @@ import { getMemoryForgetConfig, updateMemoryForgetConfig } from '@/api/memory'
 import type { ConfigForm } from './types'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 
+/**
+ * Configuration field definitions
+ */
 const configList = [
   {
     key: 'minimumRetention',
@@ -82,6 +98,9 @@ const configList = [
   },
 ]
 
+/**
+ * Forgetting engine configuration component
+ */
 const ForgettingEngine: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams();
@@ -96,6 +115,7 @@ const ForgettingEngine: React.FC = () => {
     getConfigData()
   }, [])
 
+  /** Fetch forgetting engine configuration */
   const getConfigData = () => {
     getMemoryForgetConfig(id as string)
       .then((res) => {
@@ -113,9 +133,11 @@ const ForgettingEngine: React.FC = () => {
         console.error('Failed to load data');
       })
   }
+  /** Reset form to saved configuration */
   const handleReset = () => {
     form.setFieldsValue(configData || {});
   }
+  /** Save forgetting engine configuration */
   const handleSave = () => {
     setLoading(true)
     updateMemoryForgetConfig({

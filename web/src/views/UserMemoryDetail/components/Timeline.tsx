@@ -1,8 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:31:36 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:31:36 
+ */
 import { type FC, useEffect, useState } from 'react'
-import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Progress, Space, Tooltip, Divider } from 'antd';
+import { Skeleton, Space, Divider } from 'antd';
+
 import RbCard from '@/components/RbCard/Card'
 import {
   getPerceptualTimeline
@@ -11,6 +17,19 @@ import { formatDateTime } from '@/utils/format';
 import Empty from '@/components/Empty'
 import Tag from '@/components/Tag'
 
+/**
+ * Timeline item structure
+ * @property {string} id - Item ID
+ * @property {number} perceptual_type - Perceptual type (1: visual, 2: audio, 3: text)
+ * @property {string} file_path - File path
+ * @property {string} file_name - File name
+ * @property {string} summary - Content summary
+ * @property {number} storage_type - Storage type
+ * @property {string | number} created_time - Creation time
+ * @property {string} domain - Domain
+ * @property {string} topic - Topic
+ * @property {string[]} keywords - Keywords
+ */
 interface TimelineItem {
   id: string;
   perceptual_type: number;
@@ -24,18 +43,20 @@ interface TimelineItem {
   keywords: string[]
 }
 
-const KEYS = {
-  last_visual: ['summary', 'keywords', 'topic', 'domain', 'scene'],
-  last_listen: ['summary', 'keywords', 'topic', 'domain', 'speaker_count'],
-  last_text: ['summary', 'keywords', 'topic', 'domain', 'section_count'],
-}
-
+/**
+ * Perceptual type mapping
+ */
 const perceptual_type: Record<number, string> = {
   1: 'last_visual',
   2: 'last_listen',
   3: 'last_text',
 }
 
+/**
+ * Timeline Component
+ * Displays chronological timeline of perceptual memories
+ * Shows visual, audio, and text memories with metadata
+ */
 const Timeline: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()

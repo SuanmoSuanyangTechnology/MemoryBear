@@ -1,6 +1,7 @@
 from pydantic import Field, field_validator
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
 
 
 class VariableAggregatorNodeConfig(BaseNodeConfig):
@@ -12,6 +13,11 @@ class VariableAggregatorNodeConfig(BaseNodeConfig):
     group_variables: list[str] | dict[str, list[str]] = Field(
         ...,
         description="需要被聚合的变量"
+    )
+
+    group_type: dict[str, VariableType] = Field(
+        default=None,
+        description="每个分组的变量类型"
     )
 
     @field_validator("group_variables")

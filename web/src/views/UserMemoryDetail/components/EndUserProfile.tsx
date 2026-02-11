@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:33:30 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:33:30 
+ */
+/**
+ * End User Profile Component
+ * Displays and manages end user profile information
+ */
+
 import { forwardRef, useImperativeHandle, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -11,6 +22,9 @@ import {
 import EndUserProfileModal from './EndUserProfileModal'
 import type { EndUser, EndUserProfileModalRef, EndUserProfileRef } from '../types'
 
+/**
+ * Component props
+ */
 interface EndUserProfileProps {
   onDataLoaded?: (data: { other_name?: string; id: string }) => void
 }
@@ -27,6 +41,7 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onD
     getData()
   }, [id])
   
+  /** Fetch profile data */
   const getData = () => {
     if (!id) return
     setLoading(true)
@@ -43,6 +58,7 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onD
       setLoading(false)
     })
   }
+  /** Format profile items for display */
   const formatItems = useCallback(() => {
     return ['other_name', 'position', 'department', 'contact', 'phone', 'hire_date'].map(key => ({
       key,
@@ -50,6 +66,7 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onD
       children: key === 'hire_date' && data?.[key] ? dayjs(data[key as keyof EndUser]).format('YYYY-MM-DD') : String(data?.[key as keyof EndUser] || '-'),
     }))
   }, [data])
+  /** Open edit modal */
   const handleEdit = () => {
     if (!data) return
     endUserProfileModalRef.current?.handleOpen(data)

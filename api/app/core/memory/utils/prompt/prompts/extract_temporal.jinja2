@@ -14,68 +14,113 @@
 #}
 # Task
 
+{% if language == "zh" %}
+从提供的陈述句中提取时间信息（日期和时间范围）。确定所描述的关系或事件何时生效以及何时结束（如果适用）。
+{% else %}
 Extract temporal information (dates and time ranges) from the provided statement. Determine when the relationship or event described became valid and when it ended (if applicable).
+{% endif %}
 
-# Input Data
+# {% if language == "zh" %}输入数据{% else %}Input Data{% endif %}
 {% if inputs %}
 {% for key, val in inputs.items() %}
 - {{ key }}: {{val}}
 {% endfor %}
 {% endif %}
 
-# Temporal Fields
+# {% if language == "zh" %}时间字段{% else %}Temporal Fields{% endif %}
 
+{% if language == "zh" %}
+- **valid_at**: 关系/事件开始或成为真实的时间（ISO 8601 格式）
+- **invalid_at**: 关系/事件结束或停止为真的时间（ISO 8601 格式，如果正在进行则为 null）
+{% else %}
 - **valid_at**: When the relationship/event started or became true (ISO 8601 format)
 - **invalid_at**: When the relationship/event ended or stopped being true (ISO 8601 format, or null if ongoing)
+{% endif %}
 
-# Extraction Rules
+# {% if language == "zh" %}提取规则{% else %}Extraction Rules{% endif %}
 
-## Core Principles
+## {% if language == "zh" %}核心原则{% else %}Core Principles{% endif %}
+{% if language == "zh" %}
+1. **仅使用明确陈述的时间信息** - 不要从外部知识推断日期
+2. **使用参考/发布日期作为"现在"** 解释相对时间时
+3. **仅在日期与关系的有效性相关时设置日期** - 忽略偶然的时间提及
+4. **对于时间点事件**，仅设置 `valid_at`
+{% else %}
 1. **Only use explicitly stated temporal information** - do not infer dates from external knowledge
 2. **Use the reference/publication date as "now"** when interpreting relative times
 3. **Set dates only if they relate to the validity of the relationship** - ignore incidental time mentions
 4. **For point-in-time events**, set only `valid_at`
+{% endif %}
 
-## Date Format Requirements
+## {% if language == "zh" %}日期格式要求{% else %}Date Format Requirements{% endif %}
+{% if language == "zh" %}
+- 使用 ISO 8601: `YYYY-MM-DDTHH:MM:SS.SSSSSSZ`
+- 如果未指定时间，使用 `00:00:00`（午夜）
+- 如果仅提及年份，根据情况使用 `YYYY-01-01`（开始）或 `YYYY-12-31`（结束）
+- 如果仅提及月份，使用月份的第一天或最后一天
+- 始终包含时区（如果未指定，使用 `Z` 表示 UTC）
+- 根据参考日期将相对时间（"两周前"、"去年"）转换为绝对日期
+{% else %}
 - Use ISO 8601: `YYYY-MM-DDTHH:MM:SS.SSSSSSZ`
 - If no time specified, use `00:00:00` (midnight)
 - If only year mentioned, use `YYYY-01-01` (start) or `YYYY-12-31` (end) as appropriate
 - If only month mentioned, use first or last day of month
 - Always include timezone (use `Z` for UTC if unspecified)
 - Convert relative times ("two weeks ago", "last year") to absolute dates based on reference date
+{% endif %}
 
-## Statement Type Rules
+## {% if language == "zh" %}陈述句类型规则{% else %}Statement Type Rules{% endif %}
 
-{{ inputs.get("statement_type") | upper }} Statement Guidance:
+{{ inputs.get("statement_type") | upper }} {% if language == "zh" %}陈述句指导{% else %}Statement Guidance{% endif %}:
 {%for key, guide in statement_guide.items() %}
 - {{ tidy(key) | capitalize }}: {{ guide }}
 {% endfor %}
 
-**Special Cases:**
+**{% if language == "zh" %}特殊情况{% else %}Special Cases{% endif %}:**
+{% if language == "zh" %}
+- **意见陈述句**: 仅设置 `valid_at`（意见表达的时间）
+- **预测陈述句**: 如果明确提及，将 `invalid_at` 设置为预测窗口的结束
+{% else %}
 - **Opinion statements**: Set only `valid_at` (when opinion was expressed)
 - **Prediction statements**: Set `invalid_at` to the end of the prediction window if explicitly mentioned
+{% endif %}
 
-## Temporal Type Rules
+## {% if language == "zh" %}时间类型规则{% else %}Temporal Type Rules{% endif %}
 
-{{ inputs.get("temporal_type") | upper }} Temporal Type Guidance:
+{{ inputs.get("temporal_type") | upper }} {% if language == "zh" %}时间类型指导{% else %}Temporal Type Guidance{% endif %}:
 {% for key, guide in temporal_guide.items() %}
 - {{ tidy(key) | capitalize }}: {{ guide }}
 {% endfor %}
 
 {% if inputs.get('quarter') and inputs.get('publication_date') %}
-## Quarter Reference
+## {% if language == "zh" %}季度参考{% else %}Quarter Reference{% endif %}
+{% if language == "zh" %}
+假设 {{ inputs.quarter }} 在 {{ inputs.publication_date }} 结束。从此基线计算任何季度引用（Q1、Q2 等）的日期。
+{% else %}
 Assume {{ inputs.quarter }} ends on {{ inputs.publication_date }}. Calculate dates for any quarter references (Q1, Q2, etc.) from this baseline.
 {% endif %}
+{% endif %}
 
-# Output Requirements
+# {% if language == "zh" %}输出要求{% else %}Output Requirements{% endif %}
 
-## JSON Formatting (CRITICAL)
+## {% if language == "zh" %}JSON 格式化（关键）{% else %}JSON Formatting (CRITICAL){% endif %}
+{% if language == "zh" %}
+1. 使用**仅标准 ASCII 双引号** (") - 永远不要使用中文引号（""）或其他 Unicode 变体
+2. 使用反斜杠转义内部引号: `\"`
+3. JSON 字符串值中不要有换行符
+4. 正确关闭并用逗号分隔所有字段
+{% else %}
 1. Use **only standard ASCII double quotes** (") - never use Chinese quotes ("") or other Unicode variants
 2. Escape internal quotes with backslash: `\"`
 3. No line breaks within JSON string values
 4. Properly close and comma-separate all fields
+{% endif %}
 
-## Language
+## {% if language == "zh" %}语言{% else %}Language{% endif %}
+{% if language == "zh" %}
+输出语言必须与输入语言匹配。
+{% else %}
 Output language must match input language.
+{% endif %}
 
 {{ json_schema }}

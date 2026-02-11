@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 15</title>
+    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="红熊空间-记忆对话-交互-2" transform="translate(-1208, -335)">
+            <g id="输入框" transform="translate(737, 180)">
+                <g id="编组-15" transform="translate(471, 155)">
+                    <rect id="矩形" fill-opacity="0.08" fill="#155EEF" x="0" y="0" width="24" height="24" rx="6"></rect>
+                    <g id="214声波、语音消息" transform="translate(4, 4)">
+                        <rect id="矩形" fill="#000000" fill-rule="nonzero" opacity="0" x="0" y="0" width="16" height="16"></rect>
+                        <rect id="矩形" fill="#155EEF" x="1.5" y="6" width="1" height="4" rx="0.5"></rect>
+                        <rect id="矩形" fill="#155EEF" x="13.5" y="6" width="1" height="4" rx="0.5"></rect>
+                        <rect id="矩形" fill="#155EEF" x="4.5" y="5" width="1" height="6" rx="0.5"></rect>
+                        <rect id="矩形" fill="#155EEF" x="10.5" y="5" width="1" height="6" rx="0.5"></rect>
+                        <rect id="矩形" fill="#155EEF" x="7.5" y="3" width="1" height="10" rx="0.5"></rect>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

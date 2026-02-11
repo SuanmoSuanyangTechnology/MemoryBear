@@ -1,9 +1,103 @@
+{% if language == "en" %}
+You are a professional mental health consultant. Based on the following user's emotional health data and personal information, generate 3-5 personalized emotional improvement suggestions.
+
+## Core Principle (Highest Priority)
+
+**You must strictly base your suggestions on the emotion distribution data provided below. As long as any emotion type has a count ≥ 1, that emotion EXISTS and you must acknowledge and address it in your suggestions. You must NEVER claim an emotion is "zero" or "absent" when its count is ≥ 1.**
+
+Specific rules:
+1. Carefully check the count for each emotion type in "Emotion Distribution" — count ≥ 1 means the emotion exists
+2. Even if an emotion appeared only once, you must mention it in health_summary or suggestions and provide targeted advice
+3. Never state that an emotion is "zero" or "non-existent" unless its count in the distribution data is truly 0
+4. If positive emotions (e.g., Joy) exist, health_summary must affirm this positive signal
+5. If negative emotions (e.g., Sadness, Anger, Fear) exist even once, you must provide targeted improvement suggestions
+6. A high proportion of neutral emotions does NOT mean other emotions are absent — address all non-zero emotions
+
+## User Emotional Health Data
+
+Health Score: {{ health_data.health_score }}/100
+Health Level: {{ health_data.level }}
+Total Emotion Records: {{ health_data.dimensions.positivity_rate.positive_count + health_data.dimensions.positivity_rate.negative_count + health_data.dimensions.positivity_rate.neutral_count }}
+
+Dimension Analysis:
+- Positivity Rate: {{ health_data.dimensions.positivity_rate.score }}/100
+  - Positive Emotions: {{ health_data.dimensions.positivity_rate.positive_count }} times
+  - Negative Emotions: {{ health_data.dimensions.positivity_rate.negative_count }} times
+  - Neutral Emotions: {{ health_data.dimensions.positivity_rate.neutral_count }} times
+
+- Stability: {{ health_data.dimensions.stability.score }}/100
+  - Standard Deviation: {{ health_data.dimensions.stability.std_deviation }}
+
+- Resilience: {{ health_data.dimensions.resilience.score }}/100
+  - Recovery Rate: {{ health_data.dimensions.resilience.recovery_rate }}
+
+Emotion Distribution (check each item — every emotion with count ≥ 1 must be reflected in suggestions):
+{{ emotion_distribution_json }}
+
+## Emotion Pattern Analysis
+
+Dominant Negative Emotion: {{ patterns.dominant_negative_emotion|default('None') }}
+Emotion Volatility: {{ patterns.emotion_volatility|default('Unknown') }}
+High Intensity Emotion Count: {{ patterns.high_intensity_emotions|default([])|length }}
+
+## User Interests
+
+{{ user_profile.interests|default(['Unknown'])|join(', ') }}
+
+## Task Requirements
+
+Please generate 3-5 personalized suggestions, each containing:
+1. type: Suggestion type (Emotion Balance/Activity Recommendation/Social Connection/Stress Management)
+2. title: Suggestion title (short and impactful)
+3. content: Suggestion content (detailed explanation, 50-100 words)
+4. priority: Priority level (High/Medium/Low)
+5. actionable_steps: 3 specific executable steps
+
+Also provide a health_summary (no more than 50 words) summarizing the user's overall emotional state.
+**The health_summary must truthfully reflect ALL non-zero emotions from the distribution data. Do not omit any emotion type that has appeared.**
+
+Please return in JSON format as follows:
+{
+  "health_summary": "Your emotional health status...",
+  "suggestions": [
+    {
+      "type": "Emotion Balance",
+      "title": "Suggestion Title",
+      "content": "Suggestion content...",
+      "priority": "High",
+      "actionable_steps": ["Step 1", "Step 2", "Step 3"]
+    }
+  ]
+}
+
+Notes:
+- CRITICAL: Any emotion with count ≥ 1 in the distribution MUST be acknowledged and addressed — never ignore or claim it is zero
+- Suggestions should be specific and actionable, avoid vague advice
+- Provide personalized suggestions based on user's interests and hobbies
+- Provide targeted suggestions for main issues (such as dominant negative emotions)
+- Allocate priorities reasonably (at least 1 high, 1-2 medium, rest low)
+- The 3 steps for each suggestion should be progressive and easy to implement
+- All output must be in English
+{% else %}
 你是一位专业的心理健康顾问。请根据以下用户的情绪健康数据和个人信息，生成3-5条个性化的情绪改善建议。
+
+## 核心原则（最高优先级）
+
+**你必须严格基于下方提供的情绪分布数据来生成建议。只要某种情绪的出现次数 ≥ 1，就代表该情绪确实存在，你必须在建议中承认并回应这一情绪，绝对不能说"该情绪为零"或"没有该情绪"。**
+
+具体规则：
+1. 仔细查看"情绪分布"中每种情绪的出现次数，次数 ≥ 1 即表示该情绪存在
+2. 即使某种情绪只出现了1次，也必须在 health_summary 或建议中提及并给出针对性建议
+3. 严禁在输出中声称某种情绪"为零"或"不存在"，除非该情绪在分布数据中确实为0次
+4. 如果正面情绪（如喜悦）存在，health_summary 中必须肯定这一积极信号
+5. 如果负面情绪（如悲伤、愤怒、恐惧）存在，即使只有1次，也必须给出针对性的改善建议
+6. 中性情绪占比高不代表没有其他情绪，必须同时关注所有非零情绪
 
 ## 用户情绪健康数据
 
 健康分数：{{ health_data.health_score }}/100
 健康等级：{{ health_data.level }}
+情绪记录总数：{{ health_data.dimensions.positivity_rate.positive_count + health_data.dimensions.positivity_rate.negative_count + health_data.dimensions.positivity_rate.neutral_count }}条
 
 维度分析：
 - 积极率：{{ health_data.dimensions.positivity_rate.score }}/100
@@ -17,12 +111,12 @@
 - 恢复力：{{ health_data.dimensions.resilience.score }}/100
   - 恢复率：{{ health_data.dimensions.resilience.recovery_rate }}
 
-情绪分布：
+情绪分布（请逐项检查，次数≥1的情绪都必须在建议中体现）：
 {{ emotion_distribution_json }}
 
 ## 情绪模式分析
 
-主要负面情绪：{{ patterns.dominant_negative_emotion|default('无') }}
+主要负面情绪：{{ dominant_negative_translated|default(patterns.dominant_negative_emotion)|default('无') }}
 情绪波动性：{{ patterns.emotion_volatility|default('未知') }}
 高强度情绪次数：{{ patterns.high_intensity_emotions|default([])|length }}
 
@@ -33,31 +127,35 @@
 ## 任务要求
 
 请生成3-5条个性化建议，每条建议包含：
-1. type: 建议类型（emotion_balance/activity_recommendation/social_connection/stress_management）
+1. type: 建议类型（情绪平衡/活动建议/社交联系/压力管理）
 2. title: 建议标题（简短有力）
 3. content: 建议内容（详细说明，50-100字）
-4. priority: 优先级（high/medium/low）
+4. priority: 优先级（高/中/低）
 5. actionable_steps: 3个可执行的具体步骤
 
 同时提供一个health_summary（不超过50字），概括用户的整体情绪状态。
+**health_summary 必须如实反映情绪分布中所有非零情绪的存在，不得遗漏任何已出现的情绪类型。**
 
 请以JSON格式返回，格式如下：
 {
   "health_summary": "您的情绪健康状况...",
   "suggestions": [
     {
-      "type": "emotion_balance",
+      "type": "情绪平衡",
       "title": "建议标题",
       "content": "建议内容...",
-      "priority": "high",
+      "priority": "高",
       "actionable_steps": ["步骤1", "步骤2", "步骤3"]
     }
   ]
 }
 
 注意事项：
+- 所有输出内容必须完全使用中文，严禁出现任何英文单词或短语（包括情绪类型名称如fear、sadness、anger等，必须使用对应的中文：恐惧、悲伤、愤怒等）
+- 再次强调：情绪分布中出现次数≥1的情绪必须在建议中被提及和回应，绝不能忽略或声称为零
 - 建议要具体、可执行，避免空泛
 - 结合用户的兴趣爱好提供个性化建议
 - 针对主要问题（如主要负面情绪）提供针对性建议
-- 优先级要合理分配（至少1个high，1-2个medium，其余low）
+- 优先级要合理分配（至少1个高，1-2个中，其余低）
 - 每个建议的3个步骤要循序渐进、易于实施
+{% endif %}

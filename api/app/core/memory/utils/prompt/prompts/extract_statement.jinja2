@@ -5,8 +5,13 @@
 
 ===Tasks===
 
+{% if language == "zh" %}
+你的任务是根据详细的提取指南，从提供的对话片段中识别和提取陈述句。
+每个陈述句必须按照下面提到的标准进行标记。
+{% else %}
 Your task is to identify and extract declarative statements from the provided conversational chunk based on the detailed extraction guidelines. 
 Each statement must be labeled as per the criteria mentioned below.
+{% endif %}
 
 ===Inputs===
 {% if inputs %}
@@ -17,6 +22,32 @@ Each statement must be labeled as per the criteria mentioned below.
 
 
 ===Extraction Instructions===
+{% if language == "zh" %}
+{% if granularity %}
+{% if granularity == 3 %}
+原子化和清晰：构建陈述句以清楚地显示单一的主谓宾关系。最好有多个较小的陈述句，而不是一个复杂的陈述句。
+上下文独立：陈述句必须在不需要阅读整个对话的情况下可以理解。
+{% elif granularity == 2 %}
+在句子级别提取陈述句。每个陈述句应对应一个单一、完整的思想（通常是来源中的一个完整句子），但要重新表述以获得最大的清晰度，删除对话填充词（例如，"嗯"、"像"、感叹词）。
+{% elif granularity == 1 %}
+仅提取精华句子，并将片段总结为多个独立的陈述句，每个陈述句关注事实陈述、用户偏好、关系和显著的时间上下文。
+{% endif %}
+{% endif %}
+
+上下文解析要求：
+- 将指示代词（"那个"、"这个"、"那些"、"这些"）解析为其具体指代对象
+- 如果陈述句包含无法从对话上下文中解析的模糊引用，则：
+  a) 扩展陈述句以包含对话早期的缺失上下文
+  b) 标记陈述句为需要额外上下文
+  c) 如果陈述句在没有上下文的情况下变得无意义，则跳过提取
+
+对话上下文和共指消解：
+- 将每个陈述句归属于说出它的参与者。
+- 如果参与者列表为说话者提供了名称（例如，"李雪（用户）"），请在提取的陈述句中使用具体名称（"李雪"），而不是通用角色（"用户"）。
+- 将所有代词解析为对话上下文中的具体人物或实体。
+- 识别并将抽象引用解析为其具体名称（如果提到）。
+- 将缩写和首字母缩略词扩展为其完整形式。
+{% else %}
 {% if granularity %}
 {% if granularity == 3 %}
 Atomic & Clear: Structure statements to clearly show a single subject-predicate-object relationship. It is better to have multiple smaller statements than one complex one.
@@ -29,7 +60,7 @@ Extract only essence sentences and summarize the chunk into multiple, standalone
 {% endif %}
 
 Context Resolution Requirements:
-- Resolve demonstrative pronouns ("that," "this," "those","这个", "那个") to their specific referents
+- Resolve demonstrative pronouns ("that," "this," "those") to their specific referents
 - If a statement contains vague references that cannot be resolved from the conversation context, either:
   a) Expand the statement to include the missing context from earlier in the conversation
   b) Mark the statement as requiring additional context
@@ -41,16 +72,36 @@ Conversational Context & Co-reference Resolution:
 - Resolve all pronouns to the specific person or entity from the conversation's context.
 - Identify and resolve abstract references to their specific names if mentioned.
 - Expand abbreviations and acronyms to their full form.
+{% endif %}
 
 {% if include_dialogue_context %}
+{% if language == "zh" %}
+===完整对话上下文===
+以下是完整的对话上下文，以帮助您理解引用、代词和对话流程：
+{% else %}
 ===Full Dialogue Context===
 The following is the complete dialogue context to help you understand references, pronouns, and conversational flow:
+{% endif %}
 
 {{ dialogue_context }}
 
+{% if language == "zh" %}
+===对话上下文结束===
+{% else %}
 ===End of Dialogue Context===
 {% endif %}
+{% endif %}
 
+{% if language == "zh" %}
+过滤和格式化：
+
+- 仅提取陈述句。
+  不要提取问题、命令、问候语或对话填充词。
+时间精度：
+
+包括任何明确的日期、时间或定量限定符。
+如果一个句子既描述了事件的开始（静态）又描述了其持续性质（动态），则将两者提取为单独的陈述句。
+{% else %}
 Filtering and Formatting:
 
 - Extract only declarative statements.
@@ -59,18 +110,114 @@ Temporal Precision:
 
 Include any explicit dates, times, or quantitative qualifiers.
 If a sentence describes both the start of an event (static) and its ongoing nature (dynamic), extract both as separate statements.
+{% endif %}
 
 {%- if definitions %}
   {%- for section_key, section_dict in definitions.items() %}
-==== {{ tidy(section_key) | upper }} DEFINITIONS & GUIDANCE ====
+==== {{ tidy(section_key) | upper }} {% if language == "zh" %}定义和指导{% else %}DEFINITIONS & GUIDANCE{% endif %} ====
     {%- for category, details in section_dict.items() %}
 {{ loop.index }}. {{ category }}
-- Definition: {{ details.get("definition", "") }}
+- {% if language == "zh" %}定义{% else %}Definition{% endif %}: {{ details.get("definition", "") }}
     {% endfor -%}
   {% endfor -%}
 {% endif -%}
 
 ===Examples===
+{% if language == "zh" %}
+示例 1: 英文对话
+示例片段: """
+日期: 2024年3月15日
+参与者:
+- Sarah Chen (用户)
+- 助手 (AI)
+
+用户: "我最近一直在尝试水彩画，画了一些花朵。"
+AI: "水彩画很有趣！水彩颜料通常由颜料与阿拉伯树胶等粘合剂混合而成。你觉得怎么样？"
+用户: "我认为色彩组合可以改进，但我真的很喜欢玫瑰和百合。"
+"""
+
+示例输出: {
+  "statements": [
+    {
+      "statement": "Sarah Chen 最近一直在尝试水彩画。",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "relevance": "RELEVANT"
+    },
+    {
+      "statement": "Sarah Chen 画了一些花朵。",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "relevance": "RELEVANT"
+    },
+    {
+      "statement": "水彩颜料通常由颜料与阿拉伯树胶等粘合剂混合而成。",
+      "statement_type": "FACT",
+      "temporal_type": "ATEMPORAL",
+      "relevance": "IRRELEVANT"
+    },
+    {
+      "statement": "Sarah Chen 认为她的水彩画中的色彩组合可以改进。",
+      "statement_type": "OPINION",
+      "temporal_type": "STATIC",
+      "relevance": "RELEVANT"
+    },
+    {
+      "statement": "Sarah Chen 真的很喜欢玫瑰和百合。",
+      "statement_type": "FACT",
+      "temporal_type": "STATIC",
+      "relevance": "RELEVANT"
+    }
+  ]
+}
+
+示例 2: 中文对话示例
+示例片段: """
+日期: 2024年3月15日
+参与者:
+- 张曼婷 (用户)
+- 小助手 (AI助手)
+
+用户: "我最近在尝试水彩画，画了一些花朵。"
+AI: "水彩画很有趣！水彩颜料通常由颜料和阿拉伯树胶等粘合剂混合而成。你觉得怎么样？"
+用户: "我觉得色彩搭配还有提升的空间，不过我很喜欢玫瑰和百合这两种花。"
+"""
+
+示例输出: {
+  "statements": [
+    {
+      "statement": "张曼婷最近在尝试水彩画。",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "relevance": "RELEVANT"
+    },
+    {
+      "statement": "张曼婷画了一些花朵。",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "relevance": "RELEVANT"
+    },
+    {
+      "statement": "水彩颜料通常由颜料和阿拉伯树胶等粘合剂混合而成。",
+      "statement_type": "FACT",
+      "temporal_type": "ATEMPORAL",
+      "relevance": "IRRELEVANT"
+    },
+    {
+      "statement": "张曼婷觉得水彩画的色彩搭配还有提升的空间。",
+      "statement_type": "OPINION",
+      "temporal_type": "STATIC",
+      "relevance": "RELEVANT"
+    },
+    {
+      "statement": "张曼婷很喜欢玫瑰和百合。",
+      "statement_type": "FACT",
+      "temporal_type": "STATIC",
+      "relevance": "RELEVANT"
+    }
+  ]
+}
+{% else %}
 Example 1: English Conversation
 Example Chunk: """
 Date: March 15, 2024
@@ -164,8 +311,33 @@ Example Output: {
     }
   ]
 }
+{% endif %}
 ===End of Examples===
 
+{% if language == "zh" %}
+===反思过程===
+
+提取陈述句后，执行以下自我审查步骤：
+
+**步骤 1: 归属检查**
+- 确认每个陈述句都正确归属于正确的说话者
+- 验证说话者名称在整个过程中使用一致
+- 检查 AI 助手陈述句是否正确归属
+
+**步骤 2: 完整性审查**
+- 确保没有遗漏重要的陈述句
+- 检查时间信息是否保留
+
+**步骤 3: 分类验证**
+- 审查 statement_type 分类（FACT/OPINION/PREDICTION/SUGGESTION）
+- 验证 temporal_type 分配（STATIC/DYNAMIC/ATEMPORAL）
+- 确保分类与提供的定义一致
+
+**步骤 4: 最终质量检查**
+- 删除任何问题、命令或对话填充词
+- 验证 JSON 格式合规性
+- 确认输出语言与输入语言匹配
+{% else %}
 ===Reflection Process===
 
 After extracting statements, perform the following self-review steps:
@@ -188,6 +360,7 @@ After extracting statements, perform the following self-review steps:
 - Remove any questions, commands, or conversational filler
 - Verify JSON format compliance
 - Confirm output language matches input language
+{% endif %}
 
 **Output format**
 **CRITICAL JSON FORMATTING REQUIREMENTS:**
@@ -198,10 +371,21 @@ After extracting statements, perform the following self-review steps:
 5. Example of proper escaping: "statement": "John said: \"I really like this book.\""
 
 **LANGUAGE REQUIREMENT:**
+{% if language == "zh" %}
+- 输出语言应始终与输入语言匹配
+- 如果输入是中文，则用中文提取陈述句
+- 如果输入是英文，则用英文提取陈述句
+- 保留原始语言，不要翻译
+{% else %}
 - The output language should ALWAYS match the input language
 - If input is in English, extract statements in English
 - If input is in Chinese, extract statements in Chinese
 - Preserve the original language and do not translate
+{% endif %}
 
+{% if language == "zh" %}
+仅返回与以下架构匹配的 JSON 对象数组中提取的标记陈述句列表：
+{% else %}
 Return only a list of extracted labelled statements in the JSON ARRAY of objects that match the schema below:
+{% endif %}
 {{ json_schema }}

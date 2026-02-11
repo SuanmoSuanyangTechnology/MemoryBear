@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:35:41 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:35:41 
+ */
+/**
+ * Order History Page
+ * Displays order list with filtering by status, product type, and time range
+ * Supports order detail viewing
+ */
+
 import React, { useRef, useState, useEffect } from 'react';
 import { Button, Space, Select, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -12,9 +24,9 @@ import { formatDateTime } from '@/utils/format';
 import type { Order, OrderDetailRef, Query } from './types'
 import OrderDetail from './components/OrderDetail'
 import SearchInput from '@/components/SearchInput'
-import { PRICE_LIST } from '@/views/Pricing'
 
 
+/** Order status mapping */
 export const STATUS = {
   100: {
     status: 'warning',
@@ -64,6 +76,7 @@ const OrderHistory: React.FC = () => {
   useEffect(() => {
     getStatus()
   }, [])
+  /** Fetch order status options */
   const getStatus = () => {
     getOrderStatus()
       .then(res => {
@@ -80,6 +93,7 @@ const OrderHistory: React.FC = () => {
         ])
       })
   }
+  /** Handle status filter change */
   const handleChangeStatus = (value: string) => {
     if (value !== query.status) {
       setQuery(prev => ({
@@ -88,6 +102,7 @@ const OrderHistory: React.FC = () => {
       }))
     }
   }
+  /** Handle product type filter change */
   const handleChangeType = (value: string) => {
     if (value !== query.product_type) {
       setQuery(prev => ({
@@ -96,6 +111,7 @@ const OrderHistory: React.FC = () => {
       }))
     }
   }
+  /** Handle time range filter change */
   const handleChangeTime = (value: string) => {
     setTimeType(value)
     let start_time = null;
@@ -129,6 +145,7 @@ const OrderHistory: React.FC = () => {
     }))
   }
 
+  /** Map product type to translation key */
   const getProductType = (type: string) => {
     const typeMap: Record<string, string> = {
       'FREE': 'personal',
@@ -138,7 +155,7 @@ const OrderHistory: React.FC = () => {
     };
     return typeMap[type] || 'ENTERPRISE';
   };
-  // 表格列配置
+  /** Table column configuration */
   const columns: ColumnsType = [
     {
       title: t('pricing.order_no'),

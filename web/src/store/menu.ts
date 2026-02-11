@@ -1,6 +1,26 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 16:33:34 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 16:33:34 
+ */
+/**
+ * Menu Store
+ * 
+ * Manages application menu and breadcrumb navigation with:
+ * - Menu loading from JSON configuration
+ * - Sidebar collapse state
+ * - Breadcrumb generation from menu paths
+ * - Custom breadcrumb support
+ * - Separate menu contexts (space/manage)
+ * 
+ * @store
+ */
+
 import { create } from 'zustand'
 import AllMenus from './menu.json'
 
+/** Menu item interface */
 export interface MenuItem {
   id: number;
   parent: number;
@@ -22,20 +42,32 @@ export interface MenuItem {
   master?: string | null;
   disposable?: boolean;
   appSystem?: string | null;
-  subs: MenuItem[] | null;
+  subs?: MenuItem[] | null;
   onClick?: (e?: React.MouseEvent) => void | boolean;
 }
+
+/** Menu state interface */
 interface MenuState {
+  /** Sidebar collapsed state */
   collapsed: boolean;
+  /** Toggle sidebar collapse */
   toggleSider: () => void;
+  /** All menus by context */
   allMenus: Record<'space' | 'manage', MenuItem[]>;
+  /** All breadcrumbs by context */
   allBreadcrumbs: Record<'space' | 'manage' | string, MenuItem[]>;
+  /** Load menus for specific context */
   loadMenus: (source: 'space' | 'manage') => void;
+  /** Update breadcrumbs based on key path */
   updateBreadcrumbs: (keyPath: string[], source: 'space' | 'manage') => void;
+  /** Set custom breadcrumbs */
   setCustomBreadcrumbs: (breadcrumbs: MenuItem[], source: string) => void;
 }
 
+/** Initialize breadcrumbs from localStorage */
 const initBreadcrumbs = localStorage.getItem('breadcrumbs') || '[]'
+
+/** Menu store */
 export const useMenu = create<MenuState>((set, get) => ({
   collapsed: localStorage.getItem('collapsed') === 'true',
   allMenus: {
@@ -61,7 +93,7 @@ export const useMenu = create<MenuState>((set, get) => ({
     console.log('updateBreadcrumbs paths:', paths);
     
     if (paths.length === 3) {
-      // 三级菜单：[subSubPath, subId, menuId]
+      /** Three-level menu: [subSubPath, subId, menuId] */
       const menuId = paths[2];
       const subId = paths[1];
       const subSubPath = paths[0];
@@ -81,7 +113,7 @@ export const useMenu = create<MenuState>((set, get) => ({
         }
       }
     } else {
-      // 原有逻辑处理一级和二级菜单
+      /** Original logic for one-level and two-level menus */
       const matchedMenu: MenuItem | undefined = menus.find(menu => menu.path === paths[paths.length - 1] || `${menu.id}` === paths[1]);
 
       if (matchedMenu) {

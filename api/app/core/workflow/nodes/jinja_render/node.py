@@ -5,6 +5,8 @@ from app.core.workflow.nodes import WorkflowState
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.jinja_render.config import JinjaRenderNodeConfig
 from app.core.workflow.template_renderer import TemplateRenderer
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +16,12 @@ class JinjaRenderNode(BaseNode):
         super().__init__(node_config, workflow_config)
         self.typed_config: JinjaRenderNodeConfig | None = None
 
-    async def execute(self, state: WorkflowState) -> Any:
+    def _output_types(self) -> dict[str, VariableType]:
+        return {
+            "output": VariableType.STRING
+        }
+
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
         Execute the node: render the Jinja2 template with mapped variables.
 
@@ -24,6 +31,7 @@ class JinjaRenderNode(BaseNode):
         Args:
             state (WorkflowState): Current workflow state containing variables,
                 node outputs, and runtime variables.
+            variable_pool: Variable Pool
 
         Returns:
             dict[str, Any]: Node output dictionary containing the rendered result
@@ -40,7 +48,7 @@ class JinjaRenderNode(BaseNode):
         context = {}
         for variable in self.typed_config.mapping:
             try:
-                context[variable.name] = self.get_variable(variable.value, state)
+                context[variable.name] = self.get_variable(variable.value, variable_pool)
             except Exception:
                 logger.info(f"variable not found, var: {variable.value}")
                 continue

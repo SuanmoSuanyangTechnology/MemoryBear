@@ -295,4 +295,3 @@ async def save_dialog_and_statements_to_neo4j(
         print(f"Neo4j integration error: {e}")
         print("Continuing without database storage...")
         return False
-

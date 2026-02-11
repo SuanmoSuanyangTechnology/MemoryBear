@@ -1,5 +1,16 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:12:43 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 17:26:04
+ */
+/**
+ * Home Dashboard Page
+ * Main dashboard displaying memory statistics, charts, activities, and quick operations
+ */
+
 import { useEffect, useState } from 'react';
-import { Row, Col, Space } from 'antd';
+import { Row, Col } from 'antd';
 
 import TopCardList from './components/TopCardList'
 import LineCard from './components/LineCard'
@@ -9,6 +20,9 @@ import RecentActivity from './components/RecentActivity'
 import TagList from './components/TagList'
 import QuickOperation from './components/QuickOperation'
 
+/**
+ * Dashboard statistics data
+ */
 export interface DashboardData {
   totalMemoryCapacity?: number;
   application?: number;
@@ -25,12 +39,12 @@ const Home = () => {
   const [memoryIncrement, setMemoryIncrement] = useState<Array<{ updated_at: string; total_num: number; }>>([]);
   const [limit, setLimit] = useState(7);
 
-  // 模拟API获取数据
+  /** Simulate API data fetch */
   useEffect(() => {
     getData()
     getKnowledgeTypeDistribution()
   }, []);
-  // 记忆总量 / 应用数量 / 知识库数量 / API调用次数
+  /** Fetch memory total, app count, knowledge base count, API call count */
   const getData = () => {
     getDashboardData().then(res => {
       const response = res as {
@@ -49,16 +63,16 @@ const Home = () => {
         }
       }
       const { storage_type = 'neo4j' } = response || {}
-      const responseData = response[storage_type + '_data'] || {}
+      const responseData = storage_type === 'neo4j' ? response.neo4j_data : response.rag_data
       setDashboardData({
-        totalMemoryCapacity: responseData.total_memory || 0,
-        application: responseData.total_app || 0,
-        knowledgeBaseCount: responseData.total_knowledge || 0,
-        apiCallCount: responseData.total_api_call || 0
+        totalMemoryCapacity: responseData?.total_memory || 0,
+        application: responseData?.total_app || 0,
+        knowledgeBaseCount: responseData?.total_knowledge || 0,
+        apiCallCount: responseData?.total_api_call || 0
       })
     })
   }
-  // 知识库类型分布 / 知识库数量
+  /** Fetch knowledge base type distribution */
   const getKnowledgeTypeDistribution = () => {
     setLoading({
       ...loading,
@@ -86,7 +100,7 @@ const Home = () => {
       })
     })
   }
-  // 记忆增长趋势
+  /** Fetch memory growth trend data */
   const getMemoryIncrementData = () => {
     getMemoryIncrement(limit).then(res => {
       const response = res as { updated_at: string; total_num: number; }[]
@@ -106,12 +120,10 @@ const Home = () => {
   }
 
   return (
-    <div className="rb:pb-[24px]">
-      {/* 统计卡片 */}
+    <div className="rb:pb-6">
       <TopCardList data={dashboardData} />
 
-      <Row className="rb:mt-[16px]" gutter={16}>
-        {/* 记忆增长趋势 */}
+      <Row className="rb:mt-4" gutter={16}>
         <Col span={12}>
           <LineCard
             chartData={memoryIncrement}
@@ -121,7 +133,6 @@ const Home = () => {
             seriesList={['total_num']}
           />
         </Col>
-        {/* 知识库类型分布 */}
         <Col span={12}>
           <PieCard
             loading={loading.knowledgeTypeDistribution}
@@ -130,20 +141,17 @@ const Home = () => {
         </Col>
       </Row>
 
-      <Row className="rb:mt-[16px]" gutter={16}>
+      <Row className="rb:mt-4" gutter={16}>
         <Col span={12}>
-          {/* 最近记忆活动 */}
           <RecentActivity />
         </Col>
         <Col span={12}>
-          {/* 热门记忆标签 */}
           <TagList />
         </Col>
       </Row>
 
-      <Row className="rb:mt-[16px]" gutter={16}>
+      <Row className="rb:mt-4" gutter={16}>
         <Col span={24}>
-          {/* 快速操作 */}
           <QuickOperation />
         </Col>
       </Row>

@@ -10,7 +10,7 @@ async def write_node(state: WriteState) -> WriteState:
         Write data to the database/file system.
 
         Args:
-            state: WriteState containing messages, end_user_id, and memory_config
+            state: WriteState containing messages, end_user_id, memory_config, and language
 
         Returns:
             dict: Contains 'write_result' with status and data fields
@@ -18,6 +18,7 @@ async def write_node(state: WriteState) -> WriteState:
     messages = state.get('messages', [])
     end_user_id = state.get('end_user_id', '')
     memory_config = state.get('memory_config', '')
+    language = state.get('language', 'zh')  # 默认中文
 
     # Convert LangChain messages to structured format expected by write()
     structured_messages = []
@@ -35,6 +36,7 @@ async def write_node(state: WriteState) -> WriteState:
             messages=structured_messages,
             end_user_id=end_user_id,
             memory_config=memory_config,
+            language=language,
         )
         logger.info(f"Write completed successfully! Config: {memory_config.config_name}")
 

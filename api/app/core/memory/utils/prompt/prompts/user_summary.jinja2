@@ -7,6 +7,11 @@
 
 Your task is to generate a comprehensive user profile based on the provided entities and statements. The profile should include four distinct sections that capture different aspects of the user's identity and characteristics.
 
+{% if language == "zh" %}
+**重要：请使用中文生成用户画像内容。**
+{% else %}
+**Important: Please generate the user profile content in English.**
+{% endif %}
 
 ===Inputs===
 {% if user_id %}
@@ -30,40 +35,73 @@ Your task is to generate a comprehensive user profile based on the provided enti
 
 **Section-Specific Requirements:**
 
-1. **Basic Introduction** (4-5 sentences, max 150 Chinese characters)
+{% if language == "zh" %}
+1. **基本介绍** (4-5句话，最多150字)
+   - 重点：身份、职业、地点及其他基本人口统计信息
+   - 提供关于用户是谁的事实背景
+
+2. **性格特点** (2-3句话，最多80字)
+   - 重点：性格特征、行为习惯、沟通风格
+   - 描述用户互动和行为中可观察到的模式
+
+3. **核心价值观** (1-2句话，最多50字)
+   - 重点：价值观、信念、目标和愿望
+   - 捕捉对用户最重要的内容以及驱动其决策的因素
+
+4. **一句话总结** (1句话，最多40字)
+   - 提供对用户核心特质的高度浓缩描述
+   - 类似于捕捉其本质的个人标语或座右铭
+{% else %}
+1. **Basic Introduction** (4-5 sentences, max 150 words)
    - Focus on: identity, occupation, location, and other basic demographic information
    - Provide factual background about who the user is
 
-2. **Personality Traits** (2-3 sentences, max 80 Chinese characters)
+2. **Personality Traits** (2-3 sentences, max 80 words)
    - Focus on: personality characteristics, behavioral habits, communication style
    - Describe observable patterns in how the user interacts and behaves
 
-3. **Core Values** (1-2 sentences, max 50 Chinese characters)
+3. **Core Values** (1-2 sentences, max 50 words)
    - Focus on: values, beliefs, goals, and aspirations
    - Capture what matters most to the user and what drives their decisions
 
-4. **One-Sentence Summary** (1 sentence, max 40 Chinese characters)
+4. **One-Sentence Summary** (1 sentence, max 40 words)
    - Provide a highly condensed characterization of the user's core traits
    - Similar to a personal tagline or motto that captures their essence
+{% endif %}
 
 
 ===Output Format (MUST STRICTLY FOLLOW)===
 
+{% if language == "zh" %}
 【基本介绍】
-[4-5 sentences describing the user's basic identity, occupation, and location]
+[4-5句话描述用户的基本身份、职业和地点]
 
 【性格特点】
-[2-3 sentences describing the user's personality traits, behavioral habits, and communication style]
+[2-3句话描述用户的性格特征、行为习惯和沟通风格]
 
 【核心价值观】
-[1-2 sentences describing the user's values, beliefs, and goals]
+[1-2句话描述用户的价值观、信念和目标]
 
 【一句话总结】
+[1句话提供对用户核心特质的高度浓缩总结]
+{% else %}
+【Basic Introduction】
+[4-5 sentences describing the user's basic identity, occupation, and location]
+
+【Personality Traits】
+[2-3 sentences describing the user's personality traits, behavioral habits, and communication style]
+
+【Core Values】
+[1-2 sentences describing the user's values, beliefs, and goals]
+
+【One-Sentence Summary】
 [1 sentence providing a highly condensed summary of the user's core characteristics]
+{% endif %}
 
 
 ===Example===
 
+{% if language == "zh" %}
 Example Input:
 - User ID: user_12345
 - Core Entities & Frequency: 产品经理 (15), AI (12), 深圳 (10), 数据分析 (8), 团队协作 (7)
@@ -81,6 +119,25 @@ Example Output:
 
 【一句话总结】
 "让每一个产品决策都充满温度。"
+{% else %}
+Example Input:
+- User ID: user_12345
+- Core Entities & Frequency: Product Manager (15), AI (12), San Francisco (10), Data Analysis (8), Team Collaboration (7)
+- Representative Statement Samples: I have been working as a product manager in San Francisco for 5 years | I believe good products come from deep understanding of user needs | I enjoy playing a coordinating role in teams | Data-driven decision making is my work principle
+
+Example Output:
+【Basic Introduction】
+This is a passionate senior product manager based in San Francisco. Over the past 5 years, they have focused on AI and data-driven product design, dedicated to creating products that truly improve users' lives. They believe good products stem from deep understanding of user needs and continuous exploration of technological possibilities.
+
+【Personality Traits】
+Outgoing personality with excellent communication skills and attention to detail. Enjoys playing a coordinating role in teams, helping everyone reach consensus. Maintains optimism when facing challenges, believing every problem has a solution.
+
+【Core Values】
+User-first, data-driven, continuous learning, team collaboration
+
+【One-Sentence Summary】
+"Making every product decision with warmth and purpose."
+{% endif %}
 
 ===End of Example===
 
@@ -91,7 +148,7 @@ Before generating your final output, internally verify:
 1. All content is grounded in provided data (no fabrication)
 2. Format follows the specified structure with correct headers
 3. Tone is objective, third-person, and neutral
-4. All four sections are complete and within character limits
+4. All four sections are complete and within character/word limits
 
 **IMPORTANT: These checks are for your internal use only. DO NOT include them in your output.**
 
@@ -101,14 +158,24 @@ Before generating your final output, internally verify:
 **CRITICAL: Your response must ONLY contain the four sections below. Do not include any reflection, self-review, or meta-commentary.**
 
 **LANGUAGE REQUIREMENT:**
-- The output language should ALWAYS be Chinese (Simplified)
-- All section content must be in Chinese
-- Section headers must use the specified Chinese format: 【基本介绍】【性格特点】【核心价值观】【一句话总结】
+{% if language == "zh" %}
+- 输出语言必须为简体中文
+- 所有部分内容必须使用中文
+- 部分标题必须使用指定的中文格式：【基本介绍】【性格特点】【核心价值观】【一句话总结】
+{% else %}
+- The output language must be English
+- All section content must be in English
+- Section headers must use the specified format: 【Basic Introduction】【Personality Traits】【Core Values】【One-Sentence Summary】
+{% endif %}
 
 **FORMAT REQUIREMENT:**
 - Each section must start with its header on a new line
 - Content follows immediately after the header
 - Sections are separated by blank lines
-- Strictly adhere to character limits for each section
-- **DO NOT include any text after the 【一句话总结】 section**
+{% if language == "zh" %}
+- 严格遵守每个部分的字数限制
+{% else %}
+- Strictly adhere to word limits for each section
+{% endif %}
+- **DO NOT include any text after the final section**
 - **DO NOT output reflection steps, self-review, or verification notes**

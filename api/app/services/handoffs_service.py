@@ -537,7 +537,7 @@ def convert_multi_agent_config_to_handoffs(
                     
                     # 获取该 Agent 的模型配置
                     if release.default_model_config_id:
-                        model_api_key = ModelApiKeyService.get_a_api_key(db, release.default_model_config_id)
+                        model_api_key = ModelApiKeyService.get_available_api_key(db, release.default_model_config_id)
                         if model_api_key:
                             model_config = RedBearModelConfig(
                                 model_name=model_api_key.model_name,
@@ -551,6 +551,7 @@ def convert_multi_agent_config_to_handoffs(
                                 }
                             )
                             logger.debug(f"Agent {agent_name} 使用模型: {model_api_key.model_name}")
+                            ModelApiKeyService.record_api_key_usage(db, model_api_key.id)
                         else:
                             logger.warning(f"Agent {agent_name} 模型配置无效: {release.default_model_config_id}")
                     else:

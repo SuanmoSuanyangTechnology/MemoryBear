@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:49:20 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 16:54:54
+ */
+/**
+ * Sub-Model Modal
+ * Modal for selecting models and API keys to add to group model
+ * Uses cascader for hierarchical selection
+ */
+
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Form, Cascader, App, type CascaderProps } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -10,12 +22,19 @@ import type { ProviderModelItem } from '../../types'
 
 const { SHOW_CHILD } = Cascader;
 
+/**
+ * Cascader option interface
+ */
 interface Option {
   value: string | number;
   label: string;
   children?: Option[];
   [key: string]: any;
 }
+
+/**
+ * Sub-model modal component
+ */
 const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
   refresh,
   type,
@@ -38,7 +57,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
     }
   }, [groupedByProvider, provider])
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset state */
   const handleClose = () => {
     form.resetFields();
     setVisible(false);
@@ -46,11 +65,12 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
     setModelList([])
   };
 
+  /** Open modal */
   const handleOpen = () => {
     form.resetFields()
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save selected models and API keys */
   const handleSave = () => {
     form
       .validateFields()
@@ -65,6 +85,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
         handleClose()
       })
   }
+  /** Handle cascader selection change */
   const handleChange = (value: (string | number)[][], selectedOptions: Option[][]) => {
     const filterList = selectedOptions.filter(vo => vo.length === 1).map(item => item[0])
     const lastFilterLit = value.filter(vo => vo.length !== 1)
@@ -75,6 +96,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
     setSelecteds(selectedOptions)
   }
 
+  /** Handle provider change and load models */
   const handleChangeProvider = (provider: string, api_key_ids?: any[]) => {
     form.setFieldValue('api_key_ids', undefined)
     if (provider) {
@@ -110,6 +132,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
       setModelList([])
     }
   }
+  /** Custom display renderer for cascader */
   const displayRender: CascaderProps<Option>['displayRender'] = (labels, selectedOptions = []) =>
     labels.map((label, i) => {
       const option = selectedOptions[i];
@@ -123,7 +146,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
       return <span key={option?.value || i}>{label} / </span>;
     });
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));

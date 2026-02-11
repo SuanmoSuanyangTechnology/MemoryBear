@@ -10,6 +10,8 @@ from httpx import AsyncClient, Response, Timeout
 from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
 from app.core.workflow.nodes.enums import HttpRequestMethod, HttpErrorHandle, HttpAuthType, HttpContentType
 from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig, HttpRequestNodeOutput
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__file__)
 
@@ -34,6 +36,14 @@ class HttpRequestNode(BaseNode):
         super().__init__(node_config, workflow_config)
         self.typed_config: HttpRequestNodeConfig | None = None
 
+    def _output_types(self) -> dict[str, VariableType]:
+        return {
+            "body": VariableType.STRING,
+            "status_code": VariableType.NUMBER,
+            "headers": VariableType.OBJECT,
+            "output": VariableType.STRING
+        }
+
     def _build_timeout(self) -> Timeout:
         """
         Build httpx Timeout configuration.
@@ -50,7 +60,7 @@ class HttpRequestNode(BaseNode):
         )
         return timeout
 
-    def _build_auth(self, state: WorkflowState) -> dict[str, str]:
+    def _build_auth(self, variable_pool: VariablePool) -> dict[str, str]:
         """
         Build authentication-related HTTP headers.
 
@@ -58,12 +68,12 @@ class HttpRequestNode(BaseNode):
         the current workflow runtime state.
 
         Args:
-            state: Current workflow runtime state.
+            variable_pool: Variable Pool
 
         Returns:
             A dictionary of HTTP headers used for authentication.
         """
-        api_key = self._render_template(self.typed_config.auth.api_key, state)
+        api_key = self._render_template(self.typed_config.auth.api_key, variable_pool)
         match self.typed_config.auth.auth_type:
             case HttpAuthType.NONE:
                 return {}
@@ -82,7 +92,7 @@ class HttpRequestNode(BaseNode):
             case _:
                 raise RuntimeError(f"Auth type not supported: {self.typed_config.auth.auth_type}")
 
-    def _build_header(self, state: WorkflowState) -> dict[str, str]:
+    def _build_header(self, variable_pool: VariablePool) -> dict[str, str]:
         """
         Build HTTP request headers.
 
@@ -90,10 +100,10 @@ class HttpRequestNode(BaseNode):
         """
         headers = {}
         for key, value in self.typed_config.headers.items():
-            headers[self._render_template(key, state)] = self._render_template(value, state)
+            headers[self._render_template(key, variable_pool)] = self._render_template(value, variable_pool)
         return headers
 
-    def _build_params(self, state: WorkflowState) -> dict[str, str]:
+    def _build_params(self, variable_pool: VariablePool) -> dict[str, str]:
         """
         Build URL query parameters.
 
@@ -101,10 +111,10 @@ class HttpRequestNode(BaseNode):
         """
         params = {}
         for key, value in self.typed_config.params.items():
-            params[self._render_template(key, state)] = self._render_template(value, state)
+            params[self._render_template(key, variable_pool)] = self._render_template(value, variable_pool)
         return params
 
-    def _build_content(self, state) -> dict[str, Any]:
+    def _build_content(self, variable_pool: VariablePool) -> dict[str, Any]:
         """
         Build HTTP request body arguments for httpx request methods.
 
@@ -120,13 +130,13 @@ class HttpRequestNode(BaseNode):
                 return {}
             case HttpContentType.JSON:
                 content["json"] = json.loads(self._render_template(
-                    self.typed_config.body.data, state
+                    self.typed_config.body.data, variable_pool
                 ))
             case HttpContentType.FROM_DATA:
                 data = {}
                 for item in self.typed_config.body.data:
                     if item.type == "text":
-                        data[self._render_template(item.key, state)] = self._render_template(item.value, state)
+                        data[self._render_template(item.key, variable_pool)] = self._render_template(item.value, variable_pool)
                     elif item.type == "file":
                         # TODO: File support (Feature)
                         pass
@@ -136,11 +146,11 @@ class HttpRequestNode(BaseNode):
                 pass
             case HttpContentType.WWW_FORM:
                 content["data"] = json.loads(self._render_template(
-                    json.dumps(self.typed_config.body.data), state
+                    json.dumps(self.typed_config.body.data), variable_pool
                 ))
 
             case HttpContentType.RAW:
-                content["content"] = self._render_template(self.typed_config.body.data, state)
+                content["content"] = self._render_template(self.typed_config.body.data, variable_pool)
             case _:
                 raise RuntimeError(f"Content type not supported: {self.typed_config.body.content_type}")
         return content
@@ -165,7 +175,7 @@ class HttpRequestNode(BaseNode):
             case _:
                 raise RuntimeError(f"HttpRequest method not supported: {self.typed_config.method}")
 
-    async def execute(self, state: WorkflowState) -> dict | str:
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict | str:
         """
         Execute the HTTP request node.
 
@@ -176,6 +186,7 @@ class HttpRequestNode(BaseNode):
 
         Args:
             state: Current workflow runtime state.
+            variable_pool: Variable Pool
 
         Returns:
             - dict: Serialized HttpRequestNodeOutput on success
@@ -185,8 +196,8 @@ class HttpRequestNode(BaseNode):
         async with httpx.AsyncClient(
                 verify=self.typed_config.verify_ssl,
                 timeout=self._build_timeout(),
-                headers=self._build_header(state) | self._build_auth(state),
-                params=self._build_params(state),
+                headers=self._build_header(variable_pool) | self._build_auth(variable_pool),
+                params=self._build_params(variable_pool),
                 follow_redirects=True
         ) as client:
             retries = self.typed_config.retry.max_attempts
@@ -194,8 +205,8 @@ class HttpRequestNode(BaseNode):
                 try:
                     request_func = self._get_client_method(client)
                     resp = await request_func(
-                        url=self._render_template(self.typed_config.url, state),
-                        **self._build_content(state)
+                        url=self._render_template(self.typed_config.url, variable_pool),
+                        **self._build_content(variable_pool)
                     )
                     resp.raise_for_status()
                     logger.info(f"Node {self.node_id}: HTTP request succeeded")

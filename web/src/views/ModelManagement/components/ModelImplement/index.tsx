@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:49:12 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:49:12 
+ */
+/**
+ * Model Implementation Component
+ * Manages model implementations with API keys for group models
+ * Allows adding and removing model-API key associations
+ */
+
 import { type FC, useRef } from "react";
 import { useTranslation } from 'react-i18next';
 import { Flex, Button, Space, App } from 'antd'
@@ -7,16 +19,27 @@ import SubModelModal from './SubModelModal'
 import Empty from '@/components/Empty'
 import Tag from '@/components/Tag'
 
+/**
+ * Component props
+ */
 interface ModelImplementProps {
+  /** Model type */
   type?: string;
+  /** Current model list value */
   value?: any;
+  /** Callback when value changes */
   onChange?: (value: any) => void;
 }
+
+/**
+ * Model implementation management component
+ */
 const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
   const { t } = useTranslation();
   const { modal, message } = App.useApp();
   const subModelModalRef = useRef<SubModelModalRef>(null)
 
+  /** Open add implementation modal */
   const handleAdd = () => {
     if (!type || type.trim() === '') {
       message.warning(t('common.selectPlaceholder', { title: t('modelNew.type') }))
@@ -24,6 +47,7 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
     }
     subModelModalRef.current?.handleOpen()
   }
+  /** Delete model implementation */
   const handleDelete = (vo: any) => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: [vo.model_name, vo.api_key].join(' / ') }),
@@ -35,6 +59,7 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
       }
     })
   }
+  /** Refresh model list after adding implementations */
   const handleRefresh = (list: ModelList[]) => {
     const existingModels = value || [];
     let updatedModels = [...existingModels];
@@ -47,6 +72,7 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
     onChange?.([...updatedModels]);
   }
 
+  /** Group models by provider */
   const groupedByProvider: Record<string, ModelList[]> = (value || []).reduce((acc: Record<string, ModelList[]>, item: ModelList) => {
     const provider = item.provider || 'unknown';
     if (!acc[provider]) acc[provider] = [];

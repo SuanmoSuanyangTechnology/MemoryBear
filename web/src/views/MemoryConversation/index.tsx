@@ -1,6 +1,20 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:09:03 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:09:03 
+ */
+/**
+ * Memory Conversation Page
+ * Interactive conversation interface with memory analysis
+ * Supports deep thinking, normal reply, and quick reply modes
+ */
+
 import { type FC, type ReactNode, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Col, Row, App, Skeleton, Space, Select, Flex } from 'antd'
+import dayjs from 'dayjs'
+import type { AnyObject } from 'antd/es/_util/type';
 import clsx from 'clsx'
 
 import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpty.svg'
@@ -19,46 +33,61 @@ import DeepThinkingCheckedIcon from '@/assets/images/conversation/deepThinkingCh
 import OnlineCheckedIcon from '@/assets/images/conversation/onlineChecked.svg'
 import MemoryFunctionCheckedIcon from '@/assets/images/conversation/memoryFunctionChecked.svg'
 import type { ChatItem } from '@/components/Chat/types'
-import dayjs from 'dayjs'
-import type { AnyObject } from 'antd/es/_util/type';
 
 
+/** Search mode configuration */
 const searchSwitchList = [
   {
     icon: DeepThinkingIcon,
     checkedIcon: DeepThinkingCheckedIcon,
     value: '0',
-    label: 'deepThinking' // 深度思考
+    label: 'deepThinking'
   },
   {
     icon: MemoryFunctionIcon,
     checkedIcon: MemoryFunctionCheckedIcon,
     value: '1',
-    label: 'normalReply' // 普通回复
+    label: 'normalReply'
   },
   {
     icon: OnlineIcon,
     checkedIcon: OnlineCheckedIcon,
     value: '2',
-    label: 'quickReply' // 快速回复
+    label: 'quickReply'
   },
 ]
 
+/**
+ * Test parameters for conversation API
+ */
 export interface TestParams {
+  /** End user identifier */
   end_user_id: string;
+  /** User message content */
   message: string;
+  /** Search mode switch (0: deep thinking, 1: normal, 2: quick) */
   search_switch: string;
+  /** Conversation history */
   history: { role: string; content: string }[];
+  /** Enable web search */
   web_search?: boolean;
+  /** Enable memory function */
   memory?: boolean;
+  /** Conversation ID */
   conversation_id?: string;
 }
+/**
+ * Data item in analysis logs
+ */
 interface DataItem {
     id: string;
     question: string;
     type: string;
     reason: string;
   }
+/**
+ * Log item for conversation analysis
+ */
 export interface LogItem {
   type: string;
   title: string;
@@ -72,6 +101,9 @@ export interface LogItem {
   index?: number;
 }
 
+/**
+ * Content wrapper component for analysis items
+ */
 const ContentWrapper: FC<{ children: ReactNode }> = ({ children }) => (
   <div className="rb:p-3 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
     {children}
@@ -89,6 +121,7 @@ const MemoryConversation: FC = () => {
   const [search_switch, setSearchSwitch] = useState('0')
   const [msg, setMsg] = useState<string>('')
 
+  /** Load user list on mount */
   useEffect(() => {
     getUserMemoryList().then(res => {
       setUserList((res as Data[] || []).map(item => ({
@@ -98,6 +131,7 @@ const MemoryConversation: FC = () => {
     })
   }, [])
 
+  /** Handle message send */
   const handleSend = () => {
     if(!userId) {
       message.warning(t('common.inputPlaceholder', { title: t('memoryConversation.userID') }))
@@ -121,6 +155,7 @@ const MemoryConversation: FC = () => {
       })
   }
 
+  /** Handle search mode change */
   const handleChange = (value: string) => {
     setSearchSwitch(value)
   }

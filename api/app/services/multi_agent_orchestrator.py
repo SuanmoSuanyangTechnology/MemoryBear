@@ -14,6 +14,7 @@ from app.services.conversation_state_manager import ConversationStateManager
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
+from app.services.model_service import ModelApiKeyService
 
 logger = get_business_logger()
 
@@ -2569,8 +2570,9 @@ class MultiAgentOrchestrator:
             #     ModelConfig.id == default_model_config_id,
             #     ModelApiKey.is_active.is_(True)
             # ).first()
-            api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
-            api_key_config = api_keys[0] if api_keys else None
+            # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
+            # api_key_config = api_keys[0] if api_keys else None
+            api_key_config = ModelApiKeyService.get_available_api_key(self.db, default_model_config_id)
 
             if not api_key_config:
                 logger.warning("Master Agent 没有可用的 API Key，使用简单整合")
@@ -2600,6 +2602,8 @@ class MultiAgentOrchestrator:
 
             # 调用模型进行整合
             response = await llm.ainvoke(merge_prompt)
+
+            ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
 
             # 提取响应内容
             if hasattr(response, 'content'):
@@ -2730,8 +2734,9 @@ class MultiAgentOrchestrator:
             #     ModelConfig.id == default_model_config_id,
             #     ModelApiKey.is_active.is_(True)
             # ).first()
-            api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
-            api_key_config = api_keys[0] if api_keys else None
+            # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
+            # api_key_config = api_keys[0] if api_keys else None
+            api_key_config = ModelApiKeyService.get_available_api_key(self.db, default_model_config_id)
 
             if not api_key_config:
                 logger.warning("Master Agent 没有可用的 API Key，使用简单整合")
@@ -2789,6 +2794,8 @@ class MultiAgentOrchestrator:
                         if chunk_count <= 5:
                             logger.debug(f"收到流式 chunk #{chunk_count}: {content[:30]}...")
                         yield self._format_sse_event("message", {"content": content})
+
+                ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
 
                 logger.info(f"Master Agent 流式整合完成，共 {chunk_count} 个 chunks")
 

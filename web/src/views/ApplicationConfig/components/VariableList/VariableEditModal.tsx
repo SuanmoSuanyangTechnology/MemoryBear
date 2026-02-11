@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:26:27 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:26:27 
+ */
+/**
+ * Variable Edit Modal
+ * Allows creating and editing application input variables
+ * Supports multiple variable types: text, paragraph, number, dropdown, checkbox, API variable
+ */
+
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Form, Input, Select, InputNumber, Checkbox, Tag, Divider, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -9,10 +21,17 @@ import ApiExtensionModal from './ApiExtensionModal'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface VariableEditModalProps {
+  /** Callback to update variable */
   refreshTable: (values: Variable) => void;
 }
 
+/**
+ * Supported variable types
+ */
 const types = [
   'text', 
   'paragraph', 
@@ -21,6 +40,9 @@ const types = [
   // 'checkbox', 
   // 'apiVariable'
 ]
+/**
+ * Variable type to data type mapping
+ */
 const variableType = {
   text: 'string',
   paragraph: 'string',
@@ -30,6 +52,9 @@ const variableType = {
   apiVariable: 'string',
 }
 
+/**
+ * Modal for editing variables
+ */
 const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProps>(({
   refreshTable
 }, ref) => {
@@ -42,7 +67,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
 
   const values = Form.useWatch([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
@@ -50,6 +75,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
     setEditVo(null)
   };
 
+  /** Open modal with optional variable data */
   const handleOpen = (variable?: Variable) => {
     setVisible(true);
     if (variable) {
@@ -59,7 +85,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
       form.resetFields();
     }
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save variable configuration */
   const handleSave = () => {
     form.validateFields().then((values) => {
       refreshTable({
@@ -70,12 +96,12 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
     })
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
   }));
-  // 变量类型改变时，更新初始化其他字段值
+  /** Handle variable type change */
   const handleChangeType = (value: Variable['type']) => {
     if (value) {
       form.setFieldsValue({
@@ -90,7 +116,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
       })
     }
   }
-  // 添加 API 扩展
+  /** Add API extension */
   const addApiExtension = () => {
     apiExtensionModalRef.current?.handleOpen()
   }
@@ -111,7 +137,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
           layout="vertical"
           scrollToFirstError={{ behavior: 'instant', block: 'end', focus: true }}
         >
-          {/* 变量类型 */}
+          {/* Variable Type */}
           <FormItem
             name="type"
             label={t('application.variableType')}
@@ -128,7 +154,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               optionRender={(props) => <div className="rb:flex rb:justify-between rb:items-center">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></div>}
             />
           </FormItem>
-          {/* 变量名称 */}
+          {/* Variable Name */}
           <FormItem
             name="name"
             label={t('application.variableName')}
@@ -146,7 +172,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               }}
             />
           </FormItem>
-          {/* 显示名称 */}
+          {/* Display Name */}
           <FormItem
             name="display_name"
             label={t('application.displayName')}
@@ -154,14 +180,14 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
           >
             <Input placeholder={t('common.enter')} />
           </FormItem>
-          {/* 描述 */}
+          {/* Description */}
           <FormItem
             name="description"
             label={t('application.description')}
           >
             <Input placeholder={t('common.enter')} />
           </FormItem>
-          {/* 最大长度 */}
+          {/* Max Length */}
           {['text', 'paragraph'].includes(values?.type) && (
             <FormItem
               name="max_length"
@@ -170,7 +196,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
             </FormItem>
           )}
-          {/* 默认值 */}
+          {/* Default Value */}
           {/* {['text', 'paragraph', 'number', 'checkbox'].includes(values?.type) && (
             <FormItem
               name="default_value"
@@ -182,7 +208,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               {['checkbox'].includes(values.type) && <Select options={[{ value: true, label: t('application.defaultChecked') }, { value: false, label: t('application.notDefaultChecked') }]} />}
             </FormItem>
           )} */}
-          {/* 选项 */}
+          {/* Options */}
           {['dropdownOptions'].includes(values?.type) && (
             <FormItem
               name="options"
@@ -191,7 +217,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               <SortableList />
             </FormItem>
           )}
-          {/* API 扩展 */}
+          {/* API Extension */}
           {['apiVariable'].includes(values?.type) && (
             <FormItem
               name="api_extension"
@@ -211,14 +237,14 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               />
             </FormItem>
           )}
-          {/* 是否必填 */}
+          {/* Required */}
           <FormItem
             name="required"
             valuePropName="checked"
           >
             <Checkbox>{t('application.required')}</Checkbox>
           </FormItem>
-          {/* 是否隐藏 */}
+          {/* Hidden */}
           {/* <FormItem
             name="hidden"
             valuePropName="checked"

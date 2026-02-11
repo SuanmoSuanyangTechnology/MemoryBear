@@ -29,7 +29,7 @@ from app.core.storage_exceptions import (
     StorageUploadError,
 )
 from app.db import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_share_user_id, ShareTokenData
 from app.models.file_metadata_model import FileMetadata
 from app.models.user_model import User
 from app.schemas.response_schema import ApiResponse
@@ -136,6 +136,141 @@ async def upload_file(
         )
 
     api_logger.info(f"File upload successful: {file.filename} (file_id: {file_id})")
+
+    return success(
+        data={"file_id": str(file_id), "file_key": file_key},
+        msg="File upload successful"
+    )
+
+
+@router.post("/share/files", response_model=ApiResponse)
+async def upload_file_with_share_token(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    share_data: ShareTokenData = Depends(get_share_user_id),
+    storage_service: FileStorageService = Depends(get_file_storage_service),
+):
+    """
+    Upload a file to the configured storage backend using share_token authentication.
+    """
+    from app.services.release_share_service import ReleaseShareService
+    from app.models.app_model import App
+    from app.models.workspace_model import Workspace
+    
+    # Get share and release info from share_token
+    service = ReleaseShareService(db)
+    share_info = service.get_shared_release_info(share_token=share_data.share_token)
+    
+    # Get share object to access app_id
+    share = service.repo.get_by_share_token(share_data.share_token)
+    if not share:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shared app not found"
+        )
+    
+    # Get app to access workspace_id
+    app = db.query(App).filter(
+        App.id == share.app_id,
+        App.is_active.is_(True)
+    ).first()
+    
+    if not app:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="App not found"
+        )
+    
+    # Get workspace to access tenant_id
+    workspace = db.query(Workspace).filter(
+        Workspace.id == app.workspace_id
+    ).first()
+    
+    if not workspace:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found"
+        )
+    
+    tenant_id = workspace.tenant_id
+    workspace_id = app.workspace_id
+
+    api_logger.info(
+        f"Storage upload request (share): tenant_id={tenant_id}, workspace_id={workspace_id}, "
+        f"filename={file.filename}, share_token={share_data.share_token}"
+    )
+
+    # Read file contents
+    contents = await file.read()
+    file_size = len(contents)
+
+    # Validate file size
+    if file_size == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The file is empty."
+        )
+
+    if file_size > settings.MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"The file size exceeds the {settings.MAX_FILE_SIZE} byte limit"
+        )
+
+    # Extract file extension
+    _, file_extension = os.path.splitext(file.filename)
+    file_ext = file_extension.lower()
+
+    # Generate file_id and file_key
+    file_id = uuid.uuid4()
+    file_key = generate_file_key(
+        tenant_id=tenant_id,
+        workspace_id=workspace_id,
+        file_id=file_id,
+        file_ext=file_ext,
+    )
+
+    # Create file metadata record with pending status
+    file_metadata = FileMetadata(
+        id=file_id,
+        tenant_id=tenant_id,
+        workspace_id=workspace_id,
+        file_key=file_key,
+        file_name=file.filename,
+        file_ext=file_ext,
+        file_size=file_size,
+        content_type=file.content_type,
+        status="pending",
+    )
+    db.add(file_metadata)
+    db.commit()
+    db.refresh(file_metadata)
+
+    # Upload file to storage backend
+    try:
+        await storage_service.upload_file(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            file_id=file_id,
+            file_ext=file_ext,
+            content=contents,
+            content_type=file.content_type,
+        )
+        # Update status to completed
+        file_metadata.status = "completed"
+        db.commit()
+        api_logger.info(f"File uploaded to storage (share): file_key={file_key}")
+    except StorageUploadError as e:
+        # Update status to failed
+        file_metadata.status = "failed"
+        db.commit()
+        api_logger.error(f"Storage upload failed (share): {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"File storage failed: {str(e)}"
+        )
+
+    api_logger.info(f"File upload successful (share): {file.filename} (file_id: {file_id})")
 
     return success(
         data={"file_id": str(file_id), "file_key": file_key},

@@ -1,9 +1,3 @@
-"""
-安全的表达式求值器
-
-使用 simpleeval 库提供安全的表达式评估，避免代码注入攻击。
-"""
-
 import logging
 import re
 from typing import Any
@@ -14,160 +8,119 @@ logger = logging.getLogger(__name__)
 
 
 class ExpressionEvaluator:
-    """安全的表达式求值器"""
+    """Safe expression evaluator for workflow variables and node outputs."""
     
-    # 保留的命名空间
+    # Reserved namespaces
     RESERVED_NAMESPACES = {"var", "node", "sys", "nodes"}
     
     @staticmethod
     def evaluate(
         expression: str,
-        variables: dict[str, Any],
+        conv_vars: dict[str, Any],
         node_outputs: dict[str, Any],
         system_vars: dict[str, Any] | None = None
     ) -> Any:
-        """安全地评估表达式
-        
-        Args:
-            expression: 表达式字符串，如 "{{var.score}} > 0.8"
-            variables: 用户定义的变量
-            node_outputs: 节点输出结果
-            system_vars: 系统变量
-        
-        Returns:
-            表达式求值结果
-        
-        Raises:
-            ValueError: 表达式无效或求值失败
-        
-        Examples:
-            >>> evaluator = ExpressionEvaluator()
-            >>> evaluator.evaluate(
-            ...     "var.score > 0.8",
-            ...     {"score": 0.9},
-            ...     {},
-            ...     {}
-            ... )
-            True
-            
-            >>> evaluator.evaluate(
-            ...     "node.intent.output == '售前咨询'",
-            ...     {},
-            ...     {"intent": {"output": "售前咨询"}},
-            ...     {}
-            ... )
-            True
         """
-        # 移除 Jinja2 模板语法的花括号（如果存在）
+        Safely evaluate an expression using workflow variables.
+
+        Args:
+            expression (str): The expression string, e.g., "var.score > 0.8"
+            conv_vars (dict): Conversation-level variables
+            node_outputs (dict): Outputs from workflow nodes
+            system_vars (dict, optional): System variables
+
+        Returns:
+            Any: Result of the evaluated expression
+
+        Raises:
+            ValueError: If the expression is invalid or evaluation fails
+        """
+        # Remove Jinja2-style brackets if present
         expression = expression.strip()
-        # "{{system.message}} == {{ user.messge }}" -> "system.message == user.message"
         pattern = r"\{\{\s*(.*?)\s*\}\}"
         expression = re.sub(pattern, r"\1", expression).strip()
 
-        # 构建命名空间上下文
+        # Build context for evaluation
         context = {
-            "var": variables,                    # 用户变量
-            "node": node_outputs,                # 节点输出
-            "sys": system_vars or {},            # 系统变量
+            "conv": conv_vars,                   # conversation variables
+            "node": node_outputs,                # node outputs
+            "sys": system_vars or {},            # system variables
         }
-        
-        # 为了向后兼容，也支持直接访问（但会在日志中警告）
-        context.update(variables)
+
+        context.update(conv_vars)
         context["nodes"] = node_outputs
         context.update(node_outputs)
         
         try:
-            # simpleeval 只支持安全的操作：
-            # - 算术运算: +, -, *, /, //, %, **
-            # - 比较运算: ==, !=, <, <=, >, >=
-            # - 逻辑运算: and, or, not
-            # - 成员运算: in, not in
-            # - 属性访问: obj.attr
-            # - 字典/列表访问: obj["key"], obj[0]
-            # 不支持：函数调用、导入、赋值等危险操作
+            # simpleeval supports safe operations:
+            # arithmetic, comparisons, logical ops, attribute/dict/list access
             result = simple_eval(expression, names=context)
             return result
             
         except NameNotDefined as e:
-            logger.error(f"表达式中引用了未定义的变量: {expression}, 错误: {e}")
-            raise ValueError(f"未定义的变量: {e}")
+            logger.error(f"Undefined variable in expression: {expression}, error: {e}")
+            raise ValueError(f"Undefined variable: {e}")
             
         except InvalidExpression as e:
-            logger.error(f"表达式语法无效: {expression}, 错误: {e}")
-            raise ValueError(f"表达式语法无效: {e}")
+            logger.error(f"Invalid expression syntax: {expression}, error: {e}")
+            raise ValueError(f"Invalid expression syntax: {e}")
             
         except SyntaxError as e:
-            logger.error(f"表达式语法错误: {expression}, 错误: {e}")
-            raise ValueError(f"表达式语法错误: {e}")
+            logger.error(f"Syntax error in expression: {expression}, error: {e}")
+            raise ValueError(f"Syntax error: {e}")
             
         except Exception as e:
-            logger.error(f"表达式求值异常: {expression}, 错误: {e}")
-            raise ValueError(f"表达式求值失败: {e}")
+            logger.error(f"Expression evaluation failed: {expression}, error: {e}")
+            raise ValueError(f"Expression evaluation failed: {e}")
     
     @staticmethod
     def evaluate_bool(
         expression: str,
-        variables: dict[str, Any],
+        conv_var: dict[str, Any],
         node_outputs: dict[str, Any],
         system_vars: dict[str, Any] | None = None
     ) -> bool:
-        """评估布尔表达式（用于条件判断）
-        
+        """
+        Evaluate a boolean expression (for conditions).
+
         Args:
-            expression: 布尔表达式
-            variables: 用户变量
-            node_outputs: 节点输出
-            system_vars: 系统变量
-        
+            expression (str): Boolean expression
+            conv_var (dict): Conversation variables
+            node_outputs (dict): Node outputs
+            system_vars (dict, optional): System variables
+
         Returns:
-            布尔值结果
-        
-        Examples:
-            >>> ExpressionEvaluator.evaluate_bool(
-            ...     "var.count >= 10 and var.status == 'active'",
-            ...     {"count": 15, "status": "active"},
-            ...     {},
-            ...     {}
-            ... )
-            True
+            bool: Boolean result
         """
         result = ExpressionEvaluator.evaluate(
-            expression, variables, node_outputs, system_vars
+            expression, conv_var, node_outputs, system_vars
         )
         return bool(result)
     
     @staticmethod
     def validate_variable_names(variables: list[dict]) -> list[str]:
-        """验证变量名是否合法
-        
+        """
+        Validate variable names for legality.
+
         Args:
-            variables: 变量定义列表
-        
+            variables (list[dict]): List of variable definitions
+
         Returns:
-            错误列表，如果为空则验证通过
-        
-        Examples:
-            >>> ExpressionEvaluator.validate_variable_names([
-            ...     {"name": "user_input"},
-            ...     {"name": "var"}  # 保留字
-            ... ])
-            ["变量名 'var' 是保留的命名空间，请使用其他名称"]
+            list[str]: List of error messages. Empty if all names are valid.
         """
         errors = []
         
         for var in variables:
             var_name = var.get("name", "")
-            
-            # 检查是否为保留命名空间
+
             if var_name in ExpressionEvaluator.RESERVED_NAMESPACES:
                 errors.append(
-                    f"变量名 '{var_name}' 是保留的命名空间，请使用其他名称"
+                    f"Variable name '{var_name}' is a reserved namespace, please use another name"
                 )
-            
-            # 检查是否为有效的 Python 标识符
+
             if not var_name.isidentifier():
                 errors.append(
-                    f"变量名 '{var_name}' 不是有效的标识符"
+                    f"Variable name '{var_name}' is not a valid Python identifier"
                 )
         
         return errors
@@ -176,23 +129,23 @@ class ExpressionEvaluator:
 # 便捷函数
 def evaluate_expression(
     expression: str,
-    variables: dict[str, Any],
+    conv_var: dict[str, Any],
     node_outputs: dict[str, Any],
-    system_vars: dict[str, Any] | None = None
+    system_vars: dict[str, Any]
 ) -> Any:
-    """评估表达式（便捷函数）"""
+    """Evaluate an expression (convenience function)."""
     return ExpressionEvaluator.evaluate(
-        expression, variables, node_outputs, system_vars
+        expression, conv_var, node_outputs, system_vars
     )
 
 
 def evaluate_condition(
     expression: str,
-    variables: dict[str, Any],
+    conv_var: dict[str, Any],
     node_outputs: dict[str, Any],
     system_vars: dict[str, Any] | None = None
 ) -> bool:
-    """评估条件表达式（便捷函数）"""
+    """Evaluate a boolean condition expression (convenience function)."""
     return ExpressionEvaluator.evaluate_bool(
-        expression, variables, node_outputs, system_vars
+        expression, conv_var, node_outputs, system_vars
     )

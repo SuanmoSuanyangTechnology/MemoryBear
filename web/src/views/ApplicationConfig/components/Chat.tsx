@@ -1,9 +1,21 @@
-import { type FC, useEffect, useState } from 'react';
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:27:39 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-10 17:40:15
+ */
+/**
+ * Chat debugging component for application testing
+ * Supports both single agent and multi-agent cluster modes
+ * Provides real-time streaming responses and conversation history
+ */
+
+import { type FC, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
-import { Input, Form } from 'antd'
+import { Flex, Dropdown, type MenuProps } from 'antd'
+
 import ChatIcon from '@/assets/images/application/chat.png'
-import ChatSendIcon from '@/assets/images/application/chatSend.svg'
 import DebuggingEmpty from '@/assets/images/application/debuggingEmpty.png'
 import type { ChatData, Config } from '../types'
 import { runCompare, draftRun } from '@/api/application'
@@ -11,37 +23,62 @@ import Empty from '@/components/Empty'
 import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
 import { type SSEMessage } from '@/utils/stream'
+import ChatInput from '@/components/Chat/ChatInput'
+import UploadFiles from '@/views/Conversation/components/FileUpload'
+// import AudioRecorder from '@/components/AudioRecorder'
+import UploadFileListModal from '@/views/Conversation/components/UploadFileListModal'
+import type { UploadFileListModalRef } from '@/views/Conversation/types'
 
+/**
+ * Component props
+ */
 interface ChatProps {
+  /** List of chat configurations for comparison */
   chatList: ChatData[];
+  /** Application configuration data */
   data: Config;
+  /** Update chat list state */
   updateChatList: React.Dispatch<React.SetStateAction<ChatData[]>>;
+  /** Save configuration before running */
   handleSave: (flag?: boolean) => Promise<unknown>;
+  /** Source type: multi-agent cluster or single agent */
   source?: 'multi_agent' | 'agent';
 }
+
+/**
+ * Chat debugging component
+ * Allows testing application with different model configurations side-by-side
+ */
 const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, source = 'agent' }) => {
   const { t } = useTranslation();
-  const [form] = Form.useForm<{ message: string }>()
   const [loading, setLoading] = useState(false)
   const [isCluster, setIsCluster] = useState(source === 'multi_agent')
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [compareLoading, setCompareLoading] = useState(false)
+  const [fileList, setFileList] = useState<any[]>([])
+  const [message, setMessage] = useState<string | undefined>(undefined)
+  const uploadFileListModalRef = useRef<UploadFileListModalRef>(null)
 
   useEffect(() => {
     setIsCluster(source === 'multi_agent')
+    setFileList([])
+    setMessage(undefined)
   }, [source])
 
-  const addUserMessage = (message: string) => {
+  /** Add user message to all chat lists */
+  const addUserMessage = (message: string, files: any[]) => {
     const newUserMessage: ChatItem = {
       role: 'user',
       content: message,
       created_at: Date.now(),
+      files
     };
     updateChatList(prev => prev.map(item => ({
       ...item,
       list: [...(item.list || []), newUserMessage]
     })))
   }
+  /** Add empty assistant message placeholder */
   const addAssistantMessage = () => {
     const assistantMessage: ChatItem = {
       role: 'assistant',
@@ -65,6 +102,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       })))
     }
   }
+  /** Update assistant message with streaming content */
   const updateAssistantMessage = (content?: string, model_config_id?: string, conversation_id?: string) => {
     if (!content || !model_config_id) return
     updateChatList(prev => {
@@ -92,6 +130,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       return prev;
     })
   }
+  /** Update assistant message when error occurs */
   const updateErrorAssistantMessage  = (message_length: number, model_config_id?: string) => {
     if (message_length > 0 || !model_config_id) return
 
@@ -120,17 +159,19 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       return prev
     })
   }
-  const handleSend = () => {
+  /** Send message for agent comparison mode */
+  const handleSend = (msg?: string) => {
     if (loading) return
     setLoading(true)
     setCompareLoading(true)
     handleSave(false)
       .then(() => {
-        const message = form.getFieldValue('message')
+        const message = msg
         if (!message?.trim()) return
 
-        addUserMessage(message)
-        form.setFieldsValue({ message: undefined })
+        addUserMessage(message, fileList)
+        setMessage(message)
+        setFileList([])
         addAssistantMessage()
 
         const handleStreamMessage = (data: SSEMessage[]) => {
@@ -156,6 +197,17 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
         setTimeout(() => {
           runCompare(data.app_id, {
             message,
+            files: fileList.map(file => {
+              if (file.url) {
+                return file
+              } else {
+                return {
+                  type: file.type,
+                  transfer_method: 'local_file',
+                  upload_file_id: file.response.data.file_id
+                }
+              }
+            }),
             models: chatList.map(item => ({
               model_config_id: item.model_config_id,
               label: item.label,
@@ -176,6 +228,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       })
   }
 
+  /** Add assistant message for cluster mode */
   const addClusterAssistantMessage = () => {
     const assistantMessage: ChatItem = {
       role: 'assistant',
@@ -187,6 +240,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       list: [...(item.list || []), assistantMessage]
     })))
   }
+  /** Update cluster assistant message with content */
   const updateClusterAssistantMessage = (content?: string) => {
     if (!content) return
     updateChatList(prev => {
@@ -209,6 +263,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       return [...modelChatList]
     })
   }
+  /** Update cluster message when error occurs */
   const updateClusterErrorAssistantMessage  = (message_length: number) => {
     if (message_length > 0) return
 
@@ -232,16 +287,18 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       return [...modelChatList]
     })
   }
-  const handleClusterSend = () => {
+  /** Send message for cluster mode */
+  const handleClusterSend = (msg?: string) => {
     if (loading) return
     setLoading(true)
     setCompareLoading(true)
     handleSave(false)
       .then(() => {
-        const message = form.getFieldValue('message')
+        const message = msg
         if (!message || message.trim() === '') return
-        addUserMessage(message)
-        form.setFieldsValue({ message: undefined })
+        addUserMessage(message, fileList)
+        setMessage(undefined)
+        setFileList([])
         addClusterAssistantMessage()
 
         const handleStreamMessage = (data: SSEMessage[]) => {
@@ -278,7 +335,18 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
               { 
                 message, 
                 conversation_id: conversationId, 
-                stream: true 
+                stream: true,
+                files: fileList.map(file => {
+                  if (file.url) {
+                    return file
+                  } else {
+                    return {
+                      type: file.type,
+                      transfer_method: 'local_file',
+                      upload_file_id: file.response.data.file_id
+                    }
+                  }
+                }),
               }, 
               handleStreamMessage
             )
@@ -291,12 +359,37 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       })
   }
 
+  /** Delete chat configuration from list */
   const handleDelete = (index: number) => {
     updateChatList(chatList.filter((_, voIndex) => voIndex !== index))
   }
+  const handleMessageChange = (message: string) => {
+    setMessage(message)
+  }
+  const fileChange = (file?: any) => {
+    setFileList([...fileList, file])
+  }
+  // const handleRecordingComplete = async (file: any) => {
+  //   console.log('file', file)
+  // }
+
+  const handleShowUpload: MenuProps['onClick'] = ({ key }) => {
+    switch(key) {
+      case 'define':
+        uploadFileListModalRef.current?.handleOpen()
+        break
+    }
+  }
+  const addFileList = (list?: any[]) => {
+    if (!list || list.length <= 0) return
+    setFileList([...fileList, ...(list || [])])
+  }
+  const updateFileList = (list?: any[]) => {
+    setFileList([...list || []])
+  }
 
   return (
-    <div className="rb:relative rb:h-[calc(100vh-110px)]">
+    <div className="rb:relative rb:h-full rb:flex rb:flex-col">
       {chatList.length === 0
         ? <Empty 
           url={DebuggingEmpty} 
@@ -306,12 +399,9 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
           className="rb:h-full"
         />
       : <>
-        <div className={clsx(`rb:grid rb:grid-cols-${chatList.length} rb:overflow-hidden rb:w-full`, {
-          'rb:h-[calc(100vh-236px)]': !isCluster,
-          'rb:h-[calc(100%-76px)]': isCluster,
-        })}>
+        <div className={clsx(`rb:relative rb:grid rb:grid-cols-${chatList.length} rb:overflow-hidden rb:w-full rb:flex-1 rb:min-h-0`)}>
           {chatList.map((chat, index) => (
-            <div key={index} className={clsx('rb:h-full rb:flex rb:flex-col', {
+            <div key={index} className={clsx('rb:flex rb:flex-col', {
               "rb:border-r rb:border-[#DFE4ED]": index !== chatList.length - 1 && chatList.length > 1,
             })}>
               {chat.label &&
@@ -333,9 +423,9 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
               }
               <ChatContent
                 classNames={{
-                  'rb:mx-[16px] rb:pt-[24px]': true,
-                  'rb:h-[calc(100vh-186px)]': isCluster,
-                  'rb:h-[calc(100vh-286px)]': !isCluster,
+                  'rb:mx-[16px] rb:mt-6': true,
+                  'rb:h-[calc(100vh-282px)]': isCluster,
+                  'rb:h-[calc(100vh-380px)]': !isCluster,
                 }} 
                 contentClassNames={{
                   'rb:max-w-[400px]!': chatList.length === 1,
@@ -350,26 +440,56 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
                 labelFormat={(item) => item.role === 'user' ? t('application.you') : chat.label}
                 errorDesc={t('application.ReplyException')}
               />
-              
             </div>
           ))}
         </div>
-        <div className="rb:flex rb:items-center rb:gap-2.5 rb:p-4">
-          <Form form={form} style={{width: 'calc(100% - 54px)'}}>
-            <Form.Item name="message" className="rb:mb-0!">
-              <Input 
-                className="rb:h-11 rb:shadow-[0px_2px_8px_0px_rgba(33,35,50,0.1)]" 
-                placeholder={t('application.chatPlaceholder')}
-                onPressEnter={isCluster ? handleClusterSend : handleSend}
-              />
-            </Form.Item>
-          </Form>
-          <img src={ChatSendIcon} className={clsx("rb:w-11 rb:h-11 rb:cursor-pointer", {
-            'rb:opacity-50': loading,
-          })} onClick={isCluster ? handleClusterSend : handleSend} />
+        <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:m-4 rb:mb-1">
+          <ChatInput
+            message={message}
+            className="rb:relative!"
+            loading={loading}
+            fileChange={updateFileList}
+            fileList={fileList}
+            onSend={isCluster ? handleClusterSend : handleSend}
+            onChange={handleMessageChange}
+          >
+            <Flex justify="space-between" className="rb:flex-1">
+              <Flex gap={8} align="center">
+                <Dropdown
+                  menu={{
+                    items: [
+                      { key: 'define', label: t('memoryConversation.addRemoteFile') },
+                      {
+                        key: 'upload', label: (
+                          <UploadFiles
+                            fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']}
+                            onChange={fileChange}
+                          />
+                        )
+                      },
+                    ],
+                    onClick: handleShowUpload
+                  }}
+                >
+                  <div
+                    className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')] rb:hover:bg-[url('@/assets/images/conversation/link_hover.svg')]"
+                  ></div>
+                </Dropdown>
+              </Flex>
+              {/* <Flex align="center">
+                <AudioRecorder onRecordingComplete={handleRecordingComplete} />
+                <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
+              </Flex> */}
+            </Flex>
+          </ChatInput>
         </div>
       </>
       }
+
+      <UploadFileListModal
+        ref={uploadFileListModalRef}
+        refresh={addFileList}
+      />
     </div>
   )
 }

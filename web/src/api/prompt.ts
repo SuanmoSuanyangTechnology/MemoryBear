@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 14:00:17 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 14:00:17 
+ */
 import { request } from '@/utils/request'
 import type { AiPromptForm } from '@/views/ApplicationConfig/types'
 import type { PromptReleaseData } from '@/views/Prompt/types'

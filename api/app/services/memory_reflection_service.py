@@ -108,18 +108,26 @@ class WorkspaceAppService:
             app_info["releases"].append(release_info)
 
     def _extract_memory_content(self, config: Any) -> str:
-        """Extract memory_comtent from config"""
+        """Extract memory_config_id from config (兼容新旧字段名)"""
         if not config or not isinstance(config, dict):
             return None
 
         memory_obj = config.get('memory')
         if memory_obj and isinstance(memory_obj, dict):
-            return memory_obj.get('memory_content')
+            # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
+            return memory_obj.get('memory_config_id') or memory_obj.get('memory_content')
 
         return None
 
     def _get_memory_config(self, memory_content: str) -> Dict[str, Any]:
-        """Retrieve memory_config information based on memory_content"""
+        """Retrieve memory_config information based on memory_content
+        
+        Args:
+            memory_content: Memory config ID string
+            
+        Returns:
+            Dict containing memory config info including workspace_id for model fallback
+        """
         try:
             memory_content = resolve_config_id(memory_content, self.db)
             memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, (memory_content))
@@ -127,6 +135,7 @@ class WorkspaceAppService:
             if memory_config_result:
                 return {
                     "config_id": memory_content,
+                    "workspace_id": memory_config_result.workspace_id,
                     "enable_self_reflexion": memory_config_result.enable_self_reflexion,
                     "iteration_period": memory_config_result.iteration_period,
                     "reflexion_range": memory_config_result.reflexion_range,
@@ -358,11 +367,29 @@ class MemoryReflectionService:
             }
 
     def _create_reflection_config_from_data(self, config_data: Dict[str, Any]) -> ReflectionConfig:
-        """Create reflective configuration objects from configuration data"""
+        """Create reflective configuration objects from configuration data
+        
+        If reflection_model_id is not set, falls back to workspace default LLM.
+        
+        Args:
+            config_data: Dict containing reflection config including workspace_id
+            
+        Returns:
+            ReflectionConfig object with model_id resolved
+        """
+        from app.repositories.workspace_repository import get_workspace_models_configs
 
         reflexion_range_value = config_data.get("reflexion_range")
         if reflexion_range_value is None or reflexion_range_value == "":
             reflexion_range_value = "partial"
+        
+        # Map legacy/invalid values to valid enum values
+        reflexion_range_mapping = {
+            "retrieval": "partial",  # Map old 'retrieval' to 'partial'
+            "partial": "partial",
+            "all": "all"
+        }
+        reflexion_range_value = reflexion_range_mapping.get(reflexion_range_value, "partial")
         reflexion_range = ReflectionRange(reflexion_range_value)
 
         baseline_value = config_data.get("baseline")
@@ -370,13 +397,30 @@ class MemoryReflectionService:
             baseline_value = "TIME"
         baseline = ReflectionBaseline(baseline_value)
 
-        # iteration_period =
+        # iteration_period
         iteration_period = config_data.get("iteration_period", 24)
         if isinstance(iteration_period, str):
             try:
                 iteration_period = int(iteration_period)
             except (ValueError, TypeError):
                 iteration_period = 24  # 默认24小时
+        
+        # 获取 model_id 并转换为字符串（如果是 UUID 对象）
+        reflection_model_id = config_data.get("reflection_model_id", "")
+        if reflection_model_id:
+            reflection_model_id = str(reflection_model_id)
+        
+        # 如果 reflection_model_id 为空，回退到工作空间默认 LLM
+        if not reflection_model_id:
+            workspace_id = config_data.get("workspace_id")
+            if workspace_id:
+                workspace_models = get_workspace_models_configs(self.db, workspace_id)
+                if workspace_models and workspace_models.get("llm"):
+                    reflection_model_id = workspace_models["llm"]
+                    api_logger.info(
+                        f"reflection_model_id 为空，使用工作空间默认 LLM: {reflection_model_id}"
+                    )
+        
         return ReflectionConfig(
             enabled=config_data.get("enable_self_reflexion", False),
             iteration_period=str(iteration_period),  # ReflectionConfig期望字符串
@@ -384,7 +428,7 @@ class MemoryReflectionService:
             baseline=baseline,
             memory_verify=config_data.get("memory_verify", False),
             quality_assessment=config_data.get("quality_assessment", False),
-            model_id=config_data.get("reflection_model_id", "")
+            model_id=reflection_model_id
         )
     
     async def _execute_reflection_engine(

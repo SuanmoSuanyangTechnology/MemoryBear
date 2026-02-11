@@ -1,16 +1,33 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:34:16 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:34:16 
+ */
 import { type FC, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react';
+
 import Loading from '@/components/Empty/Loading'
 import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
 
+/**
+ * Props for ActivationMetricsPieCard component
+ * @property {Array<Record<string, string | number>>} chartData - Activation value distribution data
+ * @property {boolean} loading - Loading state
+ */
 interface ActivationMetricsPieCardProps {
   chartData: Array<Record<string, string | number>>;
   loading: boolean;
 }
 const Colors = ['#155EEF', '#FFB048', '#FF5D34']
 
+/**
+ * ActivationMetricsPieCard Component
+ * Displays activation value distribution as a donut chart with legend
+ * Shows percentage distribution of different activation levels
+ */
 const ActivationMetricsPieCard: FC<ActivationMetricsPieCardProps> = ({ chartData, loading }) => {
   const { t } = useTranslation()
   const chartRef = useRef<ReactEcharts>(null);

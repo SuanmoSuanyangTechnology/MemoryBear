@@ -1,9 +1,24 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:30:51 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:30:51 
+ */
+/**
+ * Card Component
+ * Collapsible card wrapper for configuration sections
+ */
+
 import { type FC, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx';
+
 import RbCard from '@/components/RbCard/Card'
 import down from '@/assets/images/userMemory/down.svg'
 
+/**
+ * Component props
+ */
 interface CardProps {
   type?: string;
   title: string | ReactNode;
@@ -35,7 +50,7 @@ const Card: FC<CardProps> = ({
       headerType="borderless"
       extra={type && handleExpand && (
         <div 
-          className="rb:flex rb:items-center rb:text-[14px] rb:text-[#5B6167] rb:cursor-pointer rb:font-regular rb:leading-[20px]" 
+          className="rb:flex rb:items-center rb:text-[14px] rb:text-[#5B6167] rb:cursor-pointer rb:font-regular rb:leading-5" 
           onClick={() => handleExpand(type)}
         >
           {expanded ? t('common.foldUp') : t('common.expanded')}

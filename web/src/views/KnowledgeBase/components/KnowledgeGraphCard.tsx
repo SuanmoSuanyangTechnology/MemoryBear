@@ -15,7 +15,7 @@ import { type KnowledgeBase } from '../types';
 import Empty from '@/components/Empty';
 interface KnowledgeGraphCardProps {
   knowledgeBase?: KnowledgeBase;
-  onRebuildGraph?: () => void; // 添加重建图谱的回调函数
+  onRebuildGraph?: () => void; // Callback function to rebuild graph
 }
 
 const KnowledgeGraphCard: React.FC<KnowledgeGraphCardProps> = ({ knowledgeBase, onRebuildGraph }) => {
@@ -23,7 +23,7 @@ const KnowledgeGraphCard: React.FC<KnowledgeGraphCardProps> = ({ knowledgeBase, 
   const [data, setData] = useState<KnowledgeGraphResponse | undefined>()
   const [loading, setLoading] = useState(true)
   const handleRebuildGraph = () => {
-    // 调用父组件传递的回调函数来打开CreateModal并传递重建标识
+    // Call parent component's callback to open CreateModal with rebuild flag
     if (onRebuildGraph) {
       onRebuildGraph();
     }
@@ -38,15 +38,15 @@ const KnowledgeGraphCard: React.FC<KnowledgeGraphCardProps> = ({ knowledgeBase, 
       setLoading(true)
       try {
         const res = await getKnowledgeGraph(knowledgeBase?.id)
-        // 判断 res.graph 是否为空对象或不存在
+        // Check if res.graph is empty object or doesn't exist
         const graphResponse = res as KnowledgeGraphResponse;
         if (!graphResponse || !graphResponse.graph || Object.keys(graphResponse.graph).length === 0) {
-          setData(undefined) // 设置为 undefined 以显示 empty 状态
+          setData(undefined) // Set to undefined to show empty state
         } else {
           setData(graphResponse)
         }
       } catch (error) {
-        console.error('获取知识图谱数据失败:', error)
+        console.error('Failed to fetch knowledge graph data:', error)
       } finally {
         setLoading(false)
       }

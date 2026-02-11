@@ -1,11 +1,26 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:32:30 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:32:30 
+ */
+/**
+ * Page Header Component
+ * Header with navigation and operation buttons
+ */
+
 import { type FC, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Layout, Space, Button } from 'antd';
+import { Layout, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
+
 import logoutIcon from '@/assets/images/logout_hover.svg'
 
 const { Header } = Layout;
 
+/**
+ * Component props
+ */
 interface ConfigHeaderProps {
   name?: string;
   operation?: ReactNode;
@@ -21,6 +36,7 @@ const PageHeader: FC<ConfigHeaderProps> = ({
   const { t } = useTranslation();
   const navigate = useNavigate();
 
+  /** Navigate back */
   const goBack = () => {
     if (source === 'detail') {
       navigate('/user-memory', { replace: true })

@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:44:09 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:44:09 
+ */
+/**
+ * Prompt Management Page
+ * Main page with editor and history tabs for prompt optimization
+ */
+
 import { type FC, useState } from 'react';
 import { type SegmentedProps, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +19,7 @@ import PromptEditor from './Prompt';
 import History from './History'
 import type { HistoryQuery, HistoryItem } from './types';
 
+/** Available tab keys */
 const tabs = ['editor', 'history']
 const Prompt: FC = () => {
   const { t } = useTranslation();
@@ -15,19 +27,23 @@ const Prompt: FC = () => {
   const [query, setQuery] = useState<HistoryQuery>({});
   const [editVo, setEditVo] = useState<HistoryItem | null>(null)
 
+  /** Handle tab change */
   const handleChangeTab = (value: SegmentedProps['value']) => {
     setActiveTab(value)
     setEditVo(null)
     setQuery({})
   }
+  /** Handle search in history */
   const handleSearch = (value?: string) => {
     setQuery(prev => ({ ...prev, keyword: value }))
   }
+  /** Handle edit history item */
   const handleEdit = (item: HistoryItem) => {
     console.log('edit', item)
     setEditVo(item)
     setActiveTab('editor')
   }
+  /** Refresh editor state */
   const refresh = () => {
     setEditVo(null)
   }

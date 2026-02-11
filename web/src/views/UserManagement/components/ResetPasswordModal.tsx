@@ -1,10 +1,21 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:51:29 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:51:29 
+ */
+/**
+ * Reset Password Modal
+ * Modal for resetting user password with auto-generate option
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Button, Row, Col } from 'antd';
 import { useTranslation } from 'react-i18next';
 import copy from 'copy-to-clipboard'
+
 import { randomString } from '@/utils/common'
 import { useUser } from '@/store/user';
-
 import type { ResetPasswordModalRef, User } from '../types'
 import RbModal from '@/components/RbModal'
 import { changePassword } from '@/api/user'
@@ -20,19 +31,20 @@ const ResetPasswordModal = forwardRef<ResetPasswordModalRef, { source?: 'resetPa
 
   const values = Form.useWatch([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
     setLoading(false)
   };
 
+  /** Open modal with user data */
   const handleOpen = (user: User) => {
     form.resetFields();
     setEditVo(user)
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save new password */
   const handleSave = () => {
     form
       .validateFields()
@@ -69,12 +81,12 @@ const ResetPasswordModal = forwardRef<ResetPasswordModalRef, { source?: 'resetPa
         console.log('err', err)
       });
   }
-  // 自动生成长度为12的随机密码，包含字母、数字、特殊字符
+  /** Auto-generate random password (12 chars with letters, numbers, special chars) */
   const handleAutoGenerate = () => {
     form.setFieldValue('new_password', randomString());
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

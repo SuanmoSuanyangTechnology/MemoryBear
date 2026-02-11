@@ -6,12 +6,13 @@ import urllib.parse
 from string import Template
 from textwrap import dedent
 from typing import Any
-
+import urllib.parse
 import httpx
 
 from app.core.workflow.nodes import BaseNode, WorkflowState
-from app.core.workflow.nodes.base_config import VariableType
 from app.core.workflow.nodes.code.config import CodeNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,12 @@ class CodeNode(BaseNode):
         super().__init__(node_config, workflow_config)
         self.typed_config: CodeNodeConfig | None = None
 
+    def _output_types(self) -> dict[str, VariableType]:
+        output_dict = {}
+        for output in self.typed_config.output_variables:
+            output_dict[output.name] = output.type
+        return output_dict
+
     def extract_result(self, content: str):
         match = re.search(r'<<RESULT>>(.*?)<<RESULT>>', content, re.DOTALL)
         if match:
@@ -93,11 +100,11 @@ class CodeNode(BaseNode):
         else:
             raise RuntimeError("The output of main must be a dictionary")
 
-    async def execute(self, state: WorkflowState) -> Any:
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         self.typed_config = CodeNodeConfig(**self.config)
         input_variable_dict = {}
         for input_variable in self.typed_config.input_variables:
-            input_variable_dict[input_variable.name] = self.get_variable(input_variable.variable, state)
+            input_variable_dict[input_variable.name] = self.get_variable(input_variable.variable, variable_pool)
 
         code = base64.b64decode(
             self.typed_config.code

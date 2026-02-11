@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status,Header
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.db import get_db
@@ -20,10 +21,13 @@ router = APIRouter(
 @router.get("/short_term")
 async def short_term_configs(
         end_user_id: str,
-        language_type:str = Header(default="zh", alias="X-Language-Type"),
+        language_type:str = Header(default=None, alias="X-Language-Type"),
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ):
+    # 使用集中化的语言校验
+    language = get_language_from_header(language_type)
+    
     # 获取短期记忆数据
     short_term=ShortService(end_user_id)
     short_result=short_term.get_short_databasets()

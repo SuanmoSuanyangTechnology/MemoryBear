@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:49:45 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:49:45 
+ */
+/**
+ * Model List Detail Drawer
+ * Displays detailed list of models from a specific provider
+ * Allows filtering by type and configuring API keys
+ */
+
 import { useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Switch, Row, Col, Space, Tooltip } from 'antd'
@@ -12,10 +24,17 @@ import { getModelNewList, updateModelStatus, modelTypeUrl } from '@/api/models'
 import { getLogoUrl } from '../utils'
 import CustomSelect from '@/components/CustomSelect'
 
+/**
+ * Component props
+ */
 interface ModelListDetailProps {
+  /** Callback to refresh parent list */
   refresh?: () => void;
 }
 
+/**
+ * Model list detail drawer component
+ */
 const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh }, ref) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -25,12 +44,14 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
   const [loading, setLoading] = useState(false)
   const [type, setType] = useState<string | undefined | null>(null)
 
+  /** Open drawer with provider model data */
   const handleOpen = (vo: ProviderModelItem) => {
     setType(null)
     setOpen(true)
     getData(vo)
   }
 
+  /** Fetch model data for provider */
   const getData = (vo: ProviderModelItem) => {
     if (!vo.provider) return
   
@@ -43,9 +64,11 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
         setList(response[0].models)
       })
   }
+  /** Open key configuration modal */
   const handleKeyConfig = (vo: ModelListItem) => {
     multiKeyConfigModalRef.current?.handleOpen(vo, data.provider)
   }
+  /** Toggle model active status */
   const handleChange = (vo: ModelListItem) => {
     setLoading(true)
     updateModelStatus(vo.id, { is_active: !vo.is_active })
@@ -55,22 +78,27 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
       })
   }
 
+  /** Close drawer */
   const handleClose = () => {
     setType(null)
     setOpen(false)
     refresh?.()
   }
+  /** Refresh model list */
   const handleRefresh = () => {
     getData(data)
   }
+  /** Handle type filter change */
   const handleTypeChange = (value: string) => {
     setType(value)
   }
 
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
       handleOpen,
   }));
 
+  /** Filter models by selected type */
   const filterList = useMemo(() => {
     if (!type) return list
     return list.filter(vo => vo.type === type)

@@ -1,9 +1,27 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 15:15:11 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 15:15:11 
+ */
+/**
+ * CodeBlock Component
+ * 
+ * A standalone code block component for displaying formatted code with:
+ * - Syntax highlighting
+ * - Optional copy functionality
+ * - Configurable size and line numbers
+ * 
+ * @component
+ */
+
 import { type FC } from 'react'
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { atelierHeathLight } from 'react-syntax-highlighter/dist/esm/styles/hljs';
+
 import CopyBtn from './CopyBtn';
 
-
+/** Props interface for CodeBlock component */
 type ICodeBlockProps = {
   value: string;
   needCopy?: boolean;
@@ -11,12 +29,7 @@ type ICodeBlockProps = {
   showLineNumbers?: boolean;
 }
 
-// enum languageType {
-//   echarts = 'echarts',
-//   mermaid = 'mermaid',
-//   svg = 'svg',
-// }
-
+/** Code block component for displaying formatted code with optional copy functionality */
 const CodeBlock: FC<ICodeBlockProps> = ({
   value,
   needCopy = true,

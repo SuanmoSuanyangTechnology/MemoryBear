@@ -120,7 +120,8 @@ async def get_prompt_opt(
                     session_id=session_id,
                     user_id=current_user.id,
                     current_prompt=data.current_prompt,
-                    user_require=data.message
+                    user_require=data.message,
+                    skill=data.skill
             ):
                 # chunk 是 prompt 的增量内容
                 yield f"event:message\ndata: {json.dumps(chunk)}\n\n"

@@ -1,32 +1,57 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:34:09 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 16:35:30
+ */
+/**
+ * Application Modal
+ * Modal for creating and editing applications
+ * Supports three application types: agent, multi_agent, and workflow
+ */
+
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input } from 'antd';
 import { useTranslation } from 'react-i18next';
+
 import RadioGroupCard from '@/components/RadioGroupCard'
 import AgentIcon from '@/assets/images/application/agent.svg'
 import ClusterIcon from '@/assets/images/application/cluster.svg'
 import WorkflowIcon from '@/assets/images/application/workflow.svg'
-
 import type { ApplicationModalData, ApplicationModalRef, Application } from '../types'
 import RbModal from '@/components/RbModal'
 import { addApplication, updateApplication } from '@/api/application'
 
 const FormItem = Form.Item;
 
+/**
+ * Component props
+ */
 interface ApplicationModalProps {
+  /** Callback to refresh application list */
   refresh: () => void;
 }
 
-const types = [
+/**
+ * Supported application types
+ */
+export const types = [
   'agent',
   'multi_agent',
   'workflow'
 ]
+/**
+ * Application type icon mapping
+ */
 const typeIcons: Record<string, string> = {
   agent: AgentIcon,
   multi_agent: ClusterIcon,
   workflow: WorkflowIcon
 }
 
+/**
+ * Modal for creating and editing applications
+ */
 const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(({
   refresh
 }, ref) => {
@@ -38,7 +63,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
 
   const values = Form.useWatch([], form);
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /** Close modal and reset form */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
@@ -46,6 +71,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
     setEditVo(null)
   };
 
+  /** Open modal with optional application data for editing */
   const handleOpen = (application?: Application) => {
     if (application) {
       setEditVo(application || null)
@@ -59,7 +85,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
     }
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+  /** Save application (create or update) */
   const handleSave = () => {
     form
       .validateFields()
@@ -83,7 +109,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
       });
   }
 
-  // 暴露给父组件的方法
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose

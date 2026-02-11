@@ -24,7 +24,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, ConfigDict
 
-from app.core.memory.models.ontology_models import OntologyClass
+from app.core.memory.models.ontology_scenario_models import OntologyClass
 
 
 class ExtractionRequest(BaseModel):
@@ -74,47 +74,51 @@ class ExtractionResponse(BaseModel):
     extracted_count: int = Field(..., description="提取的类数量")
 
 
-class ExportRequest(BaseModel):
-    """OWL文件导出请求模型
+class ExportBySceneRequest(BaseModel):
+    """按场景导出OWL文件请求模型
     
     用于POST /api/ontology/export端点的请求体。
+    根据scene_id从数据库查询该场景下的所有本体类型并导出为OWL文件。
     
     Attributes:
-        classes: 要导出的本体类列表
-        format: 导出格式,可选值: rdfxml, turtle, ntriples, json
-        include_metadata: 是否包含完整的OWL元数据(命名空间等),默认True
+        scene_id: 本体场景ID，必填，用于查询该场景下的所有类型
+        format: 导出格式，可选值：rdfxml（默认）、turtle
     
     Examples:
-        >>> request = ExportRequest(
-        ...     classes=[...],
-        ...     format="rdfxml",
-        ...     include_metadata=True
+        >>> request = ExportBySceneRequest(
+        ...     scene_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+        ...     format="rdfxml"
         ... )
     """
-    classes: List[OntologyClass] = Field(..., description="要导出的本体类列表", min_length=1)
-    format: str = Field("rdfxml", description="导出格式: rdfxml, turtle, ntriples, json")
-    include_metadata: bool = Field(True, description="是否包含完整的OWL元数据")
+    scene_id: UUID = Field(..., description="本体场景ID")
+    format: str = Field("rdfxml", description="导出格式，可选值：rdfxml（默认）、turtle")
 
 
-class ExportResponse(BaseModel):
-    """OWL文件导出响应模型
+class ExportBySceneResponse(BaseModel):
+    """按场景导出OWL文件响应模型
     
     用于POST /api/ontology/export端点的响应体。
     
     Attributes:
         owl_content: OWL文件内容
-        format: 导出格式
+        filename: 导出文件名（含扩展名）
+        scene_id: 场景ID
+        scene_name: 场景名称
         classes_count: 导出的类数量
     
     Examples:
-        >>> response = ExportResponse(
+        >>> response = ExportBySceneResponse(
         ...     owl_content="<?xml version='1.0'?>...",
-        ...     format="rdfxml",
+        ...     filename="medical_ontology.owl",
+        ...     scene_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+        ...     scene_name="医疗场景",
         ...     classes_count=7
         ... )
     """
     owl_content: str = Field(..., description="OWL文件内容")
-    format: str = Field(..., description="导出格式")
+    filename: str = Field(..., description="导出文件名（含扩展名）")
+    scene_id: UUID = Field(..., description="场景ID")
+    scene_name: str = Field(..., description="场景名称")
     classes_count: int = Field(..., description="导出的类数量")
 
 
@@ -459,3 +463,56 @@ class ClassListResponse(BaseModel):
     scene_name: str = Field(..., description="场景名称")
     scene_description: Optional[str] = Field(None, description="场景描述")
     items: List[ClassResponse] = Field(..., description="类型列表")
+
+
+# ==================== OWL 导入相关 Schema ====================
+
+class ImportOwlRequest(BaseModel):
+    """OWL 文件导入请求
+    
+    用于 POST /api/ontology/import 端点的请求体。
+    解析 OWL 文件并将类型直接导入到指定场景。
+    
+    Attributes:
+        scene_id: 目标场景ID，必填
+        owl_content: OWL 文件内容（字符串形式）
+        format: 文件格式，可选值：rdfxml（默认）、turtle
+    
+    Examples:
+        >>> request = ImportOwlRequest(
+        ...     scene_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+        ...     owl_content="<?xml version='1.0'?>...",
+        ...     format="rdfxml"
+        ... )
+    """
+    scene_id: UUID = Field(..., description="目标场景ID")
+    owl_content: str = Field(..., min_length=1, description="OWL 文件内容")
+    format: str = Field("rdfxml", description="文件格式，可选值：rdfxml（默认）、turtle")
+
+
+class ImportOwlResponse(BaseModel):
+    """OWL 文件导入响应
+    
+    用于返回导入结果。
+    
+    Attributes:
+        scene_id: 场景ID
+        scene_name: 场景名称
+        imported_count: 成功导入的类型数量
+        skipped_count: 跳过的数量（重复）
+        items: 导入的类型列表
+    
+    Examples:
+        >>> response = ImportOwlResponse(
+        ...     scene_id=UUID("..."),
+        ...     scene_name="智能制造场景",
+        ...     imported_count=4,
+        ...     skipped_count=0,
+        ...     items=[...]
+        ... )
+    """
+    scene_id: UUID = Field(..., description="场景ID")
+    scene_name: str = Field(..., description="场景名称")
+    imported_count: int = Field(..., description="成功导入的类型数量")
+    skipped_count: int = Field(0, description="跳过的数量（重复）")
+    items: List[ClassResponse] = Field(..., description="导入的类型列表")

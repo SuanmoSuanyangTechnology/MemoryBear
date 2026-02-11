@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:50:10 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:50:10 
+ */
+/**
+ * Model List View
+ * Displays models grouped by provider with key configuration
+ * Shows model tags and allows viewing model details
+ */
+
 import { useRef, useState, useEffect, type FC } from 'react';
 import { Button, Flex, Row, Col } from 'antd'
 import { useTranslation } from 'react-i18next';
@@ -11,6 +23,9 @@ import KeyConfigModal from './components/KeyConfigModal'
 import ModelListDetail from './components/ModelListDetail'
 import { getLogoUrl } from './utils'
 
+/**
+ * Model list component
+ */
 const ModelList: FC<{ query: any }> = ({ query }) => {
   const { t } = useTranslation();
   const keyConfigModalRef = useRef<KeyConfigModalRef>(null)
@@ -19,6 +34,7 @@ const ModelList: FC<{ query: any }> = ({ query }) => {
   useEffect(() => {
     getList()
   }, [query])
+  /** Fetch model list grouped by provider */
   const getList = () => {
     getModelNewList({
       ...query,
@@ -29,9 +45,11 @@ const ModelList: FC<{ query: any }> = ({ query }) => {
       })
   }
 
+  /** Open model detail drawer */
   const handleShowModel = (vo: ProviderModelItem) => {
     modelListDetailRef.current?.handleOpen(vo)
   }
+  /** Open key configuration modal */
   const handleKeyConfig = (vo: ProviderModelItem) => {
     keyConfigModalRef.current?.handleOpen(vo)
   }

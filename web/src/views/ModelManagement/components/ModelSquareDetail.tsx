@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:49:49 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 16:54:26
+ */
+/**
+ * Model Square Detail Drawer
+ * Displays all models from a specific provider in the model square
+ * Allows adding models and editing custom models
+ */
+
 import { useState, useImperativeHandle, forwardRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Space, App, Flex, Tooltip, Divider } from 'antd'
@@ -11,10 +23,19 @@ import Tag from '@/components/Tag';
 import PageEmpty from '@/components/Empty/PageEmpty';
 import { getLogoUrl } from '../utils'
 
+/**
+ * Component props
+ */
 interface ModelSquareDetailProps {
+  /** Callback to refresh parent list */
   refresh: () => void;
+  /** Callback to edit model */
   handleEdit: (vo: ModelPlazaItem) => void;
 }
+
+/**
+ * Model square detail drawer component
+ */
 const ModelSquareDetail = forwardRef<ModelSquareDetailRef, ModelSquareDetailProps>(({ refresh, handleEdit }, ref) => {
   const { t } = useTranslation();
   const { message } = App.useApp()
@@ -23,15 +44,18 @@ const ModelSquareDetail = forwardRef<ModelSquareDetailRef, ModelSquareDetailProp
 
   const [list, setList] = useState<ModelPlazaItem[]>([])
 
+  /** Open drawer with model plaza data */
   const handleOpen = (vo: ModelPlaza) => {
     setModel(vo)
     setOpen(true)
     getList(vo)
   }
+  /** Close drawer */
   const handleClose = () => {
     setOpen(false)
     refresh()
   }
+  /** Fetch model list for provider */
   const getList = (vo: ModelPlaza) => {
     getModelPlaza({ provider: vo.provider })
       .then(res => {
@@ -39,6 +63,7 @@ const ModelSquareDetail = forwardRef<ModelSquareDetailRef, ModelSquareDetailProp
         setList(response.length > 0 ? response[0].models : [])
       })
   }
+  /** Add model to workspace */
   const handleAdd = (item: ModelPlazaItem) => {
     addModelPlaza(item.id)
       .then(() => {
@@ -47,6 +72,7 @@ const ModelSquareDetail = forwardRef<ModelSquareDetailRef, ModelSquareDetailProp
       })
   }
 
+  /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
       handleOpen,
   }));

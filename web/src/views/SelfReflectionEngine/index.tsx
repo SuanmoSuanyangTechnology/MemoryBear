@@ -1,3 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:46:47 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:46:47 
+ */
+/**
+ * Self Reflection Engine Configuration Page
+ * Configures reflection period, range, baseline, quality assessment, and privacy audit
+ * Supports pilot run with example data
+ */
+
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Form, App, Button, Space, Select } from 'antd';
 import { useParams } from 'react-router-dom';
@@ -13,20 +25,21 @@ import Tag from '@/components/Tag'
 import { useI18n } from '@/store/locale';
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 
+/** Configuration list */
 const configList = [
-  // 启用反思引擎
+  // Enable reflection engine
   {
     key: 'reflection_enabled',
     type: 'switch',
   },
-  // 反思模型
+  // Reflection model
   {
     key: 'reflection_model_id',
     type: 'customSelect',
     url: getModelListUrl,
     params: { type: 'chat,llm', page: 1, pagesize: 100, is_active: true }, // chat,llm
   },
-  // 迭代周期
+  // Iteration period
   {
     key: 'reflection_period_in_hours',
     type: 'select',
@@ -38,7 +51,7 @@ const configList = [
       { label: 'daily', value: '24' },
     ],
   },
-  // 反思范围
+  // Reflection scope
   {
     key: 'reflexion_range',
     type: 'select',
@@ -48,7 +61,7 @@ const configList = [
       { label: 'all', value: 'all' },
     ],
   },
-  // 反思基线
+  // Reflection baseline
   {
     key: 'baseline',
     type: 'select',
@@ -59,12 +72,12 @@ const configList = [
       { label: 'HYBRID', value: 'HYBRID' },
     ],
   },
-  // 质量评估
+  // Quality assessment
   {
     key: 'quality_assessment',
     type: 'switch',
   },
-  // 质量评估
+  // Quality assessment
   {
     key: 'memory_verify',
     type: 'switch',
@@ -88,6 +101,7 @@ const SelfReflectionEngine: React.FC = () => {
     getConfigData()
   }, [id])
 
+  /** Fetch configuration data */
   const getConfigData = () => {
     if (!id) {
       return
@@ -106,9 +120,11 @@ const SelfReflectionEngine: React.FC = () => {
         console.error('Failed to load data');
       })
   }
+  /** Reset form to saved values */
   const handleReset = () => {
     form.setFieldsValue(configData);
   }
+  /** Save configuration */
   const handleSave = () => {
     if (!id) {
       return
@@ -126,6 +142,7 @@ const SelfReflectionEngine: React.FC = () => {
         setLoading(false)
       })
   }
+  /** Run pilot test */
   const handleRun = () => {
     if (!id) {
       return

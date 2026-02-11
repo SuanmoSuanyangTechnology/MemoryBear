@@ -1,3 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 17:44:15 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:44:15 
+ */
+/**
+ * Prompt Editor Component
+ * AI-powered prompt optimization with chat interface and variable support
+ */
+
 import { type FC, useState, useRef, useEffect } from 'react';
 import { Button, Form, Input, App, Row, Col } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -40,6 +51,7 @@ const Prompt: FC<{ editVo: HistoryItem | null; refresh: () => void; }> = ({ edit
     updateSession()
   }, [editVo])
 
+  /** Update session ID */
   const updateSession = () => {
     console.log('updateSession')
     createPromptSessions().then(res => {
@@ -48,6 +60,7 @@ const Prompt: FC<{ editVo: HistoryItem | null; refresh: () => void; }> = ({ edit
     })
   }
 
+  /** Send message to AI for prompt optimization */
   const handleSend = () => {
     if (!promptSession) return
     if (!values.model_id) {
@@ -97,7 +110,7 @@ const Prompt: FC<{ editVo: HistoryItem | null; refresh: () => void; }> = ({ edit
             break;
           case 'end':
             setLoading(false)
-            // 流结束时同步表单值
+            // Sync form values when stream ends
             form.setFieldsValue({ current_prompt: currentPromptValueRef.current })
             break
         }
@@ -108,14 +121,17 @@ const Prompt: FC<{ editVo: HistoryItem | null; refresh: () => void; }> = ({ edit
         setLoading(false)
       })
   }
+  /** Copy prompt to clipboard */
   const handleCopy = () => {
     if (!values.current_prompt || values?.current_prompt?.trim() === '') return
     copy(values.current_prompt)
     message.success(t('common.copySuccess'))
   }
+  /** Open variable modal */
   const handleAdd = () => {
     aiPromptVariableModalRef.current?.handleOpen()
   }
+  /** Apply variable to editor */
   const handleVariableApply = (value: string) => {
     if (editorRef.current?.insertText) {
       editorRef.current.insertText(value)
@@ -123,6 +139,7 @@ const Prompt: FC<{ editVo: HistoryItem | null; refresh: () => void; }> = ({ edit
       form.setFieldValue('current_prompt', (values.current_prompt || '') + value)
     }
   }
+  /** Save prompt */
   const handleSave = () => {
     if (!values.current_prompt || !promptSession) {
       return
@@ -133,6 +150,7 @@ const Prompt: FC<{ editVo: HistoryItem | null; refresh: () => void; }> = ({ edit
     })
   }
 
+  /** Refresh editor and clear state */
   const handleRefresh = () => {
     form.setFieldValue('current_prompt', undefined)
     currentPromptValueRef.current = undefined;

@@ -1,7 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:29:41 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:29:41 
+ */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 import { Button, Space, Input, Form, App } from 'antd';
+
 import Tag, { type TagProps } from './components/Tag'
 import RbCard from '@/components/RbCard/Card'
 import { getReleaseList, rollbackRelease } from '@/api/application'
@@ -12,12 +19,21 @@ import type { Application } from '@/views/ApplicationManagement/types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import Markdown from '@/components/Markdown'
+/**
+ * Tag color mapping for release versions
+ */
 const tagColors: Record<Release['tagKey'], TagProps['color']> = {
   current: 'processing',
   rolledBack: 'warning',
   history: 'default',
 }
 
+/**
+ * Release page component
+ * Manages application version releases, rollbacks, and version history
+ * @param data - Application data
+ * @param refresh - Function to refresh application data
+ */
 const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refresh}) => {
   const { t } = useTranslation();
   const { message } = App.useApp()
@@ -30,6 +46,9 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
     getData()
   }, [data.id])
 
+  /**
+   * Fetch release list data
+   */
   const getData = () => {
     refresh()
     getReleaseList(data.id).then(res => {
@@ -38,6 +57,9 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
       setSelectedVersion(response?.[0])
     })
   }
+  /**
+   * Rollback to selected version
+   */
   const handleRollback = () => {
     if (!selectedVersion) return
     rollbackRelease(data.id, selectedVersion.version).then(() => {
@@ -124,7 +146,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                 </div>
               </RbCard>
 
-              {/* 日志 */}
+              {/* Logs */}
               <RbCard title={t('application.changeLog')} headerType="borderless">
                 <Space size={16} direction="vertical" style={{ width: '100%' }}>
                 {selectedVersion && (

@@ -415,6 +415,9 @@ class MemoryConfig:
     pruning_scene: Optional[str] = "education"
     pruning_threshold: float = 0.5
     
+    # Ontology scene association
+    scene_id: Optional[UUID] = None
+    
     def __post_init__(self):
         """Validate configuration after initialization."""
         if not self.config_name or not self.config_name.strip():

@@ -75,6 +75,4 @@ def success_response(data: Any) -> ApiResponse:
 
 def error_response(code: int, message: str) -> ApiResponse:
     """Create error response"""
-    if code >= 0:
-        code = -1
     return ApiResponse(code=code, message=message, data=None)

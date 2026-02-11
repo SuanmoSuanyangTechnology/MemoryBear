@@ -14,7 +14,7 @@ import textIcon from '@/assets/images/knowledgeBase/text.png';
 import editIcon from '@/assets/images/knowledgeBase/edit.png';
 // import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
 // import imageIcon from '@/assets/images/knowledgeBase/image.png'
-import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase } from '@/api/knowledgeBase';
+import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase, createSync } from '@/api/knowledgeBase';
 import { 
   type CreateModalRef, 
   type KnowledgeBaseListItem, 
@@ -40,7 +40,7 @@ import KnowledgeGraphCard from '../components/KnowledgeGraphCard';
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 import './Private.css'
 const { confirm } = Modal
-// 树节点数据类型
+// Tree node data type
 
 const Private: FC = () => {
   const { t } = useTranslation();
@@ -71,11 +71,14 @@ const Private: FC = () => {
   const [folderTreeRefreshKey, setFolderTreeRefreshKey] = useState(0);
   const [autoExpandPath, setAutoExpandPath] = useState<Array<{ id: string; name: string }>>([]);
   const [isGraph, setIsGraph] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const syncStartTimeRef = useRef<number | null>(null);
   const { updateBreadcrumbs } = useBreadcrumbManager({
     breadcrumbType: 'detail',
-    // 不提供 onKnowledgeBaseMenuClick，让它使用默认的导航行为（返回列表页面）
+    // Don't provide onKnowledgeBaseMenuClick, let it use default navigation behavior (return to list page)
     onKnowledgeBaseFolderClick: useCallback((folderId: string, folderPath: Array<{ id: string; name: string }>) => {
-      // 点击文件夹面包屑时，导航到对应文件夹
+      // Navigate to corresponding folder when clicking folder breadcrumb
       setParentId(folderId);
       setFolderPath(folderPath);
       setSelectedKeys([folderId]);
@@ -84,7 +87,7 @@ const Private: FC = () => {
         parent_id: folderId
       });
       
-      // 确保query对象发生变化，触发表格刷新
+      // Ensure query object changes to trigger table refresh
       setQuery({
         orderby: 'created_at',
         desc: true,
@@ -92,10 +95,10 @@ const Private: FC = () => {
         _timestamp: Date.now()
       });
       
-      // 确保API URL正确设置
+      // Ensure API URL is set correctly
       setTableApi(`/documents/${knowledgeBaseId}/documents`);
       
-      // 手动触发表格刷新，确保数据更新
+      // Manually trigger table refresh to ensure data update
       setTimeout(() => {
         tableRef.current?.loadData();
       }, 100);
@@ -108,9 +111,10 @@ const Private: FC = () => {
     setLoading(true);
     try {
       const res = await getKnowledgeBaseDetail(id);
-      // 将 KnowledgeBase 转换为 KnowledgeBaseListItem
+      // Convert KnowledgeBase to KnowledgeBaseListItem
       const listItem = res as unknown as KnowledgeBaseListItem;
       setKnowledgeBase(listItem);
+      return listItem;
     } finally {
       setLoading(false);
     }
@@ -122,7 +126,7 @@ const Private: FC = () => {
       setTableApi(url);
       fetchKnowledgeBaseDetail(knowledgeBaseId);
       
-      // 立即设置基础面包屑，确保不会显示其他页面的面包屑
+      // Immediately set base breadcrumbs to ensure other page breadcrumbs are not displayed
       updateBreadcrumbs({
         knowledgeBaseFolderPath,
         knowledgeBase: {
@@ -135,7 +139,7 @@ const Private: FC = () => {
     }
   }, [knowledgeBaseId]);
 
-  // 更新面包屑
+  // Update breadcrumbs
   useEffect(() => {
     if (knowledgeBase) {
       updateBreadcrumbs({
@@ -150,22 +154,22 @@ const Private: FC = () => {
     }
   }, [knowledgeBase, knowledgeBaseFolderPath, folderPath, updateBreadcrumbs]);
 
-  // 监听 tableApi 变化，自动刷新表格数据
+  // Listen to tableApi changes and auto refresh table data
   useEffect(() => {
     if (tableApi) {
       tableRef.current?.loadData();
     }
   }, [tableApi]);
 
-  // 监听 query 变化，确保表格数据更新
+  // Listen to query changes and ensure table data update
   useEffect(() => {
     if (tableApi && query._timestamp) {
-      // 当 query 中有 _timestamp 时，说明是通过面包屑或其他方式触发的更新
+      // When query has _timestamp, it means the update is triggered by breadcrumb or other means
       tableRef.current?.loadData();
     }
   }, [query._timestamp, tableApi]);
 
-  // 监听 location state 变化
+  // Listen to location state changes
   useEffect(() => {
     const state = location.state as { 
       refresh?: boolean; 
@@ -180,18 +184,18 @@ const Private: FC = () => {
     
     if (state?.refresh) {
       tableRef.current?.loadData();
-      // 清除 state，避免重复刷新
+      // Clear state to avoid repeated refresh
       navigate(location.pathname, { replace: true, state: {} });
     }
     
-    // 如果是从知识库列表页跳转过来的，设置知识库文件夹路径
+    // If navigated from knowledge base list page, set knowledge base folder path
     if (state?.fromKnowledgeBaseList && state?.knowledgeBaseFolderPath) {
       setKnowledgeBaseFolderPath(state.knowledgeBaseFolderPath);
     }
     
-    // 如果需要重置到根目录（回到初始状态）
+    // If need to reset to root directory (return to initial state)
     if (state?.resetToRoot) {
-      // 重置所有状态到初始状态，和页面初始化保持一致
+      // Reset all states to initial state, consistent with page initialization
       setParentId(knowledgeBaseId);
       setFolderPath([]);
       setSelectedKeys([]);
@@ -202,31 +206,31 @@ const Private: FC = () => {
       setQuery({
         orderby: 'created_at',
         desc: true,
-        _timestamp: Date.now() // 添加时间戳确保query对象发生变化，触发API调用
+        _timestamp: Date.now() // Add timestamp to ensure query object changes and trigger API call
       });
       
-      // 重新设置API URL
+      // Reset API URL
       const rootUrl = `/documents/${knowledgeBaseId}/documents`;
       setTableApi(rootUrl);
       
-      // 清除自动展开路径
+      // Clear auto expand path
       setAutoExpandPath([]);
       
-      // 刷新文件夹树 - 使用延迟确保状态重置完成后再刷新
+      // Refresh folder tree - use delay to ensure state reset is complete before refresh
       setTimeout(() => {
         setFolderTreeRefreshKey((prev) => prev + 1);
       }, 100);
       
-      // 手动触发表格刷新，确保数据更新
+      // Manually trigger table refresh to ensure data update
       setTimeout(() => {
         tableRef.current?.loadData();
       }, 200);
       
-      // 清除 state，避免重复处理
+      // Clear state to avoid repeated processing
       navigate(location.pathname, { replace: true, state: {} });
     }
     
-    // 如果是从文档详情页返回，恢复文档文件夹路径
+    // If returning from document details page, restore document folder path
     if (state?.navigateToDocumentFolder && state?.documentFolderPath) {
       setFolderPath(state.documentFolderPath);
       setParentId(state.navigateToDocumentFolder);
@@ -242,25 +246,34 @@ const Private: FC = () => {
       setTableApi(`/documents/${knowledgeBaseId}/documents`);
       setSelectedKeys([state.navigateToDocumentFolder]);
       
-      // 设置自动展开路径，让FolderTree自动展开到对应位置
+      // Set auto expand path to let FolderTree auto expand to corresponding position
       setAutoExpandPath(state.documentFolderPath);
       
-      // 手动触发表格刷新
+      // Manually trigger table refresh
       setTimeout(() => {
         tableRef.current?.loadData();
       }, 100);
       
-      // 清除自动展开路径，避免重复触发（延迟清除，确保FolderTree处理完成）
+      // Clear auto expand path to avoid repeated trigger (delayed clear to ensure FolderTree processing is complete)
       setTimeout(() => {
         setAutoExpandPath([]);
       }, 2000);
     }
   }, [location.state, knowledgeBaseId, navigate, location.pathname]);
 
-  // 处理树节点选择
+  // Cleanup sync interval on unmount
+  useEffect(() => {
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Handle tree node selection
   const onSelect = (keys: React.Key[]) => {
     if (!keys.length) {
-      // 如果没有选中任何节点，回到根目录（初始状态）
+      // If no node is selected, return to root directory (initial state)
       setParentId(knowledgeBaseId);
       setFolder({
         kb_id: knowledgeBaseId ?? '',
@@ -269,7 +282,7 @@ const Private: FC = () => {
       setQuery({
         orderby: 'created_at',
         desc: true,
-        _timestamp: Date.now() // 添加时间戳确保query对象发生变化
+        _timestamp: Date.now() // Add timestamp to ensure query object changes
       });
       setSelectedKeys([]);
       return;
@@ -284,7 +297,7 @@ const Private: FC = () => {
     setQuery({
       ...query,
       parent_id: String(keys[0]),
-      _timestamp: Date.now() // 添加时间戳确保query对象发生变化
+      _timestamp: Date.now() // Add timestamp to ensure query object changes
     })
     let url = `/documents/${knowledgeBaseId}/documents`;
     
@@ -294,14 +307,14 @@ const Private: FC = () => {
     setSelectedKeys(keys)
   };
 
-  // 处理文件夹路径变化
+  // Handle folder path change
   const handleFolderPathChange = (path: Array<{ id: string; name: string }>) => {
     setFolderPath(path);
   };
 
-  // 处理树节点展开
+  // Handle tree node expand
   const onExpand = (_expandedKeys: React.Key[], _info: any) => {
-    // 展开节点时不需要特殊处理
+    // No special handling needed when expanding nodes
   };
   // create / import list
   const createItems: MenuProps['items'] = [
@@ -344,13 +357,13 @@ const Private: FC = () => {
     //     createImageDataset?.current?.handleOpen(knowledgeBaseId || '', parentId || '')
     //   },
     // },
-        // 暂时未实现
+        // Not implemented yet
     // {
     //   key: '4',
     //   icon: <img src={blankIcon} alt="blank" style={{ width: 16, height: 16 }} />,
     //   label: t('knowledgeBase.blankDataset'),
     //   onClick: () => {
-    //     handleCreate('folder'); // 传入 type: 'folder'
+    //     handleCreate('folder'); // Pass type: 'folder'
     //   },
     // },
     // {
@@ -362,7 +375,7 @@ const Private: FC = () => {
     //   icon: <img src={templateIcon} alt="import" style={{ width: 16, height: 16 }} />,
     //   label: t('knowledgeBase.importTemplate'),
     //   onClick: () => {
-    //     handleCreate('folder'); // 传入 type: 'folder'
+    //     handleCreate('folder'); // Pass type: 'folder'
     //   },
     // },
     // {
@@ -370,17 +383,17 @@ const Private: FC = () => {
     //   icon: <img src={backupIcon} alt="import" style={{ width: 16, height: 16 }} />,
     //   label: t('knowledgeBase.importBackup'),
     //   onClick: () => {
-    //     handleCreate('folder'); // 传入 type: 'folder'
+    //     handleCreate('folder'); // Pass type: 'folder'
     //   },
     // },
     
   ];
   
-  // 处理开关
+  // Handle switch
   const onChange = (checked: boolean) => {
     if (!knowledgeBase) return;
     
-    // 构造完整的更新数据，保留现有配置
+    // Construct complete update data, keeping existing configuration
     const updateData: KnowledgeBaseFormData = {
       name: knowledgeBase.name,
       description: knowledgeBase.description,
@@ -411,30 +424,30 @@ const Private: FC = () => {
     updateKnowledgeBase(knowledgeBaseId || '', updateData);
     console.log(`switch to ${checked}`);
   };
-  // 处理搜索
+  // Handle search
   const handleSearch = (value?: string) => {
     setQuery({ ...query, keywords: value })
   }
 
-  // 处理分享
+  // Handle share
   const handleShare = () => {
     shareModalRef?.current?.handleOpen(knowledgeBaseId,knowledgeBase);
   }
-  // 处理分享回调，接收选中的数据
+  // Handle share callback, receive selected data
   const handleShareCallback = (selectedData: { checkedItems: any[], selectedItem: any | null }) => {
-    console.log('选中的数据:', selectedData);
-    // checkedItems: 所有 checked 为 true 的数据
-    // selectedItem: 当前选中的项（curIndex 对应的数据）
-    // 在这里处理分享逻辑
+    console.log('Selected data:', selectedData);
+    // checkedItems: All data with checked = true
+    // selectedItem: Currently selected item (corresponding to curIndex)
+    // Handle share logic here
   }
   const handleCreateDatasetCallback = (payload: { value: number; title: string; description: string }) => {
-    console.log('创建数据集:', payload);
+    console.log('Create dataset:', payload);
   }
-  // 处理设置
+  // Handle settings
   const handleSetting = () => {
     modalRef?.current?.handleOpen(knowledgeBase, '');
   }
-  // 处理召回测试
+  // Handle recall test
   const handleRecallTest = () => {
     recallTestDrawerRef?.current?.handleOpen(knowledgeBaseId);
   }
@@ -443,7 +456,7 @@ const Private: FC = () => {
   const handelCreateOrImport = () => {
 
   }
-  // 生成下拉菜单项（根据当前 row）
+  // Generate dropdown menu items (based on current row)
   const getOptMenuItems = (row: KnowledgeBaseListItem): MenuProps['items'] => [
     {
       key: '1',
@@ -495,19 +508,19 @@ const Private: FC = () => {
           deleteDocument(item.id)
             .then(() => {
               messageApi.success(t('common.deleteSuccess'));
-              // 刷新表格数据
+              // Refresh table data
               tableRef.current?.loadData();
             })
             .catch((err: any) => {
-              console.log('删除失败', err);
+              console.log('Delete failed', err);
             });
         },
         onCancel: () => {
-          console.log('取消删除');
+          console.log('Cancel delete');
         },
       });
   }
-  // 表格列配置
+  // Table column configuration
   const columns: ColumnsType = [
     {
       title: t('knowledgeBase.name'),
@@ -524,7 +537,7 @@ const Private: FC = () => {
                   state: {
                     documentId: document.id,
                     parentId: parentId ?? knowledgeBaseId,
-                    // 传递面包屑信息
+                    // Pass breadcrumb information
                     breadcrumbPath: {
                       knowledgeBaseFolderPath,
                       knowledgeBase: {
@@ -572,7 +585,7 @@ const Private: FC = () => {
       render: (value: string) => {
         if (!value) return '-';
         
-        // 解析日志格式，将 \n 转换为换行
+        // Parse log format, convert \n to newline
         const formattedText = value.replace(/\\n/g, '\n');
         
         return (
@@ -634,25 +647,25 @@ const Private: FC = () => {
       ),
     },
   ];
-    // 刷新列表数据
+    // Refresh list data
   if (loading) {
-    return <div>加载中...</div>;
+    return <div>Loading...</div>;
   }
 
   if (!knowledgeBase) {
     return <div>知识库不存在</div>;
   }
   const refreshDirectoryTree = async () => {
-    // 先刷新知识库详情，确保数据是最新的
+    // First refresh knowledge base details to ensure data is up-to-date
     if (knowledgeBase?.id) {
       await fetchKnowledgeBaseDetail(knowledgeBase.id);
     }
-    // 添加短暂延迟，确保后端数据已经完全更新
+    // Add short delay to ensure backend data is fully updated
     await new Promise(resolve => setTimeout(resolve, 300));
-     // 然后刷新文件夹树
+     // Then refresh folder tree
     setFolderTreeRefreshKey((prev) => prev + 1);
     
-    // 确保 folder 状态正确设置
+    // Ensure folder state is set correctly
     if (!folder) {
       setFolder({
         kb_id: knowledgeBaseId ?? '',
@@ -663,10 +676,10 @@ const Private: FC = () => {
   }
   const handleRootTreeLoad = (nodes: TreeNodeData[] | null) => {
     if (!nodes || nodes.length === 0) {
-      // 如果没有节点，设置folder为null（这会隐藏FolderTree）
+      // If no nodes, set folder to null (this will hide FolderTree)
       setFolder(null);
     } else {
-      // 如果有节点且 folder 为 null，重新设置 folder
+      // If there are nodes and folder is null, reset folder
       if (!folder) {
         setFolder({
           kb_id: knowledgeBaseId ?? '',
@@ -686,11 +699,69 @@ const Private: FC = () => {
     createFolderModalRef?.current?.handleOpen(f,'edit');
   }
 
-  const handleRefreshTable = () => {
-    // 刷新表格数据
-    fetchKnowledgeBaseDetail(knowledgeBase.id)
+  const handleRefreshTable = async () => {
+    // Check if sync has timed out (1 minute = 60000ms)
+    if (syncStartTimeRef.current) {
+      const elapsedTime = Date.now() - syncStartTimeRef.current;
+      if (elapsedTime > 60000) {
+        stopSyncing();
+        messageApi.warning(t('knowledgeBase.syncTimeout'));
+        return;
+      }
+    }
+    
+    // Refresh table data and get updated knowledge base info
+    const updatedKnowledgeBase = await fetchKnowledgeBaseDetail(knowledgeBase.id);
     tableRef.current?.loadData();
+    
+    // Check if there are documents and stop syncing if so
+    if (syncStartTimeRef.current && updatedKnowledgeBase?.doc_num && updatedKnowledgeBase.doc_num > 0) {
+      stopSyncing();
+      messageApi.success(t('knowledgeBase.syncCompleted'));
+    }
   }
+
+  // Handle sync for Web and Third-party knowledge bases
+  const handleSync = async () => {
+    if (!knowledgeBase?.id) {
+      messageApi.error(t('knowledgeBase.syncError'));
+      return;
+    }
+
+    try {
+      setIsSyncing(true);
+      syncStartTimeRef.current = Date.now(); // Record start time
+      await createSync(knowledgeBase.id);
+      messageApi.success(t('knowledgeBase.syncSuccess'));
+      
+      // Start polling: refresh table every 5 seconds and check for data
+      syncIntervalRef.current = setInterval(async () => {
+        await handleRefreshTable();
+      }, 5000);
+      
+      // Initial refresh after 1 second
+      setTimeout(async () => {
+        await handleRefreshTable();
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Sync failed:', error);
+      messageApi.error(t('knowledgeBase.syncFailed'));
+      setIsSyncing(false);
+      syncStartTimeRef.current = null;
+    }
+  };
+
+  // Stop syncing and clear interval
+  const stopSyncing = () => {
+    if (syncIntervalRef.current) {
+      clearInterval(syncIntervalRef.current);
+      syncIntervalRef.current = null;
+    }
+    syncStartTimeRef.current = null;
+    setIsSyncing(false);
+  };
+
   return (
     <>
     {contextHolder}
@@ -749,9 +820,20 @@ const Private: FC = () => {
             <Button onClick={handleShare}>{t('knowledgeBase.share')}</Button>
             <Button onClick={handleRecallTest}>{t('knowledgeBase.recallTest')}</Button>
             <Button onClick={handleSetting}>{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.setting')}</Button>
-            <Dropdown menu={{ items: createItems }} trigger={['click']}>
+            {(knowledgeBase?.type === 'Web' || knowledgeBase?.type === 'Third-party') && (
+              <Button 
+                type="primary" 
+                onClick={isSyncing ? stopSyncing : handleSync}
+                loading={isSyncing}
+              >
+                {isSyncing ? t('knowledgeBase.syncing') : t('knowledgeBase.syncNow')}
+              </Button>
+            )}
+            {knowledgeBase?.type !== 'Web' && knowledgeBase?.type !== 'Third-party' && (
+              <Dropdown menu={{ items: createItems }} trigger={['click']}>
                 <Button type="primary" onClick={handelCreateOrImport} >+ {t('knowledgeBase.createImport')}</Button>
-            </Dropdown>
+              </Dropdown>
+            )}
             
           </div>
         </div>

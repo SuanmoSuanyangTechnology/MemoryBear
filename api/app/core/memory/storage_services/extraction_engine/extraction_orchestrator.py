@@ -34,6 +34,8 @@ from app.core.memory.models.graph_models import (
     StatementNode,
 )
 from app.core.memory.models.message_models import DialogData
+from app.core.memory.models.ontology_extraction_models import OntologyTypeList
+from app.core.memory.models.ontology_extraction_models import OntologyTypeList
 from app.core.memory.models.variate_config import (
     ExtractionPipelineConfig,
 )
@@ -95,6 +97,9 @@ class ExtractionOrchestrator:
         config: Optional[ExtractionPipelineConfig] = None,
         progress_callback: Optional[Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]] = None,
         embedding_id: Optional[str] = None,
+        ontology_types: Optional[OntologyTypeList] = None,
+        enable_general_types: bool = True,
+        language: str = "zh",
     ):
         """
         初始化流水线编排器
@@ -108,6 +113,7 @@ class ExtractionOrchestrator:
                 - 接受 (stage: str, message: str, data: Optional[Dict[str, Any]]) 并返回 Awaitable[None]
                 - 在管线关键点调用以报告进度和结果数据
             embedding_id: 嵌入模型ID，如果为 None 则从全局配置获取（向后兼容）
+            language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
         """
         self.llm_client = llm_client
         self.embedder_client = embedder_client
@@ -116,6 +122,30 @@ class ExtractionOrchestrator:
         self.is_pilot_run = False  # 默认非试运行模式
         self.progress_callback = progress_callback  # 保存进度回调函数
         self.embedding_id = embedding_id  # 保存嵌入模型ID
+        self.language = language  # 保存语言配置
+    
+        # 处理本体类型配置
+        # 根据 enable_general_types 参数决定是否将通用本体类型与场景特定类型合并
+        # 如果启用合并且配置中开启了通用本体功能，则使用 OntologyTypeMerger 进行融合
+        if enable_general_types and ontology_types:
+            from app.core.memory.ontology_services.ontology_type_loader import (
+                get_ontology_type_merger,
+                is_general_ontology_enabled,
+            )
+            if is_general_ontology_enabled():
+                merger = get_ontology_type_merger()
+                self.ontology_types = merger.merge(ontology_types)
+                logger.info(
+                    f"已启用通用本体类型融合: 场景类型 {len(ontology_types.types) if ontology_types.types else 0} 个 -> "
+                    f"合并后 {len(self.ontology_types.types) if self.ontology_types.types else 0} 个"
+                )
+            else:
+                self.ontology_types = ontology_types
+                logger.info("通用本体类型功能已在配置中禁用，仅使用场景类型")
+        else:
+            self.ontology_types = ontology_types
+            if not enable_general_types and ontology_types:
+                logger.info("enable_general_types=False，仅使用场景类型")
         
         # 保存去重消歧的详细记录（内存中的数据结构）
         self.dedup_merge_records: List[Dict[str, Any]] = []  # 实体合并记录
@@ -127,7 +157,7 @@ class ExtractionOrchestrator:
             llm_client=llm_client,
             config=self.config.statement_extraction,
         )
-        self.triplet_extractor = TripletExtractor(llm_client=llm_client)
+        self.triplet_extractor = TripletExtractor(llm_client=llm_client,ontology_types=self.ontology_types, language=language)
         self.temporal_extractor = TemporalExtractor(llm_client=llm_client)
 
         logger.info("ExtractionOrchestrator 初始化完成")
@@ -615,9 +645,25 @@ class ExtractionOrchestrator:
         logger.info(f"总陈述句: {total_statements}, 用户陈述句: {filtered_statements}, 开始全局并行提取情绪")
 
         # 初始化情绪提取服务
+        # 如果 emotion_model_id 为空，回退到工作空间默认 LLM
         from app.services.emotion_extraction_service import EmotionExtractionService
+        
+        emotion_model_id = memory_config.emotion_model_id
+        if not emotion_model_id and memory_config.workspace_id:
+            from app.repositories.workspace_repository import get_workspace_models_configs
+            from app.db import SessionLocal
+            
+            db = SessionLocal()
+            try:
+                workspace_models = get_workspace_models_configs(db, memory_config.workspace_id)
+                if workspace_models and workspace_models.get("llm"):
+                    emotion_model_id = workspace_models["llm"]
+                    logger.info(f"emotion_model_id 为空，使用工作空间默认 LLM: {emotion_model_id}")
+            finally:
+                db.close()
+        
         emotion_service = EmotionExtractionService(
-            llm_id=memory_config.emotion_model_id if memory_config.emotion_model_id else None
+            llm_id=emotion_model_id if emotion_model_id else None
         )
 
         # 全局并行处理所有陈述句

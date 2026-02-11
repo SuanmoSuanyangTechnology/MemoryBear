@@ -1,8 +1,12 @@
-import os
 from typing import Optional
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
 from app.core.error_codes import BizCode
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.db import get_db
@@ -11,7 +15,6 @@ from app.models.user_model import User
 from app.schemas.memory_storage_schema import (
     ConfigKey,
     ConfigParamsCreate,
-    ConfigParamsDelete,
     ConfigPilotRun,
     ConfigUpdate,
     ConfigUpdateExtracted,
@@ -31,7 +34,7 @@ from app.services.memory_storage_service import (
     search_entity,
     search_statement,
 )
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -72,68 +75,9 @@ async def get_storage_info(
         return fail(BizCode.INTERNAL_ERROR, "存储信息获取失败", str(e))
 
 
-# --- DB connection dependency ---
-_CONN: Optional[object] = None
 
 
-"""PostgreSQL 连接生成与管理（使用 psycopg2）。"""
-# 这个可以转移，可能是已经有的
-# PostgreSQL 数据库连接
-def _make_pgsql_conn() -> Optional[object]:  # 创建 PostgreSQL 数据库连接
-    host = os.getenv("DB_HOST")
-    user = os.getenv("DB_USER")
-    password = os.getenv("DB_PASSWORD")
-    database = os.getenv("DB_NAME")
-    port_str = os.getenv("DB_PORT")
-    try:
-        import psycopg2  # type: ignore
-        port = int(port_str) if port_str else 5432
-        conn = psycopg2.connect(
-            host=host or "localhost",
-            port=port,
-            user=user,
-            password=password,
-            dbname=database,
-        )
-        # 设置自动提交，避免显式事务管理
-        conn.autocommit = True
-        # 设置会话时区为中国标准时间（Asia/Shanghai），便于直接以本地时区展示
-        try:
-            cur = conn.cursor()
-            cur.execute("SET TIME ZONE 'Asia/Shanghai'")
-            cur.close()
-        except Exception:
-            # 时区设置失败不影响连接，仅记录但不抛出
-            pass
-        return conn
-    except Exception as e:
-        try:
-            print(f"[PostgreSQL] 连接失败: {e}")
-        except Exception:
-            pass
-        return None
 
-def get_db_conn() -> Optional[object]:  # 获取 PostgreSQL 数据库连接
-    global _CONN
-    if _CONN is None:
-        _CONN = _make_pgsql_conn()
-    return _CONN
-
-
-def reset_db_conn() -> bool:  # 重置 PostgreSQL 数据库连接
-    """Close and recreate the global DB connection."""
-    global _CONN
-    try:
-        if _CONN:
-            try:
-                _CONN.close()
-            except Exception:
-                pass
-        _CONN = _make_pgsql_conn()
-        return _CONN is not None
-    except Exception:
-        _CONN = None
-        return False
 
 
 @router.post("/create_config", response_model=ApiResponse)   # 创建配置文件，其他参数默认
@@ -141,7 +85,7 @@ def create_config(
     payload: ConfigParamsCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
+) -> dict:
     workspace_id = current_user.current_workspace_id
     # 检查用户是否已选择工作空间
     if workspace_id is None:
@@ -163,9 +107,20 @@ def create_config(
 @router.delete("/delete_config", response_model=ApiResponse)  # 删除数据库中的内容（按配置名称）
 def delete_config(
     config_id: UUID|int,
+    force: bool = Query(False, description="是否强制删除（即使有终端用户正在使用）"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
+) -> dict:
+    """删除记忆配置（带终端用户保护）
+    
+    - 检查是否为默认配置，默认配置不允许删除
+    - 检查是否有终端用户连接到该配置
+    - 如果有连接且 force=False，返回警告
+    - 如果 force=True，清除终端用户引用后删除配置
+    
+    Query Parameters:
+        force: 设置为 true 可强制删除（即使有终端用户正在使用）
+    """
     workspace_id = current_user.current_workspace_id
     config_id=resolve_config_id(config_id, db)
     # 检查用户是否已选择工作空间
@@ -173,21 +128,62 @@ def delete_config(
         api_logger.warning(f"用户 {current_user.username} 尝试删除配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
     
-    api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求删除配置: {config_id}")
+    api_logger.info(
+        f"用户 {current_user.username} 在工作空间 {workspace_id} 请求删除配置: "
+        f"config_id={config_id}, force={force}"
+    )
+    
     try:
-        svc = DataConfigService(db)
-        result = svc.delete(ConfigParamsDelete(config_id=config_id))
-        return success(data=result, msg="删除成功")
+        # 使用带保护的删除服务
+        from app.services.memory_config_service import MemoryConfigService
+        
+        config_service = MemoryConfigService(db)
+        result = config_service.delete_config(config_id=config_id, force=force)
+        
+        if result["status"] == "error":
+            api_logger.warning(
+                f"记忆配置删除被拒绝: config_id={config_id}, reason={result['message']}"
+            )
+            return fail(
+                code=BizCode.FORBIDDEN,
+                msg=result["message"],
+                data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
+            )
+        
+        if result["status"] == "warning":
+            api_logger.warning(
+                f"记忆配置正在使用，无法删除: config_id={config_id}, "
+                f"connected_count={result['connected_count']}"
+            )
+            return fail(
+                code=BizCode.RESOURCE_IN_USE,
+                msg=result["message"],
+                data={
+                    "connected_count": result["connected_count"],
+                    "force_required": result["force_required"]
+                }
+            )
+        
+        api_logger.info(
+            f"记忆配置删除成功: config_id={config_id}, "
+            f"affected_users={result['affected_users']}"
+        )
+        return success(
+            msg=result["message"],
+            data={"affected_users": result["affected_users"]}
+        )
+        
     except Exception as e:
-        api_logger.error(f"Delete config failed: {str(e)}")
+        api_logger.error(f"Delete config failed: {str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "删除配置失败", str(e))
+
 
 @router.post("/update_config", response_model=ApiResponse)  # 更新配置文件中name和desc
 def update_config(
     payload: ConfigUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
+) -> dict:
     workspace_id = current_user.current_workspace_id
     payload.config_id = resolve_config_id(payload.config_id, db)
     # 检查用户是否已选择工作空间
@@ -215,7 +211,7 @@ def update_config_extracted(
     payload: ConfigUpdateExtracted,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
+) -> dict:
     workspace_id = current_user.current_workspace_id
     payload.config_id = resolve_config_id(payload.config_id, db)
     # 检查用户是否已选择工作空间
@@ -242,7 +238,7 @@ def read_config_extracted(
     config_id: UUID | int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
+) -> dict:
     workspace_id = current_user.current_workspace_id
     config_id = resolve_config_id(config_id, db)
     # 检查用户是否已选择工作空间
@@ -263,7 +259,7 @@ def read_config_extracted(
 def read_all_config(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    ) -> dict:
+) -> dict:
     workspace_id = current_user.current_workspace_id
     
     # 检查用户是否已选择工作空间
@@ -285,17 +281,22 @@ def read_all_config(
 @router.post("/pilot_run", response_model=None)
 async def pilot_run(
     payload: ConfigPilotRun,
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
+    # 使用集中化的语言校验
+    language = get_language_from_header(language_type)
+    
     api_logger.info(
         f"Pilot run requested: config_id={payload.config_id}, "
-        f"dialogue_text_length={len(payload.dialogue_text)}"
+        f"dialogue_text_length={len(payload.dialogue_text)}, "
+        f"custom_text_length={len(payload.custom_text) if payload.custom_text else 0}"
     )
     payload.config_id = resolve_config_id(payload.config_id, db)
     svc = DataConfigService(db)
     return StreamingResponse(
-        svc.pilot_run_stream(payload),
+        svc.pilot_run_stream(payload, language=language),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -304,9 +305,8 @@ async def pilot_run(
         },
     )
 
-"""
-以下为搜索与分析接口，直接挂载到同一 router，统一响应为 ApiResponse。
-"""
+
+# ==================== Search & Analytics ====================
 
 @router.get("/search/kb_type_distribution", response_model=ApiResponse)
 async def get_kb_type_distribution(
@@ -446,8 +446,9 @@ async def get_hot_memory_tags_api(
     
     try:
         # 尝试从Redis缓存获取
-        from app.aioRedis import aio_redis_get, aio_redis_set
         import json
+
+        from app.aioRedis import aio_redis_get, aio_redis_set
         
         cached_result = await aio_redis_get(cache_key)
         if cached_result:

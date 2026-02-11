@@ -50,13 +50,16 @@ async def lifespan(app: FastAPI):
         logger.info("自动数据库升级已禁用 (DB_AUTO_UPGRADE=false)")
 
     # 加载预定义模型
-    logger.info("开始加载预定义模型...")
-    try:
-        with get_db_context() as db:
-            result = load_models(db, silent=True)
-            logger.info(f"预定义模型加载完成: 成功{result['success']}个, 跳过{result['skipped']}个, 失败{result['failed']}个")
-    except Exception as e:
-        logger.warning(f"加载预定义模型时出错: {str(e)}")
+    if settings.LOAD_MODEL:
+        logger.info("开始加载预定义模型...")
+        try:
+            with get_db_context() as db:
+                result = load_models(db, silent=True)
+                logger.info(f"预定义模型加载完成: 成功{result['success']}个, 跳过{result['skipped']}个, 失败{result['failed']}个")
+        except Exception as e:
+            logger.warning(f"加载预定义模型时出错: {str(e)}")
+    else:
+        logger.info("预定义模型加载已禁用 (LOAD_MODEL=false)")
 
     logger.info("应用程序启动完成")
     yield
@@ -77,10 +80,14 @@ default_origins = [
 ]
 allowed_origins = list({o for o in (default_origins + settings.CORS_ORIGINS) if o})
 
+# 如果 CORS_ORIGINS 包含 "*"，则允许所有来源
+if "*" in settings.CORS_ORIGINS:
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=True if "*" not in allowed_origins else False,  # 允许所有来源时不能使用 credentials
     allow_methods=["*"],
     allow_headers=["*"],
 )

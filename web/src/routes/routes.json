@@ -10,6 +10,7 @@
       { "path": "/pricing", "element": "Pricing" },
       { "path": "/order-pay", "element": "OrderPayment" },
       { "path": "/orders", "element": "OrderHistory" },
+      { "path": "/skills", "element": "Skills" },
       { "path": "/no-permission", "element": "NoPermission" }
     ]
   },
@@ -51,9 +52,17 @@
     ]
   },
   {
+    "element": "BasicAuthLayout",
+    "children": [
+      { "path": "/skills/add", "element": "SkillConfig" },
+      { "path": "/skills/config/:id", "element": "SkillConfig" }
+    ]
+  },
+  {
     "element": "NoAuthLayout",
     "children": [
-      { "path": "/conversation/:token", "element": "Conversation" }
+      { "path": "/conversation/:token", "element": "Conversation" },
+      { "path": "/jump", "element": "Jump" }
     ]
   },
   {

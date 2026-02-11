@@ -1,10 +1,30 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-02 15:23:39 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-02 15:23:39 
+ */
+/**
+ * RbSlider Component
+ * 
+ * A custom slider component that extends Ant Design's Slider with:
+ * - Value display next to the slider
+ * - Value change callback for side effects
+ * - Fixed width and custom styling
+ * 
+ * @component
+ */
+
 import { type FC, useEffect } from 'react';
 import { Slider, type SliderSingleProps } from 'antd';
 
+/** Props interface for RbSlider component */
 interface RbSliderProps extends SliderSingleProps {
+  /** Callback fired when value changes (for side effects) */
   onValueChange?: (value: number | null | undefined) => void;
 }
 
+/** Custom slider component with value display */
 const RbSlider: FC<RbSliderProps> = ({
   value,
   min = 0,
@@ -12,21 +32,18 @@ const RbSlider: FC<RbSliderProps> = ({
   step = 1,
   ...rest
 }) => {
-  // 监听value变化，包括初始值
+  /** Listen to value changes and trigger side effects via onValueChange callback */
   useEffect(() => {
     if (onValueChange) {
       onValueChange(value);
     }
   }, [value, onValueChange]);
- 
-  // const flag1 = value && value > (min + step * 1)
-  // const flag = value && value > (min + step * 1)
+
   return (
-    <div className="rb:flex rb:items-center rb:justify-between rb:gap-[8px] rb:rounded-[5px]">
+    <div className="rb:flex rb:items-center rb:justify-between rb:gap-2 rb:rounded-[5px]">
+      {/* Slider with fixed width */}
       <Slider 
         style={{
-          // width: flag1 ? '384px' : '373px',
-          // margin: flag ? '0 11px 0 0': '0 5px 0 11px'
           overflow: 'inherit',
           width: '384px'
         }}
@@ -34,7 +51,8 @@ const RbSlider: FC<RbSliderProps> = ({
         step={step}
         value={value}
       />
-      <div className="rb:text-[14px] rb:text-[#155EEF] rb:leading-[20px]">{value || min}</div>
+      {/* Display current value or minimum value */}
+      <div className="rb:text-[14px] rb:text-[#155EEF] rb:leading-5">{value || min}</div>
     </div>
   );
 };

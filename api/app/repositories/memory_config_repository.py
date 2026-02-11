@@ -715,3 +715,95 @@ class MemoryConfigRepository:
             db_logger.error(f"删除记忆配置失败: config_id={config_id} - {str(e)}")
             raise
 
+    @staticmethod
+    def get_workspace_default(db: Session, workspace_id: uuid.UUID) -> Optional[MemoryConfig]:
+        """获取工作空间的默认记忆配置
+        
+        优先返回标记为默认的配置，如果没有则返回最早创建的活跃配置。
+        
+        Args:
+            db: 数据库会话
+            workspace_id: 工作空间ID
+            
+        Returns:
+            Optional[MemoryConfig]: 默认配置对象，不存在则返回None
+        """
+        db_logger.debug(f"查询工作空间默认配置: workspace_id={workspace_id}")
+        
+        try:
+            # 优先查找显式标记为默认的配置
+            stmt = (
+                select(MemoryConfig)
+                .where(
+                    MemoryConfig.workspace_id == workspace_id,
+                    MemoryConfig.is_default.is_(True),
+                    MemoryConfig.state.is_(True),
+                )
+                .limit(1)
+            )
+            
+            config = db.scalars(stmt).first()
+            
+            if config:
+                db_logger.debug(f"找到默认配置: config_id={config.config_id}")
+                return config
+            
+            # 回退：获取最早创建的活跃配置
+            stmt = (
+                select(MemoryConfig)
+                .where(
+                    MemoryConfig.workspace_id == workspace_id,
+                    MemoryConfig.state.is_(True),
+                )
+                .order_by(MemoryConfig.created_at.asc())
+                .limit(1)
+            )
+            
+            config = db.scalars(stmt).first()
+            
+            if config:
+                db_logger.debug(f"使用最早创建的配置作为默认: config_id={config.config_id}")
+            else:
+                db_logger.warning(f"工作空间没有活跃的记忆配置: workspace_id={workspace_id}")
+            
+            return config
+            
+        except Exception as e:
+            db_logger.error(f"查询工作空间默认配置失败: workspace_id={workspace_id} - {str(e)}")
+            raise
+
+    @staticmethod
+    def get_with_fallback(
+        db: Session,
+        config_id: Optional[uuid.UUID],
+        workspace_id: uuid.UUID
+    ) -> Optional[MemoryConfig]:
+        """获取记忆配置，支持回退到工作空间默认配置
+        
+        如果 config_id 为 None 或配置不存在，则回退到工作空间默认配置。
+        
+        Args:
+            db: 数据库会话
+            config_id: 配置ID（可为None）
+            workspace_id: 工作空间ID，用于回退查询
+            
+        Returns:
+            Optional[MemoryConfig]: 配置对象，如果都不存在则返回None
+        """
+        db_logger.debug(f"查询配置（支持回退）: config_id={config_id}, workspace_id={workspace_id}")
+        
+        if not config_id:
+            db_logger.debug("config_id 为空，使用工作空间默认配置")
+            return MemoryConfigRepository.get_workspace_default(db, workspace_id)
+        
+        config = db.get(MemoryConfig, config_id)
+        
+        if config:
+            return config
+        
+        db_logger.warning(
+            f"配置不存在，回退到工作空间默认配置: missing_config_id={config_id}, workspace_id={workspace_id}"
+        )
+        
+        return MemoryConfigRepository.get_workspace_default(db, workspace_id)
+

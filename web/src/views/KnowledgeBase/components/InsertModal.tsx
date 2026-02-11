@@ -130,7 +130,7 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
         }
       }
     } catch (error) {
-      console.error('操作失败:', error);
+      console.error('Operation failed:', error);
       const errorMsg = isEditMode
         ? (t('knowledgeBase.updateFailed') || '更新失败')
         : (t('knowledgeBase.insertFailed') || '插入失败');

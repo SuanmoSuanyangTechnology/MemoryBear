@@ -1,5 +1,12 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 16:29:37 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 16:29:37 
+ */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
+
 import ConfigHeader from './components/ConfigHeader'
 import type { AgentRef, ClusterRef, WorkflowRef } from './types'
 import type { Application } from '@/views/ApplicationManagement/types'
@@ -11,14 +18,28 @@ import { getApplication } from '@/api/application'
 import Workflow from '@/views/Workflow';
 import Statistics from './Statistics'
 
+/**
+ * Application configuration page component
+ * Main container for configuring agents, workflows, multi-agent clusters
+ * Manages tabs for arrangement, API, release, and statistics
+ */
 const ApplicationConfig: React.FC = () => {
+  // Hooks
   const { id } = useParams();
+  
+  // Refs for different application types
   const agentRef = useRef<AgentRef>(null)
   const clusterRef = useRef<ClusterRef>(null)
   const workflowRef = useRef<WorkflowRef>(null)
+  
+  // State
   const [application, setApplication] = useState<Application | null>(null);
   const [activeTab, setActiveTab] = useState('arrangement');
 
+  /**
+   * Handle tab change with auto-save for arrangement tab
+   * @param key - New tab key
+   */
   const handleChangeTab = async (key: string) => {
     if (activeTab === 'arrangement' && application?.type === 'agent' && agentRef.current) {
       agentRef.current.handleSave(false)
@@ -44,6 +65,9 @@ const ApplicationConfig: React.FC = () => {
     getApplicationInfo()
   }, [id])
 
+  /**
+   * Fetch application information
+   */
   const getApplicationInfo = () => {
     if (!id) {
       return

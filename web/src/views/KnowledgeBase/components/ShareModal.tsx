@@ -4,13 +4,13 @@
  * @Author: yujiangping
  * @Date: 2025-11-10 18:52:55
  * @LastEditors: yujiangping
- * @LastEditTime: 2025-11-29 12:29:31
+ * @LastEditTime: 2026-02-10 15:18:32
  */
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Switch } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { message } from 'antd';
-import type { ShareModalRef, ShareModalRefProps, KnowledgeBase} from '@/views/KnowledgeBase/types';
+import type { ShareModalRef, ShareModalRefProps, KnowledgeBase, SpaceItem} from '@/views/KnowledgeBase/types';
 import RbModal from '@/components/RbModal'
 // import betchControlIcon from '@/assets/images/knowledgeBase/betch-control.png';
 import kbIcon from '@/assets/images/knowledgeBase/knowledge-management.png';
@@ -33,7 +33,7 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase | null>(null);
   const [spaceList, setSpaceList] = useState<SpaceItem[]>([]);
  
-  // 封装取消方法，添加关闭弹窗逻辑
+  // Close modal and reset state
   const handleClose = () => {
     setCurIndex(9999);
     setLoading(false)
@@ -66,11 +66,11 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
     console.log('Workspace IDs:', workspaceIds);
     shareSpaceModalRef?.current?.handleOpen(kbId,knowledgeBase,workspaceIds);
     
-    // 分享后关闭弹窗
+    // Close modal after sharing
     handleClose();
   }
   const handleChange = (checked: boolean, item: any) => {
-    // 打开/关闭分享出去的数据库
+    // Toggle shared knowledge base status
     console.log('Switch changed:', checked, item);
     updateKnowledgeBase(item.target_kb?.id, {
       status: checked ? 1 : 2
@@ -82,7 +82,7 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
     })
   }
 
-  // 暴露给父组件的方法
+  // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose,
@@ -93,7 +93,7 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
     <>
     {contextHolder}
     <RbModal
-      title={t('knowledgeBase.toWorkspace')}
+      title={t('knowledgeBase.shareSpace')}
       open={visible}
       onCancel={handleClose}
       okText={t('knowledgeBase.share')}
@@ -101,8 +101,8 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
       confirmLoading={loading}
     >
         <div className='rb:flex rb:flex-col rb:text-left'>
-            <h4 className='rb:text-sm rb:font-medium rb:text-gray-800'>{t('knowledgeBase.shareTitle')}</h4>
-            <span className='rb:text-xs rb:text-gray-500'>{t('knowledgeBase.shareNote')}</span>
+            <h4 className='rb:text-sm rb:font-medium rb:text-gray-800'>{t('knowledgeBase.shareSpaceTitle')}</h4>
+            <span className='rb:text-xs rb:text-gray-500'>{t('knowledgeBase.shareSpaceNote')}</span>
             <div className='rb:flex rb:flex-col rb:text-left rb:gap-4 rb:mt-4 '>
               {spaceList.length === 0 && (
                 <NoData />

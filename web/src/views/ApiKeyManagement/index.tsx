@@ -1,8 +1,16 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 15:52:50 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 15:52:50 
+ */
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, App, Space } from 'antd';
 import clsx from 'clsx';
 import { DeleteOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons';
+import copy from 'copy-to-clipboard'
+
 import type { ApiKey, ApiKeyModalRef } from './types';
 import ApiKeyModal from './components/ApiKeyModal';
 import ApiKeyDetailModal from './components/ApiKeyDetailModal';
@@ -11,26 +19,49 @@ import { getApiKeyListUrl, deleteApiKey } from '@/api/apiKey';
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { formatDateTime } from '@/utils/format';
 import Tag from '@/components/Tag'
-import copy from 'copy-to-clipboard'
 import { maskApiKeys } from '@/utils/apiKeyReplacer';
 
+/**
+ * API Key Management page component
+ * Manages service API keys with CRUD operations
+ */
 const ApiKeyManagement: React.FC = () => {
+  // Hooks
   const { t } = useTranslation();
   const { modal, message } = App.useApp();
+  
+  // Refs
   const apiKeyModalRef = useRef<ApiKeyModalRef>(null);
   const apiKeyDetailModalRef = useRef<ApiKeyModalRef>(null)
   const scrollListRef = useRef<PageScrollListRef>(null)
 
+  /**
+   * Refresh the API key list
+   */
   const refresh = () => {
     scrollListRef.current?.refresh();
   }
   
+  /**
+   * Open modal to create or edit API key
+   * @param item - Optional API key item for edit mode
+   */
   const handleEdit = (item?: ApiKey) => {
     apiKeyModalRef.current?.handleOpen(item);
   }
+  
+  /**
+   * Open modal to view API key details
+   * @param item - API key item to view
+   */
   const handleView = (item: ApiKey) => {
     apiKeyDetailModalRef.current?.handleOpen(item);
   }
+  
+  /**
+   * Delete API key with confirmation
+   * @param item - API key item to delete
+   */
   const handleDelete = (item: ApiKey) => {
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: item.name }),
@@ -46,6 +77,10 @@ const ApiKeyManagement: React.FC = () => {
       }
     })
   }
+  /**
+   * Copy content to clipboard
+   * @param content - Content to copy
+   */
   const handleCopy = (content: string) => {
     copy(content)
     message.success(t('common.copySuccess'))

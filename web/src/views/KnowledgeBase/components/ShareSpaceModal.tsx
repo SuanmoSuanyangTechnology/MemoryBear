@@ -30,7 +30,7 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase | null>(null);
   const [spaceList, setSpaceList] = useState<SpaceItem[]>([]);
  
-  // 封装取消方法，添加关闭弹窗逻辑
+  // Close modal and reset state
   const handleClose = () => {
     setCurIndex(-1);
     setLoading(false)
@@ -51,10 +51,10 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
   }
   const handleShare = async() => {
 
-    // 获取所有 checked 为 true 的数据
+    // Get all data with checked = true
     const checkedItems = spaceList.filter(item => item.is_active);
     debugger
-    // 获取当前选中的项（curIndex 对应的数据）
+    // Get currently selected item (corresponding to curIndex)
     const selectedItem = curIndex !== -1 ? spaceList[curIndex] : null;
     if(!selectedItem){
       messageApi.error(t('knowledgeBase.selectSpace'));
@@ -70,13 +70,13 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
     }else{
       messageApi.error(t('knowledgeBase.shareFailed'));
     }
-    // 调用父组件传递的回调函数，传递选中的数据
+    // Call parent component's callback function with selected data
     onShare?.({
       checkedItems,
       selectedItem
     });
     
-    // 分享后关闭弹窗
+    // Close modal after sharing
     handleClose();
   }
   const handleClick = (index: number, checked: boolean) => {
@@ -84,7 +84,7 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
     setCurIndex(index);
   }
   
-  // 暴露给父组件的方法
+  // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose,

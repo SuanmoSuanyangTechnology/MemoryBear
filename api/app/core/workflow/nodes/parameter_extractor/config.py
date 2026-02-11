@@ -1,7 +1,7 @@
 import uuid
+from enum import StrEnum
 
 from pydantic import Field, BaseModel
-from enum import StrEnum
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
 

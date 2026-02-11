@@ -27,7 +27,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
         { label: t('knowledgeBase.vector'), value: false },
     ]);
 
-    // 获取检索模式选项
+    // Get retrieval mode options
     useEffect(() => {
         fetchRetrievalModeOptions();
     }, []);
@@ -36,9 +36,9 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
         try {
             const response = await getRetrievalModeType();
             if (response && Array.isArray(response)) {
-                // 将 API 返回的数据转换为选项格式
+                // Convert API response to option format
                 const options = response.map((item: any) => {
-                    // 支持多种数据格式
+                    // Support multiple data formats
                     let label = t(`knowledgeBase.${item}`) + ' ' + t(`knowledgeBase.retrieve`);
                     let value = item;
                     
@@ -50,8 +50,8 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                 }
             }
         } catch (error) {
-            console.error('获取检索模式选项失败:', error);
-            // 保持默认选项
+            console.error('Failed to fetch retrieval mode options:', error);
+            // Keep default options
         }
     };
 
@@ -60,8 +60,8 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
         setKnowledgeBaseId(kbId || '');
         form.resetFields();
         setData([]);
-        setRetrieveType('hybrid'); // 重置为默认值
-        // 确保表单字段也设置为默认值
+        setRetrieveType('hybrid'); // Reset to default value
+        // Ensure form field is also set to default value
         form.setFieldsValue({ retrieve_type: 'hybrid' });
     }
     const fetchData = (params: RecallTestParams) => {
@@ -91,10 +91,10 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
             console.log('RecallTest - params:', params);
             fetchData(params);
         }).catch((error) => {
-            console.error('表单验证失败:', error);
+            console.error('Form validation failed:', error);
         });
     }
-    // 暴露给父组件的方法
+    // Expose methods to parent component
     useImperativeHandle(ref, () => ({
         handleOpen,
     }));
@@ -134,7 +134,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                   />
               </Form.Item>
 
-              {/* 当 retrieve_type = semantic 或 hybrid 时显示 */}
+              {/* Show when retrieve_type = semantic or hybrid */}
               {(retrieveType === 'semantic' || retrieveType === 'hybrid') && (
                   <Form.Item name="similarity_threshold" label={t('knowledgeBase.similarityThreshold')}>
                       <Select
@@ -155,7 +155,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                   </Form.Item>
               )}
 
-              {/* 当 retrieve_type = participle 或 hybrid 时显示 */}
+              {/* Show when retrieve_type = participle or hybrid */}
               {(retrieveType === 'participle' || retrieveType === 'hybrid') && (
                   <Form.Item name="vector_similarity_weight" label={t('knowledgeBase.semanticSimilarity')}>
                       <Select

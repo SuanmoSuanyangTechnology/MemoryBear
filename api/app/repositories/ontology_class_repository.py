@@ -202,7 +202,7 @@ class OntologyClassRepository:
             )
             raise
     
-    def get_by_scene(self, scene_id: UUID) -> List[OntologyClass]:
+    def get_classes_by_scene(self, scene_id: UUID) -> List[OntologyClass]:
         """获取场景下的所有类型
         
         按创建时间倒序排列。
@@ -215,7 +215,7 @@ class OntologyClassRepository:
             
         Examples:
             >>> repo = OntologyClassRepository(db)
-            >>> classes = repo.get_by_scene(scene_id)
+            >>> classes = repo.get_classes_by_scene(scene_id)
         """
         try:
             logger.debug(f"Getting ontology classes by scene: {scene_id}")

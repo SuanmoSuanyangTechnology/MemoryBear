@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 13:59:45 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 13:59:45 
+ */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
 import type { Config } from '@/views/ApplicationConfig/types'
@@ -5,71 +11,72 @@ import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { QueryParams } from '@/views/Conversation/types'
 import type { WorkflowConfig } from '@/views/Workflow/types'
 
-// 应用列表
+// Application list
 export const getApplicationListUrl = '/apps'
 export const getApplicationList = (data: Record<string, unknown>) => {
   return request.get(getApplicationListUrl, data)
 }
-// 获取应用配置
+// Get application config
 export const getApplicationConfig = (id: string) => {
   return request.get(`/apps/${id}/config`)
 }
-// 获取集群应用配置
+// Get multi-agent config
 export const getMultiAgentConfig = (id: string) => {
   return request.get(`/apps/${id}/multi-agent`)
 }
-// 获取 workflow应用配置
+// Get workflow config
 export const getWorkflowConfig = (id: string) => {
   return request.get(`/apps/${id}/workflow`)
 }
-// 应用详情
+// Application details
 export const getApplication = (id: string) => {
   return request.get(`/apps/${id}`)
 }
-// 更新应用
+// Update application
 export const updateApplication = (id: string, values: ApplicationModalData) => {
   return request.put(`/apps/${id}`, values)
 }
-// 创建应用
+// Create application
 export const addApplication = (values: ApplicationModalData) => {
   return request.post('/apps', values)
 }
-// 保存Agent配置
+// Save agent config
 export const saveAgentConfig = (app_id: string, values: Config) => {
   return request.put(`/apps/${app_id}/config`, values)
 }
-// 保存集群配置
+// Save multi-agent config
 export const saveMultiAgentConfig = (app_id: string, values: Config) => {
   return request.put(`/apps/${app_id}/multi-agent`, values)
 }
-// 保存workflow配置
+// Save workflow config
 export const saveWorkflowConfig = (app_id: string, values: WorkflowConfig) => {
   return request.put(`/apps/${app_id}/workflow`, values)
 }
-// 模型比对试运行
+// Model comparison test run
 export const runCompare = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void) => {
   return handleSSE(`/apps/${app_id}/draft/run/compare`, values, onMessage)
 }
+// Test run
 export const draftRun = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void) => {
   return handleSSE(`/apps/${app_id}/draft/run`, values, onMessage)
 }
-// 删除应用
+// Delete application
 export const deleteApplication = (app_id: string) => {
   return request.delete(`/apps/${app_id}`)
 }
-// 发布版本列表
+// Release version list
 export const getReleaseList = (app_id: string) => {
   return request.get(`/apps/${app_id}/releases`)
 }
-// 发布版本
+// Publish release
 export const publishRelease = (app_id: string, values: Record<string, unknown>) => {
   return request.post(`/apps/${app_id}/publish`, values)
 }
-// 回滚版本
+// Rollback release
 export const rollbackRelease = (app_id: string, version: string) => {
   return request.post(`/apps/${app_id}/rollback/${version}`)
 }
-// 发布版本分享
+// Share release
 export const shareRelease = (app_id: string, release_id: string) => {
   return request.post(`/apps/${app_id}/releases/${release_id}/share`, {
     "is_enabled": true,
@@ -77,7 +84,7 @@ export const shareRelease = (app_id: string, release_id: string) => {
     "allow_embed": true
   })
 }
-// 获取体验对话历史
+// Get conversation history
 export const getConversationHistory = (share_token: string, data: { page: number; pagesize: number }) => {
   return request.get(`/public/share/conversations`, data, {
     headers: {
@@ -85,7 +92,7 @@ export const getConversationHistory = (share_token: string, data: { page: number
     }
   })
 }
-// 发送体验对话
+// Send conversation
 export const sendConversation = (values: QueryParams, onMessage: (data: SSEMessage[]) => void, shareToken: string) => {
   return handleSSE(`/public/share/chat`, values, onMessage, {
     headers: {
@@ -93,7 +100,7 @@ export const sendConversation = (values: QueryParams, onMessage: (data: SSEMessa
     }
   })
 }
-// 获取体验会话详情
+// Get conversation details
 export const getConversationDetail = (share_token: string, conversation_id: string) => {
   return request.get(`/public/share/conversations/${conversation_id}`, {}, {
     headers: {
@@ -101,15 +108,15 @@ export const getConversationDetail = (share_token: string, conversation_id: stri
     }
   })
 }
-// 获取体验对话token
+// Get share token
 export const getShareToken = (share_token: string, user_id: string) => {
   return request.post(`/public/share/${share_token}/token`, { user_id })
 }
-// 复制应用
+// Copy application
 export const copyApplication = (app_id: string, new_name: string) => {
   return request.post(`/apps/${app_id}/copy?new_name=${new_name}`)
 }
-// 数据统计
+// Data statistics
 export const getAppStatistics = (app_id: string, data: { start_date: number; end_date: number; }) => {
   return request.get(`/apps/${app_id}/statistics`, data)
 }

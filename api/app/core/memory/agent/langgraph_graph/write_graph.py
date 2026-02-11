@@ -1,4 +1,3 @@
-
 import asyncio
 import json
 import sys
@@ -20,6 +19,8 @@ logger = get_agent_logger(__name__)
 
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
 @asynccontextmanager
 async def make_write_graph():
     """

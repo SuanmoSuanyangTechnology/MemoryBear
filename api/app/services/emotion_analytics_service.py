@@ -57,24 +57,57 @@ class EmotionAnalyticsService:
         self.emotion_repo = EmotionRepository(connector)
         logger.info("情绪分析服务初始化完成")
 
+    # 情绪类型的中英文映射
+    EMOTION_TYPE_TRANSLATIONS = {
+        'joy': {'zh': '喜悦', 'en': 'Joy'},
+        'sadness': {'zh': '悲伤', 'en': 'Sadness'},
+        'anger': {'zh': '愤怒', 'en': 'Anger'},
+        'fear': {'zh': '恐惧', 'en': 'Fear'},
+        'surprise': {'zh': '惊讶', 'en': 'Surprise'},
+        'neutral': {'zh': '中性', 'en': 'Neutral'}
+    }
+
+    def _translate_emotion_type(self, emotion_type: str, language: str = "zh") -> str:
+        """将情绪类型翻译成指定语言
+        
+        Args:
+            emotion_type: 情绪类型（英文key）
+            language: 目标语言 ("zh" 或 "en")
+        
+        Returns:
+            翻译后的情绪类型名称
+        """
+        if emotion_type in self.EMOTION_TYPE_TRANSLATIONS:
+            return self.EMOTION_TYPE_TRANSLATIONS[emotion_type].get(language, emotion_type)
+        return emotion_type
+
     async def get_emotion_tags(
             self,
             end_user_id: str,
             emotion_type: Optional[str] = None,
             start_date: Optional[str] = None,
             end_date: Optional[str] = None,
-            limit: int = 10
+            limit: int = 10,
+            language: str = "zh"
     ) -> Dict[str, Any]:
         """获取情绪标签统计
 
         查询指定用户的情绪类型分布，包括计数、百分比和平均强度。
         确保返回所有6个情绪维度（joy、sadness、anger、fear、surprise、neutral），
         即使某些维度没有数据也会返回count=0的记录。
+        
+        Args:
+            end_user_id: 用户ID
+            emotion_type: 情绪类型过滤
+            start_date: 开始日期
+            end_date: 结束日期
+            limit: 返回数量限制
+            language: 输出语言 ("zh" 中文, "en" 英文)
 
         """
         try:
             logger.info(f"获取情绪标签统计: user={end_user_id}, type={emotion_type}, "
-                        f"start={start_date}, end={end_date}, limit={limit}")
+                        f"start={start_date}, end={end_date}, limit={limit}, language={language}")
 
             # 调用仓储层查询
             tags = await self.emotion_repo.get_emotion_tags(
@@ -91,11 +124,13 @@ class EmotionAnalyticsService:
             # 将查询结果转换为字典，方便查找
             tags_dict = {tag["emotion_type"]: tag for tag in tags}
 
-            # 补全缺失的情绪维度
+            # 补全缺失的情绪维度，直接使用英文枚举key（前端自行翻译）
             complete_tags = []
             for emotion in all_emotion_types:
                 if emotion in tags_dict:
-                    complete_tags.append(tags_dict[emotion])
+                    tag = tags_dict[emotion].copy()
+                    tag["emotion_type"] = emotion
+                    complete_tags.append(tag)
                 else:
                     # 如果该情绪类型不存在，添加默认值
                     complete_tags.append({
@@ -185,14 +220,16 @@ class EmotionAnalyticsService:
         """计算积极率
 
         根据情绪类型分类正面、负面和中性情绪，计算积极率。
-        公式：(正面数 / (正面数 + 负面数)) * 100
+        当存在非中性情绪时：(正面数 / (正面数 + 负面数)) * 100
+        当只有中性情绪时：基于中性情绪的存在给出基准分数
+        当完全没有情绪数据时：score 为 None，表示无法计算
 
         Args:
             emotions: 情绪数据列表，每个包含 emotion_type 字段
 
         Returns:
             Dict: 包含积极率计算结果：
-                - score: 积极率分数（0-100）
+                - score: 积极率分数（0-100），无数据时为 None
                 - positive_count: 正面情绪数量
                 - negative_count: 负面情绪数量
                 - neutral_count: 中性情绪数量
@@ -210,14 +247,19 @@ class EmotionAnalyticsService:
         total_non_neutral = positive_count + negative_count
         if total_non_neutral > 0:
             score = (positive_count / total_non_neutral) * 100
+        elif neutral_count > 0:
+            # 只有中性情绪，说明情绪状态平稳，给予基准分 50
+            score = 50.0
         else:
-            score = 50.0  # 如果没有非中性情绪，默认为50
+            # 完全没有情绪数据，无法计算积极率
+            score = None
 
+        score_display = f"{score:.2f}" if score is not None else "N/A"
         logger.debug(f"积极率计算: positive={positive_count}, negative={negative_count}, "
-                     f"neutral={neutral_count}, score={score:.2f}")
+                     f"neutral={neutral_count}, score={score_display}")
 
         return {
-            "score": round(score, 2),
+            "score": round(score, 2) if score is not None else None,
             "positive_count": positive_count,
             "negative_count": negative_count,
             "neutral_count": neutral_count
@@ -346,16 +388,26 @@ class EmotionAnalyticsService:
                 time_range=time_range
             )
 
+            # 如果指定时间范围内没有数据，尝试更大的时间范围
+            if not emotions and time_range != "90d":
+                logger.info(f"用户 {end_user_id} 在 {time_range} 内无数据，尝试90天范围")
+                emotions = await self.emotion_repo.get_emotions_in_range(
+                    end_user_id=end_user_id,
+                    time_range="90d"
+                )
+                if emotions:
+                    time_range = "90d"
+
             # 如果没有数据，返回默认值
             if not emotions:
                 logger.warning(f"用户 {end_user_id} 在时间范围 {time_range} 内没有情绪数据")
                 return {
-                    "health_score": 0.0,
+                    "health_score": None,
                     "level": "无数据",
                     "dimensions": {
-                        "positivity_rate": {"score": 0.0, "positive_count": 0, "negative_count": 0, "neutral_count": 0},
-                        "stability": {"score": 0.0, "std_deviation": 0.0},
-                        "resilience": {"score": 0.0, "recovery_rate": 0.0}
+                        "positivity_rate": {"score": None, "positive_count": 0, "negative_count": 0, "neutral_count": 0},
+                        "stability": {"score": None, "std_deviation": 0.0},
+                        "resilience": {"score": None, "recovery_rate": 0.0}
                     },
                     "emotion_distribution": {},
                     "time_range": time_range
@@ -368,8 +420,10 @@ class EmotionAnalyticsService:
 
             # 计算综合健康分数
             # 公式：positivity_rate * 0.4 + stability * 0.3 + resilience * 0.3
+            # 如果积极率无法计算（无数据），视为 0 参与加权
+            positivity_score = positivity_rate["score"] if positivity_rate["score"] is not None else 0.0
             health_score = (
-                    positivity_rate["score"] * 0.4 +
+                    positivity_score * 0.4 +
                     stability["score"] * 0.3 +
                     resilience["score"] * 0.3
             )
@@ -475,6 +529,7 @@ class EmotionAnalyticsService:
             self,
             end_user_id: str,
             db: Session,
+            language: str = "zh",
     ) -> Dict[str, Any]:
         """生成个性化情绪建议
 
@@ -483,6 +538,7 @@ class EmotionAnalyticsService:
         Args:
             end_user_id: 宿主ID（用户组ID）
             db: 数据库会话
+            language: 输出语言 ("zh" 中文, "en" 英文)
 
         Returns:
             Dict: 包含个性化建议的响应：
@@ -501,14 +557,16 @@ class EmotionAnalyticsService:
 
                 connected_config = get_end_user_connected_config(end_user_id, db)
                 config_id = connected_config.get("memory_config_id")
-                config_id = resolve_config_id(config_id, db)
-                if config_id is not None:
+                workspace_id = connected_config.get("workspace_id")
+                config_id = resolve_config_id(config_id, db) if config_id else None
+                if config_id is not None or workspace_id is not None:
                     from app.services.memory_config_service import (
                         MemoryConfigService,
                     )
                     config_service = MemoryConfigService(db)
                     memory_config = config_service.load_memory_config(
-                        config_id=(config_id),
+                        config_id=config_id,
+                        workspace_id=workspace_id,
                         service_name="EmotionAnalyticsService.generate_emotion_suggestions"
                     )
                     from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -526,6 +584,27 @@ class EmotionAnalyticsService:
                 time_range="30d"
             )
 
+            # 3.1 如果30天内没有数据，尝试获取90天的数据
+            if not emotions:
+                logger.info(f"用户 {end_user_id} 30天内无情绪数据，尝试获取90天数据")
+                emotions = await self.emotion_repo.get_emotions_in_range(
+                    end_user_id=end_user_id,
+                    time_range="90d"
+                )
+                health_data = await self.calculate_emotion_health_index(end_user_id, time_range="90d")
+
+            # 3.2 如果仍然没有时间范围内的数据，从情绪标签统计获取（无时间过滤）
+            if not emotions:
+                logger.info(f"用户 {end_user_id} 90天内也无情绪数据，从标签统计获取全量数据")
+                tags_data = await self.get_emotion_tags(end_user_id=end_user_id)
+                if tags_data.get("total_count", 0) > 0:
+                    # 用标签统计数据构建简化的 health_data
+                    health_data["emotion_distribution"] = {
+                        tag["emotion_type"]: tag["count"]
+                        for tag in tags_data.get("tags", [])
+                    }
+                    health_data["total_emotion_count"] = tags_data["total_count"]
+
             # 4. 分析情绪模式
             patterns = self._analyze_emotion_patterns(emotions)
 
@@ -533,7 +612,7 @@ class EmotionAnalyticsService:
             user_profile = await self._get_simple_user_profile(end_user_id)
 
             # 6. 构建LLM prompt
-            prompt = await self._build_suggestion_prompt(health_data, patterns, user_profile)
+            prompt = await self._build_suggestion_prompt(health_data, patterns, user_profile, language)
 
             # 7. 调用LLM生成建议（使用配置中的LLM）
             if llm_client is None:
@@ -554,12 +633,12 @@ class EmotionAnalyticsService:
             except Exception as e:
                 logger.error(f"LLM 结构化输出失败: {str(e)}")
                 # 返回默认建议
-                suggestions_response = self._get_default_suggestions(health_data)
+                suggestions_response = self._get_default_suggestions(health_data, language)
 
             # 8. 验证建议数量（3-5条）
             if len(suggestions_response.suggestions) < 3:
                 logger.warning(f"建议数量不足: {len(suggestions_response.suggestions)}")
-                suggestions_response = self._get_default_suggestions(health_data)
+                suggestions_response = self._get_default_suggestions(health_data, language)
             elif len(suggestions_response.suggestions) > 5:
                 logger.warning(f"建议数量过多: {len(suggestions_response.suggestions)}")
                 suggestions_response.suggestions = suggestions_response.suggestions[:5]
@@ -624,7 +703,8 @@ class EmotionAnalyticsService:
             self,
             health_data: Dict[str, Any],
             patterns: Dict[str, Any],
-            user_profile: Dict[str, Any]
+            user_profile: Dict[str, Any],
+            language: str = "zh"
     ) -> str:
         """构建情绪建议生成的prompt
 
@@ -632,6 +712,7 @@ class EmotionAnalyticsService:
             health_data: 情绪健康数据
             patterns: 情绪模式分析结果
             user_profile: 用户画像数据
+            language: 输出语言 ("zh" 中文, "en" 英文)
 
         Returns:
             str: LLM prompt
@@ -643,66 +724,114 @@ class EmotionAnalyticsService:
         prompt = await render_emotion_suggestions_prompt(
             health_data=health_data,
             patterns=patterns,
-            user_profile=user_profile
+            user_profile=user_profile,
+            language=language
         )
 
         return prompt
 
-    def _get_default_suggestions(self, health_data: Dict[str, Any]) -> EmotionSuggestionsResponse:
+    def _get_default_suggestions(self, health_data: Dict[str, Any], language: str = "zh") -> EmotionSuggestionsResponse:
         """获取默认建议（当LLM调用失败时使用）
 
         Args:
             health_data: 情绪健康数据
+            language: 输出语言 ("zh" 中文, "en" 英文)
 
         Returns:
             EmotionSuggestionsResponse: 默认建议
         """
-        health_score = health_data.get('health_score', 0)
+        health_score = health_data.get('health_score') or 0
 
-        if health_score >= 80:
-            summary = "您的情绪健康状况优秀，请继续保持积极的生活态度。"
-        elif health_score >= 60:
-            summary = "您的情绪健康状况良好，可以通过一些调整进一步提升。"
-        elif health_score >= 40:
-            summary = "您的情绪健康需要关注，建议采取一些改善措施。"
+        if language == "en":
+            if health_score >= 80:
+                summary = "Your emotional health is excellent. Keep up the positive attitude."
+            elif health_score >= 60:
+                summary = "Your emotional health is good. Some adjustments can further improve it."
+            elif health_score >= 40:
+                summary = "Your emotional health needs attention. Consider taking improvement measures."
+            else:
+                summary = "Your emotional health needs serious attention. Consider seeking professional help."
+
+            suggestions = [
+                EmotionSuggestion(
+                    type="Emotion Balance",
+                    title="Maintain Emotional Balance",
+                    content="Through mindfulness meditation and deep breathing exercises, help you better manage emotional fluctuations and improve emotional stability.",
+                    priority="High",
+                    actionable_steps=[
+                        "Practice 5-10 minutes of mindfulness meditation every morning",
+                        "Take 3 deep breaths when feeling emotional fluctuations",
+                        "Record daily emotional changes to identify triggers"
+                    ]
+                ),
+                EmotionSuggestion(
+                    type="Activity Recommendation",
+                    title="Increase Outdoor Activities",
+                    content="Moderate outdoor exercise can effectively improve mood and enhance physical and mental health. Recommend 3-4 outdoor activities per week.",
+                    priority="Medium",
+                    actionable_steps=[
+                        "Schedule 2-3 30-minute walks per week",
+                        "Try outdoor sports like cycling or hiking on weekends",
+                        "Focus on surroundings and relax during outdoor activities"
+                    ]
+                ),
+                EmotionSuggestion(
+                    type="Social Connection",
+                    title="Strengthen Social Connections",
+                    content="Maintaining good social connections with friends and family can provide emotional support and improve emotional health.",
+                    priority="Medium",
+                    actionable_steps=[
+                        "Have a deep conversation with at least one friend or family member weekly",
+                        "Join social activities or interest groups you enjoy",
+                        "Actively share your feelings and thoughts"
+                    ]
+                )
+            ]
         else:
-            summary = "您的情绪健康需要重点关注，建议寻求专业帮助。"
+            if health_score >= 80:
+                summary = "您的情绪健康状况优秀，请继续保持积极的生活态度。"
+            elif health_score >= 60:
+                summary = "您的情绪健康状况良好，可以通过一些调整进一步提升。"
+            elif health_score >= 40:
+                summary = "您的情绪健康需要关注，建议采取一些改善措施。"
+            else:
+                summary = "您的情绪健康需要重点关注，建议寻求专业帮助。"
 
-        suggestions = [
-            EmotionSuggestion(
-                type="emotion_balance",
-                title="保持情绪平衡",
-                content="通过正念冥想和深呼吸练习，帮助您更好地管理情绪波动，提升情绪稳定性。",
-                priority="high",
-                actionable_steps=[
-                    "每天早晨进行5-10分钟的正念冥想",
-                    "感到情绪波动时，进行3次深呼吸",
-                    "记录每天的情绪变化，识别触发因素"
-                ]
-            ),
-            EmotionSuggestion(
-                type="activity_recommendation",
-                title="增加户外活动",
-                content="适度的户外运动可以有效改善情绪，增强身心健康。建议每周进行3-4次户外活动。",
-                priority="medium",
-                actionable_steps=[
-                    "每周安排2-3次30分钟的散步",
-                    "周末尝试户外运动如骑行或爬山",
-                    "在户外活动时关注周围环境，放松心情"
-                ]
-            ),
-            EmotionSuggestion(
-                type="social_connection",
-                title="加强社交联系",
-                content="与朋友和家人保持良好的社交联系，可以提供情感支持，改善情绪健康。",
-                priority="medium",
-                actionable_steps=[
-                    "每周至少与一位朋友或家人深入交流",
-                    "参加感兴趣的社交活动或兴趣小组",
-                    "主动分享自己的感受和想法"
-                ]
-            )
-        ]
+            suggestions = [
+                EmotionSuggestion(
+                    type="情绪平衡",
+                    title="保持情绪平衡",
+                    content="通过正念冥想和深呼吸练习，帮助您更好地管理情绪波动，提升情绪稳定性。",
+                    priority="高",
+                    actionable_steps=[
+                        "每天早晨进行5-10分钟的正念冥想",
+                        "感到情绪波动时，进行3次深呼吸",
+                        "记录每天的情绪变化，识别触发因素"
+                    ]
+                ),
+                EmotionSuggestion(
+                    type="活动建议",
+                    title="增加户外活动",
+                    content="适度的户外运动可以有效改善情绪，增强身心健康。建议每周进行3-4次户外活动。",
+                    priority="中",
+                    actionable_steps=[
+                        "每周安排2-3次30分钟的散步",
+                        "周末尝试户外运动如骑行或爬山",
+                        "在户外活动时关注周围环境，放松心情"
+                    ]
+                ),
+                EmotionSuggestion(
+                    type="社交联系",
+                    title="加强社交联系",
+                    content="与朋友和家人保持良好的社交联系，可以提供情感支持，改善情绪健康。",
+                    priority="中",
+                    actionable_steps=[
+                        "每周至少与一位朋友或家人深入交流",
+                        "参加感兴趣的社交活动或兴趣小组",
+                        "主动分享自己的感受和想法"
+                    ]
+                )
+            ]
 
         return EmotionSuggestionsResponse(
             health_summary=summary,

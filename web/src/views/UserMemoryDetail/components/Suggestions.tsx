@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 18:31:50 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 18:31:50 
+ */
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -8,6 +14,11 @@ import { getEmotionSuggestions } from '@/api/memory'
 import RbAlert from '@/components/RbAlert'
 
 
+/**
+ * Suggestions data structure
+ * @property {string} health_summary - Overall health summary
+ * @property {Array} suggestions - List of suggestions with actionable steps
+ */
 interface Suggestions {
   health_summary: string;
   suggestions: Array<{
@@ -18,6 +29,12 @@ interface Suggestions {
     actionable_steps: string[];
   }>;
 }
+
+/**
+ * Suggestions Component
+ * Displays emotional health suggestions with actionable steps
+ * Shows health summary and prioritized recommendations
+ */
 const Suggestions = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
