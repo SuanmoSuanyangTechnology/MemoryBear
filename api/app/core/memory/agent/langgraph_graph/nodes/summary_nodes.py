@@ -3,6 +3,8 @@
 import os
 import time
 
+import pandas as pd
+
 from app.core.logging_config import get_agent_logger, log_time
 from app.core.memory.agent.models.summary_models import (
     RetrieveSummaryResponse,
@@ -14,10 +16,11 @@ from app.core.memory.agent.utils.llm_tools import (
     PROJECT_ROOT_,
     ReadState,
 )
+from app.core.memory.agent.utils.redis_semantic_search import RedisSemanticSearch
 from app.core.memory.agent.utils.redis_tool import store
 from app.core.memory.agent.utils.session_tools import SessionService
 from app.core.memory.agent.utils.template_tools import TemplateService
-from app.db import get_db
+from app.db import get_db, get_db_context
 
 template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
 logger = get_agent_logger(__name__)
@@ -34,9 +37,31 @@ class SummaryNodeService(LLMServiceMixin):
 summary_service = SummaryNodeService()
 
 async def summary_history(state: ReadState) -> ReadState:
+    query=state.get("data", '')
     end_user_id = state.get("end_user_id", '')
-    history = await SessionService(store).get_history(end_user_id, end_user_id, end_user_id)
-    return history
+    memory_config = state.get('memory_config', None)
+    embedding_model_id=memory_config.embedding_model_id
+    # history = await SessionService(store).get_history(end_user_id, end_user_id, end_user_id)
+    history=[]
+    with get_db_context() as db:
+        # 使用任意 embedding 模型
+        semantic_search = RedisSemanticSearch(db, embedding_model_id)
+        results = semantic_search.keyword_fuzzy_search(
+            query_text=query,
+            session_type="write",  # 或 "read", "count"
+            top_k=50,
+            end_user_id=end_user_id  # 可选：按用户ID过滤
+        )
+        if results != []:
+            for i in results:
+                history.append({"Query": i['messages'], "Answer": i['aimessages']})
+    df = pd.DataFrame(history)
+    unique_df = df.drop_duplicates(subset=['Query', 'Answer'])
+    # 转回字典格式
+    unique_results = unique_df.to_dict(orient='records')
+    for i in unique_results:
+        print(i)
+    return unique_results
 
 async def summary_llm(state: ReadState, history, retrieve_info, template_name, operation_name, response_model,search_mode) -> str:
     """
@@ -131,8 +156,21 @@ async def summary_redis_save(state: ReadState,aimessages) -> ReadState:
         ai_response=aimessages
     )
     await SessionService(store).cleanup_duplicates()
-    logger.info(f"sessionid: {aimessages} 写入成功")
-async def summary_prompt(state: ReadState,aimessages,raw_results) -> ReadState:
+    logger.info(f"redis sessionid: {aimessages} 写入成功")
+
+    memory_config = state.get('memory_config', None)
+    embedding_model_id = memory_config.embedding_model_id
+    with get_db_context() as db:
+        semantic_search = RedisSemanticSearch(db, embedding_model_id)
+        await (semantic_search.add_session_with_vector(
+            end_user_id=end_user_id,
+            messages=data,
+            aimessages=aimessages,
+            session_type="read"
+        ))
+    logger.info(f"redis-statck sessionid: {aimessages} 写入成功")
+
+async def summary_prompt(state: ReadState,aimessages,raw_results,history) -> ReadState:
     storage_type=state.get("storage_type",'')
     user_rag_memory_id=state.get("user_rag_memory_id",'')
     data=state.get("data", '')
@@ -144,6 +182,7 @@ async def summary_prompt(state: ReadState,aimessages,raw_results) -> ReadState:
         "_intermediate": {
             "type": "input_summary",
             "title": "快速答案",
+            "history":history,
             "summary": aimessages,
             "query": data,
             "raw_results": raw_results,
@@ -196,7 +235,7 @@ async def Input_Summary(state: ReadState) -> ReadState:
         # aimessages=await summary_llm(state,history,retrieve_info,'Retrieve_Summary_prompt.jinja2',
         #                              'input_summary',RetrieveSummaryResponse)
         # logger.info(f"快速答案总结==>>:{storage_type}--{user_rag_memory_id}--{aimessages}")
-        summary_result = await summary_prompt(state, retrieve_info, retrieve_info)
+        summary_result = await summary_prompt(state, retrieve_info, retrieve_info,history)
         summary = summary_result[0]
     except Exception as e:
         logger.error( f"Input_Summary failed: {e}", exc_info=True )
@@ -247,7 +286,7 @@ async def Retrieve_Summary(state: ReadState)-> ReadState:
     log_time('Retrieval summary', duration)
     
     # 修复协程调用 - 先await，然后访问返回值
-    summary_result = await summary_prompt(state, aimessages, retrieve_info_str)
+    summary_result = await summary_prompt(state, aimessages, retrieve_info_str,history)
     summary = summary_result[1]
     return {"summary":summary}
 
@@ -284,7 +323,7 @@ async def Summary(state: ReadState)-> ReadState:
     log_time('Retrieval summary', duration)
 
     # 修复协程调用 - 先await，然后访问返回值
-    summary_result = await summary_prompt(state, aimessages, retrieve_info_str)
+    summary_result = await summary_prompt(state, aimessages, retrieve_info_str,history)
     summary = summary_result[1]
     return {"summary":summary}
 

@@ -738,14 +738,19 @@ class RedisSemanticSearch:
             
             # 如果指定了用户ID，添加过滤条件
             if end_user_id:
-                escaped_user_id = self._escape_redis_query(end_user_id)
-                query_str = f"(@end_user_id:{escaped_user_id}) ({query_str})"
+                # end_user_id 是 TEXT 字段，使用双引号进行精确匹配
+                # 双引号语法适用于 TEXT 字段的精确短语匹配
+                user_query = f'@end_user_id:"{end_user_id}"'
+                
+                # 组合查询：用户ID过滤 AND 关键词搜索
+                query_str = f"{user_query} ({query_str})"
             
             logger.info(f"查询字符串: {query_str}")
             
             # 4. 执行搜索
             from redis.commands.search.query import Query
             
+            # 使用完整的查询字符串
             query = (
                 Query(query_str)
                 .paging(0, top_k)
@@ -753,7 +758,7 @@ class RedisSemanticSearch:
             )
             
             results = vector_search.r.ft(index_name).search(query)
-            
+
             # 5. 解析结果
             parsed_results = []
             for doc in results.docs:
@@ -859,8 +864,9 @@ class RedisSemanticSearch:
             
             # 如果指定了用户ID，添加过滤条件
             if end_user_id:
-                escaped_user_id = self._escape_redis_query(end_user_id)
-                query_str = f"(@end_user_id:{escaped_user_id}) ({query_str})"
+                # end_user_id 是 TEXT 字段，使用双引号进行精确匹配
+                user_query = f'@end_user_id:"{end_user_id}"'
+                query_str = f"{user_query} ({query_str})"
             
             logger.info(f"查询字符串: {query_str}")
             

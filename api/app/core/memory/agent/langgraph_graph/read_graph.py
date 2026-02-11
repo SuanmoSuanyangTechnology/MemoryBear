@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from contextlib import asynccontextmanager
 
+import pandas as pd
 from langchain_core.messages import HumanMessage
 from langgraph.constants import START, END
 from langgraph.graph import StateGraph
@@ -78,17 +79,17 @@ async def make_read_graph():
 
 async def main():
     """主函数 - 运行工作流"""
-    message = "昨天有什么好看的电影"
-    end_user_id = '88a459f5_text09'  # 组ID
+    message = "杭州提到了什么？"
+    end_user_id = 'a7725ebd-2090-4f58-a7ce-909ac0b5ddbf'  # 组ID
     storage_type = 'neo4j'  # 存储类型
-    search_switch = '1'  # 搜索开关
+    search_switch = '2'  # 搜索开关
     user_rag_memory_id = 'wwwwwwww'  # 用户RAG记忆ID
 
     # 获取数据库会话
     db_session = next(get_db())
     config_service = MemoryConfigService(db_session)
     memory_config = config_service.load_memory_config(
-        config_id=17,  # 改为整数
+        config_id="8daf4340-45a6-4095-8997-b0e6a65dde9d",  # 改为整数
         service_name="MemoryAgentService"
     )
     import time
@@ -172,6 +173,48 @@ async def main():
     print(100*'y')
 
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+# if __name__ == "__main__":
+# #     # import asyncio
+# #     # asyncio.run(main())
+#     from app.db import get_db_context
+#     from app.core.memory.agent.utils.redis_semantic_search import RedisSemanticSearch
+#     from app.core.memory.agent.utils.redis_tool import store
+#     import asyncio
+#     from app.core.memory.agent.utils.session_tools import SessionService
+#     end_user_id='47f363a2-15a5-474a-873e-d87d9fa64852'
+#     # history = asyncio.run (SessionService(store).get_history(end_user_id, end_user_id, end_user_id))
+#     history=[]
+#     with get_db_context() as db:
+#         # 使用任意 embedding 模型
+#         semantic_search = RedisSemanticSearch(db, "d14944db-23c4-44ff-b81f-40deff86324f")
+#
+#         # asyncio.run(semantic_search.add_session_with_vector(
+#         #     end_user_id=end_user_id,
+#         #     messages="帮我查一下杭州有什么美食",
+#         #     aimessages="杭州有很多著名景点"
+#         # ))
+#
+#        # # 搜索（自动适配维度）
+#        #  results = asyncio.run( semantic_search.hybrid_semantic_search(
+#        #      query="周五爬山",
+#        #      top_k=10,
+#        #      end_user_id=end_user_id,
+#        #      session_type="write"
+#        #  ))
+#
+#         results = semantic_search.keyword_fuzzy_search(
+#             query_text="我去过杭州吗？",
+#             session_type="write",  # 或 "read", "count"
+#             top_k=10,
+#             end_user_id=end_user_id  # 可选：按用户ID过滤
+#         )
+#         if results!=[]:
+#             for i in results:
+#                 history.append({"Query":i['messages'],"Answer":i['aimessages']})
+#     df = pd.DataFrame(history)
+#     unique_df = df.drop_duplicates(subset=['Query', 'Answer'])
+#
+#     # 转回字典格式
+#     unique_results = unique_df.to_dict(orient='records')
+#     print((unique_results))
+

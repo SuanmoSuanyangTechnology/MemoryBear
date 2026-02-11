@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 
+from app.core.memory.agent.utils.redis_semantic_search import RedisSemanticSearch
 from app.db import get_db, get_db_context
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.llm_tools import WriteState
@@ -45,6 +46,7 @@ async def make_write_graph():
 async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[],memory_config:str='',end_user_id:str='',scope:int=6):
     from app.core.memory.agent.langgraph_graph.routing.write_router import memory_long_term_storage, window_dialogue,aggregate_judgment
     from app.core.memory.agent.utils.redis_tool import write_store
+    '''redis write'''
     write_store.save_session_write(end_user_id,  (langchain_messages))
     # 获取数据库会话
     with get_db_context() as db_session:
@@ -53,6 +55,28 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
             config_id=memory_config,  # 改为整数
             service_name="MemoryAgentService"
         )
+        aimessages=[]
+        messages=[]
+        for langchain_message in langchain_messages:
+            if langchain_message['role'] == 'user':
+                messages.append(langchain_message['content'])
+            if langchain_message['role'] == 'assistant':
+                aimessages.append(langchain_message['content'])
+
+        for msg ,aimsg in zip(messages, aimessages):
+            '''redis_stack write'''
+            # 使用任意 embedding 模型
+            logger.info(100 * '`')
+            logger.info(msg+'--'+aimsg)
+            logger.info(100*'`')
+            semantic_search = RedisSemanticSearch(db_session, memory_config.embedding_model_id)
+            await (semantic_search.add_session_with_vector(
+                end_user_id=end_user_id,
+                messages=msg,
+                aimessages=aimsg,
+                session_type="write"
+            ))
+
         if long_term_type=='chunk':
             '''方案一:对话窗口6轮对话'''
             await window_dialogue(end_user_id,langchain_messages,memory_config,scope)
