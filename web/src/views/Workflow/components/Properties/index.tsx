@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 19:56:42
+ * @Last Modified time: 2026-02-11 12:07:06
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -627,6 +627,7 @@ const Properties: FC<PropertiesProps> = ({
                   }
                   layout={config.type === 'switch' ? 'horizontal' : 'vertical'}
                   className={key === 'parallel_count' ? 'rb:-mt-3! rb:leading-3.5!' : ''}
+                  hidden={Boolean(config.hidden)}
                 >
                   {config.type === 'input'
                     ? <Input placeholder={t('common.pleaseEnter')} />
