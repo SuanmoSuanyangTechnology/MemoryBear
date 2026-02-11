@@ -55,8 +55,10 @@ class Settings:
     # Redis configuration
     REDIS_HOST: str = os.getenv("REDIS_HOST", "127.0.0.1")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_PORT_STACK: int = int(os.getenv("REDIS_PORT_STACK", "6380"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "1"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
+    REDIS_PASSWORD_STACK: str = os.getenv("REDIS_PASSWORD_STACK", "")  # Redis Stack 可能使用不同的密码
     
 
     # ElasticSearch configuration
