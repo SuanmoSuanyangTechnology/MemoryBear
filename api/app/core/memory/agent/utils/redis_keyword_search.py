@@ -582,22 +582,22 @@ keyword_search = RedisKeywordSearch(
     db=settings.REDIS_DB,
     password=settings.REDIS_PASSWORD
 )
-# 1. 添加索引
-keyword_search.add_keyword_index(
-    session_id="uuid-123",
-    keywords=["杭州", "旅游", "美食"],
-    session_type="read"
-)
-
-# 2. 搜索
-results = keyword_search.search_by_keywords_and(
-    keywords=["杭州", "美食"],
-    session_type="read"
-)
+# # 1. 添加索引
+# keyword_search.add_keyword_index(
+#     session_id="uuid-123",
+#     keywords=["杭州", "旅游", "美食"],
+#     session_type="read"
+# )
 #
-# 3. 高级搜索
-results = keyword_search.advanced_search(
-    keywords=["杭州"],
-    user_id="user_123",
-    time_range=("2026-02-01 00:00:00", "2026-02-09 23:59:59")
-)
+# # 2. 搜索
+# results = keyword_search.search_by_keywords_and(
+#     keywords=["杭州", "美食"],
+#     session_type="read"
+# )
+# #
+# # 3. 高级搜索
+# results = keyword_search.advanced_search(
+#     keywords=["杭州"],
+#     user_id="user_123",
+#     time_range=("2026-02-01 00:00:00", "2026-02-09 23:59:59")
+# )

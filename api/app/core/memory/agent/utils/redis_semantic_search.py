@@ -446,57 +446,159 @@ class RedisSemanticSearch:
                                     session_type: str = "read",
                                     top_k: int = 10,
                                     end_user_id: Optional[str] = None,
-                                    vector_weight: float = 0.7,
-                                    keyword_weight: float = 0.3,
-                                    score_threshold: float = 0.3) -> List[Dict[str, Any]]:
+                                    vector_weight: float = 0.6,
+                                    keyword_weight: float = 0.4,
+                                    score_threshold: float = 0.3,
+                                    candidate_multiplier: int = 3) -> List[Dict[str, Any]]:
         """
-        混合语义搜索（向量 + 关键词）
+        混合语义搜索（向量搜索 + 关键词模糊搜索）
+        
+        结合向量语义搜索和关键词模糊搜索的优势：
+        - 向量搜索：捕捉语义相似性
+        - 关键词搜索：确保关键词匹配
         
         Args:
             query: 查询文本
             session_type: 会话类型
             top_k: 返回前 K 个结果
             end_user_id: 用户ID过滤
-            vector_weight: 向量权重
-            keyword_weight: 关键词权重
-            score_threshold: 相似度阈值
+            vector_weight: 向量搜索权重（默认 0.6）
+            keyword_weight: 关键词搜索权重（默认 0.4）
+            score_threshold: 混合分数阈值（0-1）
+            candidate_multiplier: 候选结果倍数（获取 top_k * multiplier 个候选）
             
         Returns:
-            List[Dict]: 搜索结果
+            List[Dict]: 搜索结果，按混合分数降序排序
         """
         try:
-            # 1. 生成查询向量
-            query_vector = await self.get_embedding(query)
+            logger.info(f"开始混合语义搜索: query='{query}', top_k={top_k}")
             
-            if not query_vector:
-                logger.error("生成查询向量失败")
-                return []
+            # 计算候选数量
+            candidate_count = top_k * candidate_multiplier
             
-            # 2. 提取关键词
-            keywords = keyword_search.extract_keywords(query)
+            # 1. 向量语义搜索
+            vector_results = []
+            if self._embedder_client:
+                try:
+                    query_vector = await self.get_embedding(query)
+                    
+                    if query_vector and REDISEARCH_AVAILABLE and vector_search:
+                        vector_results = vector_search.vector_search(
+                            query_vector=query_vector,
+                            session_type=session_type,
+                            top_k=candidate_count,
+                            end_user_id=end_user_id,
+                            score_threshold=0.0  # 不在这里过滤，后面统一过滤
+                        )
+                        logger.info(f"向量搜索找到 {len(vector_results)} 个结果")
+                    else:
+                        logger.warning("向量搜索不可用")
+                except Exception as e:
+                    logger.warning(f"向量搜索失败: {e}")
+            else:
+                logger.warning("Embedder 客户端未初始化，跳过向量搜索")
             
-            # 3. 混合搜索
-            results = vector_search.hybrid_search(
-                query_vector=query_vector,
-                keywords=keywords,
-                session_type=session_type,
-                top_k=top_k,
-                end_user_id=end_user_id,
-                vector_weight=vector_weight,
-                keyword_weight=keyword_weight
-            )
-
-            # 4. 过滤低分结果
-            filtered_results = [
-                r for r in results
-                if r.get('hybrid_score', 0) >= score_threshold
-            ]
+            # 2. 关键词模糊搜索
+            keyword_results = []
+            try:
+                keyword_results = self.keyword_fuzzy_search(
+                    query_text=query,
+                    session_type=session_type,
+                    top_k=candidate_count,
+                    end_user_id=end_user_id
+                )
+                logger.info(f"关键词搜索找到 {len(keyword_results)} 个结果")
+            except Exception as e:
+                logger.warning(f"关键词搜索失败: {e}")
             
-            logger.info(f"混合语义搜索找到 {len(filtered_results)} 个结果")
-            return filtered_results
+            # 3. 合并结果并计算混合分数
+            session_scores = {}
+            print(keyword_results)
+            # 处理向量搜索结果
+            for result in vector_results:
+                session_id = result['session_id']
+                # 向量搜索返回的 similarity 是相似度（0-1，越大越好）
+                vector_score = result.get('similarity', 0.0)
+                
+                session_scores[session_id] = {
+                    'vector_score': vector_score,
+                    'keyword_score': 0.0,
+                    'data': result
+                }
+            
+            # 处理关键词搜索结果
+            for result in keyword_results:
+                session_id = result['session_id']
+                # 关键词搜索返回的 match_score 是匹配分数（0-1，越大越好）
+                keyword_score = result.get('match_score', 0.0)
+                
+                if session_id in session_scores:
+                    # 已存在，更新关键词分数
+                    session_scores[session_id]['keyword_score'] = keyword_score
+                    # 合并 matched_keywords 信息
+                    session_scores[session_id]['data']['matched_keywords'] = result.get('matched_keywords', [])
+                    session_scores[session_id]['data']['total_keywords'] = result.get('total_keywords', 0)
+                else:
+                    # 新结果，添加
+                    session_scores[session_id] = {
+                        'vector_score': 0.0,
+                        'keyword_score': keyword_score,
+                        'data': result
+                    }
+            
+            # 4. 计算混合分数并构建最终结果
+            hybrid_results = []
+            for session_id, scores in session_scores.items():
+                # 计算加权混合分数
+                hybrid_score = (
+                    scores['vector_score'] * vector_weight +
+                    scores['keyword_score'] * keyword_weight
+                )
+                
+                # 应用阈值过滤
+                if hybrid_score < score_threshold:
+                    continue
+                
+                # 构建结果
+                result = scores['data'].copy()
+                result['hybrid_score'] = hybrid_score
+                result['vector_score'] = scores['vector_score']
+                result['keyword_score'] = scores['keyword_score']
+                
+                # 确保包含所有必要字段
+                if 'matched_keywords' not in result:
+                    result['matched_keywords'] = []
+                if 'total_keywords' not in result:
+                    result['total_keywords'] = 0
+                
+                hybrid_results.append(result)
+            
+            # 5. 按混合分数排序
+            hybrid_results.sort(key=lambda x: x['hybrid_score'], reverse=True)
+            
+            # 6. 返回前 top_k 个结果
+            final_results = hybrid_results[:top_k]
+            
+            logger.info(f"混合语义搜索完成，返回 {len(final_results)} 个结果")
+            
+            # 记录详细信息（调试用）
+            if final_results:
+                logger.debug(f"Top 3 结果:")
+                for i, r in enumerate(final_results[:3], 1):
+                    logger.debug(
+                        f"  {i}. session_id={r['session_id']}, "
+                        f"hybrid={r['hybrid_score']:.3f}, "
+                        f"vector={r['vector_score']:.3f}, "
+                        f"keyword={r['keyword_score']:.3f}, "
+                        f"matched_kw={r.get('matched_keywords', [])}"
+                    )
+            
+            return final_results
             
         except Exception as e:
             logger.error(f"混合语义搜索失败: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     # ==================== 相似会话推荐 ====================
@@ -544,6 +646,258 @@ class RedisSemanticSearch:
             
         except Exception as e:
             logger.error(f"查找相似会话失败: {e}")
+            return []
+    
+    # ==================== 关键词模糊搜索 ====================
+    
+    def keyword_fuzzy_search(self,
+                            query_text: str,
+                            session_type: str = "read",
+                            top_k: int = 10,
+                            end_user_id: Optional[str] = None,
+                            search_fields: List[str] = None) -> List[Dict[str, Any]]:
+        """
+        基于关键词的模糊搜索
+        
+        先提取查询文本的关键词，然后对每个关键词在 messages 和 aimessages 字段中进行模糊匹配
+        
+        Args:
+            query_text: 查询文本
+            session_type: 会话类型 ("read", "write", "count")
+            top_k: 返回前 K 个结果
+            end_user_id: 用户ID过滤（可选）
+            search_fields: 要搜索的字段列表，默认为 ["messages", "aimessages"]
+            
+        Returns:
+            List[Dict]: 搜索结果列表
+        """
+        try:
+            # 检查 vector_search 是否可用
+            if not REDISEARCH_AVAILABLE or vector_search is None:
+                logger.warning("RediSearch 不可用，无法进行关键词搜索")
+                return []
+            
+            # 确定索引名称
+            if session_type == "read":
+                index_name = vector_search.INDEX_NAME_READ
+            elif session_type == "write":
+                index_name = vector_search.INDEX_NAME_WRITE
+            elif session_type == "count":
+                index_name = vector_search.INDEX_NAME_COUNT
+            else:
+                logger.error(f"不支持的会话类型: {session_type}")
+                return []
+            
+            # 检查索引是否存在
+            try:
+                vector_search.r.ft(index_name).info()
+            except Exception as e:
+                logger.error(f"索引 {index_name} 不存在: {e}")
+                return []
+            
+            # 1. 提取关键词
+            if keyword_search:
+                keywords = keyword_search.extract_keywords(query_text)
+            else:
+                # 如果关键词提取器不可用，使用简单的分词
+                keywords = query_text.split()
+            
+            if not keywords:
+                logger.warning("未提取到关键词")
+                return []
+            
+            logger.info(f"提取到关键词: {keywords}")
+            
+            # 2. 确定搜索字段
+            if search_fields is None:
+                search_fields = ["messages", "aimessages"]
+            
+            # 3. 构建查询字符串（对每个关键词进行模糊匹配）
+            query_parts = []
+            
+            for keyword in keywords:
+                # 转义特殊字符
+                escaped_keyword = self._escape_redis_query(keyword)
+                
+                # 为每个字段构建模糊查询
+                field_queries = []
+                for field in search_fields:
+                    # 使用通配符进行模糊匹配
+                    field_queries.append(f"@{field}:*{escaped_keyword}*")
+                
+                # 组合字段查询（OR 关系）
+                if field_queries:
+                    query_parts.append(f"({' | '.join(field_queries)})")
+            
+            # 组合所有关键词查询（OR 关系，匹配任意关键词）
+            if not query_parts:
+                logger.warning("未生成有效的查询")
+                return []
+            
+            query_str = " | ".join(query_parts)
+            
+            # 如果指定了用户ID，添加过滤条件
+            if end_user_id:
+                escaped_user_id = self._escape_redis_query(end_user_id)
+                query_str = f"(@end_user_id:{escaped_user_id}) ({query_str})"
+            
+            logger.info(f"查询字符串: {query_str}")
+            
+            # 4. 执行搜索
+            from redis.commands.search.query import Query
+            
+            query = (
+                Query(query_str)
+                .paging(0, top_k)
+                .return_fields("end_user_id", "messages", "aimessages", "timestamp", "created_time", "created_at")
+            )
+            
+            results = vector_search.r.ft(index_name).search(query)
+            
+            # 5. 解析结果
+            parsed_results = []
+            for doc in results.docs:
+                # 从 doc.id 中提取 session_id
+                doc_id = doc.id if hasattr(doc, 'id') else ''
+                session_id = doc_id.split(':')[-1] if ':' in doc_id else doc_id
+                
+                # 计算匹配的关键词数量（用于排序）
+                messages = doc.messages if hasattr(doc, 'messages') else ''
+                aimessages = doc.aimessages if hasattr(doc, 'aimessages') else ''
+                combined_text = f"{messages} {aimessages}".lower()
+                
+                matched_keywords = [kw for kw in keywords if kw.lower() in combined_text]
+                match_score = len(matched_keywords) / len(keywords) if keywords else 0
+                
+                parsed_results.append({
+                    'session_id': session_id,
+                    'end_user_id': doc.end_user_id if hasattr(doc, 'end_user_id') else '',
+                    'messages': messages,
+                    'aimessages': aimessages,
+                    'timestamp': int(doc.timestamp) if hasattr(doc, 'timestamp') else 0,
+                    'created_time': int(doc.created_time) if hasattr(doc, 'created_time') else 0,
+                    'created_at': doc.created_at if hasattr(doc, 'created_at') else '',
+                    'matched_keywords': matched_keywords,
+                    'match_score': match_score,
+                    'total_keywords': len(keywords)
+                })
+            
+            # 6. 按匹配分数排序
+            parsed_results.sort(key=lambda x: x['match_score'], reverse=True)
+            
+            logger.info(f"关键词模糊搜索找到 {len(parsed_results)} 个结果")
+            return parsed_results
+            
+        except Exception as e:
+            logger.error(f"关键词模糊搜索失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    def _escape_redis_query(self, text: str) -> str:
+        """
+        转义 Redis 查询中的特殊字符
+        
+        Args:
+            text: 要转义的文本
+            
+        Returns:
+            str: 转义后的文本
+        """
+        # Redis 查询中的特殊字符
+        special_chars = ['@', '-', '(', ')', '{', '}', '[', ']', '"', '~', '*', ':', '\\', '|', '!', '^', '.', ',', '<', '>', '&', '%', '$', '#']
+        
+        for char in special_chars:
+            text = text.replace(char, f'\\{char}')
+        
+        return text
+    
+    def simple_text_search(self,
+                          query_text: str,
+                          session_type: str = "read",
+                          top_k: int = 10,
+                          end_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        简单的全文搜索（不提取关键词，直接搜索原文）
+        
+        Args:
+            query_text: 查询文本
+            session_type: 会话类型
+            top_k: 返回前 K 个结果
+            end_user_id: 用户ID过滤
+            
+        Returns:
+            List[Dict]: 搜索结果列表
+        """
+        try:
+            # 检查 vector_search 是否可用
+            if not REDISEARCH_AVAILABLE or vector_search is None:
+                logger.warning("RediSearch 不可用，无法进行文本搜索")
+                return []
+            
+            # 确定索引名称
+            if session_type == "read":
+                index_name = vector_search.INDEX_NAME_READ
+            elif session_type == "write":
+                index_name = vector_search.INDEX_NAME_WRITE
+            elif session_type == "count":
+                index_name = vector_search.INDEX_NAME_COUNT
+            else:
+                logger.error(f"不支持的会话类型: {session_type}")
+                return []
+            
+            # 检查索引是否存在
+            try:
+                vector_search.r.ft(index_name).info()
+            except Exception as e:
+                logger.error(f"索引 {index_name} 不存在: {e}")
+                return []
+            
+            # 构建查询
+            escaped_text = self._escape_redis_query(query_text)
+            query_str = f"(@messages:*{escaped_text}*) | (@aimessages:*{escaped_text}*)"
+            
+            # 如果指定了用户ID，添加过滤条件
+            if end_user_id:
+                escaped_user_id = self._escape_redis_query(end_user_id)
+                query_str = f"(@end_user_id:{escaped_user_id}) ({query_str})"
+            
+            logger.info(f"查询字符串: {query_str}")
+            
+            # 执行搜索
+            from redis.commands.search.query import Query
+            
+            query = (
+                Query(query_str)
+                .paging(0, top_k)
+                .return_fields("end_user_id", "messages", "aimessages", "timestamp", "created_time", "created_at")
+            )
+            
+            results = vector_search.r.ft(index_name).search(query)
+            
+            # 解析结果
+            parsed_results = []
+            for doc in results.docs:
+                doc_id = doc.id if hasattr(doc, 'id') else ''
+                session_id = doc_id.split(':')[-1] if ':' in doc_id else doc_id
+                
+                parsed_results.append({
+                    'session_id': session_id,
+                    'end_user_id': doc.end_user_id if hasattr(doc, 'end_user_id') else '',
+                    'messages': doc.messages if hasattr(doc, 'messages') else '',
+                    'aimessages': doc.aimessages if hasattr(doc, 'aimessages') else '',
+                    'timestamp': int(doc.timestamp) if hasattr(doc, 'timestamp') else 0,
+                    'created_time': int(doc.created_time) if hasattr(doc, 'created_time') else 0,
+                    'created_at': doc.created_at if hasattr(doc, 'created_at') else ''
+                })
+            
+            logger.info(f"简单文本搜索找到 {len(parsed_results)} 个结果")
+            return parsed_results
+            
+        except Exception as e:
+            logger.error(f"简单文本搜索失败: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     # ==================== 批量索引现有数据 ====================

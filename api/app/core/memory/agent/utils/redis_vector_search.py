@@ -480,6 +480,7 @@ class RedisVectorSearch:
             # 检查索引是否存在，并验证维度
             index_exists = False
             index_dim_matches = False
+
             try:
                 index_info = self.r.ft(index_name).info()
                 index_exists = True
