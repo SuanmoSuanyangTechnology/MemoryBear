@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 17:40:08
+ * @Last Modified time: 2026-02-11 11:32:48
  */
 /**
  * File Upload Component
@@ -167,7 +167,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
       formData.append('file', file);
       
       const response = await request.uploadFile(action, formData, requestConfig);
-      
+
       onSuccess?.({data: response});
     } catch (error) {
       onError?.(error as Error);
@@ -178,8 +178,9 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
    * Handles upload state changes
    */
   const handleChange: UploadProps['onChange'] = ({ fileList: newFileList }) => {
+    setFileList(newFileList);
     if (onChange) {
-      onChange(maxCount === 1 ? newFileList[0] : newFileList);
+      onChange(maxCount === 1 ? newFileList[newFileList.length - 1] : newFileList);
     }
   };
 
