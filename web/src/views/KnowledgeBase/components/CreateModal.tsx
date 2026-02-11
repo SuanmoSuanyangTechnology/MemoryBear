@@ -221,9 +221,9 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       status: record.status,
     };
 
-    // Process parser_config data, set default values if not present
+    // Process parser_config data, preserve all existing fields and merge graphrag config
     baseValues.parser_config = {
-      ...record.parser_config,
+      ...record.parser_config, // Preserve all existing parser_config fields (yuque_user_id, yuque_token, feishu_app_id, etc.)
       graphrag: {
         use_graphrag: false,
         scene_name: '',
@@ -362,12 +362,32 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   // Actual save logic
   const performSave = async () => {
     try {
-      await form.validateFields();
-      setLoading(true);
-      const formValues = form.getFieldsValue();
+      // Get fields to validate based on current tab and edit mode
+      let fieldsToValidate: any[] | undefined = undefined;
       
-      // Check Third-party authentication before saving
-      if (formValues.type === 'Third-party' || currentType === 'Third-party') {
+      // If in edit mode and on knowledge graph tab, only validate knowledge graph fields
+      if (datasets?.id && activeTab === 'knowledgeGraph') {
+        fieldsToValidate = [
+          ['parser_config', 'graphrag', 'use_graphrag'],
+          ['parser_config', 'graphrag', 'scene_name'],
+          ['parser_config', 'graphrag', 'entity_types'],
+          ['parser_config', 'graphrag', 'method'],
+          ['parser_config', 'graphrag', 'resolution'],
+          ['parser_config', 'graphrag', 'community'],
+        ];
+      }
+      
+      // Validate only specified fields or all fields
+      await form.validateFields(fieldsToValidate);
+      setLoading(true);
+      // Get all field values including disabled fields
+      const formValues = form.getFieldsValue(true);
+      
+      // Only check Third-party authentication when creating new or explicitly on basic config tab
+      // Skip authentication check when editing and on knowledge graph tab
+      const shouldCheckAuth = !datasets?.id || activeTab === 'basic';
+      
+      if (shouldCheckAuth && (formValues.type === 'Third-party' || currentType === 'Third-party')) {
         const platform = formValues.parser_config?._third_party_platform || thirdPartyPlatform;
         
         try {

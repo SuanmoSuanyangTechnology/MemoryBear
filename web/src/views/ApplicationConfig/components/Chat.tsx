@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 12:18:23
+ * @Last Modified time: 2026-02-10 17:40:15
  */
 /**
  * Chat debugging component for application testing
@@ -366,10 +366,8 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
   const handleMessageChange = (message: string) => {
     setMessage(message)
   }
-  const [update, setUpdate] = useState(false)
   const fileChange = (file?: any) => {
     setFileList([...fileList, file])
-    setUpdate(prev => !prev)
   }
   // const handleRecordingComplete = async (file: any) => {
   //   console.log('file', file)
@@ -456,29 +454,27 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
             onChange={handleMessageChange}
           >
             <Flex justify="space-between" className="rb:flex-1">
-                <Flex gap={8} align="center">
-                  <Dropdown
-                    menu={{
-                      items: [
-                        { key: 'define', label: t('memoryConversation.addRemoteFile') },
-                        {
-                          key: 'upload', label: (
-                            <UploadFiles
-                              fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']}
-                              onChange={fileChange}
-                              fileList={[]}
-                              update={update}
-                            />
-                          )
-                        },
-                      ],
-                      onClick: handleShowUpload
-                    }}
-                  >
-                    <div
-                      className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')] rb:hover:bg-[url('@/assets/images/conversation/link_hover.svg')]"
-                    ></div>
-                  </Dropdown>
+              <Flex gap={8} align="center">
+                <Dropdown
+                  menu={{
+                    items: [
+                      { key: 'define', label: t('memoryConversation.addRemoteFile') },
+                      {
+                        key: 'upload', label: (
+                          <UploadFiles
+                            fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']}
+                            onChange={fileChange}
+                          />
+                        )
+                      },
+                    ],
+                    onClick: handleShowUpload
+                  }}
+                >
+                  <div
+                    className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')] rb:hover:bg-[url('@/assets/images/conversation/link_hover.svg')]"
+                  ></div>
+                </Dropdown>
               </Flex>
               {/* <Flex align="center">
                 <AudioRecorder onRecordingComplete={handleRecordingComplete} />

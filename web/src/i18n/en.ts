@@ -1289,6 +1289,7 @@ export const en = {
       priority: 'Structured Integration',
       addTool: 'Add Tool',
       tool: 'Tool',
+      variableConfig: 'Variable Configuration',
 
       statistics: 'Data Statistics',
       daily_conversations: 'Daily Conversations',

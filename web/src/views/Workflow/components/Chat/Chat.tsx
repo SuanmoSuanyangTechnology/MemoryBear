@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 12:17:41
+ * @Last Modified time: 2026-02-10 17:41:24
  */
 /**
  * Workflow Chat Component
@@ -343,13 +343,11 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
   const handleMessageChange = (message: string) => {
     setMessage(message)
   }
-  const [update, setUpdate] = useState(false)
   /**
    * Handles file upload from local device
    */
   const fileChange = (file?: any) => {
     setFileList([...fileList, file])
-    setUpdate(prev => !prev)
   }
   // const handleRecordingComplete = async (file: any) => {
   //   console.log('file', file)
@@ -517,8 +515,6 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                         <UploadFiles
                           fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']}
                           onChange={fileChange}
-                          fileList={[]}
-                          update={update}
                         />
                       )
                     },

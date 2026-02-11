@@ -334,6 +334,18 @@ const KnowledgeBaseManagement: FC = () => {
       setHasMore(hasNext);
 
       buildModelMenus(list, isLoadMore);
+      
+      // 首次加载后，检查是否需要自动加载更多（解决无滚动条问题）
+      if (!isLoadMore && hasNext) {
+        setTimeout(() => {
+          const scrollDiv = document.getElementById('scrollableDiv');
+          if (scrollDiv && scrollDiv.scrollHeight <= scrollDiv.clientHeight) {
+            console.log('No scrollbar detected, auto-loading more data');
+            setPage(2);
+            fetchData(2, true);
+          }
+        }, 100);
+      }
     } catch (error) {
       console.error('Failed to fetch knowledge base list:', error);
       if (!isLoadMore) {
@@ -532,10 +544,10 @@ const KnowledgeBaseManagement: FC = () => {
       <InfiniteScroll
         dataLength={data.length}
         next={loadMore}
-        hasMore={hasMore && !loading}
-        loader={<div className="rb:text-center rb:py-4">{t('common.loading')}</div>}
+        hasMore={hasMore}
+        loader={loading && data.length > 0 ? <div className="rb:text-center rb:py-4">{t('common.loading')}</div> : null}
         endMessage={
-          data.length > 0 ? (
+          data.length > 0 && !hasMore ? (
             <div className="rb:text-center rb:py-4 rb:text-gray-400">
               {t('common.noMoreData')}
             </div>

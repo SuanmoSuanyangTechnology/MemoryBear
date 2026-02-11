@@ -124,17 +124,17 @@ class EmotionAnalyticsService:
             # 将查询结果转换为字典，方便查找
             tags_dict = {tag["emotion_type"]: tag for tag in tags}
 
-            # 补全缺失的情绪维度，并翻译 emotion_type
+            # 补全缺失的情绪维度，直接使用英文枚举key（前端自行翻译）
             complete_tags = []
             for emotion in all_emotion_types:
                 if emotion in tags_dict:
                     tag = tags_dict[emotion].copy()
-                    tag["emotion_type"] = self._translate_emotion_type(emotion, language)
+                    tag["emotion_type"] = emotion
                     complete_tags.append(tag)
                 else:
                     # 如果该情绪类型不存在，添加默认值
                     complete_tags.append({
-                        "emotion_type": self._translate_emotion_type(emotion, language),
+                        "emotion_type": emotion,
                         "count": 0,
                         "percentage": 0.0,
                         "avg_intensity": 0.0
