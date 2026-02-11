@@ -173,48 +173,52 @@ async def main():
     print(100*'y')
 
 
-# if __name__ == "__main__":
-# #     # import asyncio
-# #     # asyncio.run(main())
-#     from app.db import get_db_context
-#     from app.core.memory.agent.utils.redis_semantic_search import RedisSemanticSearch
-#     from app.core.memory.agent.utils.redis_tool import store
-#     import asyncio
-#     from app.core.memory.agent.utils.session_tools import SessionService
-#     end_user_id='47f363a2-15a5-474a-873e-d87d9fa64852'
-#     # history = asyncio.run (SessionService(store).get_history(end_user_id, end_user_id, end_user_id))
-#     history=[]
-#     with get_db_context() as db:
-#         # 使用任意 embedding 模型
-#         semantic_search = RedisSemanticSearch(db, "d14944db-23c4-44ff-b81f-40deff86324f")
-#
-#         # asyncio.run(semantic_search.add_session_with_vector(
-#         #     end_user_id=end_user_id,
-#         #     messages="帮我查一下杭州有什么美食",
-#         #     aimessages="杭州有很多著名景点"
-#         # ))
-#
-#        # # 搜索（自动适配维度）
-#        #  results = asyncio.run( semantic_search.hybrid_semantic_search(
-#        #      query="周五爬山",
-#        #      top_k=10,
-#        #      end_user_id=end_user_id,
-#        #      session_type="write"
-#        #  ))
-#
-#         results = semantic_search.keyword_fuzzy_search(
-#             query_text="我去过杭州吗？",
-#             session_type="write",  # 或 "read", "count"
-#             top_k=10,
-#             end_user_id=end_user_id  # 可选：按用户ID过滤
-#         )
-#         if results!=[]:
-#             for i in results:
-#                 history.append({"Query":i['messages'],"Answer":i['aimessages']})
-#     df = pd.DataFrame(history)
-#     unique_df = df.drop_duplicates(subset=['Query', 'Answer'])
-#
-#     # 转回字典格式
-#     unique_results = unique_df.to_dict(orient='records')
-#     print((unique_results))
+if __name__ == "__main__":
+#     # import asyncio
+#     # asyncio.run(main())
+    from app.db import get_db_context
+    from app.core.memory.agent.utils.redis_semantic_search import RedisSemanticSearch
+    from app.core.memory.agent.utils.redis_tool import store
+    import asyncio
+    from app.core.memory.agent.utils.session_tools import SessionService
+    end_user_id='47f363a2-15a5-474a-873e-d87d9fa64852'
+    # history = asyncio.run (SessionService(store).get_history(end_user_id, end_user_id, end_user_id))
+    history=[]
+    with get_db_context() as db:
+        # 使用任意 embedding 模型
+        semantic_search = RedisSemanticSearch(db, "d14944db-23c4-44ff-b81f-40deff86324f")
+
+        # asyncio.run(semantic_search.add_session_with_vector(
+        #     end_user_id=end_user_id,
+        #     messages="帮我查一下杭州有什么美食",
+        #     aimessages="杭州有很多著名景点"
+        # ))
+
+       # # 搜索（自动适配维度）
+       #  results = asyncio.run( semantic_search.hybrid_semantic_search(
+       #      query="周五爬山",
+       #      top_k=10,
+       #      end_user_id=end_user_id,
+       #      session_type="write"
+       #  ))
+
+        results = semantic_search.keyword_fuzzy_search(
+            query_text="我去过杭州吗？",
+            session_type="write",  # 或 "read", "count"
+            top_k=10,
+            end_user_id=end_user_id  # 可选：按用户ID过滤
+        )
+        if results!=[]:
+            for i in results:
+                history.append({"Query":i['messages'],"Answer":i['aimessages']})
+    df = pd.DataFrame(history)
+    unique_df = df.drop_duplicates(subset=['Query', 'Answer'])
+
+    # 转回字典格式
+    unique_results = unique_df.to_dict(orient='records')
+    print((unique_results))
+# for i in unique_results:
+#     ans = nli(i['Query'], que)
+#     print(i['Query'], '----', ans)
+
 
