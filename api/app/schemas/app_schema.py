@@ -439,7 +439,7 @@ class DraftRunRequest(BaseModel):
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
-    files: Optional[List[FileInput]] = Field(default=None, description="附件列表（支持多文件）")
+    files: Optional[List[FileInput]] = Field(default_factory=list, description="附件列表（支持多文件）")
 
 
 class DraftRunResponse(BaseModel):

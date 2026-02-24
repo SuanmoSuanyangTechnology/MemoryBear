@@ -279,6 +279,10 @@ class WorkflowExecutor:
                         async for error_event in self.event_handler.handle_node_error_event(data):
                             yield error_event
 
+                    elif event_type == "cycle_item":
+                        async for cycle_event in self.event_handler.handle_cycle_item_event(data):
+                            yield cycle_event
+
                 elif mode == "debug":
                     async for debug_event in self.event_handler.handle_debug_event(data, input_data):
                         yield debug_event
