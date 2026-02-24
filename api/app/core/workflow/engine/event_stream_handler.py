@@ -271,3 +271,11 @@ class EventStreamHandler:
                 }
             }
 
+    @staticmethod
+    async def handle_cycle_item_event(data: dict):
+        yield {
+            "event": "cycle_item",
+            "data": data.get("data")
+        }
+
+
