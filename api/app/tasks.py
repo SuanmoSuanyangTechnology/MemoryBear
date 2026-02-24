@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional
 
 import redis
 import requests
-import trio
 
 # Import a unified Celery instance
 from app.celery_app import celery_app
@@ -66,6 +65,10 @@ def parse_document(file_path: str, document_id: uuid.UUID):
     """
     Document parsing, vectorization, and storage
     """
+    # Force re-importing Trio in child processes (to avoid inheriting the state of the parent process)
+    import trio
+    import importlib
+    importlib.reload(trio)
     db = next(get_db())  # Manually call the generator
     db_document = None
     db_knowledge = None
@@ -292,6 +295,10 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
     """
     build knowledge graph
     """
+    # Force re-importing Trio in child processes (to avoid inheriting the state of the parent process)
+    import trio
+    import importlib
+    importlib.reload(trio)
     db = next(get_db())  # Manually call the generator
     db_documents = None
     db_knowledge = None
