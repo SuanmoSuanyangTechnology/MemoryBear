@@ -2148,6 +2148,14 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       input: 'Input',
       output: 'Output',
       error: 'Error Message',
+      loopNum: ' loops',
+      iterationNum: ' iterations',
+      runtime: {
+        loop: 'Loop',
+        iteration: 'Iteration',
+        input_cycle_vars: 'Initial Loop Variables',
+        output_cycle_vars: 'Final Loop Variables',
+      }
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',
