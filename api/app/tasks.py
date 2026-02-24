@@ -379,6 +379,9 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
                 )
             except Exception as e:
                 print(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task failed for task {task}:\n{str(e)}\n")
+            finally:
+                if db:
+                    db.close()
             print(f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({time.time() - start_time}s)")
 
         result = f"build knowledge graph '{db_knowledge.name}' processed successfully."
@@ -389,7 +392,8 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
         result = f"build knowledge grap '{db_knowledge.name}' failed."
         return result
     finally:
-        db.close()
+        if db:
+            db.close()
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")
