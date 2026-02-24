@@ -2242,6 +2242,14 @@ export const zh = {
       input: '输入',
       output: '输出',
       error: '错误信息',
+      loopNum: '个循环',
+      iterationNum: '个迭代',
+      runtime: {
+        loop: '循环',
+        iteration: '迭代',
+        input_cycle_vars: '初始循环变量',
+        output_cycle_vars: '最终循环变量',
+      }
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',
