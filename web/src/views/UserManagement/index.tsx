@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:51:08 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:51:08 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-25 15:44:54
  */
 /**
  * User Management Page
@@ -127,7 +127,7 @@ const UserManagement: React.FC = () => {
             type="link"
             onClick={() => handleChangeStatus(record as User)}
           >
-            {t(`common.${record.is_active ? 'disabled' : 'enabled'}`)}
+            {t(`user.${record.is_active ? 'disabledOpera' : 'enabledOpera'}`)}
           </Button>
         </Space>
       ),
