@@ -8,6 +8,8 @@ from .file_schema import File, FileCreate, FileUpdate
 from .tenant_schema import Tenant, TenantCreate, TenantUpdate
 from .chunk_schema import ChunkCreate, ChunkUpdate, ChunkRetrieve
 from .knowledgeshare_schema import KnowledgeShare, KnowledgeShareCreate
+from .mcp_market_schema import McpMarketCreate, McpMarketUpdate, McpMarket
+from .mcp_market_config_schema import McpMarketConfigCreate, McpMarketConfigUpdate, McpMarketConfig
 from .order_schema import CreateOrderRequest, OrderResponse, ExternalOrderResponse
 from .app_schema import (
     AppChatRequest,
@@ -78,6 +80,12 @@ __all__ = [
     "ChunkRetrieve",
     "KnowledgeShare",
     "KnowledgeShareCreate",
+    "McpMarketCreate",
+    "McpMarketUpdate",
+    "McpMarket",
+    "McpMarketConfigCreate",
+    "McpMarketConfigUpdate",
+    "McpMarketConfig",
     "CreateOrderRequest",
     "OrderResponse",
     "ExternalOrderResponse",
