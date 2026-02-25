@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
@@ -369,7 +370,7 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
                 print(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task result for task {task}:\n{result}\n")
                 return result
 
-            try:
+            def sync_task():
                 trio.run(
                     lambda: _run(
                         row=task,
@@ -384,6 +385,10 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
                         with_community=with_community,
                     )
                 )
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(sync_task)
+                    future.result()  # Blocks until the task completes
             except Exception as e:
                 print(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task failed for task {task}:\n{str(e)}\n")
             finally:
