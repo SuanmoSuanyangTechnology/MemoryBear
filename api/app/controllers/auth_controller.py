@@ -61,6 +61,7 @@ async def login_for_access_token(
                 user = auth_service.register_user_with_invite(
                 db=db,
                 email=form_data.email,
+                username=form_data.username,
                 password=form_data.password,
                 invite_token=form_data.invite,
                 workspace_id=invite_info.workspace_id
