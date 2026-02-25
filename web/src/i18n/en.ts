@@ -1,6 +1,5 @@
 export const en = {
   translation: {
-    welcome: 'Welcome to React Font CLI',
     title: 'Memory Bear.AI ',
     memoryBear: 'Memory Bear.AI',
     index:{
@@ -248,6 +247,7 @@ export const en = {
       usernameOrAccount: 'Username / Login Account',
       displayName: 'Display Name',
       role: 'Role',
+      password: 'Password',
       status: 'Status',
       createTime: 'Creation Time',
       lastLoginTime: 'Last Login Time',
@@ -602,6 +602,9 @@ export const en = {
       bedrock: "Bedrock"
     },
     knowledgeBase: {
+      home: 'Home',
+      selectSpace: 'Please select space',
+      preview: 'Preview',
       pleaseUploadFileFirst: 'Please upload file first',
       shareSuccess: 'Share successfully',
       shareFailed: 'Share failed',
@@ -1192,7 +1195,7 @@ export const en = {
       stateSharingStrategy: 'State Sharing Strategy',
       intermediateResultProcessing: 'Intermediate Result Processing',
       metadataTransfer: 'Metadata Transfer',
-
+      knowledgeConfig: 'Knowledge Base Configuration',
       temperature: 'Temperature',
       temperature_desc: 'Temperature parameters, control the randomness of output',
       max_tokens: 'Max Tokens',
@@ -1336,6 +1339,13 @@ export const en = {
       analyTask: 'Analyze Task Intent',
       dynamicMatchSkill: 'Dynamic Match Skill',
       executeTask: 'Execute Task',
+
+      upload: 'Upload & Parse',
+      complex: 'Compatibility Analysis',
+      node: 'Node Mapping',
+      configCheck: 'Configuration Validation',
+      sureInfo: 'Information Confirmation',
+      completed: 'Import Completed',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -2012,6 +2022,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           query: 'Query Variable',
           knowledge_retrieval: 'Knowledge Base',
           recallConfig: 'Recall Test',
+          addKnowledge: 'Add Knowledge Base'
         },
         'parameter-extractor': {
           model_id: 'Model',
