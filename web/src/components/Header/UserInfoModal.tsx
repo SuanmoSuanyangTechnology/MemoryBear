@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:09:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-02 15:51:54
+ * @Last Modified time: 2026-02-25 11:40:47
  */
 /**
  * UserInfoModal Component
@@ -15,7 +15,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
-import { Button } from 'antd';
+import { Button, Space } from 'antd';
 import { UnlockOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
@@ -23,7 +23,9 @@ import { useUser } from '@/store/user';
 import RbModal from '@/components/RbModal'
 import { formatDateTime } from '@/utils/format';
 import ResetPasswordModal from '@/views/UserManagement/components/ResetPasswordModal'
-import type { ResetPasswordModalRef } from '@/views/UserManagement/types'
+import type { ResetPasswordModalRef, VerifyPasswordModalRef, ChangeEmailModalRef } from '@/views/UserManagement/types'
+import VerifyPasswordModal from '@/views/UserManagement/components/VerifyPasswordModal'
+import ChangeEmailModal from '@/views/UserManagement/components/ChangeEmailModal'
 
 /** Interface for UserInfoModal ref methods exposed to parent components */
 export interface UserInfoModalRef {
@@ -37,8 +39,10 @@ export interface UserInfoModalRef {
 const UserInfoModal = forwardRef<UserInfoModalRef>((_props, ref) => {
   const { t } = useTranslation();
   const resetPasswordModalRef = useRef<ResetPasswordModalRef>(null)
-  const { user } = useUser();
+  const { user, getUserInfo } = useUser();
   const [visible, setVisible] = useState(false);
+  const verifyPasswordModalRef = useRef<VerifyPasswordModalRef>(null)
+  const changeEmailModalRef = useRef<ChangeEmailModalRef>(null)
 
   /** Close the modal */
   const handleClose = () => {
@@ -49,6 +53,17 @@ const UserInfoModal = forwardRef<UserInfoModalRef>((_props, ref) => {
   const handleOpen = () => {
     setVisible(true);
   };
+
+  /** Open password verification modal before editing email */
+  const handleEditEmail = () => {
+    verifyPasswordModalRef.current?.handleOpen()
+  }
+  
+  /** Update user information after email change */
+  const updateUserInfo = () => {
+    localStorage.removeItem('user')
+    getUserInfo()
+  }
 
   /** Expose handleOpen and handleClose methods to parent component via ref */
   useImperativeHandle(ref, () => ({
@@ -74,7 +89,13 @@ const UserInfoModal = forwardRef<UserInfoModalRef>((_props, ref) => {
       {/* Email */}
       <div className="rb:flex rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3">
         <span className="rb:whitespace-nowrap">{t('user.email')}</span>
-        <span className="rb:text-[#212332]">{user.email}</span>
+        <Space size={8} className="rb:text-[#212332]">
+          {user.email}
+          <div
+            className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]"
+            onClick={handleEditEmail}
+          ></div>
+        </Space>
       </div>
       {/* Role */}
       <div className="rb:flex rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3">
@@ -105,6 +126,14 @@ const UserInfoModal = forwardRef<UserInfoModalRef>((_props, ref) => {
       <ResetPasswordModal
         ref={resetPasswordModalRef}
         source="changePassword"
+      />
+      <VerifyPasswordModal
+        ref={verifyPasswordModalRef}
+        refresh={() => changeEmailModalRef.current?.handleOpen()}
+      />
+      <ChangeEmailModal
+        ref={changeEmailModalRef}
+        refresh={updateUserInfo}
       />
     </RbModal>
   );
