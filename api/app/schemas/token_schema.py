@@ -26,5 +26,6 @@ class RefreshTokenRequest(BaseModel):
 class TokenRequest(BaseModel):
     email: EmailStr
     password: str
-    invite: Optional[str] = None
+    invite: Optional[str] = None,
+    username: Optional[str] = None
 

@@ -129,7 +129,8 @@ def register_user_with_invite(
     email: str,
     password: str,
     invite_token: str,
-    workspace_id: str
+    workspace_id: str,
+    username: Optional[str] = None,
 ) -> User:
     """
     使用邀请码注册新用户并加入工作空间
@@ -139,6 +140,7 @@ def register_user_with_invite(
     :param password: 用户密码
     :param invite_token: 邀请令牌
     :param workspace_id: 工作空间ID
+    :param username: 用户名
     :return: 创建的用户对象
     """
     from app.schemas.user_schema import UserCreate
@@ -154,7 +156,7 @@ def register_user_with_invite(
         user_create = UserCreate(
             email=email,
             password=password,
-            username=email.split('@')[0]
+            username=email.split('@')[0] if not username else username
         )
         user = user_service.create_user(db=db, user=user_create)
         logger.info(f"用户创建成功: {user.email} (ID: {user.id})")
