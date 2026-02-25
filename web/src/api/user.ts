@@ -1,11 +1,11 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:23 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 14:00:23 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-25 11:17:44
  */
 import { request } from '@/utils/request'
-import type { CreateModalData } from '@/views/UserManagement/types'
+import type { CreateModalData, ChangeEmailModalForm } from '@/views/UserManagement/types'
 import { cookieUtils } from '@/utils/request'
 
 // User info
@@ -28,6 +28,10 @@ export const refreshToken = () => {
 export const changePassword = (data: { user_id: string; new_password: string }) => {
   return request.put('/users/admin/change-password', data)
 }
+// Verify password
+export const verifyPassword = (data: { password: string }) => {
+  return request.post('/users/verify_pwd', data)
+}
 // Disable user
 export const deleteUser = (user_id: string) => {
   return request.delete(`/users/${user_id}`)
@@ -44,4 +48,12 @@ export const addUser = (data: CreateModalData) => {
 export const logoutUrl = '/logout'
 export const logout = () => {
   return request.post(logoutUrl)
+}
+// Send email verification code
+export const sendEmailCode = (data: { email: string }) => {
+  return request.post('/users/send-email-code', data)
+}
+// Verify code and change email
+export const changeEmail = (data: ChangeEmailModalForm) => {
+  return request.put('/users/change-email', data)
 }

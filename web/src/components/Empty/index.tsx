@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:03:25 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-02 15:47:31
+ * @Last Modified time: 2026-02-25 11:14:25
  */
 /**
  * Empty Component
@@ -13,7 +13,7 @@
  * @component
  */
 
-import { type FC } from 'react';
+import { type FC, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import emptyIcon from '@/assets/images/empty/empty.svg';
@@ -24,7 +24,7 @@ interface EmptyProps {
   /** Icon size - single number or [width, height] array */
   size?: number | number[];
   /** Main title text */
-  title?: string;
+  title?: string | ReactElement;
   /** Whether to show subtitle */
   isNeedSubTitle?: boolean;
   /** Custom subtitle text */

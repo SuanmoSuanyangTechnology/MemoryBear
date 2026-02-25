@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:50:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 17:51:17
+ * @Last Modified time: 2026-02-25 11:44:02
  */
 /**
  * User data type
@@ -49,4 +49,33 @@ export interface CreateModalRef {
  */
 export interface ResetPasswordModalRef {
   handleOpen: (user: User) => void;
+}
+/**
+ * Verify password modal ref interface
+ */
+export interface VerifyPasswordModalRef {
+  handleOpen: () => void;
+}
+
+/**
+ * Check password modal ref interface
+ */
+export interface CheckPasswordModalRef {
+  handleOpen: () => void;
+  handleClose: () => void;
+}
+
+/**
+ * Change email modal ref interface
+ */
+export interface ChangeEmailModalRef {
+  handleOpen: () => void;
+}
+
+/**
+ * Change email form data type
+ */
+export interface ChangeEmailModalForm {
+  new_email: string;
+  code: string;
 }
