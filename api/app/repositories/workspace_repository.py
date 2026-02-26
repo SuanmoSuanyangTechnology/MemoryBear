@@ -115,6 +115,7 @@ class WorkspaceRepository:
                 self.db.query(Workspace)
                 .join(WorkspaceMember, Workspace.id == WorkspaceMember.workspace_id)
                 .filter(WorkspaceMember.user_id == user_id)
+                .filter(WorkspaceMember.is_active.is_(True))
                 .filter(Workspace.is_active.is_(True))
                 .order_by(Workspace.updated_at.desc())
                 .all()

@@ -70,10 +70,10 @@ def  delete_workspace_member(
         _check_workspace_admin_permission(db, workspace_id, user)
         workspace_member = workspace_repository.get_member_by_id(db=db, member_id=member_id)
         if not workspace_member:
-                raise BusinessException(f"工作空间成员 {member_id} 不存在", BizCode.WORKSPACE_MEMBER_NOT_FOUND)
+                raise BusinessException(f"工作空间成员 {member_id} 不存在", BizCode.WORKSPACE_NOT_FOUND)
 
         if workspace_member.workspace_id != workspace_id:
-                raise BusinessException(f"工作空间成员 {member_id} 不存在于工作空间 {workspace_id}", BizCode.WORKSPACE_MEMBER_NOT_FOUND)
+                raise BusinessException(f"工作空间成员 {member_id} 不存在于工作空间 {workspace_id}", BizCode.WORKSPACE_NOT_FOUND)
 
         try:
             workspace_member.is_active = False
