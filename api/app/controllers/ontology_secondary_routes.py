@@ -11,7 +11,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
-from app.core.logging_config import get_api_logger
+from app.core.logging_config import get_api_logger, get_business_logger
 from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -30,9 +30,11 @@ from app.schemas.response_schema import ApiResponse
 from app.services.ontology_service import OntologyService
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.models.base import RedBearModelConfig
+from app.repositories.ontology_class_repository import OntologyClassRepository
 
 
 api_logger = get_api_logger()
+business_logger = get_business_logger()
 
 
 def _get_dummy_ontology_service(db: Session) -> OntologyService:
@@ -366,6 +368,20 @@ async def update_class_handler(
             api_logger.warning(f"User {current_user.id} has no current workspace")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
+        # 检查是否为系统默认类型
+        class_repo = OntologyClassRepository(db)
+        ontology_class = class_repo.get_by_id(class_uuid)
+        if ontology_class and ontology_class.is_system_default:
+            business_logger.warning(
+                f"尝试修改系统默认类型: user_id={current_user.id}, "
+                f"class_id={class_id}, class_name={ontology_class.class_name}"
+            )
+            return fail(
+                BizCode.BAD_REQUEST,
+                "系统默认类型不可修改",
+                "该类型为系统预设类型，不允许修改"
+            )
+        
         # 创建Service
         service = _get_dummy_ontology_service(db)
         
@@ -428,6 +444,20 @@ async def delete_class_handler(
         if not workspace_id:
             api_logger.warning(f"User {current_user.id} has no current workspace")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        # 检查是否为系统默认类型
+        class_repo = OntologyClassRepository(db)
+        ontology_class = class_repo.get_by_id(class_uuid)
+        if ontology_class and ontology_class.is_system_default:
+            business_logger.warning(
+                f"尝试删除系统默认类型: user_id={current_user.id}, "
+                f"class_id={class_id}, class_name={ontology_class.class_name}"
+            )
+            return fail(
+                BizCode.BAD_REQUEST,
+                "系统默认类型不可删除",
+                "该类型为系统预设类型，不允许删除"
+            )
         
         # 创建Service
         service = _get_dummy_ontology_service(db)

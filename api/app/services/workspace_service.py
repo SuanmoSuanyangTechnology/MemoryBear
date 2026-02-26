@@ -30,6 +30,7 @@ from app.schemas.workspace_schema import (
     WorkspaceModelsUpdate,
     WorkspaceUpdate,
 )
+from app.services.default_ontology_initializer import DefaultOntologyInitializer
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
@@ -145,7 +146,7 @@ def create_workspace(
             db=db, workspace=workspace, tenant_id=user.tenant_id
         )
         business_logger.info(f"工作空间创建成功: {db_workspace.name} (ID: {db_workspace.id}), 创建者: {user.username}")
-        db.commit()
+        db.flush()  # 使用 flush 而不是 commit，获取 ID 但不提交事务
         db.refresh(db_workspace)
 
         # Create default memory config for the workspace (only for neo4j storage types)
@@ -168,6 +169,26 @@ def create_workspace(
                 )
                 # Don't fail workspace creation if memory config creation fails
                 # The workspace can still function without a default memory config
+
+        # Initialize default ontology scenes for the workspace
+        try:
+            initializer = DefaultOntologyInitializer(db)
+            success, error_msg = initializer.initialize_default_scenes(db_workspace.id)
+            
+            if success:
+                business_logger.info(
+                    f"为工作空间 {db_workspace.id} 创建默认本体场景成功"
+                )
+            else:
+                business_logger.warning(
+                    f"为工作空间 {db_workspace.id} 创建默认本体场景失败: {error_msg}"
+                )
+        except Exception as ontology_error:
+            business_logger.error(
+                f"为工作空间 {db_workspace.id} 创建默认本体场景异常: {str(ontology_error)}"
+            )
+            # Don't fail workspace creation if default ontology initialization fails
+            # The workspace can still function without default ontology scenes
 
         # 如果 storage_type 是 "rag"，自动创建知识库
         if workspace.storage_type == "rag":
@@ -209,7 +230,6 @@ def create_workspace(
                     db=db,
                     knowledge=knowledge_data
                 )
-                db.commit()
                 business_logger.info(
                     f"为工作空间 {db_workspace.id} 自动创建知识库成功: "
                     f"{db_knowledge.name} (ID: {db_knowledge.id})"
@@ -224,6 +244,12 @@ def create_workspace(
                     BizCode.INTERNAL_ERROR
                 )
 
+        # 统一提交所有更改
+        db.commit()
+        business_logger.info(
+            f"工作空间 {db_workspace.id} 及相关资源创建完成并已提交"
+        )
+        
         return db_workspace
 
     except Exception as e:
@@ -1036,7 +1062,7 @@ def _create_default_memory_config(
     )
     
     db.add(default_config)
-    db.commit()
+    db.flush()  # 使用 flush 而不是 commit，让调用者统一提交
     
     business_logger.info(
         "Created default memory config for workspace",
