@@ -30,7 +30,7 @@ from app.schemas.workspace_schema import (
     WorkspaceModelsUpdate,
     WorkspaceUpdate,
 )
-from app.services.default_ontology_initializer import DefaultOntologyInitializer
+from app.config.default_ontology_initializer import DefaultOntologyInitializer
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
@@ -130,7 +130,7 @@ def _create_workspace_only(
         raise
 
 def create_workspace(
-        db: Session, workspace: WorkspaceCreate, user: User
+        db: Session, workspace: WorkspaceCreate, user: User, language: str = "zh"
 ) -> Workspace:
     business_logger.info(
         f"创建工作空间: {workspace.name}, 创建者: {user.username}, "
@@ -173,19 +173,21 @@ def create_workspace(
         # Initialize default ontology scenes for the workspace
         try:
             initializer = DefaultOntologyInitializer(db)
-            success, error_msg = initializer.initialize_default_scenes(db_workspace.id)
+            success, error_msg = initializer.initialize_default_scenes(
+                db_workspace.id, language=language
+            )
             
             if success:
                 business_logger.info(
-                    f"为工作空间 {db_workspace.id} 创建默认本体场景成功"
+                    f"为工作空间 {db_workspace.id} 创建默认本体场景成功 (language={language})"
                 )
             else:
                 business_logger.warning(
-                    f"为工作空间 {db_workspace.id} 创建默认本体场景失败: {error_msg}"
+                    f"为工作空间 {db_workspace.id} 创建默认本体场景失败: {error_msg} (language={language})"
                 )
         except Exception as ontology_error:
             business_logger.error(
-                f"为工作空间 {db_workspace.id} 创建默认本体场景异常: {str(ontology_error)}"
+                f"为工作空间 {db_workspace.id} 创建默认本体场景异常: {str(ontology_error)} (language={language})"
             )
             # Don't fail workspace creation if default ontology initialization fails
             # The workspace can still function without default ontology scenes

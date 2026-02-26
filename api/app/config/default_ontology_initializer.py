@@ -14,7 +14,13 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.config.default_ontology_config import DEFAULT_SCENES
+from app.config.default_ontology_config import (
+    DEFAULT_SCENES,
+    get_scene_name,
+    get_scene_description,
+    get_type_name,
+    get_type_description,
+)
 from app.core.logging_config import get_business_logger
 from app.repositories.ontology_scene_repository import OntologySceneRepository
 from app.repositories.ontology_class_repository import OntologyClassRepository
@@ -46,7 +52,8 @@ class DefaultOntologyInitializer:
     
     def initialize_default_scenes(
         self,
-        workspace_id: UUID
+        workspace_id: UUID,
+        language: str = "zh"
     ) -> Tuple[bool, str]:
         """为工作空间初始化默认场景
         
@@ -55,13 +62,14 @@ class DefaultOntologyInitializer:
         
         Args:
             workspace_id: 工作空间ID
+            language: 语言类型 ("zh" 或 "en")，默认为 "zh"
             
         Returns:
             Tuple[bool, str]: (是否成功, 错误信息)
         """
         try:
             self.logger.info(
-                f"开始初始化默认本体场景 - workspace_id={workspace_id}"
+                f"开始初始化默认本体场景 - workspace_id={workspace_id}, language={language}"
             )
             
             scenes_created = 0
@@ -69,10 +77,10 @@ class DefaultOntologyInitializer:
             
             # 遍历默认场景配置
             for scene_config in DEFAULT_SCENES:
-                scene_name = scene_config.get("name_chinese", "未知场景")
+                scene_name = get_scene_name(scene_config, language)
                 
                 # 创建场景及其类型
-                scene_id = self._create_scene_with_types(workspace_id, scene_config)
+                scene_id = self._create_scene_with_types(workspace_id, scene_config, language)
                 
                 if scene_id:
                     scenes_created += 1
@@ -82,18 +90,18 @@ class DefaultOntologyInitializer:
                     
                     self.logger.info(
                         f"场景创建成功 - scene_name={scene_name}, "
-                        f"scene_id={scene_id}, types_count={types_count}"
+                        f"scene_id={scene_id}, types_count={types_count}, language={language}"
                     )
                 else:
                     self.logger.warning(
                         f"场景创建失败 - scene_name={scene_name}, "
-                        f"workspace_id={workspace_id}"
+                        f"workspace_id={workspace_id}, language={language}"
                     )
             
             # 记录总体结果
             self.logger.info(
                 f"默认场景初始化完成 - workspace_id={workspace_id}, "
-                f"scenes_created={scenes_created}, "
+                f"language={language}, scenes_created={scenes_created}, "
                 f"total_types_created={total_types_created}"
             )
             
@@ -104,7 +112,7 @@ class DefaultOntologyInitializer:
                 error_msg = "所有默认场景创建失败"
                 self.logger.error(
                     f"默认场景初始化失败 - workspace_id={workspace_id}, "
-                    f"error={error_msg}"
+                    f"language={language}, error={error_msg}"
                 )
                 return False, error_msg
                 
@@ -112,7 +120,7 @@ class DefaultOntologyInitializer:
             error_msg = f"默认场景初始化异常: {str(e)}"
             self.logger.error(
                 f"默认场景初始化异常 - workspace_id={workspace_id}, "
-                f"error={str(e)}",
+                f"language={language}, error={str(e)}",
                 exc_info=True
             )
             return False, error_msg
@@ -120,33 +128,37 @@ class DefaultOntologyInitializer:
     def _create_scene_with_types(
         self,
         workspace_id: UUID,
-        scene_config: dict
+        scene_config: dict,
+        language: str = "zh"
     ) -> Optional[UUID]:
         """创建场景及其类型
         
         Args:
             workspace_id: 工作空间ID
             scene_config: 场景配置字典
+            language: 语言类型 ("zh" 或 "en")
             
         Returns:
             Optional[UUID]: 创建的场景ID，失败返回None
         """
         try:
-            scene_name = scene_config.get("name_chinese")
+            scene_name = get_scene_name(scene_config, language)
+            scene_description = get_scene_description(scene_config, language)
             
             # 检查是否已存在同名场景（支持向后兼容）
             existing_scene = self.scene_repo.get_by_name(scene_name, workspace_id)
             if existing_scene:
                 self.logger.info(
                     f"场景已存在，跳过创建 - scene_name={scene_name}, "
-                    f"workspace_id={workspace_id}, scene_id={existing_scene.scene_id}"
+                    f"workspace_id={workspace_id}, scene_id={existing_scene.scene_id}, "
+                    f"language={language}"
                 )
                 return None
             
             # 创建场景记录，设置 is_system_default=true
             scene_data = {
                 "scene_name": scene_name,
-                "scene_description": scene_config.get("description")
+                "scene_description": scene_description
             }
             
             scene = self.scene_repo.create(scene_data, workspace_id)
@@ -157,25 +169,25 @@ class DefaultOntologyInitializer:
             
             self.logger.info(
                 f"场景创建成功 - scene_name={scene_name}, "
-                f"scene_id={scene.scene_id}, is_system_default=True"
+                f"scene_id={scene.scene_id}, is_system_default=True, language={language}"
             )
             
             # 批量创建类型
             types_config = scene_config.get("types", [])
-            types_created = self._batch_create_types(scene.scene_id, types_config)
+            types_created = self._batch_create_types(scene.scene_id, types_config, language)
             
             self.logger.info(
                 f"场景类型创建完成 - scene_id={scene.scene_id}, "
-                f"types_created={types_created}/{len(types_config)}"
+                f"types_created={types_created}/{len(types_config)}, language={language}"
             )
             
             return scene.scene_id
             
         except Exception as e:
-            scene_name = scene_config.get("name_chinese", "未知场景")
+            scene_name = get_scene_name(scene_config, language)
             self.logger.error(
                 f"场景创建失败 - scene_name={scene_name}, "
-                f"workspace_id={workspace_id}, error={str(e)}",
+                f"workspace_id={workspace_id}, language={language}, error={str(e)}",
                 exc_info=True
             )
             return None
@@ -183,13 +195,15 @@ class DefaultOntologyInitializer:
     def _batch_create_types(
         self,
         scene_id: UUID,
-        types_config: List[dict]
+        types_config: List[dict],
+        language: str = "zh"
     ) -> int:
         """批量创建实体类型
         
         Args:
             scene_id: 场景ID
             types_config: 类型配置列表
+            language: 语言类型 ("zh" 或 "en")
             
         Returns:
             int: 成功创建的类型数量
@@ -198,12 +212,13 @@ class DefaultOntologyInitializer:
         
         for type_config in types_config:
             try:
-                type_name = type_config.get("name_chinese")
+                type_name = get_type_name(type_config, language)
+                type_description = get_type_description(type_config, language)
                 
                 # 创建类型数据
                 class_data = {
                     "class_name": type_name,
-                    "class_description": type_config.get("description")
+                    "class_description": type_description
                 }
                 
                 # 创建类型
@@ -218,15 +233,15 @@ class DefaultOntologyInitializer:
                 self.logger.debug(
                     f"类型创建成功 - class_name={type_name}, "
                     f"class_id={ontology_class.class_id}, "
-                    f"scene_id={scene_id}, is_system_default=True"
+                    f"scene_id={scene_id}, is_system_default=True, language={language}"
                 )
                 
             except Exception as e:
-                type_name = type_config.get("name_chinese", "未知类型")
+                type_name = get_type_name(type_config, language)
                 self.logger.warning(
                     f"单个类型创建失败，继续创建其他类型 - "
                     f"class_name={type_name}, scene_id={scene_id}, "
-                    f"error={str(e)}"
+                    f"language={language}, error={str(e)}"
                 )
                 # 继续创建其他类型
                 continue
