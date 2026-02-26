@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
-from app.core.logging_config import get_api_logger
+from app.core.logging_config import get_api_logger, get_business_logger
 from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -61,6 +61,7 @@ from app.repositories.ontology_scene_repository import OntologySceneRepository
 
 
 api_logger = get_api_logger()
+business_logger = get_business_logger()
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
@@ -399,6 +400,20 @@ async def update_scene(
             api_logger.warning(f"User {current_user.id} has no current workspace")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
+        # 检查是否为系统默认场景
+        scene_repo = OntologySceneRepository(db)
+        scene = scene_repo.get_by_id(scene_uuid)
+        if scene and scene.is_system_default:
+            business_logger.warning(
+                f"尝试修改系统默认场景: user_id={current_user.id}, "
+                f"scene_id={scene_id}, scene_name={scene.scene_name}"
+            )
+            return fail(
+                BizCode.BAD_REQUEST,
+                "系统默认场景不可修改",
+                "该场景为系统预设场景，不允许修改"
+            )
+        
         # 创建OntologyService实例
         from app.core.memory.llm_tools.openai_client import OpenAIClient
         from app.core.models.base import RedBearModelConfig
@@ -490,6 +505,20 @@ async def delete_scene(
         if not workspace_id:
             api_logger.warning(f"User {current_user.id} has no current workspace")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        # 检查是否为系统默认场景
+        scene_repo = OntologySceneRepository(db)
+        scene = scene_repo.get_by_id(scene_uuid)
+        if scene and scene.is_system_default:
+            business_logger.warning(
+                f"尝试删除系统默认场景: user_id={current_user.id}, "
+                f"scene_id={scene_id}, scene_name={scene.scene_name}"
+            )
+            return fail(
+                BizCode.BAD_REQUEST,
+                "系统默认场景不可删除",
+                "该场景为系统预设场景，不允许删除"
+            )
         
         # 创建OntologyService实例
         from app.core.memory.llm_tools.openai_client import OpenAIClient

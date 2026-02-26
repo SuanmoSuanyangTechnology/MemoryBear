@@ -9,7 +9,7 @@ Classes:
 
 import datetime
 import uuid
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db import Base
@@ -25,6 +25,9 @@ class OntologyClass(Base):
     # 类型信息
     class_name = Column(String(200), nullable=False, comment="类型名称")
     class_description = Column(Text, nullable=True, comment="类型描述")
+    
+    # 系统默认标识
+    is_system_default = Column(Boolean, default=False, nullable=False, comment="是否为系统默认类型")
 
     # 外键：关联到本体场景
     scene_id = Column(UUID(as_uuid=True), ForeignKey("ontology_scene.scene_id", ondelete="CASCADE"), nullable=False, index=True, comment="所属场景ID")
