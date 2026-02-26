@@ -26,7 +26,7 @@ logger = get_business_logger()
 
 def generate_file_key(
     tenant_id: uuid.UUID,
-    workspace_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
     file_id: uuid.UUID,
     file_ext: str,
 ) -> str:
@@ -56,8 +56,9 @@ def generate_file_key(
     # Ensure file_ext starts with a dot
     if file_ext and not file_ext.startswith('.'):
         file_ext = f'.{file_ext}'
-    
-    return f"{tenant_id}/{workspace_id}/{file_id}{file_ext}"
+    if workspace_id:
+        return f"{tenant_id}/{workspace_id}/{file_id}{file_ext}"
+    return f"{tenant_id}/{file_id}{file_ext}"
 
 
 class FileStorageService:
@@ -96,7 +97,7 @@ class FileStorageService:
     async def upload_file(
         self,
         tenant_id: uuid.UUID,
-        workspace_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
         file_id: uuid.UUID,
         file_ext: str,
         content: bytes,
