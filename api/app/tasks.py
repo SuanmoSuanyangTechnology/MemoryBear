@@ -255,7 +255,7 @@ def parse_document(file_path: str, document_id: uuid.UUID):
                 progress_msg += f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task result for task {task}:\n{result}\n"
                 return result
 
-            try:
+            def sync_task():
                 trio.run(
                     lambda: _run(
                         row=task,
@@ -270,6 +270,10 @@ def parse_document(file_path: str, document_id: uuid.UUID):
                         with_community=with_community,
                     )
                 )
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(sync_task)
+                    future.result()  # Blocks until the task completes
             except Exception as e:
                 progress_msg += f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task failed for task {task}:\n{str(e)}\n"
             progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({time.time() - start_time}s)"
