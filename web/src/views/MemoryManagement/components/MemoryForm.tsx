@@ -18,6 +18,7 @@ import RbModal from '@/components/RbModal'
 import { createMemoryConfig, updateMemoryConfig } from '@/api/memory'
 import { getOntologyScenesSimpleUrl } from '@/api/ontology'
 import CustomSelect from '@/components/CustomSelect';
+import { stringRegExp } from '@/utils/validator';
 
 const FormItem = Form.Item;
 
@@ -110,7 +111,11 @@ const MemoryForm = forwardRef<MemoryFormRef, MemoryFormProps>(({
         <FormItem
           name="config_name"
           label={t('memory.configurationName')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('common.pleaseEnter')} />
         </FormItem>
@@ -118,6 +123,7 @@ const MemoryForm = forwardRef<MemoryFormRef, MemoryFormProps>(({
         <FormItem
           name="config_desc"
           label={t('memory.desc')}
+          rules={[{ max: 500 }]}
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </FormItem>
