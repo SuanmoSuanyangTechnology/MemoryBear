@@ -1163,10 +1163,31 @@ async def analytics_user_summary(end_user_id: Optional[str] = None, language: st
     """
     from app.core.memory.utils.prompt.prompt_utils import render_user_summary_prompt
     from app.core.language_utils import validate_language
+    from app.repositories.end_user_repository import EndUserRepository
+    from app.db import get_db
     import re
     
     # 验证语言参数
     language = validate_language(language)
+    
+    # 获取用户的 other_name 字段
+    user_display_name = "该用户" if language == "zh" else "the user"
+    if end_user_id:
+        try:
+            # 获取数据库会话并查询用户信息
+            db = next(get_db())
+            try:
+                repo = EndUserRepository(db)
+                end_user = repo.get_by_id(uuid.UUID(end_user_id))
+                if end_user and end_user.other_name:
+                    user_display_name = end_user.other_name
+                    logger.info(f"使用 other_name 作为用户显示名称: {user_display_name}")
+                else:
+                    logger.info(f"用户 {end_user_id} 的 other_name 为空，使用默认称呼: {user_display_name}")
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning(f"获取用户 other_name 失败，使用默认称呼: {str(e)}")
     
     # 创建 UserSummaryHelper 实例
     user_summary_tool = UserSummaryHelper(end_user_id or os.getenv("SELECTED_end_user_id", "group_123"))
@@ -1184,7 +1205,8 @@ async def analytics_user_summary(end_user_id: Optional[str] = None, language: st
             user_id=user_summary_tool.user_id,
             entities=", ".join(entity_lines) if entity_lines else "(空)" if language == "zh" else "(empty)",
             statements=" | ".join(statement_samples) if statement_samples else "(空)" if language == "zh" else "(empty)",
-            language=language
+            language=language,
+            user_display_name=user_display_name
         )
 
         messages = [
