@@ -1,4 +1,34 @@
 {
+  "v0.2.5": {
+    "introduction": {
+      "codeName": "行云",
+      "releaseDate": "2026-2-26",
+      "upgradePosition": "🐻 精炼根基，优化核心用户体验与系统稳定性",
+      "coreUpgrades": [
+        "1. 用户体验与国际化 🎨<br>* SSO 语言参数修复：解决 SSO 认证后添加 `?language=zh` 参数仍显示英文的问题，语言偏好现正确保留<br>* 邮箱修改支持：用户可直接在用户管理系统中修改邮箱地址",
+        "2. 工作流可视化增强 💬<br>* 循环与迭代节点输出展示：实时显示执行进度和中间输出，便于调试复杂迭代过程<br>* 变量支持回车选择：支持回车键确认变量选择，简化工作流配置流程",
+        "3. 多租户模型管理 ⚙️<br>* 租户隔离的模型密钥：模型广场排除自定义模型，模型列表按租户隔离密钥，防止跨租户密钥泄露",
+        "4. 稳健性与缺陷修复 🔧<br>* 知识图谱构建修复：解决知识图谱构建流程稳定性问题，确保更可靠的实体提取和关系映射",
+        "<br>",
+        "版本 0.2.5 通过解决国际化边界情况、增强多租户隔离和改进工作流透明度，构建更具生产就绪性的平台。工作流可视化改进为更复杂的调试和监控能力奠定基础。未来将继续深化企业就绪性，扩展用户管理功能、优化知识图谱智能和增强工作流编排能力，在可观测性、性能优化和无缝集成模式方面持续改进。",
+        "智慧致远 🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "Flowing Clouds",
+      "releaseDate": "2026-2-26",
+      "upgradePosition": "🐻 Refined foundations with enhanced user experience and system stability",
+      "coreUpgrades": [
+        "1. User Experience & Internationalization 🎨<br>* SSO Language Parameter Fix: Resolved issue where `?language=zh` parameter still showed English UI after SSO authentication<br>* Email Update Support: Users can now modify email addresses directly in user management system",
+        "2. Workflow Visualization Enhancements 💬<br>* Loop & Iteration Node Output Display: Real-time display of execution progress and intermediate outputs for easier debugging<br>* Variable Selection with Enter Key: Enabled Enter key confirmation for streamlined variable assignment",
+        "3. Multi-Tenant Model Management ⚙️<br>* Tenant-Scoped Model Keys: Model marketplace excludes custom models, model list properly isolates keys per tenant to prevent cross-tenant exposure",
+        "4. Robustness & Bug Fixes 🔧<br>* Knowledge Graph Construction Fix: Addressed stability issues in knowledge graph pipeline for more reliable entity extraction and relationship mapping",
+        "<br>",
+        "Version 0.2.5 matures MemoryBear's operational foundations by addressing internationalization edge cases, enhancing multi-tenant isolation, and improving workflow transparency. The workflow visualization improvements lay groundwork for sophisticated debugging and monitoring capabilities. Looking forward, we will deepen enterprise readiness by expanding user management features, refining knowledge graph intelligence, and enhancing workflow orchestration with continued improvements in observability, performance optimization, and seamless integration patterns.",
+        "Intelligent Resilience 🐻✨"
+      ]
+    }
+  },
   "v0.2.4": {
     "introduction": {
       "codeName": "智远",
