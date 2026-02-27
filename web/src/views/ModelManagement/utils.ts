@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:22 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:50:22 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-27 10:22:46
  */
 /**
  * Utility functions for Model Management
@@ -33,6 +33,27 @@ export const ICONS = {
  * @returns Logo URL or undefined
  */
 export const getLogoUrl = (logo?: string) => {
+  if (!logo) {
+    return undefined
+  }
+  if (logo.startsWith('http')) {
+    return logo
+  }
+
+  return ICONS[logo as keyof typeof ICONS] || undefined
+}
+
+/**
+ * Get logo URL from provider name or URL
+ * @param provider - Provider name
+ * @param logo - Provider name or logo URL
+ * @returns Logo URL or undefined
+ */
+export const getListLogoUrl = (provider?: string, logo?: string) => {
+  let url = ICONS[provider as keyof typeof ICONS]
+
+  if (url) return url
+
   if (!logo) {
     return undefined
   }
