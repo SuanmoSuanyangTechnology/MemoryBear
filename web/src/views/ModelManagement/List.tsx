@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:10 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:50:10 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-27 10:20:51
  */
 /**
  * Model List View
@@ -21,7 +21,7 @@ import PageEmpty from '@/components/Empty/PageEmpty';
 import Tag from '@/components/Tag';
 import KeyConfigModal from './components/KeyConfigModal'
 import ModelListDetail from './components/ModelListDetail'
-import { getLogoUrl } from './utils'
+import { getListLogoUrl } from './utils'
 
 /**
  * Model list component
@@ -70,7 +70,7 @@ const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListI
               <RbCard
                 key={item.provider}
                 title={t(`modelNew.${item.provider}`)}
-                avatarUrl={getLogoUrl(item.logo)}
+                avatarUrl={getListLogoUrl(item.provider, item.logo)}
                 avatar={
                   <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
                     {item.provider[0].toUpperCase()}
