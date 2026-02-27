@@ -1,4 +1,4 @@
-import { useEffect, useState, type FC } from 'react';
+import { useEffect, useState, useRef, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $getSelection, $isRangeSelection, $isTextNode, COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND, KEY_ARROW_DOWN_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ESCAPE_COMMAND } from 'lexical';
 
@@ -22,6 +22,26 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [popupPosition, setPopupPosition] = useState({ top: 0, left: 0 });
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  const scrollSelectedIntoView = () => {
+    if (!popupRef.current) return;
+    
+    const selectedElement = popupRef.current.querySelector('[data-selected="true"]');
+    if (!selectedElement) return;
+    
+    const container = popupRef.current;
+    const element = selectedElement as HTMLElement;
+    
+    const containerRect = container.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+    
+    if (elementRect.bottom > containerRect.bottom) {
+      container.scrollTop += elementRect.bottom - containerRect.bottom;
+    } else if (elementRect.top < containerRect.top) {
+      container.scrollTop -= containerRect.top - elementRect.top;
+    }
+  };
 
   useEffect(() => {
     return editor.registerUpdateListener(({ editorState }) => {
@@ -116,7 +136,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
     setShowSuggestions(false);
   };
 
-  const groupedSuggestions = options.reduce((groups: Record<string, any[]>, suggestion) => {
+  const groupedSuggestions = options.reduce((groups: Record<string, Suggestion[]>, suggestion) => {
     const { nodeData } = suggestion
     const nodeId = nodeData.id as string;
     if (!groups[nodeId]) {
@@ -163,7 +183,9 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
             while (nextIndex < allOptions.length && allOptions[nextIndex].disabled) {
               nextIndex++;
             }
-            return nextIndex >= allOptions.length ? prev : nextIndex;
+            const newIndex = nextIndex >= allOptions.length ? prev : nextIndex;
+            setTimeout(() => scrollSelectedIntoView(), 0);
+            return newIndex;
           });
           return true;
         }
@@ -182,7 +204,9 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
             while (prevIndex >= 0 && allOptions[prevIndex].disabled) {
               prevIndex--;
             }
-            return prevIndex < 0 ? prev : prevIndex;
+            const newIndex = prevIndex < 0 ? prev : prevIndex;
+            setTimeout(() => scrollSelectedIntoView(), 0);
+            return newIndex;
           });
           return true;
         }
@@ -218,6 +242,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
   }
   return (
     <div
+      ref={popupRef}
       data-autocomplete-popup="true"
       onMouseDown={(e) => e.preventDefault()}
       style={{
@@ -248,6 +273,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
               return (
                 <div
                   key={option.key}
+                  data-selected={selectedIndex === globalIndex}
                   style={{
                     padding: '8px 12px',
                     cursor: option.disabled ? 'not-allowed' : 'pointer',
