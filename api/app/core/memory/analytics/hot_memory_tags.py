@@ -139,10 +139,10 @@ async def get_raw_tags_from_db(
     
     return [(record["name"], record["frequency"]) for record in results]
 
-async def get_hot_memory_tags(end_user_id: str, limit: int = 40, by_user: bool = False) -> List[Tuple[str, int]]:
+async def get_hot_memory_tags(end_user_id: str, limit: int = 10, by_user: bool = False) -> List[Tuple[str, int]]:
     """
     获取原始标签，然后使用LLM进行筛选，返回最终的热门标签列表。
-    查询更多的标签(limit=40)给LLM提供更丰富的上下文进行筛选。
+    查询更多的标签(limit=10)给LLM提供更丰富的上下文进行筛选。
 
     Args:
         end_user_id: 必需参数。如果by_user=False，则为end_user_id；如果by_user=True，则为user_id
