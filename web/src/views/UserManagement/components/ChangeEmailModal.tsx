@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-25 11:45:07 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-25 11:45:07 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-27 09:59:41
  */
 /**
  * ChangeEmailModal Component
@@ -114,7 +114,7 @@ const ChangeEmailModal = forwardRef<ChangeEmailModalRef, ChangeEmailModalProps>(
         sendEmailCode({ email: values.new_email })
           .then(() => {
             message.success(t('user.sendSuccess'))
-            setCountdown(300)
+            setCountdown(60)
             const timer = setInterval(() => {
               setCountdown((prev) => {
                 if (prev <= 1) {
