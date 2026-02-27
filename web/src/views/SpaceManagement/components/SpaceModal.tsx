@@ -34,8 +34,8 @@ interface SpaceModalProps {
 }
 /** Storage types */
 const types: StorageType[] = [
-  'rag',
   'neo4j',
+  'rag',
 ]
 /** Type icons mapping */
 const typeIcons: Record<StorageType, string> = {
@@ -154,6 +154,9 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
       <Form
         form={form}
         layout="vertical"
+        initialValues={{
+          storage_type: types[0],
+        }}
       >
         <Form.Item
           name="icon"
@@ -183,7 +186,8 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
               value: type,
               label: t(`space.${type}`),
               labelDesc: t(`space.${type}Desc`),
-              icon: typeIcons[type]
+              icon: typeIcons[type],
+              recommend: type === 'neo4j',
             }))}
             block={true}
           />
