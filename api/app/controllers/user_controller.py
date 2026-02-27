@@ -100,7 +100,7 @@ def get_current_user_info(
             result_schema.current_workspace_name = current_workspace.name
         
         for ws in result.workspaces:
-            if ws.workspace_id == current_user.current_workspace_id:
+            if ws.workspace_id == current_user.current_workspace_id and ws.is_active:
                 result_schema.role = ws.role
                 break
     
