@@ -328,7 +328,6 @@ async def Summary(state: ReadState)-> ReadState:
     summary_result = await summary_prompt(state, aimessages, retrieve_info_str)
     summary = summary_result[1]
     return {"summary":summary}
-
 async def Summary_fails(state: ReadState)-> ReadState:
     storage_type=state.get("storage_type", '')
     user_rag_memory_id=state.get("user_rag_memory_id", '')
