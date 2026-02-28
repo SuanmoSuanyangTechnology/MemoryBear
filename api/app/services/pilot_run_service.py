@@ -106,6 +106,7 @@ async def run_pilot_extraction(
         # ========== 步骤 2.1: 语义剪枝 ==========
         pruned_dialogs = [dialog]
         deleted_messages = []  # 记录被删除的消息
+        pruning_stats = None  # 保存剪枝统计信息，用于最终汇总
         
         if memory_config.pruning_enabled:
             try:
@@ -147,13 +148,17 @@ async def run_pilot_extraction(
                         if msg["content"] not in remaining_contents
                     ]
                     
-                    pruning_result = {
+                    # 保存剪枝统计信息（用于最终汇总，只保留deleted_count）
+                    pruning_stats = {
                         "enabled": True,
                         "scene": config.pruning_scene,
                         "threshold": config.pruning_threshold,
-                        "original_count": original_msg_count,
-                        "remaining_count": remaining_msg_count,
                         "deleted_count": deleted_msg_count,
+                    }
+                    
+                    # 输出剪枝结果（显示删除的消息详情）
+                    pruning_result = {
+                        "type": "pruning",
                         "deleted_messages": deleted_messages,
                     }
                     
@@ -163,7 +168,7 @@ async def run_pilot_extraction(
                     )
                     
                     if progress_callback:
-                        await progress_callback("text_preprocessing_pruning", "语义剪枝完成", pruning_result)
+                        await progress_callback("text_preprocessing_result", "语义剪枝完成", pruning_result)
                 else:
                     logger.warning("[PILOT_RUN] 剪枝后对话为空，使用原始对话")
                     pruned_dialogs = [dialog]
@@ -173,19 +178,16 @@ async def run_pilot_extraction(
                 pruned_dialogs = [dialog]
                 if progress_callback:
                     error_result = {
-                        "enabled": True,
+                        "type": "pruning",
                         "error": str(e),
                         "fallback": "使用原始对话"
                     }
-                    await progress_callback("text_preprocessing_pruning", "语义剪枝失败", error_result)
+                    await progress_callback("text_preprocessing_result", "语义剪枝失败", error_result)
         else:
             logger.info("[PILOT_RUN] 语义剪枝已关闭，跳过")
-            if progress_callback:
-                pruning_result = {
-                    "enabled": False,
-                    "message": "语义剪枝已关闭"
-                }
-                await progress_callback("text_preprocessing_pruning", "语义剪枝已关闭", pruning_result)
+            pruning_stats = {
+                "enabled": False,
+            }
 
         # ========== 步骤 2.2: 语义分块 ==========
         chunked_dialogs = await get_chunked_dialogs_from_preprocessed(
@@ -203,6 +205,7 @@ async def run_pilot_extraction(
                 if hasattr(dlg, 'chunks') and dlg.chunks:
                     for i, chunk in enumerate(dlg.chunks):
                         chunk_result = {
+                            "type": "chunking",
                             "chunk_index": i + 1,
                             "content": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
                             "full_length": len(chunk.content),
@@ -211,11 +214,17 @@ async def run_pilot_extraction(
                         }
                         await progress_callback("text_preprocessing_result", f"分块 {i + 1} 处理完成", chunk_result)
 
+            # 构建预处理完成总结（包含剪枝统计）
             preprocessing_summary = {
                 "total_chunks": sum(len(dlg.chunks) for dlg in chunked_dialogs if hasattr(dlg, 'chunks') and dlg.chunks),
                 "total_dialogs": len(chunked_dialogs),
                 "chunker_strategy": memory_config.chunker_strategy,
             }
+            
+            # 添加剪枝统计信息
+            if pruning_stats:
+                preprocessing_summary["pruning"] = pruning_stats
+            
             await progress_callback("text_preprocessing_complete", "预处理文本完成（剪枝 + 分块）", preprocessing_summary)
 
         log_time("Data Loading & Chunking", time.time() - step_start, log_file)
