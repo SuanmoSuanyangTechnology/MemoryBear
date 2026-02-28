@@ -16,18 +16,18 @@ class Settings:
     # cloud: SaaS 云服务版（全功能，按量计费）
     # enterprise: 企业私有化版（License 控制）
     DEPLOYMENT_MODE: str = os.getenv("DEPLOYMENT_MODE", "community")
-    
+
     # License 配置（企业版）
     LICENSE_FILE: str = os.getenv("LICENSE_FILE", "/etc/app/license.json")
     LICENSE_SERVER_URL: str = os.getenv("LICENSE_SERVER_URL", "https://license.yourcompany.com")
-    
+
     # 计费服务配置（SaaS 版）
     BILLING_SERVICE_URL: str = os.getenv("BILLING_SERVICE_URL", "")
-    
+
     # 基础 URL（用于 SSO 回调等）
     BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    
+
     ENABLE_SINGLE_WORKSPACE: bool = os.getenv("ENABLE_SINGLE_WORKSPACE", "true").lower() == "true"
     # API Keys Configuration
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
@@ -57,7 +57,6 @@ class Settings:
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "1"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
-    
 
     # ElasticSearch configuration
     ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "https://127.0.0.1")
@@ -91,7 +90,7 @@ class Settings:
 
     # Single Sign-On configuration
     ENABLE_SINGLE_SESSION: bool = os.getenv("ENABLE_SINGLE_SESSION", "false").lower() == "true"
-    
+
     # SSO 免登配置
     SSO_TOKEN_EXPIRE_SECONDS: int = int(os.getenv("SSO_TOKEN_EXPIRE_SECONDS", "300"))
     SSO_TRUSTED_SOURCES_CONFIG: str = os.getenv("SSO_TRUSTED_SOURCES_CONFIG", "{}")
@@ -130,7 +129,7 @@ class Settings:
 
     # Server Configuration
     SERVER_IP: str = os.getenv("SERVER_IP", "127.0.0.1")
-    FILE_LOCAL_SERVER_URL : str = os.getenv("FILE_LOCAL_SERVER_URL", "http://localhost:8000/api")
+    FILE_LOCAL_SERVER_URL: str = os.getenv("FILE_LOCAL_SERVER_URL", "http://localhost:8000/api")
 
     # ========================================================================
     # Internal Configuration (not in .env, used by application code)
@@ -225,6 +224,7 @@ class Settings:
     LOAD_MODEL: bool = os.getenv("LOAD_MODEL", "false").lower() == "true"
 
     # workflow config
+    WORKFLOW_IMPORT_CACHE_TIMEOUT: int = int(os.getenv("WORKFLOW_IMPORT_CACHE_TIMEOUT", 1800))
     WORKFLOW_NODE_TIMEOUT: int = int(os.getenv("WORKFLOW_NODE_TIMEOUT", 600))
 
     # ========================================================================
@@ -232,20 +232,20 @@ class Settings:
     # ========================================================================
     # 通用本体文件路径列表（逗号分隔）
     GENERAL_ONTOLOGY_FILES: str = os.getenv("GENERAL_ONTOLOGY_FILES", "General_purpose_entity.ttl")
-    
+
     # 是否启用通用本体类型功能
     ENABLE_GENERAL_ONTOLOGY_TYPES: bool = os.getenv("ENABLE_GENERAL_ONTOLOGY_TYPES", "true").lower() == "true"
-    
+
     # Prompt 中最大类型数量
     MAX_ONTOLOGY_TYPES_IN_PROMPT: int = int(os.getenv("MAX_ONTOLOGY_TYPES_IN_PROMPT", "50"))
-    
+
     # 核心通用类型列表（逗号分隔）
     CORE_GENERAL_TYPES: str = os.getenv(
         "CORE_GENERAL_TYPES",
         "Person,Organization,Company,GovernmentAgency,Place,Location,City,Country,Building,"
         "Event,SportsEvent,SocialEvent,Work,Book,Film,Software,Concept,TopicalConcept,AcademicSubject"
     )
-    
+
     # 实验模式开关（允许通过 API 动态切换本体配置）
     ONTOLOGY_EXPERIMENT_MODE: bool = os.getenv("ONTOLOGY_EXPERIMENT_MODE", "true").lower() == "true"
 

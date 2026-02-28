@@ -321,6 +321,26 @@ class AppService:
         self.db.add(agent_cfg)
         logger.debug("Agent 配置已创建", extra={"app_id": str(app_id)})
 
+    def _create_workflow_config(
+            self,
+            app_id: uuid.UUID,
+            data: app_schema.WorkflowConfigCreate,
+            now: datetime.datetime
+    ):
+        workflow_cfg = WorkflowConfig(
+            id=uuid.uuid4(),
+            app_id=app_id,
+            nodes=[node.model_dump() for node in data.nodes] if data.nodes else [],
+            edges=[edge.model_dump() for edge in data.edges] if data.edges else [],
+            variables=[var.model_dump() for var in data.variables] if data.variables else [],
+            execution_config=data.execution_config.model_dump() if data.execution_config else {},
+            triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
+            is_active=True,
+            created_at=now,
+            updated_at=now
+        )
+        self.db.add(workflow_cfg)
+
     def _create_multi_agent_config(
             self,
             app_id: uuid.UUID,
@@ -531,6 +551,9 @@ class AppService:
             # 如果是 multi_agent 类型且提供了配置，创建 MultiAgentConfig
             if app.type == "multi_agent" and data.multi_agent_config:
                 self._create_multi_agent_config(app.id, data.multi_agent_config, now)
+
+            if app.type == "workflow" and data.workflow_config:
+                self._create_workflow_config(app.id, data.workflow_config, now)
 
             self.db.commit()
             self.db.refresh(app)
@@ -968,7 +991,7 @@ class AppService:
         config = self.db.scalars(stmt).first()
 
         try:
-            config_memory=config.memory
+            config_memory = config.memory
             if 'memory_content' in config_memory:
                 config.memory['memory_config_id'] = config.memory.pop('memory_content')
         except:
@@ -1189,9 +1212,9 @@ class AppService:
     # ==================== 记忆配置提取方法 ====================
 
     def _extract_memory_config_id(
-        self,
-        app_type: str,
-        config: Dict[str, Any]
+            self,
+            app_type: str,
+            config: Dict[str, Any]
     ) -> Tuple[Optional[uuid.UUID], bool]:
         """从发布配置中提取 memory_config_id（委托给 MemoryConfigService）
         
@@ -1205,13 +1228,13 @@ class AppService:
                 - is_legacy_int: 是否检测到旧格式 int 数据，需要回退到工作空间默认配置
         """
         from app.services.memory_config_service import MemoryConfigService
-        
+
         service = MemoryConfigService(self.db)
         return service.extract_memory_config_id(app_type, config)
 
     def _get_workspace_default_memory_config_id(
-        self,
-        workspace_id: uuid.UUID
+            self,
+            workspace_id: uuid.UUID
     ) -> Optional[uuid.UUID]:
         """获取工作空间的默认记忆配置ID
         
@@ -1222,22 +1245,22 @@ class AppService:
             Optional[uuid.UUID]: 默认记忆配置ID，如果不存在则返回 None
         """
         from app.services.memory_config_service import MemoryConfigService
-        
+
         service = MemoryConfigService(self.db)
         config = service.get_workspace_default_config(workspace_id)
-        
+
         if not config:
             logger.warning(
                 f"工作空间没有可用的记忆配置: workspace_id={workspace_id}"
             )
             return None
-        
+
         return config.config_id
 
     def _update_endusers_memory_config(
-        self,
-        app_id: uuid.UUID,
-        memory_config_id: uuid.UUID
+            self,
+            app_id: uuid.UUID,
+            memory_config_id: uuid.UUID
     ) -> int:
         """批量更新应用下所有终端用户的 memory_config_id
         
@@ -1249,13 +1272,13 @@ class AppService:
             int: 更新的终端用户数量
         """
         from app.repositories.end_user_repository import EndUserRepository
-        
+
         repo = EndUserRepository(self.db)
         updated_count = repo.batch_update_memory_config_id(
             app_id=app_id,
             memory_config_id=memory_config_id
         )
-        
+
         return updated_count
 
     # ==================== 应用发布管理 ====================
@@ -1403,7 +1426,7 @@ class AppService:
 
         # 提取记忆配置ID并更新终端用户
         memory_config_id, is_legacy_int = self._extract_memory_config_id(app.type, config)
-        
+
         # 如果检测到旧格式 int 数据，回退到工作空间默认配置
         if is_legacy_int and not memory_config_id:
             memory_config_id = self._get_workspace_default_memory_config_id(app.workspace_id)
@@ -1412,7 +1435,7 @@ class AppService:
                     f"发布时使用工作空间默认记忆配置（旧数据兼容）: app_id={app_id}, "
                     f"workspace_id={app.workspace_id}, memory_config_id={memory_config_id}"
                 )
-        
+
         if memory_config_id:
             updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
             logger.info(
@@ -1537,7 +1560,7 @@ class AppService:
 
         # 提取记忆配置ID并更新终端用户
         memory_config_id, is_legacy_int = self._extract_memory_config_id(release.type, release.config)
-        
+
         # 如果检测到旧格式 int 数据，回退到工作空间默认配置
         if is_legacy_int and not memory_config_id:
             memory_config_id = self._get_workspace_default_memory_config_id(app.workspace_id)
@@ -1546,7 +1569,7 @@ class AppService:
                     f"回滚时使用工作空间默认记忆配置（旧数据兼容）: app_id={app_id}, "
                     f"workspace_id={app.workspace_id}, memory_config_id={memory_config_id}"
                 )
-        
+
         if memory_config_id:
             updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
             logger.info(

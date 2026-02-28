@@ -236,5 +236,5 @@ class HttpRequestNode(BaseNode):
                         logger.warning(
                             f"Node {self.node_id}: HTTP request failed, switching to error handling branch"
                         )
-                        return "ERROR"
+                        return {"output": "ERROR"}
                 raise RuntimeError("http request failed")

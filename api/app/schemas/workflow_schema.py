@@ -18,7 +18,10 @@ class NodeConfig(BaseModel):
 class NodeDefinition(BaseModel):
     """节点定义"""
     id: str = Field(..., description="节点唯一标识")
-    type: str = Field(..., description="节点类型: start, end, llm, agent, tool, condition, loop, transform, human, code")
+    type: str = Field(
+        ...,
+        description="节点类型: start, end, llm, agent, tool, condition, loop, transform, human, code"
+    )
     name: str | None = Field(None, description="节点名称")
     cycle: str | None = Field(None, description="父循环节点id")
     description: str | None = Field(None, description="节点描述")
@@ -30,12 +33,12 @@ class NodeDefinition(BaseModel):
 
 class EdgeDefinition(BaseModel):
     """边定义"""
-    id: str | None = Field(None, description="边唯一标识（可选）")
+    id: str | None = Field(default=None, description="边唯一标识（可选）")
     source: str = Field(..., description="源节点 ID")
     target: str = Field(..., description="目标节点 ID")
-    type: str | None = Field(None, description="边类型: normal, error")
-    condition: str | None = Field(None, description="条件表达式（条件边）")
-    label: str | None = Field(None, description="边标签")
+    type: str | None = Field(default=None, description="边类型: normal, error")
+    condition: str | None = Field(default=None, description="条件表达式（条件边）")
+    label: str | None = Field(default=None, description="边标签")
 
 
 class VariableDefinition(BaseModel):
@@ -44,7 +47,7 @@ class VariableDefinition(BaseModel):
     type: str = Field(default="string", description="变量类型: string, number, boolean, object, array")
     required: bool = Field(default=False, description="是否必填")
     default: Any = Field(None, description="默认值")
-    description: str | None = Field(None, description="变量描述")
+    description: str | None = Field(default=None, description="变量描述")
 
 
 class ExecutionConfig(BaseModel):
@@ -59,6 +62,13 @@ class TriggerConfig(BaseModel):
     """触发器配置"""
     type: str = Field(..., description="触发器类型: schedule, webhook, event")
     config: dict[str, Any] = Field(default_factory=dict, description="触发器配置")
+
+
+class WorkflowImportSave(BaseModel):
+    """工作流导入请求"""
+    temp_id: str
+    name: str
+    description: str
 
 
 # ==================== 工作流配置 ====================
@@ -84,7 +94,7 @@ class WorkflowConfigUpdate(BaseModel):
 class WorkflowConfig(BaseModel):
     """工作流配置输出"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: uuid.UUID
     app_id: uuid.UUID
     nodes: list[dict[str, Any]]
@@ -95,11 +105,11 @@ class WorkflowConfig(BaseModel):
     is_active: bool
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    
+
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
@@ -123,7 +133,8 @@ class WorkflowExecutionResponse(BaseModel):
     output_data: dict[str, Any] | None = Field(None, description="所有节点的详细输出数据")
     error_message: str | None = Field(None, description="错误信息")
     elapsed_time: float | None = Field(None, description="耗时（秒）")
-    token_usage: dict[str, Any] | None = Field(None, description="Token 使用情况 {prompt_tokens, completion_tokens, total_tokens}")
+    token_usage: dict[str, Any] | None = Field(None,
+                                               description="Token 使用情况 {prompt_tokens, completion_tokens, total_tokens}")
 
 
 class WorkflowExecutionStreamChunk(BaseModel):
@@ -136,7 +147,7 @@ class WorkflowExecutionStreamChunk(BaseModel):
 class WorkflowExecution(BaseModel):
     """工作流执行记录输出"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: uuid.UUID
     workflow_config_id: uuid.UUID
     app_id: uuid.UUID
@@ -156,15 +167,15 @@ class WorkflowExecution(BaseModel):
     token_usage: dict[str, Any] | None
     meta_data: dict[str, Any]
     created_at: datetime.datetime
-    
+
     @field_serializer("started_at", when_used="json")
     def _serialize_started_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("completed_at", when_used="json")
     def _serialize_completed_at(self, dt: datetime.datetime | None):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
@@ -173,7 +184,7 @@ class WorkflowExecution(BaseModel):
 class WorkflowNodeExecution(BaseModel):
     """工作流节点执行记录输出"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: uuid.UUID
     execution_id: uuid.UUID
     node_id: str
@@ -193,15 +204,15 @@ class WorkflowNodeExecution(BaseModel):
     cache_key: str | None
     meta_data: dict[str, Any]
     created_at: datetime.datetime
-    
+
     @field_serializer("started_at", when_used="json")
     def _serialize_started_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("completed_at", when_used="json")
     def _serialize_completed_at(self, dt: datetime.datetime | None):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
