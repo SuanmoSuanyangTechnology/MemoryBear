@@ -10,7 +10,6 @@ from app.core.config import settings
 # 设置日志记录器
 logger = logging.getLogger(__name__)
 
-
 # 创建连接池
 pool = ConnectionPool.from_url(
     f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}",
@@ -21,6 +20,7 @@ pool = ConnectionPool.from_url(
 )
 aio_redis = redis.StrictRedis(connection_pool=pool)
 
+
 async def get_redis_connection():
     """获取Redis连接"""
     try:
@@ -29,7 +29,8 @@ async def get_redis_connection():
         logger.error(f"Redis连接失败: {str(e)}")
         return None
 
-async def aio_redis_set(key: str, val: str|dict, expire: int = None):
+
+async def aio_redis_set(key: str, val: str | dict, expire: int = None):
     """设置Redis键值
     
     Args:
@@ -40,7 +41,7 @@ async def aio_redis_set(key: str, val: str|dict, expire: int = None):
     try:
         if isinstance(val, dict):
             val = json.dumps(val, ensure_ascii=False)
-        
+
         if expire is not None:
             # 设置带过期时间的键值
             await aio_redis.set(key, val, ex=expire)
@@ -50,6 +51,7 @@ async def aio_redis_set(key: str, val: str|dict, expire: int = None):
     except Exception as e:
         logger.error(f"Redis set错误: {str(e)}")
 
+
 async def aio_redis_get(key: str):
     """获取Redis键值"""
     try:
@@ -58,6 +60,7 @@ async def aio_redis_get(key: str):
         logger.error(f"Redis get错误: {str(e)}")
         return None
 
+
 async def aio_redis_delete(key: str):
     """删除Redis键"""
     try:
@@ -65,6 +68,7 @@ async def aio_redis_delete(key: str):
     except Exception as e:
         logger.error(f"Redis delete错误: {str(e)}")
         return None
+
 
 async def aio_redis_publish(channel: str, message: Dict[str, Any]) -> bool:
     """发布消息到Redis频道"""
@@ -78,9 +82,10 @@ async def aio_redis_publish(channel: str, message: Dict[str, Any]) -> bool:
         logger.error(f"Redis发布错误: {str(e)}")
         return False
 
+
 class RedisSubscriber:
     """Redis订阅器"""
-    
+
     def __init__(self, channel: str):
         self.channel = channel
         self.conn = None
@@ -88,25 +93,25 @@ class RedisSubscriber:
         self.is_closed = False
         self._queue = asyncio.Queue()
         self._task = None
-    
+
     async def start(self):
         """开始订阅"""
         if self.is_closed or self._task:
             return
-            
+
         self._task = asyncio.create_task(self._receive_messages())
         logger.info(f"开始订阅: {self.channel}")
-    
+
     async def _receive_messages(self):
         """接收消息"""
         try:
             self.conn = await get_redis_connection()
             if not self.conn:
                 return
-                
+
             self.pubsub = self.conn.pubsub()
             await self.pubsub.subscribe(self.channel)
-            
+
             while not self.is_closed:
                 try:
                     message = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=0.01)
@@ -127,7 +132,7 @@ class RedisSubscriber:
         finally:
             await self._queue.put(None)
             await self._cleanup()
-    
+
     async def _cleanup(self):
         """清理资源"""
         if self.pubsub:
@@ -141,7 +146,7 @@ class RedisSubscriber:
                 await self.conn.close()
             except Exception:
                 pass
-    
+
     async def get_message(self) -> Optional[Dict[str, Any]]:
         """获取消息"""
         if self.is_closed:
@@ -153,7 +158,7 @@ class RedisSubscriber:
         except Exception as e:
             logger.error(f"获取消息错误: {str(e)}")
             return None
-    
+
     async def close(self):
         """关闭订阅器"""
         if self.is_closed:
@@ -163,32 +168,33 @@ class RedisSubscriber:
             self._task.cancel()
         await self._cleanup()
 
+
 class RedisPubSubManager:
     """Redis发布订阅管理器"""
-    
+
     def __init__(self):
         self.subscribers = {}
-    
+
     async def publish(self, channel: str, message: Dict[str, Any]) -> bool:
         return await aio_redis_publish(channel, message)
-    
+
     def get_subscriber(self, channel: str) -> RedisSubscriber:
         if channel in self.subscribers:
             subscriber = self.subscribers[channel]
             if not subscriber.is_closed:
                 return subscriber
-        
+
         subscriber = RedisSubscriber(channel)
         self.subscribers[channel] = subscriber
         return subscriber
-    
+
     def cancel_subscription(self, channel: str) -> bool:
         if channel in self.subscribers:
             asyncio.create_task(self.subscribers[channel].close())
             del self.subscribers[channel]
             return True
         return False
-    
+
     def cancel_all_subscriptions(self) -> int:
         count = len(self.subscribers)
         for subscriber in self.subscribers.values():
@@ -196,6 +202,6 @@ class RedisPubSubManager:
         self.subscribers.clear()
         return count
 
+
 # 全局实例
 pubsub_manager = RedisPubSubManager()
-

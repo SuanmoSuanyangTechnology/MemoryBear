@@ -88,6 +88,8 @@ class AssignerNode(BaseNode):
                     await operator.remove_first()
                 case AssignmentOperator.REMOVE_LAST:
                     await operator.remove_last()
+                case AssignmentOperator.EXTEND:
+                    await operator.extend()
                 case _:
                     raise ValueError(f"Invalid Operator: {assignment.operation}")
             logger.info(f"Node {self.node_id}: execution completed")

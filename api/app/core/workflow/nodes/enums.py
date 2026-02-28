@@ -61,6 +61,7 @@ class AssignmentOperator(StrEnum):
     APPEND = "append"
     REMOVE_LAST = "remove_last"
     REMOVE_FIRST = "remove_first"
+    EXTEND = "extend"
 
 
 class HttpRequestMethod(StrEnum):
