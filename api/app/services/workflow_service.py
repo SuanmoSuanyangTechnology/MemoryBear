@@ -6,13 +6,16 @@ import logging
 import uuid
 from typing import Any, Annotated, Optional
 
+import yaml
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
+from app.core.workflow.adapters.registry import PlatformAdapterRegistry
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
+from app.models import App
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
@@ -37,6 +40,8 @@ class WorkflowService:
         self.node_execution_repo = WorkflowNodeExecutionRepository(db)
         self.conversation_service = ConversationService(db)
         self.multimodal_service = MultimodalService(db)
+
+        self.registry = PlatformAdapterRegistry
 
     # ==================== 配置管理 ====================
 
@@ -199,6 +204,32 @@ class WorkflowService:
         config.is_active = False
         logger.info(f"删除工作流配置成功: app_id={app_id}, config_id={config.id}")
         return True
+
+    def export_workflow_dsl(self, app_id: uuid.UUID):
+        config = self.get_workflow_config(app_id)
+        if not config:
+            raise BusinessException(
+                code=BizCode.NOT_FOUND,
+                message=f"工作流配置不存在: app_id={app_id}"
+            )
+
+        app: App = config.app
+        dsl_info = {
+            "app": {
+                "name": app.name,
+                "description": app.description,
+                "icon": app.icon,
+                "icon_type": app.icon_type
+            },
+            "workflow": {
+                "variables": config.variables,
+                "edges": config.edges,
+                "nodes": config.nodes,
+                "execution_config": config.execution_config,
+                "triggers": config.triggers
+            }
+        }
+        return yaml.dump(dsl_info, default_flow_style=False, allow_unicode=True)
 
     def check_config(self, app_id: uuid.UUID) -> WorkflowConfig:
         """检查工作流配置的完整性
