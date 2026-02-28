@@ -2,10 +2,10 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:12:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-04 14:06:28
+ * @Last Modified time: 2026-02-28 17:28:41
  */
 /**
- * BasicLayout Component
+ * BasicAuthLayout Component
  * 
  * A minimal layout wrapper that provides:
  * - User information initialization
@@ -26,12 +26,12 @@ import { useUser } from '@/store/user';
  * Basic layout component for pages without navigation UI.
  * Fetches user info and storage type on mount, then renders child routes.
  */
-const BasicLayout: FC = () => {
+const BasicAuthLayout: FC = () => {
   const { getUserInfo } = useUser();
   
   // Fetch user information and storage type on component mount
   useEffect(() => {
-    getUserInfo();
+    getUserInfo(undefined, true); // Pass true to skip navigation jump
   }, [getUserInfo]);
 
   return (
@@ -42,4 +42,4 @@ const BasicLayout: FC = () => {
   )
 };
 
-export default BasicLayout;
+export default BasicAuthLayout;

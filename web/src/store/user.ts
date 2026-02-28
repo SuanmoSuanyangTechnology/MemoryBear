@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:33:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-04 18:30:10
+ * @Last Modified time: 2026-02-28 17:21:20
  */
 /**
  * User Store
@@ -44,7 +44,7 @@ export interface UserState {
   /** Update login information */
   updateLoginInfo: (values: LoginInfo) => void;
   /** Get user information */
-  getUserInfo: (flag?: boolean) => void;
+  getUserInfo: (flag?: boolean, notNeedJump?: boolean) => void;
   /** Clear user information */
   clearUserInfo: () => void;
   /** Logout user */
@@ -73,13 +73,13 @@ export const useUser = create<UserState>((set, get) => ({
     cookieUtils.set('refreshToken', values.refresh_token);
     set({ loginInfo: values });
   },
-  getUserInfo: async (flag?: boolean) => {
+  getUserInfo: async (flag?: boolean, notNeedJump?: boolean) => {
     if (!cookieUtils.get('authToken')) {
       return
     }
     const { checkJump } = get()
     const localUser = JSON.parse(localStorage.getItem('user') || '{}') as User;
-    if (localUser.id) {
+    if (localUser.id && !notNeedJump) {
       checkJump()
       return
     }

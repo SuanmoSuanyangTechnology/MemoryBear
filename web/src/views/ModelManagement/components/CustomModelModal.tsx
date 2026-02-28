@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:49:28 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-28 17:24:05
  */
 /**
  * Custom Model Modal
@@ -50,7 +50,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       setModel(model);
       form.setFieldsValue({
         ...model,
-        logo: model.logo ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined
+        logo: model.logo && model.logo.startsWith('http') ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined
       });
     } else {
       setIsEdit(false);
