@@ -736,12 +736,21 @@ export const zh = {
       dynamicMatchSkill: '动态匹配技能',
       executeTask: '执行任务',
 
+      importWorkflow: '导入工作流',
+      platform: '来源平台',
       upload: '上传与解析',
       complex: '兼容性分析',
-      node: '节点映射',
-      configCheck: '配置校验',
       sureInfo: '信息确认',
       completed: '完成导入',
+      baseInfo: '基本信息',
+      workflowName: '工作流名称',
+      fileName: '文件名称',
+      fileSize: '文件大小',
+      importSuccess: '导入成功',
+      importSuccessDesc: '您的工作流已成功导入，可以在应用管理中查看和管理',
+      gotoList: '返回应用列表',
+      gotoDetail: '查看详情',
+      dify: 'Dify',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'

@@ -118,7 +118,8 @@ const ConditionList: FC<CaseListProps> = ({
                 const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue);
                 const leftFieldType = leftFieldOption?.dataType;
                 const operatorList = operatorsObj[leftFieldType || 'default'] || operatorsObj.default || [];
-                const inputType = leftFieldType === 'number' ? currentExpression.input_type : undefined;
+                const inputType = leftFieldType === 'number' ? currentExpression.input_type?.toLocaleLowerCase() : undefined;
+                console.log('inputType', inputType)
                 
                 return (
                   <div key={field.key} className="rb:flex rb:items-start rb:ml-9.5 rb:mb-4">
@@ -160,7 +161,7 @@ const ConditionList: FC<CaseListProps> = ({
                             <Form.Item name={[field.name, 'input_type']} noStyle>
                               <Select
                                 placeholder={t('common.pleaseSelect')}
-                                options={[{ value: 'Variable', label: 'Variable' }, { value: 'Constant', label: 'Constant' }]}
+                                options={[{ value: 'variable', label: 'Variable' }, { value: 'constant', label: 'Constant' }]}
                                 popupMatchSelectWidth={false}
                                 variant="borderless"
                                 className="rb:w-full!"
@@ -169,7 +170,7 @@ const ConditionList: FC<CaseListProps> = ({
                             </Form.Item>
                             <Divider type="vertical" />
                             <Form.Item name={[field.name, 'right']} noStyle>
-                              {inputType === 'Variable'
+                              {inputType === 'variable'
                                 ?
                                 <VariableSelect
                                   placeholder={t('common.pleaseSelect')}

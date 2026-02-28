@@ -83,9 +83,9 @@ const ApplicationManagement: React.FC = () => {
     setQuery(prev => ({...prev, type: value}))
   }
 
-  // const handleImport = () => {
-  //   uploadWorkflowModalRef.current?.handleOpen()
-  // }
+  const handleImport = () => {
+    uploadWorkflowModalRef.current?.handleOpen()
+  }
   return (
     <>
       <Row gutter={16} className="rb:mb-4">
@@ -111,9 +111,9 @@ const ApplicationManagement: React.FC = () => {
         </Col>
         <Col span={12} className="rb:text-right">
           <Space size={12}>
-            {/* <Button onClick={handleImport}>
+            <Button onClick={handleImport}>
               {t('application.importWorkflow')}
-            </Button> */}
+            </Button>
             <Button type="primary" onClick={handleCreate}>
               {t('application.createApplication')}
             </Button>

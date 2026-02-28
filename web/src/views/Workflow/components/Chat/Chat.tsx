@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-27 09:58:30
+ * @Last Modified time: 2026-02-28 16:43:06
  */
 /**
  * Workflow Chat Component
@@ -97,6 +97,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     setConversationId(null)
     setMessage(undefined)
     setFileList([])
+    setLoading(false)
+    setStreamLoading(false)
   }
   /**
    * Opens the variable configuration modal
@@ -179,6 +181,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
           cycle_idx: number;
           node_id: string;
           node_name?: string;
+          node_type?: string;
           input?: any;
           output?: any;
           elapsed_time?: string;
@@ -188,7 +191,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
         };
 
         const node = graphRef.current?.getNodes().find(n => n.id === node_id);
-        const { name, icon } = node?.getData() || {}
+        const { name, icon, type } = node?.getData() || {}
 
         switch(item.event) {
           // Append streaming text chunks to assistant message
@@ -218,6 +221,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                     ...newSubContent[filterIndex],
                     node_id: node_id,
                     node_name: name,
+                    node_type: type,
                     icon,
                     content: {},
                   }
@@ -226,6 +230,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                     id: node_id,
                     node_id: node_id,
                     node_name: name,
+                    node_type: type,
                     icon,
                     content: {},
                   })
@@ -282,6 +287,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                     cycle_idx,
                     node_id,
                     node_name: name,
+                    node_type: type,
                     icon,
                     content: {
                       cycle_idx,

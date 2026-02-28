@@ -2,12 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-06 11:08:37
+ * @Last Modified time: 2026-02-28 16:16:03
  */
 /**
  * Type definitions for Application Management
  */
-
+import type { WorkflowConfig } from '@/views/Workflow/types';
 /**
  * Search query parameters
  */
@@ -174,9 +174,63 @@ export interface ApiExtensionModalRef {
   handleOpen: () => void;
 }
 
-
+/**
+ * Upload workflow modal form data
+ */
 export interface UploadWorkflowModalData {
+  /** Platform type (e.g., 'dify') */
+  platform: string;
+  /** Array of uploaded files */
+  file: any[];
+  /** Optional workflow name */
+  name?: string;
+  /** Optional original file name */
+  fileName?: string;
+  /** Optional file size in bytes */
+  fileSize?: number;
+  /** Optional workflow description */
+  description?: string;
 }
+
+/**
+ * Complex item for errors and warnings
+ */
+interface ComplexItem {
+  /** Error/warning type */
+  type: string;
+  /** Detailed error/warning message */
+  detail: string;
+  /** Node identifier where the error/warning occurred */
+  node_id: string;
+  /** Node name where the error/warning occurred */
+  node_name: string;
+  /** Optional scope of the error/warning */
+  scope: string | null;
+  /** Optional name associated with the error/warning */
+  name: string | null;
+}
+
+/**
+ * Upload data response
+ * @extends WorkflowConfig
+ */
+export interface UploadData extends WorkflowConfig {
+  /** Whether the upload was successful */
+  success: boolean;
+  /** Temporary identifier for the uploaded workflow */
+  temp_id: string;
+  /** Optional workflow identifier if already exists */
+  workflow_id?: string;
+  /** Array of error items */
+  errors: ComplexItem[];
+  /** Array of warning items */
+  warnings: ComplexItem[];
+}
+
+/**
+ * Upload workflow modal ref interface
+ */
 export interface UploadWorkflowModalRef {
+  /** Open the upload workflow modal */
   handleOpen: () => void;
 }
