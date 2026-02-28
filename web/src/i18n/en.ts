@@ -452,6 +452,7 @@ export const en = {
       nextStep: 'Next Step',
       prevStep: 'Previous Step',
       exportSuccess: 'Export successful',
+      recommend: 'Recommend',
     },
     model: {
       searchPlaceholder: 'search model…',

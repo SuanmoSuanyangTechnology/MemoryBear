@@ -1028,6 +1028,7 @@ export const zh = {
       nextStep: '下一步',
       prevStep: '上一步',
       exportSuccess: '导出成功',
+      recommend: '推荐',
     },
     model: {
       searchPlaceholder: '搜索模型…',

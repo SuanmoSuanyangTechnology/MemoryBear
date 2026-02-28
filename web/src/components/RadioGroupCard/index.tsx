@@ -20,6 +20,7 @@
 import { type FC, type Key, type ReactNode, useEffect } from 'react';
 import { type RadioGroupProps } from 'antd';
 import clsx from 'clsx'
+import { useTranslation } from 'react-i18next';
 
 /** Radio card option interface */
 interface RadioCardOption {
@@ -33,6 +34,8 @@ interface RadioCardOption {
   icon?: string;
   /** Whether the option is disabled */
   disabled?: boolean;
+  /** Whether the option is recommended */
+  recommend?: boolean;
   /** Additional properties */
   [key: string]: string | number | boolean | undefined | null | Key;
 }
@@ -63,6 +66,7 @@ const RadioGroupCard: FC<RadioCardProps> = ({
   allowClear = true,
   block = false,
 }) => {
+  const { t } = useTranslation();
   /** Listen to value changes and trigger side effects via onValueChange callback */
   useEffect(() => {
     if (onValueChange) {
@@ -91,12 +95,13 @@ const RadioGroupCard: FC<RadioCardProps> = ({
     })}>
       {/* Render each option as a selectable card */}
       {options.map(option => (
-        <div key={String(option.value)} className={clsx("rb:border rb:rounded-lg rb:w-full rb:p-[20px_12px] rb:text-center rb:cursor-pointer", {
+        <div key={String(option.value)} className={clsx("rb:relative rb:border rb:rounded-lg rb:w-full rb:p-[20px_12px] rb:text-center rb:cursor-pointer", {
           'rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF]': option.value === value,
           'rb:border-[#EBEBEB] rb:bg-[#ffffff]': option.value !== value,
           'rb:opacity-[0.75]': option.disabled,
           'rb:flex rb:items-center rb:text-left rb:gap-4': block,
         })} onClick={() => handleChange(option)}>
+          {option.recommend && <div className="rb:absolute rb:right-0 rb:top-0 rb:bg-[#FF5D34] rb:rounded-[0px_7px_0px_8px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-4 rb:p-[4px_8px]">{t('common.recommend')}</div>}
           {/* Use custom render or default card layout */}
           {itemRender ? itemRender(option) : (
             <>
