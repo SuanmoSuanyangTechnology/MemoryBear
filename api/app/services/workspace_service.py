@@ -30,6 +30,7 @@ from app.schemas.workspace_schema import (
     WorkspaceModelsUpdate,
     WorkspaceUpdate,
 )
+from app.config.default_ontology_initializer import DefaultOntologyInitializer
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
@@ -129,7 +130,7 @@ def _create_workspace_only(
         raise
 
 def create_workspace(
-        db: Session, workspace: WorkspaceCreate, user: User
+        db: Session, workspace: WorkspaceCreate, user: User, language: str = "zh"
 ) -> Workspace:
     business_logger.info(
         f"创建工作空间: {workspace.name}, 创建者: {user.username}, "
@@ -145,10 +146,68 @@ def create_workspace(
             db=db, workspace=workspace, tenant_id=user.tenant_id
         )
         business_logger.info(f"工作空间创建成功: {db_workspace.name} (ID: {db_workspace.id}), 创建者: {user.username}")
-        db.commit()
+        db.flush()  # 使用 flush 而不是 commit，获取 ID 但不提交事务
         db.refresh(db_workspace)
 
+        # Initialize default ontology scenes for the workspace (先创建本体场景)
+        default_scene_id = None
+        try:
+            initializer = DefaultOntologyInitializer(db)
+            success, error_msg = initializer.initialize_default_scenes(
+                db_workspace.id, language=language
+            )
+            
+            if success:
+                business_logger.info(
+                    f"为工作空间 {db_workspace.id} 创建默认本体场景成功 (language={language})"
+                )
+                
+                # 获取默认场景ID，优先使用"在线教育"场景，如果不存在则使用"情感陪伴"场景
+                from app.repositories.ontology_scene_repository import OntologySceneRepository
+                from app.config.default_ontology_config import (
+                    ONLINE_EDUCATION_SCENE, 
+                    EMOTIONAL_COMPANION_SCENE,
+                    get_scene_name
+                )
+                
+                scene_repo = OntologySceneRepository(db)
+                
+                # 优先尝试获取教育场景
+                education_scene_name = get_scene_name(ONLINE_EDUCATION_SCENE, language)
+                education_scene = scene_repo.get_by_name(education_scene_name, db_workspace.id)
+                
+                if education_scene:
+                    default_scene_id = education_scene.scene_id
+                    business_logger.info(
+                        f"获取到教育场景ID用于默认记忆配置: {default_scene_id} (scene_name={education_scene_name})"
+                    )
+                else:
+                    # 如果教育场景不存在，尝试获取情感陪伴场景
+                    companion_scene_name = get_scene_name(EMOTIONAL_COMPANION_SCENE, language)
+                    companion_scene = scene_repo.get_by_name(companion_scene_name, db_workspace.id)
+                    
+                    if companion_scene:
+                        default_scene_id = companion_scene.scene_id
+                        business_logger.info(
+                            f"教育场景不存在，使用情感陪伴场景ID用于默认记忆配置: {default_scene_id} (scene_name={companion_scene_name})"
+                        )
+                    else:
+                        business_logger.warning(
+                            f"未找到任何默认场景 (education={education_scene_name}, companion={companion_scene_name})"
+                        )
+            else:
+                business_logger.warning(
+                    f"为工作空间 {db_workspace.id} 创建默认本体场景失败: {error_msg} (language={language})"
+                )
+        except Exception as ontology_error:
+            business_logger.error(
+                f"为工作空间 {db_workspace.id} 创建默认本体场景异常: {str(ontology_error)} (language={language})"
+            )
+            # Don't fail workspace creation if default ontology initialization fails
+            # The workspace can still function without default ontology scenes
+
         # Create default memory config for the workspace (only for neo4j storage types)
+        # 将默认场景ID（教育场景或情感陪伴场景）关联到记忆配置
         if workspace.storage_type == 'neo4j':
             try:
                 _create_default_memory_config(
@@ -158,9 +217,10 @@ def create_workspace(
                     llm_id=llm,
                     embedding_id=embedding,
                     rerank_id=rerank,
+                    scene_id=default_scene_id,  # 传入默认场景ID（优先教育场景，其次情感陪伴场景）
                 )
                 business_logger.info(
-                    f"为工作空间 {db_workspace.id} 创建默认记忆配置成功"
+                    f"为工作空间 {db_workspace.id} 创建默认记忆配置成功 (scene_id={default_scene_id})"
                 )
             except Exception as mc_error:
                 business_logger.error(
@@ -209,7 +269,6 @@ def create_workspace(
                     db=db,
                     knowledge=knowledge_data
                 )
-                db.commit()
                 business_logger.info(
                     f"为工作空间 {db_workspace.id} 自动创建知识库成功: "
                     f"{db_knowledge.name} (ID: {db_knowledge.id})"
@@ -224,6 +283,12 @@ def create_workspace(
                     BizCode.INTERNAL_ERROR
                 )
 
+        # 统一提交所有更改
+        db.commit()
+        business_logger.info(
+            f"工作空间 {db_workspace.id} 及相关资源创建完成并已提交"
+        )
+        
         return db_workspace
 
     except Exception as e:
@@ -919,6 +984,43 @@ def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
             f"Workspace {workspace.id} missing default memory config, creating one"
         )
         
+        # 尝试获取默认场景ID，优先教育场景，其次情感陪伴场景
+        default_scene_id = None
+        try:
+            from app.repositories.ontology_scene_repository import OntologySceneRepository
+            from app.config.default_ontology_config import (
+                ONLINE_EDUCATION_SCENE,
+                EMOTIONAL_COMPANION_SCENE,
+                get_scene_name
+            )
+            
+            scene_repo = OntologySceneRepository(db)
+            # 尝试中文和英文场景名称
+            for language in ["zh", "en"]:
+                # 优先尝试教育场景
+                education_scene_name = get_scene_name(ONLINE_EDUCATION_SCENE, language)
+                education_scene = scene_repo.get_by_name(education_scene_name, workspace.id)
+                if education_scene:
+                    default_scene_id = education_scene.scene_id
+                    business_logger.info(
+                        f"找到教育场景用于默认记忆配置: scene_id={default_scene_id}, scene_name={education_scene_name}"
+                    )
+                    break
+                
+                # 如果教育场景不存在，尝试情感陪伴场景
+                companion_scene_name = get_scene_name(EMOTIONAL_COMPANION_SCENE, language)
+                companion_scene = scene_repo.get_by_name(companion_scene_name, workspace.id)
+                if companion_scene:
+                    default_scene_id = companion_scene.scene_id
+                    business_logger.info(
+                        f"教育场景不存在，找到情感陪伴场景用于默认记忆配置: scene_id={default_scene_id}, scene_name={companion_scene_name}"
+                    )
+                    break
+        except Exception as scene_error:
+            business_logger.warning(
+                f"获取默认场景失败，将创建不关联场景的记忆配置: {str(scene_error)}"
+            )
+        
         try:
             _create_default_memory_config(
                 db=db,
@@ -927,6 +1029,7 @@ def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
                 llm_id=uuid.UUID(workspace.llm) if workspace.llm else None,
                 embedding_id=uuid.UUID(workspace.embedding) if workspace.embedding else None,
                 rerank_id=uuid.UUID(workspace.rerank) if workspace.rerank else None,
+                scene_id=default_scene_id,  # 传入默认场景ID（优先教育场景，其次情感陪伴场景）
             )
         except Exception as e:
             business_logger.error(
@@ -1008,6 +1111,7 @@ def _create_default_memory_config(
     llm_id: Optional[uuid.UUID] = None,
     embedding_id: Optional[uuid.UUID] = None,
     rerank_id: Optional[uuid.UUID] = None,
+    scene_id: Optional[uuid.UUID] = None,
 ) -> None:
     """Create a default memory config for a newly created workspace.
     
@@ -1018,6 +1122,7 @@ def _create_default_memory_config(
         llm_id: Optional LLM model ID
         embedding_id: Optional embedding model ID
         rerank_id: Optional rerank model ID
+        scene_id: Optional ontology scene ID (默认关联教育场景)
     """
     from app.models.memory_config_model import MemoryConfig
     
@@ -1031,12 +1136,13 @@ def _create_default_memory_config(
         llm_id=str(llm_id) if llm_id else None,
         embedding_id=str(embedding_id) if embedding_id else None,
         rerank_id=str(rerank_id) if rerank_id else None,
+        scene_id=scene_id,  # 关联本体场景ID
         state=True,  # Active by default
         is_default=True,  # Mark as workspace default
     )
     
     db.add(default_config)
-    db.commit()
+    db.flush()  # 使用 flush 而不是 commit，让调用者统一提交
     
     business_logger.info(
         "Created default memory config for workspace",
@@ -1044,5 +1150,6 @@ def _create_default_memory_config(
             "workspace_id": str(workspace_id),
             "config_id": str(config_id),
             "config_name": default_config.config_name,
+            "scene_id": str(scene_id) if scene_id else None,
         }
     )

@@ -1,7 +1,7 @@
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_api_logger
@@ -95,16 +95,29 @@ def get_workspaces(
 @router.post("", response_model=ApiResponse)
 def create_workspace(
     workspace: WorkspaceCreate,
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
 ):
     """创建新的工作空间"""
-    api_logger.info(f"用户 {current_user.username} 请求创建工作空间: {workspace.name}")
+    from app.core.language_utils import get_language_from_header
+    
+    # 验证并获取语言参数
+    language = get_language_from_header(language_type)
+    
+    api_logger.info(
+        f"用户 {current_user.username} 请求创建工作空间: {workspace.name}, "
+        f"language={language}"
+    )
 
     result = workspace_service.create_workspace(
-        db=db, workspace=workspace, user=current_user)
+        db=db, workspace=workspace, user=current_user, language=language
+    )
 
-    api_logger.info(f"工作空间创建成功 - 名称: {workspace.name}, ID: {result.id}, 创建者: {current_user.username}")
+    api_logger.info(
+        f"工作空间创建成功 - 名称: {workspace.name}, ID: {result.id}, "
+        f"创建者: {current_user.username}, language={language}"
+    )
     result_schema = WorkspaceResponse.model_validate(result)
     return success(data=result_schema, msg="工作空间创建成功")
 

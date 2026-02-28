@@ -9,7 +9,7 @@ Classes:
 
 import datetime
 import uuid
-from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey, UniqueConstraint, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db import Base
@@ -28,6 +28,9 @@ class OntologyScene(Base):
     # 场景信息
     scene_name = Column(String(200), nullable=False, comment="场景名称")
     scene_description = Column(Text, nullable=True, comment="场景描述")
+    
+    # 系统默认标识
+    is_system_default = Column(Boolean, default=False, nullable=False, index=True, comment="是否为系统默认场景")
 
     # 外键：关联到工作空间
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True, comment="所属工作空间ID")
