@@ -200,18 +200,19 @@ async def run_pilot_extraction(
         # 进度回调：输出每个分块的结果
         if progress_callback:
             for dlg in chunked_dialogs:
-                for i, chunk in enumerate(dlg.chunks):
-                    chunk_result = {
-                        "chunk_index": i + 1,
-                        "content": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
-                        "full_length": len(chunk.content),
-                        "dialog_id": dlg.id,
-                        "chunker_strategy": memory_config.chunker_strategy,
-                    }
-                    await progress_callback("text_preprocessing_chunking", f"分块 {i + 1} 处理完成", chunk_result)
+                if hasattr(dlg, 'chunks') and dlg.chunks:
+                    for i, chunk in enumerate(dlg.chunks):
+                        chunk_result = {
+                            "chunk_index": i + 1,
+                            "content": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
+                            "full_length": len(chunk.content),
+                            "dialog_id": dlg.id,
+                            "chunker_strategy": memory_config.chunker_strategy,
+                        }
+                        await progress_callback("text_preprocessing_result", f"分块 {i + 1} 处理完成", chunk_result)
 
             preprocessing_summary = {
-                "total_chunks": sum(len(dlg.chunks) for dlg in chunked_dialogs),
+                "total_chunks": sum(len(dlg.chunks) for dlg in chunked_dialogs if hasattr(dlg, 'chunks') and dlg.chunks),
                 "total_dialogs": len(chunked_dialogs),
                 "chunker_strategy": memory_config.chunker_strategy,
             }
