@@ -68,7 +68,7 @@ class WorkflowImportSave(BaseModel):
     """工作流导入请求"""
     temp_id: str
     name: str
-    description: str
+    description: str | None = Field(default=None)
 
 
 # ==================== 工作流配置 ====================

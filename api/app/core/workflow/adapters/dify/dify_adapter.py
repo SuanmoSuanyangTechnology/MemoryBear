@@ -43,7 +43,8 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         "knowledge-retrieval": NodeType.KNOWLEDGE_RETRIEVAL,
         "parameter-extractor": NodeType.PARAMETER_EXTRACTOR,
         "question-classifier": NodeType.QUESTION_CLASSIFIER,
-        "variable-aggregator": NodeType.VAR_AGGREGATOR
+        "variable-aggregator": NodeType.VAR_AGGREGATOR,
+        "tool": NodeType.TOOL
     }
 
     def __init__(self, config: dict[str, Any]):
@@ -89,6 +90,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         return True
 
     def parse_workflow(self) -> WorkflowParserResult:
+        self._init_node_output_map()
         for node in self.origin_nodes:
             node = self._convert_node(node)
             if node:
@@ -127,6 +129,11 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             warnings=self.warnings,
             errors=self.errors
         )
+
+    def _init_node_output_map(self):
+        for node in self.origin_nodes:
+            if self.map_node_type(node["data"]["type"]) == NodeType.LLM:
+                self.node_output_map[f"{node['id']}.text"] = f"{node['id']}.output"
 
     def _convert_cycle_node_position(self, node_id: str, position: dict):
         for node in self.origin_nodes:
@@ -214,6 +221,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
                 type=ExceptionType.EDGE,
                 detail=f"convert edge error - {e}",
             ))
+            logger.debug(f"convert edge error - {e}", exc_info=True)
             return None
 
     def _convert_variable(self, variable) -> VariableDefinition | None:
@@ -221,7 +229,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             return VariableDefinition(
                 name=variable["name"],
                 default=variable["value"],
-                type=variable["value_type"],
+                type=self.variable_type_map(variable["value_type"]),
             )
         except Exception as e:
             self.errors.append(ExceptionDefineition(
