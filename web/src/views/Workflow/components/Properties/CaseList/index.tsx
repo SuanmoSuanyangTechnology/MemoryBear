@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-09 18:24:53 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-09 18:24:53 
+ */
 import { type FC } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next';
@@ -6,7 +12,7 @@ import { Form, Button, Select, Space, Divider, InputNumber, Radio, type SelectPr
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
 import Editor from '../../Editor'
-import { edgeAttrs, portArgs } from '../../../constant'
+import { edgeAttrs, portTextAttrs, nodeWidth } from '../../../constant'
 
 interface CaseListProps {
   value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; operator: string; right: string; input_type?: string; }[] }>;
@@ -52,15 +58,16 @@ const CaseList: FC<CaseListProps> = ({
   const { t } = useTranslation();
   const form = Form.useFormInstance();
 
+  // Update node ports based on case count changes (add/remove cases)
   const updateNodePorts = (caseCount: number, removedCaseIndex?: number) => {
     if (!selectedNode || !graphRef?.current) return;
     
-    // 获取当前端口数量来判断是添加还是删除操作
+    // Get current port count to determine if it's an add or remove operation
     const currentPorts = selectedNode.getPorts().filter((port: any) => port.group === 'right');
-    const currentCaseCount = currentPorts.length - 1; // 减去ELSE端口
+    const currentCaseCount = currentPorts.length - 1; // Exclude ELSE port
     const isAddingCase = removedCaseIndex === undefined && caseCount > currentCaseCount;
     
-    // 保存现有连线信息（包括左侧端口连线）
+    // Save existing edge connections (including left-side port connections)
     const existingEdges = graphRef.current.getEdges().filter((edge: any) => 
       edge.getSourceCellId() === selectedNode.id || edge.getTargetCellId() === selectedNode.id
     );
@@ -73,7 +80,7 @@ const CaseList: FC<CaseListProps> = ({
       isIncoming: edge.getTargetCellId() === selectedNode.id
     }));
     
-    // 移除所有现有的右侧端口
+    // Remove all existing right-side ports
     const existingPorts = selectedNode.getPorts();
     existingPorts.forEach((port: any) => {
       if (port.group === 'right') {
@@ -81,43 +88,52 @@ const CaseList: FC<CaseListProps> = ({
       }
     });
     
-    // 计算新的节点高度：基础高度88px + 每个额外port增加30px
+    // Calculate new node height: base height 88px + 30px for each additional port
     const baseHeight = 88;
     const totalPorts = caseCount + 1; // IF/ELIF + ELSE
     const newHeight = baseHeight + (totalPorts - 2) * 30;
 
-    selectedNode.prop('size', { width: 240, height: newHeight })
-    
-    // 添加 IF 端口
+    selectedNode.prop('size', { width: nodeWidth, height: newHeight })
+
+    // Add IF port
     selectedNode.addPort({
       id: 'CASE1',
       group: 'right',
-      args: portArgs,
-      attrs: { text: { text: 'IF', fontSize: 12, fill: '#5B6167' }}
-    });
+      args: {
+        x: nodeWidth,
+        y: 42,
+      },
+      attrs: { text: { text: 'IF', ...portTextAttrs } }
+    })
     
-    // 添加 ELIF 端口
+    // Add ELIF ports
     for (let i = 1; i < caseCount; i++) {
       selectedNode.addPort({
         id: `CASE${i + 1}`,
         group: 'right',
-        args: portArgs,
-        attrs: { text: { text: 'ELIF', fontSize: 12, fill: '#5B6167' }}
+        args: {
+          x: nodeWidth,
+          y: 30 * i + 42,
+        },
+        attrs: { text: { text: 'ELIF', ...portTextAttrs }}
       });
     }
     
-    // 添加 ELSE 端口
+    // Add ELSE port
     selectedNode.addPort({
       id: `CASE${caseCount + 1}`,
       group: 'right',
-      args: portArgs,
-      attrs: { text: { text: 'ELSE', fontSize: 12, fill: '#5B6167' }}
+      args: {
+        x: nodeWidth,
+        y: 30 * caseCount + 42,
+      },
+      attrs: { text: { text: 'ELSE', ...portTextAttrs }}
     });
     
-    // 恢复连线
+    // Restore edge connections
     setTimeout(() => {
       edgeConnections.forEach(({ edge, sourcePortId, targetCellId, targetPortId, sourceCellId, isIncoming }: any) => {
-        // 如果是进入连线（左侧端口），直接恢复
+        // If it's an incoming connection (left-side port), restore directly
         if (isIncoming) {
           const sourceCell = graphRef.current?.getCellById(sourceCellId);
           if (sourceCell) {
@@ -131,10 +147,10 @@ const CaseList: FC<CaseListProps> = ({
           return;
         }
         
-        // 处理右侧端口连线
+        // Handle right-side port connections
         const originalCaseNumber = parseInt(sourcePortId.match(/CASE(\d+)/)?.[1] || '0');
         
-        // 如果是删除操作且是被删除的端口，删除连线
+        // If it's a remove operation and the port is being removed, delete the connection
         if (removedCaseIndex !== undefined && originalCaseNumber === removedCaseIndex + 1) {
           graphRef.current?.removeCell(edge);
           return;
@@ -142,22 +158,22 @@ const CaseList: FC<CaseListProps> = ({
         
         let newPortId = sourcePortId;
         
-        // 如果是删除操作，需要重新映射端口ID
+        // If it's a remove operation, remap port IDs
         if (removedCaseIndex !== undefined) {
           if (originalCaseNumber > removedCaseIndex + 1) {
-            // 被删除端口之后的端口，编号向前移动
+            // Ports after the removed port, shift numbering forward
             newPortId = `CASE${originalCaseNumber - 1}`;
           }
-          // ELSE端口始终映射到新的ELSE端口位置
+          // ELSE port always maps to the new ELSE port position
           else if (originalCaseNumber === currentCaseCount + 1) {
             newPortId = `CASE${caseCount + 1}`;
           }
         } else if (isAddingCase) {
-          // 如果是添加操作，ELSE端口需要重新映射
+          // If it's an add operation, ELSE port needs to be remapped
           if (originalCaseNumber === currentCaseCount + 1) {
-            newPortId = `CASE${caseCount + 1}`; // 新的ELSE端口
+            newPortId = `CASE${caseCount + 1}`; // New ELSE port
           }
-          // 新添加的端口不恢复任何连线
+          // Newly added ports don't restore any connections
         }
         
         const newPorts = selectedNode.getPorts();

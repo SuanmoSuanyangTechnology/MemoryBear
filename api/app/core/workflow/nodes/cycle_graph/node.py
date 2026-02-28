@@ -4,14 +4,14 @@ from typing import Any
 from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from app.core.workflow.nodes import WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.cycle_graph import LoopNodeConfig, IterationNodeConfig
 from app.core.workflow.nodes.cycle_graph.iteration import IterationRuntime
 from app.core.workflow.nodes.cycle_graph.loop import LoopRuntime
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class CycleGraphNode(BaseNode):
         2. Construct a StateGraph using GraphBuilder in subgraph mode
         3. Compile the graph for runtime execution
         """
-        from app.core.workflow.graph_builder import GraphBuilder
+        from app.core.workflow.engine.graph_builder import GraphBuilder
         self.cycle_nodes, self.cycle_edges = self.pure_cycle_graph()
         self.child_variable_pool = VariablePool()
         builder = GraphBuilder(
@@ -172,6 +172,7 @@ class CycleGraphNode(BaseNode):
         if self.node_type == NodeType.LOOP:
             return await LoopRuntime(
                 start_id=self.start_node_id,
+                stream=False,
                 graph=self.graph,
                 node_id=self.node_id,
                 config=self.config,
@@ -182,6 +183,7 @@ class CycleGraphNode(BaseNode):
         if self.node_type == NodeType.ITERATION:
             return await IterationRuntime(
                 start_id=self.start_node_id,
+                stream=False,
                 graph=self.graph,
                 node_id=self.node_id,
                 config=self.config,
@@ -189,4 +191,37 @@ class CycleGraphNode(BaseNode):
                 variable_pool=variable_pool,
                 child_variable_pool=self.child_variable_pool
             ).run()
+        raise RuntimeError("Unknown cycle node type")
+
+    async def execute_stream(self, state: WorkflowState, variable_pool: VariablePool):
+        if self.node_type == NodeType.LOOP:
+            yield {
+                "__final__": True,
+                "result": await LoopRuntime(
+                    start_id=self.start_node_id,
+                    stream=True,
+                    graph=self.graph,
+                    node_id=self.node_id,
+                    config=self.config,
+                    state=state,
+                    variable_pool=variable_pool,
+                    child_variable_pool=self.child_variable_pool,
+                ).run()
+            }
+            return
+        if self.node_type == NodeType.ITERATION:
+            yield {
+                "__final__": True,
+                "result": await IterationRuntime(
+                    start_id=self.start_node_id,
+                    stream=True,
+                    graph=self.graph,
+                    node_id=self.node_id,
+                    config=self.config,
+                    state=state,
+                    variable_pool=variable_pool,
+                    child_variable_pool=self.child_variable_pool
+                ).run()
+            }
+            return
         raise RuntimeError("Unknown cycle node type")

@@ -26,7 +26,7 @@ import { getLogoUrl } from './utils'
 /**
  * Model square component
  */
-const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPlazaItem) => void; }>(({ query, handleEdit }, ref) => {
+const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
   const { t } = useTranslation();
   const { message } = App.useApp()
   const modelSquareDetailRef = useRef<ModelSquareDetailRef>(null)
@@ -96,7 +96,6 @@ const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPl
                     <Flex justify="space-between">
                       <Space size={8}><UsergroupAddOutlined /> {item.add_count}</Space>
                       <Space>
-                        {!item.is_official && <Button type="primary" disabled={item.is_deprecated} onClick={() => handleEdit(item)}>{t('modelNew.edit')}</Button>}
                         {item.is_added
                           ? <Button type="primary" disabled>{t('modelNew.added')}</Button>
                           : <Button type="primary" ghost disabled={item.is_deprecated} onClick={() => handleAdd(item)}>{item.is_deprecated ? t('modelNew.deprecated') : `+ ${t('common.add')}`}</Button>
@@ -114,7 +113,6 @@ const ModelSquare = forwardRef <BaseRef, { query: any; handleEdit: (vo?: ModelPl
       <ModelSquareDetail
         ref={modelSquareDetailRef}
         refresh={getList}
-        handleEdit={handleEdit}
       />
     </>
   )

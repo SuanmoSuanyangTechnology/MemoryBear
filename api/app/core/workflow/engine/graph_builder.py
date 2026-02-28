@@ -1,176 +1,27 @@
+# -*- coding: UTF-8 -*-
+# Author: Eternity
+# @Email: 1533512157@qq.com
+# @Time : 2026/2/10 13:33
 import logging
 import re
 import uuid
 from collections import defaultdict
 from functools import lru_cache
-from typing import Any
+from typing import Any, Iterable
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import START, END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Send
-from pydantic import BaseModel, Field
 
-from app.core.workflow.expression_evaluator import evaluate_condition
-from app.core.workflow.nodes import WorkflowState, NodeFactory
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.stream_output_coordinator import OutputContent, StreamOutputConfig
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes import NodeFactory
 from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES
-from app.core.workflow.variable_pool import VariablePool
+from app.core.workflow.utils.expression_evaluator import evaluate_condition
 
 logger = logging.getLogger(__name__)
-
-SCOPE_PATTERN = re.compile(
-    r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\.[a-zA-Z0-9_]+\s*}}"
-)
-
-
-class OutputContent(BaseModel):
-    """
-    Represents a single output segment of an End node.
-
-    An output segment can be either:
-    - literal text (static string)
-    - a variable placeholder (e.g. {{ node.field }})
-
-    Each segment has its own activation state, which is especially
-    important in stream mode.
-    """
-
-    literal: str = Field(
-        ...,
-        description="Raw output content. Can be literal text or a variable placeholder."
-    )
-
-    activate: bool = Field(
-        ...,
-        description=(
-            "Whether this output segment is currently active.\n"
-            "- True: allowed to be emitted/output\n"
-            "- False: blocked until activated by branch control"
-        )
-    )
-
-    is_variable: bool = Field(
-        ...,
-        description=(
-            "Whether this segment represents a variable placeholder.\n"
-            "True  -> variable (e.g. {{ node.field }})\n"
-            "False -> literal text"
-        )
-    )
-
-    _SCOPE: str | None = None
-
-    def get_scope(self) -> str:
-        self._SCOPE = SCOPE_PATTERN.findall(self.literal)[0]
-        return self._SCOPE
-
-    def depends_on_scope(self, scope: str) -> bool:
-        """
-        Check if this segment depends on a given scope.
-
-        Args:
-            scope (str): Node ID or special variable prefix (e.g., "sys").
-
-        Returns:
-            bool: True if this segment references the given scope.
-        """
-        if self._SCOPE:
-            return self._SCOPE == scope
-        return self.get_scope() == scope
-
-
-class StreamOutputConfig(BaseModel):
-    """
-    Streaming output configuration for an End node.
-
-    This configuration describes how the End node output behaves in streaming mode,
-    including:
-    - whether output emission is globally activated
-    - which upstream branch/control nodes gate the activation
-    - how each parsed output segment is streamed and activated
-    """
-
-    activate: bool = Field(
-        ...,
-        description=(
-            "Global activation flag for the End node output.\n"
-            "When False, output segments should not be emitted even if available.\n"
-            "This flag typically becomes True once required control branch conditions "
-            "are satisfied."
-        )
-    )
-
-    control_nodes: dict[str, list[str]] = Field(
-        ...,
-        description=(
-            "Control branch conditions for this End node output.\n"
-            "Mapping of `branch_node_id -> expected_branch_label`.\n"
-            "The End node output becomes globally active when a controlling branch node "
-            "reports a matching completion status."
-        )
-    )
-
-    outputs: list[OutputContent] = Field(
-        ...,
-        description=(
-            "Ordered list of output segments parsed from the output template.\n"
-            "Each segment represents either a literal text block or a variable placeholder "
-            "that may be activated independently."
-        )
-    )
-
-    cursor: int = Field(
-        ...,
-        description=(
-            "Streaming cursor index.\n"
-            "Indicates the next output segment index to be emitted.\n"
-            "Segments with index < cursor are considered already streamed."
-        )
-    )
-
-    def update_activate(self, scope: str, status=None):
-        """
-        Update streaming activation state based on an upstream node or special variable.
-
-        Args:
-            scope (str):
-                Identifier of the completed upstream entity.
-                - If a control branch node, it should match a key in `control_nodes`.
-                - If a variable placeholder (e.g., "sys.xxx"), it may appear in output segments.
-            status (optional):
-                Completion status of the control branch node.
-                Required when `scope` refers to a control node.
-
-        Behavior:
-        1. Control branch nodes:
-           - If `scope` matches a key in `control_nodes` and `status` matches the expected
-             branch label, the End node output becomes globally active (`activate = True`).
-
-        2. Variable output segments:
-           - For each segment that is a variable (`is_variable=True`):
-               - If the segment literal references `scope`, mark the segment as active.
-               - This applies both to regular node variables (e.g., "node_id.field")
-                 and special system variables (e.g., "sys.xxx").
-
-        Notes:
-        - This method does not emit output or advance the streaming cursor.
-        - It only updates activation flags based on upstream events or special variables.
-        """
-
-        # Case 1: resolve control branch dependency
-        if scope in self.control_nodes.keys():
-            if status is None:
-                raise RuntimeError("[Stream Output] Control node activation status not provided")
-            if status in self.control_nodes[scope]:
-                self.activate = True
-
-        # Case 2: activate variable segments related to this node
-        for i in range(len(self.outputs)):
-            if (
-                    self.outputs[i].is_variable
-                    and self.outputs[i].depends_on_scope(scope)
-            ):
-                self.outputs[i].activate = True
 
 
 class GraphBuilder:
@@ -230,7 +81,7 @@ class GraphBuilder:
             raise RuntimeError(f"Node not found: Id={node_id}")
 
     @staticmethod
-    def _merge_control_nodes(control_nodes: list[tuple[str, str]]) -> dict[str, list]:
+    def _merge_control_nodes(control_nodes: Iterable[tuple[str, str]]) -> dict[str, list]:
         result = defaultdict(list)
         for node in control_nodes:
             result[node[0]].append(node[1])

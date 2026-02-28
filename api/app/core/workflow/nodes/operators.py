@@ -3,9 +3,9 @@ import re
 from abc import ABC
 from typing import Union, Type, NoReturn, Any
 
-from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.enums import ValueInputType
-from app.core.workflow.variable_pool import VariablePool
+from app.core.workflow.variable.base_variable import VariableType
 
 
 class TypeTransformer:

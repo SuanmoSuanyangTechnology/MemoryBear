@@ -35,7 +35,7 @@ class FileMetadata(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True, comment="Tenant ID")
-    workspace_id = Column(UUID(as_uuid=True), nullable=False, index=True, comment="Workspace ID")
+    workspace_id = Column(UUID(as_uuid=True), nullable=True, index=True, comment="Workspace ID")
     file_key = Column(String(512), nullable=False, unique=True, index=True, comment="Storage file key")
     file_name = Column(String(255), nullable=False, comment="Original file name")
     file_ext = Column(String(32), nullable=False, comment="File extension")

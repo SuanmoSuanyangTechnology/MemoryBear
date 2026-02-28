@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 18:46:40
+ * @Last Modified time: 2026-02-25 18:11:49
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -168,7 +168,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     setLoading(true)
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
-      const { skills } = response
+      const { skills, variables } = response
       let allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
       let allTools = Array.isArray(response.tools) ? response.tools : []
       const memoryContent = response.memory?.memory_config_id
@@ -187,6 +187,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
           skill_ids: allSkills
         }
       })
+      updateVariableList([...variables])
       setData({
         ...response,
         tools: allTools

@@ -1,6 +1,5 @@
 export const en = {
   translation: {
-    welcome: 'Welcome to React Font CLI',
     title: 'Memory Bear.AI ',
     memoryBear: 'Memory Bear.AI',
     index:{
@@ -248,6 +247,7 @@ export const en = {
       usernameOrAccount: 'Username / Login Account',
       displayName: 'Display Name',
       role: 'Role',
+      password: 'Password',
       status: 'Status',
       createTime: 'Creation Time',
       lastLoginTime: 'Last Login Time',
@@ -256,10 +256,12 @@ export const en = {
       resetPasswordSuccess: 'Password reset successful',
       resetPasswordFailed: 'Password reset failed',
       enabled: 'Enabled',
+      enabledOpera: 'Activate',
       enabledConfirm: 'Are you sure to enable this user?',
       enabledConfirmSuccess: 'Enabled successfully',
       enabledConfirmFailed: 'Enabled failed',
       disabled: 'Disabled',
+      disabledOpera: 'Deactivate',
       disabledConfirm: 'Are you sure to disable this user?',
       disabledConfirmSuccess: 'Disabled successfully',
       disabledConfirmFailed: 'Disabled failed',
@@ -274,6 +276,28 @@ export const en = {
       createdAt: 'Creation Time',
       member: 'Member',
       passwordRule: 'password should have at least 6 characters',
+      authVerify: 'Identity Verification',
+      authVerifyDesc: 'For security reasons, please verify your login password first',
+      verify: 'Verify',
+      loginPassword: 'Login Password',
+      loginPasswordPlaceholder: 'Please enter the login password for the current account',
+      loginPasswordVerifyFailed: 'Incorrect password, please try again',
+      bindNewEmail: 'Bind New Email',
+      sureChange: 'Confirm Change',
+      sendEmailCode: 'Send Verification Code',
+      currentEmail: 'Current Email',
+      newEmail: 'New Email Address',
+      emailCode: 'Verification Code',
+      emailCodePlaceholder: 'Please enter the verification code received by the new email',
+      sureChangeEmail: 'Confirm to change the bound email to',
+      sureChangeEmailDesc: '?',
+      changeSuccess: 'Changed successfully',
+      sendSuccess: 'Verification code has been sent, please check',
+      newEmailSameAsOld: 'New email cannot be the same as current email',
+      emailCodeLengthRule: 'Please enter a 6-digit verification code',
+      emailFormatError: 'Incorrect email format',
+      sendCodeTooFrequent: 'Please resend after {{seconds}}s',
+      retrySend: 'Can resend after {{seconds}}s',
     },
     timezones: {
       'Asia/Shanghai': 'China Standard Time (UTC+8)',
@@ -428,6 +452,7 @@ export const en = {
       nextStep: 'Next Step',
       prevStep: 'Previous Step',
       exportSuccess: 'Export successful',
+      recommend: 'Recommend',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -578,6 +603,9 @@ export const en = {
       bedrock: "Bedrock"
     },
     knowledgeBase: {
+      home: 'Home',
+      selectSpace: 'Please select space',
+      preview: 'Preview',
       pleaseUploadFileFirst: 'Please upload file first',
       shareSuccess: 'Share successfully',
       shareFailed: 'Share failed',
@@ -1168,7 +1196,7 @@ export const en = {
       stateSharingStrategy: 'State Sharing Strategy',
       intermediateResultProcessing: 'Intermediate Result Processing',
       metadataTransfer: 'Metadata Transfer',
-
+      knowledgeConfig: 'Knowledge Base Configuration',
       temperature: 'Temperature',
       temperature_desc: 'Temperature parameters, control the randomness of output',
       max_tokens: 'Max Tokens',
@@ -1312,6 +1340,13 @@ export const en = {
       analyTask: 'Analyze Task Intent',
       dynamicMatchSkill: 'Dynamic Match Skill',
       executeTask: 'Execute Task',
+
+      upload: 'Upload & Parse',
+      complex: 'Compatibility Analysis',
+      node: 'Node Mapping',
+      configCheck: 'Configuration Validation',
+      sureInfo: 'Information Confirmation',
+      completed: 'Import Completed',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -1988,6 +2023,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           query: 'Query Variable',
           knowledge_retrieval: 'Knowledge Base',
           recallConfig: 'Recall Test',
+          addKnowledge: 'Add Knowledge Base'
         },
         'parameter-extractor': {
           model_id: 'Model',
@@ -2148,6 +2184,14 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       input: 'Input',
       output: 'Output',
       error: 'Error Message',
+      loopNum: ' loops',
+      iterationNum: ' iterations',
+      runtime: {
+        loop: 'Loop',
+        iteration: 'Iteration',
+        input_cycle_vars: 'Initial Loop Variables',
+        output_cycle_vars: 'Final Loop Variables',
+      }
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',

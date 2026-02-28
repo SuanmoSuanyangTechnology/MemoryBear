@@ -328,7 +328,7 @@ async def update_composite_model(
     
     try:
         if model_data.type is not None:
-            raise BusinessException("不允许更改模型类型和供应商", BizCode.INVALID_PARAMETER)
+            raise BusinessException("不允许更改模型类型", BizCode.INVALID_PARAMETER)
         result_orm = await ModelConfigService.update_composite_model(db=db, model_id=model_id, model_data=model_data, tenant_id=current_user.tenant_id)
         api_logger.info(f"组合模型更新成功: {result_orm.name} (ID: {model_id})")
         
@@ -368,6 +368,9 @@ def update_model(
     更新模型配置
     """
     api_logger.info(f"更新模型配置请求: model_id={model_id}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
+
+    if model_data.type is not None or model_data.provider is not None:
+        raise BusinessException("不允许更改模型类型和供应商", BizCode.INVALID_PARAMETER)
     
     try:
         api_logger.debug(f"开始更新模型配置: model_id={model_id}")

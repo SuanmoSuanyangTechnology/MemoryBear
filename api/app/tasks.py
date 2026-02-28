@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
@@ -13,7 +14,6 @@ from typing import Any, Dict, List, Optional
 
 import redis
 import requests
-import trio
 
 # Import a unified Celery instance
 from app.celery_app import celery_app
@@ -66,6 +66,10 @@ def parse_document(file_path: str, document_id: uuid.UUID):
     """
     Document parsing, vectorization, and storage
     """
+    # Force re-importing Trio in child processes (to avoid inheriting the state of the parent process)
+    import trio
+    import importlib
+    importlib.reload(trio)
     db = next(get_db())  # Manually call the generator
     db_document = None
     db_knowledge = None
@@ -292,6 +296,10 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
     """
     build knowledge graph
     """
+    # Force re-importing Trio in child processes (to avoid inheriting the state of the parent process)
+    import trio
+    import importlib
+    importlib.reload(trio)
     db = next(get_db())  # Manually call the generator
     db_documents = None
     db_knowledge = None
@@ -362,7 +370,7 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
                 print(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task result for task {task}:\n{result}\n")
                 return result
 
-            try:
+            def sync_task():
                 trio.run(
                     lambda: _run(
                         row=task,
@@ -377,8 +385,15 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
                         with_community=with_community,
                     )
                 )
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(sync_task)
+                    future.result()  # Blocks until the task completes
             except Exception as e:
                 print(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task failed for task {task}:\n{str(e)}\n")
+            finally:
+                if db:
+                    db.close()
             print(f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({time.time() - start_time}s)")
 
         result = f"build knowledge graph '{db_knowledge.name}' processed successfully."
@@ -389,7 +404,8 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
         result = f"build knowledge grap '{db_knowledge.name}' failed."
         return result
     finally:
-        db.close()
+        if db:
+            db.close()
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")

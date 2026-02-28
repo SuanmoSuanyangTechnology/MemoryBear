@@ -137,3 +137,4 @@ boto3>=1.28.0
 aiofiles>=23.0.0
 lxml>=4.9.0
 httpx>=0.28.0
+modelscope>=1.34.0

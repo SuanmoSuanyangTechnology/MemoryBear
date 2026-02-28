@@ -66,9 +66,9 @@ export const addModelPlaza = (model_base_id: string) => {
 }
 // Create custom model
 export const addCustomModel = (data: CustomModelForm) => {
-  return request.post('/models/model_plaza', data)
+  return request.post('/models', data)
 }
 // Update custom model
 export const updateCustomModel = (model_base_id: string, data: CustomModelForm) => {
-  return request.put(`/models/model_plaza/${model_base_id}`, data)
+  return request.put(`/models/${model_base_id}`, data)
 }

@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-09 18:34:33 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-09 18:34:33 
+ */
 import { type FC } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Form, Space } from 'antd';
@@ -5,7 +11,7 @@ import { Graph, Node } from '@antv/x6';
 
 import Editor from '../../Editor';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
-import { edgeAttrs, portArgs } from '../../../constant'
+import { edgeAttrs, portTextAttrs, nodeWidth } from '../../../constant'
 
 interface CategoryListProps {
   parentName: string;
@@ -19,10 +25,11 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
   const form = Form.useFormInstance();
   const formValues = Form.useWatch([parentName], form);
 
+  // Update node ports based on category count changes (add/remove categories)
   const updateNodePorts = (caseCount: number, removedCaseIndex?: number) => {
     if (!selectedNode || !graphRef?.current) return;
 
-    // 保存现有连线信息（包括左侧端口连线）
+    // Save existing edge connections (including left-side port connections)
     const existingEdges = graphRef.current.getEdges().filter((edge: any) =>
       edge.getSourceCellId() === selectedNode.id || edge.getTargetCellId() === selectedNode.id
     );
@@ -35,7 +42,7 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
       isIncoming: edge.getTargetCellId() === selectedNode.id
     }));
 
-    // 移除所有现有的右侧端口
+    // Remove all existing right-side ports
     const existingPorts = selectedNode.getPorts();
     existingPorts.forEach((port: any) => {
       if (port.group === 'right') {
@@ -43,28 +50,30 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
       }
     });
 
-    // 计算新的节点高度：基础高度88px + 每个额外port增加30px
+    // Calculate new node height: base height 88px + 30px for each additional port
     const baseHeight = 88;
-    const totalPorts = caseCount + 1; // IF/ELIF + ELSE
-    const newHeight = baseHeight + (totalPorts - 2) * 30;
+    const newHeight = baseHeight + (caseCount - 2) * 30;
 
-    selectedNode.prop('size', { width: 240, height: newHeight < baseHeight ? baseHeight : newHeight })
+    selectedNode.prop('size', { width: nodeWidth, height: newHeight < baseHeight ? baseHeight : newHeight })
 
-    // 添加 分类 端口
+    // Add category ports
     for (let i = 0; i < caseCount; i++) {
       selectedNode.addPort({
         id: `CASE${i + 1}`,
         group: 'right',
-        args: portArgs,
-        attrs: { text: { text: `分类${i + 1}`, fontSize: 12, fill: '#5B6167' } }
+        args: {
+          x: nodeWidth,
+          y: 30 * i + 42,
+        },
+        attrs: { text: { text: `分类${i + 1}`, ...portTextAttrs } }
       });
     }
-    // 恢复连线
+    // Restore edge connections
     setTimeout(() => {
       edgeConnections.forEach(({ edge, sourcePortId, targetCellId, targetPortId, sourceCellId, isIncoming }: any) => {
         graphRef.current?.removeCell(edge);
         
-        // 如果是进入连线（左侧端口），直接恢复
+        // If it's an incoming connection (left-side port), restore directly
         if (isIncoming) {
           const sourceCell = graphRef.current?.getCellById(sourceCellId);
           if (sourceCell) {
@@ -77,22 +86,22 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
           return;
         }
 
-        // 处理右侧端口连线
+        // Handle right-side port connections
         const originalCaseNumber = parseInt(sourcePortId.match(/CASE(\d+)/)?.[1] || '0');
 
-        // 如果是被删除的端口，不重新创建连线
+        // If it's a removed port, don't recreate the connection
         if (removedCaseIndex !== undefined && originalCaseNumber === removedCaseIndex + 1) {
           return;
         }
 
         let newPortId = sourcePortId;
 
-        // 如果删除了某个端口，需要重新映射后续端口的ID
+        // If a port was removed, remap subsequent port IDs
         if (removedCaseIndex !== undefined && originalCaseNumber > removedCaseIndex + 1) {
           newPortId = `CASE${originalCaseNumber - 1}`;
         }
 
-        // 检查新端口是否存在
+        // Check if the new port exists
         const newPorts = selectedNode.getPorts();
         const matchingPort = newPorts.find((port: any) => port.id === newPortId);
 

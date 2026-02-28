@@ -2,11 +2,11 @@ import logging
 import re
 from typing import Any
 
-from app.core.workflow.nodes import WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.variable_aggregator.config import VariableAggregatorNodeConfig
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
-from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 

@@ -1,10 +1,10 @@
 from typing import Any
 
-from app.core.workflow.nodes import WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.memory.config import MemoryReadNodeConfig, MemoryWriteNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
 from app.db import get_db_read
 from app.services.memory_agent_service import MemoryAgentService
 from app.tasks import write_message_task

@@ -2,12 +2,13 @@ import logging
 import re
 from typing import Any
 
-from app.core.workflow.nodes.base_node import BaseNode, WorkflowState
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator
 from app.core.workflow.nodes.if_else import IfElseNodeConfig
 from app.core.workflow.nodes.operators import ConditionExpressionResolver, CompareOperatorInstance
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
 
 logger = logging.getLogger(__name__)
 

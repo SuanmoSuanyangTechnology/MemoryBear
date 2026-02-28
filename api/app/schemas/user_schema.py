@@ -36,6 +36,28 @@ class AdminChangePasswordRequest(BaseModel):
     new_password: Optional[str] = Field(None, min_length=6, description="新密码，至少6位。如果不提供则自动生成随机密码")
 
 
+class ChangeEmailRequest(BaseModel):
+    """修改邮箱请求"""
+    password: str = Field(..., description="当前密码")
+    new_email: EmailStr = Field(..., description="新邮箱地址")
+
+
+class SendEmailCodeRequest(BaseModel):
+    """发送邮箱验证码请求"""
+    email: EmailStr = Field(..., description="邮箱地址")
+
+
+class VerifyEmailCodeRequest(BaseModel):
+    """验证邮箱验证码并修改邮箱请求"""
+    new_email: EmailStr = Field(..., description="新邮箱地址")
+    code: str = Field(..., min_length=6, max_length=6, description="验证码")
+
+
+class VerifyPasswordRequest(BaseModel):
+    """验证密码请求"""
+    password: str = Field(..., description="密码")
+
+
 class ChangePasswordResponse(BaseModel):
     """修改密码响应"""
     message: str

@@ -5,7 +5,6 @@
 """
 
 import logging
-from collections import defaultdict
 from typing import Any
 
 from jinja2 import TemplateSyntaxError, UndefinedError, Environment, StrictUndefined, Undefined

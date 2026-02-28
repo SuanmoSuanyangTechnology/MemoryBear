@@ -1,8 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-09 18:31:30 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-09 18:31:30 
+ */
 import { useState } from 'react';
 import { Popover } from 'antd';
 import clsx from 'clsx';
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
-import { nodeLibrary, graphNodeLibrary, edgeAttrs } from '../../constant';
+import { nodeLibrary, graphNodeLibrary, edgeAttrs, nodeWidth } from '../../constant';
 import { useTranslation } from 'react-i18next';
 
 const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
@@ -10,6 +16,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
+  // Handle node selection from popover and create new node replacing the add-node placeholder
   const handleNodeSelect = (selectedNodeType: any) => {
     const parentBBox = node.getBBox();
     const cycleId = data.cycle;
@@ -32,7 +39,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       },
     });
 
-    // 将新节点添加为父节点的子节点
+    // Add new node as child of parent node
     if (cycleId) {
       const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
       if (parentNode) {
@@ -61,14 +68,14 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       });
     });
 
-    // 删除所有add-node类型的节点
+    // Remove all add-node type nodes
     graph.getNodes().forEach((n: any) => {
       if (n.getData()?.type === 'add-node' && n.getData()?.cycle === cycleId) {
         n.remove();
       }
     });
 
-    // 自动调整循环节点大小
+    // Automatically adjust loop node size
     const loopNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
     if (loopNode) {
       const adjustLoopSize = () => {
@@ -85,7 +92,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
           }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
           
           const padding = 20;
-          const newWidth = Math.max(240, bounds.maxX - bounds.minX + padding * 2);
+          const newWidth = Math.max(nodeWidth, bounds.maxX - bounds.minX + padding * 2);
           const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding * 2);
           
           loopNode.prop('size', { width: newWidth, height: newHeight });
@@ -94,7 +101,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       
       adjustLoopSize();
       
-      // 监听子节点移动事件
+      // Listen to child node movement events
       const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
       childNodes.forEach((childNode: any) => {
         childNode.on('change:position', adjustLoopSize);
@@ -104,7 +111,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
   };
 
   const content = (
-    <div style={{ maxHeight: '300px', overflowY: 'auto', minWidth: '240px' }}>
+    <div style={{ maxHeight: '300px', overflowY: 'auto', minWidth: `${nodeWidth}px'` }}>
       {nodeLibrary.map((category, categoryIndex) => {
         const filteredNodes = category.nodes.filter(nodeType => 
           nodeType.type !== 'start' && nodeType.type !== 'end' && nodeType.type !== 'iteration' && nodeType.type !== 'loop' && nodeType.type !== 'cycle-start'

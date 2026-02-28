@@ -19,6 +19,8 @@ from . import (
     implicit_memory_controller,
     knowledge_controller,
     knowledgeshare_controller,
+    mcp_market_controller,
+    mcp_market_config_controller,
     memory_agent_controller,
     memory_dashboard_controller,
     memory_episodic_controller,
@@ -60,6 +62,8 @@ manager_router.include_router(model_controller.router)
 manager_router.include_router(file_controller.router)
 manager_router.include_router(document_controller.router)
 manager_router.include_router(knowledge_controller.router)
+manager_router.include_router(mcp_market_controller.router)
+manager_router.include_router(mcp_market_config_controller.router)
 manager_router.include_router(chunk_controller.router)
 manager_router.include_router(test_controller.router)
 manager_router.include_router(knowledgeshare_controller.router)

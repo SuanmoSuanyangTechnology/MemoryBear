@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 20:05:04
+ * @Last Modified time: 2026-02-09 18:37:01
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -12,7 +12,7 @@ import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portArgs } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 
@@ -171,6 +171,7 @@ export const useWorkflowGraph = ({
             }
           })
         }
+
         const nodeConfig = {
           ...(graphNodeLibrary[type] ?? graphNodeLibrary.default),
           id,
@@ -182,39 +183,28 @@ export const useWorkflowGraph = ({
         
         // Generate ports dynamically for if-else node based on cases
         if (type === 'if-else' && config.cases && Array.isArray(config.cases)) {
-          const caseCount = config.cases.length;
-          const totalPorts = caseCount + 1; // IF/ELIF + ELSE
+          const totalPorts = config.cases.length + 1; // IF/ELIF + ELSE
           const baseHeight = 88;
           const newHeight = baseHeight + (totalPorts - 2) * 30;
           
           const portItems: PortMetadata[] = [
             { group: 'left' },
-            { group: 'right', id: 'CASE1', args: portArgs, attrs: { text: { text: 'IF', fontSize: 12, fill: '#5B6167' }} }
           ];
-          
-          // Add ELIF ports
-          for (let i = 1; i < caseCount; i++) {
+          // Add IF/ELIF/ELSE ports
+          for (let i = 0; i < totalPorts; i++) {
             portItems.push({
               group: 'right',
               id: `CASE${i + 1}`,
-              args: portArgs,
-              attrs: { text: { text: 'ELIF', fontSize: 12, fill: '#5B6167' }}
+              args: {
+                x: nodeWidth,
+                y: 30 * i + 42,
+              },
+              attrs: { text: { text: i === 0 ? 'IF' : i === totalPorts - 1 ? 'ELSE' : 'ELIF', ...portTextAttrs } }
             });
           }
           
-          // Add ELSE port
-          portItems.push({
-            group: 'right',
-            id: `CASE${caseCount + 1}`,
-            args: portArgs,
-            attrs: { text: { text: 'ELSE', fontSize: 12, fill: '#5B6167' }}
-          });
-          
           nodeConfig.ports = {
-            groups: {
-              right: { position: 'right', markup: portMarkup, attrs: portAttrs },
-              left: { position: 'left', markup: portMarkup, attrs: portAttrs },
-            },
+            groups: defaultAbsolutePortGroups,
             items: portItems
           };
           
@@ -225,7 +215,7 @@ export const useWorkflowGraph = ({
         if (type === 'question-classifier' && config.categories && Array.isArray(config.categories)) {
           const categoryCount = config.categories.length;
           const baseHeight = 88;
-          const newHeight = baseHeight + (categoryCount - 1) * 30;
+          const newHeight = baseHeight + (categoryCount - 2) * 30;
           
           const portItems: PortMetadata[] = [
             { group: 'left' }
@@ -236,16 +226,16 @@ export const useWorkflowGraph = ({
             portItems.push({
               group: 'right',
               id: `CASE${index + 1}`,
-              args: portArgs,
-              attrs: { text: { text: `分类${index + 1}`, fontSize: 12, fill: '#5B6167' }}
+              args: {
+                x: nodeWidth,
+                y: 30 * index + 42,
+              },
+              attrs: { text: { text: `分类${index + 1}`, ...portTextAttrs }}
             });
           });
           
           nodeConfig.ports = {
-            groups: {
-              right: { position: 'right', markup: portMarkup, attrs: portAttrs },
-              left: { position: 'left', markup: portMarkup, attrs: portAttrs },
-            },
+            groups: defaultAbsolutePortGroups,
             items: portItems
           };
           
@@ -262,7 +252,7 @@ export const useWorkflowGraph = ({
             items: [
               { group: 'left' },
               { group: 'right', id: 'right' },
-              { group: 'right', id: 'ERROR', attrs: { text: { text: t('workflow.config.http-request.errorBranch'), fontSize: 12, fill: '#5B6167' }}}
+              { group: 'right', id: 'ERROR', attrs: { text: { text: t('workflow.config.http-request.errorBranch'), ...portTextAttrs }}}
             ]
           };
         }

@@ -9,6 +9,8 @@ from .generic_file_model import GenericFile
 from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey, ModelBase, LoadBalanceStrategy
 from .memory_short_model import ShortTermMemory, LongTermMemory
 from .knowledgeshare_model import KnowledgeShare
+from .mcp_market_model import McpMarket
+from .mcp_market_config_model import McpMarketConfig
 from .app_model import App
 from .agent_app_config_model import AgentConfig
 from .app_release_model import AppRelease
@@ -50,6 +52,8 @@ __all__ = [
     "ModelType",
     "ModelApiKey",
     "KnowledgeShare",
+    "McpMarket",
+    "McpMarketConfig",
     "App",
     "AgentConfig",
     "AppRelease",

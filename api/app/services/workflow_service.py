@@ -588,7 +588,7 @@ class WorkflowService:
                         "message_length": len(payload.get("output", ""))
                     }
                 }
-            case "node_start" | "node_end" | "node_error":
+            case "node_start" | "node_end" | "node_error" | "cycle_item":
                 return None
             case _:
                 return event

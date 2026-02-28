@@ -4,11 +4,11 @@
 # @Time : 2026/2/6
 import pytest
 
+from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import StartNode
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.variable_pool import VariablePool
 from tests.workflow.nodes.base import (
-    simple_state, 
+    simple_state,
     simple_vairable_pool,
     TEST_EXECUTION_ID,
     TEST_WORKSPACE_ID,

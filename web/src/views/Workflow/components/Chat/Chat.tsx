@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 17:41:24
+ * @Last Modified time: 2026-02-27 09:58:30
  */
 /**
  * Workflow Chat Component
@@ -23,10 +23,7 @@
  */
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import clsx from 'clsx'
-import { App, Space, Button, Collapse, Flex, Dropdown, type MenuProps } from 'antd'
-import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons'
-import CodeBlock from '@/components/Markdown/CodeBlock'
+import { App, Space, Button, Flex, Dropdown, type MenuProps } from 'antd'
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import RbDrawer from '@/components/RbDrawer';
@@ -39,13 +36,12 @@ import dayjs from 'dayjs'
 import type { ChatRef, VariableConfigModalRef, GraphRef } from '../../types'
 import { type SSEMessage } from '@/utils/stream'
 import type { Variable } from '../Properties/VariableList/types'
-import styles from './chat.module.css'
-import Markdown from '@/components/Markdown'
 import ChatInput from '@/components/Chat/ChatInput'
 import UploadFiles from '@/views/Conversation/components/FileUpload'
 // import AudioRecorder from '@/components/AudioRecorder'
 import UploadFileListModal from '@/views/Conversation/components/UploadFileListModal'
 import type { UploadFileListModalRef } from '@/views/Conversation/types'
+import Runtime from './Runtime';
 
 const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId, graphRef }, ref) => {
   const { t } = useTranslation()
@@ -176,9 +172,11 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { chunk, conversation_id, node_id, input, output, error, elapsed_time, status } = item.data as {
+        const { chunk, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status } = item.data as {
           chunk: string;
           conversation_id: string | null;
+          cycle_id: string;
+          cycle_idx: number;
           node_id: string;
           node_name?: string;
           input?: any;
@@ -191,8 +189,6 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
 
         const node = graphRef.current?.getNodes().find(n => n.id === node_id);
         const { name, icon } = node?.getData() || {}
-
-        console.log('node', node?.getData())
 
         switch(item.event) {
           // Append streaming text chunks to assistant message
@@ -266,6 +262,44 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                 newList[lastIndex] = {
                   ...newList[lastIndex],
                   subContent: newSubContent
+                }
+              }
+              return newList
+            })
+            break
+          // Update node with subContent
+          case 'cycle_item':
+            setChatList(prev => {
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                const newSubContent = newList[lastIndex].subContent || []
+                const filterIndex = newSubContent.findIndex(vo => vo.id === cycle_id)
+                if (filterIndex > -1) {
+                  const items = newSubContent[filterIndex].subContent || []
+                  items.push({
+                    cycle_id,
+                    cycle_idx,
+                    node_id,
+                    node_name: name,
+                    icon,
+                    content: {
+                      cycle_idx,
+                      input,
+                      output,
+                      error,
+                    },
+                    status: status || 'completed',
+                    elapsed_time
+                  })
+                  newSubContent[filterIndex] = {
+                    ...newSubContent[filterIndex],
+                    subContent: [...items]
+                  }
+                  newList[lastIndex] = {
+                    ...newList[lastIndex],
+                    subContent: newSubContent
+                  }
                 }
               }
               return newList
@@ -383,12 +417,6 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     handleClose
   }));
 
-  /**
-   * Returns CSS class for status-based text color
-   */
-  const getStatus = (status?: string) => {
-    return status === 'completed' ? 'rb:text-[#369F21]' : status === 'failed' ? 'rb:text-[#FF5D34]' : 'rb:text-[#5B6167]'
-  }
   return (
     <RbDrawer
       title={<div className="rb:flex rb:items-center rb:gap-2.5">
@@ -413,85 +441,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
         labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
         errorDesc={t('application.ReplyException')}
         renderRuntime={(item, index) => {
-          return (
-            <div key={index} className="rb:w-100 rb:mb-2">
-              <Collapse
-                className={styles[item.status || 'default']}
-                items={[{
-                  key: 0,
-                  label: <div className={getStatus(item.status)}>
-                    {item.status === 'completed' ? <CheckCircleFilled className="rb:mr-1" /> : item.status === 'failed' ? <CloseCircleFilled className="rb:mr-1" /> : <LoadingOutlined className="rb:mr-1" />}
-                    {t('application.workflow')}
-                  </div>,
-                  className: styles.collapseItem,
-                  children: (
-                    Array.isArray(item.subContent)
-                    ? <Space size={8} direction="vertical" className="rb:w-full!">
-                      {item.subContent?.map(vo => (
-                        <Collapse
-                          key={vo.node_id}
-                          items={[{
-                            key: vo.node_id,
-                            label: <div className={clsx("rb:flex rb:justify-between rb:items-center", getStatus(vo.status))}>
-                              <div className="rb:flex rb:items-center rb:gap-1 rb:flex-1">
-                                {vo.icon && <img src={vo.icon} className="rb:size-4" />}
-                                <div className="rb:wrap-break-word rb:line-clamp-1">{vo.node_name || vo.node_id}</div>
-                              </div>
-                              <span>
-                                {typeof vo.elapsed_time == 'number' && <>{vo.elapsed_time?.toFixed(3)}ms</>}
-                                {vo.status === 'completed' ? <CheckCircleFilled className="rb:ml-1" /> : vo.status === 'failed' ? <CloseCircleFilled className="rb:ml-1" /> : <LoadingOutlined className="rb:ml-1" />}
-                              </span>
-                            </div>,
-                            className: styles.collapseItem,
-                            children: (
-                              <Space size={8} direction="vertical" className="rb:w-full!">
-                                {vo.status === 'failed' &&
-                                  <div className={clsx("rb:bg-[#F0F3F8] rb:rounded-md", getStatus(vo.status))}>
-                                    <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
-                                      {t(`workflow.error`)}
-                                      <Button
-                                        className="rb:py-0! rb:px-1! rb:text-[12px]!"
-                                        size="small"
-                                      >{t('common.copy')}</Button>
-                                    </div>
-                                    <div className="rb:pb-2 rb:px-3 rb:max-h-40 rb:overflow-auto">
-                                      <Markdown content={vo.content?.error || ''} />
-                                    </div>
-                                  </div>
-                                }
-                                {['input', 'output'].map(key => (
-                                  <div key={key} className="rb:bg-[#F0F3F8] rb:rounded-md">
-                                    <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
-                                      {t(`workflow.${key}`)}
-                                      <Button
-                                        className="rb:py-0! rb:px-1! rb:text-[12px]!"
-                                        size="small"
-                                      >{t('common.copy')}</Button>
-                                    </div>
-                                    <div className="rb:max-h-40 rb:overflow-auto">
-                                      <CodeBlock
-                                        size="small"
-                                        value={typeof vo.content === 'object' && vo.content?.[key] ? JSON.stringify(vo.content[key], null, 2) : '{}'}
-                                        needCopy={false}
-                                        showLineNumbers={true}
-                                      />
-                                    </div>
-                                  </div>
-                                ))}
-                              </Space>
-                            )
-                          }]}
-                        />
-                      ))}
-                    </Space>
-                      : <div className={clsx("rb:bg-[#FBFDFF] rb:rounded-md rb:py-2 rb:px-3 ", getStatus('failed'))}>
-                      <Markdown content={item.subContent || ''}  />
-                    </div>
-                  )
-                }]}
-              />
-            </div>
-          )
+          return <Runtime item={item} index={index} />
         }}
       />
       <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:m-4 rb:mb-1">

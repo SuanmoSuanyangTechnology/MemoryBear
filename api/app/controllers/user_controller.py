@@ -2,15 +2,23 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 import uuid
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.db import get_db
 from app.dependencies import get_current_user, get_current_superuser
 from app.models.user_model import User
 from app.schemas import user_schema
-from app.schemas.user_schema import ChangePasswordRequest, AdminChangePasswordRequest
+from app.schemas.user_schema import (
+    ChangePasswordRequest,
+    AdminChangePasswordRequest,
+    SendEmailCodeRequest,
+    VerifyEmailCodeRequest,
+    VerifyPasswordRequest)
 from app.schemas.response_schema import ApiResponse
 from app.services import user_service
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
+from app.core.security import verify_password
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -92,7 +100,7 @@ def get_current_user_info(
             result_schema.current_workspace_name = current_workspace.name
         
         for ws in result.workspaces:
-            if ws.workspace_id == current_user.current_workspace_id:
+            if ws.workspace_id == current_user.current_workspace_id and ws.is_active:
                 result_schema.role = ws.role
                 break
     
@@ -118,6 +126,7 @@ def get_tenant_superusers(
     
     superusers_schema = [user_schema.User.model_validate(u) for u in superusers]
     return success(data=superusers_schema, msg="租户超管列表获取成功")
+
 
 
 @router.get("/{user_id}", response_model=ApiResponse)
@@ -181,3 +190,53 @@ async def admin_change_password(
     else:
         api_logger.info(f"管理员密码重置成功: 用户 {request.user_id}, 随机密码已生成")
         return success(data=generated_password, msg="密码重置成功")
+
+
+@router.post("/verify_pwd", response_model=ApiResponse)
+def verify_pwd(
+    request: VerifyPasswordRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """验证当前用户密码"""
+    api_logger.info(f"用户验证密码请求: {current_user.username}")
+    
+    is_valid = verify_password(request.password, current_user.hashed_password)
+    api_logger.info(f"用户密码验证结果: {current_user.username}, valid={is_valid}")
+    if not is_valid:
+        raise BusinessException("密码验证失败", code=BizCode.VALIDATION_FAILED)
+    return success(data={"valid": is_valid}, msg="验证完成")
+
+
+@router.post("/send-email-code", response_model=ApiResponse)
+async def send_email_code(
+    request: SendEmailCodeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """发送邮箱验证码"""
+    api_logger.info(f"用户请求发送邮箱验证码: {current_user.username}, email={request.email}")
+    
+    await user_service.send_email_code_method(db=db, email=request.email, user_id=current_user.id)
+    
+    api_logger.info(f"邮箱验证码已发送: {current_user.username}")
+    return success(msg="验证码已发送到您的邮箱，请查收")
+
+
+@router.put("/change-email", response_model=ApiResponse)
+async def change_email(
+    request: VerifyEmailCodeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """验证验证码并修改邮箱"""
+    api_logger.info(f"用户修改邮箱: {current_user.username}, new_email={request.new_email}")
+
+    await user_service.verify_and_change_email(
+        db=db,
+        user_id=current_user.id,
+        new_email=request.new_email,
+        code=request.code
+    )
+    
+    api_logger.info(f"用户邮箱修改成功: {current_user.username}")
+    return success(msg="邮箱修改成功")

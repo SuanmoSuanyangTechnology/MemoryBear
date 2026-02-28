@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:10 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:50:10 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-27 10:20:51
  */
 /**
  * Model List View
@@ -10,27 +10,28 @@
  * Shows model tags and allows viewing model details
  */
 
-import { useRef, useState, useEffect, type FC } from 'react';
+import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Button, Flex, Row, Col } from 'antd'
 import { useTranslation } from 'react-i18next';
 
-import type { ProviderModelItem, KeyConfigModalRef, ModelListDetailRef } from './types'
+import type { ProviderModelItem, KeyConfigModalRef, ModelListDetailRef, ModelListItem, BaseRef } from './types'
 import RbCard from '@/components/RbCard/Card'
 import { getModelNewList } from '@/api/models'
 import PageEmpty from '@/components/Empty/PageEmpty';
 import Tag from '@/components/Tag';
 import KeyConfigModal from './components/KeyConfigModal'
 import ModelListDetail from './components/ModelListDetail'
-import { getLogoUrl } from './utils'
+import { getListLogoUrl } from './utils'
 
 /**
  * Model list component
  */
-const ModelList: FC<{ query: any }> = ({ query }) => {
+const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListItem) => void; }> (({ query, handleEdit }, ref) => {
   const { t } = useTranslation();
   const keyConfigModalRef = useRef<KeyConfigModalRef>(null)
   const modelListDetailRef = useRef<ModelListDetailRef>(null)
   const [list, setList] = useState<ProviderModelItem[]>([])
+
   useEffect(() => {
     getList()
   }, [query])
@@ -54,6 +55,11 @@ const ModelList: FC<{ query: any }> = ({ query }) => {
     keyConfigModalRef.current?.handleOpen(vo)
   }
 
+  /** Expose methods to parent component */
+  useImperativeHandle(ref, () => ({
+    getList,
+    modelListDetailRefresh: () => modelListDetailRef.current?.handleRefresh()
+  }));
   return (
     <>
       {list.length === 0
@@ -64,7 +70,7 @@ const ModelList: FC<{ query: any }> = ({ query }) => {
               <RbCard
                 key={item.provider}
                 title={t(`modelNew.${item.provider}`)}
-                avatarUrl={getLogoUrl(item.logo)}
+                avatarUrl={getListLogoUrl(item.provider, item.logo)}
                 avatar={
                   <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
                     {item.provider[0].toUpperCase()}
@@ -96,9 +102,10 @@ const ModelList: FC<{ query: any }> = ({ query }) => {
       <ModelListDetail
         ref={modelListDetailRef}
         refresh={getList}
+        handleEdit={handleEdit}
       />
     </>
   )
-}
+})
 
 export default ModelList

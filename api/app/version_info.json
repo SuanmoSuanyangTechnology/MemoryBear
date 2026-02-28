@@ -1,4 +1,68 @@
 {
+  "v0.2.5": {
+    "introduction": {
+      "codeName": "行云",
+      "releaseDate": "2026-2-26",
+      "upgradePosition": "🐻 精炼根基，优化核心用户体验与系统稳定性",
+      "coreUpgrades": [
+        "1. 用户体验与国际化 🎨<br>* 语言参数修复：语言偏好现正确保留<br>* 邮箱修改支持：用户可直接在用户管理系统中修改邮箱地址",
+        "2. 工作流可视化增强 💬<br>* 循环与迭代节点输出展示：实时显示执行进度和中间输出，便于调试复杂迭代过程<br>* 变量支持回车选择：支持回车键确认变量选择，简化工作流配置流程",
+        "3. 优化模型管理 ⚙️<br>* 模型广场移除自定义模型，优化模型使用体验",
+        "4. 稳健性与缺陷修复 🔧<br>* 知识图谱构建修复：解决知识图谱构建流程稳定性问题，确保更可靠的实体提取和关系映射",
+        "<br>",
+        "版本 0.2.5 通过解决国际化边界情况和改进工作流透明度，构建更具生产就绪性的平台。工作流可视化改进为更复杂的调试和监控能力奠定基础。未来将继续深化企业就绪性，扩展用户管理功能、优化知识图谱智能和增强工作流编排能力，在可观测性、性能优化和无缝集成模式方面持续改进。",
+        "智慧致远 🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "Flowing Clouds",
+      "releaseDate": "2026-2-26",
+      "upgradePosition": "🐻 Refined foundations with enhanced user experience and system stability",
+      "coreUpgrades": [
+        "1. User Experience & Internationalization 🎨<br>* Language parameter fix: language preferences are now correctly retained<br>* Email Update Support: Users can now modify email addresses directly in user management system",
+        "2. Workflow Visualization Enhancements 💬<br>* Loop & Iteration Node Output Display: Real-time display of execution progress and intermediate outputs for easier debugging<br>* Variable Selection with Enter Key: Enabled Enter key confirmation for streamlined variable assignment",
+        "3. Optimized Model Management ⚙️<br>* Custom models have been removed from the Model marketplace to optimize the model usage experience",
+        "4. Robustness & Bug Fixes 🔧<br>* Knowledge Graph Construction Fix: Addressed stability issues in knowledge graph pipeline for more reliable entity extraction and relationship mapping",
+        "<br>",
+        "Version 0.2.5 matures MemoryBear's operational foundations by addressing internationalization edge cases and improving workflow transparency. The workflow visualization improvements lay groundwork for sophisticated debugging and monitoring capabilities. Looking forward, we will deepen enterprise readiness by expanding user management features, refining knowledge graph intelligence, and enhancing workflow orchestration with continued improvements in observability, performance optimization, and seamless integration patterns.",
+        "Intelligent Resilience 🐻✨"
+      ]
+    }
+  },
+  "v0.2.4": {
+    "introduction": {
+      "codeName": "智远",
+      "releaseDate": "2026-2-11",
+      "upgradePosition": "🐻 生产级稳健性升级版本，智慧致远，从容应对复杂场景",
+      "coreUpgrades": [
+        "1. Skills 技能框架 🛠️<br>* Skills 支持：引入全新的Skills技能系统，支持可扩展的能力模块，可在Agent和工作流中动态加载与编排",
+        "2. 多模态与交互 💬<br>* 文件多模态支持：全面支持消息输入、LLM处理和输出渲染中的多模态文件处理，实现更丰富的媒体感知对话<br>* 语音交互：语音交互功能正在积极开发中，为免提对话体验奠定基础（开发中）",
+        "3. 知识库集成 📚<br>* 飞书知识库：无缝对接飞书文档库，支持企业知识检索<br>* 语雀知识库：原生连接语雀文档平台，扩展对国内企业工具生态的覆盖<br>* Web站点知识库：通用Web站点抓取与索引，支持从公开网页内容构建知识库<br>* 视觉模型选择优化：知识库视觉模型配置现已支持LLM和Chat两种模型类型，移除了此前仅限Chat类型的限制",
+        "4. 记忆智能 🧠<br>* 本体工程（二期）：基于本体工程的高级记忆场景分类与萃取，实现结构化、领域感知的记忆组织，提升分类准确性<br>* 默认模型配置：情绪分析、反思和记忆萃取模块现默认使用空间级模型，确保开箱即用的一致性行为<br>* 智能模型回退：当已配置的情绪或反思模型为空或不可用时，系统自动回退至空间默认模型，避免静默失败<br>* 记忆模型回退兜底：当记忆中配置的模型为空或不可用时，系统优雅降级至空间默认模型",
+        "5. 性能与扩展 ⚡<br>* 模型并发（model_api_keys）：支持并发模型API Key管理，实现并行模型调用，提升高负载场景下的吞吐能力",
+        "6. 稳健性与缺陷修复 🔧<br>* 记忆配置版本固定：修复用户记忆配置未跟随应用版本发布固定的问题，消除跨部署的行为不一致<br>* 空间默认记忆保护：空间级默认记忆配置现不可删除；用户级配置仍可删除<br>* Agent与工作流配置兜底：解决Agent和工作流节点中记忆配置可能为空、或已选择但未配置的边界情况——全面的回退处理现可防止运行时错误<br>* 隐形记忆字段重命名：将隐形记忆接口JSON响应中的user_id修正为end_user_id，与规范数据模型对齐<br>* 记忆配置ID迁移：将Agent和工作流记忆配置中的memory_content重命名为memory_config_id，保持API一致性<br>* Worker-Memory告警解决：解决worker-memory服务中的告警级别问题，提升运维监控清晰度<br>* 双语接口修复：修复记忆相关API接口的中英文不一致问题<br>* 新用户记忆配置自动回填：新创建的EndUser若memory_config_id为None，系统自动从最新Release获取memory_config_id并回填<br>* 存量用户记忆配置自动回填：已有EndUser若memory_config_id为None，系统同样从最新Release获取并回填，确保向后兼容，无需手动迁移",
+        "<br>",
+        "Memory Bear v0.2.4 向生产级稳健性迈进，Skills框架与多模态支持开启认知平台新篇章。",
+        "记忆熊，智慧致远，从容应对真实世界的多样性。🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "ZhiYuan",
+      "releaseDate": "2026-2-11",
+      "upgradePosition": "🐻 Production-grade resilience release — Wisdom Reaching Far, gracefully handling complex scenarios",
+      "coreUpgrades": [
+        "1. Skills Framework 🛠️<br>* Skills Support: Introduced a new Skills system, enabling extensible capability modules that can be dynamically loaded and orchestrated within agents and workflows",
+        "2. Multimodal & Interaction 💬<br>* File Multimodal Support: Full multimodal file handling across message input, LLM processing, and output rendering — supporting richer, media-aware conversations<br>* Voice Interaction: Voice-based interaction capabilities are under active development, laying the groundwork for hands-free conversational experiences (In Progress)",
+        "3. Knowledge Base Integration 📚<br>* Feishu Knowledge Base: Seamless integration with Feishu (Lark) document repositories for enterprise knowledge retrieval<br>* Yuque Knowledge Base: Native connector for Yuque documentation platforms, expanding coverage of Chinese enterprise tooling<br>* Web Site Knowledge Base: General-purpose web site crawling and indexing for knowledge base construction from public web content<br>* Visual Model Selection: Knowledge base visual model configuration now supports both LLM and Chat model types, removing the previous restriction to Chat-only selection",
+        "4. Memory Intelligence 🧠<br>* Ontology Engineering (Phase 2): Advanced memory scene classification and extraction powered by ontology engineering — enabling structured, domain-aware memory organization with improved categorization accuracy<br>* Default Model Configuration: Emotion analysis, reflection, and memory extraction modules now default to the space-level model, ensuring consistent behavior out of the box<br>* Intelligent Model Fallback: If configured emotion or reflection models are empty or unavailable, the system automatically falls back to the space default model — preventing silent failures<br>* Memory Config Fallback for Models: When any memory-configured model is empty or unavailable, the system gracefully degrades to the space default model",
+        "5. Performance & Scalability ⚡<br>* Model Concurrency (model_api_keys): Support for concurrent model API key management, enabling parallel model invocations and improved throughput for high-load scenarios",
+        "6. Robustness & Bug Fixes 🔧<br>* Memory Config Version Pinning: Fixed an issue where user memory configurations were not pinned to application release versions, causing inconsistent behavior across deployments<br>* Space Default Memory Protection: Space-level default memory configurations are now protected from deletion; user-level configurations remain deletable<br>* Agent & Workflow Config Fallback: Resolved edge cases in Agent and Workflow nodes where memory config could be empty or selected but unconfigured — comprehensive fallback handling now prevents runtime errors<br>* Implicit Memory Field Rename: Corrected user_id to end_user_id in JSON responses from implicit memory interfaces, aligning with the canonical data model<br>* Memory Config ID Migration: Renamed memory_content to memory_config_id in Agent and Workflow memory configurations for API consistency<br>* Worker-Memory Alerts: Resolved warning-level alerts in the worker-memory service, improving operational monitoring clarity<br>* Bilingual Interface Fixes: Fixed Chinese/English language inconsistencies across memory-related API interfaces<br>* EndUser Memory Config Auto-Backfill (New Users): When a newly created EndUser has memory_config_id as None, the system automatically fetches the latest release's memory_config_id and backfills it<br>* EndUser Memory Config Auto-Backfill (Existing Users): For existing EndUsers with memory_config_id as None, the system similarly retrieves and backfills from the latest release — ensuring backward compatibility without manual migration",
+        "<br>",
+        "Memory Bear v0.2.4 advances toward production-grade resilience, with the Skills framework and multimodal support opening a new chapter for the cognitive platform.",
+        "MemoryBear — Wisdom Reaching Far, gracefully handling real-world variability. 🐻✨"
+      ]
+    }
+  },
   "v0.2.3": {
     "introduction": {
       "codeName": "归墟",
