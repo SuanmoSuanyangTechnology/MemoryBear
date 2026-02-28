@@ -1988,6 +1988,7 @@ async def get_chunked_dialogs_with_preprocessing(
     input_data_path: Optional[str] = None,
     llm_client: Optional[Any] = None,
     skip_cleaning: bool = True,
+    pruning_config: Optional[Dict] = None,
 ) -> List[DialogData]:
     """包含数据预处理步骤的完整分块流程
     
@@ -2000,6 +2001,7 @@ async def get_chunked_dialogs_with_preprocessing(
         input_data_path: 输入数据路径
         llm_client: LLM 客户端
         skip_cleaning: 是否跳过数据清洗步骤（默认False）
+        pruning_config: 剪枝配置字典，包含 pruning_switch, pruning_scene, pruning_threshold
         
     Returns:
         带 chunks 的 DialogData 列表
@@ -2030,7 +2032,19 @@ async def get_chunked_dialogs_with_preprocessing(
         from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_pruning import (
             SemanticPruner,
         )
-        pruner = SemanticPruner(llm_client=llm_client)
+        from app.core.memory.models.config_models import PruningConfig
+        
+        # 构建剪枝配置
+        if pruning_config:
+            # 使用传入的配置
+            config = PruningConfig(**pruning_config)
+            print(f"[剪枝] 使用传入配置: switch={config.pruning_switch}, scene={config.pruning_scene}, threshold={config.pruning_threshold}")
+        else:
+            # 使用默认配置（关闭剪枝）
+            config = None
+            print("[剪枝] 未提供配置，使用默认配置（剪枝关闭）")
+        
+        pruner = SemanticPruner(config=config, llm_client=llm_client)
         
         # 记录单对话场景下剪枝前的消息数量
         single_dialog_original_msgs = None
