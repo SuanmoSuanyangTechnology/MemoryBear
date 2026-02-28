@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 18:37:01
+ * @Last Modified time: 2026-02-28 17:59:34
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -135,7 +135,24 @@ export const useWorkflowGraph = ({
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
-            if (type === 'memory-write' && key === 'message' && nodeLibraryConfig.config) {
+            if (type === 'loop' && key === 'condition' && nodeLibraryConfig.config) {
+              const { condition } = config;
+              console.log('condition', condition)
+              nodeLibraryConfig.config[key].defaultValue = condition ? {
+                ...condition,
+                expressions: (condition as any).expressions.map((expr: any) => {
+                  return expr.input_type ? { ...expr, input_type: expr.input_type.toLocaleLowerCase() } : expr
+                })
+              } : {}
+            } else if (type === 'if-else' && key === 'cases' && nodeLibraryConfig.config) {
+              const { cases } = config;
+              nodeLibraryConfig.config[key].defaultValue = cases && Array.isArray(cases) ? cases.map(item => ({
+                ...item,
+                expressions: item.expressions.map((expr: any) => {
+                  return expr.input_type ? { ...expr, input_type: expr.input_type.toLocaleLowerCase() } : expr
+                }),
+              })) : []
+            } else if (type === 'memory-write' && key === 'message' && nodeLibraryConfig.config) {
               nodeLibraryConfig.config['messages'].defaultValue = [{ role: 'USER', content: config[key] }]
               delete nodeLibraryConfig.config[key]
             } else if (key === 'memory' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
