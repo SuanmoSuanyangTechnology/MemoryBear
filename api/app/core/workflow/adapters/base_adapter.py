@@ -68,6 +68,8 @@ class BasePlatformAdapter(ABC):
         self.branch_node_cache = defaultdict(list)
         self.error_branch_node_cache = []
 
+        self.node_output_map = {}
+
     @abstractmethod
     def get_metadata(self) -> PlatformMetadata:
         """get platform metadata"""

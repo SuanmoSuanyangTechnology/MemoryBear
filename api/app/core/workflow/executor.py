@@ -175,7 +175,7 @@ class WorkflowExecutor:
             elapsed_time = (end_time - start_time).total_seconds()
 
             logger.info(
-                f"Workflow execution completed: execution_id={self.execution_context.execution_id}, elapsed_time={elapsed_time:.2f}s")
+                f"Workflow execution completed: execution_id={self.execution_context.execution_id}, elapsed_time={elapsed_time:.2f}ms")
 
             return self.result_builder.build_final_output(result, self.variable_pool, elapsed_time, full_content)
 
@@ -322,7 +322,7 @@ class WorkflowExecutor:
             )
             logger.info(
                 f"Workflow execution completed (streaming), "
-                f"elapsed: {elapsed_time:.2f}s, execution_id: {self.execution_context.execution_id}"
+                f"elapsed: {elapsed_time:.2f}ms, execution_id: {self.execution_context.execution_id}"
             )
 
             yield {

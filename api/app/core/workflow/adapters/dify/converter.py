@@ -44,6 +44,7 @@ class DifyConverter(BaseConverter):
     warnings: list
     branch_node_cache: dict
     error_branch_node_cache: list
+    node_output_map: dict
 
     def __init__(self):
         self.CONFIG_CONVERT_MAP = {
@@ -60,7 +61,8 @@ class DifyConverter(BaseConverter):
             "knowledge-retrieval": self.convert_knowledge_node_config,
             "parameter-extractor": self.convert_parameter_extractor_node_config,
             "question-classifier": self.convert_question_classifier_node_config,
-            "variable-aggregator": self.convert_variable_aggregator,
+            "variable-aggregator": self.convert_variable_aggregator_node_config,
+            "tool": self.convert_tool_node_config,
             "loop-start": lambda x: {},
             "iteration-start": lambda x: {},
             "loop-end": lambda x: {},
@@ -74,8 +76,7 @@ class DifyConverter(BaseConverter):
     def is_variable(expression) -> bool:
         return bool(re.match(r"\{\{#(.*?)#}}", expression))
 
-    @staticmethod
-    def process_var_selector(var_selector):
+    def process_var_selector(self, var_selector):
         if not var_selector:
             return ""
         selector = var_selector.split('.')
@@ -86,7 +87,7 @@ class DifyConverter(BaseConverter):
         var_selector = ".".join(selector)
         mapping = {
             "sys.query": "sys.message"
-        }
+        } | self.node_output_map
 
         var_selector = mapping.get(var_selector, var_selector)
         return var_selector
@@ -124,6 +125,8 @@ class DifyConverter(BaseConverter):
             "checkbox": VariableType.BOOLEAN,
             "file-list": VariableType.ARRAY_FILE,
             "select": VariableType.STRING,
+            "integer": VariableType.NUMBER,
+            "float": VariableType.NUMBER,
         }
         var_type = type_map.get(source_type, source_type)
         return var_type
@@ -160,6 +163,8 @@ class DifyConverter(BaseConverter):
             "≥": ComparisonOperator.GE,
             "≤": ComparisonOperator.LE,
             "not empty": ComparisonOperator.NOT_EMPTY,
+            "start with": ComparisonOperator.START_WITH,
+            "end with": ComparisonOperator.END_WITH,
         }
         return operator_map.get(operator, operator)
 
@@ -633,7 +638,7 @@ class DifyConverter(BaseConverter):
             prompt=node_data["instruction"]
         ).model_dump()
 
-    def convert_variable_aggregator(self, node: dict) -> dict:
+    def convert_variable_aggregator_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         group_enable = node_data["advanced_settings"]["group_enabled"]
         group_variables = {}
@@ -657,3 +662,13 @@ class DifyConverter(BaseConverter):
             group_variables=group_variables,
             group_type=group_type,
         ).model_dump()
+
+    def convert_tool_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        self.warnings.append(ExceptionDefineition(
+            node_id=node["id"],
+            node_name=node_data["title"],
+            type=ExceptionType.CONFIG,
+            detail=f"Please reconfigure the tool node.",
+        ))
+        return {}
