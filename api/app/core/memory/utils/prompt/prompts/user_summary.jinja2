@@ -14,8 +14,8 @@ Your task is to generate a comprehensive user profile based on the provided enti
 {% endif %}
 
 ===Inputs===
-{% if user_id %}
-- User ID: {{ user_id }}
+{% if user_display_name %}
+- User Display Name: {{ user_display_name }}
 {% endif %}
 {% if entities %}
 - Core Entities & Frequency: {{ entities }}
@@ -32,6 +32,20 @@ Your task is to generate a comprehensive user profile based on the provided enti
 2. Use objective third-person descriptions with a restrained and neutral tone
 3. Avoid excessive adjectives and empty phrases
 4. Strictly follow the output format specified below
+
+{% if language == "zh" %}
+**【严格人称规定】**
+- 在描述用户时，必须使用"{{ user_display_name }}"作为人称
+- 绝对禁止使用用户ID（如 {{ user_id }}）来称呼用户
+- 绝对禁止在摘要中出现任何形式的UUID或ID字符串
+- 如果需要指代用户，只能使用"{{ user_display_name }}"或相应的代词（他/她/TA）
+{% else %}
+**【STRICT PRONOUN RULES】**
+- When describing the user, you MUST use "{{ user_display_name }}" as the reference
+- It is ABSOLUTELY FORBIDDEN to use the user ID (such as {{ user_id }}) to refer to the user
+- It is ABSOLUTELY FORBIDDEN to include any form of UUID or ID string in the summary
+- If you need to refer to the user, you can ONLY use "{{ user_display_name }}" or appropriate pronouns (he/she/they)
+{% endif %}
 
 **Section-Specific Requirements:**
 
@@ -103,13 +117,13 @@ Your task is to generate a comprehensive user profile based on the provided enti
 
 {% if language == "zh" %}
 Example Input:
-- User ID: user_12345
+- User Display Name: 张三
 - Core Entities & Frequency: 产品经理 (15), AI (12), 深圳 (10), 数据分析 (8), 团队协作 (7)
 - Representative Statement Samples: 我在深圳从事产品经理工作已经5年了 | 我相信好的产品源于对用户需求的深刻理解 | 我喜欢在团队中起到协调作用 | 数据驱动决策是我的工作原则
 
 Example Output:
 【基本介绍】
-我是张三，一名充满热情的高级产品经理。在过去的5年里，我专注于AI和数据驱动的产品设计，致力于创造能够真正改善用户生活的产品。我相信好的产品源于对用户需求的深刻理解和对技术可能性的不断探索。
+张三是一名充满热情的高级产品经理，在深圳工作。在过去的5年里，张三专注于AI和数据驱动的产品设计，致力于创造能够真正改善用户生活的产品。张三相信好的产品源于对用户需求的深刻理解和对技术可能性的不断探索。
 
 【性格特点】
 性格开朗，善于沟通，注重细节。喜欢在团队中起到协调作用，帮助大家达成共识。面对挑战时保持乐观，相信每个问题都有解决方案。
@@ -121,13 +135,13 @@ Example Output:
 "让每一个产品决策都充满温度。"
 {% else %}
 Example Input:
-- User ID: user_12345
+- User Display Name: John
 - Core Entities & Frequency: Product Manager (15), AI (12), San Francisco (10), Data Analysis (8), Team Collaboration (7)
 - Representative Statement Samples: I have been working as a product manager in San Francisco for 5 years | I believe good products come from deep understanding of user needs | I enjoy playing a coordinating role in teams | Data-driven decision making is my work principle
 
 Example Output:
 【Basic Introduction】
-This is a passionate senior product manager based in San Francisco. Over the past 5 years, they have focused on AI and data-driven product design, dedicated to creating products that truly improve users' lives. They believe good products stem from deep understanding of user needs and continuous exploration of technological possibilities.
+John is a passionate senior product manager based in San Francisco. Over the past 5 years, John has focused on AI and data-driven product design, dedicated to creating products that truly improve users' lives. John believes good products stem from deep understanding of user needs and continuous exploration of technological possibilities.
 
 【Personality Traits】
 Outgoing personality with excellent communication skills and attention to detail. Enjoys playing a coordinating role in teams, helping everyone reach consensus. Maintains optimism when facing challenges, believing every problem has a solution.

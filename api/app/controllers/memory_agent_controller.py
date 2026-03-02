@@ -633,12 +633,11 @@ async def get_knowledge_type_stats_api(
     current_user: User = Depends(get_current_user)
 ):
     """
-    统计当前空间下各知识库类型的数量，包含 General | Web | Third-party | Folder | Memory。
+    统计当前空间下各知识库类型的数量，包含 General | Web | Third-party | Folder。
     会对缺失类型补 0，返回字典形式。
     可选按状态过滤。
     - 知识库类型根据当前用户的 current_workspace_id 过滤
-    - Memory 是 Neo4j 中 Chunk 的数量，根据 end_user_id (end_user_id) 过滤
-    - 如果用户没有当前工作空间或未提供 end_user_id，对应的统计返回 0
+    - 如果用户没有当前工作空间，对应的统计返回 0
     """
     api_logger.info(f"Knowledge type stats requested for workspace_id: {current_user.current_workspace_id}, end_user_id: {end_user_id}")
     try:
