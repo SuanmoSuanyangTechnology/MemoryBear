@@ -140,12 +140,22 @@ async def run_pilot_extraction(
                     remaining_msg_count = len(remaining_messages)
                     deleted_msg_count = original_msg_count - remaining_msg_count
                     
-                    # 找出被删除的消息（通过内容对比）
-                    remaining_contents = {msg["content"] for msg in remaining_messages}
+                    # 找出被删除的消息（基于索引精确匹配）
+                    # 为剩余消息创建带索引的列表，用于精确追踪
+                    remaining_with_index = []
+                    remaining_idx = 0
+                    for orig_idx, orig_msg in enumerate(original_messages):
+                        if remaining_idx < len(remaining_messages) and \
+                           orig_msg["role"] == remaining_messages[remaining_idx]["role"] and \
+                           orig_msg["content"] == remaining_messages[remaining_idx]["content"]:
+                            remaining_with_index.append(orig_idx)
+                            remaining_idx += 1
+                    
+                    # 找出未在保留列表中的消息索引
                     deleted_messages = [
                         {"index": idx, "role": msg["role"], "content": msg["content"]}
                         for idx, msg in enumerate(original_messages)
-                        if msg["content"] not in remaining_contents
+                        if idx not in remaining_with_index
                     ]
                     
                     # 保存剪枝统计信息（用于最终汇总，只保留deleted_count）

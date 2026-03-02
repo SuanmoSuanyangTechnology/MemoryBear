@@ -1932,17 +1932,17 @@ def preprocess_data(
     Returns:
         经过清洗转换后的 DialogData 列表
     """
-    print("\n=== 数据预处理 ===")
+    logger.debug("=== 数据预处理 ===")
     from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_preprocessor import (
         DataPreprocessor,
     )
     preprocessor = DataPreprocessor()
     try:
         cleaned_data = preprocessor.preprocess(input_path=input_path, output_path=output_path, skip_cleaning=skip_cleaning, indices=indices)
-        print(f"数据预处理完成！共处理了 {len(cleaned_data)} 条对话数据")
+        logger.debug(f"数据预处理完成！共处理了 {len(cleaned_data)} 条对话数据")
         return cleaned_data
     except Exception as e:
-        print(f"数据预处理过程中出现错误: {e}")
+        logger.error(f"数据预处理过程中出现错误: {e}")
         raise
 
 
@@ -1961,7 +1961,7 @@ async def get_chunked_dialogs_from_preprocessed(
     Returns:
         带 chunks 的 DialogData 列表
     """
-    print(f"\n=== 批量对话分块处理 (使用 {chunker_strategy}) ===")
+    logger.debug(f"=== 批量对话分块处理 (使用 {chunker_strategy}) ===")
     if not data:
         raise ValueError("预处理数据为空，无法进行分块")
         
@@ -2006,7 +2006,7 @@ async def get_chunked_dialogs_with_preprocessing(
     Returns:
         带 chunks 的 DialogData 列表
     """
-    print("\n=== 完整数据处理流程（包含预处理）===")
+    logger.debug("=== 完整数据处理流程（包含预处理）===")
 
     if input_data_path is None:
         input_data_path = os.path.join(
@@ -2038,11 +2038,11 @@ async def get_chunked_dialogs_with_preprocessing(
         if pruning_config:
             # 使用传入的配置
             config = PruningConfig(**pruning_config)
-            print(f"[剪枝] 使用传入配置: switch={config.pruning_switch}, scene={config.pruning_scene}, threshold={config.pruning_threshold}")
+            logger.debug(f"[剪枝] 使用传入配置: switch={config.pruning_switch}, scene={config.pruning_scene}, threshold={config.pruning_threshold}")
         else:
             # 使用默认配置（关闭剪枝）
             config = None
-            print("[剪枝] 未提供配置，使用默认配置（剪枝关闭）")
+            logger.debug("[剪枝] 未提供配置，使用默认配置（剪枝关闭）")
         
         pruner = SemanticPruner(config=config, llm_client=llm_client)
         
@@ -2057,12 +2057,12 @@ async def get_chunked_dialogs_with_preprocessing(
         if len(preprocessed_data) == 1 and single_dialog_original_msgs is not None:
             remaining_msgs = len(preprocessed_data[0].context.msgs) if preprocessed_data[0].context else 0
             deleted_msgs = max(0, single_dialog_original_msgs - remaining_msgs)
-            print(
+            logger.debug(
                 f"语义剪枝完成！剩余 1 条对话！原始消息数：{single_dialog_original_msgs}，"
                 f"保留消息数：{remaining_msgs}，删除 {deleted_msgs} 条。"
             )
         else:
-            print(f"语义剪枝完成！剩余 {len(preprocessed_data)} 条对话")
+            logger.debug(f"语义剪枝完成！剩余 {len(preprocessed_data)} 条对话")
             
         # 保存剪枝后的数据
         try:
@@ -2073,9 +2073,9 @@ async def get_chunked_dialogs_with_preprocessing(
             dp = DataPreprocessor(output_file_path=pruned_output_path)
             dp.save_data(preprocessed_data, output_path=pruned_output_path)
         except Exception as se:
-            print(f"保存剪枝结果失败：{se}")
+            logger.error(f"保存剪枝结果失败：{se}")
     except Exception as e:
-        print(f"语义剪枝过程中出现错误，跳过剪枝: {e}")
+        logger.error(f"语义剪枝过程中出现错误，跳过剪枝: {e}")
         
     # 步骤3: 对话分块
     return await get_chunked_dialogs_from_preprocessed(

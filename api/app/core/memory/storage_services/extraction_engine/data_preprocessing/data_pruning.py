@@ -82,6 +82,10 @@ class SemanticPruner:
         self.language = language  # 保存语言配置
         self.max_concurrent = max_concurrent  # 新增：最大并发数
         
+        # 详细日志配置：限制逐条消息日志的数量
+        self._detailed_prune_logging = True  # 是否启用详细日志
+        self._max_debug_msgs_per_dialog = 20  # 每个对话最多记录前N条消息的详细日志
+        
         # 加载场景特定配置
         self.scene_config: ScenePatterns = SceneConfigRegistry.get_config(
             self.config.pruning_scene, 
@@ -595,6 +599,11 @@ class SemanticPruner:
             unimportant_msgs = []  # 不重要消息（可删除）
             filler_msgs = []  # 填充消息（优先删除）
             
+            # 判断是否需要详细日志（仅对前N条消息记录）
+            should_log_details = self._detailed_prune_logging and original_count <= self._max_debug_msgs_per_dialog
+            if self._detailed_prune_logging and original_count > self._max_debug_msgs_per_dialog:
+                self._log(f"  对话[{d_idx}]消息数={original_count}，仅采样前{self._max_debug_msgs_per_dialog}条进行详细日志")
+            
             for idx, m in enumerate(msgs):
                 msg_text = m.msg.strip()
                 
@@ -607,15 +616,18 @@ class SemanticPruner:
                 # 填充消息（寒暄、表情等）
                 if self._is_filler_message(m):
                     filler_msgs.append((idx, m))
-                    self._log(f"  [{idx}] '{msg_text[:30]}...' → 填充")
+                    if should_log_details or idx < self._max_debug_msgs_per_dialog:
+                        self._log(f"  [{idx}] '{msg_text[:30]}...' → 填充")
                 # 重要信息（学号、成绩、时间、金额等）
                 elif self._is_important_message(m):
                     important_msgs.append((idx, m))
-                    self._log(f"  [{idx}] '{msg_text[:30]}...' → 重要（场景规则）")
+                    if should_log_details or idx < self._max_debug_msgs_per_dialog:
+                        self._log(f"  [{idx}] '{msg_text[:30]}...' → 重要（场景规则）")
                 # 其他消息
                 else:
                     unimportant_msgs.append((idx, m))
-                    self._log(f"  [{idx}] '{msg_text[:30]}...' → 不重要")
+                    if should_log_details or idx < self._max_debug_msgs_per_dialog:
+                        self._log(f"  [{idx}] '{msg_text[:30]}...' → 不重要")
             
             # 计算删除配额
             delete_target = int(original_count * proportion)
