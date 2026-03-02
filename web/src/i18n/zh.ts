@@ -736,7 +736,9 @@ export const zh = {
       dynamicMatchSkill: '动态匹配技能',
       executeTask: '执行任务',
 
-      importWorkflow: '导入工作流',
+      import: '导入应用',
+      importWorkflow: '第三方工作流',
+      importThirdParty: '导入工作流',
       platform: '来源平台',
       upload: '上传与解析',
       complex: '兼容性分析',
@@ -751,6 +753,7 @@ export const zh = {
       gotoList: '返回应用列表',
       gotoDetail: '查看详情',
       dify: 'Dify',
+      pleaseUploadFile: '请上传工作流文件',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
@@ -1982,6 +1985,7 @@ export const zh = {
       evolutionAndGovernance: '演化与治理',
       self_optimization: '自我优化',
       process_evolution: '流程演化',
+      unknown: '未知节点',
 
       clickToConfigure: '点击配置节点参数',
       nodeProperties: '节点属性',
@@ -2169,6 +2173,9 @@ export const zh = {
           output_variables: '输出变量',
           refreshTip: '同步函数签名至代码',
         },
+        unknown: {
+          replaceNodeType: '替换节点'
+        },
         name: '键',
         type: '类型',
         value: '值',
@@ -2200,7 +2207,8 @@ export const zh = {
         iteration: '迭代',
         input_cycle_vars: '初始循环变量',
         output_cycle_vars: '最终循环变量',
-      }
+      },
+      sureReplace: '确认替换',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',

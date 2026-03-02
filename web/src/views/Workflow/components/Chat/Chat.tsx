@@ -320,7 +320,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                 newList[lastIndex] = {
                   ...newList[lastIndex],
                   status,
-                  content: newList[lastIndex].content === '' ? null : newList[lastIndex].content
+                  error,
+                  content: newList[lastIndex].content === '' ? null : newList[lastIndex].content,
                 }
               }
               return newList

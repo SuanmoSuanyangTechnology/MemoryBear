@@ -30,7 +30,8 @@ export interface LexicalEditorProps {
   lineHeight?: number;
   size?: 'default' | 'small';
   type?: 'input' | 'textarea',
-  language?: 'string' | 'jinja2'
+  language?: 'string' | 'jinja2';
+  className?: string;
 }
 
 const theme = {
@@ -58,7 +59,9 @@ const Editor: FC<LexicalEditorProps> =({
   variant = 'borderless',
   size = 'default',
   type = 'textarea',
-  language = 'string'
+  language = 'string',
+  height,
+  className
 }) => {
   const [_count, setCount] = useState(0);
   const [enableJinja2, setEnableJinja2] = useState(false)
@@ -156,23 +159,23 @@ const Editor: FC<LexicalEditorProps> =({
   };
   const minheight = useMemo(() => {
     if (type === 'input') {
-      return `${size === 'small' ? 26 : 30}px`
+      return `${height ? height : size === 'small' ? 28 : 30}px`
     }
-    return `${size === 'small' ? 60 : 120}px`
-  }, [type, size])
+    return `${height ? height : size === 'small' ? 60 : 120}px`
+  }, [type, size, height])
   const fontSize = useMemo(() => {
     return `${size === 'small' ? 12 : 14}px`
   }, [size])
   const lineHeight = useMemo(() => {
-    return `${size === 'small' ? 16 : 20}px`
+    return `${height ? height : size === 'small' ? 16 : 20}px`
   }, [size])
   const placeHolderMinheight = useMemo(() => {
-    return `${size === 'small' ? 16 : 30}px`
-  }, [type, size])
+    return `${height ? height : size === 'small' ? 16 : 30}px`
+  }, [type, size, height])
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
-      <div style={{ position: 'relative' }}>
+      <div style={{ position: 'relative' }} className={className}>
         <RichTextPlugin
           contentEditable={
             enableLineNumbers ? (

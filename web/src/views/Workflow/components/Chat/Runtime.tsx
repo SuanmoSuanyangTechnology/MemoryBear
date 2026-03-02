@@ -217,14 +217,20 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
           children: (
             detail
               ? (
-              <div className="rb:bg-[#FBFDFF] rb:rounded-md">
-                <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => setDetail(null)} className="rb:px-0! rb:text-[12px]!">
-                  {t('common.return')}
-                </Button>
-                {renderDetailChild(detail.subContent)}
-              </div>
-            )
-              : renderChild(item.subContent)
+                <div className="rb:bg-[#FBFDFF] rb:rounded-md">
+                  <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => setDetail(null)} className="rb:px-0! rb:text-[12px]!">
+                    {t('common.return')}
+                  </Button>
+                  {renderDetailChild(detail.subContent)}
+                </div>
+              )
+              : <>
+                {item.error
+                ? <div className={clsx("rb:bg-[#FBFDFF] rb:rounded-md rb:py-2 rb:px-3 ", getStatus('failed'))}>
+                  <Markdown content={item.error} />
+                  </div> 
+                : renderChild(item.subContent)
+              }</>
           )
         }]}
       />

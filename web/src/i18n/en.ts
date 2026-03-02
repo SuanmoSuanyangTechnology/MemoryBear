@@ -1341,7 +1341,9 @@ export const en = {
       dynamicMatchSkill: 'Dynamic Match Skill',
       executeTask: 'Execute Task',
 
-      importWorkflow: 'Import Workflow',
+      import: 'Import Application',
+      importWorkflow: 'Third-Party Workflow',
+      importThirdParty: 'Import Workflow',
       platform: 'Source Platform',
       upload: 'Upload & Parse',
       complex: 'Compatibility Analysis',
@@ -1355,6 +1357,7 @@ export const en = {
       gotoList: 'Return to Application List',
       gotoDetail: 'View Details',
       dify: 'Dify',
+      pleaseUploadFile: 'Please upload workflow file', 
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -1985,6 +1988,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       evolutionAndGovernance: 'Evolution & Governance',
       self_optimization: 'Self Optimization',
       process_evolution: 'Process Evolution',
+      unknown: 'Unknown Node',
 
       clickToConfigure: 'Click to configure node parameters',
       nodeProperties: 'Node Properties',
