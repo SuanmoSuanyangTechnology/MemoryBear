@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import uuid
 from typing import Any, Callable, Coroutine
 
 import httpx
@@ -13,6 +14,7 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import HttpRequestMethod, HttpErrorHandle, HttpAuthType, HttpContentType
 from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig, HttpRequestNodeOutput
 from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable.variable_objects import FileVariable, ArrayVariable
 
 logger = logging.getLogger(__file__)
 
@@ -115,7 +117,7 @@ class HttpRequestNode(BaseNode):
             params[self._render_template(key, variable_pool)] = self._render_template(value, variable_pool)
         return params
 
-    def _build_content(self, variable_pool: VariablePool) -> dict[str, Any]:
+    async def _build_content(self, variable_pool: VariablePool) -> dict[str, Any]:
         """
         Build HTTP request body arguments for httpx request methods.
 
@@ -135,16 +137,35 @@ class HttpRequestNode(BaseNode):
                 ))
             case HttpContentType.FROM_DATA:
                 data = {}
+                content["files"] = {}
                 for item in self.typed_config.body.data:
                     if item.type == "text":
-                        data[self._render_template(item.key, variable_pool)] = self._render_template(item.value, variable_pool)
+                        data[self._render_template(item.key, variable_pool)] = self._render_template(item.value,
+                                                                                                     variable_pool)
                     elif item.type == "file":
-                        # TODO: File support (Feature)
-                        pass
+                        content["files"][self._render_template(item.key, variable_pool)] = (
+                            uuid.uuid4().hex,
+                            await variable_pool.get_instance(item.value).get_content()
+                        )
                 content["data"] = data
             case HttpContentType.BINARY:
-                # TODO: File support (Feature)
-                pass
+                content["files"] = []
+                file_instence = variable_pool.get_instance(self.typed_config.body.data)
+                if isinstance(file_instence, ArrayVariable):
+                    for v in file_instence.value:
+                        if isinstance(v, FileVariable):
+                            content["files"].append(
+                                (
+                                    "files", (uuid.uuid4().hex, await v.get_content())
+                                )
+                            )
+                elif isinstance(file_instence, FileVariable):
+                    content["files"].append(
+                        (
+                            "file", (uuid.uuid4().hex, await file_instence.get_content())
+                        )
+                    )
+
             case HttpContentType.WWW_FORM:
                 content["data"] = json.loads(self._render_template(
                     json.dumps(self.typed_config.body.data), variable_pool
@@ -207,7 +228,7 @@ class HttpRequestNode(BaseNode):
                     request_func = self._get_client_method(client)
                     resp = await request_func(
                         url=self._render_template(self.typed_config.url, variable_pool),
-                        **self._build_content(variable_pool)
+                        **(await self._build_content(variable_pool))
                     )
                     resp.raise_for_status()
                     logger.info(f"Node {self.node_id}: HTTP request succeeded")

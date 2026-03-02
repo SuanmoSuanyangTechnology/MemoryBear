@@ -73,7 +73,7 @@ class VariableStruct(BaseModel, Generic[T]):
         instance:
             The concrete variable object. The actual Python type is
             represented by the generic parameter ``T`` (e.g. StringVariable,
-            NumberVariable, ArrayObject[StringVariable]).
+            NumberVariable, ArrayVariable[StringVariable]).
         mut:
             Whether the variable is mutable.
     """
@@ -151,6 +151,36 @@ class VariablePool:
         if var_instance is None:
             return None
         return var_instance
+
+    def get_instance(
+            self,
+            selector: str,
+            default: Any = None,
+            strict: bool = True
+    ):
+        """Retrieve a variable instance from the variable pool.
+
+        Args:
+            selector:
+                Variable selector as a string variable literal (e.g. "{{ sys.message }}").
+            default:
+                The value to return if the variable does not exist.
+            strict:
+                If True, raises KeyError when the variable does not exist.
+
+        Returns:
+            The variable instance object if it exists; otherwise returns `default`.
+
+        Raises:
+            KeyError: If strict is True and the variable does not exist.
+        """
+        variable_struct = self._get_variable_struct(selector)
+        if variable_struct is None:
+            if strict:
+                raise KeyError(f"{selector} not exist")
+            return default
+
+        return variable_struct.instance
 
     def get_value(
             self,

@@ -580,6 +580,7 @@ class WorkflowService:
                 # "variables": result.get("variables"),
                 # "messages": result.get("messages"),
                 "output": result.get("output"),  # 最终输出（字符串）
+                "message": result.get("output"),  # 最终输出（字符串）
                 # "output_data": result.get("node_outputs", {}),  # 所有节点输出（详细数据）
                 "conversation_id": result.get("conversation_id"),  # 所有节点输出（详细数据）payload.,  # 会话 ID
                 "error_message": result.get("error"),
