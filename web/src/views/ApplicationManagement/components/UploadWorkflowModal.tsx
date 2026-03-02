@@ -287,7 +287,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
               isCanDrag={true}
               fileSize={100}
               maxCount={1}
-              fileType={['yml', 'yaml', 'zip', 'json']}
+              fileType={['yml']}
             />
           </Form.Item>
         </Form>
