@@ -158,6 +158,22 @@ class VariablePool:
             default: Any = None,
             strict: bool = True
     ):
+        """Retrieve a variable instance from the variable pool.
+
+        Args:
+            selector:
+                Variable selector as a string variable literal (e.g. "{{ sys.message }}").
+            default:
+                The value to return if the variable does not exist.
+            strict:
+                If True, raises KeyError when the variable does not exist.
+
+        Returns:
+            The variable instance object if it exists; otherwise returns `default`.
+
+        Raises:
+            KeyError: If strict is True and the variable does not exist.
+        """
         variable_struct = self._get_variable_struct(selector)
         if variable_struct is None:
             if strict:
