@@ -736,7 +736,9 @@ export const zh = {
       dynamicMatchSkill: '动态匹配技能',
       executeTask: '执行任务',
 
-      importWorkflow: '导入工作流',
+      import: '导入应用',
+      importWorkflow: '第三方工作流',
+      importThirdParty: '导入工作流',
       platform: '来源平台',
       upload: '上传与解析',
       complex: '兼容性分析',
@@ -751,6 +753,7 @@ export const zh = {
       gotoList: '返回应用列表',
       gotoDetail: '查看详情',
       dify: 'Dify',
+      pleaseUploadFile: '请上传工作流文件',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
