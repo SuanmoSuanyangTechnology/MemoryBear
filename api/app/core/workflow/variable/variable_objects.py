@@ -1,8 +1,10 @@
 from typing import Any, TypeVar, Type, Generic
 
+import httpx
 from deprecated import deprecated
 
 from app.core.workflow.variable.base_variable import BaseVariable, VariableType, FileObject, FileType
+from app.core.config import settings
 
 T = TypeVar("T", bound=BaseVariable)
 
@@ -80,8 +82,23 @@ class FileVariable(BaseVariable):
     def get_value(self) -> Any:
         return self.value.model_dump()
 
+    async def get_content(self):
+        total_bytes = 0
+        chunks = []
 
-class ArrayObject(BaseVariable, Generic[T]):
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", self.value.url) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes(8192):
+                    total_bytes += len(chunk)
+                    if total_bytes > settings.MAX_FILE_SIZE:
+                        raise ValueError(f"File too large: {total_bytes} bytes")
+                    chunks.append(chunk)
+
+        return b"".join(chunks)
+
+
+class ArrayVariable(BaseVariable, Generic[T]):
     type = 'array'
 
     def __init__(self, child_type: Type[T], value: list[Any]):
@@ -108,7 +125,7 @@ class ArrayObject(BaseVariable, Generic[T]):
         return [v.get_value() for v in self.value]
 
 
-class NestedArrayObject(BaseVariable):
+class NestedArrayVariable(BaseVariable):
     type = 'array_nest'
 
     def valid_value(self, value: list[T]) -> list[T]:
@@ -116,23 +133,23 @@ class NestedArrayObject(BaseVariable):
             raise TypeError(f"Value must be a list - {type(value)}:{value}")
         final_value = []
         for v in value:
-            if not isinstance(v, ArrayObject):
+            if not isinstance(v, list):
                 raise TypeError("All elements must be of type list")
-            final_value.append(v)
+            final_value.append(make_array(AnyVariable, v))
         return final_value
 
     def to_literal(self) -> str:
-        return "\n".join(["\n".join([item.to_literal() for item in row]) for row in self.value])
+        return "\n".join(["\n".join([str(item) for item in row.get_value()]) for row in self.value])
 
     def get_value(self) -> Any:
-        return [[item.get_value() for item in row] for row in self.value]
+        return [[item for item in row.get_value()] for row in self.value]
 
 
 @deprecated(
     reason="Using arbitrary-type values may cause unexpected errors; please switch to strongly-typed values.",
     category=RuntimeWarning
 )
-class AnyObject(BaseVariable):
+class AnyVariable(BaseVariable):
     type = 'any'
 
     def valid_value(self, value: Any) -> Any:
@@ -142,10 +159,10 @@ class AnyObject(BaseVariable):
         return str(self.value)
 
 
-def make_array(child_type: Type[T], value: list[Any]) -> ArrayObject[T]:
-    """简化 ArrayObject 创建，不需要重复写类型"""
+def make_array(child_type: Type[T], value: list[Any]) -> ArrayVariable[T]:
+    """简化 ArrayVariable 创建，不需要重复写类型"""
 
-    return ArrayObject(child_type, value)
+    return ArrayVariable(child_type, value)
 
 
 def create_variable_instance(var_type: VariableType, value: Any) -> T:
@@ -168,7 +185,9 @@ def create_variable_instance(var_type: VariableType, value: Any) -> T:
             return make_array(DictVariable, value)
         case VariableType.ARRAY_FILE:
             return make_array(FileVariable, value)
+        case VariableType.NESTED_ARRAY:
+            return NestedArrayVariable(value)
         case VariableType.ANY:
-            return AnyObject(value)
+            return AnyVariable(value)
         case _:
             raise TypeError(f"Invalid type - {var_type}")
