@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import type { OntologyItem, OntologyModalData, OntologyModalRef } from '../types'
 import RbModal from '@/components/RbModal'
 import { createOntologyScene, updateOntologyScene } from '@/api/ontology'
+import { stringRegExp } from '@/utils/validator';
 
 const FormItem = Form.Item;
 
@@ -109,7 +110,11 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
         <FormItem
           name="scene_name"
           label={t('ontology.scene_name')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('common.enter')} />
         </FormItem>
@@ -117,6 +122,7 @@ const OntologyModal = forwardRef<OntologyModalRef, OntologyModalProps>(({
         <FormItem
           name="scene_description"
           label={t('ontology.scene_description')}
+          rules={[{ max: 500 }]}
         >
           <Input.TextArea placeholder={t('ontology.descriptionPlaceholder')} />
         </FormItem>

@@ -29,7 +29,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
   const { t } = useTranslation();
   const activeMethods = ['POST'];
   const { message, modal } = App.useApp()
-  const copyContent = window.location.origin + '/v1/chat'
+  const copyContent = window.location.origin + '/v1/app/chat'
   const apiKeyModalRef = useRef<ApiKeyModalRef>(null);
   const apiKeyConfigModalRef = useRef<ApiKeyConfigModalRef>(null);
   const [apiKeyList, setApiKeyList] = useState<ApiKey[]>([])

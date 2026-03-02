@@ -169,8 +169,8 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
       const { skills, variables } = response
-      let allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
-      let allTools = Array.isArray(response.tools) ? response.tools : []
+      const allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
+      const allTools = Array.isArray(response.tools) ? response.tools : []
       const memoryContent = response.memory?.memory_config_id
       const parsedMemoryContent = memoryContent === null || memoryContent === '' 
         ? undefined 
@@ -431,7 +431,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                   </Button>
                 </div>
 
-                <Form.Item name="system_prompt" className="rb:mb-0!">
+                <Form.Item
+                  name="system_prompt"
+                  className="rb:mb-0!"
+                  rules={[{ max: 10000 }]}
+                >
                   <Input.TextArea
                     placeholder={t('application.promptPlaceholder')}
                     styles={{

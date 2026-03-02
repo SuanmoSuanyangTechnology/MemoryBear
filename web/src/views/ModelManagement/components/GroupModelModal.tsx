@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:33 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:49:33 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-02 12:23:13
  */
 /**
  * Group Model Modal
@@ -21,6 +21,7 @@ import { updateCompositeModel, modelTypeUrl, addCompositeModel } from '@/api/mod
 import UploadImages from '@/components/Upload/UploadImages'
 import ModelImplement from './ModelImplement'
 import { getFileLink } from '@/api/fileStorage'
+import { validateSquareImage, stringRegExp } from '@/utils/validator'
 
 /**
  * Group model modal component
@@ -133,15 +134,26 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
           name="logo" 
           label={t('modelNew.logo')}
           valuePropName="fileList"
-          rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          rules={[
+            { required: true, message: t('common.pleaseSelect') },
+            { validator: validateSquareImage(t('common.imageSquareRequired')) }
+          ]}
+          extra={t('common.logoTip')?.split('\n').map((vo, index) => <div key={index}>{vo}</div>)}
         >
-          <UploadImages />
+          <UploadImages
+            fileSize={2}
+            fileType={['png', 'jpg']}
+          />
         </Form.Item>
 
         <Form.Item 
           name="name" 
           label={t('modelNew.name')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('common.pleaseEnter')} />
         </Form.Item>
@@ -165,6 +177,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
         <Form.Item
           name="description"
           label={t('modelNew.description')}
+          rules={[{ max: 500 }]}
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </Form.Item>
