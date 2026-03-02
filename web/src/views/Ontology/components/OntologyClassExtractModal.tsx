@@ -182,7 +182,10 @@ const OntologyClassExtractModal = forwardRef<OntologyClassExtractModalRef, Ontol
         <FormItem
           name="scenario"
           label={t('ontology.scenario')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 2000 },
+          ]}
         >
           <Input.TextArea placeholder={t('ontology.scenarioPlaceholder')} />
         </FormItem>

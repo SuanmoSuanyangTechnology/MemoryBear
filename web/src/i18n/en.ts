@@ -453,6 +453,8 @@ export const en = {
       prevStep: 'Previous Step',
       exportSuccess: 'Export successful',
       recommend: 'Recommend',
+      logoTip: `Supported image formats: JPG, PNG \n Suggested size: square ratio \n Maximum size: ≤ 2MB`,
+      imageSquareRequired: 'Please upload a square image',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -542,7 +544,8 @@ export const en = {
       ollama: "Ollama",
       xinference: "Xinference",
       gpustack: "Gpustack",
-      bedrock: "Bedrock"
+      bedrock: "Bedrock",
+      nameInvalid: 'Model name can only contain letters, numbers, underscores and spaces, cannot be empty or pure whitespace',
     },
     modelNew: {
       group: 'Model Group',
