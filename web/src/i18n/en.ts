@@ -1980,6 +1980,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       evolutionAndGovernance: 'Evolution & Governance',
       self_optimization: 'Self Optimization',
       process_evolution: 'Process Evolution',
+      unknown: 'Unknown Node',
 
       clickToConfigure: 'Click to configure node parameters',
       nodeProperties: 'Node Properties',

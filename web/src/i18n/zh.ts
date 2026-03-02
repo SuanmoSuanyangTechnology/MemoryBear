@@ -1977,6 +1977,7 @@ export const zh = {
       evolutionAndGovernance: '演化与治理',
       self_optimization: '自我优化',
       process_evolution: '流程演化',
+      unknown: '未知节点',
 
       clickToConfigure: '点击配置节点参数',
       nodeProperties: '节点属性',
@@ -2164,6 +2165,9 @@ export const zh = {
           output_variables: '输出变量',
           refreshTip: '同步函数签名至代码',
         },
+        unknown: {
+          replaceNodeType: '替换节点'
+        },
         name: '键',
         type: '类型',
         value: '值',
@@ -2195,7 +2199,8 @@ export const zh = {
         iteration: '迭代',
         input_cycle_vars: '初始循环变量',
         output_cycle_vars: '最终循环变量',
-      }
+      },
+      sureReplace: '确认替换',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',
