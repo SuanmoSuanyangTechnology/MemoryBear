@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 21:04:14
+ * @Last Modified time: 2026-03-02 11:41:12
  */
 /**
  * Result Component
@@ -91,7 +91,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
     setDeduplication({...initObj} as ModuleItem)
     setTestResult({} as TestResult)
     const handleStreamMessage = (list: SSEMessage[]) => {
-    
+
       list.forEach((data: AnyObject) => {
         switch(data.event) {
           case 'text_preprocessing': // Start text preprocessing
@@ -104,7 +104,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
           case 'text_preprocessing_result': // Text preprocessing in progress
             setTextPreprocessing(prev => ({
               ...prev,
-              data: [...prev.data, data.data?.data]
+              data: [...prev.data, data.data?.deleted_messages ? { deleted_messages: data.data?.deleted_messages } : data.data?.data],
             }))
             break
           case 'text_preprocessing_complete': // Text preprocessing complete
@@ -193,9 +193,9 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
       dialogue_text: t('memoryExtractionEngine.exampleText'),
       custom_text: runForm.getFieldValue('custom_text')
     }, handleStreamMessage)
-    .finally(() => {
-      setRunLoading(false)
-    })
+      .finally(() => {
+        setRunLoading(false)
+      })
   }
   const completedNum = [textPreprocessing, knowledgeExtraction, creatingNodesEdges, deduplication].filter(item => item.status === 'completed').length
   const deduplicationData = groupDataByType(deduplication.data, 'result_type')
@@ -251,10 +251,10 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
             </div>
           </>
           : !testResult || Object.keys(testResult).length === 0
-          ? <RbAlert color="orange" icon={<ExclamationCircleFilled />} className="rb:mb-3.5">
-            {t('memoryExtractionEngine.warning')}
-          </RbAlert>
-          : <RbAlert color="green" icon={<ExclamationCircleFilled />} className="rb:mb-3.5">
+            ? <RbAlert color="orange" icon={<ExclamationCircleFilled />} className="rb:mb-3.5">
+              {t('memoryExtractionEngine.warning')}
+            </RbAlert>
+            : <RbAlert color="green" icon={<ExclamationCircleFilled />} className="rb:mb-3.5">
               {t('memoryExtractionEngine.success')}
             </RbAlert>
         }
@@ -266,15 +266,28 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
             headerType="borderL"
             headerClassName="rb:before:bg-[#155EEF]!"
           >
-            {textPreprocessing.data.map((vo, index) => (
-              <div key={index} className="rb:mb-3 rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">
-                <Markdown content={'-' + t('memoryExtractionEngine.fragment') + vo.chunk_index + ': ' + (vo.content.startsWith('\n') ? vo.content : '\n' + vo.content)} />
-              </div>
-            ))}
+            {textPreprocessing.data.map((vo, index) => {
+              if (vo.deleted_messages) {
+                return <div key={index} className="rb:mb-3 rb:pb-1 rb:border-b rb:border-b-[#EBEBEB]">
+                  <div className="rb:font-medium rb:text-[12px] rb:mb-2">{t('memoryExtractionEngine.Pruned')}</div>
+                  {vo.deleted_messages.map((msg: any, idx: number) => (
+                    <div key={idx} className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">
+                      <Markdown content={'-' + t('memoryExtractionEngine.pruning') + (idx + 1) + ': ' + msg.content} />
+                    </div>
+                  ))}
+                </div>
+              }
+              return (
+                <div key={index} className="rb:mb-3 rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">
+                  <Markdown content={'-' + t('memoryExtractionEngine.fragment') + vo.chunk_index + ': ' + (vo.content.startsWith('\n') ? vo.content : '\n' + vo.content)} />
+                </div>
+              )
+            })}
             {formatTime(textPreprocessing)}
             {textPreprocessing.result &&
               <RbAlert color="blue" icon={<CheckCircleFilled />} className="rb:mt-3">
-                {t('memoryExtractionEngine.text_preprocessing_desc', { count: textPreprocessing.result.total_chunks })}, 
+                {t('memoryExtractionEngine.pruning_desc', { count: textPreprocessing.result.pruning.deleted_count || 0 })},
+                {t('memoryExtractionEngine.text_preprocessing_desc', { count: textPreprocessing.result.total_chunks })},
                 {t('memoryExtractionEngine.chunkerStrategy')}: {t(`memoryExtractionEngine.${lowercaseFirst(textPreprocessing.result.chunker_strategy)}`)}
               </RbAlert>
             }
@@ -286,7 +299,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
             headerType="borderL"
             headerClassName="rb:before:bg-[#155EEF]!"
           >
-            {knowledgeExtraction.data.map((vo, index) => 
+            {knowledgeExtraction.data.map((vo, index) =>
               <div key={index} className="rb:mb-3 rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">{vo.statement}</div>
             )}
             {formatTime(knowledgeExtraction)}
@@ -345,31 +358,30 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
                 {Object.keys(resultObj).map((key, index) => {
                   const keys = (resultObj as Record<string, string>)[key].split('.')
                   return (
-                  <div key={index}>
-                    <div className="rb:text-[24px] rb:leading-7.5 rb:font-extrabold">{(testResult?.[keys[0] as keyof TestResult] as any)?.[keys[1]]}</div>
-                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">{t(`memoryExtractionEngine.${key}`)}</div>
-                    <div className="rb:mt-1 rb:text-[12px] rb:text-[#369F21] rb:leading-3.5 rb:font-regular">
-                      {}
-                      {key === 'extractTheNumberOfEntities' && testResult.dedup
-                        ? t(`memoryExtractionEngine.${key}Desc`, {
-                          num: testResult.dedup.total_merged_count,
-                          exact: testResult.dedup.breakdown.exact,
-                          fuzzy: testResult.dedup.breakdown.fuzzy,
-                          llm: testResult.dedup.breakdown.llm,
-                        })
-                        : key === 'numberOfEntityDisambiguation' && testResult.disambiguation
-                        ? t(`memoryExtractionEngine.${key}Desc`, { num: testResult.disambiguation.effects?.length, block_count: testResult.disambiguation.block_count })
-                        : key === 'numberOfRelationalTriples' && testResult.triplets
-                        ? t(`memoryExtractionEngine.${key}Desc`, { num: testResult.triplets.count })
-                        :t(`memoryExtractionEngine.${key}Desc`)
-                      }
+                    <div key={index}>
+                      <div className="rb:text-[24px] rb:leading-7.5 rb:font-extrabold">{(testResult?.[keys[0] as keyof TestResult] as any)?.[keys[1]]}</div>
+                      <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:font-regular">{t(`memoryExtractionEngine.${key}`)}</div>
+                      <div className="rb:mt-1 rb:text-[12px] rb:text-[#369F21] rb:leading-3.5 rb:font-regular">
+                        {key === 'extractTheNumberOfEntities' && testResult.dedup
+                          ? t(`memoryExtractionEngine.${key}Desc`, {
+                            num: testResult.dedup.total_merged_count,
+                            exact: testResult.dedup.breakdown.exact,
+                            fuzzy: testResult.dedup.breakdown.fuzzy,
+                            llm: testResult.dedup.breakdown.llm,
+                          })
+                          : key === 'numberOfEntityDisambiguation' && testResult.disambiguation
+                            ? t(`memoryExtractionEngine.${key}Desc`, { num: testResult.disambiguation.effects?.length, block_count: testResult.disambiguation.block_count })
+                            : key === 'numberOfRelationalTriples' && testResult.triplets
+                              ? t(`memoryExtractionEngine.${key}Desc`, { num: testResult.triplets.count })
+                              :t(`memoryExtractionEngine.${key}Desc`)
+                        }
+                      </div>
                     </div>
-                  </div>
-                )})}
+                  )})}
               </div>
             </RbCard>
           }
-          
+
           {testResult?.dedup?.impact && testResult.dedup.impact?.length > 0 &&
             <RbCard
               title={t('memoryExtractionEngine.entityDeduplicationImpact')}
@@ -388,7 +400,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               </RbAlert>
             </RbCard>
           }
-          
+
           {testResult?.disambiguation && testResult.disambiguation?.effects?.length > 0 &&
             <RbCard
               title={t('memoryExtractionEngine.theEffectOfEntityDisambiguationLLMDriven')}
@@ -399,7 +411,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
                 <div key={index} className={clsx("rb:text-[12px] rb:text-[#5B6167] rb:leading-4", {
                   'rb:mt-4': index > 0,
                 })}>
-                  <div className="rb:font-medium rb:mb-2">Disagreement Case {index +1}:</div>
+                  <div className="rb:font-medium rb:mb-2">{t('memoryExtractionEngine.disagreementCase')} {index +1}:</div>
                   -{item.left.name}({item.left.type}) vs {item.right.name}({item.right.type}) → <span className="rb:text-[#369F21]">{item.result}</span>
                 </div>
               ))}
@@ -409,7 +421,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               </RbAlert>
             </RbCard>
           }
-          
+
           {testResult?.core_entities && testResult?.core_entities.length > 0 &&
             <RbCard
               title={t('memoryExtractionEngine.coreEntitiesAfterDedup')}
@@ -433,7 +445,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
               </div>
             </RbCard>
           }
-          
+
           {testResult?.triplet_samples && testResult?.triplet_samples.length > 0 &&
             <RbCard
               title={t('memoryExtractionEngine.extractRelationalTriples')}

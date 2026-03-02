@@ -1640,6 +1640,10 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       scene_type_distribution: 'Scene Type Distribution',
       general_type_distribution: 'General Type Distribution',
       unmatched: 'Unmatched',
+      disagreementCase: 'Disagreement Case',
+      Pruned: 'Pruned',
+      pruning: 'Pruning',
+      pruning_desc: 'Text pruning {{count}} fragments'
     },
     memoryConversation: {
       searchPlaceholder: 'Enter user ID...',

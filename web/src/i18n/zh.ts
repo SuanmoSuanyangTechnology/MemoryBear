@@ -1637,6 +1637,10 @@ export const zh = {
       scene_type_distribution: '场景类型',
       general_type_distribution: '通用类型',
       unmatched: '未匹配',
+      disagreementCase: '不一致案例',
+      Pruned: '已剪枝',
+      pruning: '剪枝',
+      pruning_desc: '文本剪枝{{count}}个片段'
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',
