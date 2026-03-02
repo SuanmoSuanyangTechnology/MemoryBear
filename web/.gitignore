@@ -24,9 +24,3 @@ dist-ssr
 *.sw?
 vite.config.js
 package-lock.json
-
-src/test/*
-src/*/__tests__/*
-vitest.config.ts
-public/vitest-auto-imports.d.ts
-package_test.json
