@@ -27,12 +27,45 @@ const ChatContent: FC<ChatContentProps> = ({
 }) => {
   // Scroll container reference for controlling auto-scroll to bottom
   const scrollContainerRef = useRef<(HTMLDivElement | null)>(null)
+  const prevDataLengthRef = useRef(data.length);
+  const isScrolledToBottomRef = useRef(true); // Track if user is scrolled to bottom
+  
+  // Track scroll position to determine if user is at bottom
+  useEffect(() => {
+    const handleScroll = () => {
+      if (scrollContainerRef.current) {
+        const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+        // Consider user is at bottom if within 20px of the bottom
+        isScrolledToBottomRef.current = scrollHeight - scrollTop - clientHeight < 20;
+      }
+    };
+    
+    const container = scrollContainerRef.current;
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+      // Initial check
+      handleScroll();
+    }
+    
+    return () => {
+      if (container) {
+        container.removeEventListener('scroll', handleScroll);
+      }
+    };
+  }, []);
   
   // Auto-scroll to bottom when data changes to show latest messages
+  // When data array length remains unchanged, if data is updated and user manually scrolled up, don't auto-scroll to bottom
+  // When data array length changes, auto-scroll to bottom
+  // If already scrolled to bottom, will auto-scroll to bottom
   useEffect(() => {
     setTimeout(() => {
       if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        // Auto-scroll if data length changed OR user is currently at bottom
+        if (data.length !== prevDataLengthRef.current || isScrolledToBottomRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+        prevDataLengthRef.current = data.length;
       }
     }, 0);
   }, [data])
