@@ -1,0 +1,47 @@
+{% if language == "zh" %}
+You are a user interest analysis expert. Your task is to identify activity-based tags from a tag list that represent the user's hobbies and interests. Please output the results in Chinese.
+
+**Keep Rules** (keep if any condition is met):
+- Tags representing sports or physical activities the user actively participates in (e.g., '攀岩', '篮球', '游泳', '跑步')
+- Tags representing cultural or entertainment hobbies (e.g., '读书', '看电影', '听音乐', '摄影')
+- Tags representing learning or creative activities (e.g., '编程', '绘画', '写作', '烹饪')
+- Tags representing specific interest domains or hobby categories (e.g., '历史', '天文', '园艺')
+
+**Filter Rules** (remove if any condition is met):
+- Pure object or tool names that do not represent an activity (e.g., '篮球鞋', '相机', '书桌')
+- Pure location or venue names (e.g., '篮球场', '图书馆', '健身房')
+- Abstract concepts or quality descriptions (e.g., '核心力量', '团队合作', '专注力')
+- Person names, brand names, or proper nouns (e.g., '乔丹', 'Nike')
+
+**Merge Rules**: For semantically similar tags, keep only the most representative one.
+For example: keep '篮球' over '打篮球'; keep '读书' over '阅读'.
+
+**Example**:
+Input: ['攀岩', '篮球场', '篮球鞋', '篮球', '《三体》', '历史', '核心力量', '烹饪', '菜刀']
+Output: ['攀岩', '篮球', '历史', '烹饪']
+
+Please filter the following tag list and return only the tags that represent user interest activities in Chinese: {{ tag_list }}
+{% else %}
+You are a user interest analysis expert. Your task is to identify activity-based tags from a tag list that represent the user's hobbies and interests. Please output the results in English.
+
+**Keep Rules** (keep if any condition is met):
+- Tags representing sports or physical activities the user actively participates in (e.g., 'rock climbing', 'basketball', 'swimming', 'running')
+- Tags representing cultural or entertainment hobbies (e.g., 'reading', 'watching movies', 'listening to music', 'photography')
+- Tags representing learning or creative activities (e.g., 'programming', 'painting', 'writing', 'cooking')
+- Tags representing specific interest domains or hobby categories (e.g., 'history', 'astronomy', 'gardening')
+
+**Filter Rules** (remove if any condition is met):
+- Pure object or tool names that do not represent an activity (e.g., 'basketball shoes', 'camera', 'desk')
+- Pure location or venue names (e.g., 'basketball court', 'library', 'gym')
+- Abstract concepts or quality descriptions (e.g., 'core strength', 'teamwork', 'focus')
+- Person names, brand names, or proper nouns (e.g., 'Jordan', 'Nike')
+
+**Merge Rules**: For semantically similar tags, keep only the most representative one.
+For example: keep 'basketball' over 'playing basketball'; keep 'reading' over 'reading books'.
+
+**Example**:
+Input: ['rock climbing', 'basketball court', 'basketball shoes', 'basketball', 'The Three-Body Problem', 'history', 'core strength', 'cooking', 'kitchen knife']
+Output: ['rock climbing', 'basketball', 'history', 'cooking']
+
+Please filter the following tag list and return only the tags that represent user interest activities in English: {{ tag_list }}
+{% endif %}

@@ -548,3 +548,20 @@ async def render_ontology_extraction_prompt(
     })
     
     return rendered_prompt
+
+
+def render_interest_filter_prompt(tag_list: str, language: str = "zh") -> str:
+    """
+    Renders the interest filter prompt using the interest_filter.jinja2 template.
+
+    Args:
+        tag_list: Comma-separated string of raw tags to filter
+        language: Output language ("zh" for Chinese, "en" for English)
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("interest_filter.jinja2")
+    rendered_prompt = template.render(tag_list=tag_list, language=language)
+    log_prompt_rendering('interest filter', rendered_prompt)
+    return rendered_prompt
