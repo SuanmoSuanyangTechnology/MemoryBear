@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2025-11-10 18:52:55
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-02-10 15:18:32
+ * @LastEditTime: 2026-03-03 14:46:08
  */
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Switch } from 'antd';
@@ -75,7 +75,12 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
     updateKnowledgeBase(item.target_kb?.id, {
       status: checked ? 1 : 2
     }).then(() => {
-      messageApi.success(t('knowledgeBase.shareSuccess'));
+      if(checked){
+        messageApi.success(t('knowledgeBase.shareSuccess'));
+      }else{
+        messageApi.success(t('knowledgeBase.stopShareSuccess'));
+      }
+      
       getShareSpaceList(kbId);
     }).catch(() => {
       messageApi.error(t('knowledgeBase.shareFailed'));
