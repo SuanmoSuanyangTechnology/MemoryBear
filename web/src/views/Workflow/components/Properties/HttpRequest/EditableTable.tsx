@@ -59,7 +59,7 @@ const EditableTable: FC<EditableTableProps> = ({
         render: (_: any, __: TableRow, index: number) => (
           <Form.Item name={[index, 'name']} noStyle>
             <Editor
-              options={booleanFilterOptions}
+              options={booleanFilterOptions.filter(option => !option.dataType.includes('file'))}
               type="input"
               className={contentClassName}
               size={size}
@@ -109,7 +109,7 @@ const EditableTable: FC<EditableTableProps> = ({
               const currentType = form.getFieldValue([...Array.isArray(parentName) ? parentName : [parentName], index, 'type']);
               const filteredOptions = currentType === 'file' 
                 ? booleanFilterOptions.filter(option => option.dataType.includes('file'))
-                : booleanFilterOptions;
+                : booleanFilterOptions.filter(option => !option.dataType.includes('file'));
               
               return (
                 <Form.Item name={[index, 'value']} noStyle>

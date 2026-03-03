@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 11:14:30
+ * @Last Modified time: 2026-03-03 14:24:34
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -403,6 +403,9 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   const handleSaveChatVariable = (values: Variable[]) => {
     setChatVariables(values)
   }
+  useEffect(() => {
+    setChatVariables(values?.variables || [])
+  }, [values?.variables])
   console.log('values', values)
   return (
     <>
@@ -507,6 +510,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
               chatList={chatList}
               updateChatList={setChatList}
               handleSave={handleSave}
+              chatVariables={chatVariables}
             />
           </RbCard>
         </Col>

@@ -1682,7 +1682,8 @@ export const zh = {
       fileType: '文件类型',
       image: '图片',
       fileUrl: '文件链接',
-      addRemoteFile: '添加远程文件'
+      addRemoteFile: '添加远程文件',
+      variableConfig: '变量配置',
     },
     login: {
       title: '红熊记忆科学',
@@ -2193,7 +2194,7 @@ export const zh = {
       save: '保存',
       export: '导出',
       variableConfig: '变量配置',
-      variableRequired: '必填',
+      variableRequired: '必填，请配置变量值',
       addMessage: '添加消息',
       answerDesc: '回复',
       addNode: '添加节点',

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 16:34:15
+ * @Last Modified time: 2026-03-03 12:08:42
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -120,15 +120,19 @@ export const copyApplication = (app_id: string, new_name: string) => {
 export const getAppStatistics = (app_id: string, data: { start_date: number; end_date: number; }) => {
   return request.get(`/apps/${app_id}/statistics`, data)
 }
-// 导出工作流
-export const exportWorkflow = (app_id: string, fileName: string) => {
-  return request.downloadFile(`/apps/${app_id}/workflow/export`, fileName, undefined, undefined, 'GET')
-}
-// 工作流上传+兼容性分析
+// Upload workflow and analyze compatibility
 export const importWorkflow = (formData: FormData) => {
   return request.uploadFile(`/apps/workflow/import`, formData)
 }
-// 完成工作流导入
+// Complete workflow import
 export const completeImportWorkflow = (data: { temp_id: string; name?: string; description?: string }) => {
   return request.post(`/apps/workflow/import/save`, data)
+}
+// Get experience config
+export const getExperienceConfig = (share_token: string) => {
+  return request.get(`/public/share/config`, {}, {
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+    }
+  })
 }
