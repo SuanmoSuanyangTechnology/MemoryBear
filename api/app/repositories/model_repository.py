@@ -428,19 +428,17 @@ class ModelConfigRepository:
         
         try:
             # 查询ModelConfig关联的ModelApiKey，筛选出匹配的model_config_id
-            model_config_ids = db.query(ModelConfig.id).join(
-                ModelBase, ModelConfig.model_id == ModelBase.id
-            ).filter(
+            model_config_ids = db.query(ModelConfig.id).filter(
                 and_(
                     or_(
                         ModelConfig.tenant_id == tenant_id,
                         ModelConfig.is_public
                     ),
-                    ModelBase.provider == provider,
+                    ModelConfig.provider == provider,
                     ModelConfig.is_active,
                     ~ModelConfig.is_composite
                 )
-            ).distinct().all()
+            ).all()
 
             db_logger.debug(f"查询成功: 数量={len(model_config_ids)}")
             return [row[0] for row in model_config_ids]

@@ -12,7 +12,7 @@ from app.core.workflow.adapters.errors import UnsupportVariableType, UnknowModel
     ExceptionType
 from app.core.workflow.nodes.assigner import AssignerNodeConfig
 from app.core.workflow.nodes.assigner.config import AssignmentItem
-from app.core.workflow.nodes.base_config import VariableDefinition
+from app.core.workflow.nodes.base_config import VariableDefinition, BaseNodeConfig
 from app.core.workflow.nodes.code import CodeNodeConfig
 from app.core.workflow.nodes.code.config import InputVariable, OutputVariable
 from app.core.workflow.nodes.configs import StartNodeConfig, LLMNodeConfig
@@ -44,6 +44,7 @@ class DifyConverter(BaseConverter):
     warnings: list
     branch_node_cache: dict
     error_branch_node_cache: list
+    node_output_map: dict
 
     def __init__(self):
         self.CONFIG_CONVERT_MAP = {
@@ -60,33 +61,53 @@ class DifyConverter(BaseConverter):
             "knowledge-retrieval": self.convert_knowledge_node_config,
             "parameter-extractor": self.convert_parameter_extractor_node_config,
             "question-classifier": self.convert_question_classifier_node_config,
-            "variable-aggregator": self.convert_variable_aggregator,
+            "variable-aggregator": self.convert_variable_aggregator_node_config,
+            "tool": self.convert_tool_node_config,
             "loop-start": lambda x: {},
             "iteration-start": lambda x: {},
             "loop-end": lambda x: {},
         }
 
     def get_node_convert(self, node_type):
-        func = self.CONFIG_CONVERT_MAP.get(node_type, None)
+        func = self.CONFIG_CONVERT_MAP.get(node_type, lambda x: {})
         return func
+
+    def config_validate(
+            self,
+            node_id: str,
+            node_name: str,
+            config: type[BaseNodeConfig],
+            value: dict
+    ):
+        try:
+            return config.model_validate(value)
+        except Exception as e:
+            self.errors.append(ExceptionDefineition(
+                type=ExceptionType.CONFIG,
+                node_id=node_id,
+                node_name=node_name,
+                detail=str(e)
+            ))
+            return None
 
     @staticmethod
     def is_variable(expression) -> bool:
         return bool(re.match(r"\{\{#(.*?)#}}", expression))
 
-    @staticmethod
-    def process_var_selector(var_selector):
+    def process_var_selector(self, var_selector):
         if not var_selector:
             return ""
         selector = var_selector.split('.')
-        if len(selector) != 2:
+        if len(selector) not in [2, 3]:
             raise Exception(f"invalid variable selector: {var_selector}")
+        if len(selector) == 3:
+            selector = selector[1:]
         if selector[0] == "conversation":
             selector[0] = "conv"
         var_selector = ".".join(selector)
         mapping = {
-            "sys.query": "sys.message"
-        }
+                      "sys.query": "sys.message"
+                  } | self.node_output_map
 
         var_selector = mapping.get(var_selector, var_selector)
         return var_selector
@@ -124,6 +145,8 @@ class DifyConverter(BaseConverter):
             "checkbox": VariableType.BOOLEAN,
             "file-list": VariableType.ARRAY_FILE,
             "select": VariableType.STRING,
+            "integer": VariableType.NUMBER,
+            "float": VariableType.NUMBER,
         }
         var_type = type_map.get(source_type, source_type)
         return var_type
@@ -160,6 +183,8 @@ class DifyConverter(BaseConverter):
             "≥": ComparisonOperator.GE,
             "≤": ComparisonOperator.LE,
             "not empty": ComparisonOperator.NOT_EMPTY,
+            "start with": ComparisonOperator.START_WITH,
+            "end with": ComparisonOperator.END_WITH,
         }
         return operator_map.get(operator, operator)
 
@@ -232,7 +257,7 @@ class DifyConverter(BaseConverter):
                         node_id=node["id"],
                         node_name=node_data["title"],
                         name=var["variable"],
-                        detail=f"Unsupport Variable type for start node: {var_type}"
+                        detail=f"Unsupported Variable type for start node: {var_type}"
                     )
                 )
                 continue
@@ -248,9 +273,11 @@ class DifyConverter(BaseConverter):
                 max_length=var.get("max_length"),
             )
             start_vars.append(var_def)
-        return StartNodeConfig(
+        result = StartNodeConfig.model_construct(
             variables=start_vars
         ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], StartNodeConfig, result)
+        return result
 
     def convert_question_classifier_node_config(self, node: dict) -> dict:
         node_data = node["data"]
@@ -265,16 +292,18 @@ class DifyConverter(BaseConverter):
         for category in node_data["classes"]:
             self.branch_node_cache[node["id"]].append(category["id"])
             categories.append(
-                ClassifierConfig(
+                ClassifierConfig.model_construct(
                     class_name=category["name"],
                 )
             )
 
-        return QuestionClassifierNodeConfig.model_construct(
-            input_variable=self._process_list_variable_litearl(node_data["query_variable_selector"]),
-            user_supplement_prompt=self.trans_variable_format(node_data["instructions"]),
+        result = QuestionClassifierNodeConfig.model_construct(
+            input_variable=self._process_list_variable_litearl(node_data.get("query_variable_selector")),
+            user_supplement_prompt=self.trans_variable_format(node_data.get("instructions", "")),
             categories=categories,
         ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], QuestionClassifierNodeConfig, result)
+        return result
 
     def convert_llm_node_config(self, node: dict) -> dict:
         node_data = node["data"]
@@ -310,7 +339,7 @@ class DifyConverter(BaseConverter):
         vision_input = self._process_list_variable_litearl(
             node_data["vision"]["configs"]["variable_selector"]
         ) if vision else None
-        return LLMNodeConfig.model_construct(
+        result = LLMNodeConfig.model_construct(
             model_id=None,
             context=context,
             memory=memory,
@@ -318,12 +347,16 @@ class DifyConverter(BaseConverter):
             vision_input=vision_input,
             messages=messages
         ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], LLMNodeConfig, result)
+        return result
 
     def convert_end_node_config(self, node: dict) -> dict:
         node_data = node["data"]
-        return EndNodeConfig(
-            output=self.trans_variable_format(node_data["answer"]),
+        result = EndNodeConfig.model_construct(
+            output=self.trans_variable_format(node_data.get("answer", "")),
         ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], EndNodeConfig, result)
+        return result
 
     def convert_if_else_node_config(self, node: dict) -> dict:
         node_data = node["data"]
@@ -354,9 +387,11 @@ class DifyConverter(BaseConverter):
                 )
             )
             self.branch_node_cache[node["id"]].append(case_id)
-        return IfElseNodeConfig(
+        result = IfElseNodeConfig.model_construct(
             cases=cases
         ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], IfElseNodeConfig, result)
+        return result
 
     def convert_loop_node_config(self, node: dict) -> dict:
         node_data = node["data"]
@@ -365,7 +400,7 @@ class DifyConverter(BaseConverter):
         for condition in node_data["break_conditions"]:
             right_value = condition["value"]
             conditions.append(
-                LoopConditionDetail(
+                LoopConditionDetail.model_construct(
                     operator=self.convert_compare_operator(condition["comparison_operator"]),
                     left=self._process_list_variable_litearl(condition["variable_selector"]),
                     right=self.trans_variable_format(
@@ -378,7 +413,7 @@ class DifyConverter(BaseConverter):
                     if isinstance(right_value, str) and self.is_variable(right_value) else ValueInputType.CONSTANT,
                 )
             )
-        condition_config = ConditionsConfig(
+        condition_config = ConditionsConfig.model_construct(
             logical_operator=logical_operator,
             expressions=conditions
         )
@@ -387,9 +422,9 @@ class DifyConverter(BaseConverter):
             right_input_type = variable["value_type"]
             right_value_type = self.variable_type_map(variable["var_type"])
             if right_input_type == ValueInputType.VARIABLE:
-                right_value = self._process_list_variable_litearl(variable["value"])
+                right_value = self._process_list_variable_litearl(variable.get("value", ""))
             else:
-                right_value = self.convert_variable_type(right_value_type, variable["value"])
+                right_value = self.convert_variable_type(right_value_type, variable.get("value", ""))
             loop_variables.append(
                 CycleVariable(
                     name=variable["label"],
@@ -398,22 +433,27 @@ class DifyConverter(BaseConverter):
                     input_type=right_input_type
                 )
             )
-        return LoopNodeConfig(
+        result = LoopNodeConfig.model_construct(
             condition=condition_config,
             cycle_vars=loop_variables,
-            max_loop=node_data["loop_count"]
+            max_loop=node_data.get("loop_count", 10)
         ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], LoopNodeConfig, result)
+        return result
 
     def convert_iteration_node_config(self, node: dict) -> dict:
         node_data = node["data"]
-        return IterationNodeConfig(
+        result = IterationNodeConfig.model_construct(
             input=self._process_list_variable_litearl(node_data["iterator_selector"]),
             parallel=node_data["is_parallel"],
             parallel_count=node_data["parallel_nums"],
             output=self._process_list_variable_litearl(node_data["output_selector"]),
-            output_type=self.variable_type_map(node_data["output_type"]),
+            output_type=self.variable_type_map(node_data.get("output_type")),
             flatten=node_data["flatten_output"],
         ).model_dump()
+
+        self.config_validate(node["id"], node["data"]["title"], IterationNodeConfig, result)
+        return result
 
     def convert_assigner_node_config(self, node: dict) -> dict:
         node_data = node["data"]
@@ -430,16 +470,18 @@ class DifyConverter(BaseConverter):
                     operation=self.convert_assignment_operator(assignment["operation"])
                 )
             )
-        return AssignerNodeConfig(
+        result = AssignerNodeConfig.model_construct(
             assignments=assignments
         ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], AssignerNodeConfig, result)
+        return result
 
     def convert_code_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         input_variables = []
         for input_variable in node_data["variables"]:
             input_variables.append(
-                InputVariable(
+                InputVariable.model_construct(
                     name=input_variable["variable"],
                     variable=self._process_list_variable_litearl(input_variable["value_selector"]),
                 )
@@ -448,7 +490,7 @@ class DifyConverter(BaseConverter):
         output_variables = []
         for output_variable in node_data["outputs"]:
             output_variables.append(
-                OutputVariable(
+                OutputVariable.model_construct(
                     name=output_variable,
                     type=node_data["outputs"][output_variable]["type"],
                 )
@@ -456,18 +498,20 @@ class DifyConverter(BaseConverter):
 
         code = base64.b64encode(quote(node_data["code"]).encode("utf-8")).decode("utf-8")
 
-        return CodeNodeConfig(
+        result = CodeNodeConfig.model_construct(
             input_variables=input_variables,
             language=node_data["code_language"],
             output_variables=output_variables,
             code=code
         ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], CodeNodeConfig, result)
+        return result
 
     def convert_http_node_config(self, node: dict) -> dict:
         node_data = node["data"]
-        if node_data["authorization"] != 'no-auth':
+        if node_data["authorization"]["type"] != 'no-auth':
             auth_type = self.convert_http_auth_type(node_data["authorization"]["config"]["type"])
-            auth_config = HttpAuthConfig(
+            auth_config = HttpAuthConfig.model_construct(
                 auth_type=auth_type,
                 header=node_data["authorization"]["config"].get("header"),
                 api_key=node_data["authorization"]["config"].get("api_key"),
@@ -499,7 +543,7 @@ class DifyConverter(BaseConverter):
                 body_content = ""
 
         headers = {}
-        for header in node_data["headers"].split("\n"):
+        for header in node_data.get("headers", "").split("\n"):
             if not header:
                 continue
 
@@ -517,7 +561,7 @@ class DifyConverter(BaseConverter):
                 ))
 
         params = {}
-        for param in node_data["params"].split("\n"):
+        for param in node_data.get("params", "").split("\n"):
             if not param:
                 continue
 
@@ -542,7 +586,7 @@ class DifyConverter(BaseConverter):
             default_body = ""
             default_header = {}
             default_status_code = 0
-            for var in node_data["default_value"]:
+            for var in node_data.get("default_value") or []:
                 if var["key"] == "body":
                     default_body = var["value"]
                 elif var["key"] == "header":
@@ -556,45 +600,50 @@ class DifyConverter(BaseConverter):
             )
 
         self.error_branch_node_cache.append(node['id'])
-        return HttpRequestNodeConfig(
+        result = HttpRequestNodeConfig.model_construct(
             method=node_data["method"].upper(),
             url=node_data["url"],
             auth=auth_config,
-            body=HttpContentTypeConfig(
+            body=HttpContentTypeConfig.model_construct(
                 content_type=self.convert_http_content_type(node_data["body"]["type"]),
                 data=body_content,
             ),
             headers=headers,
             params=params,
             verify_ssl=node_data["ssl_verify"],
-            timeouts=HttpTimeOutConfig(
+            timeouts=HttpTimeOutConfig.model_construct(
                 connect_timeout=node_data["timeout"]["max_connect_timeout"] or 5,
                 read_timeout=node_data["timeout"]["max_read_timeout"] or 5,
                 write_timeout=node_data["timeout"]["max_write_timeout"] or 5,
             ),
-            retry=HttpRetryConfig(
+            retry=HttpRetryConfig.model_construct(
                 enable=node_data["retry_config"]["retry_enabled"],
                 max_attempts=node_data["retry_config"]["max_retries"],
                 retry_interval=node_data["retry_config"]["retry_interval"],
             ),
-            error_handle=HttpErrorHandleConfig(
+            error_handle=HttpErrorHandleConfig.model_construct(
                 method=error_handle_type,
                 default=default_value,
             )
         ).model_dump()
 
+        self.config_validate(node["id"], node["data"]["title"], HttpRequestNodeConfig, result)
+        return result
+
     def convert_jinja_render_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         mapping = []
         for variable in node_data["variables"]:
-            mapping.append(VariablesMappingConfig(
+            mapping.append(VariablesMappingConfig.model_construct(
                 name=variable["variable"],
                 value=self._process_list_variable_litearl(variable["value_selector"])
             ))
-        return JinjaRenderNodeConfig(
+        result = JinjaRenderNodeConfig.model_construct(
             template=node_data["template"],
             mapping=mapping,
         ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], JinjaRenderNodeConfig, result)
+        return result
 
     def convert_knowledge_node_config(self, node: dict) -> dict:
         node_data = node["data"]
@@ -604,9 +653,12 @@ class DifyConverter(BaseConverter):
             type=ExceptionType.CONFIG,
             detail=f"Please reconfigure the Knowledge Retrieval node.",
         ))
-        return KnowledgeRetrievalNodeConfig.model_construct(
+        result = KnowledgeRetrievalNodeConfig.model_construct(
             query=self._process_list_variable_litearl(node_data["query_variable_selector"]),
         ).model_dump()
+
+        self.config_validate(node["id"], node["data"]["title"], KnowledgeRetrievalNodeConfig, result)
+        return result
 
     def convert_parameter_extractor_node_config(self, node: dict) -> dict:
         node_data = node["data"]
@@ -618,42 +670,59 @@ class DifyConverter(BaseConverter):
             )
         )
         params = []
-        for param in node_data["parameters"]:
+        for param in node_data.get("parameters", []):
             params.append(
-                ParamsConfig(
+                ParamsConfig.model_construct(
                     name=param["name"],
                     desc=param["description"],
                     required=param["required"],
                     type=param["type"],
                 )
             )
-        return ParameterExtractorNodeConfig.model_construct(
+        result = ParameterExtractorNodeConfig.model_construct(
             text=self._process_list_variable_litearl(node_data["query"]),
             params=params,
-            prompt=node_data["instruction"]
+            prompt=node_data.get("instruction")
         ).model_dump()
 
-    def convert_variable_aggregator(self, node: dict) -> dict:
+        self.config_validate(node["id"], node["data"]["title"], ParameterExtractorNodeConfig, result)
+        return result
+
+    def convert_variable_aggregator_node_config(self, node: dict) -> dict:
         node_data = node["data"]
-        group_enable = node_data["advanced_settings"]["group_enabled"]
+        advanced_settings = node_data.get("advanced_settings", {})
         group_variables = {}
         group_type = {}
-        if not group_enable:
+        if not advanced_settings or not advanced_settings["group_enabled"]:
             group_variables["output"] = [
                 self._process_list_variable_litearl(variable)
                 for variable in node_data["variables"]
             ]
             group_type["output"] = node_data["output_type"]
         else:
-            for group in node_data["advanced_settings"]["groups"]:
+            for group in advanced_settings["groups"]:
                 group_variables[group["group_name"]] = [
                     self._process_list_variable_litearl(variable)
                     for variable in group["variables"]
                 ]
                 group_type[group["group_name"]] = group["output_type"]
 
-        return VariableAggregatorNodeConfig(
-            group=group_enable,
+        result = VariableAggregatorNodeConfig.model_construct(
+            group=advanced_settings.get("group_enabled", False),
             group_variables=group_variables,
             group_type=group_type,
         ).model_dump()
+
+        self.config_validate(node["id"], node["data"]["title"], VariableAggregatorNodeConfig, result)
+
+        return result
+
+    def convert_tool_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        self.warnings.append(ExceptionDefineition(
+            node_id=node["id"],
+            node_name=node_data["title"],
+            type=ExceptionType.CONFIG,
+            detail=f"Please reconfigure the tool node.",
+        ))
+        return {}

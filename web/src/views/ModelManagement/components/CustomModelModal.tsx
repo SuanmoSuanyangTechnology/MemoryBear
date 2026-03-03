@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:49:28 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-28 17:24:05
  */
 /**
  * Custom Model Modal
@@ -20,6 +20,7 @@ import CustomSelect from '@/components/CustomSelect'
 import UploadImages from '@/components/Upload/UploadImages'
 import { updateCustomModel, addCustomModel, modelTypeUrl, modelProviderUrl } from '@/api/models'
 import { getFileLink } from '@/api/fileStorage'
+import { validateSquareImage, stringRegExp } from '@/utils/validator'
 
 /**
  * Custom model modal component
@@ -50,7 +51,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       setModel(model);
       form.setFieldsValue({
         ...model,
-        logo: model.logo ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined
+        logo: model.logo && model.logo.startsWith('http') ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined
       });
     } else {
       setIsEdit(false);
@@ -65,7 +66,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     const res = isEdit ? updateCustomModel(model.id, rest) : addCustomModel(data)
 
     res.then(() => {
-      refresh && refresh(isEdit)
+      refresh?.(isEdit)
       handleClose()
       message.success(isEdit ? t('common.updateSuccess') : t('common.createSuccess'))
     })
@@ -79,7 +80,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       .validateFields()
       .then((values) => {
         const { logo, ...rest } = values;
-        let formData: CustomModelForm = {
+        const formData: CustomModelForm = {
           ...rest
         }
 
@@ -125,14 +126,22 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           name="logo"
           label={t('modelNew.logo')}
           valuePropName="fileList"
-          rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          rules={[
+            { required: true, message: t('common.pleaseSelect') },
+            { validator: validateSquareImage(t('common.imageSquareRequired')) }
+          ]}
+          extra={t('common.logoTip')?.split('\n').map((vo, index) => <div key={index}>{vo}</div>)}
         >
-          <UploadImages />
+          <UploadImages fileSize={2} />
         </Form.Item>
         <Form.Item
           name="name"
           label={t('modelNew.name')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.name') }) }]}
+          rules={[
+            { required: true, message: t('common.inputPlaceholder', { title: t('modelNew.name') }) },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('common.pleaseEnter')} />
         </Form.Item>
@@ -166,6 +175,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         <Form.Item
           name="description"
           label={t('modelNew.description')}
+          rules={[{ max: 500 }]}
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </Form.Item>

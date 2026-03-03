@@ -17,6 +17,8 @@ export interface SkillFormData {
   tools: Array<{
     /** Tool identifier */
     tool_id: string;
+    /** Tool operation/action */
+    operation?: string;
   }>;
   /** Skill configuration settings */
   config: {

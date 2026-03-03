@@ -24,6 +24,8 @@ class NodeType(StrEnum):
     MEMORY_READ = "memory-read"
     MEMORY_WRITE = "memory-write"
 
+    UNKNOWN = "unknown"
+
 
 BRANCH_NODES = [NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER]
 

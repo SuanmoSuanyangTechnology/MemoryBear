@@ -12,9 +12,20 @@ class ExpressionEvaluator:
     
     # Reserved namespaces
     RESERVED_NAMESPACES = {"var", "node", "sys", "nodes"}
-    
-    @staticmethod
+
+    @classmethod
+    def normalize_template(cls, template: str) -> str:
+        pattern = re.compile(
+            r"\{\{\s*(\d+)\.(\w+)\s*}}"
+        )
+        return pattern.sub(
+            r'{{ node["\1"].\2 }}',
+            template
+        )
+
+    @classmethod
     def evaluate(
+        cls,
         expression: str,
         conv_vars: dict[str, Any],
         node_outputs: dict[str, Any],
@@ -37,6 +48,7 @@ class ExpressionEvaluator:
         """
         # Remove Jinja2-style brackets if present
         expression = expression.strip()
+        expression = cls.normalize_template(expression)
         pattern = r"\{\{\s*(.*?)\s*\}\}"
         expression = re.sub(pattern, r"\1", expression).strip()
 

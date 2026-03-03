@@ -1031,6 +1031,9 @@ export const zh = {
       nextStep: '下一步',
       prevStep: '上一步',
       exportSuccess: '导出成功',
+      recommend: '推荐',
+      logoTip: `支持图片格式（JPG、PNG）\n 尺寸：正方形比例 \n 文件大小限制：≤ 2MB`,
+      imageSquareRequired: '请上传正方形比例图片',
     },
     model: {
       searchPlaceholder: '搜索模型…',
@@ -1178,7 +1181,8 @@ export const zh = {
       ollama: "Ollama",
       xinference: "Xinference",
       gpustack: "Gpustack",
-      bedrock: "Bedrock"
+      bedrock: "Bedrock",
+      nameInvalid: '模型名称只能包含字母、数字、下划线和空格, 不能为空或纯空格',
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',
@@ -1639,6 +1643,10 @@ export const zh = {
       scene_type_distribution: '场景类型',
       general_type_distribution: '通用类型',
       unmatched: '未匹配',
+      disagreementCase: '不一致案例',
+      Pruned: '已剪枝',
+      pruning: '剪枝',
+      pruning_desc: '文本剪枝{{count}}个片段'
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',

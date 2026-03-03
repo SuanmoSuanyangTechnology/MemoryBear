@@ -23,6 +23,7 @@ import UploadImages from '@/components/Upload/UploadImages'
 import { getFileLink } from '@/api/fileStorage'
 import ragIcon from '@/assets/images/space/rag.png'
 import neo4jIcon from '@/assets/images/space/neo4j.png'
+import { stringRegExp } from '@/utils/validator';
 
 const FormItem = Form.Item;
 
@@ -34,8 +35,8 @@ interface SpaceModalProps {
 }
 /** Storage types */
 const types: StorageType[] = [
-  'rag',
   'neo4j',
+  'rag',
 ]
 /** Type icons mapping */
 const typeIcons: Record<StorageType, string> = {
@@ -91,7 +92,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
           setCurrentStep(1)
         } else {
           const { icon, ...rest } = values
-          let formData: SpaceModalData = {
+          const formData: SpaceModalData = {
             ...rest
           }
           if (icon?.response?.data.file_id) {
@@ -154,6 +155,9 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
       <Form
         form={form}
         layout="vertical"
+        initialValues={{
+          storage_type: types[0],
+        }}
       >
         <Form.Item
           name="icon"
@@ -161,14 +165,19 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
           valuePropName="fileList"
           hidden={currentStep === 1}
           rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.spaceIcon') }) }]}
+          extra={t('common.logoTip')?.split('\n').map((vo, index) => <div key={index}>{vo}</div>)}
         >
-          <UploadImages />
+          <UploadImages fileSize={2} />
         </Form.Item>
         <FormItem
           name="name"
           label={t('space.spaceName')}
           hidden={currentStep === 1}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('space.spaceName') }) }]}
+          rules={[
+            { required: true, message: t('common.inputPlaceholder', { title: t('space.spaceName') }) },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('common.inputPlaceholder', { title: t('space.spaceName') })} />
         </FormItem>
@@ -183,7 +192,8 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
               value: type,
               label: t(`space.${type}`),
               labelDesc: t(`space.${type}Desc`),
-              icon: typeIcons[type]
+              icon: typeIcons[type],
+              recommend: type === 'neo4j',
             }))}
             block={true}
           />

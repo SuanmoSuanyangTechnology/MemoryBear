@@ -121,6 +121,7 @@ const tabKeys = ['group', 'list', 'square']
             {activeTab !== 'list' &&
               <Form.Item name="search" noStyle>
                 <SearchInput
+                  maxLength={50}
                   placeholder={t(`modelNew.${activeTab}SearchPlaceholder`)}
                   className="rb:w-70!"
                 />

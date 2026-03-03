@@ -196,7 +196,7 @@ class BaseNode(ABC):
                 timeout=timeout
             )
 
-            elapsed_time = time.time() - start_time
+            elapsed_time = (time.time() - start_time) * 1000
 
             # Extract processed outputs using subclass-defined logic.
             extracted_output = self._extract_output(business_result)
@@ -219,7 +219,7 @@ class BaseNode(ABC):
             } | self.trans_activate(state)
 
         except TimeoutError:
-            elapsed_time = time.time() - start_time
+            elapsed_time = (time.time() - start_time) * 1000
             logger.error(
                 f"Node {self.node_id} execution timed out ({timeout} seconds)."
             )
@@ -230,7 +230,7 @@ class BaseNode(ABC):
                 variable_pool,
             )
         except Exception as e:
-            elapsed_time = time.time() - start_time
+            elapsed_time = (time.time() - start_time) * 1000
             logger.error(
                 f"Node {self.node_id} execution failed: {e}",
                 exc_info=True,
@@ -307,10 +307,10 @@ class BaseNode(ABC):
                         "done": done
                     })
 
-            elapsed_time = time.time() - start_time
+            elapsed_time = (time.time() - start_time) * 1000
 
             logger.info(f"Node {self.node_id} streaming execution finished, "
-                        f"time elapsed: {elapsed_time:.2f}s, chunks: {chunk_count}")
+                        f"time elapsed: {elapsed_time:.2f}ms, chunks: {chunk_count}")
 
             # Extract processed output (call subclass's _extract_output)
             extracted_output = self._extract_output(final_result)
@@ -337,7 +337,7 @@ class BaseNode(ABC):
             yield state_update | self.trans_activate(state)
 
         except TimeoutError:
-            elapsed_time = time.time() - start_time
+            elapsed_time = (time.time() - start_time) * 1000
             logger.error(f"Node {self.node_id} execution timed out ({timeout}s)")
             error_output = self._wrap_error(
                 f"Node execution timed out ({timeout}s)",
@@ -347,7 +347,7 @@ class BaseNode(ABC):
             )
             yield error_output
         except Exception as e:
-            elapsed_time = time.time() - start_time
+            elapsed_time = (time.time() - start_time) * 1000
             logger.error(f"Node {self.node_id} execution failed: {e}", exc_info=True)
             error_output = self._wrap_error(str(e), elapsed_time, state, variable_pool)
             yield error_output
