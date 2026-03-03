@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 14:00:06 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-03 14:58:32
  */
 import { request } from '@/utils/request'
 import type {
@@ -163,8 +163,13 @@ export const getImplicitInterestAreas = (end_user_id: string) => {
 export const getImplicitHabits = (end_user_id: string) => {
   return request.get(`/memory/implicit-memory/habits/${end_user_id}`)
 }
+// Implicit Memory - Generate user portrait
 export const generateProfile = (end_user_id: string) => {
   return request.post(`/memory/implicit-memory/generate_profile`, { end_user_id })
+}
+// Implicit Memory - Check if data exists
+export const implicitCheckData = (end_user_id: string) => {
+  return request.get(`/memory/implicit-memory/check-data/${end_user_id}`)
 }
 // Short-term memory
 export const getShortTerm = (end_user_id: string) => {
