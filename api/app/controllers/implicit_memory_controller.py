@@ -152,10 +152,9 @@ async def check_user_data_exists(
         
         if cached_profile is None:
             api_logger.info(f"用户 {end_user_id} 的画像数据不存在")
-            return fail(
-                BizCode.NOT_FOUND,
-                "画像数据不存在，请点击右上角刷新进行初始化",
-                {"exists": False}
+            return success(
+                data={"exists": False},
+                msg="画像数据不存在，请点击右上角刷新进行初始化"
             )
         
         api_logger.info(f"用户 {end_user_id} 的画像数据存在")
@@ -203,11 +202,7 @@ async def get_preference_tags(
         
         if cached_profile is None:
             api_logger.info(f"用户 {end_user_id} 的画像数据不存在")
-            return fail(
-                BizCode.NOT_FOUND,
-                "画像数据不存在，请点击右上角刷新进行初始化",
-                ""
-            )
+            return fail(BizCode.NOT_FOUND, "", "")
         
         # Extract preferences from cache
         preferences = cached_profile.get("preferences", [])
@@ -274,11 +269,7 @@ async def get_dimension_portrait(
         
         if cached_profile is None:
             api_logger.info(f"用户 {end_user_id} 的画像数据不存在")
-            return fail(
-                BizCode.NOT_FOUND,
-                "画像数据不存在，请点击右上角刷新进行初始化",
-                ""
-            )
+            return fail(BizCode.NOT_FOUND, "", "")
         
         # Extract portrait from cache
         portrait = cached_profile.get("portrait", {})
@@ -322,11 +313,7 @@ async def get_interest_area_distribution(
         
         if cached_profile is None:
             api_logger.info(f"用户 {end_user_id} 的画像数据不存在")
-            return fail(
-                BizCode.NOT_FOUND,
-                "画像数据不存在，请点击右上角刷新进行初始化",
-                ""
-            )
+            return fail(BizCode.NOT_FOUND, "", "")
         
         # Extract interest areas from cache
         interest_areas = cached_profile.get("interest_areas", {})
@@ -374,11 +361,7 @@ async def get_behavior_habits(
         
         if cached_profile is None:
             api_logger.info(f"用户 {end_user_id} 的画像数据不存在")
-            return fail(
-                BizCode.NOT_FOUND,
-                "画像数据不存在，请点击右上角刷新进行初始化",
-                ""
-            )
+            return fail(BizCode.NOT_FOUND, "", "")
         
         # Extract habits from cache
         habits = cached_profile.get("habits", [])

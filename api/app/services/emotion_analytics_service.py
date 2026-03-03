@@ -892,12 +892,12 @@ class EmotionAnalyticsService:
 
             logger.info(f"保存建议到数据库: user={end_user_id}")
 
-            # 保存到数据库
             repo = ImplicitEmotionsStorageRepository(db)
             repo.update_emotion_suggestions(end_user_id, suggestions_data)
+            db.commit()
 
             logger.info(f"建议保存成功: user={end_user_id}")
 
         except Exception as e:
+            db.rollback()
             logger.error(f"保存建议失败: {str(e)}", exc_info=True)
-            # 不抛出异常，存储失败不应影响主流程

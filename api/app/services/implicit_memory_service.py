@@ -471,12 +471,12 @@ class ImplicitMemoryService:
             
             logger.info(f"保存用户画像到数据库: user={end_user_id}")
             
-            # 保存到数据库
             repo = ImplicitEmotionsStorageRepository(db)
             repo.update_implicit_profile(end_user_id, profile_data)
+            db.commit()
             
             logger.info(f"用户画像保存成功: user={end_user_id}")
             
         except Exception as e:
+            db.rollback()
             logger.error(f"保存用户画像失败: {str(e)}", exc_info=True)
-            # 不抛出异常，存储失败不应影响主流程
