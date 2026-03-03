@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:46 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:28:46 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-03 14:03:44
  */
 /**
  * Release Share Modal
@@ -79,7 +79,7 @@ const ReleaseShareModal = forwardRef<ReleaseShareModalRef, ReleaseShareModalProp
 
   return (
     <RbModal
-      title={<>{t('application.shareVersion')} {version?.version}</>}
+      title={<>{t('application.shareVersion')} ({version?.version_name && version.version_name[0].toLocaleLowerCase() === 'v' ? version.version_name : version?.version_name ? `v${version.version_name}` : `v${version?.version}`})</>}
       open={visible}
       onCancel={handleClose}
       footer={false}
