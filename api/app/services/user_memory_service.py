@@ -10,6 +10,9 @@ from collections import Counter
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
 from app.core.logging_config import get_logger
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
@@ -23,8 +26,6 @@ from app.services.memory_base_service import MemoryBaseService, MemoryTransServi
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_perceptual_service import MemoryPerceptualService
 from app.services.memory_short_service import ShortService
-from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)
 
@@ -1035,9 +1036,10 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None, lan
             "growth_trajectory": str         # 成长轨迹
         }
     """
-    from app.core.memory.utils.prompt.prompt_utils import render_memory_insight_prompt
-    from app.core.language_utils import validate_language
     import re
+
+    from app.core.language_utils import validate_language
+    from app.core.memory.utils.prompt.prompt_utils import render_memory_insight_prompt
     
     # 验证语言参数
     language = validate_language(language)
@@ -1161,11 +1163,12 @@ async def analytics_user_summary(end_user_id: Optional[str] = None, language: st
             "one_sentence": str
         }
     """
-    from app.core.memory.utils.prompt.prompt_utils import render_user_summary_prompt
-    from app.core.language_utils import validate_language
-    from app.repositories.end_user_repository import EndUserRepository
-    from app.db import get_db
     import re
+
+    from app.core.language_utils import validate_language
+    from app.core.memory.utils.prompt.prompt_utils import render_user_summary_prompt
+    from app.db import get_db
+    from app.repositories.end_user_repository import EndUserRepository
     
     # 验证语言参数
     language = validate_language(language)
@@ -1457,7 +1460,7 @@ async def analytics_memory_types(
     short_term_count = 0
     if end_user_id:
         try:
-            short_term_service = ShortService(end_user_id)
+            short_term_service = ShortService(end_user_id, db)
             short_term_data = short_term_service.get_short_databasets()
             # 统计 short_term 数组的长度
             if short_term_data:
@@ -1471,8 +1474,10 @@ async def analytics_memory_types(
     forgetting_threshold = 0.3  # 默认值
     if end_user_id:
         try:
+            from app.core.memory.storage_services.forgetting_engine.config_utils import (
+                load_actr_config_from_db,
+            )
             from app.services.memory_agent_service import get_end_user_connected_config
-            from app.core.memory.storage_services.forgetting_engine.config_utils import load_actr_config_from_db
             
             # 获取用户关联的 config_id
             connected_config = get_end_user_connected_config(end_user_id, db)
