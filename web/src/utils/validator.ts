@@ -45,6 +45,5 @@ export const validateSquareImage = (errorMessage: string = 'Image must be square
   };
 };
 
-// - Cannot be empty or pure whitespace
-// - Cannot start with a space
-export const stringRegExp = /^[a-zA-Z0-9\u4e00-\u9fa5][a-zA-Z0-9\u4e00-\u9fa5\s]*$/
+// - Cannot start or end with a space
+export const stringRegExp = /^(?!\s).*(?<!\s)$/
