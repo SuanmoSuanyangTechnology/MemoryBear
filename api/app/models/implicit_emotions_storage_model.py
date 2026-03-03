@@ -19,8 +19,8 @@ class ImplicitEmotionsStorage(Base):
     # 主键
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, comment="主键ID")
     
-    # 用户标识
-    end_user_id = Column(String(255), nullable=False, unique=True, index=True, comment="终端用户ID")
+    # 用户标识（unique=True会自动创建唯一索引）
+    end_user_id = Column(String(255), nullable=False, unique=True, comment="终端用户ID")
     
     # 隐性记忆画像数据（JSON格式）
     implicit_profile = Column(JSONB, nullable=True, comment="隐性记忆用户画像数据")
@@ -36,9 +36,8 @@ class ImplicitEmotionsStorage(Base):
     implicit_generated_at = Column(DateTime, nullable=True, comment="隐性记忆画像生成时间")
     emotion_generated_at = Column(DateTime, nullable=True, comment="情绪建议生成时间")
     
-    # 索引
+    # 索引（只为updated_at创建索引，end_user_id的unique约束已自动创建索引）
     __table_args__ = (
-        Index('idx_end_user_id', 'end_user_id'),
         Index('idx_updated_at', 'updated_at'),
     )
     

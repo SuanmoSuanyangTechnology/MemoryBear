@@ -262,7 +262,6 @@ async def check_emotion_data_exists(
 @router.post("/suggestions", response_model=ApiResponse)
 async def get_emotion_suggestions(
     request: EmotionSuggestionsRequest,
-    language_type: str = Header(default=None, alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -277,9 +276,6 @@ async def get_emotion_suggestions(
         存储的个性化情绪建议响应
     """
     try:
-        # 使用集中化的语言校验
-        language = get_language_from_header(language_type)
-        
         api_logger.info(
             f"用户 {current_user.username} 请求获取个性化情绪建议",
             extra={
@@ -295,15 +291,13 @@ async def get_emotion_suggestions(
         )
 
         if data is None:
-            # 数据不存在，返回提示信息
             api_logger.info(
                 f"用户 {request.end_user_id} 的建议数据不存在",
                 extra={"end_user_id": request.end_user_id}
             )
-            return fail(
-                BizCode.NOT_FOUND,
-                "情绪建议数据不存在，请点击右上角刷新进行初始化",
-                ""
+            return success(
+                data={"exists": False},
+                msg="情绪建议数据不存在，请点击右上角刷新进行初始化"
             )
 
         api_logger.info(
