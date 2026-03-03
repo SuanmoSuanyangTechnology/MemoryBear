@@ -1,6 +1,6 @@
-import { forwardRef, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Row, Col } from 'antd'
+import { Row, Col, App } from 'antd'
 import { useParams } from 'react-router-dom'
 
 import Preferences from '../components/Preferences'
@@ -9,15 +9,27 @@ import InterestAreas from '../components/InterestAreas'
 import Habits from '../components/Habits'
 import {
   generateProfile,
+  implicitCheckData,
 } from '@/api/memory'
 
 const ImplicitDetail = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
+  const { message } = App.useApp()
   const preferencesRef = useRef<{ handleRefresh: () => void; }>(null)
   const portraitRef = useRef<{ handleRefresh: () => void; }>(null)
   const interestAreasRef = useRef<{ handleRefresh: () => void; }>(null)
   const habitsRef = useRef<{ handleRefresh: () => void; }>(null)
+  
+  useEffect(() => {
+    if (!id) return
+    implicitCheckData(id)
+      .then(res => {
+        if (!(res as { exists: boolean }).exists) {
+          message.warning(t('implicitDetail.noData'))
+        }
+      })
+  }, [id])
 
   const handleRefresh = () => {
     if (!id) {
