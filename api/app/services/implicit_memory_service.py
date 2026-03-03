@@ -422,32 +422,33 @@ class ImplicitMemoryService:
         end_user_id: str,
         db: Session
     ) -> Optional[dict]:
-        """从 Redis 缓存获取完整用户画像
+        """从数据库获取完整用户画像
         
         Args:
             end_user_id: 终端用户ID
-            db: 数据库会话（保留参数以保持接口兼容性）
+            db: 数据库会话
             
         Returns:
-            Dict: 缓存的画像数据，如果不存在或已过期返回 None
+            Dict: 存储的画像数据，如果不存在返回 None
         """
         try:
-            from app.cache.memory.implicit_memory import ImplicitMemoryCache
+            from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
             
-            logger.info(f"尝试从 Redis 缓存获取用户画像: user={end_user_id}")
+            logger.info(f"尝试从数据库获取用户画像: user={end_user_id}")
             
-            # 从 Redis 获取缓存
-            cached_data = await ImplicitMemoryCache.get_user_profile(end_user_id)
+            # 从数据库获取存储记录
+            repo = ImplicitEmotionsStorageRepository(db)
+            storage = repo.get_by_end_user_id(end_user_id)
             
-            if cached_data is None:
-                logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
+            if storage is None or storage.implicit_profile is None:
+                logger.info(f"用户 {end_user_id} 的画像数据不存在")
                 return None
             
-            logger.info(f"成功从 Redis 缓存获取用户画像: user={end_user_id}")
-            return cached_data
+            logger.info(f"成功从数据库获取用户画像: user={end_user_id}")
+            return storage.implicit_profile
             
         except Exception as e:
-            logger.error(f"从 Redis 缓存获取用户画像失败: {str(e)}", exc_info=True)
+            logger.error(f"从数据库获取用户画像失败: {str(e)}", exc_info=True)
             return None
     
     async def save_profile_cache(
@@ -455,36 +456,27 @@ class ImplicitMemoryService:
         end_user_id: str,
         profile_data: dict,
         db: Session,
-        expires_hours: int = 168  # 默认7天
+        expires_hours: int = 168  # 参数保留以保持接口兼容性
     ) -> None:
-        """保存用户画像到 Redis 缓存
+        """保存用户画像到数据库
         
         Args:
             end_user_id: 终端用户ID
             profile_data: 画像数据
-            db: 数据库会话（保留参数以保持接口兼容性）
-            expires_hours: 过期时间（小时），默认168小时（7天）
+            db: 数据库会话
+            expires_hours: 保留参数（兼容性）
         """
         try:
-            from app.cache.memory.implicit_memory import ImplicitMemoryCache
+            from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
             
-            logger.info(f"保存用户画像到 Redis 缓存: user={end_user_id}, expires={expires_hours}小时")
+            logger.info(f"保存用户画像到数据库: user={end_user_id}")
             
-            # 计算过期时间（秒）
-            expire_seconds = expires_hours * 3600
+            # 保存到数据库
+            repo = ImplicitEmotionsStorageRepository(db)
+            repo.update_implicit_profile(end_user_id, profile_data)
             
-            # 保存到 Redis
-            success = await ImplicitMemoryCache.set_user_profile(
-                user_id=end_user_id,
-                profile_data=profile_data,
-                expire=expire_seconds
-            )
-            
-            if success:
-                logger.info(f"用户画像缓存保存成功: user={end_user_id}")
-            else:
-                logger.warning(f"用户画像缓存保存失败: user={end_user_id}")
+            logger.info(f"用户画像保存成功: user={end_user_id}")
             
         except Exception as e:
-            logger.error(f"保存用户画像缓存失败: {str(e)}", exc_info=True)
-            # 不抛出异常，缓存失败不应影响主流程
+            logger.error(f"保存用户画像失败: {str(e)}", exc_info=True)
+            # 不抛出异常，存储失败不应影响主流程
