@@ -208,55 +208,55 @@ async def get_emotion_health(
 
 
 
-@router.post("/check-data", response_model=ApiResponse)
-async def check_emotion_data_exists(
-    request: EmotionSuggestionsRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """检查用户情绪建议数据是否存在
+# @router.post("/check-data", response_model=ApiResponse)
+# async def check_emotion_data_exists(
+#     request: EmotionSuggestionsRequest,
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+# ):
+#     """检查用户情绪建议数据是否存在
 
-    Args:
-        request: 包含 end_user_id
-        db: 数据库会话
-        current_user: 当前用户
+#     Args:
+#         request: 包含 end_user_id
+#         db: 数据库会话
+#         current_user: 当前用户
 
-    Returns:
-        数据存在状态
-    """
-    try:
-        api_logger.info(
-            f"检查用户情绪建议数据是否存在: {request.end_user_id}",
-            extra={"end_user_id": request.end_user_id}
-        )
+#     Returns:
+#         数据存在状态
+#     """
+#     try:
+#         api_logger.info(
+#             f"检查用户情绪建议数据是否存在: {request.end_user_id}",
+#             extra={"end_user_id": request.end_user_id}
+#         )
 
-        # 从数据库获取建议
-        data = await emotion_service.get_cached_suggestions(
-            end_user_id=request.end_user_id,
-            db=db
-        )
+#         # 从数据库获取建议
+#         data = await emotion_service.get_cached_suggestions(
+#             end_user_id=request.end_user_id,
+#             db=db
+#         )
 
-        if data is None:
-            api_logger.info(f"用户 {request.end_user_id} 的情绪建议数据不存在")
-            return fail(
-                BizCode.NOT_FOUND,
-                "情绪建议数据不存在，请点击右上角刷新进行初始化",
-                {"exists": False}
-            )
+#         if data is None:
+#             api_logger.info(f"用户 {request.end_user_id} 的情绪建议数据不存在")
+#             return fail(
+#                 BizCode.NOT_FOUND,
+#                 "情绪建议数据不存在，请点击右上角刷新进行初始化",
+#                 {"exists": False}
+#             )
 
-        api_logger.info(f"用户 {request.end_user_id} 的情绪建议数据存在")
-        return success(data={"exists": True}, msg="情绪建议数据已存在")
+#         api_logger.info(f"用户 {request.end_user_id} 的情绪建议数据存在")
+#         return success(data={"exists": True}, msg="情绪建议数据已存在")
 
-    except Exception as e:
-        api_logger.error(
-            f"检查情绪建议数据失败: {str(e)}",
-            extra={"end_user_id": request.end_user_id},
-            exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"检查情绪建议数据失败: {str(e)}"
-        )
+#     except Exception as e:
+#         api_logger.error(
+#             f"检查情绪建议数据失败: {str(e)}",
+#             extra={"end_user_id": request.end_user_id},
+#             exc_info=True
+#         )
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"检查情绪建议数据失败: {str(e)}"
+#         )
 
 
 @router.post("/suggestions", response_model=ApiResponse)
