@@ -82,7 +82,8 @@ celery_app.conf.update(
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'periodic_tasks'},
-        'app.controllers.memory_storage_controller.search_all': {'queue': 'periodic_tasks'},
+        'app.tasks.write_all_workspaces_memory_task': {'queue': 'periodic_tasks'},
+        'app.tasks.update_implicit_emotions_storage': {'queue': 'periodic_tasks'},
     },
 )
 
@@ -95,6 +96,7 @@ memory_cache_regeneration_schedule = timedelta(hours=settings.MEMORY_CACHE_REGEN
 # 这个30秒的设计不合理
 workspace_reflection_schedule = timedelta(seconds=30)  # 每30秒运行一次settings.REFLECTION_INTERVAL_TIME
 forgetting_cycle_schedule = timedelta(hours=24)  # 每24小时运行一次遗忘周期
+implicit_emotions_update_schedule = timedelta(hours=24)  # 每24小时更新一次隐性记忆和情绪数据
 
 #构建定时任务配置
 beat_schedule_config = {
@@ -115,16 +117,16 @@ beat_schedule_config = {
             "config_id": None,  # 使用默认配置，可以通过环境变量配置
         },
     },
-}
-
-#如果配置了默认工作空间ID，则添加记忆总量统计任务
-if settings.DEFAULT_WORKSPACE_ID:
-    beat_schedule_config["write-total-memory"] = {
-        "task": "app.controllers.memory_storage_controller.search_all",
+    "write-all-workspaces-memory": {
+        "task": "app.tasks.write_all_workspaces_memory_task",
         "schedule": memory_increment_schedule,
-        "kwargs": {
-            "workspace_id": settings.DEFAULT_WORKSPACE_ID,
-        },
-    }
+        "args": (),
+    },
+    "update-implicit-emotions-storage": {
+        "task": "app.tasks.update_implicit_emotions_storage",
+        "schedule": implicit_emotions_update_schedule,
+        "args": (),
+    },
+}
 
 celery_app.conf.beat_schedule = beat_schedule_config

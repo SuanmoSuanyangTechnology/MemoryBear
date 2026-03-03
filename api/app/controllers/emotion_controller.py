@@ -208,14 +208,64 @@ async def get_emotion_health(
 
 
 
+# @router.post("/check-data", response_model=ApiResponse)
+# async def check_emotion_data_exists(
+#     request: EmotionSuggestionsRequest,
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+# ):
+#     """检查用户情绪建议数据是否存在
+
+#     Args:
+#         request: 包含 end_user_id
+#         db: 数据库会话
+#         current_user: 当前用户
+
+#     Returns:
+#         数据存在状态
+#     """
+#     try:
+#         api_logger.info(
+#             f"检查用户情绪建议数据是否存在: {request.end_user_id}",
+#             extra={"end_user_id": request.end_user_id}
+#         )
+
+#         # 从数据库获取建议
+#         data = await emotion_service.get_cached_suggestions(
+#             end_user_id=request.end_user_id,
+#             db=db
+#         )
+
+#         if data is None:
+#             api_logger.info(f"用户 {request.end_user_id} 的情绪建议数据不存在")
+#             return fail(
+#                 BizCode.NOT_FOUND,
+#                 "情绪建议数据不存在，请点击右上角刷新进行初始化",
+#                 {"exists": False}
+#             )
+
+#         api_logger.info(f"用户 {request.end_user_id} 的情绪建议数据存在")
+#         return success(data={"exists": True}, msg="情绪建议数据已存在")
+
+#     except Exception as e:
+#         api_logger.error(
+#             f"检查情绪建议数据失败: {str(e)}",
+#             extra={"end_user_id": request.end_user_id},
+#             exc_info=True
+#         )
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"检查情绪建议数据失败: {str(e)}"
+#         )
+
+
 @router.post("/suggestions", response_model=ApiResponse)
 async def get_emotion_suggestions(
     request: EmotionSuggestionsRequest,
-    language_type: str = Header(default=None, alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取个性化情绪建议（从缓存读取）
+    """获取个性化情绪建议（从数据库读取）
 
     Args:
         request: 包含 end_user_id 和可选的 config_id
@@ -223,77 +273,42 @@ async def get_emotion_suggestions(
         current_user: 当前用户
 
     Returns:
-        缓存的个性化情绪建议响应
+        存储的个性化情绪建议响应
     """
     try:
-        # 使用集中化的语言校验
-        language = get_language_from_header(language_type)
-        
         api_logger.info(
-            f"用户 {current_user.username} 请求获取个性化情绪建议（缓存）",
+            f"用户 {current_user.username} 请求获取个性化情绪建议",
             extra={
                 "end_user_id": request.end_user_id,
                 "config_id": request.config_id
             }
         )
 
-        # 从缓存获取建议
+        # 从数据库获取建议
         data = await emotion_service.get_cached_suggestions(
             end_user_id=request.end_user_id,
             db=db
         )
 
         if data is None:
-            # 缓存不存在或已过期，自动触发生成
             api_logger.info(
-                f"用户 {request.end_user_id} 的建议缓存不存在或已过期，自动生成新建议",
+                f"用户 {request.end_user_id} 的建议数据不存在",
                 extra={"end_user_id": request.end_user_id}
             )
-            try:
-                data = await emotion_service.generate_emotion_suggestions(
-                    end_user_id=request.end_user_id,
-                    db=db,
-                    language=language
-                )
-                # 保存到缓存
-                await emotion_service.save_suggestions_cache(
-                    end_user_id=request.end_user_id,
-                    suggestions_data=data,
-                    db=db,
-                    expires_hours=24
-                )
-            except (ValueError, KeyError) as gen_e:
-                # 预期内的业务异常：配置缺失、数据格式问题等
-                api_logger.warning(
-                    f"自动生成建议失败（业务异常）: {str(gen_e)}",
-                    extra={"end_user_id": request.end_user_id}
-                )
-                return fail(
-                    BizCode.NOT_FOUND,
-                    f"自动生成建议失败: {str(gen_e)}",
-                    ""
-                )
-            except Exception as gen_e:
-                # 非预期异常：记录完整 traceback 便于排查
-                api_logger.error(
-                    f"自动生成建议时发生未预期异常: {str(gen_e)}",
-                    extra={"end_user_id": request.end_user_id},
-                    exc_info=True
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"生成建议时发生内部错误: {str(gen_e)}"
-                )
+            return fail(
+                code=404,
+                msg="情绪建议数据不存在，请点击右上角刷新进行初始化"
+            )
 
         api_logger.info(
-            "个性化建议获取成功（缓存）",
+            "个性化建议获取成功",
             extra={
                 "end_user_id": request.end_user_id,
                 "suggestions_count": len(data.get("suggestions", []))
             }
         )
 
-        return success(data=data, msg="个性化建议获取成功（缓存）")
+        return success(data=data, msg="个性化建议获取成功")
 
     except Exception as e:
         api_logger.error(
@@ -314,7 +329,7 @@ async def generate_emotion_suggestions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """生成个性化情绪建议（调用LLM并缓存）
+    """生成个性化情绪建议（调用LLM并保存到数据库）
 
     Args:
         request: 包含 end_user_id
@@ -342,12 +357,11 @@ async def generate_emotion_suggestions(
             language=language
         )
 
-        # 保存到缓存
+        # 保存到数据库
         await emotion_service.save_suggestions_cache(
             end_user_id=request.end_user_id,
             suggestions_data=data,
-            db=db,
-            expires_hours=24
+            db=db
         )
 
         api_logger.info(
