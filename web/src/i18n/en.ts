@@ -455,6 +455,7 @@ export const en = {
       recommend: 'Recommend',
       logoTip: `Supported image formats: JPG, PNG \n Suggested size: square ratio \n Maximum size: ≤ 2MB`,
       imageSquareRequired: 'Please upload a square image',
+      nameInvalid: 'Name cannot start or end with a space',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -545,7 +546,6 @@ export const en = {
       xinference: "Xinference",
       gpustack: "Gpustack",
       bedrock: "Bedrock",
-      nameInvalid: 'Model name can only contain letters, numbers, underscores and spaces, cannot be empty or pure whitespace',
     },
     modelNew: {
       group: 'Model Group',
