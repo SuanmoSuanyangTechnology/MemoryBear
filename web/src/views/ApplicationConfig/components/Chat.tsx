@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 17:40:15
+ * @Last Modified time: 2026-03-03 14:21:54
  */
 /**
  * Chat debugging component for application testing
@@ -13,7 +13,7 @@
 import { type FC, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
-import { Flex, Dropdown, type MenuProps } from 'antd'
+import { Flex, Dropdown, type MenuProps, App } from 'antd'
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import DebuggingEmpty from '@/assets/images/application/debuggingEmpty.png'
@@ -28,6 +28,7 @@ import UploadFiles from '@/views/Conversation/components/FileUpload'
 // import AudioRecorder from '@/components/AudioRecorder'
 import UploadFileListModal from '@/views/Conversation/components/UploadFileListModal'
 import type { UploadFileListModalRef } from '@/views/Conversation/types'
+import type { Variable } from './VariableList/types'
 
 /**
  * Component props
@@ -43,14 +44,16 @@ interface ChatProps {
   handleSave: (flag?: boolean) => Promise<unknown>;
   /** Source type: multi-agent cluster or single agent */
   source?: 'multi_agent' | 'agent';
+  chatVariables?: Variable[]; // Add chatVariables prop
 }
 
 /**
  * Chat debugging component
  * Allows testing application with different model configurations side-by-side
  */
-const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, source = 'agent' }) => {
+const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, source = 'agent', chatVariables }) => {
   const { t } = useTranslation();
+  const { message: messageApi } = App.useApp()
   const [loading, setLoading] = useState(false)
   const [isCluster, setIsCluster] = useState(source === 'multi_agent')
   const [conversationId, setConversationId] = useState<string | null>(null)
@@ -195,6 +198,27 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
         };
 
         setTimeout(() => {
+          // Validate required variables before sending
+          let isCanSend = true
+          const params: Record<string, any> = {}
+          if (chatVariables && chatVariables.length > 0) {
+            const needRequired: string[] = []
+            chatVariables.forEach(vo => {
+              params[vo.name] = vo.value
+
+              if (vo.required && (params[vo.name] === null || params[vo.name] === undefined || params[vo.name] === '')) {
+                isCanSend = false
+                needRequired.push(vo.name)
+              }
+            })
+
+            if (needRequired.length) {
+              messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
+            }
+          }
+          if (!isCanSend) {
+            return
+          }
           runCompare(data.app_id, {
             message,
             files: fileList.map(file => {
@@ -214,7 +238,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
               model_parameters: item.model_parameters,
               conversation_id: item.conversation_id
             })),
-            variables: {},
+            variables: params,
             "parallel": true,
             "stream": true,
             "timeout": 60,
