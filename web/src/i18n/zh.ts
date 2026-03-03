@@ -122,6 +122,7 @@ export const zh = {
       preview: '预览',
       pleaseUploadFileFirst: '请先上传文件',
       shareSuccess: '分享成功',
+      stopShareSuccess: '已取消分享，对方将无法访问该知识库',
       shareFailed: '分享失败',
       allModels: '所有模型',
       knowledgeBaseInfo: '知识库信息',

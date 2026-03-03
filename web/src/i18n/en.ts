@@ -611,6 +611,7 @@ export const en = {
       preview: 'Preview',
       pleaseUploadFileFirst: 'Please upload file first',
       shareSuccess: 'Share successfully',
+      stopShareSuccess: 'Sharing is off. Access denied. ',
       shareFailed: 'Share failed',
       allModels: 'All Models',
       knowledgeBaseInfo: 'Knowledge base information',
