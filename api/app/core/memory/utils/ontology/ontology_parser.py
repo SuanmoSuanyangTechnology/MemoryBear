@@ -327,7 +327,7 @@ class MultiOntologyParser:
     
     Example:
         >>> parser = MultiOntologyParser([
-        ...     "General_purpose_entity.ttl",
+        ...     "app/core/memory/ontology_services/General_purpose_entity.ttl",
         ...     "domain_specific.owl"
         ... ])
         >>> registry = parser.parse_all()
