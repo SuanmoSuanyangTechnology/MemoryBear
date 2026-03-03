@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
+from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
 from app.models import App
@@ -617,7 +618,8 @@ class WorkflowService:
                     "event": "end",
                     "data": {
                         "elapsed_time": payload.get("elapsed_time"),
-                        "message_length": len(payload.get("output", ""))
+                        "message_length": len(payload.get("output", "")),
+                        "error": payload.get("error", "")
                     }
                 }
             case "node_start" | "node_end" | "node_error" | "cycle_item":
@@ -778,6 +780,14 @@ class WorkflowService:
                     "error": str(e)
                 }
             }
+
+    @staticmethod
+    def get_start_node_variables(config: dict) -> list:
+        nodes = config.get("nodes", [])
+        for node in nodes:
+            if node.get("type") == NodeType.START:
+                return node.get("config", {}).get("variables", [])
+        raise BusinessException("workflow config error - start node not found")
 
     def _clean_event_for_json(self, event: dict[str, Any]) -> dict[str, Any]:
         """清理事件数据，移除不可序列化的对象
