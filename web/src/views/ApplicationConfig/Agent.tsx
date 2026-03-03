@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-25 18:11:49
+ * @Last Modified time: 2026-03-03 11:14:30
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -175,6 +175,10 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
       const parsedMemoryContent = memoryContent === null || memoryContent === '' 
         ? undefined 
         : !isNaN(Number(memoryContent)) ? Number(memoryContent) : memoryContent
+      const variableList = variables?.map((item, index) => ({
+        ...item,
+        index
+      })) || []
       form.setFieldsValue({
         ...response,
         tools: allTools,
@@ -185,9 +189,10 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         skills: {
           ...skills,
           skill_ids: allSkills
-        }
+        },
+        variables: [...variableList]
       })
-      updateVariableList([...variables])
+      updateVariableList([...variableList])
       setData({
         ...response,
         tools: allTools
