@@ -1,10 +1,17 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2025-12-23 16:22:51 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-03 10:12:33
+ */
 import { useEffect, useState, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $getSelection, $isRangeSelection, $isTextNode, COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND, KEY_ARROW_DOWN_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ESCAPE_COMMAND } from 'lexical';
 
-import { INSERT_VARIABLE_COMMAND } from '../commands';
+import { INSERT_VARIABLE_COMMAND, CLOSE_AUTOCOMPLETE_COMMAND } from '../commands';
 import type { NodeProperties } from '../../../types'
 
+// Suggestion item interface for autocomplete dropdown
 export interface Suggestion {
   key: string;
   label: string;
@@ -13,16 +20,18 @@ export interface Suggestion {
   value: string;
   group?: string
   nodeData: NodeProperties;
-  isContext?: boolean; // 标记是否为context变量
-  disabled?: boolean; // 标记是否禁用
+  isContext?: boolean; // Flag for context variable
+  disabled?: boolean; // Flag for disabled state
 }
 
+// Autocomplete plugin for variable suggestions triggered by '/' character
 const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> = ({ options, enableJinja2 = false }) => {
   const [editor] = useLexicalComposerContext();
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [popupPosition, setPopupPosition] = useState({ top: 0, left: 0 });
 
+  // Listen to editor updates and show suggestions when '/' is typed
   useEffect(() => {
     return editor.registerUpdateListener(({ editorState }) => {
       editorState.read(() => {
@@ -49,6 +58,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
           setSelectedIndex(0);
         }
 
+        // Calculate popup position to keep it within viewport bounds
         if (shouldShow) {
           const domSelection = window.getSelection();
           if (domSelection && domSelection.rangeCount > 0) {
@@ -84,9 +94,22 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
     });
   }, [editor]);
 
+  // Register command to close autocomplete popup
+  useEffect(() => {
+    return editor.registerCommand(
+      CLOSE_AUTOCOMPLETE_COMMAND,
+      () => {
+        setShowSuggestions(false);
+        return true;
+      },
+      COMMAND_PRIORITY_HIGH
+    );
+  }, [editor]);
+
+  // Insert selected suggestion into editor
   const insertMention = (suggestion: Suggestion) => {
     if (enableJinja2) {
-      // 在jinja2模式下，插入{{variable}}格式的文本
+      // In Jinja2 mode, insert {{variable}} format text
       editor.update(() => {
         const selection = $getSelection();
         if ($isRangeSelection(selection)) {
@@ -94,7 +117,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
           const anchorOffset = selection.anchor.offset;
           const nodeText = anchorNode.getTextContent();
           
-          // 移除触发字符'/'
+          // Remove trigger character '/'
           const textBefore = nodeText.substring(0, anchorOffset - 1);
           const textAfter = nodeText.substring(anchorOffset);
           const newText = textBefore + `{{${suggestion.value}}}` + textAfter;
@@ -103,19 +126,20 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
             anchorNode.setTextContent(newText);
           }
           
-          // 设置光标位置到插入文本之后
+          // Set cursor position after inserted text
           const newOffset = textBefore.length + `{{${suggestion.value}}}`.length;
           selection.anchor.offset = newOffset;
           selection.focus.offset = newOffset;
         }
       });
     } else {
-      // 普通模式下使用VariableNode
+      // In normal mode, use VariableNode
       editor.dispatchCommand(INSERT_VARIABLE_COMMAND, { data: suggestion });
     }
     setShowSuggestions(false);
   };
 
+  // Group suggestions by node ID
   const groupedSuggestions = options.reduce((groups: Record<string, any[]>, suggestion) => {
     const { nodeData } = suggestion
     const nodeId = nodeData.id as string;
@@ -126,6 +150,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
     return groups;
   }, {});
 
+  // Handle Enter key to select suggestion
   useEffect(() => {
     if (!showSuggestions) return;
 
@@ -148,11 +173,13 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
     );
   }, [showSuggestions, selectedIndex, groupedSuggestions, insertMention, editor]);
 
+  // Handle keyboard navigation (Arrow Up/Down, Escape)
   useEffect(() => {
     if (!showSuggestions) return;
 
     const allOptions = Object.values(groupedSuggestions).flat();
 
+    // Navigate down through suggestions, skip disabled items
     const unregisterArrowDown = editor.registerCommand(
       KEY_ARROW_DOWN_COMMAND,
       (event) => {
@@ -172,6 +199,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
       COMMAND_PRIORITY_HIGH
     );
 
+    // Navigate up through suggestions, skip disabled items
     const unregisterArrowUp = editor.registerCommand(
       KEY_ARROW_UP_COMMAND,
       (event) => {
@@ -191,6 +219,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
       COMMAND_PRIORITY_HIGH
     );
 
+    // Close suggestions on Escape key
     const unregisterEscape = editor.registerCommand(
       KEY_ESCAPE_COMMAND,
       (event) => {
@@ -239,7 +268,9 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
         const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
         return (
           <div key={nodeId}>
+            {/* Divider between groups */}
             {groupIndex > 0 && <div style={{ height: '1px', background: '#f0f0f0', margin: '4px 0' }} />}
+            {/* Group header with node name */}
             <div style={{ padding: '4px 12px', fontSize: '12px', color: '#999', fontWeight: 'bold' }}>
               {nodeName}
             </div>

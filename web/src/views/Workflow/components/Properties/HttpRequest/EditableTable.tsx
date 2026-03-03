@@ -49,7 +49,7 @@ const EditableTable: FC<EditableTableProps> = ({
   const getColumns = (remove: (index: number) => void): TableProps<TableRow>['columns'] => {
     const hasType = typeOptions.length > 0;
     const cellClassName="rb:p-1!"
-    const contentClassName ="rb:w-[108px]! rb:text-[12px]!"
+    const contentClassName ="rb:w-[108px]! rb:text-[12px]! rb:overflow-hidden!"
 
     return [
       {
