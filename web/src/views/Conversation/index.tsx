@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 17:41:05
+ * @Last Modified time: 2026-03-03 13:46:22
  */
 /**
  * Conversation Page
@@ -14,11 +14,12 @@ import { type FC, useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Flex, Skeleton, Form, Dropdown, type MenuProps } from 'antd'
+import { Flex, Skeleton, Form, Dropdown, type MenuProps, App } from 'antd'
+import { SettingOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
-import { getConversationHistory, sendConversation, getConversationDetail, getShareToken } from '@/api/application'
+import { getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig } from '@/api/application'
 import type { HistoryItem, QueryParams, UploadFileListModalRef } from './types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
@@ -37,12 +38,16 @@ import UploadFiles from './components/FileUpload'
 // import AudioRecorder from '@/components/AudioRecorder'
 import { shareFileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 import UploadFileListModal from './components/UploadFileListModal'
+import type { VariableConfigModalRef } from '@/views/Workflow/types'
+import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
+import VariableConfigModal from '@/views/Workflow/components/Chat/VariableConfigModal';
 
 /**
  * Conversation component for shared applications
  */
 const Conversation: FC = () => {
   const { t } = useTranslation()
+  const { message: messageApi } = App.useApp()
   const { token } = useParams()
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
@@ -64,6 +69,22 @@ const Conversation: FC = () => {
   const queryValues = Form.useWatch<QueryParams>([], form)
 
   const uploadFileListModalRef = useRef<UploadFileListModalRef>(null)
+
+  const variableConfigModalRef = useRef<VariableConfigModalRef>(null)
+  const [variables, setVariables] = useState<Variable[]>([]) // Workflow input variables
+
+  /**
+   * Opens the variable configuration modal
+   */
+  const handleEditVariables = () => {
+    variableConfigModalRef.current?.handleOpen(variables)
+  }
+  /**
+   * Saves updated variable values from the modal
+   */
+  const handleSave = (values: Variable[]) => {
+    setVariables([...values])
+  }
   useEffect(() => {
     const shareToken = localStorage.getItem(`shareToken_${token}`)
     setShareToken(shareToken)
@@ -81,6 +102,17 @@ const Conversation: FC = () => {
       getHistory()
     }
   }, [token, shareToken, page, hasMore, historyList])
+  useEffect(() => {
+    if (shareToken && token) {
+      getExperienceConfig(token)
+        .then(res => {
+          const response = res as { variables: Variable[] }
+          setVariables(response.variables || [])
+        })
+    } else {
+      setChatList([])
+    }
+  }, [shareToken, token])
 
   /** Group conversation history by date */
   const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]> => {
@@ -191,12 +223,35 @@ const Conversation: FC = () => {
     })
   }
 
+  const isNeedVariableConfig = variables.some(vo => vo.required && (vo.value === null || vo.value === undefined || vo.value === ''))
+
   /** Send message and handle streaming response */
   const handleSend = () => {
     if (!token || !shareToken) {
       return
     }
     const { files = [], ...rest } = queryValues || {}
+    // Validate required variables before sending
+    let isCanSend = true
+    const params: Record<string, any> = {}
+    if (variables.length > 0) {
+      const needRequired: string[] = []
+      variables.forEach(vo => {
+        params[vo.name] = vo.value ?? vo.defaultValue
+
+        if (vo.required && (params[vo.name] === null || params[vo.name] === undefined || params[vo.name] === '')) {
+          isCanSend = false
+          needRequired.push(vo.name)
+        }
+      })
+
+      if (needRequired.length) {
+        messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
+      }
+    }
+    if (!isCanSend) {
+      return
+    }
     setLoading(true)
     setStreamLoading(true)
     addUserMessage(message, files)
@@ -247,7 +302,8 @@ const Conversation: FC = () => {
             upload_file_id: file.response.data.file_id
           }
         }
-      })
+      }),
+      variables: params
     }, handleStreamMessage, shareToken)
       .finally(() => {
         setLoading(false)
@@ -384,6 +440,20 @@ const Conversation: FC = () => {
                     {t(`memoryConversation.memory`)}
                   </ButtonCheckbox>
                 </Form.Item>
+                {variables.length > 0 && (
+                  <Form.Item name="variables" className="rb:mb-0!">
+                    <div
+                      className={clsx("rb:flex rb:items-center rb:border rb:rounded-lg rb:px-2 rb:text-[12px] rb:h-6 rb:cursor-pointer rb:hover:bg-[#F0F3F8] rb:text-[#212332]", {
+                        'rb:border-[#FF5D34] rb:text-[#FF5D34]': isNeedVariableConfig,
+                        'rb:border-[#DFE4ED]': !isNeedVariableConfig,
+                      })}
+                      onClick={handleEditVariables}
+                    >
+                      <SettingOutlined className="rb:mr-1" />
+                      {t(`memoryConversation.variableConfig`)}
+                      </div>
+                  </Form.Item>
+                )}
               </Flex>
               {/* <Flex align="center">
                 <AudioRecorder onRecordingComplete={handleRecordingComplete} />
@@ -398,6 +468,11 @@ const Conversation: FC = () => {
       <UploadFileListModal
         ref={uploadFileListModalRef}
         refresh={addFileList}
+      />
+      <VariableConfigModal
+        ref={variableConfigModalRef}
+        refresh={handleSave}
+        variables={variables}
       />
     </Flex>
   )

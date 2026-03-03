@@ -1684,7 +1684,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       fileType: 'File Type',
       image: 'Image',
       fileUrl: 'File URL',
-      addRemoteFile: 'Add Remote File'
+      addRemoteFile: 'Add Remote File',
+      variableConfig: 'Variable Configuration',
     },
     login: {
       title: 'Red Bear Memory Science',
@@ -2192,7 +2193,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       save: 'Save',
       export: 'Export',
       variableConfig: 'Variable Configuration',
-      variableRequired: 'Required',
+      variableRequired: 'Required, please configure variable values',
       addMessage: 'Add Message',
       answerDesc: 'Reply',
       addNode: 'Add Node',
