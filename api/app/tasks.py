@@ -2147,6 +2147,8 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
     async def _run() -> Dict[str, Any]:
         from app.core.logging_config import get_logger
         from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
+        from app.models.implicit_emotions_storage_model import ImplicitEmotionsStorage
+        from sqlalchemy import select, func
         from app.services.implicit_memory_service import ImplicitMemoryService
         from app.services.emotion_analytics_service import EmotionAnalyticsService
 
@@ -2161,15 +2163,18 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
 
         with get_db_context() as db:
             try:
-                # 获取所有已存储数据的用户ID
+                # 获取所有已存储数据的用户ID（分批次处理）
                 repo = ImplicitEmotionsStorageRepository(db)
-                user_ids = repo.get_all_user_ids()
-                total_users = len(user_ids)
                 
+                # 先统计总数用于日志
+                from sqlalchemy import func
+                total_users = db.execute(
+                    select(func.count()).select_from(ImplicitEmotionsStorage)
+                ).scalar() or 0
                 logger.info(f"找到 {total_users} 个需要更新的用户")
 
-                # 遍历每个用户并更新数据
-                for end_user_id in user_ids:
+                # 遍历每个用户并更新数据（分批次，避免一次性加载所有ID）
+                for end_user_id in repo.get_all_user_ids(batch_size=100):
                     logger.info(f"开始处理用户: {end_user_id}")
                     user_start_time = time.time()
                     
