@@ -62,7 +62,7 @@ def process_item(item: dict):
 
 
 @celery_app.task(name="app.core.rag.tasks.parse_document")
-def parse_document(file_path: str, document_id: str):
+def parse_document(file_path: str, document_id: uuid.UUID):
     """
     Document parsing, vectorization, and storage
     """
@@ -76,9 +76,6 @@ def parse_document(file_path: str, document_id: str):
     db_knowledge = None
     progress_msg = f"{datetime.now().strftime('%H:%M:%S')} Task has been received.\n"
     try:
-        # 确保 document_id 是 UUID 对象
-        if not isinstance(document_id, uuid.UUID):
-            document_id = uuid.UUID(str(document_id))
         db_document = db.query(Document).filter(Document.id == document_id).first()
         db_knowledge = db.query(Knowledge).filter(Knowledge.id == db_document.kb_id).first()
         # 1. Document parsing & segmentation
@@ -289,13 +286,11 @@ def parse_document(file_path: str, document_id: str):
         result = f"parse document '{db_document.file_name}' processed successfully."
         return result
     except Exception as e:
-        if db_document is not None:
-            db_document.progress_msg = (db_document.progress_msg or "") + f"Failed to vectorize and import the parsed document: {str(e)}\n"
+        if 'db_document' in locals():
+            db_document.progress_msg += f"Failed to vectorize and import the parsed document:{str(e)}\n"
             db_document.run = 0
             db.commit()
-            result = f"parse document '{db_document.file_name}' failed."
-        else:
-            result = f"parse document '{document_id}' failed: document not found in DB. error={str(e)}"
+        result = f"parse document '{db_document.file_name}' failed."
         return result
     finally:
         db.close()
