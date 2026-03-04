@@ -606,8 +606,8 @@ async def dashboard_data(
             
             # 获取RAG相关数据
             try:
-                # total_memory: 使用 total_chunk（总chunk数）
-                total_chunk = memory_dashboard_service.get_rag_total_chunk(db, current_user)
+                # total_memory: 只统计用户知识库（permission_id='Memory'）的chunk数
+                total_chunk = memory_dashboard_service.get_rag_user_kb_total_chunk(db, current_user)
                 rag_data["total_memory"] = total_chunk
                 
                 # total_app: 统计当前空间下的所有app数量
