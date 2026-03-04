@@ -1184,6 +1184,12 @@ export const zh = {
       xinference: "Xinference",
       gpustack: "Gpustack",
       bedrock: "Bedrock",
+
+      is_vision: '支持视觉',
+      is_omni: '支持全模态',
+      vision: '视觉',
+      audio: '音频',
+      video: '视频',
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',

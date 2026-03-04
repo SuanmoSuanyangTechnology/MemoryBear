@@ -603,7 +603,13 @@ export const en = {
       ollama: "Ollama",
       xinference: "Xinference",
       gpustack: "Gpustack",
-      bedrock: "Bedrock"
+      bedrock: "Bedrock",
+
+      is_vision: 'Vision Support',
+      is_omni: 'Omni Support',
+      vision: 'Vision',
+      audio: 'Audio',
+      video: 'Video',
     },
     knowledgeBase: {
       home: 'Home',
