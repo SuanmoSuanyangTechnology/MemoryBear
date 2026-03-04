@@ -295,12 +295,12 @@ class WorkflowExecutor:
                             self.graph,
                             self.execution_context.checkpoint_config
                     ):
-                        full_content += msg_event["data"]['chunk']
+                        full_content += msg_event["data"]['content']
                         yield msg_event
 
             # Flush any remaining chunks
             async for msg_event in self.stream_coordinator.flush_remaining_chunk(self.variable_pool):
-                full_content += msg_event["data"]['chunk']
+                full_content += msg_event["data"]['content']
                 yield msg_event
 
             result = graph.get_state(self.execution_context.checkpoint_config).values
