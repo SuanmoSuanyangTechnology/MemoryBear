@@ -390,17 +390,57 @@ def get_rag_total_kb(
     current_user: User
 ) -> int:
     """
-    根据当前用户所在的workspace_id查询konwledges表所有不同id的数量
+    根据当前用户所在的workspace_id查询konwledges表中排除用户知识库（permission_id!='Memory'）的数量
     """
     workspace_id = current_user.current_workspace_id
-    business_logger.info(f"获取RAG总知识库数: workspace_id={workspace_id}, 操作者: {current_user.username}")
+    business_logger.info(f"获取RAG总知识库数(排除用户知识库): workspace_id={workspace_id}, 操作者: {current_user.username}")
     
     try:
-        total_kb = knowledge_repository.get_total_kb_count_by_workspace(db, workspace_id)
+        total_kb = knowledge_repository.get_non_user_kb_count_by_workspace(db, workspace_id)
         business_logger.info(f"成功获取RAG总知识库数: {total_kb}")
         return total_kb
     except Exception as e:
         business_logger.error(f"获取RAG总知识库数失败: workspace_id={workspace_id} - {str(e)}")
+        raise
+
+
+def get_rag_user_kb_total_chunk(
+    db: Session,
+    current_user: User
+) -> int:
+    """
+    根据当前用户所在的workspace_id，从documents表统计所有用户知识库的chunk总数。
+    与 /end_users 接口保持同源：查询 file_name 匹配 end_user_id.txt 的文档 chunk_num 之和。
+    """
+    workspace_id = current_user.current_workspace_id
+    business_logger.info(f"获取用户知识库总chunk数(documents表): workspace_id={workspace_id}, 操作者: {current_user.username}")
+
+    try:
+        from app.models.document_model import Document
+        from app.models.end_user_model import EndUser
+        from app.models.app_model import App
+        from sqlalchemy import func
+
+        # 通过 App 关联取该 workspace 下所有 end_user_id
+        end_user_ids = [
+            str(u.id) for u in db.query(EndUser.id)
+            .join(App, EndUser.app_id == App.id)
+            .filter(App.workspace_id == workspace_id)
+            .all()
+        ]
+        if not end_user_ids:
+            return 0
+
+        file_names = [f"{uid}.txt" for uid in end_user_ids]
+        result = db.query(func.sum(Document.chunk_num)).filter(
+            Document.file_name.in_(file_names)
+        ).scalar()
+
+        total_chunk = int(result or 0)
+        business_logger.info(f"成功获取用户知识库总chunk数: {total_chunk}")
+        return total_chunk
+    except Exception as e:
+        business_logger.error(f"获取用户知识库总chunk数失败: workspace_id={workspace_id} - {str(e)}")
         raise
 
 def get_current_user_total_chunk(
