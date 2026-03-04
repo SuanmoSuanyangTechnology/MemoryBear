@@ -6,6 +6,7 @@ import {
   getShortTerm,
 } from '@/api/memory'
 import Empty from '@/components/Empty'
+import Markdown from '@/components/Markdown'
 
 interface ShortTermItem {
   retrieval: Array<{ query: string; retrieval: string[]; }>;
@@ -85,7 +86,9 @@ const ShortTermDetail: FC = () => {
                 ))}
                 <div>
                   <div className="rb:font-medium rb:leading-5 rb:mb-1">{t('shortTermDetail.answer')}</div>
-                  <div className="rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-3 rb:py-2.5 rb:leading-5">{vo.answer}</div>
+                  <div className="rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-3 rb:py-2.5 rb:leading-5">
+                    <Markdown content={vo.answer} />
+                  </div>
                 </div>
               </Space>
             </div>
@@ -103,7 +106,9 @@ const ShortTermDetail: FC = () => {
           : data.long_term?.map((vo, voIdx) => (
             <div key={voIdx} className="rb:leading-5 rb:shadow-[inset_3px_0px_0px_0px_#155EEF] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:px-6 rb:py-3">
               <div className="rb:mb-1 rb:font-medium rb:leading-5.5">{vo.query}</div>
-              <div className="rb:mt-1 rb:leading-5 rb:text-[#5B6167] rb:text-[12px]">{vo.retrieval}</div>
+              <div className="rb:mt-1 rb:leading-5 rb:text-[#5B6167] rb:text-[12px]">
+                <Markdown content={vo.retrieval} />
+              </div>
             </div>
           ))
         }
