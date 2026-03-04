@@ -274,7 +274,7 @@ class StreamOutputCoordinator:
                 yield {
                     "event": "message",
                     "data": {
-                        "chunk": final_chunk
+                        "content": final_chunk
                     }
                 }
 
