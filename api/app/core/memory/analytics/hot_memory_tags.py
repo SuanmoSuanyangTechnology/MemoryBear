@@ -281,16 +281,25 @@ async def get_interest_distribution(end_user_id: str, limit: int = 10, by_user: 
             return []
 
         raw_tag_names = [tag for tag, freq in raw_tags_with_freq]
+        raw_freq_map = {tag: freq for tag, freq in raw_tags_with_freq}
 
-        # 使用兴趣活动专用prompt进行筛选
+        # 使用兴趣活动专用prompt进行筛选（支持语义推断出新标签）
         interest_tag_names = await filter_interests_with_llm(raw_tag_names, end_user_id, language=language)
 
-        # 保留原始频率，按兴趣筛选结果过滤
-        final_tags = [
-            (tag, freq)
-            for tag, freq in raw_tags_with_freq
-            if tag in interest_tag_names
-        ]
+        # 构建最终标签列表：
+        # - 原始标签中存在的，保留原始频率
+        # - LLM推断出的新标签（不在原始列表中），赋予默认频率1
+        final_tags = []
+        seen = set()
+        for tag in interest_tag_names:
+            if tag in seen:
+                continue
+            seen.add(tag)
+            freq = raw_freq_map.get(tag, 1)
+            final_tags.append((tag, freq))
+
+        # 按频率降序排列
+        final_tags.sort(key=lambda x: x[1], reverse=True)
 
         return final_tags[:limit]
     finally:
