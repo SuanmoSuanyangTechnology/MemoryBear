@@ -2276,6 +2276,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       suggestions: 'Personalized Suggestions',
       suggestionLoading: 'Your personalized suggestions are being generated',
       item: 'item',
+      noData: 'Emotion suggestion data does not exist, please click the refresh button to initialize',
     },
     reflectionEngine: {
       reflectionEngineConfig: 'Reflection Engine Configuration',
@@ -2523,7 +2524,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       supporting_evidence: 'Preference Source',
       specific_examples: 'Source',
       wordEmpty: 'Click on a node in the left chart to view preference details',
-      noData: 'Portrait data does not exist, please click the refresh button in the top right corner to initialize',
+      noData: 'Portrait data does not exist, please click the refresh button to initialize',
     },
     shortTermDetail: {
       title: 'Short-term memory is the "workbench" of the AI system, connecting instant conversations with long-term knowledge bases. Through real-time capture, deep retrieval, intelligent extraction and filtering transformation, temporary unstructured information is converted into valuable long-term knowledge.',
