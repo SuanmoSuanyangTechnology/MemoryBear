@@ -1945,7 +1945,9 @@ export const zh = {
       path: '路径',
       viewDetail: '查看详情',
       textLink: '测试连接',
-      noResult: '处理结果将显示在这里'
+      noResult: '处理结果将显示在这里',
+      serverUrlInvalid: '必须以 http:// 或 https:// 开头，且不能有前后空格',
+      requestHeaderKeyInvalid: '只支持英文、数字、连字符(-)、下划线(_)，不能以连字符或下划线开头结尾',
     },
     workflow: {
       coreNode: '核心节点',

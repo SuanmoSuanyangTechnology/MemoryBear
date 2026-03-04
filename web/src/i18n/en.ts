@@ -1948,7 +1948,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       path: 'Path',
       viewDetail: 'View Details',
       textLink: 'Test Connection',
-      noResult: 'Processing results will be displayed here'
+      noResult: 'Processing results will be displayed here',
+      serverUrlInvalid: 'Must start with http:// or https://, and cannot have leading or trailing spaces',
+      requestHeaderKeyInvalid: 'Only English letters, numbers, hyphens (-), and underscores (_) are allowed, and cannot start or end with a hyphen or underscore',
     },
     workflow: {
       coreNode: 'Core Nodes',
