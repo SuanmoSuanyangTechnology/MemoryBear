@@ -1,9 +1,12 @@
 import asyncio
 import json
+import logging
 import os
 from typing import List, Tuple
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -89,7 +92,7 @@ async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
         return structured_response.meaningful_tags
 
     except Exception as e:
-        print(f"LLM筛选过程中发生错误: {e}")
+        logger.error(f"LLM筛选过程中发生错误: {e}", exc_info=True)
         # 在LLM失败时返回原始标签，确保流程继续
         return tags
 
@@ -153,7 +156,7 @@ async def filter_interests_with_llm(tags: List[str], end_user_id: str, language:
         return structured_response.interest_tags
 
     except Exception as e:
-        print(f"兴趣标签LLM筛选过程中发生错误: {e}")
+        logger.error(f"兴趣标签LLM筛选过程中发生错误: {e}", exc_info=True)
         return tags
 
 
