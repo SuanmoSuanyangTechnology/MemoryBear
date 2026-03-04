@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 14:21:54
+ * @Last Modified time: 2026-03-04 18:05:36
  */
 /**
  * Chat debugging component for application testing
@@ -217,6 +217,8 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
             }
           }
           if (!isCanSend) {
+            setLoading(false)
+            setCompareLoading(false)
             return
           }
           runCompare(data.app_id, {
