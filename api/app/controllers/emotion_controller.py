@@ -295,8 +295,8 @@ async def get_emotion_suggestions(
                 f"用户 {request.end_user_id} 的建议数据不存在",
                 extra={"end_user_id": request.end_user_id}
             )
-            return fail(
-                code=404,
+            return success(
+                data={"exists": False},
                 msg="情绪建议数据不存在，请点击右上角刷新进行初始化"
             )
 
