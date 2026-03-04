@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 16:43:06
+ * @Last Modified time: 2026-03-04 12:10:17
  */
 /**
  * Workflow Chat Component
@@ -174,8 +174,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { chunk, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status } = item.data as {
-          chunk: string;
+        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status } = item.data as {
+          content: string;
           conversation_id: string | null;
           cycle_id: string;
           cycle_idx: number;
@@ -202,7 +202,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
               if (lastIndex >= 0) {
                 newList[lastIndex] = {
                   ...newList[lastIndex],
-                  content: newList[lastIndex].content + chunk
+                  content: newList[lastIndex].content + content
                 }
               }
               return newList

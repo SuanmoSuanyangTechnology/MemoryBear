@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 13:46:22
+ * @Last Modified time: 2026-03-04 12:10:44
  */
 /**
  * Conversation Page
@@ -267,8 +267,8 @@ const Conversation: FC = () => {
             currentConversationId = newId
             break
           case 'message':
-            const { content, chunk, conversation_id: curId } = item.data as { content: string; chunk: string; conversation_id: string;  }
-            updateAssistantMessage(content ?? chunk)
+            const { content, conversation_id: curId } = item.data as { content: string; conversation_id: string;  }
+            updateAssistantMessage(content)
 
             if (curId) {
               currentConversationId = curId;
