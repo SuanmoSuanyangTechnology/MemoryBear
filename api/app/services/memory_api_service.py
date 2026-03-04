@@ -140,9 +140,11 @@ class MemoryAPIService:
         
         try:
             # Delegate to MemoryAgentService
+            # Convert string message to list[dict] format expected by MemoryAgentService
+            messages = message if isinstance(message, list) else [{"role": "user", "content": message}]
             result = await MemoryAgentService().write_memory(
                 end_user_id=end_user_id,
-                messages=message,
+                messages=messages,
                 config_id=config_id,
                 db=self.db,
                 storage_type=storage_type,
@@ -151,8 +153,13 @@ class MemoryAPIService:
             
             logger.info(f"Memory write successful for end_user: {end_user_id}")
             
+            # result may be a string "success" or a dict with a "status" key
+            if isinstance(result, dict):
+                status = result.get("status", "success")
+            else:
+                status = result if isinstance(result, str) else "success"
             return {
-                "status": "success" if result == "success" else result,
+                "status": status,
                 "end_user_id": end_user_id
             }
             
