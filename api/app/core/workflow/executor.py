@@ -272,7 +272,7 @@ class WorkflowExecutor:
                     event_type = data.get("type", "node_chunk")  # "message" or "node_chunk"
                     if event_type == "node_chunk":
                         async for msg_event in self.event_handler.handle_node_chunk_event(data):
-                            full_content += msg_event["data"]["chunk"]
+                            full_content += msg_event["data"]["content"]
                             yield msg_event
 
                     elif event_type == "node_error":
