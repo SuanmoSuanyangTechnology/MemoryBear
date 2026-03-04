@@ -154,13 +154,17 @@ class MemoryAPIService:
             logger.info(f"Memory write successful for end_user: {end_user_id}")
             
             # result may be a string "success" or a dict with a "status" key
+            # Preserve the full dict so callers don't silently lose extra fields
+            # (e.g. error codes, metadata) returned by MemoryAgentService.
             if isinstance(result, dict):
-                status = result.get("status", "success")
-            else:
-                status = result if isinstance(result, str) else "success"
+                return {
+                    **result,
+                    "status": result.get("status", "unknown"),
+                    "end_user_id": end_user_id,
+                }
             return {
-                "status": status,
-                "end_user_id": end_user_id
+                "status": result if isinstance(result, str) else "success",
+                "end_user_id": end_user_id,
             }
             
         except ConfigurationError as e:
