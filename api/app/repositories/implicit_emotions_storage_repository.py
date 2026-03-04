@@ -5,7 +5,7 @@ Implicit Emotions Storage Repository
 事务由调用方控制，仓储层只使用 flush/refresh
 """
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from typing import Optional, Generator
 from sqlalchemy.orm import Session
 from sqlalchemy import select, not_, exists
@@ -125,7 +125,10 @@ class ImplicitEmotionsStorageRepository:
             用户ID字符串
         """
         from sqlalchemy import cast, String as SAString
-        today_start = datetime.combine(date.today(), datetime.min.time())
+        CST = timezone(timedelta(hours=8))
+        now_cst = datetime.now(CST)
+        today_start = now_cst.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
+        tomorrow_start = today_start + timedelta(days=1)
         offset = 0
         while True:
             try:
@@ -133,6 +136,7 @@ class ImplicitEmotionsStorageRepository:
                     select(EndUser.id)
                     .where(
                         EndUser.created_at >= today_start,
+                        EndUser.created_at < tomorrow_start,
                         not_(
                             exists(
                                 select(ImplicitEmotionsStorage.end_user_id).where(
