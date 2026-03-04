@@ -15,7 +15,7 @@ import { useParams } from 'react-router-dom'
 import ReactEcharts from 'echarts-for-react';
 import { Space } from 'antd'
 
-import { getHotMemoryTagsByUser } from '@/api/memory';
+import { getInterestDistributionByUser } from '@/api/memory';
 import Empty from '@/components/Empty';
 import Loading from '@/components/Empty/Loading';
 import RbCard from '@/components/RbCard/Card';
@@ -38,7 +38,7 @@ const InterestDistribution: FC = () => {
   /** Fetch interest distribution data */
   const getData = () => {
     setLoading(true)
-    getHotMemoryTagsByUser(id as string).then(res => {
+    getInterestDistributionByUser(id as string).then(res => {
       const response = res as { name: string; frequency: number }[]
       setData(response.map(item => ({
         ...item,
