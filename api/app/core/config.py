@@ -205,6 +205,12 @@ class Settings:
     # Memory Cache Regeneration Configuration
     MEMORY_CACHE_REGENERATION_HOURS: int = int(os.getenv("MEMORY_CACHE_REGENERATION_HOURS", "24"))
 
+    # Celery Beat Schedule Configuration (定时任务执行频率)
+    MEMORY_INCREMENT_HOUR: int = int(os.getenv("MEMORY_INCREMENT_HOUR", "2"))
+    MEMORY_INCREMENT_MINUTE: int = int(os.getenv("MEMORY_INCREMENT_MINUTE", "0"))
+    WORKSPACE_REFLECTION_INTERVAL_SECONDS: int = int(os.getenv("WORKSPACE_REFLECTION_INTERVAL_SECONDS", "30"))
+    FORGETTING_CYCLE_INTERVAL_HOURS: int = int(os.getenv("FORGETTING_CYCLE_INTERVAL_HOURS", "24"))
+
     # Memory Module Configuration (internal)
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")
     MEMORY_CONFIG_DIR: str = os.getenv("MEMORY_CONFIG_DIR", "app/core/memory")
