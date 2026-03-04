@@ -1774,6 +1774,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       mcp: 'MCP Services',
       inner: 'Built-in Tools',
       custom: 'Custom Tools',
+      market: 'Tool Market',
       mcpSearchPlaceholder: 'Search MCP Services...',
       innerSearchPlaceholder: 'Search Tools...',
       customSearchPlaceholder: 'Search Custom Tools...',

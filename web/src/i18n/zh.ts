@@ -1771,6 +1771,7 @@ export const zh = {
       mcp: 'MCP 服务',
       inner: '内置工具',
       custom: '自定义工具',
+      market: '工具市场',
       mcpSearchPlaceholder: '搜索MCP服务...',
       innerSearchPlaceholder: '搜索工具...',
       customSearchPlaceholder: '搜索自定义工具...',
