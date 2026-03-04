@@ -456,6 +456,7 @@ export const en = {
       logoTip: `Supported image formats: JPG, PNG \n Suggested size: square ratio \n Maximum size: ≤ 2MB`,
       imageSquareRequired: 'Please upload a square image',
       nameInvalid: 'Name cannot start or end with a space',
+      notAllSpaces: 'Cannot be all spaces',
     },
     model: {
       searchPlaceholder: 'search model…',

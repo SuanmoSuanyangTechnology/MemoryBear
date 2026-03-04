@@ -1032,6 +1032,7 @@ export const zh = {
       logoTip: `支持图片格式（JPG、PNG）\n 尺寸：正方形比例 \n 文件大小限制：≤ 2MB`,
       imageSquareRequired: '请上传正方形比例图片',
       nameInvalid: '不能是空格开头或结尾',
+      notAllSpaces: '不能是纯空格',
     },
     model: {
       searchPlaceholder: '搜索模型…',
