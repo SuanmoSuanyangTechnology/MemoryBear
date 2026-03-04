@@ -249,6 +249,7 @@ async def chat(
                         app_id=app.id,
                         workspace_id=workspace_id,
                         release_id=app.current_release.id,
+                        public=True
                 ):
                     event_type = event.get("event", "message")
                     event_data = event.get("data", {})
