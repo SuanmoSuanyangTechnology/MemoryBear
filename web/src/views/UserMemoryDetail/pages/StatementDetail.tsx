@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2025-12-19 16:54:52 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-04 16:28:00
+ */
 import { forwardRef, useImperativeHandle, useRef } from 'react'
 import { Row, Col, Space } from 'antd';
 import { useParams } from 'react-router-dom'
@@ -9,9 +15,17 @@ import Suggestions from '../components/Suggestions'
 import { generateSuggestions } from '@/api/memory'
 
 
-const StatementDetail = forwardRef((_props, ref) => {
+/**
+ * StatementDetail - Displays emotional memory analysis for a user
+ * Shows word cloud, emotion tags, health index, and personalized suggestions
+ */
+const StatementDetail = forwardRef<{ handleRefresh: () => void },{ refresh: () => void; }>(({
+  refresh
+}, ref) => {
   const { id } = useParams()
   const suggestionsRef = useRef<{ handleRefresh: () => void; }>(null)
+
+  // Regenerate suggestions and refresh the Suggestions child component
   const handleRefresh = () => {
     if (!id) {
       return Promise.resolve()
@@ -41,7 +55,7 @@ const StatementDetail = forwardRef((_props, ref) => {
         </Space>
       </Col>
       <Col span={12}>
-        <Suggestions ref={suggestionsRef} />
+        <Suggestions ref={suggestionsRef} refresh={refresh} />
       </Col>
     </Row>
   )

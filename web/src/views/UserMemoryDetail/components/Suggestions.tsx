@@ -1,12 +1,13 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:31:50 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:31:50 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-04 16:22:03
  */
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
+import { App } from 'antd'
 
 import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
@@ -20,6 +21,7 @@ import RbAlert from '@/components/RbAlert'
  * @property {Array} suggestions - List of suggestions with actionable steps
  */
 interface Suggestions {
+  exists?: boolean;
   health_summary: string;
   suggestions: Array<{
     type: string;
@@ -35,9 +37,10 @@ interface Suggestions {
  * Displays emotional health suggestions with actionable steps
  * Shows health summary and prioritized recommendations
  */
-const Suggestions = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
+const Suggestions = forwardRef<{ handleRefresh: () => void; }, { refresh: () => void; }>(({ refresh }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
+  const { modal } = App.useApp()
   const [loading, setLoading] = useState(false)
   const [suggestions, setSuggestions] = useState<Suggestions | null>(null)
 
@@ -52,7 +55,19 @@ const Suggestions = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => 
     setLoading(true)
     getEmotionSuggestions(id)
       .then((res) => {
-        setSuggestions(res as Suggestions)
+        const response = res as Suggestions
+        if (!response.exists && (!response.suggestions || !response.suggestions?.length)) {
+          modal.confirm({
+            title: t('statementDetail.noData'),
+            okText: t('common.refresh'),
+            cancelText: t('common.cancel'),
+            onOk: () => {
+              refresh()
+            }
+          })
+        } else {
+          setSuggestions(res as Suggestions)
+        }
       })
       .finally(() => {
         setLoading(false)
