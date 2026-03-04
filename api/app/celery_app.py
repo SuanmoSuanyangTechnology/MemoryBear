@@ -44,8 +44,8 @@ celery_app.conf.update(
     task_ignore_result=False,
     
     # 超时设置
-    task_time_limit=1800,  # 30分钟硬超时
-    task_soft_time_limit=1500,  # 25分钟软超时
+    task_time_limit=3600,  # 60分钟硬超时
+    task_soft_time_limit=3000,  # 50分钟软超时
     
     # Worker 设置 (per-worker settings are in docker-compose command line)
     worker_prefetch_multiplier=1,  # Don't hoard tasks, fairer distribution
