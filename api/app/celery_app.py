@@ -1,6 +1,7 @@
 import os
 import platform
 from datetime import timedelta
+from celery.schedules import crontab
 from urllib.parse import quote
 
 from celery import Celery
@@ -90,11 +91,10 @@ celery_app.conf.update(
 celery_app.autodiscover_tasks(['app'])
 
 # Celery Beat schedule for periodic tasks
-memory_increment_schedule = timedelta(hours=settings.MEMORY_INCREMENT_INTERVAL_HOURS)
+memory_increment_schedule = crontab(hour=settings.MEMORY_INCREMENT_HOUR, minute=settings.MEMORY_INCREMENT_MINUTE)
 memory_cache_regeneration_schedule = timedelta(hours=settings.MEMORY_CACHE_REGENERATION_HOURS)
-# 这个30秒的设计不合理
-workspace_reflection_schedule = timedelta(seconds=30)  # 每30秒运行一次settings.REFLECTION_INTERVAL_TIME
-forgetting_cycle_schedule = timedelta(hours=24)  # 每24小时运行一次遗忘周期
+workspace_reflection_schedule = timedelta(seconds=settings.WORKSPACE_REFLECTION_INTERVAL_SECONDS)
+forgetting_cycle_schedule = timedelta(hours=settings.FORGETTING_CYCLE_INTERVAL_HOURS)
 
 #构建定时任务配置
 beat_schedule_config = {

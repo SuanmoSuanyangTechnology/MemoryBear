@@ -1,9 +1,10 @@
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
 from dotenv import load_dotenv
+from pydantic import Field, TypeAdapter
 
 load_dotenv()
 
@@ -200,11 +201,24 @@ class Settings:
 
     REFLECTION_INTERVAL_SECONDS: float = float(os.getenv("REFLECTION_INTERVAL_SECONDS", "300"))
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))
-    MEMORY_INCREMENT_INTERVAL_HOURS: float = float(os.getenv("MEMORY_INCREMENT_INTERVAL_HOURS", "24"))
     REFLECTION_INTERVAL_TIME: Optional[str] = int(os.getenv("REFLECTION_INTERVAL_TIME", 30))
 
     # Memory Cache Regeneration Configuration
     MEMORY_CACHE_REGENERATION_HOURS: int = int(os.getenv("MEMORY_CACHE_REGENERATION_HOURS", "24"))
+
+    # Celery Beat Schedule Configuration (定时任务执行频率)
+    MEMORY_INCREMENT_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="cron hour [0, 23]")]
+    ).validate_python(int(os.getenv("MEMORY_INCREMENT_HOUR", "2")))
+    MEMORY_INCREMENT_MINUTE: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=59, description="cron minute [0, 59]")]
+    ).validate_python(int(os.getenv("MEMORY_INCREMENT_MINUTE", "0")))
+    WORKSPACE_REFLECTION_INTERVAL_SECONDS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="reflection interval in seconds, must be >= 1")]
+    ).validate_python(int(os.getenv("WORKSPACE_REFLECTION_INTERVAL_SECONDS", "30")))
+    FORGETTING_CYCLE_INTERVAL_HOURS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="forgetting cycle interval in hours, must be >= 1")]
+    ).validate_python(int(os.getenv("FORGETTING_CYCLE_INTERVAL_HOURS", "24")))
 
     # Memory Module Configuration (internal)
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")
@@ -230,7 +244,7 @@ class Settings:
     # General Ontology Type Configuration
     # ========================================================================
     # 通用本体文件路径列表（逗号分隔）
-    GENERAL_ONTOLOGY_FILES: str = os.getenv("GENERAL_ONTOLOGY_FILES", "app/core/memory/ontology_services/General_purpose_entity.ttl")
+    GENERAL_ONTOLOGY_FILES: str = os.getenv("GENERAL_ONTOLOGY_FILES", "api/app/core/memory/ontology_services/General_purpose_entity.ttl")
 
     # 是否启用通用本体类型功能
     ENABLE_GENERAL_ONTOLOGY_TYPES: bool = os.getenv("ENABLE_GENERAL_ONTOLOGY_TYPES", "true").lower() == "true"
