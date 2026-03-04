@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+from app.cache.memory.interest_memory import InterestMemoryCache
 from app.celery_app import celery_app
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
@@ -684,11 +685,29 @@ async def get_interest_distribution_by_user_api(
     language = get_language_from_header(language_type)
     api_logger.info(f"Interest distribution by user requested: end_user_id={end_user_id}, language={language}")
     try:
+        # 优先读取缓存
+        cached = await InterestMemoryCache.get_interest_distribution(
+            end_user_id=end_user_id,
+            language=language,
+        )
+        if cached is not None:
+            api_logger.info(f"Interest distribution cache hit: end_user_id={end_user_id}")
+            return success(data=cached, msg="获取兴趣分布标签成功")
+
+        # 缓存未命中，调用模型生成
         result = await memory_agent_service.get_interest_distribution_by_user(
             end_user_id=end_user_id,
             limit=limit,
             language=language
         )
+
+        # 写入缓存，24小时过期
+        await InterestMemoryCache.set_interest_distribution(
+            end_user_id=end_user_id,
+            language=language,
+            data=result,
+        )
+
         return success(data=result, msg="获取兴趣分布标签成功")
     except Exception as e:
         api_logger.error(f"Interest distribution by user failed: {str(e)}")
