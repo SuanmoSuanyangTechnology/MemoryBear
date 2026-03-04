@@ -2214,7 +2214,7 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
 
                         # 更新情绪建议
                         try:
-                            emotion_service = EmotionAnalyticsService(db=db, end_user_id=end_user_id)
+                            emotion_service = EmotionAnalyticsService()
                             suggestions_data = await emotion_service.generate_emotion_suggestions(
                                 end_user_id=end_user_id,
                                 db=db,
@@ -2273,22 +2273,109 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                         user_results.append(error_info)
                         logger.error(f"处理用户 {end_user_id} 时出错: {str(e)}")
 
+                # ---- 处理增量用户（当天新增、尚未初始化的用户）----
+                new_users_initialized = 0
+                new_users_failed = 0
+                logger.info("开始处理当天新增的增量用户初始化")
+
+                for end_user_id in repo.get_new_user_ids_today(batch_size=100):
+                    logger.info(f"开始初始化新用户: {end_user_id}")
+                    user_start_time = time.time()
+                    implicit_success = False
+                    emotion_success = False
+                    errors = []
+
+                    try:
+                        try:
+                            implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
+                            profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+                            await implicit_service.save_profile_cache(
+                                end_user_id=end_user_id,
+                                profile_data=profile_data,
+                                db=db
+                            )
+                            implicit_success = True
+                            logger.info(f"成功初始化新用户 {end_user_id} 的隐性记忆画像")
+                        except Exception as e:
+                            error_msg = f"隐性记忆初始化失败: {str(e)}"
+                            errors.append(error_msg)
+                            logger.error(f"新用户 {end_user_id} {error_msg}")
+
+                        try:
+                            emotion_service = EmotionAnalyticsService()
+                            suggestions_data = await emotion_service.generate_emotion_suggestions(
+                                end_user_id=end_user_id,
+                                db=db,
+                                language="zh"
+                            )
+                            await emotion_service.save_suggestions_cache(
+                                end_user_id=end_user_id,
+                                suggestions_data=suggestions_data,
+                                db=db
+                            )
+                            emotion_success = True
+                            logger.info(f"成功初始化新用户 {end_user_id} 的情绪建议")
+                        except Exception as e:
+                            error_msg = f"情绪建议初始化失败: {str(e)}"
+                            errors.append(error_msg)
+                            logger.error(f"新用户 {end_user_id} {error_msg}")
+
+                        if implicit_success or emotion_success:
+                            new_users_initialized += 1
+                        else:
+                            new_users_failed += 1
+
+                        user_elapsed = time.time() - user_start_time
+                        user_results.append({
+                            "end_user_id": end_user_id,
+                            "type": "init",
+                            "implicit_success": implicit_success,
+                            "emotion_success": emotion_success,
+                            "errors": errors,
+                            "elapsed_time": user_elapsed
+                        })
+
+                    except Exception as e:
+                        new_users_failed += 1
+                        user_elapsed = time.time() - user_start_time
+                        user_results.append({
+                            "end_user_id": end_user_id,
+                            "type": "init",
+                            "implicit_success": False,
+                            "emotion_success": False,
+                            "errors": [str(e)],
+                            "elapsed_time": user_elapsed
+                        })
+                        logger.error(f"初始化新用户 {end_user_id} 时出错: {str(e)}")
+
+                logger.info(
+                    f"增量用户初始化完成: 成功={new_users_initialized}, 失败={new_users_failed}"
+                )
+                # ---- 增量用户处理结束 ----
+
                 # 记录总体统计信息
                 logger.info(
                     f"隐性记忆和情绪数据更新定时任务完成: "
-                    f"总用户数={total_users}, "
+                    f"存量用户总数={total_users}, "
                     f"隐性记忆成功={successful_implicit}, "
                     f"情绪建议成功={successful_emotion}, "
-                    f"失败={failed}"
+                    f"存量失败={failed}, "
+                    f"增量初始化成功={new_users_initialized}, "
+                    f"增量初始化失败={new_users_failed}"
                 )
 
                 return {
                     "status": "SUCCESS",
-                    "message": f"成功处理 {total_users} 个用户，隐性记忆 {successful_implicit} 个成功，情绪建议 {successful_emotion} 个成功",
+                    "message": (
+                        f"存量用户 {total_users} 个，隐性记忆 {successful_implicit} 个成功，情绪建议 {successful_emotion} 个成功；"
+                        f"增量新用户初始化 {new_users_initialized} 个成功，{new_users_failed} 个失败"
+                    ),
                     "total_users": total_users,
                     "successful_implicit": successful_implicit,
                     "successful_emotion": successful_emotion,
                     "failed": failed,
+                    "new_users_initialized": new_users_initialized,
+                    "new_users_failed": new_users_failed,
                     "user_results": user_results[:50]  # 只保留前50个用户的详细结果
                 }
 
@@ -2301,6 +2388,8 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                     "successful_implicit": successful_implicit,
                     "successful_emotion": successful_emotion,
                     "failed": failed,
+                    "new_users_initialized": 0,
+                    "new_users_failed": 0,
                     "user_results": user_results[:50]
                 }
 
