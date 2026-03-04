@@ -423,7 +423,7 @@ def get_rag_user_kb_total_chunk(
 
         # 通过 App 关联取该 workspace 下所有 end_user_id
         end_user_ids = [
-            str(u.id) for u in db.query(EndUser.id)
+            str(eid) for (eid,) in db.query(EndUser.id)
             .join(App, EndUser.app_id == App.id)
             .filter(App.workspace_id == workspace_id)
             .all()

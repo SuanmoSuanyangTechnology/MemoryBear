@@ -74,11 +74,11 @@ def parse_document(file_path: str, document_id: str):
     db = next(get_db())  # Manually call the generator
     db_document = None
     db_knowledge = None
-    # 确保 document_id 是 UUID 对象
-    if not isinstance(document_id, uuid.UUID):
-        document_id = uuid.UUID(str(document_id))
     progress_msg = f"{datetime.now().strftime('%H:%M:%S')} Task has been received.\n"
     try:
+        # 确保 document_id 是 UUID 对象
+        if not isinstance(document_id, uuid.UUID):
+            document_id = uuid.UUID(str(document_id))
         db_document = db.query(Document).filter(Document.id == document_id).first()
         db_knowledge = db.query(Knowledge).filter(Knowledge.id == db_document.kb_id).first()
         # 1. Document parsing & segmentation
