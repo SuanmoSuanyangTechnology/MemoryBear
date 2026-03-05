@@ -107,6 +107,7 @@ def get_user_workspaces(db: Session, user: User) -> List[Workspace]:
     for workspace in workspaces:
         if workspace.storage_type == 'neo4j':
             _ensure_default_memory_config(db, workspace)
+            _ensure_default_ontology_scenes(db, workspace)
     
     business_logger.info(f"用户 {user.username} 的工作空间数量: {len(workspaces)}")
     return workspaces
@@ -1102,6 +1103,52 @@ def _fill_workspace_configs_model_defaults(
             business_logger.error(
                 f"Failed to update memory configs in workspace {workspace.id}: {str(e)}"
             )
+
+
+def _ensure_default_ontology_scenes(db: Session, workspace: Workspace) -> None:
+    """Ensure a workspace has default ontology scenes, creating them if missing.
+
+    Checks whether any is_system_default scene exists for the workspace.
+    If not, runs the DefaultOntologyInitializer to create them.
+
+    Args:
+        db: Database session
+        workspace: The workspace to check
+    """
+    from app.models.ontology_scene import OntologyScene
+
+    # 幂等检查：是否已存在系统默认场景
+    existing = db.query(OntologyScene).filter(
+        OntologyScene.workspace_id == workspace.id,
+        OntologyScene.is_system_default.is_(True)
+    ).first()
+
+    if existing:
+        return
+
+    business_logger.info(
+        f"Workspace {workspace.id} missing default ontology scenes, creating them"
+    )
+
+    try:
+        initializer = DefaultOntologyInitializer(db)
+        success, error_msg = initializer.initialize_default_scenes(
+            workspace.id, language="zh"
+        )
+        if success:
+            db.commit()
+            business_logger.info(
+                f"为工作空间 {workspace.id} 补建默认本体场景成功"
+            )
+        else:
+            business_logger.warning(
+                f"为工作空间 {workspace.id} 补建默认本体场景失败: {error_msg}"
+            )
+    except Exception as e:
+        db.rollback()
+        business_logger.error(
+            f"为工作空间 {workspace.id} 补建默认本体场景异常: {str(e)}"
+        )
 
 
 def _create_default_memory_config(
