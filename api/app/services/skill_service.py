@@ -121,7 +121,7 @@ class SkillService:
                 if skill and skill.is_active:
                     # 加载技能关联的工具
                     for tool_config in skill.tools:
-                        tool = tool_service._get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
+                        tool = tool_service.get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
                         if tool:
                             langchain_tool = tool.to_langchain_tool(tool_config.get("operation", None))
                             tools.append(langchain_tool)
