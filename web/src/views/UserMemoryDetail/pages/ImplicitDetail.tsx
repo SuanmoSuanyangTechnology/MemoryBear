@@ -36,19 +36,20 @@ const ImplicitDetail = forwardRef<{ handleRefresh: () => void; }, { refresh: () 
   // Check if implicit data exists, prompt user to initialize if not
   useEffect(() => {
     if (!id) return
+    let modalInstance: { destroy: () => void } | null = null
     implicitCheckData(id)
       .then(res => {
         if (!(res as { exists: boolean }).exists) {
-            modal.confirm({
-              title: t('implicitDetail.noData'),
-              okText: t('common.refresh'),
-              cancelText: t('common.cancel'),
-              onOk: () => {
-                refresh()
-              }
-            })
+          modalInstance = modal.warning({
+            title: t('implicitDetail.noData'),
+            okText: t('common.refresh'),
+            onOk: () => {
+              refresh()
+            }
+          })
         }
       })
+    return () => modalInstance?.destroy()
   }, [id])
 
   // Refresh all implicit memory components by regenerating profile
