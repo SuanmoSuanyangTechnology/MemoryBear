@@ -4,7 +4,7 @@
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-03-04 16:22:03
  */
-import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { App } from 'antd'
@@ -43,9 +43,11 @@ const Suggestions = forwardRef<{ handleRefresh: () => void; }, { refresh: () => 
   const { modal } = App.useApp()
   const [loading, setLoading] = useState(false)
   const [suggestions, setSuggestions] = useState<Suggestions | null>(null)
+  const modalInstanceRef = useRef<{ destroy: () => void } | null>(null)
 
   useEffect(() => {
     getSuggestionData()
+    return () => modalInstanceRef.current?.destroy()
   }, [id])
 
   const getSuggestionData = () => {
@@ -57,10 +59,9 @@ const Suggestions = forwardRef<{ handleRefresh: () => void; }, { refresh: () => 
       .then((res) => {
         const response = res as Suggestions
         if (!response.exists && (!response.suggestions || !response.suggestions?.length)) {
-          modal.confirm({
+          modalInstanceRef.current = modal.warning({
             title: t('statementDetail.noData'),
             okText: t('common.refresh'),
-            cancelText: t('common.cancel'),
             onOk: () => {
               refresh()
             }
