@@ -265,8 +265,11 @@ async def create_class_handler(
         ]
         
         if count == 1:
-            # 单个创建
+            # 单个创建 - 先检查重名
             class_data = classes_data[0]
+            existing = OntologyClassRepository(db).get_by_name(class_data["class_name"], request.scene_id)
+            if existing:
+                raise ValueError(f"DUPLICATE_CLASS_NAME:{class_data['class_name']}")
             ontology_class = service.create_class(
                 scene_id=request.scene_id,
                 class_name=class_data["class_name"],
@@ -324,9 +327,21 @@ async def create_class_handler(
             return success(data=response.model_dump(mode='json'), msg="批量创建完成")
         
     except ValueError as e:
-        api_logger.warning(f"Validation error in class creation: {str(e)}")
-        return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
-        
+        err_str = str(e)
+        if err_str.startswith("DUPLICATE_CLASS_NAME:"):
+            class_name = err_str.split(":", 1)[1]
+            api_logger.warning(f"Duplicate class name '{class_name}' in scene {request.scene_id}")
+            from app.core.language_utils import get_language_from_header
+            from fastapi.responses import JSONResponse
+            lang = get_language_from_header(x_language_type)
+            if lang == "en":
+                msg = fail(BizCode.BAD_REQUEST, "Class name already exists", f"A class named \"{class_name}\" already exists in this scene. Please use a different name.")
+            else:
+                msg = fail(BizCode.BAD_REQUEST, "类型名称已存在", f"当前场景下已存在名为「{class_name}」的类型，请使用其他名称")
+            return JSONResponse(status_code=400, content=msg)
+        api_logger.warning(f"Validation error in class creation: {err_str}")
+        return fail(BizCode.BAD_REQUEST, "请求参数无效", err_str)
+
     except RuntimeError as e:
         err_str = str(e)
         if "UniqueViolation" in err_str or "uq_scene_class_name" in err_str:

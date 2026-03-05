@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db import Base
@@ -9,9 +9,6 @@ from app.db import Base
 class MemoryConfig(Base):
     """记忆配置表 - 用于存储记忆系统的配置参数"""
     __tablename__ = "memory_config"
-    __table_args__ = (
-        UniqueConstraint('workspace_id', 'config_name', name='uq_workspace_config_name'),
-    )
 
     # 主键
     config_id = Column(UUID(as_uuid=True), primary_key=True,  comment="配置ID")
