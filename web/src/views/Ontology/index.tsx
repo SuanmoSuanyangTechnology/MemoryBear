@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:15 
  * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 14:10:15 
+ * @Last Modified time: 2026-03-05 10:57:53 
  */
 import { type FC, useState, useRef, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -164,11 +164,13 @@ const Ontology: FC = () => {
               </div>
             ))}
             <Divider size="middle" />
-            <Flex gap={8} wrap>
+            <Flex gap={8} wrap align="center">
               <div className="rb:text-[#5B6167] rb:leading-4.5">{t('ontology.entityTypes')}: </div>
-              {item.entity_type?.map((type, i) => (
-                <Tag key={i} color={i % 2 ? 'processing' : 'success'}>{type}</Tag>
-              ))}
+              <div className="rb:flex-1 rb:overflow-hidden rb:wrap-break-word! rb:line-clamp-1!">
+                {item.entity_type?.map((type, i) => (
+                  <Tag key={i} color={i % 2 ? 'processing' : 'success'} className="rb:ml-2">{type}</Tag>
+                ))}
+              </div>
               {item.type_num > 3 && (
                 <Tag color="default">+{item.type_num - 3}</Tag>
               )}

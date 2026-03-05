@@ -183,7 +183,9 @@ service.interceptors.response.use(
         msg = msg || i18n.t('common.serverError');
         break;
       default:
-        if (!msg && Array.isArray(error.response?.data?.detail)) {
+        if (msg === 'SYSTEM_DEFAULT_SCENE_CANNOT_DELETE') {
+          msg = i18n.t(`common.${msg}`)
+        } else if (!msg && Array.isArray(error.response?.data?.detail)) {
           msg = error.response?.data?.detail?.map((item: { msg: string }) => item.msg).join(';')
         } else {
           msg = msg || i18n.t('common.unknownError');
