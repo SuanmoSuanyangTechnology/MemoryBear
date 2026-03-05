@@ -440,6 +440,7 @@ export const en = {
       logoutApiCannotRefreshToken: 'Logout API cannot refresh token',
       publicApiCannotRefreshToken: 'Public API cannot refresh token',
       refreshTokenNotExist: 'Refresh token does not exist',
+      SYSTEM_DEFAULT_SCENE_CANNOT_DELETE: 'This is a system preset scene and cannot be deleted',
       reset: 'Reset',
       refresh: 'Refresh',
       return: 'Return',
