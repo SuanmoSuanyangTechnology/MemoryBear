@@ -1034,6 +1034,7 @@ export const zh = {
       prevStep: '上一步',
       exportSuccess: '导出成功',
       recommend: '推荐',
+      default: '默认',
       logoTip: `支持图片格式（JPG、PNG）\n 尺寸：正方形比例 \n 文件大小限制：≤ 2MB`,
       imageSquareRequired: '请上传正方形比例图片',
       nameInvalid: '不能是空格开头或结尾',

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:15 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-05 10:57:53 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-05 16:28:53
  */
 import { type FC, useState, useRef, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -144,8 +144,13 @@ const Ontology: FC = () => {
             title={item.scene_name}
             extra={<Tag>{item.type_num} {t('ontology.typeCount')}</Tag>}
             onClick={() => handleJump(item)}
-            className="rb:cursor-pointer"
+            className="rb:cursor-pointer rb:relative"
           >
+            {item.is_system_default &&
+              <div className="rb:absolute rb:-right-px rb:-top-px rb:bg-[#FF5D34] rb:rounded-[0px_7px_0px_8px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-4 rb:py-0.5 rb:px-1">
+                {t('common.default')}
+              </div>
+            }
             <div
               className="rb:flex rb:gap-2 rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3"
             >
