@@ -7,7 +7,7 @@
 from uuid import UUID
 from typing import Optional
 
-from fastapi import Depends
+from fastapi import Depends, Header
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -238,7 +238,8 @@ async def scenes_handler(
 async def create_class_handler(
     request: ClassCreateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    x_language_type: Optional[str] = None
 ):
     """创建本体类型（统一使用列表形式，支持单个或批量）"""
     
@@ -334,8 +335,20 @@ async def create_class_handler(
         return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
         
     except RuntimeError as e:
-        api_logger.error(f"Runtime error in class creation: {str(e)}", exc_info=True)
-        return fail(BizCode.INTERNAL_ERROR, "类型创建失败", str(e))
+        err_str = str(e)
+        if "UniqueViolation" in err_str or "uq_scene_class_name" in err_str:
+            api_logger.warning(f"Duplicate class name in scene {request.scene_id}")
+            from app.core.language_utils import get_language_from_header
+            from fastapi.responses import JSONResponse
+            lang = get_language_from_header(x_language_type)
+            class_name = request.classes[0].class_name if request.classes else ""
+            if lang == "en":
+                msg = fail(BizCode.BAD_REQUEST, "Class name already exists", f"A class named \"{class_name}\" already exists in this scene. Please use a different name.")
+            else:
+                msg = fail(BizCode.BAD_REQUEST, "类型名称已存在", f"当前场景下已存在名为「{class_name}」的类型，请使用其他名称")
+            return JSONResponse(status_code=400, content=msg)
+        api_logger.error(f"Runtime error in class creation: {err_str}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "类型创建失败", err_str)
         
     except Exception as e:
         api_logger.error(f"Unexpected error in class creation: {str(e)}", exc_info=True)
