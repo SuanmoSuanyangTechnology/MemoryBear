@@ -523,10 +523,9 @@ async def delete_scene(
                 f"尝试删除系统默认场景: user_id={current_user.id}, "
                 f"scene_id={scene_id}, scene_name={scene.scene_name}"
             )
-            return fail(
-                BizCode.BAD_REQUEST,
-                "系统默认场景不可删除",
-                "该场景为系统预设场景，不允许删除"
+            raise HTTPException(
+                status_code=400,
+                detail="SYSTEM_DEFAULT_SCENE_CANNOT_DELETE"
             )
         
         # 创建OntologyService实例
@@ -552,6 +551,9 @@ async def delete_scene(
         
         return success(data={"deleted": success_flag}, msg="场景删除成功")
         
+    except HTTPException:
+        raise
+
     except ValueError as e:
         api_logger.warning(f"Validation error in scene deletion: {str(e)}")
         return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
