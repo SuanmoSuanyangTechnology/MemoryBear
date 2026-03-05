@@ -1690,6 +1690,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       uploadFile: 'Upload File',
       fileType: 'File Type',
       image: 'Image',
+      video: 'Video',
+      audio: 'Audio',
       fileUrl: 'File URL',
       addRemoteFile: 'Add Remote File',
       variableConfig: 'Variable Configuration',

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 10:17:54
+ * @Last Modified time: 2026-03-04 17:47:09
  */
 /**
  * Upload File List Modal Component
@@ -104,7 +104,9 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
                     <Select
                       placeholder={t('memoryConversation.fileType')}
                       options={[
-                        { label: t('memoryConversation.image'), value: 'image' }
+                        { label: t('memoryConversation.image'), value: 'image' },
+                        { label: t('memoryConversation.audio'), value: 'audio' },
+                        { label: t('memoryConversation.video'), value: 'video' },
                       ]}
                       className="rb:w-30"
                     />

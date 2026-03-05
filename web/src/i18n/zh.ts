@@ -1687,6 +1687,8 @@ export const zh = {
       uploadFile: '上传文件',
       fileType: '文件类型',
       image: '图片',
+      video: '视频',
+      audio: '音频',
       fileUrl: '文件链接',
       addRemoteFile: '添加远程文件',
       variableConfig: '变量配置',

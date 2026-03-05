@@ -2,10 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 12:13:52
+ * @Last Modified time: 2026-03-04 18:42:49
  */
 import { type FC, useEffect, useMemo } from 'react'
 import { Flex, Input, Form } from 'antd'
+
 import SendIcon from '@/assets/images/conversation/send.svg'
 import SendDisabledIcon from '@/assets/images/conversation/sendDisabled.svg'
 import LoadingIcon from '@/assets/images/conversation/loading.svg'
@@ -80,9 +81,31 @@ const ChatInput: FC<ChatInputProps> = ({
                 </div>
               )
             }
+            if (file.type.includes('video')) {
+              return (
+                <div key={file.uid} className="rb:w-45 rb:h-16 rb:inline-block rb:group rb:relative rb:rounded-lg">
+                  <video src={file.url} controls className="rb:w-45 rb:h-16 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
+                  <div
+                    className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
+                    onClick={() => handleDelete(file)}
+                  ></div>
+                </div>
+              )
+            }
+            if (file.type.includes('audio')) {
+              return (
+                <div key={file.uid} className="rb:w-45 rb:h-16 rb:inline-flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5 rb:gap-2">
+                  <audio src={file.url} controls className="rb:w-45 rb:h-16" />
+                  <div
+                    className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
+                    onClick={() => handleDelete(file)}
+                  ></div>
+                </div>
+              )
+            }
             return (
               <div key={file.uid} className="rb:w-45 rb:text-[12px] rb:gap-2.5 rb:flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5">
-                {(file.type.includes('word') || file.type.includes('wordprocessingml.document')) && <div
+                {(file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document')) && <div
                   className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/word_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/word.svg')]"
                 ></div>}
                 {(file.type.includes('pdf')) && <div
