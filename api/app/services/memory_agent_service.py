@@ -36,7 +36,7 @@ from app.core.memory.agent.utils.messages_tools import (
 )
 from app.core.memory.agent.utils.type_classifier import status_typle
 from app.core.memory.agent.utils.write_tools import write  # 新增：直接导入 write 函数
-from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags
+from app.core.memory.analytics.hot_memory_tags import get_hot_memory_tags, get_interest_distribution
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
@@ -890,36 +890,36 @@ class MemoryAgentService:
         return result
 
 
-    async def get_hot_memory_tags_by_user(
+
+    async def get_interest_distribution_by_user(
         self,
         end_user_id: Optional[str] = None,
-        limit: int = 20
+        limit: int = 5,
+        language: str = "zh"
     ) -> List[Dict[str, Any]]:
         """
-        获取指定用户的热门记忆标签
+        获取指定用户的兴趣分布标签。
+        
+        与热门标签不同，此接口专注于识别用户的兴趣活动（运动、爱好、学习等），
+        过滤掉纯物品、工具、地点等不代表用户主动参与活动的名词。
 
         参数：
-        - end_user_id: 用户ID（可选），对应Neo4j中的end_user_id字段
+        - end_user_id: 用户ID（必填）
         - limit: 返回标签数量限制
+        - language: 输出语言（"zh" 中文, "en" 英文）
 
         返回格式：
         [
-            {"name": "标签名", "frequency": 频次},
+            {"name": "兴趣活动名", "frequency": 频次},
             ...
         ]
-        
-        注意：标签语言由写入时的 X-Language-Type 决定，查询时不进行翻译
         """
         try:
-            # by_user=False 表示按 end_user_id 查询（在Neo4j中，end_user_id就是用户维度）
-            tags = await get_hot_memory_tags(end_user_id, limit=limit, by_user=False)
-            payload = []
-            for tag, freq in tags:
-                payload.append({"name": tag, "frequency": freq})
-            return payload
+            tags = await get_interest_distribution(end_user_id, limit=limit, by_user=False, language=language)
+            return [{"name": tag, "frequency": freq} for tag, freq in tags]
         except Exception as e:
-            logger.error(f"热门记忆标签查询失败: {e}")
-            raise Exception(f"热门记忆标签查询失败: {e}")
+            logger.error(f"兴趣分布标签查询失败: {e}")
+            raise Exception(f"兴趣分布标签查询失败: {e}")
 
 
     async def get_user_profile(

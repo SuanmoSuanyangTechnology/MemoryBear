@@ -127,7 +127,7 @@ class EventStreamHandler:
                     yield {
                         "event": "message",
                         "data": {
-                            "chunk": data.get("chunk")
+                            "content": data.get("chunk")
                         }
                     }
 

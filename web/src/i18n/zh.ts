@@ -1036,6 +1036,7 @@ export const zh = {
       logoTip: `支持图片格式（JPG、PNG）\n 尺寸：正方形比例 \n 文件大小限制：≤ 2MB`,
       imageSquareRequired: '请上传正方形比例图片',
       nameInvalid: '不能是空格开头或结尾',
+      notAllSpaces: '不能是纯空格',
     },
     model: {
       searchPlaceholder: '搜索模型…',
@@ -1779,6 +1780,7 @@ export const zh = {
       mcp: 'MCP 服务',
       inner: '内置工具',
       custom: '自定义工具',
+      market: '工具市场',
       mcpSearchPlaceholder: '搜索MCP服务...',
       innerSearchPlaceholder: '搜索工具...',
       customSearchPlaceholder: '搜索自定义工具...',
@@ -1952,7 +1954,9 @@ export const zh = {
       path: '路径',
       viewDetail: '查看详情',
       textLink: '测试连接',
-      noResult: '处理结果将显示在这里'
+      noResult: '处理结果将显示在这里',
+      serverUrlInvalid: '必须以 http:// 或 https:// 开头，且不能有前后空格',
+      requestHeaderKeyInvalid: '只支持英文、数字、连字符(-)、下划线(_)，不能以连字符或下划线开头结尾',
     },
     workflow: {
       coreNode: '核心节点',

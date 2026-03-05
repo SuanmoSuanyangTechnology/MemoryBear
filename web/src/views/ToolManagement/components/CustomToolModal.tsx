@@ -6,6 +6,7 @@ import type { CustomToolItem, CustomToolModalRef, ToolItem } from '../types'
 import RbModal from '@/components/RbModal';
 import { parseSchema, addTool, updateTool } from '@/api/tools';
 import Table from '@/components/Table';
+import { stringRegExp } from '@/utils/validator';
 const FormItem = Form.Item;
 
 interface CustomToolModalProps {
@@ -134,7 +135,11 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
         <Form.Item
           name="name"
           label={t('tool.name')}
-          rules={[{ required: true, message: t('common.enterNamePlaceholder') }]}
+          rules={[
+            { required: true, message: t('tool.enterNamePlaceholder') },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('tool.enterNamePlaceholder')} />
         </Form.Item>

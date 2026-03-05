@@ -456,6 +456,7 @@ export const en = {
       logoTip: `Supported image formats: JPG, PNG \n Suggested size: square ratio \n Maximum size: ≤ 2MB`,
       imageSquareRequired: 'Please upload a square image',
       nameInvalid: 'Name cannot start or end with a space',
+      notAllSpaces: 'Cannot be all spaces',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -1782,6 +1783,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       mcp: 'MCP Services',
       inner: 'Built-in Tools',
       custom: 'Custom Tools',
+      market: 'Tool Market',
       mcpSearchPlaceholder: 'Search MCP Services...',
       innerSearchPlaceholder: 'Search Tools...',
       customSearchPlaceholder: 'Search Custom Tools...',
@@ -1955,7 +1957,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       path: 'Path',
       viewDetail: 'View Details',
       textLink: 'Test Connection',
-      noResult: 'Processing results will be displayed here'
+      noResult: 'Processing results will be displayed here',
+      serverUrlInvalid: 'Must start with http:// or https://, and cannot have leading or trailing spaces',
+      requestHeaderKeyInvalid: 'Only English letters, numbers, hyphens (-), and underscores (_) are allowed, and cannot start or end with a hyphen or underscore',
     },
     workflow: {
       coreNode: 'Core Nodes',

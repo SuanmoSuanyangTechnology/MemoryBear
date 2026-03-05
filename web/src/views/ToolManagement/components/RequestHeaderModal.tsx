@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { RequestHeader, RequestHeaderModalRef } from './McpServiceModal'
 import RbModal from '@/components/RbModal'
+import { stringRegExp } from '@/utils/validator';
 
 const FormItem = Form.Item;
 
@@ -82,7 +83,11 @@ const RequestHeaderModal = forwardRef<RequestHeaderModalRef, RequestHeaderModalP
         <FormItem
           name="key"
           label={t('tool.requestHeaderName')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { pattern: /^[a-zA-Z0-9][a-zA-Z0-9\-_]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$/, message: t('tool.requestHeaderKeyInvalid') },
+            { max: 100 }
+          ]}
         >
           <Input placeholder={t('common.enter')} />
         </FormItem>
@@ -90,7 +95,11 @@ const RequestHeaderModal = forwardRef<RequestHeaderModalRef, RequestHeaderModalP
         <FormItem
           name="value"
           label={t('tool.requestHeaderValue')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+            { max: 2000 }
+          ]}
         >
           <Input placeholder={t('common.enter',)} />
         </FormItem>
