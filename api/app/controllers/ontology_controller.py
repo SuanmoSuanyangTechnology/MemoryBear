@@ -124,15 +124,23 @@ def _get_ontology_service(
             )
         
         # 通过 Repository 获取可用的 API Key（负载均衡逻辑由 Repository 处理）
-        from app.repositories.model_repository import ModelApiKeyRepository
-        api_keys = ModelApiKeyRepository.get_by_model_config(db, model_config.id)
-        if not api_keys:
+        # from app.repositories.model_repository import ModelApiKeyRepository
+        from app.services.model_service import ModelApiKeyService
+        api_key_config = ModelApiKeyService.get_available_api_key(db, model_config.id)
+        if not api_key_config:
             logger.error(f"Model {llm_id} has no active API key")
             raise HTTPException(
                 status_code=400,
                 detail="指定的LLM模型没有可用的API密钥"
             )
-        api_key_config = api_keys[0]
+        # api_keys = ModelApiKeyRepository.get_by_model_config(db, model_config.id)
+        # if not api_keys:
+        #     logger.error(f"Model {llm_id} has no active API key")
+        #     raise HTTPException(
+        #         status_code=400,
+        #         detail="指定的LLM模型没有可用的API密钥"
+        #     )
+        # api_key_config = api_keys[0]
         
         is_composite = getattr(model_config, 'is_composite', False)
         logger.info(
@@ -154,6 +162,7 @@ def _get_ontology_service(
             provider=actual_provider,
             api_key=api_key_config.api_key,
             base_url=api_key_config.api_base,
+            is_omni=api_key_config.is_omni,
             max_retries=3,
             timeout=60.0
         )
@@ -514,10 +523,9 @@ async def delete_scene(
                 f"尝试删除系统默认场景: user_id={current_user.id}, "
                 f"scene_id={scene_id}, scene_name={scene.scene_name}"
             )
-            return fail(
-                BizCode.BAD_REQUEST,
-                "系统默认场景不可删除",
-                "该场景为系统预设场景，不允许删除"
+            raise HTTPException(
+                status_code=400,
+                detail="SYSTEM_DEFAULT_SCENE_CANNOT_DELETE"
             )
         
         # 创建OntologyService实例
@@ -543,6 +551,9 @@ async def delete_scene(
         
         return success(data={"deleted": success_flag}, msg="场景删除成功")
         
+    except HTTPException:
+        raise
+
     except ValueError as e:
         api_logger.warning(f"Validation error in scene deletion: {str(e)}")
         return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))

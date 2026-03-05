@@ -47,6 +47,7 @@ import breakIcon from '@/assets/images/workflow/break.png'
 import assignerIcon from '@/assets/images/workflow/assigner.png'
 import memoryReadIcon from '@/assets/images/workflow/memory-read.png'
 import memoryWriteIcon from '@/assets/images/workflow/memory-write.png'
+import unknownIcon from '@/assets/images/workflow/unknown.svg'
 
 import { memoryConfigListUrl } from '@/api/memory'
 
@@ -524,6 +525,10 @@ export const nodeLibrary: NodeLibrary[] = [
   //   ]
   // },
 ];
+export const unknownNode = {
+  type: 'unknown',
+  icon: unknownIcon
+}
 
 export const nodeWidth = 240;
 /**

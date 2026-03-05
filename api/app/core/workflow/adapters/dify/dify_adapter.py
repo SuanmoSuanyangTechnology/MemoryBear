@@ -59,7 +59,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         )
 
     def map_node_type(self, platform_node_type) -> str:
-        return self.NODE_TYPE_MAPPING.get(platform_node_type)
+        return self.NODE_TYPE_MAPPING.get(platform_node_type, NodeType.UNKNOWN)
 
     @property
     def origin_nodes(self):
@@ -80,7 +80,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         return True
 
     def validate_config(self) -> bool:
-        require_fields = frozenset({'app', 'dependencies', 'kind', 'version', 'workflow'})
+        require_fields = frozenset({'app', 'kind', 'version', 'workflow'})
         if not all(field in self.config for field in require_fields):
             return False
 
@@ -179,8 +179,13 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         node_type = node_data["type"]
         try:
             converter = self.get_node_convert(node_type)
-            if converter is None:
-                raise Exception(f"node type not supported - {node_type}")
+            if node_type not in self.CONFIG_CONVERT_MAP:
+                self.errors.append(ExceptionDefineition(
+                    type=ExceptionType.NODE,
+                    node_id=node["id"],
+                    node_name=node["data"]["title"],
+                    detail=f"node type {node_type} is unsupported",
+                ))
             return converter(node)
         except Exception as e:
             self.errors.append(ExceptionDefineition(

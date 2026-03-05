@@ -152,7 +152,11 @@ const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
         <FormItem
           name="email"
           label={t('member.email')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { type: 'email' },
+            { max: 100 },
+          ]}
         >
           <Input placeholder={t('common.enterPlaceholder', { title: t('member.email') })} disabled={!!editingUser} />
         </FormItem>

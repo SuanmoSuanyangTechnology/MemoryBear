@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+from app.cache.memory.interest_memory import InterestMemoryCache
 from app.celery_app import celery_app
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
@@ -633,12 +634,11 @@ async def get_knowledge_type_stats_api(
     current_user: User = Depends(get_current_user)
 ):
     """
-    统计当前空间下各知识库类型的数量，包含 General | Web | Third-party | Folder | Memory。
+    统计当前空间下各知识库类型的数量，包含 General | Web | Third-party | Folder。
     会对缺失类型补 0，返回字典形式。
     可选按状态过滤。
     - 知识库类型根据当前用户的 current_workspace_id 过滤
-    - Memory 是 Neo4j 中 Chunk 的数量，根据 end_user_id (end_user_id) 过滤
-    - 如果用户没有当前工作空间或未提供 end_user_id，对应的统计返回 0
+    - 如果用户没有当前工作空间，对应的统计返回 0
     """
     api_logger.info(f"Knowledge type stats requested for workspace_id: {current_user.current_workspace_id}, end_user_id: {end_user_id}")
     try:
@@ -662,34 +662,56 @@ async def get_knowledge_type_stats_api(
         return fail(BizCode.INTERNAL_ERROR, "获取知识库类型统计失败", str(e))
 
 
-@router.get("/analytics/hot_memory_tags/by_user", response_model=ApiResponse)
-async def get_hot_memory_tags_by_user_api(
-    end_user_id: Optional[str] = Query(None, description="用户ID（可选）"),
-    limit: int = Query(20, description="返回标签数量限制"),
+@router.get("/analytics/interest_distribution/by_user", response_model=ApiResponse)
+async def get_interest_distribution_by_user_api(
+    end_user_id: str = Query(..., description="用户ID（必填）"),
+    limit: int = Query(5, le=5, description="返回兴趣标签数量限制，最多5个"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
-    db: Session=Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """
-    获取指定用户的热门记忆标签
+    获取指定用户的兴趣分布标签
     
-    注意：标签语言由写入时的 X-Language-Type 决定，查询时不进行翻译
+    与热门标签不同，此接口专注于识别用户的兴趣活动（运动、爱好、学习、创作等），
+    过滤掉纯物品、工具、地点等不代表用户主动参与活动的名词。
     
     返回格式：
     [
-        {"name": "标签名", "frequency": 频次},
+        {"name": "兴趣活动名", "frequency": 频次},
         ...
     ]
     """
-    api_logger.info(f"Hot memory tags by user requested: end_user_id={end_user_id}")
+    language = get_language_from_header(language_type)
+    api_logger.info(f"Interest distribution by user requested: end_user_id={end_user_id}, language={language}")
     try:
-        result = await memory_agent_service.get_hot_memory_tags_by_user(
+        # 优先读取缓存
+        cached = await InterestMemoryCache.get_interest_distribution(
             end_user_id=end_user_id,
-            limit=limit
+            language=language,
         )
-        return success(data=result, msg="获取热门记忆标签成功")
+        if cached is not None:
+            api_logger.info(f"Interest distribution cache hit: end_user_id={end_user_id}")
+            return success(data=cached, msg="获取兴趣分布标签成功")
+
+        # 缓存未命中，调用模型生成
+        result = await memory_agent_service.get_interest_distribution_by_user(
+            end_user_id=end_user_id,
+            limit=limit,
+            language=language
+        )
+
+        # 写入缓存，24小时过期
+        await InterestMemoryCache.set_interest_distribution(
+            end_user_id=end_user_id,
+            language=language,
+            data=result,
+        )
+
+        return success(data=result, msg="获取兴趣分布标签成功")
     except Exception as e:
-        api_logger.error(f"Hot memory tags by user failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "获取热门记忆标签失败", str(e))
+        api_logger.error(f"Interest distribution by user failed: {str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "获取兴趣分布标签失败", str(e))
 
 
 @router.get("/analytics/user_profile", response_model=ApiResponse)

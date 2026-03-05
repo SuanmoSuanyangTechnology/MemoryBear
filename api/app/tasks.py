@@ -1,16 +1,16 @@
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
+import shutil
 import time
 import uuid
-from uuid import UUID
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from math import ceil
 from pathlib import Path
-import shutil
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 import redis
 import requests
@@ -38,7 +38,7 @@ from app.db import get_db, get_db_context
 from app.models.document_model import Document
 from app.models.file_model import File
 from app.models.knowledge_model import Knowledge
-from app.schemas import file_schema, document_schema
+from app.schemas import document_schema, file_schema
 from app.services.memory_agent_service import MemoryAgentService
 from app.utils.config_utils import resolve_config_id
 
@@ -67,8 +67,9 @@ def parse_document(file_path: str, document_id: uuid.UUID):
     Document parsing, vectorization, and storage
     """
     # Force re-importing Trio in child processes (to avoid inheriting the state of the parent process)
-    import trio
     import importlib
+
+    import trio
     importlib.reload(trio)
     db = next(get_db())  # Manually call the generator
     db_document = None
@@ -256,7 +257,7 @@ def parse_document(file_path: str, document_id: uuid.UUID):
                 progress_msg += f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task result for task {task}:\n{result}\n"
                 return result
 
-            try:
+            def sync_task():
                 trio.run(
                     lambda: _run(
                         row=task,
@@ -271,6 +272,10 @@ def parse_document(file_path: str, document_id: uuid.UUID):
                         with_community=with_community,
                     )
                 )
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(sync_task)
+                    future.result()  # Blocks until the task completes
             except Exception as e:
                 progress_msg += f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task failed for task {task}:\n{str(e)}\n"
             progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({time.time() - start_time}s)"
@@ -297,8 +302,9 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
     build knowledge graph
     """
     # Force re-importing Trio in child processes (to avoid inheriting the state of the parent process)
-    import trio
     import importlib
+
+    import trio
     importlib.reload(trio)
     db = next(get_db())  # Manually call the generator
     db_documents = None
@@ -932,24 +938,18 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
     if actual_config_id is None:
         try:
             from app.services.memory_agent_service import get_end_user_connected_config
-            db = next(get_db())
-            try:
+            with get_db_context() as db:
                 connected_config = get_end_user_connected_config(end_user_id, db)
                 actual_config_id = connected_config.get("memory_config_id")
-            finally:
-                db.close()
         except Exception:
             # Log but continue - will fail later with proper error
             pass
 
     async def _run() -> str:
-        db = next(get_db())
-        try:
+        with get_db_context() as db:
             service = MemoryAgentService()
             return await service.read_memory(end_user_id, message, history, search_switch, actual_config_id, db,
                                              storage_type, user_rag_memory_id)
-        finally:
-            db.close()
 
     try:
         # 使用 nest_asyncio 来避免事件循环冲突
@@ -1049,19 +1049,15 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
     if actual_config_id is None:
         try:
             from app.services.memory_agent_service import get_end_user_connected_config
-            db = next(get_db())
-            try:
+            with get_db_context() as db:
                 connected_config = get_end_user_connected_config(end_user_id, db)
                 actual_config_id = connected_config.get("memory_config_id")
-            finally:
-                db.close()
         except Exception:
             # Log but continue - will fail later with proper error
             pass
 
     async def _run() -> str:
-        db = next(get_db())
-        try:
+        with get_db_context() as db:
             logger.info(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory with config_id={actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
             service = MemoryAgentService()
@@ -1069,11 +1065,6 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
                                                 user_rag_memory_id, language)
             logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
             return result
-        except Exception as e:
-            logger.error(f"[CELERY WRITE] Write failed: {e}", exc_info=True)
-            raise
-        finally:
-            db.close()
 
     try:
         # 使用 nest_asyncio 来避免事件循环冲突
@@ -1303,6 +1294,203 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
             "error": str(e),
             "workspace_id": workspace_id,
             "elapsed_time": elapsed_time,
+        }
+@celery_app.task(
+    name="app.tasks.write_all_workspaces_memory_task",
+    bind=True,
+    ignore_result=False,
+    max_retries=3,
+    acks_late=True,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
+    """定时任务：遍历所有工作空间，统计并写入记忆增量
+
+    此任务会：
+    1. 查询所有活跃的工作空间
+    2. 对每个工作空间统计记忆总量
+    3. 将统计结果写入 memory_increments 表
+
+    Returns:
+        包含任务执行结果的字典
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.logging_config import get_api_logger
+        from app.models.app_model import App
+        from app.models.end_user_model import EndUser
+        from app.models.workspace_model import Workspace
+        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.services.memory_storage_service import search_all
+
+        api_logger = get_api_logger()
+
+        with get_db_context() as db:
+            try:
+                # 获取所有活跃的工作空间
+                workspaces = db.query(Workspace).filter(
+                    Workspace.is_active.is_(True)
+                ).all()
+
+                if not workspaces:
+                    api_logger.warning("没有找到活跃的工作空间")
+                    return {
+                        "status": "SUCCESS",
+                        "message": "没有找到活跃的工作空间",
+                        "workspace_count": 0,
+                        "workspace_results": []
+                    }
+
+                api_logger.info(f"开始统计 {len(workspaces)} 个工作空间的记忆增量")
+                all_workspace_results = []
+
+                # 遍历每个工作空间
+                for workspace in workspaces:
+                    workspace_id = workspace.id
+                    api_logger.info(f"开始处理工作空间: {workspace.name} (ID: {workspace_id})")
+
+                    try:
+                        # 1. 查询当前workspace下的所有app（仅未删除的）
+                        apps = db.query(App).filter(
+                            App.workspace_id == workspace_id,
+                            App.is_active.is_(True)
+                        ).all()
+
+                        if not apps:
+                            # 如果没有app，总量为0
+                            memory_increment = write_memory_increment(
+                                db=db,
+                                workspace_id=workspace_id,
+                                total_num=0
+                            )
+                            all_workspace_results.append({
+                                "workspace_id": str(workspace_id),
+                                "workspace_name": workspace.name,
+                                "status": "SUCCESS",
+                                "total_num": 0,
+                                "end_user_count": 0,
+                                "memory_increment_id": str(memory_increment.id),
+                                "created_at": memory_increment.created_at.isoformat(),
+                            })
+                            api_logger.info(f"工作空间 {workspace.name} 没有应用，记录总量为0")
+                            continue
+
+                        # 2. 查询所有app下的end_user_id（去重）
+                        app_ids = [app.id for app in apps]
+                        end_users = db.query(EndUser.id).filter(
+                            EndUser.app_id.in_(app_ids)
+                        ).distinct().all()
+
+                        # 3. 遍历所有end_user，查询每个宿主的记忆总量并累加
+                        total_num = 0
+                        end_user_details = []
+
+                        for (end_user_id,) in end_users:
+                            try:
+                                # 调用 search_all 接口查询该宿主的总量
+                                result = await search_all(str(end_user_id))
+                                user_total = result.get("total", 0)
+                                total_num += user_total
+                                end_user_details.append({
+                                    "end_user_id": str(end_user_id),
+                                    "total": user_total
+                                })
+                            except Exception as e:
+                                # 记录单个用户查询失败，但继续处理其他用户
+                                api_logger.warning(f"查询用户 {end_user_id} 记忆失败: {str(e)}")
+                                end_user_details.append({
+                                    "end_user_id": str(end_user_id),
+                                    "total": 0,
+                                    "error": str(e)
+                                })
+
+                        # 4. 写入数据库
+                        memory_increment = write_memory_increment(
+                            db=db,
+                            workspace_id=workspace_id,
+                            total_num=total_num
+                        )
+
+                        all_workspace_results.append({
+                            "workspace_id": str(workspace_id),
+                            "workspace_name": workspace.name,
+                            "status": "SUCCESS",
+                            "total_num": total_num,
+                            "end_user_count": len(end_users),
+                            "memory_increment_id": str(memory_increment.id),
+                            "created_at": memory_increment.created_at.isoformat(),
+                        })
+
+                        api_logger.info(
+                            f"工作空间 {workspace.name} 统计完成: 总量={total_num}, 用户数={len(end_users)}"
+                        )
+
+                    except Exception as e:
+                        db.rollback()  # 回滚失败的事务，允许继续处理下一个工作空间
+                        api_logger.error(f"处理工作空间 {workspace.name} (ID: {workspace_id}) 失败: {str(e)}")
+                        all_workspace_results.append({
+                            "workspace_id": str(workspace_id),
+                            "workspace_name": workspace.name,
+                            "status": "FAILURE",
+                            "error": str(e),
+                            "total_num": 0,
+                            "end_user_count": 0,
+                        })
+
+                total_memory = sum(r.get("total_num", 0) for r in all_workspace_results)
+                success_count = sum(1 for r in all_workspace_results if r.get("status") == "SUCCESS")
+
+                return {
+                    "status": "SUCCESS",
+                    "message": f"成功处理 {success_count}/{len(workspaces)} 个工作空间，总记忆量: {total_memory}",
+                    "workspace_count": len(workspaces),
+                    "success_count": success_count,
+                    "total_memory": total_memory,
+                    "workspace_results": all_workspace_results
+                }
+
+            except Exception as e:
+                api_logger.error(f"记忆增量统计任务执行失败: {str(e)}")
+                return {
+                    "status": "FAILURE",
+                    "error": str(e),
+                    "workspace_count": 0,
+                    "workspace_results": []
+                }
+
+    try:
+        # 使用 nest_asyncio 来避免事件循环冲突
+        try:
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError:
+            pass
+
+        # 尝试获取现有事件循环，如果不存在则创建新的
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(_run())
+        elapsed_time = time.time() - start_time
+        result["elapsed_time"] = elapsed_time
+        result["task_id"] = self.request.id
+
+        return result
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "elapsed_time": elapsed_time,
+            "task_id": self.request.id
         }
 
 
@@ -1925,3 +2113,306 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
 #             "elapsed_time": elapsed_time,
 #             "task_id": self.request.id
 #         }
+
+
+# =============================================================================
+# 隐性记忆和情绪数据更新定时任务
+# =============================================================================
+
+@celery_app.task(
+    name="app.tasks.update_implicit_emotions_storage",
+    bind=True,
+    ignore_result=True,
+    max_retries=0,
+    acks_late=False,
+    time_limit=7200,  # 2小时硬超时
+    soft_time_limit=6900,  # 1小时55分钟软超时
+)
+def update_implicit_emotions_storage(self) -> Dict[str, Any]:
+    """定时任务：更新所有用户的隐性记忆画像和情绪建议数据
+
+    遍历数据库中所有已存在数据的用户，为每个用户重新生成隐性记忆画像和情绪建议。
+    实现错误隔离，单个用户失败不影响其他用户的处理。
+
+    Returns:
+        包含任务执行结果的字典，包括：
+        - status: 任务状态 (SUCCESS/FAILURE)
+        - message: 执行消息
+        - total_users: 总用户数
+        - successful_implicit: 成功更新隐性记忆的用户数
+        - successful_emotion: 成功更新情绪建议的用户数
+        - failed: 失败的用户数
+        - user_results: 每个用户的详细结果
+        - elapsed_time: 执行耗时（秒）
+        - task_id: 任务ID
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.logging_config import get_logger
+        from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
+        from app.models.implicit_emotions_storage_model import ImplicitEmotionsStorage
+        from sqlalchemy import select, func
+        from app.services.implicit_memory_service import ImplicitMemoryService
+        from app.services.emotion_analytics_service import EmotionAnalyticsService
+
+        logger = get_logger(__name__)
+        logger.info("开始执行隐性记忆和情绪数据更新定时任务")
+
+        total_users = 0
+        successful_implicit = 0
+        successful_emotion = 0
+        failed = 0
+        user_results = []
+
+        with get_db_context() as db:
+            try:
+                # 获取所有已存储数据的用户ID（分批次处理）
+                repo = ImplicitEmotionsStorageRepository(db)
+                
+                # 先统计总数用于日志
+                from sqlalchemy import func
+                total_users = db.execute(
+                    select(func.count()).select_from(ImplicitEmotionsStorage)
+                ).scalar() or 0
+                logger.info(f"找到 {total_users} 个需要更新的用户")
+
+                # 遍历每个用户并更新数据（分批次，避免一次性加载所有ID）
+                for end_user_id in repo.get_all_user_ids(batch_size=100):
+                    logger.info(f"开始处理用户: {end_user_id}")
+                    user_start_time = time.time()
+                    
+                    implicit_success = False
+                    emotion_success = False
+                    errors = []
+
+                    try:
+                        # 更新隐性记忆画像
+                        try:
+                            implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
+                            profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+                            await implicit_service.save_profile_cache(
+                                end_user_id=end_user_id,
+                                profile_data=profile_data,
+                                db=db
+                            )
+                            implicit_success = True
+                            logger.info(f"成功更新用户 {end_user_id} 的隐性记忆画像")
+                        except Exception as e:
+                            error_msg = f"隐性记忆更新失败: {str(e)}"
+                            errors.append(error_msg)
+                            logger.error(f"用户 {end_user_id} {error_msg}")
+
+                        # 更新情绪建议
+                        try:
+                            emotion_service = EmotionAnalyticsService()
+                            suggestions_data = await emotion_service.generate_emotion_suggestions(
+                                end_user_id=end_user_id,
+                                db=db,
+                                language="zh"
+                            )
+                            await emotion_service.save_suggestions_cache(
+                                end_user_id=end_user_id,
+                                suggestions_data=suggestions_data,
+                                db=db
+                            )
+                            emotion_success = True
+                            logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
+                        except Exception as e:
+                            error_msg = f"情绪建议更新失败: {str(e)}"
+                            errors.append(error_msg)
+                            logger.error(f"用户 {end_user_id} {error_msg}")
+
+                        # 统计结果
+                        if implicit_success:
+                            successful_implicit += 1
+                        if emotion_success:
+                            successful_emotion += 1
+                        if not implicit_success and not emotion_success:
+                            failed += 1
+
+                        user_elapsed = time.time() - user_start_time
+                        
+                        # 记录用户处理结果
+                        user_result = {
+                            "end_user_id": end_user_id,
+                            "implicit_success": implicit_success,
+                            "emotion_success": emotion_success,
+                            "errors": errors,
+                            "elapsed_time": user_elapsed
+                        }
+                        user_results.append(user_result)
+
+                        logger.info(
+                            f"用户 {end_user_id} 处理完成: "
+                            f"隐性记忆={'成功' if implicit_success else '失败'}, "
+                            f"情绪建议={'成功' if emotion_success else '失败'}, "
+                            f"耗时={user_elapsed:.2f}秒"
+                        )
+
+                    except Exception as e:
+                        # 单个用户失败不影响其他用户（错误隔离）
+                        failed += 1
+                        user_elapsed = time.time() - user_start_time
+                        error_info = {
+                            "end_user_id": end_user_id,
+                            "implicit_success": False,
+                            "emotion_success": False,
+                            "errors": [str(e)],
+                            "elapsed_time": user_elapsed
+                        }
+                        user_results.append(error_info)
+                        logger.error(f"处理用户 {end_user_id} 时出错: {str(e)}")
+
+                # ---- 处理增量用户（当天新增、尚未初始化的用户）----
+                new_users_initialized = 0
+                new_users_failed = 0
+                logger.info("开始处理当天新增的增量用户初始化")
+
+                for end_user_id in repo.get_new_user_ids_today(batch_size=100):
+                    logger.info(f"开始初始化新用户: {end_user_id}")
+                    user_start_time = time.time()
+                    implicit_success = False
+                    emotion_success = False
+                    errors = []
+
+                    try:
+                        try:
+                            implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
+                            profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+                            await implicit_service.save_profile_cache(
+                                end_user_id=end_user_id,
+                                profile_data=profile_data,
+                                db=db
+                            )
+                            implicit_success = True
+                            logger.info(f"成功初始化新用户 {end_user_id} 的隐性记忆画像")
+                        except Exception as e:
+                            error_msg = f"隐性记忆初始化失败: {str(e)}"
+                            errors.append(error_msg)
+                            logger.error(f"新用户 {end_user_id} {error_msg}")
+
+                        try:
+                            emotion_service = EmotionAnalyticsService()
+                            suggestions_data = await emotion_service.generate_emotion_suggestions(
+                                end_user_id=end_user_id,
+                                db=db,
+                                language="zh"
+                            )
+                            await emotion_service.save_suggestions_cache(
+                                end_user_id=end_user_id,
+                                suggestions_data=suggestions_data,
+                                db=db
+                            )
+                            emotion_success = True
+                            logger.info(f"成功初始化新用户 {end_user_id} 的情绪建议")
+                        except Exception as e:
+                            error_msg = f"情绪建议初始化失败: {str(e)}"
+                            errors.append(error_msg)
+                            logger.error(f"新用户 {end_user_id} {error_msg}")
+
+                        if implicit_success or emotion_success:
+                            new_users_initialized += 1
+                        else:
+                            new_users_failed += 1
+
+                        user_elapsed = time.time() - user_start_time
+                        user_results.append({
+                            "end_user_id": end_user_id,
+                            "type": "init",
+                            "implicit_success": implicit_success,
+                            "emotion_success": emotion_success,
+                            "errors": errors,
+                            "elapsed_time": user_elapsed
+                        })
+
+                    except Exception as e:
+                        new_users_failed += 1
+                        user_elapsed = time.time() - user_start_time
+                        user_results.append({
+                            "end_user_id": end_user_id,
+                            "type": "init",
+                            "implicit_success": False,
+                            "emotion_success": False,
+                            "errors": [str(e)],
+                            "elapsed_time": user_elapsed
+                        })
+                        logger.error(f"初始化新用户 {end_user_id} 时出错: {str(e)}")
+
+                logger.info(
+                    f"增量用户初始化完成: 成功={new_users_initialized}, 失败={new_users_failed}"
+                )
+                # ---- 增量用户处理结束 ----
+
+                # 记录总体统计信息
+                logger.info(
+                    f"隐性记忆和情绪数据更新定时任务完成: "
+                    f"存量用户总数={total_users}, "
+                    f"隐性记忆成功={successful_implicit}, "
+                    f"情绪建议成功={successful_emotion}, "
+                    f"存量失败={failed}, "
+                    f"增量初始化成功={new_users_initialized}, "
+                    f"增量初始化失败={new_users_failed}"
+                )
+
+                return {
+                    "status": "SUCCESS",
+                    "message": (
+                        f"存量用户 {total_users} 个，隐性记忆 {successful_implicit} 个成功，情绪建议 {successful_emotion} 个成功；"
+                        f"增量新用户初始化 {new_users_initialized} 个成功，{new_users_failed} 个失败"
+                    ),
+                    "total_users": total_users,
+                    "successful_implicit": successful_implicit,
+                    "successful_emotion": successful_emotion,
+                    "failed": failed,
+                    "new_users_initialized": new_users_initialized,
+                    "new_users_failed": new_users_failed,
+                    "user_results": user_results[:50]  # 只保留前50个用户的详细结果
+                }
+
+            except Exception as e:
+                logger.error(f"隐性记忆和情绪数据更新定时任务执行失败: {str(e)}")
+                return {
+                    "status": "FAILURE",
+                    "error": str(e),
+                    "total_users": total_users,
+                    "successful_implicit": successful_implicit,
+                    "successful_emotion": successful_emotion,
+                    "failed": failed,
+                    "new_users_initialized": 0,
+                    "new_users_failed": 0,
+                    "user_results": user_results[:50]
+                }
+
+    try:
+        # 使用 nest_asyncio 来避免事件循环冲突
+        try:
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError:
+            pass
+
+        # 尝试获取现有事件循环，如果不存在则创建新的
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(_run())
+        elapsed_time = time.time() - start_time
+        result["elapsed_time"] = elapsed_time
+        result["task_id"] = self.request.id
+
+        return result
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "elapsed_time": elapsed_time,
+            "task_id": self.request.id
+        }

@@ -209,7 +209,7 @@ class ToolService:
 
         try:
             # 获取工具实例
-            tool = self._get_tool_instance(tool_id, tenant_id)
+            tool = self.get_tool_instance(tool_id, tenant_id)
             if not tool:
                 return ToolResult.error_result(
                     error=f"工具不存在: {tool_id}",
@@ -335,7 +335,7 @@ class ToolService:
             return []
         
         # 获取工具实例
-        tool_instance = self._get_tool_instance(str(config.id), config.tenant_id)
+        tool_instance = self.get_tool_instance(str(config.id), config.tenant_id)
         if not tool_instance:
             return []
         
@@ -792,7 +792,7 @@ class ToolService:
         """获取工具配置"""
         return self.tool_repo.find_by_id_and_tenant(self.db, uuid.UUID(tool_id), tenant_id)
 
-    def _get_tool_instance(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[BaseTool]:
+    def get_tool_instance(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[BaseTool]:
         """获取工具实例"""
         if tool_id in self._tool_cache:
             return self._tool_cache[tool_id]
@@ -1416,7 +1416,7 @@ class ToolService:
         """测试内置工具连接"""
         try:
             # 获取工具实例
-            tool_instance = self._get_tool_instance(str(config.id), config.tenant_id)
+            tool_instance = self.get_tool_instance(str(config.id), config.tenant_id)
             if not tool_instance:
                 return {"success": False, "message": "无法创建工具实例"}
             

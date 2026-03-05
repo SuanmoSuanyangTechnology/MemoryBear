@@ -1,9 +1,11 @@
+import { type FC, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
 import { Button, Select, Table, Form, type TableProps } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
 import Empty from '@/components/Empty';
-import VariableSelect from '../VariableSelect';
+import Editor from '../../Editor'
 
 export interface TableRow {
   key?: string;
@@ -21,7 +23,7 @@ interface EditableTableProps {
   size?: "small"
 }
 
-const EditableTable: React.FC<EditableTableProps> = ({
+const EditableTable: FC<EditableTableProps> = ({
   parentName,
   title,
   options = [],
@@ -37,10 +39,17 @@ const EditableTable: React.FC<EditableTableProps> = ({
     ...(typeOptions.length > 0 && { type: typeOptions[0].value })
   });
 
+  // Filter options based on boolean type if needed
+  const booleanFilterOptions = useMemo(() => {
+    return filterBooleanType
+      ? options.filter(option => option.dataType !== 'boolean')
+      : options
+  }, [options, filterBooleanType])
+
   const getColumns = (remove: (index: number) => void): TableProps<TableRow>['columns'] => {
     const hasType = typeOptions.length > 0;
     const cellClassName="rb:p-1!"
-    const contentClassName ="rb:w-[108px]! rb:text-[12px]!"
+    const contentClassName ="rb:w-[108px]! rb:text-[12px]! rb:overflow-hidden!"
 
     return [
       {
@@ -49,14 +58,12 @@ const EditableTable: React.FC<EditableTableProps> = ({
         className: cellClassName,
         render: (_: any, __: TableRow, index: number) => (
           <Form.Item name={[index, 'name']} noStyle>
-            <VariableSelect 
-              placeholder={t('common.pleaseSelect')} 
-              // size="small" 
-              options={options}
-              filterBooleanType={filterBooleanType}
-              popupMatchSelectWidth={false}
+            <Editor
+              options={booleanFilterOptions.filter(option => !option.dataType.includes('file'))}
+              type="input"
               className={contentClassName}
               size={size}
+              height={16}
             />
           </Form.Item>
         )
@@ -101,19 +108,17 @@ const EditableTable: React.FC<EditableTableProps> = ({
             {(form) => {
               const currentType = form.getFieldValue([...Array.isArray(parentName) ? parentName : [parentName], index, 'type']);
               const filteredOptions = currentType === 'file' 
-                ? options.filter(option => option.dataType === 'file')
-                : options;
+                ? booleanFilterOptions.filter(option => option.dataType.includes('file'))
+                : booleanFilterOptions.filter(option => !option.dataType.includes('file'));
               
               return (
                 <Form.Item name={[index, 'value']} noStyle>
-                  <VariableSelect 
-                    placeholder={t('common.pleaseSelect')} 
-                    // size="small" 
+                  <Editor
                     options={filteredOptions}
-                    filterBooleanType={filterBooleanType}
-                    popupMatchSelectWidth={false}
+                    type="input"
                     className={contentClassName}
                     size={size}
+                    height={16}
                   />
                 </Form.Item>
               );

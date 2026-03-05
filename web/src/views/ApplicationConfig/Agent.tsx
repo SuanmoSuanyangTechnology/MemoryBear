@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-25 18:11:49
+ * @Last Modified time: 2026-03-03 14:24:34
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -169,12 +169,16 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
       const { skills, variables } = response
-      let allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
-      let allTools = Array.isArray(response.tools) ? response.tools : []
+      const allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
+      const allTools = Array.isArray(response.tools) ? response.tools : []
       const memoryContent = response.memory?.memory_config_id
       const parsedMemoryContent = memoryContent === null || memoryContent === '' 
         ? undefined 
         : !isNaN(Number(memoryContent)) ? Number(memoryContent) : memoryContent
+      const variableList = variables?.map((item, index) => ({
+        ...item,
+        index
+      })) || []
       form.setFieldsValue({
         ...response,
         tools: allTools,
@@ -185,9 +189,10 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         skills: {
           ...skills,
           skill_ids: allSkills
-        }
+        },
+        variables: [...variableList]
       })
-      updateVariableList([...variables])
+      updateVariableList([...variableList])
       setData({
         ...response,
         tools: allTools
@@ -398,6 +403,9 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   const handleSaveChatVariable = (values: Variable[]) => {
     setChatVariables(values)
   }
+  useEffect(() => {
+    setChatVariables(values?.variables || [])
+  }, [values?.variables])
   console.log('values', values)
   return (
     <>
@@ -431,7 +439,11 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                   </Button>
                 </div>
 
-                <Form.Item name="system_prompt" className="rb:mb-0!">
+                <Form.Item
+                  name="system_prompt"
+                  className="rb:mb-0!"
+                  rules={[{ max: 10000 }]}
+                >
                   <Input.TextArea
                     placeholder={t('application.promptPlaceholder')}
                     styles={{
@@ -498,6 +510,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
               chatList={chatList}
               updateChatList={setChatList}
               handleSave={handleSave}
+              chatVariables={chatVariables}
             />
           </RbCard>
         </Col>

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-28 14:08:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 16:20:40
+ * @Last Modified time: 2026-03-02 17:39:49
  */
 /**
  * UploadWorkflowModal Component
@@ -14,7 +14,7 @@
  * 4. Completed - Show success message and options
  */
 import { forwardRef, useImperativeHandle, useState, useMemo } from 'react';
-import { Form, Select, Steps, Flex, Alert, Input, Button, Result } from 'antd';
+import { Form, Select, Steps, Flex, Alert, Input, Button, Result, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { UploadWorkflowModalData, UploadData, UploadWorkflowModalRef } from '../types'
@@ -92,18 +92,22 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
     
     switch(current) {
       case 0: // Step 1: Upload file
+        if (!values.file || values.file.length === 0) {
+          message.warning(t('application.pleaseUploadFile'));
+          return;
+        }
         const formData = new FormData();
         setFirstFormData(values);
         formData.append('platform', values.platform);
         formData.append('file', values.file[0]);
-        
+
         // Call import workflow API
         importWorkflow(formData)
           .then(res => {
             const response = res as UploadData;
             const { errors, warnings } = response;
             setData(response);
-            
+
             // Navigate to error/warning step if any, otherwise go to confirmation
             if (errors.length || warnings.length) {
               setCurrent(1);
@@ -203,7 +207,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
             {t('common.cancel')}
           </Button>,
           <Button
-            key="submit"
+            key="nextStep"
             type="primary"
             loading={loading}
             onClick={handleSave}
@@ -215,7 +219,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
         return null;
       default: // Steps 1-2
         return [
-          <Button onClick={handleClose}>
+          <Button key="cancel" onClick={handleClose}>
             {t('common.cancel')}
           </Button>,
           <Button key="back" onClick={handleLastStep}>
@@ -235,7 +239,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
 
   return (
     <RbModal
-      title={t('application.importWorkflow')}
+      title={t('application.importThirdParty')}
       open={visible}
       onCancel={handleClose}
       okText={t('application.nextStep')}
@@ -262,7 +266,10 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
             platform: 'dify'
           }}
         >
-          <Form.Item name="platform" label={t('application.platform')}>
+          <Form.Item
+            name="platform" label={t('application.platform')}
+            rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          >
             <Select
               placeholder={t('common.pleaseSelect')}
               options={['dify'].map(value => ({
@@ -270,16 +277,17 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
               }))}
             />
           </Form.Item>
-          <Form.Item name="file" valuePropName="fileList" noStyle>
+          <Form.Item
+            name="file"
+            valuePropName="fileList"
+            noStyle
+          >
             <UploadFiles
               isAutoUpload={false}
               isCanDrag={true}
               fileSize={100}
               maxCount={1}
-              fileType={['yml', 'yaml', 'zip', 'json']}
-              onChange={(fileList) => {
-                console.log('文件列表变化:', fileList);
-              }}
+              fileType={['yml']}
             />
           </Form.Item>
         </Form>

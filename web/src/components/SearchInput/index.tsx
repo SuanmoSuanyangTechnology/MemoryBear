@@ -41,6 +41,8 @@ interface SearchInputProps {
   className?: string;
   /** Input size */
   size?: InputProps['size']
+  /** Maximum length of the input value */
+  maxLength?: number;
 }
 
 /** Search input component with debounce and throttle support */

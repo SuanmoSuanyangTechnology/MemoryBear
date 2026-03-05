@@ -35,6 +35,7 @@ from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
 from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
+from .implicit_emotions_storage_model import ImplicitEmotionsStorage
 
 __all__ = [
     "Tenants",
@@ -90,5 +91,6 @@ __all__ = [
     "MemoryPerceptualModel",
     "ModelBase",
     "LoadBalanceStrategy",
-    "Skill"
+    "Skill",
+    "ImplicitEmotionsStorage"
 ]

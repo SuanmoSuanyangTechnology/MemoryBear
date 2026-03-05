@@ -17,6 +17,7 @@ import type { AiPromptModalRef } from '@/views/ApplicationConfig/types'
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 import type { SkillFormData } from '../types'
 import { getSkillDetail, createSkill, updateSkill } from '@/api/skill'
+import { stringRegExp } from '@/utils/validator';
 
 /**
  * Skill Configuration Page Component
@@ -110,7 +111,7 @@ const SkillConfig: FC = () => {
         // Format tools data for API
         const formData = {
           ...rest,
-          tools: tools?.map((item: any) => ({
+          tools: tools?.map((item) => ({
             tool_id: item.tool_id,
             operation: item.operation
           }))
@@ -144,13 +145,18 @@ const SkillConfig: FC = () => {
             <Form.Item
               name="name"
               label={t('skills.name')}
-              rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('skills.name') }) }]}
+              rules={[
+                { required: true, message: t('common.inputPlaceholder', { title: t('skills.name') }) },
+                { max: 50 },
+                { pattern: stringRegExp, message: t('common.nameInvalid') },
+              ]}
             >
               <Input placeholder={t('common.pleaseEnter')} />
             </Form.Item>
             <Form.Item
               name="description"
               label={t('skills.description')}
+              rules={[{ max: 500 }]}
             >
               <Input.TextArea placeholder={t('skills.descriptionPlaceholder')} />
             </Form.Item>

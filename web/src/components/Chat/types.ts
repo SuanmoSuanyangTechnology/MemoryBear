@@ -23,6 +23,7 @@ export interface ChatItem {
   status?: string;
   subContent?: Record<string, any>[];
   files?: any[];
+  error?: string;
 }
 
 /**

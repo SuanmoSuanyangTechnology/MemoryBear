@@ -1,5 +1,6 @@
 export interface Variable {
   name: string;
+  display_name?: string;
   type: string;
   required: boolean;
   description: string;

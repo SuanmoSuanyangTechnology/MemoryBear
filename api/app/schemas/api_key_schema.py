@@ -155,8 +155,7 @@ class ApiKey(BaseModel):
         return datetime.datetime.now() > self.expires_at
 
     @field_serializer('expires_at', 'last_used_at', 'created_at', 'updated_at')
-    @classmethod
-    def serialize_datetime(cls, v: Optional[datetime.datetime]) -> Optional[int]:
+    def serialize_datetime(self, v: Optional[datetime.datetime]) -> Optional[int]:
         """将datetime转换为时间戳"""
         return datetime_to_timestamp(v)
 
@@ -171,8 +170,7 @@ class ApiKeyStats(BaseModel):
     avg_response_time: Optional[float] = Field(None, description="平均响应时间（毫秒）")
 
     @field_serializer('last_used_at')
-    @classmethod
-    def serialize_datetime(cls, v: Optional[datetime.datetime]) -> Optional[int]:
+    def serialize_datetime(self, v: Optional[datetime.datetime]) -> Optional[int]:
         """将datetime转换为时间戳"""
         return datetime_to_timestamp(v)
 
@@ -219,7 +217,6 @@ class ApiKeyLog(BaseModel):
     created_at: datetime.datetime
 
     @field_serializer('created_at')
-    @classmethod
-    def serialize_datetime(cls, v: datetime.datetime) -> int:
+    def serialize_datetime(self, v: datetime.datetime) -> int:
         """将datetime转换为时间戳"""
         return datetime_to_timestamp(v)

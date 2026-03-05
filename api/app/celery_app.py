@@ -1,9 +1,11 @@
 import os
 import platform
 from datetime import timedelta
+from celery.schedules import crontab
 from urllib.parse import quote
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
 
@@ -43,8 +45,8 @@ celery_app.conf.update(
     task_ignore_result=False,
     
     # 超时设置
-    task_time_limit=1800,  # 30分钟硬超时
-    task_soft_time_limit=1500,  # 25分钟软超时
+    task_time_limit=3600,  # 60分钟硬超时
+    task_soft_time_limit=3000,  # 50分钟软超时
     
     # Worker 设置 (per-worker settings are in docker-compose command line)
     worker_prefetch_multiplier=1,  # Don't hoard tasks, fairer distribution
@@ -82,7 +84,8 @@ celery_app.conf.update(
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'periodic_tasks'},
-        'app.controllers.memory_storage_controller.search_all': {'queue': 'periodic_tasks'},
+        'app.tasks.write_all_workspaces_memory_task': {'queue': 'periodic_tasks'},
+        'app.tasks.update_implicit_emotions_storage': {'queue': 'periodic_tasks'},
     },
 )
 
@@ -90,11 +93,14 @@ celery_app.conf.update(
 celery_app.autodiscover_tasks(['app'])
 
 # Celery Beat schedule for periodic tasks
-memory_increment_schedule = timedelta(hours=settings.MEMORY_INCREMENT_INTERVAL_HOURS)
+memory_increment_schedule = crontab(hour=settings.MEMORY_INCREMENT_HOUR, minute=settings.MEMORY_INCREMENT_MINUTE)
 memory_cache_regeneration_schedule = timedelta(hours=settings.MEMORY_CACHE_REGENERATION_HOURS)
-# 这个30秒的设计不合理
-workspace_reflection_schedule = timedelta(seconds=30)  # 每30秒运行一次settings.REFLECTION_INTERVAL_TIME
-forgetting_cycle_schedule = timedelta(hours=24)  # 每24小时运行一次遗忘周期
+workspace_reflection_schedule = timedelta(seconds=settings.WORKSPACE_REFLECTION_INTERVAL_SECONDS)
+forgetting_cycle_schedule = timedelta(hours=settings.FORGETTING_CYCLE_INTERVAL_HOURS)
+implicit_emotions_update_schedule = crontab(
+    hour=settings.IMPLICIT_EMOTIONS_UPDATE_HOUR,
+    minute=settings.IMPLICIT_EMOTIONS_UPDATE_MINUTE,
+)
 
 #构建定时任务配置
 beat_schedule_config = {
@@ -115,16 +121,16 @@ beat_schedule_config = {
             "config_id": None,  # 使用默认配置，可以通过环境变量配置
         },
     },
-}
-
-#如果配置了默认工作空间ID，则添加记忆总量统计任务
-if settings.DEFAULT_WORKSPACE_ID:
-    beat_schedule_config["write-total-memory"] = {
-        "task": "app.controllers.memory_storage_controller.search_all",
+    "write-all-workspaces-memory": {
+        "task": "app.tasks.write_all_workspaces_memory_task",
         "schedule": memory_increment_schedule,
-        "kwargs": {
-            "workspace_id": settings.DEFAULT_WORKSPACE_ID,
-        },
-    }
+        "args": (),
+    },
+    "update-implicit-emotions-storage": {
+        "task": "app.tasks.update_implicit_emotions_storage",
+        "schedule": implicit_emotions_update_schedule,
+        "args": (),
+    },
+}
 
 celery_app.conf.beat_schedule = beat_schedule_config

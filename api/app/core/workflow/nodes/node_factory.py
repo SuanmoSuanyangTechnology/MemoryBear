@@ -123,10 +123,10 @@ class NodeFactory:
         # 获取节点类
         node_class = cls._node_types.get(node_type)
         if not node_class:
-            raise ValueError(f"不支持的节点类型: {node_type}")
+            raise ValueError(f"Unsupported node type: {node_type}")
 
         # 创建节点实例
-        logger.debug(f"创建节点: {node_config.get('id')} (type={node_type})")
+        logger.debug(f"create node instance: {node_config.get('id')} (type={node_type})")
         return node_class(node_config, workflow_config)
 
     @classmethod

@@ -16,7 +16,7 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db
 from app.models import AppRelease
-from app.services.draft_run_service import DraftRunService
+from app.services.draft_run_service import AgentRunService
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class AgentNode(BaseNode):
     def _output_types(self) -> dict[str, VariableType]:
         return {"output": VariableType.STRING}
 
-    def _prepare_agent(self, variable_pool: VariablePool) -> tuple[DraftRunService, AppRelease, str]:
+    def _prepare_agent(self, variable_pool: VariablePool) -> tuple[AgentRunService, AppRelease, str]:
         """准备 Agent（公共逻辑）
         
         Args:
@@ -65,7 +65,7 @@ class AgentNode(BaseNode):
         if not release:
             raise ValueError(f"Agent 不存在: {agent_id}")
         
-        draft_service = DraftRunService(db)
+        draft_service = AgentRunService(db)
         
         return draft_service, release, message
     

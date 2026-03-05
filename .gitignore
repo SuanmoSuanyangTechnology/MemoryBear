@@ -29,6 +29,7 @@ search_results.json
 api/migrations/versions
 tmp
 files
+powers/ 
 
 # Exclude dep files
 huggingface.co/

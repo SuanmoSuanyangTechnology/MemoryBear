@@ -414,6 +414,7 @@ class LLMRouter:
                 provider=api_key_config.provider,
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
+                is_omni=api_key_config.is_omni,
                 temperature=0.3,
                 max_tokens=500
             )

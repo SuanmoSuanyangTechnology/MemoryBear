@@ -400,7 +400,8 @@ async def render_user_summary_prompt(
     user_id: str,
     entities: str,
     statements: str,
-    language: str = "zh"
+    language: str = "zh",
+    user_display_name: str = None
 ) -> str:
     """
     Renders the user summary prompt using the user_summary.jinja2 template.
@@ -410,16 +411,22 @@ async def render_user_summary_prompt(
         entities: Core entities with frequency information
         statements: Representative statement samples
         language: The language to use for summary generation ("zh" for Chinese, "en" for English)
+        user_display_name: Display name for the user (e.g., other_name or "该用户"/"the user")
 
     Returns:
         Rendered prompt content as string
     """
+    # 如果没有提供 user_display_name，使用默认值
+    if user_display_name is None:
+        user_display_name = "该用户" if language == "zh" else "the user"
+    
     template = prompt_env.get_template("user_summary.jinja2")
     rendered_prompt = template.render(
         user_id=user_id,
         entities=entities,
         statements=statements,
-        language=language
+        language=language,
+        user_display_name=user_display_name
     )
     
     # 记录渲染结果到提示日志
@@ -429,7 +436,8 @@ async def render_user_summary_prompt(
         'user_id': user_id,
         'entities_len': len(entities),
         'statements_len': len(statements),
-        'language': language
+        'language': language,
+        'user_display_name': user_display_name
     })
     
     return rendered_prompt
@@ -539,4 +547,21 @@ async def render_ontology_extraction_prompt(
         'language': language
     })
     
+    return rendered_prompt
+
+
+def render_interest_filter_prompt(tag_list: str, language: str = "zh") -> str:
+    """
+    Renders the interest filter prompt using the interest_filter.jinja2 template.
+
+    Args:
+        tag_list: Comma-separated string of raw tags to filter
+        language: Output language ("zh" for Chinese, "en" for English)
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("interest_filter.jinja2")
+    rendered_prompt = template.render(tag_list=tag_list, language=language)
+    log_prompt_rendering('interest filter', rendered_prompt)
     return rendered_prompt

@@ -6,6 +6,8 @@ models:
   description: DeepSeek-R1-Distill-Qwen-14B大语言模型，支持智能体思考，32000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -16,6 +18,8 @@ models:
   description: DeepSeek-R1-Distill-Qwen-32B大语言模型，支持智能体思考，32000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -26,6 +30,8 @@ models:
   description: DeepSeek-R1大语言模型，支持智能体思考，131072超大上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -36,6 +42,8 @@ models:
   description: DeepSeek-V3.1大语言模型，支持智能体思考，131072超大上下文窗口，对话模式，支持丰富生成参数调节
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -46,6 +54,8 @@ models:
   description: DeepSeek-V3.2-exp实验版大语言模型，支持智能体思考，131072超大上下文窗口，对话模式，支持丰富生成参数调节
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -56,6 +66,8 @@ models:
   description: DeepSeek-V3.2大语言模型，支持智能体思考，131072超大上下文窗口，对话模式，支持丰富生成参数调节
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -66,6 +78,8 @@ models:
   description: DeepSeek-V3大语言模型，支持智能体思考，64000上下文窗口，对话模式，支持文本与JSON格式输出
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -76,6 +90,8 @@ models:
   description: farui-plus大语言模型，支持多工具调用、智能体思考、流式工具调用，12288上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -88,6 +104,8 @@ models:
   description: GLM-4.7大语言模型，支持多工具调用、智能体思考、流式工具调用，202752超大上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -100,6 +118,9 @@ models:
   description: qvq-max-latest大语言模型，支持视觉、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+  is_omni: false
   tags:
   - 大语言模型
   - vision
@@ -112,6 +133,9 @@ models:
   description: qvq-max大语言模型，支持视觉、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+  is_omni: false
   tags:
   - 大语言模型
   - vision
@@ -124,6 +148,8 @@ models:
   description: qwen-coder-turbo-0919代码专用大语言模型，支持智能体思考，131072上下文窗口，对话模式，已废弃
   is_deprecated: true
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - 代码模型
@@ -135,6 +161,8 @@ models:
   description: qwen-max-latest大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式，支持联网搜索
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -147,6 +175,8 @@ models:
   description: qwen-max-longcontext长上下文大语言模型，支持多工具调用、智能体思考、流式工具调用，32000上下文窗口，对话模式，已废弃
   is_deprecated: true
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -159,6 +189,8 @@ models:
   description: qwen-max大语言模型，支持多工具调用、智能体思考、流式工具调用，32768上下文窗口，对话模式，支持联网搜索
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -171,6 +203,8 @@ models:
   description: qwen-mt-plus多语言翻译大语言模型，支持智能体思考，16384上下文窗口，对话模式，支持多语种互译与领域翻译适配
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - 翻译模型
@@ -182,6 +216,8 @@ models:
   description: qwen-mt-turbo轻量化多语言翻译大语言模型，支持智能体思考，16384上下文窗口，对话模式，支持多语种互译与领域翻译适配
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - 翻译模型
@@ -193,6 +229,8 @@ models:
   description: qwen-plus-0112大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式，支持联网搜索，已废弃
   is_deprecated: true
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -205,6 +243,8 @@ models:
   description: qwen-plus-0125大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式，支持联网搜索，已废弃
   is_deprecated: true
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -217,6 +257,8 @@ models:
   description: qwen-plus-0723大语言模型，支持多工具调用、智能体思考、流式工具调用，32000上下文窗口，对话模式，支持联网搜索，已废弃
   is_deprecated: true
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -229,6 +271,8 @@ models:
   description: qwen-plus-0806大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式，支持联网搜索，已废弃
   is_deprecated: true
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -241,6 +285,8 @@ models:
   description: qwen-plus-0919大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式，支持联网搜索，已废弃
   is_deprecated: true
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -253,6 +299,8 @@ models:
   description: qwen-plus-1125大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式，支持联网搜索，已废弃
   is_deprecated: true
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -265,6 +313,8 @@ models:
   description: qwen-plus-1127大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式，支持联网搜索，已废弃
   is_deprecated: true
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -277,6 +327,8 @@ models:
   description: qwen-plus-1220大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式，已废弃
   is_deprecated: true
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -289,6 +341,10 @@ models:
   description: qwen-vl-max多模态大模型，支持视觉理解、智能体思考、视频理解，131072上下文窗口，对话模式，未废弃
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -302,6 +358,10 @@ models:
   description: qwen-vl-plus-0809多模态大模型，支持视觉理解、智能体思考、视频理解，32768上下文窗口，对话模式，已废弃
   is_deprecated: true
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -315,6 +375,10 @@ models:
   description: qwen-vl-plus-2025-01-02多模态大模型，支持视觉理解、智能体思考、视频理解，32768上下文窗口，对话模式，未废弃
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -328,6 +392,10 @@ models:
   description: qwen-vl-plus-2025-01-25多模态大模型，支持视觉理解、智能体思考、视频理解，131072上下文窗口，对话模式，未废弃
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -341,6 +409,10 @@ models:
   description: qwen-vl-plus-latest多模态大模型，支持视觉理解、智能体思考、视频理解，131072上下文窗口，对话模式，未废弃
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -354,6 +426,10 @@ models:
   description: qwen-vl-plus多模态大模型，支持视觉理解、智能体思考、视频理解，131072上下文窗口，对话模式，未废弃
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -367,6 +443,8 @@ models:
   description: qwen2.5-0.5b-instruct大语言模型，支持多工具调用、智能体思考、流式工具调用，32768上下文窗口，对话模式，未废弃
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -379,6 +457,8 @@ models:
   description: qwen3-14b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -391,6 +471,8 @@ models:
   description: qwen3-235b-a22b-instruct-2507大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -403,6 +485,8 @@ models:
   description: qwen3-235b-a22b-thinking-2507大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -415,6 +499,8 @@ models:
   description: qwen3-235b-a22b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -427,6 +513,8 @@ models:
   description: qwen3-30b-a3b-instruct-2507大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -439,6 +527,8 @@ models:
   description: qwen3-30b-a3b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -451,6 +541,8 @@ models:
   description: qwen3-32b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -463,6 +555,8 @@ models:
   description: qwen3-4b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -475,6 +569,8 @@ models:
   description: qwen3-8b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -487,6 +583,8 @@ models:
   description: qwen3-coder-30b-a3b-instruct大语言模型，支持智能体思考，262144上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - 代码模型
@@ -498,6 +596,8 @@ models:
   description: qwen3-coder-480b-a35b-instruct大语言模型，支持智能体思考，262144上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - 代码模型
@@ -509,6 +609,8 @@ models:
   description: qwen3-coder-plus-2025-09-23大语言模型，支持智能体思考，1000000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - 代码模型
@@ -520,6 +622,8 @@ models:
   description: qwen3-coder-plus大语言模型，支持智能体思考，1000000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - 代码模型
@@ -531,6 +635,8 @@ models:
   description: qwen3-max-2025-09-23大语言模型，支持多工具调用、智能体思考、流式工具调用，262144上下文窗口，对话模式，支持联网搜索
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -544,6 +650,8 @@ models:
   description: qwen3-max-2026-01-23大语言模型，支持多工具调用、智能体思考、流式工具调用，262144上下文窗口，对话模式，支持联网搜索
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -557,6 +665,8 @@ models:
   description: qwen3-max-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，262144上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -569,6 +679,8 @@ models:
   description: qwen3-max大语言模型，支持多工具调用、智能体思考、流式工具调用，262144上下文窗口，对话模式，支持联网搜索
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -582,6 +694,8 @@ models:
   description: qwen3-next-80b-a3b-instruct大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -594,6 +708,8 @@ models:
   description: qwen3-next-80b-a3b-thinking大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -606,6 +722,11 @@ models:
   description: qwen3-omni-flash-2025-12-01多模态大语言模型，支持视觉、智能体思考、视频、音频能力，65536上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+    - audio
+  is_omni: true
   tags:
   - 大语言模型
   - 多模态模型
@@ -620,6 +741,10 @@ models:
   description: qwen3-vl-235b-a22b-instruct多模态大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉、视频能力，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -635,6 +760,10 @@ models:
   description: qwen3-vl-235b-a22b-thinking多模态大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉、视频能力，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -650,6 +779,10 @@ models:
   description: qwen3-vl-30b-a3b-instruct多模态大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉、视频能力，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -665,6 +798,10 @@ models:
   description: qwen3-vl-30b-a3b-thinking多模态大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉、视频能力，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -680,6 +817,10 @@ models:
   description: qwen3-vl-flash多模态大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉、视频能力，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -695,6 +836,10 @@ models:
   description: qwen3-vl-plus-2025-09-23多模态大语言模型，支持视觉、智能体思考、视频能力，262144上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -708,6 +853,10 @@ models:
   description: qwen3-vl-plus多模态大语言模型，支持视觉、智能体思考、视频能力，262144上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
   tags:
   - 大语言模型
   - 多模态模型
@@ -721,6 +870,8 @@ models:
   description: qwq-32b大语言模型，支持智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -732,6 +883,8 @@ models:
   description: qwq-plus-0305大语言模型，支持智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -743,6 +896,8 @@ models:
   description: qwq-plus大语言模型，支持智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -754,6 +909,8 @@ models:
   description: gte-rerank-v2重排序模型，4000上下文窗口
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 重排序模型
   logo: dashscope
@@ -763,6 +920,8 @@ models:
   description: gte-rerank重排序模型，4000上下文窗口
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 重排序模型
   logo: dashscope
@@ -772,6 +931,9 @@ models:
   description: multimodal-embedding-v1多模态嵌入模型，支持视觉能力，8192上下文窗口，最大分块数10
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+  is_omni: false
   tags:
   - 嵌入模型
   - 多模态模型
@@ -783,6 +945,8 @@ models:
   description: text-embedding-v1文本嵌入模型，2048上下文窗口，最大分块数25
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 嵌入模型
   - 文本嵌入
@@ -793,6 +957,8 @@ models:
   description: text-embedding-v2文本嵌入模型，2048上下文窗口，最大分块数25
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 嵌入模型
   - 文本嵌入
@@ -803,6 +969,8 @@ models:
   description: text-embedding-v3文本嵌入模型，8192上下文窗口，最大分块数10
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 嵌入模型
   - 文本嵌入
@@ -813,6 +981,8 @@ models:
   description: text-embedding-v4文本嵌入模型，8192上下文窗口，最大分块数10
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 嵌入模型
   - 文本嵌入

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:57:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-06 21:11:19
+ * @Last Modified time: 2026-03-03 13:46:55
  */
 /**
  * Type definitions for Conversation
@@ -51,6 +51,7 @@ export interface QueryParams {
   /** Current conversation ID */
   conversation_id?: string | null;
   files?: any[];
+  variables?: Record<string, any>;
 }
 
 export interface UploadFileListModalRef {

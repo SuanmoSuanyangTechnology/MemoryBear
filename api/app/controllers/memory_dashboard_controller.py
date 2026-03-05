@@ -9,6 +9,7 @@ from app.schemas.response_schema import ApiResponse
 
 from app.services import memory_dashboard_service, memory_storage_service, workspace_service
 from app.services.memory_agent_service import get_end_users_connected_configs_batch
+from app.services.app_statistics_service import AppStatisticsService
 from app.core.logging_config import get_api_logger
 
 # 获取API专用日志器
@@ -469,6 +470,8 @@ async def get_chunk_insight(
 @router.get("/dashboard_data", response_model=ApiResponse)
 async def dashboard_data(
     end_user_id: Optional[str] = Query(None, description="可选的用户ID"),
+    start_date: Optional[int] = Query(None, description="开始时间戳（毫秒）"),
+    end_date: Optional[int] = Query(None, description="结束时间戳（毫秒）"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -502,6 +505,15 @@ async def dashboard_data(
     """
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的dashboard整合数据")
+    
+    # 如果没有提供时间范围，默认使用最近30天
+    if start_date is None or end_date is None:
+        from datetime import datetime, timedelta
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=30)
+        end_date = int(end_dt.timestamp() * 1000)
+        start_date = int(start_dt.timestamp() * 1000)
+        api_logger.info(f"使用默认时间范围: {start_dt} 到 {end_dt}")
     
     # 获取 storage_type，如果为 None 则使用默认值
     storage_type = workspace_service.get_workspace_storage_type(
@@ -563,17 +575,22 @@ async def dashboard_data(
             except Exception as e:
                 api_logger.warning(f"获取知识库类型统计失败: {str(e)}")
             
-            # 3. 获取API调用增量（total_api_call，转换为整数）
+            # 3. 获取API调用统计（total_api_call）
             try:
-                api_increment = memory_dashboard_service.get_workspace_api_increment(
-                    db=db,
+                # 使用 AppStatisticsService 获取真实的API调用统计
+                app_stats_service = AppStatisticsService(db)
+                api_stats = app_stats_service.get_workspace_api_statistics(
                     workspace_id=workspace_id,
-                    current_user=current_user
+                    start_date=start_date,
+                    end_date=end_date
                 )
-                neo4j_data["total_api_call"] = api_increment
-                api_logger.info(f"成功获取API调用增量: {neo4j_data['total_api_call']}")
+                # 计算总调用次数
+                total_api_calls = sum(item.get("total_calls", 0) for item in api_stats)
+                neo4j_data["total_api_call"] = total_api_calls
+                api_logger.info(f"成功获取API调用统计: {neo4j_data['total_api_call']}")
             except Exception as e:
-                api_logger.warning(f"获取API调用增量失败: {str(e)}")
+                api_logger.error(f"获取API调用统计失败: {str(e)}")
+                neo4j_data["total_api_call"] = 0
             
             result["neo4j_data"] = neo4j_data
             api_logger.info("成功获取neo4j_data")
@@ -589,8 +606,8 @@ async def dashboard_data(
             
             # 获取RAG相关数据
             try:
-                # total_memory: 使用 total_chunk（总chunk数）
-                total_chunk = memory_dashboard_service.get_rag_total_chunk(db, current_user)
+                # total_memory: 只统计用户知识库（permission_id='Memory'）的chunk数
+                total_chunk = memory_dashboard_service.get_rag_user_kb_total_chunk(db, current_user)
                 rag_data["total_memory"] = total_chunk
                 
                 # total_app: 统计当前空间下的所有app数量
@@ -602,10 +619,23 @@ async def dashboard_data(
                 total_kb = memory_dashboard_service.get_rag_total_kb(db, current_user)
                 rag_data["total_knowledge"] = total_kb
                 
-                # total_api_call: 固定值
-                rag_data["total_api_call"] = 1024
+                # total_api_call: 使用 AppStatisticsService 获取真实的API调用统计
+                try:
+                    app_stats_service = AppStatisticsService(db)
+                    api_stats = app_stats_service.get_workspace_api_statistics(
+                        workspace_id=workspace_id,
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    # 计算总调用次数
+                    total_api_calls = sum(item.get("total_calls", 0) for item in api_stats)
+                    rag_data["total_api_call"] = total_api_calls
+                    api_logger.info(f"成功获取RAG模式API调用统计: {rag_data['total_api_call']}")
+                except Exception as e:
+                    api_logger.warning(f"获取RAG模式API调用统计失败，使用默认值: {str(e)}")
+                    rag_data["total_api_call"] = 0
                 
-                api_logger.info(f"成功获取RAG相关数据: memory={total_chunk}, app={len(apps_orm)}, knowledge={total_kb}")
+                api_logger.info(f"成功获取RAG相关数据: memory={total_chunk}, app={len(apps_orm)}, knowledge={total_kb}, api_calls={rag_data['total_api_call']}")
             except Exception as e:
                 api_logger.warning(f"获取RAG相关数据失败: {str(e)}")
             
