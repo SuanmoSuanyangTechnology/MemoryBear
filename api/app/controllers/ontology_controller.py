@@ -25,7 +25,7 @@ from typing import Dict, Optional, List
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Header
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -289,7 +289,8 @@ async def extract_ontology(
 async def create_scene(
     request: SceneCreateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    x_language_type: Optional[str] = Header(None, alias="X-Language-Type")
 ):
     """创建本体场景
     
@@ -360,8 +361,18 @@ async def create_scene(
         return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
         
     except RuntimeError as e:
-        api_logger.error(f"Runtime error in scene creation: {str(e)}", exc_info=True)
-        return fail(BizCode.INTERNAL_ERROR, "场景创建失败", str(e))
+        err_str = str(e)
+        if "UniqueViolation" in err_str or "uq_workspace_scene_name" in err_str:
+            api_logger.warning(f"Duplicate scene name '{request.scene_name}' in workspace {current_user.current_workspace_id}")
+            from app.core.language_utils import get_language_from_header
+            lang = get_language_from_header(x_language_type)
+            if lang == "en":
+                msg = fail(BizCode.BAD_REQUEST, "Scene name already exists", f"A scene named \"{request.scene_name}\" already exists in the current workspace. Please use a different name.")
+            else:
+                msg = fail(BizCode.BAD_REQUEST, "场景名称已存在", f"当前工作空间下已存在名为「{request.scene_name}」的场景，请使用其他名称")
+            return JSONResponse(status_code=400, content=msg)
+        api_logger.error(f"Runtime error in scene creation: {err_str}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "场景创建失败", err_str)
         
     except Exception as e:
         api_logger.error(f"Unexpected error in scene creation: {str(e)}", exc_info=True)
@@ -661,7 +672,8 @@ async def get_scenes(
 async def create_class(
     request: ClassCreateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    x_language_type: Optional[str] = Header(None, alias="X-Language-Type")
 ):
     """创建本体类型
     
@@ -676,7 +688,7 @@ async def create_class(
         ApiResponse: 包含创建的类型信息
     """
     from app.controllers.ontology_secondary_routes import create_class_handler
-    return await create_class_handler(request, db, current_user)
+    return await create_class_handler(request, db, current_user, x_language_type)
 
 
 @router.put("/class/{class_id}", response_model=ApiResponse)

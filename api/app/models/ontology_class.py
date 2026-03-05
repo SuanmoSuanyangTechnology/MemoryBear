@@ -9,7 +9,7 @@ Classes:
 
 import datetime
 import uuid
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Boolean
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Boolean, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db import Base
@@ -18,6 +18,9 @@ from app.db import Base
 class OntologyClass(Base):
     """本体类型表 - 用于存储某个场景提取出来的本体类型信息"""
     __tablename__ = "ontology_class"
+    __table_args__ = (
+        UniqueConstraint('scene_id', 'class_name', name='uq_scene_class_name'),
+    )
 
     # 主键
     class_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True, comment="类型ID")
