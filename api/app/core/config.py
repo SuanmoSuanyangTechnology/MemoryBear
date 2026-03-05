@@ -219,8 +219,12 @@ class Settings:
     FORGETTING_CYCLE_INTERVAL_HOURS: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="forgetting cycle interval in hours, must be >= 1")]
     ).validate_python(int(os.getenv("FORGETTING_CYCLE_INTERVAL_HOURS", "24")))
-
+    
+    IMPLICIT_EMOTIONS_UPDATE_HOUR: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_HOUR", "2"))
+    # implicit_emotions_update: 每天几分执行（分钟，0-59）
+    IMPLICIT_EMOTIONS_UPDATE_MINUTE: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_MINUTE", "0"))  
     # Memory Module Configuration (internal)
+    
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")
     MEMORY_CONFIG_DIR: str = os.getenv("MEMORY_CONFIG_DIR", "app/core/memory")
 

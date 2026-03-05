@@ -5,6 +5,7 @@ from celery.schedules import crontab
 from urllib.parse import quote
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
 
@@ -84,6 +85,7 @@ celery_app.conf.update(
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'periodic_tasks'},
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'periodic_tasks'},
+        'app.tasks.update_implicit_emotions_storage': {'queue': 'periodic_tasks'},
     },
 )
 
@@ -95,6 +97,10 @@ memory_increment_schedule = crontab(hour=settings.MEMORY_INCREMENT_HOUR, minute=
 memory_cache_regeneration_schedule = timedelta(hours=settings.MEMORY_CACHE_REGENERATION_HOURS)
 workspace_reflection_schedule = timedelta(seconds=settings.WORKSPACE_REFLECTION_INTERVAL_SECONDS)
 forgetting_cycle_schedule = timedelta(hours=settings.FORGETTING_CYCLE_INTERVAL_HOURS)
+implicit_emotions_update_schedule = crontab(
+    hour=settings.IMPLICIT_EMOTIONS_UPDATE_HOUR,
+    minute=settings.IMPLICIT_EMOTIONS_UPDATE_MINUTE,
+)
 
 #构建定时任务配置
 beat_schedule_config = {
@@ -118,6 +124,11 @@ beat_schedule_config = {
     "write-all-workspaces-memory": {
         "task": "app.tasks.write_all_workspaces_memory_task",
         "schedule": memory_increment_schedule,
+        "args": (),
+    },
+    "update-implicit-emotions-storage": {
+        "task": "app.tasks.update_implicit_emotions_storage",
+        "schedule": implicit_emotions_update_schedule,
         "args": (),
     },
 }
