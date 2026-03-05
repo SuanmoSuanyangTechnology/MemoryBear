@@ -1,6 +1,12 @@
-import { forwardRef, useImperativeHandle, useRef } from 'react'
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-01-08 19:46:02 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-04 16:26:55
+ */
+import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Row, Col } from 'antd'
+import { Row, Col, App } from 'antd'
 import { useParams } from 'react-router-dom'
 
 import Preferences from '../components/Preferences'
@@ -9,16 +15,44 @@ import InterestAreas from '../components/InterestAreas'
 import Habits from '../components/Habits'
 import {
   generateProfile,
+  implicitCheckData,
 } from '@/api/memory'
 
-const ImplicitDetail = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
+/**
+ * ImplicitDetail Component - Displays user's implicit memory profile
+ * Shows unconscious preferences, personality traits, interests and habits
+ */
+const ImplicitDetail = forwardRef<{ handleRefresh: () => void; }, { refresh: () => void; }>(({
+  refresh
+}, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
+  const { modal } = App.useApp()
   const preferencesRef = useRef<{ handleRefresh: () => void; }>(null)
   const portraitRef = useRef<{ handleRefresh: () => void; }>(null)
   const interestAreasRef = useRef<{ handleRefresh: () => void; }>(null)
   const habitsRef = useRef<{ handleRefresh: () => void; }>(null)
+  
+  // Check if implicit data exists, prompt user to initialize if not
+  useEffect(() => {
+    if (!id) return
+    let modalInstance: { destroy: () => void } | null = null
+    implicitCheckData(id)
+      .then(res => {
+        if (!(res as { exists: boolean }).exists) {
+          modalInstance = modal.warning({
+            title: t('implicitDetail.noData'),
+            okText: t('common.refresh'),
+            onOk: () => {
+              refresh()
+            }
+          })
+        }
+      })
+    return () => modalInstance?.destroy()
+  }, [id])
 
+  // Refresh all implicit memory components by regenerating profile
   const handleRefresh = () => {
     if (!id) {
       return Promise.resolve()

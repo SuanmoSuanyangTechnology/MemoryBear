@@ -816,11 +816,10 @@ class MemoryAgentService:
         """
         统计知识库类型分布，包含：
         1. PostgreSQL 中的知识库类型：General, Web, Third-party, Folder（根据 workspace_id 过滤）
-        2. Neo4j 中的 memory 类型（仅统计 Chunk 数量，根据 end_user_id/end_user_id 过滤）
-        3. total: 所有类型的总和
+        2. total: 所有类型的总和
 
         参数：
-        - end_user_id: 用户组ID（可选，未提供时 memory 统计为 0）
+        - end_user_id: 用户组ID（可选，保留参数以保持接口兼容性）
         - only_active: 是否仅统计有效记录
         - current_workspace_id: 当前工作空间ID（可选，未提供时知识库统计为 0）
         - db: 数据库会话
@@ -831,7 +830,6 @@ class MemoryAgentService:
             "Web": count,
             "Third-party": count,
             "Folder": count,
-            "memory": chunk_count,
             "total": sum_of_all
         }
         """
@@ -878,51 +876,8 @@ class MemoryAgentService:
             logger.error(f"知识库类型统计失败: {e}")
             raise Exception(f"知识库类型统计失败: {e}")
 
-        # 2. 统计 Neo4j 中的 memory 总量（统计当前空间下所有宿主的 Chunk 总数）
-        try:
-            if current_workspace_id:
-                # 获取当前空间下的所有宿主
-                from app.repositories import app_repository, end_user_repository
-                from app.schemas.app_schema import App as AppSchema
-                from app.schemas.end_user_schema import EndUser as EndUserSchema
-
-                # 查询应用并转换为 Pydantic 模型
-                apps_orm = app_repository.get_apps_by_workspace_id(db, current_workspace_id)
-                apps = [AppSchema.model_validate(h) for h in apps_orm]
-                app_ids = [app.id for app in apps]
-
-                # 获取所有宿主
-                end_users = []
-                for app_id in app_ids:
-                    end_user_orm_list = end_user_repository.get_end_users_by_app_id(db, app_id)
-                    end_users.extend(h for h in end_user_orm_list)
-
-                # 统计所有宿主的 Chunk 总数
-                total_chunks = 0
-                for end_user in end_users:
-                    end_user_id_str = str(end_user.id)
-                    memory_query = """
-                    MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id RETURN count(n) AS Count
-                    """
-                    neo4j_result = await _neo4j_connector.execute_query(
-                        memory_query,
-                        end_user_id=end_user_id_str,
-                    )
-                    chunk_count = neo4j_result[0]["Count"] if neo4j_result else 0
-                    total_chunks += chunk_count
-                    logger.debug(f"EndUser {end_user_id_str} Chunk数量: {chunk_count}")
-
-                result["memory"] = total_chunks
-                logger.info(f"Neo4j memory统计成功: 总Chunk数={total_chunks}, 宿主数={len(end_users)}")
-            else:
-                # 没有 workspace_id 时，返回 0
-                result["memory"] = 0
-                logger.info("未提供 workspace_id，memory 统计为 0")
-
-        except Exception as e:
-            logger.error(f"Neo4j memory统计失败: {e}", exc_info=True)
-            # 如果 Neo4j 查询失败，memory 设为 0
-            result["memory"] = 0
+        # 2. 统计 Neo4j 中的 memory 总量已移除
+        # memory 字段不再返回
 
         # 3. 计算知识库类型总和（不包括 memory）
         result["total"] = (
