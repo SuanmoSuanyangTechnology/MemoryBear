@@ -184,7 +184,8 @@ class PromptOptimizerService:
             model_name=api_config.model_name,
             provider=api_config.provider,
             api_key=api_config.api_key,
-            base_url=api_config.api_base
+            base_url=api_config.api_base,
+            is_omni=api_config.is_omni
         ), type=ModelType(model_config.type))
         try:
             prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')

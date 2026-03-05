@@ -157,6 +157,7 @@ class AppChatService:
             api_key=api_key_obj.api_key,
             provider=api_key_obj.provider,
             api_base=api_key_obj.api_base,
+            is_omni=api_key_obj.is_omni,
             temperature=model_parameters.get("temperature", 0.7),
             max_tokens=model_parameters.get("max_tokens", 2000),
             system_prompt=system_prompt,
@@ -180,7 +181,7 @@ class AppChatService:
         # 处理多模态文件
         processed_files = None
         if files:
-            multimodal_service = MultimodalService(self.db)
+            multimodal_service = MultimodalService(self.db, api_key_obj.provider, is_omni=api_key_obj.is_omni)
             processed_files = await multimodal_service.process_files(files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
 
@@ -343,6 +344,7 @@ class AppChatService:
                 api_key=api_key_obj.api_key,
                 provider=api_key_obj.provider,
                 api_base=api_key_obj.api_base,
+                is_omni=api_key_obj.is_omni,
                 temperature=model_parameters.get("temperature", 0.7),
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -366,7 +368,7 @@ class AppChatService:
             # 处理多模态文件
             processed_files = None
             if files:
-                multimodal_service = MultimodalService(self.db)
+                multimodal_service = MultimodalService(self.db, api_key_obj.provider, is_omni=api_key_obj.is_omni)
                 processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
 

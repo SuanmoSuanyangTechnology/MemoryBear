@@ -21,6 +21,8 @@ class ModelConfigBase(BaseModel):
     is_active: bool = Field(True, description="是否激活")
     is_public: bool = Field(False, description="是否公开")
     load_balance_strategy: Optional[str] = Field(LoadBalanceStrategy.NONE.value, description="负载均衡策略")
+    capability: List[str] = Field(default_factory=list, description="模型能力列表")
+    is_omni: bool = Field(False, description="是否为Omni模型")
 
 
 class ApiKeyCreateNested(BaseModel):
@@ -30,6 +32,8 @@ class ApiKeyCreateNested(BaseModel):
     provider: Optional[str] = Field(None, description="API Key提供商")
     api_key: str = Field(..., description="API密钥", max_length=500)
     api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
+    capability: Optional[List[str]] = Field(None, description="模型能力列表")
+    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
     config: Optional[Dict[str, Any]] = Field({}, description="API Key特定配置")
     priority: str = Field("1", description="优先级", max_length=10)
 
@@ -63,6 +67,8 @@ class ModelConfigUpdate(BaseModel):
     config: Optional[Dict[str, Any]] = Field(None, description="模型配置参数")
     is_active: Optional[bool] = Field(None, description="是否激活")
     is_public: Optional[bool] = Field(None, description="是否公开")
+    capability: Optional[List[str]] = Field(None, description="模型能力列表")
+    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
 
 
 class ModelConfig(ModelConfigBase):
@@ -95,6 +101,8 @@ class ModelApiKeyCreateByProvider(BaseModel):
     api_key: str = Field(..., description="API密钥", max_length=500)
     api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
     description: Optional[str] = Field(None, description="备注")
+    capability: Optional[List[str]] = Field(None, description="模型能力列表")
+    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
     config: Optional[Dict[str, Any]] = Field({}, description="API Key特定配置")
     is_active: bool = Field(True, description="是否激活")
     priority: str = Field("1", description="优先级", max_length=10)
@@ -108,6 +116,8 @@ class ModelApiKeyBase(BaseModel):
     provider: ModelProvider = Field(..., description="API Key提供商")
     api_key: str = Field(..., description="API密钥", max_length=500)
     api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
+    capability: List[str] = Field(default_factory=list, description="模型能力列表")
+    is_omni: bool = Field(False, description="是否为Omni模型")
     config: Optional[Dict[str, Any]] = Field({}, description="API Key特定配置")
     is_active: bool = Field(True, description="是否激活")
     priority: str = Field("1", description="优先级", max_length=10)
@@ -124,6 +134,8 @@ class ModelApiKeyUpdate(BaseModel):
     provider: Optional[ModelProvider] = Field(None, description="API Key提供商")
     api_key: Optional[str] = Field(None, description="API密钥", max_length=500)
     api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
+    capability: Optional[List[str]] = Field(None, description="模型能力列表")
+    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
     config: Optional[Dict[str, Any]] = Field(None, description="API Key特定配置")
     is_active: Optional[bool] = Field(None, description="是否激活")
     priority: Optional[str] = Field(None, description="优先级", max_length=10)
@@ -270,6 +282,8 @@ class ModelBaseCreate(BaseModel):
     description: Optional[str] = Field(None, description="模型描述")
     is_official: bool = Field(True, description="是否供应商官方模型")
     tags: List[str] = Field(default_factory=list, description="模型标签")
+    capability: List[str] = Field(default_factory=list, description="模型能力列表（如['vision', 'audio', 'video']）")
+    is_omni: bool = Field(False, description="是否为Omni模型")
 
 
 class ModelBaseUpdate(BaseModel):
@@ -282,6 +296,8 @@ class ModelBaseUpdate(BaseModel):
     is_deprecated: Optional[bool] = Field(None, description="是否弃用")
     is_official: Optional[bool] = Field(None, description="是否供应商官方模型")
     tags: Optional[List[str]] = Field(None, description="模型标签")
+    capability: Optional[List[str]] = Field(None, description="模型能力列表")
+    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
 
 
 class ModelBase(BaseModel):
@@ -298,6 +314,8 @@ class ModelBase(BaseModel):
     is_official: bool
     tags: List[str]
     add_count: int
+    capability: List[str] = []
+    is_omni: bool = False
 
 
 class ModelBaseQuery(BaseModel):

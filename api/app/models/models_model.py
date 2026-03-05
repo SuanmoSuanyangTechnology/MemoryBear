@@ -2,7 +2,7 @@ import datetime
 import uuid
 from enum import StrEnum
 
-from sqlalchemy import Column, String, Boolean, DateTime, Text, ForeignKey, Enum as SQLEnum, UniqueConstraint, Integer, ARRAY, Table
+from sqlalchemy import Column, String, Boolean, DateTime, Text, ForeignKey, Enum as SQLEnum, UniqueConstraint, Integer, ARRAY, Table, text
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -78,6 +78,9 @@ class ModelConfig(BaseModel):
     description = Column(String, comment="模型描述")
     
     # 模型配置参数
+    capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                        comment="模型能力列表（如['vision', 'audio', 'video']）")
+    is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
     config = Column(JSON, comment="模型配置参数")
     # - temperature : 控制生成文本的随机性。值越高，输出越随机、越有创造性；值越低，输出越确定、越保守。
     # - top_p : 一种替代 temperature 的采样方法，控制模型从概率最高的词中选择的范围。
@@ -118,6 +121,11 @@ class ModelApiKey(BaseModel):
     api_key = Column(String, nullable=False, comment="API密钥")
     api_base = Column(String, comment="API基础URL")
     
+    # 模型能力参数
+    capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                        comment="模型能力列表（如['vision', 'audio', 'video']）")
+    is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
+    
     # 配置参数
     config = Column(JSON, comment="API Key特定配置")
     
@@ -155,6 +163,9 @@ class ModelBase(Base):
     tags = Column(ARRAY(String), default=list, nullable=False, comment="模型标签（如['聊天', '创作']）")
     add_count = Column(Integer, default=0, nullable=False, comment="模型被用户添加的次数")
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间", server_default=func.now())
+    capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                        comment="模型能力列表（如['vision', 'audio', 'video']）")
+    is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
 
     # 关联关系
     configs = relationship("ModelConfig", back_populates="model_base", cascade="all, delete-orphan")

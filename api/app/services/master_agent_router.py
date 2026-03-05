@@ -392,6 +392,7 @@ class MasterAgentRouter:
                 provider=api_key_config.provider,
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
+                is_omni=api_key_config.is_omni,
                 extra_params = extra_params
             )
 

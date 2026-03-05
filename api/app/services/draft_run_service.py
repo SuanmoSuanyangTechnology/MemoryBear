@@ -415,6 +415,7 @@ class DraftRunService:
                 api_key=api_key_config["api_key"],
                 provider=api_key_config.get("provider", "openai"),
                 api_base=api_key_config.get("api_base"),
+                is_omni=api_key_config.get("is_omni", False),
                 temperature=effective_params.get("temperature", 0.7),
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -442,7 +443,7 @@ class DraftRunService:
             if files:
                 # 获取 provider 信息
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, provider=provider)
+                multimodal_service = MultimodalService(self.db, provider=provider, is_omni=api_key_config.get("is_omni", False))
                 processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
@@ -683,6 +684,7 @@ class DraftRunService:
                 api_key=api_key_config["api_key"],
                 provider=api_key_config.get("provider", "openai"),
                 api_base=api_key_config.get("api_base"),
+                is_omni=api_key_config.get("is_omni", False),
                 temperature=effective_params.get("temperature", 0.7),
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -711,7 +713,7 @@ class DraftRunService:
             if files:
                 # 获取 provider 信息
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, provider=provider)
+                multimodal_service = MultimodalService(self.db, provider=provider, is_omni=api_key_config.get("is_omni", False))
                 processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
@@ -809,7 +811,7 @@ class DraftRunService:
         """
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    async def _get_api_key(self, model_config_id: uuid.UUID) -> Dict[str, str]:
+    async def _get_api_key(self, model_config_id: uuid.UUID) -> Dict:
         """获取模型的 API Key
 
         Args:
@@ -846,7 +848,8 @@ class DraftRunService:
             "provider": api_key.provider,
             "api_key": api_key.api_key,
             "api_base": api_key.api_base,
-            "api_key_id": api_key.id
+            "api_key_id": api_key.id,
+            "is_omni": api_key.is_omni
         }
 
     async def _ensure_conversation(

@@ -835,7 +835,8 @@ async def draft_run_compare(
         web_search=True,
         memory=True,
         parallel=payload.parallel,
-        timeout=payload.timeout or 60
+        timeout=payload.timeout or 60,
+        files=payload.files
     )
 
     logger.info(

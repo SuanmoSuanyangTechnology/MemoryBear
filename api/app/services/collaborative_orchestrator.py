@@ -445,6 +445,7 @@ class CollaborativeOrchestrator:
                 "provider": api_key_config.provider,
                 "api_key": api_key_config.api_key,
                 "api_base": api_key_config.api_base,
+                "is_omni": api_key_config.is_omni,
                 "model_parameters": config_data.get("model_parameters", {}),
                 "api_key_id": api_key_config.id
             }
@@ -511,6 +512,7 @@ class CollaborativeOrchestrator:
                 provider=agent_config["provider"],
                 api_key=agent_config["api_key"],
                 base_url=agent_config.get("api_base"),
+                is_omni=agent_config.get("is_omni", False),
                 extra_params=extra_params
             )
             
