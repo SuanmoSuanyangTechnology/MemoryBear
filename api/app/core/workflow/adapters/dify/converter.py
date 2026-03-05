@@ -98,7 +98,7 @@ class DifyConverter(BaseConverter):
         if not var_selector:
             return ""
         selector = var_selector.split('.')
-        if len(selector) not in [2, 3]:
+        if len(selector) not in [2, 3] and var_selector != "context":
             raise Exception(f"invalid variable selector: {var_selector}")
         if len(selector) == 3:
             selector = selector[1:]
@@ -332,7 +332,9 @@ class DifyConverter(BaseConverter):
             messages.append(
                 MessageConfig(
                     role="user",
-                    content=self.trans_variable_format(node_data["memory"]["query_prompt_template"])
+                    content=self.trans_variable_format(
+                        node_data["memory"].get("query_prompt_template", "{{#sys.query#}}")
+                    )
                 )
             )
         vision = node_data["vision"]["enabled"]
