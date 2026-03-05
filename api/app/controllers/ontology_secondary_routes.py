@@ -58,7 +58,7 @@ async def scenes_handler(
     workspace_id: Optional[str] = None,
     scene_name: Optional[str] = None,
     page: Optional[int] = None,
-    page_size: Optional[int] = None,
+    pagesize: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -71,14 +71,14 @@ async def scenes_handler(
         workspace_id: 工作空间ID（可选，默认当前用户工作空间）
         scene_name: 场景名称关键词（可选，支持模糊匹配）
         page: 页码（可选，从1开始，仅在全量查询时有效）
-        page_size: 每页数量（可选，仅在全量查询时有效）
+        pagesize: 每页数量（可选，仅在全量查询时有效）
         db: 数据库会话
         current_user: 当前用户
     """
     operation = "search" if scene_name else "list"
     api_logger.info(
         f"Scene {operation} requested by user {current_user.id}, "
-        f"workspace_id={workspace_id}, keyword={scene_name}, page={page}, page_size={page_size}"
+        f"workspace_id={workspace_id}, keyword={scene_name}, page={page}, pagesize={pagesize}"
     )
     
     try:
@@ -105,13 +105,13 @@ async def scenes_handler(
                 api_logger.warning(f"Invalid page number: {page}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "页码必须大于0")
             
-            if page_size is not None and page_size < 1:
-                api_logger.warning(f"Invalid page_size: {page_size}")
+            if pagesize is not None and pagesize < 1:
+                api_logger.warning(f"Invalid pagesize: {pagesize}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "每页数量必须大于0")
             
-            # 如果只提供了page或page_size中的一个，返回错误
-            if (page is not None and page_size is None) or (page is None and page_size is not None):
-                api_logger.warning(f"Incomplete pagination params: page={page}, page_size={page_size}")
+            # 如果只提供了page或pagesize中的一个，返回错误
+            if (page is not None and pagesize is None) or (page is None and pagesize is not None):
+                api_logger.warning(f"Incomplete pagination params: page={page}, pagesize={pagesize}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "分页参数page和pagesize必须同时提供")
             
             # 模糊搜索场景（支持分页）
@@ -119,17 +119,15 @@ async def scenes_handler(
             total = len(scenes)
             
             # 如果提供了分页参数，进行分页处理
-            if page is not None and page_size is not None:
-                start_idx = (page - 1) * page_size
-                end_idx = start_idx + page_size
+            if page is not None and pagesize is not None:
+                start_idx = (page - 1) * pagesize
+                end_idx = start_idx + pagesize
                 scenes = scenes[start_idx:end_idx]
             
             # 构建响应
             items = []
             for scene in scenes:
-                # 获取前3个class_name作为entity_type
                 entity_type = [cls.class_name for cls in scene.classes[:3]] if scene.classes else None
-                # 动态计算 type_num
                 type_num = len(scene.classes) if scene.classes else 0
                 
                 items.append(SceneResponse(
@@ -141,17 +139,16 @@ async def scenes_handler(
                     workspace_id=scene.workspace_id,
                     created_at=scene.created_at,
                     updated_at=scene.updated_at,
-                    classes_count=type_num
+                    classes_count=type_num,
+                    is_system_default=scene.is_system_default
                 ))
             
             # 构建响应（包含分页信息）
-            if page is not None and page_size is not None:
-                # 计算是否有下一页
-                hasnext = (page * page_size) < total
-                
+            if page is not None and pagesize is not None:
+                hasnext = (page * pagesize) < total
                 pagination_info = PaginationInfo(
                     page=page,
-                    pagesize=page_size,
+                    pagesize=pagesize,
                     total=total,
                     hasnext=hasnext
                 )
@@ -165,28 +162,25 @@ async def scenes_handler(
             )
         else:
             # 获取所有场景（支持分页）
-            # 验证分页参数
             if page is not None and page < 1:
                 api_logger.warning(f"Invalid page number: {page}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "页码必须大于0")
             
-            if page_size is not None and page_size < 1:
-                api_logger.warning(f"Invalid page_size: {page_size}")
+            if pagesize is not None and pagesize < 1:
+                api_logger.warning(f"Invalid pagesize: {pagesize}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "每页数量必须大于0")
             
-            # 如果只提供了page或page_size中的一个，返回错误
-            if (page is not None and page_size is None) or (page is None and page_size is not None):
-                api_logger.warning(f"Incomplete pagination params: page={page}, page_size={page_size}")
+            # 如果只提供了page或pagesize中的一个，返回错误
+            if (page is not None and pagesize is None) or (page is None and pagesize is not None):
+                api_logger.warning(f"Incomplete pagination params: page={page}, pagesize={pagesize}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "分页参数page和pagesize必须同时提供")
             
-            scenes, total = service.list_scenes(ws_uuid, page, page_size)
+            scenes, total = service.list_scenes(ws_uuid, page, pagesize)
             
             # 构建响应
             items = []
             for scene in scenes:
-                # 获取前3个class_name作为entity_type
                 entity_type = [cls.class_name for cls in scene.classes[:3]] if scene.classes else None
-                # 动态计算 type_num
                 type_num = len(scene.classes) if scene.classes else 0
                 
                 items.append(SceneResponse(
@@ -198,17 +192,16 @@ async def scenes_handler(
                     workspace_id=scene.workspace_id,
                     created_at=scene.created_at,
                     updated_at=scene.updated_at,
-                    classes_count=type_num
+                    classes_count=type_num,
+                    is_system_default=scene.is_system_default
                 ))
             
             # 构建响应（包含分页信息）
-            if page is not None and page_size is not None:
-                # 计算是否有下一页
-                hasnext = (page * page_size) < total
-                
+            if page is not None and pagesize is not None:
+                hasnext = (page * pagesize) < total
                 pagination_info = PaginationInfo(
                     page=page,
-                    pagesize=page_size,
+                    pagesize=pagesize,
                     total=total,
                     hasnext=hasnext
                 )
