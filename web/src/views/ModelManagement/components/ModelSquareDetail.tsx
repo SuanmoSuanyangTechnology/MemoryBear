@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 16:54:26
+ * @Last Modified time: 2026-03-04 11:50:31
  */
 /**
  * Model Square Detail Drawer
@@ -89,9 +89,10 @@ const ModelSquareDetail = forwardRef<ModelSquareDetailRef, ModelSquareDetailProp
               <RbCard
                 key={item.id}
                 title={item.name}
-                subTitle={<Space size={8}>
-                  <Tag className="rb:mt-1">{t(`modelNew.${item.type}`)}</Tag>
-                  {item.is_official && <Tag color="success" className="rb:mt-1">{t(`modelNew.official`)}</Tag>}
+                subTitle={<Space size={8} className="rb:mt-1!">
+                  <Tag>{t(`modelNew.${item.type}`)}</Tag>
+                  {item.is_official && <Tag color="success">{t(`modelNew.official`)}</Tag>}
+                  {item.capability?.filter(item => item !== 'video').map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
                 </Space>}
                 avatarUrl={getLogoUrl(item.logo)}
                 avatar={

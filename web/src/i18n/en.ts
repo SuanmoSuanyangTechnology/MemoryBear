@@ -605,7 +605,13 @@ export const en = {
       ollama: "Ollama",
       xinference: "Xinference",
       gpustack: "Gpustack",
-      bedrock: "Bedrock"
+      bedrock: "Bedrock",
+
+      is_vision: 'Vision Support',
+      is_omni: 'Omni Support',
+      vision: 'Vision',
+      audio: 'Audio',
+      video: 'Video',
     },
     knowledgeBase: {
       home: 'Home',
@@ -1686,6 +1692,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       uploadFile: 'Upload File',
       fileType: 'File Type',
       image: 'Image',
+      video: 'Video',
+      audio: 'Audio',
       fileUrl: 'File URL',
       addRemoteFile: 'Add Remote File',
       variableConfig: 'Variable Configuration',

@@ -14,7 +14,7 @@ import { type FC, useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Flex, Skeleton, Form, Dropdown, type MenuProps, App } from 'antd'
+import { Flex, Skeleton, Form, Dropdown, type MenuProps, App, Divider } from 'antd'
 import { SettingOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
@@ -35,7 +35,7 @@ import OnlineCheckedIcon from '@/assets/images/conversation/onlineChecked.svg'
 import MemoryFunctionCheckedIcon from '@/assets/images/conversation/memoryFunctionChecked.svg'
 import { type SSEMessage } from '@/utils/stream'
 import UploadFiles from './components/FileUpload'
-// import AudioRecorder from '@/components/AudioRecorder'
+import AudioRecorder from '@/components/AudioRecorder'
 import { shareFileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 import UploadFileListModal from './components/UploadFileListModal'
 import type { VariableConfigModalRef } from '@/views/Workflow/types'
@@ -305,17 +305,27 @@ const Conversation: FC = () => {
       }),
       variables: params
     }, handleStreamMessage, shareToken)
+      .catch(() => {
+        setLoading(false)
+        setStreamLoading(false)
+      })
       .finally(() => {
         setLoading(false)
+        setStreamLoading(false)
       })
   }
 
   const fileChange = (file?: any) => {
     form.setFieldValue('files', [...(queryValues.files || []), file])
   }
-  // const handleRecordingComplete = async (file: any) => {
-  //   console.log('file', file)
-  // }
+  const handleRecordingComplete = async (file: any) => {
+    form.setFieldValue('files', [...(queryValues.files || []), {
+      uid: file.file_id,
+      response: { data: file },
+      thumbUrl: file.url,
+      type: file.type
+    }])
+  }
 
   const handleShowUpload: MenuProps['onClick'] = ({ key }) => {
     switch(key) {
@@ -329,6 +339,7 @@ const Conversation: FC = () => {
     form.setFieldValue('files', [...(queryValues.files || []), ...fileList])
   }
   const updateFileList = (fileList?: any[]) => {
+    console.log('fileList', fileList)
     form.setFieldValue('files', [...(fileList || [])])
   }
 
@@ -383,7 +394,7 @@ const Conversation: FC = () => {
         <div className='rb:w-190  rb:h-screen rb:mx-auto rb:pt-10'>
         <Chat
           empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
-          contentClassName="rb:h-[calc(100%-180px)]"
+          contentClassName={!queryValues?.files?.length ? "rb:h-[calc(100%-144px)]" : "rb:h-[calc(100%-208px)]"}
           data={chatList}
           streamLoading={streamLoading}
           loading={loading}
@@ -405,13 +416,12 @@ const Conversation: FC = () => {
                           key: 'upload', label: (
                             <UploadFiles
                               action={shareFileUploadUrlWithoutApiPrefix}
-                              fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']}
                               onChange={fileChange}
                               requestConfig={{
                                 headers: {
                                   'Content-Type': 'multipart/form-data',
                                   Authorization: `Bearer ${shareToken || ''}`,
-                              } }}
+                              }}}
                             />
                           )
                         },
@@ -455,10 +465,19 @@ const Conversation: FC = () => {
                   </Form.Item>
                 )}
               </Flex>
-              {/* <Flex align="center">
-                <AudioRecorder onRecordingComplete={handleRecordingComplete} />
+              <Flex align="center">
+                <AudioRecorder
+                  action={shareFileUploadUrlWithoutApiPrefix}
+                  requestConfig={{
+                    headers: {
+                      'Content-Type': 'multipart/form-data',
+                      Authorization: `Bearer ${shareToken || ''}`,
+                    }
+                  }}
+                  onRecordingComplete={handleRecordingComplete}
+                />
                 <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
-              </Flex> */}
+              </Flex>
             </Flex>
           </Form>
         </Chat>
