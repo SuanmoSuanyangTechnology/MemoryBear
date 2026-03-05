@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:01 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 17:33:24
+ * @Last Modified time: 2026-03-05 16:33:53
  */
 /**
  * Memory management form data type
@@ -42,6 +42,7 @@ export interface Memory {
   workspace_id: string;
   scene_id: string;
   scene_name: string;
+  is_system_default: boolean;
   [key: string]: string | number | boolean;
 }
 /**

@@ -454,6 +454,7 @@ export const en = {
       prevStep: 'Previous Step',
       exportSuccess: 'Export successful',
       recommend: 'Recommend',
+      default: 'Default',
     },
     model: {
       searchPlaceholder: 'search model…',

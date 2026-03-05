@@ -1030,6 +1030,7 @@ export const zh = {
       prevStep: '上一步',
       exportSuccess: '导出成功',
       recommend: '推荐',
+      default: '默认',
     },
     model: {
       searchPlaceholder: '搜索模型…',
