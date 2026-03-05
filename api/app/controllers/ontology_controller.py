@@ -612,7 +612,7 @@ async def get_scenes(
     workspace_id: Optional[str] = None,
     scene_name: Optional[str] = None,
     page: Optional[int] = None,
-    pagesize: Optional[int] = None,
+    page_size: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -652,7 +652,7 @@ async def get_scenes(
         - 不分页时，page 字段为 null
     """
     from app.controllers.ontology_secondary_routes import scenes_handler
-    return await scenes_handler(workspace_id, scene_name, page, pagesize, db, current_user)
+    return await scenes_handler(workspace_id, scene_name, page, page_size, db, current_user)
 
 
 # ==================== 本体类型管理接口 ====================
