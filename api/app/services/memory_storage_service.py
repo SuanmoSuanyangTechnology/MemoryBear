@@ -115,17 +115,6 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
 
     # --- Create ---
     def create(self, params: ConfigParamsCreate) -> Dict[str, Any]: # 创建配置参数（仅名称与描述）
-        # 检查同一工作空间下是否已存在同名配置
-        if params.workspace_id and params.config_name:
-            from app.models.memory_config_model import MemoryConfig
-            existing = (
-                self.db.query(MemoryConfig)
-                .filter_by(workspace_id=params.workspace_id, config_name=params.config_name)
-                .first()
-            )
-            if existing:
-                raise ValueError(f"DUPLICATE_CONFIG_NAME:{params.config_name}")
-
         # 如果workspace_id存在且模型字段未全部指定，则自动获取
         if params.workspace_id and not all([params.llm_id, params.embedding_id, params.rerank_id]):
             configs = self._get_workspace_configs(params.workspace_id)
