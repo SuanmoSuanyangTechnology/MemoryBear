@@ -80,6 +80,7 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
                     {
                       (field.type === 'string' || field.type === 'text') && <Input placeholder={t('common.pleaseEnter')} />
                     }
+                    { field.type === 'paragraph' && <Input.TextArea placeholder={t('common.pleaseEnter')} /> }
                     {
                       field.type === 'number' && <InputNumber placeholder={t('common.pleaseEnter')} style={{ width: '100%' }} onChange={(value) => form.setFieldValue(['variables', name, 'value'], value)} />
                     }
