@@ -232,7 +232,7 @@ class AppService:
                 # 检查主 Agent 的模型配置
                 multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
 
-            model_api_key = ModelApiKeyService.get_a_api_key(self.db, multi_agent_config.default_model_config_id)
+            model_api_key = ModelApiKeyService.get_available_api_key(self.db, multi_agent_config.default_model_config_id)
             if not model_api_key:
                 raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
 

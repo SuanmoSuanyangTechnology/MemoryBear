@@ -2593,6 +2593,7 @@ class MultiAgentOrchestrator:
                 provider=api_key_config.provider,
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
+                is_omni=api_key_config.is_omni,
                 temperature=0.7,  # 整合任务使用中等温度
                 max_tokens=2000
             )
@@ -2758,6 +2759,7 @@ class MultiAgentOrchestrator:
                 provider=api_key_config.provider,
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
+                is_omni=api_key_config.is_omni,
                 temperature=0.7,
                 max_tokens=2000,
                 extra_params={"streaming": True}  # 启用流式输出

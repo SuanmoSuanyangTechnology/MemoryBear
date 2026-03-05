@@ -27,6 +27,7 @@ class RedBearModelConfig(BaseModel):
     provider: str
     api_key: str
     base_url: Optional[str] = None
+    is_omni: bool = False  # 是否为 Omni 模型
     # 请求超时时间（秒）- 默认120秒以支持复杂的LLM调用，可通过环境变量 LLM_TIMEOUT 配置
     timeout: float = Field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT", "120.0")))
     # 最大重试次数 - 默认2次以避免过长等待，可通过环境变量 LLM_MAX_RETRIES 配置
@@ -45,7 +46,28 @@ class RedBearModelFactory:
         # 打印供应商信息用于调试
         from app.core.logging_config import get_business_logger
         logger = get_business_logger()
-        logger.debug(f"获取模型参数 - Provider: {provider}, Model: {config.model_name}")
+        logger.debug(f"获取模型参数 - Provider: {provider}, Model: {config.model_name}, is_omni: {config.is_omni}")
+
+        # dashscope 的 omni 模型使用 OpenAI 兼容模式
+        if provider == ModelProvider.DASHSCOPE and config.is_omni:
+            import httpx
+            if not config.base_url:
+                config.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            timeout_config = httpx.Timeout(
+                timeout=config.timeout,
+                connect=60.0,
+                read=config.timeout,
+                write=60.0,
+                pool=10.0,
+            )
+            return {
+                "model": config.model_name,
+                "base_url": config.base_url,
+                "api_key": config.api_key,
+                "timeout": timeout_config,
+                "max_retries": config.max_retries,
+                **config.extra_params
+            }
 
         if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.OLLAMA]:
             # 使用 httpx.Timeout 对象来设置详细的超时配置
@@ -135,6 +157,12 @@ class RedBearModelFactory:
 def get_provider_llm_class(config:RedBearModelConfig, type: ModelType=ModelType.LLM) -> type[BaseLLM]:
     """根据模型提供商获取对应的模型类"""
     provider = config.provider.lower()
+    
+    # dashscope 的 omni 模型使用 OpenAI 兼容模式
+    if provider == ModelProvider.DASHSCOPE and config.is_omni:
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI
+    
     if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK] : 
         if type == ModelType.LLM:
             from langchain_openai import OpenAI

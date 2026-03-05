@@ -544,6 +544,7 @@ def convert_multi_agent_config_to_handoffs(
                                 provider=model_api_key.provider,
                                 api_key=model_api_key.api_key,
                                 base_url=model_api_key.api_base,
+                                is_omni=model_api_key.is_omni,
                                 extra_params={
                                     "temperature": 0.7,
                                     "max_tokens": 2000,
