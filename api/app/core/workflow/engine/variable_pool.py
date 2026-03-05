@@ -303,38 +303,52 @@ class VariablePool:
         """
         return self._get_variable_struct(selector) is not None
 
-    def get_all_system_vars(self) -> dict[str, Any]:
+    def get_all_system_vars(self, literal=False) -> dict[str, Any]:
         """获取所有系统变量
         
         Returns:
             系统变量字典
         """
         sys_namespace = self.variables.get("sys", {})
+        if literal:
+            return {k: v.instance.to_literal() for k, v in sys_namespace.items()}
         return {k: v.instance.get_value() for k, v in sys_namespace.items()}
 
-    def get_all_conversation_vars(self) -> dict[str, Any]:
+    def get_all_conversation_vars(self, literal=False) -> dict[str, Any]:
         """获取所有会话变量
         
         Returns:
             会话变量字典
         """
         conv_namespace = self.variables.get("conv", {})
+        if literal:
+            return {k: v.instance.to_literal() for k, v in conv_namespace.items()}
         return {k: v.instance.get_value() for k, v in conv_namespace.items()}
 
-    def get_all_node_outputs(self) -> dict[str, Any]:
+    def get_all_node_outputs(self, literal=False) -> dict[str, Any]:
         """获取所有节点输出（运行时变量）
         
         Returns:
             节点输出字典，键为节点 ID
         """
-        runtime_vars = {
-            namespace: {
-                k: v.instance.get_value()
-                for k, v in vars_dict.items()
+        if literal:
+            runtime_vars = {
+                namespace: {
+                    k: v.instance.to_literal()
+                    for k, v in vars_dict.items()
+                }
+                for namespace, vars_dict in self.variables.items()
+                if namespace not in ("sys", "conv")
             }
-            for namespace, vars_dict in self.variables.items()
-            if namespace not in ("sys", "conv")
-        }
+        else:
+            runtime_vars = {
+                namespace: {
+                    k: v.instance.get_value()
+                    for k, v in vars_dict.items()
+                }
+                for namespace, vars_dict in self.variables.items()
+                if namespace not in ("sys", "conv")
+            }
         return runtime_vars
 
     def get_node_output(self, node_id: str, defalut: Any = None, strict: bool = True) -> dict[str, Any] | None:

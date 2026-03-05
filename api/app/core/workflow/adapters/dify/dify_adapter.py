@@ -80,7 +80,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         return True
 
     def validate_config(self) -> bool:
-        require_fields = frozenset({'app', 'dependencies', 'kind', 'version', 'workflow'})
+        require_fields = frozenset({'app', 'kind', 'version', 'workflow'})
         if not all(field in self.config for field in require_fields):
             return False
 
