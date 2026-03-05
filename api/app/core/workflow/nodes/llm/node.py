@@ -172,9 +172,9 @@ class LLMNode(BaseNode):
 
             if self.typed_config.vision_input and self.typed_config.vision:
                 file_content = []
-                files = variable_pool.get_value(self.typed_config.vision_input)
-                for file in files:
-                    content = await self.process_message(provider, file, self.typed_config.vision)
+                files = variable_pool.get_instance(self.typed_config.vision_input)
+                for file in files.value:
+                    content = await self.process_message(provider, file.value, self.typed_config.vision)
                     if content:
                         file_content.append(content)
                 if messages and messages[-1]["role"] == 'user':

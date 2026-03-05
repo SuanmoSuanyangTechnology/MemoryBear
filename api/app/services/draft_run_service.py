@@ -255,7 +255,7 @@ class AgentRunService:
     @staticmethod
     def prepare_variables(
             input_vars: dict | None,
-            variables_config: dict | None
+            variables_config: dict
     ) -> dict:
         input_vars = input_vars or {}
         for variable in variables_config:

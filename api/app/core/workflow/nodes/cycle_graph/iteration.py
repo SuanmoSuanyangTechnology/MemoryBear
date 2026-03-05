@@ -91,8 +91,8 @@ class IterationRuntime:
         return loopstate
 
     def merge_conv_vars(self):
-        self.variable_pool.get_all_conversation_vars().update(
-            self.child_variable_pool.get_all_conversation_vars()
+        self.variable_pool.variables["conv"].update(
+            self.child_variable_pool.variables["conv"]
         )
 
     async def run_task(self, item, idx):

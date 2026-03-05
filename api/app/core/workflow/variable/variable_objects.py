@@ -63,13 +63,16 @@ class FileVariable(BaseVariable):
     def valid_value(self, value) -> FileObject:
 
         if isinstance(value, dict):
-            if not value.get("__file"):
+            if not value.get("is_file"):
                 raise TypeError(f"Value must be a FileObject  - {type(value)}:{value}")
             return FileObject(
                 **{
                     "type": str(value.get('type')),
+                    "transfer_method": value.get("transfer_method"),
                     "url": value.get('url'),
-                    "__file": True
+                    "file_id": value.get("file_id"),
+                    "origin_file_type": value.get("origin_file_type"),
+                    "is_file": True
                 }
             )
         if isinstance(value, FileObject):
