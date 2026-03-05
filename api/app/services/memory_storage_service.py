@@ -211,6 +211,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "apply_id": config.apply_id,
                 "scene_id": str(config.scene_id) if config.scene_id else None,
                 "scene_name": scene_name,  # 新增：场景名称
+                "is_system_default": config.is_default,  # 是否为系统默认配置
                 "llm_id": config.llm_id,
                 "embedding_id": config.embedding_id,
                 "rerank_id": config.rerank_id,
