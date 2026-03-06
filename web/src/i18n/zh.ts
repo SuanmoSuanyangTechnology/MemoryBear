@@ -1020,9 +1020,6 @@ export const zh = {
       logoutApiCannotRefreshToken: '退出登录接口不能刷新token',
       publicApiCannotRefreshToken: '公共接口不能刷新token',
       refreshTokenNotExist: '刷新token不存在',
-      SYSTEM_DEFAULT_SCENE_CANNOT_DELETE: '该场景为系统预设场景，不允许删除',
-      SYSTEM_DEFAULT_CLASS_CANNOT_DELETE: '该类型为系统预设类型，不允许删除',
-      SYSTEM_DEFAULT_SCENE_CANNOT_UPDATE: '该场景为系统预设场景，不允许修改',
       reset: '重置',
       refresh: '刷新',
       return: '返回',
@@ -2620,6 +2617,7 @@ export const zh = {
       updated_at: '更新时间',
       entityTypes: '实体类型',
 
+      classSearchPlaceholder: '搜索类型',
       addClass: '添加类型',
       class_name: '类型名称',
       class_description: '类型定义',
