@@ -69,7 +69,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         config: { ...config_data }
       })
 
-      if (config_data.connection_config.headers) {
+      if (config_data?.connection_config?.headers) {
         console.log(Object.keys(config_data.connection_config.headers).map(key => ({
           key,
           value: config_data.connection_config.headers[key]
@@ -80,6 +80,12 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         })))
       }
       setEditVo(data)
+    } else if (data) {
+      const { config_data, name, description, icon } = data
+      form.setFieldsValue({
+        name, description, icon,
+        ...(config_data ? { config: { ...config_data } } : {})
+      })
     } else {
       form.resetFields();
     }

@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2026-01-05 17:22:23
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-03-04 15:12:48
+ * @LastEditTime: 2026-03-04 15:34:50
  */
 import React, { useState } from 'react';
 import { Tabs } from 'antd';
@@ -54,7 +54,7 @@ const ToolManagement: React.FC = () => {
       {activeTab === 'mcp' && <Mcp getStatusTag={getStatusTag} />}
       {activeTab === 'inner' && <Inner getStatusTag={getStatusTag} />}
       {activeTab === 'custom' && <Custom getStatusTag={getStatusTag} />}
-      {/* {activeTab === 'market' && <Market getStatusTag={getStatusTag} />} */}
+      {activeTab === 'market' && <Market getStatusTag={getStatusTag} />}
     </div>
   );
 };

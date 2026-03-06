@@ -1948,7 +1948,20 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       path: 'Path',
       viewDetail: 'View Details',
       textLink: 'Test Connection',
-      noResult: 'Processing results will be displayed here'
+      noResult: 'Processing results will be displayed here',
+
+      marketConfig: 'Configure {{name}}',
+      marketSaveAndConnect: 'Save & Connect',
+      marketUrl: 'Market URL',
+      marketUrlPlaceholder: 'Market URL',
+      marketCopy: 'Copy',
+      marketApiKeyOptional: 'Optional',
+      marketApiKeyExtra: 'Some markets require an API Key to access the full service list',
+      marketApiKeyPlaceholder: 'Enter API Key to access more services',
+      marketConnectionStatus: 'Connection Status',
+      marketConnected: '● Connected',
+      marketDisconnected: '○ Disconnected',
+      marketConnecting: 'Connecting to {{name}}...',
     },
     workflow: {
       coreNode: 'Core Nodes',

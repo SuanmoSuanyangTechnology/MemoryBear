@@ -137,3 +137,9 @@ export interface CustomToolModalRef {
   handleOpen: (data?: ToolItem) => void;
   handleClose: () => void;
 }
+
+export interface MarketQuery {
+  mcp_market_config_id?: string;
+  page?: number;
+  pagesize?: number;
+}

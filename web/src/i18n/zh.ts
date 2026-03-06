@@ -1945,7 +1945,20 @@ export const zh = {
       path: '路径',
       viewDetail: '查看详情',
       textLink: '测试连接',
-      noResult: '处理结果将显示在这里'
+      noResult: '处理结果将显示在这里',
+
+      marketConfig: '配置 {{name}}',
+      marketSaveAndConnect: '保存并连接',
+      marketUrl: '市场地址',
+      marketUrlPlaceholder: '市场地址',
+      marketCopy: '复制',
+      marketApiKeyOptional: '可选',
+      marketApiKeyExtra: '部分市场需要 API Key 才能获取完整的服务列表',
+      marketApiKeyPlaceholder: '输入 API Key 以获取更多服务',
+      marketConnectionStatus: '连接状态',
+      marketConnected: '● 已连接',
+      marketDisconnected: '○ 未连接',
+      marketConnecting: '正在连接 {{name}}...',
     },
     workflow: {
       coreNode: '核心节点',
