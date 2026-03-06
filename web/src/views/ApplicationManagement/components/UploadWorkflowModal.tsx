@@ -142,6 +142,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
         break;
       case 2: // Step 3: Confirm information
         if (data) {
+          setLoading(true);
           // Complete import workflow
           completeImportWorkflow({
             temp_id: data.temp_id,
@@ -152,7 +153,8 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
               const response = res as { id: string };
               setCurrent(3);
               setAppId(response.id);
-            });
+            })
+            .finally(() => setLoading(false));
         }
         break;
       default:
@@ -243,7 +245,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
           </Button>
         ];
     }
-  }, [current]);
+  }, [current, loading]);
 
   return (
     <RbModal
