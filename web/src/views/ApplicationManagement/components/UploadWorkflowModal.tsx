@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-28 14:08:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-02 17:39:49
+ * @Last Modified time: 2026-03-06 12:05:46
  */
 /**
  * UploadWorkflowModal Component
@@ -101,6 +101,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
         formData.append('platform', values.platform);
         formData.append('file', values.file[0]);
 
+        setLoading(true)
         // Call import workflow API
         importWorkflow(formData)
           .then(res => {
@@ -114,21 +115,24 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
             } else {
               setCurrent(2);
               // Pre-fill form with file information
+              const fileNameSplit = values.file[0].name.split('.')
               form.setFieldsValue({
-                name: values.file[0].name.split('.')[0],
+                name: fileNameSplit.slice(0, fileNameSplit.length - 1).join('.'),
                 platform: values.platform,
                 fileName: values.file[0].name,
                 fileSize: values.file[0].size,
               });
             }
-          });
+          })
+          .finally(() => setLoading(false));
         break;
       case 1: // Step 2: Error/warning display
         if (firstFormData) {
           const { file, platform } = firstFormData;
+          const fileNameSplit = firstFormData.file[0].name.split('.')
           // Pre-fill form with file information
           form.setFieldsValue({
-            name: file[0].name.split('.')[0],
+            name: fileNameSplit.slice(0, fileNameSplit.length - 1).join('.'),
             platform: platform,
             fileName: file[0].name,
             fileSize: file[0].size,
@@ -175,7 +179,9 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
     }
 
     // Reset form if not going back to error/warning step
-    if (newStep !== 1) {
+    if (newStep === 0) {
+      form.setFieldsValue(firstFormData || {})
+    } else if (newStep !== 1) {
       form.resetFields();
     }
     setCurrent(newStep);
@@ -186,14 +192,16 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
    * @param {string} type - Navigation type ('detail' or 'list')
    */
   const handleJump = (type: string) => {
-    switch(type) {
-      case 'detail':
-        // Open application detail page in new tab
-        window.open(`/#/application/config/${appId}`, '_blank');
-        break;
-    }
-    refresh();
     handleClose();
+    refresh();
+    setTimeout(() => {
+      switch (type) {
+        case 'detail':
+          // Open application detail page in new tab
+          window.open(`/#/application/config/${appId}`, '_blank');
+          break;
+      }
+    }, 100)
   };
 
   /**
@@ -350,7 +358,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
           title={t('application.importSuccess')}
           subTitle={t('application.importSuccessDesc')}
           extra={[
-          <Button key="back" onClick={() => handleJump('list')}>
+            <Button key="back" onClick={() => handleJump('list')}>
             {t('application.gotoList')}
           </Button>,
           <Button

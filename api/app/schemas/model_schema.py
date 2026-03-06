@@ -23,6 +23,7 @@ class ModelConfigBase(BaseModel):
     load_balance_strategy: Optional[str] = Field(LoadBalanceStrategy.NONE.value, description="负载均衡策略")
     capability: List[str] = Field(default_factory=list, description="模型能力列表")
     is_omni: bool = Field(False, description="是否为Omni模型")
+    model_id: Optional[uuid.UUID] = Field(None, description="基础模型ID")
 
 
 class ApiKeyCreateNested(BaseModel):

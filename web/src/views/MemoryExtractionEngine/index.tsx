@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:02 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:30:02 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-06 13:50:05
  */
 /**
  * Memory Extraction Engine Configuration Page
@@ -13,7 +13,7 @@
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Space, Select, InputNumber, Slider, App, Form } from 'antd'
+import { Row, Col, Space, Select, InputNumber, Slider, App, Form, Input } from 'antd'
 import clsx from 'clsx'
 
 import Card from './components/Card'
@@ -35,15 +35,15 @@ const keys = [
 /**
  * Configuration description component
  */
-const ConfigDesc: FC<{ config: Variable, className?: string }> = ({config, className}) => {
+const ConfigDesc: FC<{ config: Variable, className?: string; onlyMeaning?: boolean; }> = ({ config, className, onlyMeaning = false}) => {
   const { t } = useTranslation();
   return (
     <div className={className}>
-      <Space size={8} className={clsx("rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 ")}>
+      {!onlyMeaning && <Space size={8} className={clsx("rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 ")}>
         {config.variableName && <span className="rb:font-regular">{t('memoryExtractionEngine.variableName')}: {config.variableName}</span>}
         {config.control && <span className="rb:font-regular">{t('memoryExtractionEngine.control')}: {t(`memoryExtractionEngine.${config.control}`)}</span>}
         {config.type && <span className="rb:font-regular">{t('memoryExtractionEngine.type')}: {config.type}</span>}
-      </Space>
+      </Space>}
       {config.meaning && <div className={clsx("rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 ")}>{t('memoryExtractionEngine.Meaning')}: {t(`memoryExtractionEngine.${config.meaning}`)}</div>}
     </div>
   )
@@ -250,6 +250,21 @@ const MemoryExtractionEngine: FC = () => {
                                     <InputNumber min={config.min || 0} style={{ width: '100%' }} placeholder={t('common.pleaseEnter')} />
                                   </Form.Item>
                                   <ConfigDesc config={config} className="rb:-mt-4!" />
+                                </div>
+                              </>
+                            }
+                            {config.control === 'text' &&
+                              <>
+                                <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mt-6 rb:mb-2">
+                                  -{t(`memoryExtractionEngine.${config.label}`)}
+                                </div>
+                                <div className="rb:pl-2">
+                                  <Form.Item
+                                    name={config.variableName}
+                                  >
+                                    <Input placeholder={t('common.pleaseEnter')} disabled />
+                                  </Form.Item>
+                                  <ConfigDesc config={config} onlyMeaning={true} className="rb:-mt-4!" />
                                 </div>
                               </>
                             }

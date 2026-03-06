@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-05 15:09:22
+ * @Last Modified time: 2026-03-06 12:20:43
  */
 /**
  * File Upload Component
@@ -208,6 +208,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     newFileList.map(file => {
       const type = (file.type && transform_file_type[file.type as keyof typeof transform_file_type]) || file.type || 'document'
       file.type = type
+      file.thumbUrl = file.thumbUrl || URL.createObjectURL(file.originFileObj as Blob)
     })
     setFileList(newFileList);
     if (onChange) {
