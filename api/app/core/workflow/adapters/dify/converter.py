@@ -129,11 +129,11 @@ class DifyConverter(BaseConverter):
 
     @staticmethod
     def _convert_file(var):
-        pass
+        return None
 
     @staticmethod
     def _convert_array_file(var):
-        pass
+        return []
 
     @staticmethod
     def variable_type_map(source_type) -> VariableType | None:
@@ -198,7 +198,7 @@ class DifyConverter(BaseConverter):
             "over-write": AssignmentOperator.COVER,
             "remove-last": AssignmentOperator.REMOVE_LAST,
             "remove-first": AssignmentOperator.REMOVE_FIRST,
-
+            "set": AssignmentOperator.ASSIGN,
         }
         return operator_map.get(operator, operator)
 
@@ -267,10 +267,10 @@ class DifyConverter(BaseConverter):
                 type=var_type,
                 required=var["required"],
                 default=self.convert_variable_type(
-                    var_type, var["default"]
+                    var_type, var.get("default")
                 ),
                 description=var["label"],
-                max_length=var.get("max_length"),
+                max_length=var.get("max_length", 50),
             )
             start_vars.append(var_def)
         result = StartNodeConfig.model_construct(
@@ -333,7 +333,7 @@ class DifyConverter(BaseConverter):
                 MessageConfig(
                     role="user",
                     content=self.trans_variable_format(
-                        node_data["memory"].get("query_prompt_template", "{{#sys.query#}}")
+                        node_data["memory"].get("query_prompt_template") or "{{#sys.query#}}"
                     )
                 )
             )
@@ -612,7 +612,7 @@ class DifyConverter(BaseConverter):
             ),
             headers=headers,
             params=params,
-            verify_ssl=node_data["ssl_verify"],
+            verify_ssl=node_data.get("ssl_verify", False),
             timeouts=HttpTimeOutConfig.model_construct(
                 connect_timeout=node_data["timeout"]["max_connect_timeout"] or 5,
                 read_timeout=node_data["timeout"]["max_read_timeout"] or 5,
@@ -696,7 +696,7 @@ class DifyConverter(BaseConverter):
         group_variables = {}
         group_type = {}
         if not advanced_settings or not advanced_settings["group_enabled"]:
-            group_variables["output"] = [
+            group_variables = [
                 self._process_list_variable_litearl(variable)
                 for variable in node_data["variables"]
             ]
