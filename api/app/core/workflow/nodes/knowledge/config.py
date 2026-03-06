@@ -40,7 +40,7 @@ class KnowledgeRetrievalNodeConfig(BaseNodeConfig):
     )
 
     knowledge_bases: list[KnowledgeBaseConfig] = Field(
-        ...,
+        default_factory=list,
         description="Knowledge base config"
     )
 

@@ -1,16 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, status,Header
+from typing import Optional
+
+from dotenv import load_dotenv
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from sqlalchemy.orm import Session
+
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
-
+from app.services.memory_short_service import LongService, ShortService
 from app.services.memory_storage_service import search_entity
-from app.services.memory_short_service import ShortService,LongService
-from dotenv import load_dotenv
-from sqlalchemy.orm import Session
-from typing import Optional
+
 load_dotenv()
 api_logger = get_api_logger()
 
@@ -29,11 +31,11 @@ async def short_term_configs(
     language = get_language_from_header(language_type)
     
     # 获取短期记忆数据
-    short_term=ShortService(end_user_id)
+    short_term=ShortService(end_user_id, db)
     short_result=short_term.get_short_databasets()
     short_count=short_term.get_short_count()
 
-    long_term=LongService(end_user_id)
+    long_term=LongService(end_user_id, db)
     long_result=long_term.get_long_databasets()
 
     entity_result = await search_entity(end_user_id)

@@ -1,101 +1,229 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-28 14:08:14 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-02 17:39:49
+ */
+/**
+ * UploadWorkflowModal Component
+ * 
+ * This component provides a modal for uploading workflow files with a multi-step process:
+ * 1. Upload - Select platform and file
+ * 2. Complex - Show warnings and errors if any
+ * 3. SureInfo - Confirm and edit workflow information
+ * 4. Completed - Show success message and options
+ */
 import { forwardRef, useImperativeHandle, useState, useMemo } from 'react';
-import { Form, Select, Steps, Flex, Alert, Row, Col, Statistic, Input, Button } from 'antd';
+import { Form, Select, Steps, Flex, Alert, Input, Button, Result, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { UploadWorkflowModalData, UploadWorkflowModalRef } from '../types'
+import type { UploadWorkflowModalData, UploadData, UploadWorkflowModalRef } from '../types'
 import RbModal from '@/components/RbModal'
 import UploadFiles from '@/components/Upload/UploadFiles'
-import { fileUploadUrl } from '@/api/fileStorage'
-import RbCard from '@/components/RbCard/Card'
+import { importWorkflow, completeImportWorkflow } from '@/api/application'
 
+/**
+ * Props for UploadWorkflowModal component
+ */
 interface UploadWorkflowModalProps {
+  /** Function to refresh the parent component after workflow import */
   refresh: () => void;
 }
+
+/**
+ * Steps definition for the upload process
+ */
 const steps = [
-  'upload',
-  'complex',
-  'node',
-  'configCheck',
-  'sureInfo',
-  'completed'
+  'upload',      // Step 1: File upload
+  'complex',     // Step 2: Error/warning display
+  'sureInfo',    // Step 3: Information confirmation
+  'completed'    // Step 4: Success message
 ]
+
+/**
+ * UploadWorkflowModal component
+ * 
+ * @param {UploadWorkflowModalProps} props - Component props
+ * @param {React.Ref<UploadWorkflowModalRef>} ref - Ref for imperative methods
+ */
 const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowModalProps>(({
   refresh
 }, ref) => {
   const { t } = useTranslation();
-  const [visible, setVisible] = useState(false);
-  const [form] = Form.useForm<UploadWorkflowModalData>();
-  const [loading, setLoading] = useState(false)
-  const [current, setCurrent] = useState<number>(5);
+  
+  // State management
+  const [visible, setVisible] = useState(false);           // Modal visibility
+  const [form] = Form.useForm<UploadWorkflowModalData>();  // Form instance
+  const [loading, setLoading] = useState(false);           // Loading state
+  const [current, setCurrent] = useState<number>(0);       // Current step
+  const [data, setData] = useState<UploadData | null>(null); // Upload response data
+  const [firstFormData, setFirstFormData] = useState<UploadWorkflowModalData | null>(null); // First step form data
+  const [appId, setAppId] = useState<string | null>(null); // Imported application ID
 
-  // 封装取消方法，添加关闭弹窗逻辑
+  /**
+   * Handle modal close
+   * Resets all states and form fields
+   */
   const handleClose = () => {
     setVisible(false);
     form.resetFields();
-    setLoading(false)
+    setData(null);
+    setCurrent(0);
+    setFirstFormData(null);
+    setAppId(null);
+    setLoading(false);
   };
 
+  /**
+   * Handle modal open
+   * Resets form fields and shows modal
+   */
   const handleOpen = () => {
     form.resetFields();
     setVisible(true);
   };
-  // 封装保存方法，添加提交逻辑
+
+  /**
+   * Handle save/submit action
+   * Processes different logic based on current step
+   */
   const handleSave = () => {
+    const values = form.getFieldsValue();
+    
     switch(current) {
-      case 0:
-        setCurrent(1)
+      case 0: // Step 1: Upload file
+        if (!values.file || values.file.length === 0) {
+          message.warning(t('application.pleaseUploadFile'));
+          return;
+        }
+        const formData = new FormData();
+        setFirstFormData(values);
+        formData.append('platform', values.platform);
+        formData.append('file', values.file[0]);
+
+        // Call import workflow API
+        importWorkflow(formData)
+          .then(res => {
+            const response = res as UploadData;
+            const { errors, warnings } = response;
+            setData(response);
+
+            // Navigate to error/warning step if any, otherwise go to confirmation
+            if (errors.length || warnings.length) {
+              setCurrent(1);
+            } else {
+              setCurrent(2);
+              // Pre-fill form with file information
+              form.setFieldsValue({
+                name: values.file[0].name.split('.')[0],
+                platform: values.platform,
+                fileName: values.file[0].name,
+                fileSize: values.file[0].size,
+              });
+            }
+          });
         break;
-      case 1:
-        setCurrent(2)
+      case 1: // Step 2: Error/warning display
+        if (firstFormData) {
+          const { file, platform } = firstFormData;
+          // Pre-fill form with file information
+          form.setFieldsValue({
+            name: file[0].name.split('.')[0],
+            platform: platform,
+            fileName: file[0].name,
+            fileSize: file[0].size,
+          });
+        }
+        setCurrent(2);
         break;
-      case 2:
-        setCurrent(3)
-        break;
-      case 3:
-        setCurrent(4)
-        break;
-      case 4:
-        setCurrent(5)
-        break;
-      case 5:
+      case 2: // Step 3: Confirm information
+        if (data) {
+          // Complete import workflow
+          completeImportWorkflow({
+            temp_id: data.temp_id,
+            name: values.name,
+            description: values.description,
+          })
+            .then((res) => {
+              const response = res as { id: string };
+              setCurrent(3);
+              setAppId(response.id);
+            });
+        }
         break;
       default:
-        setCurrent(prev => prev + 1)
+        setCurrent(prev => prev + 1);
         break;
     }
-    // form
-    //   .validateFields()
-    //   .then(() => {
-    //   })
-    //   .catch((err) => {
-    //     console.log('err', err)
-    //   });
-  }
+  };
 
-  // 暴露给父组件的方法
+  // Expose methods to parent component via ref
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
   }));
 
+  /**
+   * Handle navigation to previous step
+   * Adjusts step based on whether there were errors/warnings
+   */
   const handleLastStep = () => {
-    setCurrent(prev => prev - 1)
-  }
+    let newStep = current - 1;
+    // If no errors or warnings, skip the error/warning step
+    if (!data?.warnings?.length && !data?.errors?.length) {
+      newStep = current - 2;
+    }
+
+    // Reset form if not going back to error/warning step
+    if (newStep !== 1) {
+      form.resetFields();
+    }
+    setCurrent(newStep);
+  };
+
+  /**
+   * Handle navigation after successful import
+   * @param {string} type - Navigation type ('detail' or 'list')
+   */
   const handleJump = (type: string) => {
     switch(type) {
       case 'detail':
-        break;
-      default: 
+        // Open application detail page in new tab
+        window.open(`/#/application/config/${appId}`, '_blank');
         break;
     }
-  }
+    refresh();
+    handleClose();
+  };
 
+  /**
+   * Generate modal footer based on current step
+   */
   const getFooter = useMemo(() => {
     switch(current) {
-      case 0:
+      case 0: // Step 1: Upload
         return [
           <Button key="back" onClick={handleClose}>
             {t('common.cancel')}
+          </Button>,
+          <Button
+            key="nextStep"
+            type="primary"
+            loading={loading}
+            onClick={handleSave}
+          >
+            {t('common.nextStep')}
+          </Button>
+        ];
+      case 3: // Step 4: Completed
+        return null;
+      default: // Steps 1-2
+        return [
+          <Button key="cancel" onClick={handleClose}>
+            {t('common.cancel')}
+          </Button>,
+          <Button key="back" onClick={handleLastStep}>
+            {t('common.prevStep')}
           </Button>,
           <Button
             key="submit"
@@ -103,11 +231,125 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
             loading={loading}
             onClick={handleSave}
           >
-            {t('application.nextStep')}
+            {t('common.nextStep')}
           </Button>
-        ]
-      case 5:
-        return [
+        ];
+    }
+  }, [current]);
+
+  return (
+    <RbModal
+      title={t('application.importThirdParty')}
+      open={visible}
+      onCancel={handleClose}
+      okText={t('application.nextStep')}
+      onOk={handleSave}
+      footer={getFooter}
+      width={1000}
+    >
+      {/* Steps indicator */}
+      <div className='rb:p-3 rb:bg-[#FBFDFF] rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:mb-3'>
+        <Steps
+          labelPlacement="vertical"
+          size="small"
+          current={current}
+          items={steps.map(key => ({ title: t(`application.${key}`) }))}
+        />
+      </div> 
+      
+      {/* Step 1: File upload */}
+      {current === 0 &&
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{
+            platform: 'dify'
+          }}
+        >
+          <Form.Item
+            name="platform" label={t('application.platform')}
+            rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          >
+            <Select
+              placeholder={t('common.pleaseSelect')}
+              options={['dify'].map(value => ({
+                label: t(`application.${value}`), value: value,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="file"
+            valuePropName="fileList"
+            noStyle
+          >
+            <UploadFiles
+              isAutoUpload={false}
+              isCanDrag={true}
+              fileSize={100}
+              maxCount={1}
+              fileType={['yml']}
+            />
+          </Form.Item>
+        </Form>
+      }
+
+      {/* Step 2: Error/warning display */}
+      {current === 1 &&
+        <Flex vertical gap={12} className="rb:w-[70%]! rb:mx-auto!">
+          {data?.warnings.map(vo => (
+            <Alert
+              key={vo.node_id}
+              message={<div>
+                <div>{vo.node_name || vo.node_id} - {vo.type}</div>
+                {vo.detail}
+              </div>}
+              type="warning"
+              showIcon
+            />
+          ))}
+          {data?.errors.map(vo => (
+            <Alert
+              key={vo.node_id}
+              message={<div>
+                <div>{vo.node_name || vo.node_id} - {vo.type}</div>
+                {vo.detail}
+              </div>}
+              type="error"
+              showIcon
+            />
+          ))}
+        </Flex>
+      }
+
+      {/* Step 3: Information confirmation */}
+      {current === 2 &&
+        <Form form={form} layout="vertical" className="rb:w-[70%]! rb:mx-auto!">
+          <div className="rb:text-[#5B6167] rb:font-medium">{t('application.baseInfo')}</div>
+          <Form.Item name="name" label={t('application.workflowName')} rules={[{ required: true }]}>
+            <Input placeholder={t('common.pleaseEnter')} />
+          </Form.Item>
+          <Form.Item name="platform" label={t('application.platform')}>
+            <Input disabled />
+          </Form.Item>
+          <Form.Item name="fileName" label={t('application.fileName')}>
+            <Input disabled />
+          </Form.Item>
+          <Form.Item name="fileSize" label={t('application.fileSize')}>
+            <Input disabled />
+          </Form.Item>
+          <Form.Item name="description" label={t('application.description')} layout="vertical">
+            <Input.TextArea placeholder={t('common.pleaseEnter')} />
+          </Form.Item>
+        </Form>
+      }
+      
+      {/* Step 4: Success message */}
+      {current === 3 &&
+        <Result
+          status="success"
+          title={t('application.importSuccess')}
+          subTitle={t('application.importSuccessDesc')}
+          extra={[
           <Button key="back" onClick={() => handleJump('list')}>
             {t('application.gotoList')}
           </Button>,
@@ -119,146 +361,8 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
           >
             {t('application.gotoDetail')}
           </Button>
-        ]
-      default:
-        return [
-          <Button onClick={handleClose}>
-            {t('common.cancel')}
-          </Button>,
-          <Button key="back" onClick={handleLastStep}>
-            {t('application.lastStep')}
-          </Button>,
-          <Button
-            key="submit"
-            type="primary"
-            loading={loading}
-            onClick={handleSave}
-          >
-            {t('application.nextStep')}
-          </Button>
-        ]
-    }
-  }, [current])
-
-  return (
-    <RbModal
-      title={t('application.importWorkflow')}
-      open={visible}
-      onCancel={handleClose}
-      okText={t('application.nextStep')}
-      onOk={handleSave}
-      footer={getFooter}
-      width={1000}
-    >
-      <div className='rb:p-3 rb:bg-[#FBFDFF] rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:mb-3'>
-        <Steps
-          labelPlacement="vertical"
-          size="small"
-          current={current}
-          items={steps.map(key => ({ title: t(`application.${key}`) }))}
+        ]}
         />
-      </div> 
-      {current === 0 &&
-        <Form
-          form={form}
-          layout="vertical"
-        >
-          <Form.Item name="provider" label={t('application.workflowProvider')}>
-            <Select
-              placeholder={t('common.pleaseSelect')}
-              options={[
-                { label: 'Dify', value: 'dify' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="file" valuePropName="fileList" noStyle>
-            <UploadFiles
-              action={fileUploadUrl}
-              isCanDrag={true}
-              fileSize={100}
-              multiple={true}
-              maxCount={1}
-              fileType={['yml', 'yaml', 'zip', 'json']}
-              onChange={(fileList) => {
-                console.log('文件列表变化:', fileList);
-              }}
-            />
-          </Form.Item>
-        </Form>
-      }
-
-      {current === 1 &&
-        <Flex vertical gap={12} className="rb:w-[70%]! rb:mx-auto!">
-          {['fileType', 'parse', 'nodes', 'variable'].map(key => (
-            <Alert key={key} message={key} type="success" showIcon />
-          ))}
-
-          <Row gutter={12}>
-            {['complex', 'nodes', 'task'].map(key => (
-              <Col key={key} span={8}>
-                <Statistic title={key} value={0} className="rb:text-center rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:py-3!" />
-              </Col>
-            ))}
-          </Row>
-        </Flex>
-      }
-
-      {/* 节点映射 */}
-      {current === 2 &&
-        <Flex vertical gap={12} className="rb:w-[70%]! rb:mx-auto!">
-          <RbCard>
-            <Flex justify="space-around">
-              <div> Left Node</div>
-              →
-              <div>
-                <Select
-                  placeholder={t('common.pleaseSelect')}
-                  className="rb:w-50"
-                />
-              </div>
-            </Flex>
-          </RbCard>
-        </Flex>
-      }
-      {current === 3 &&
-        <Flex vertical gap={12} className="rb:w-[70%]! rb:mx-auto!">
-
-        </Flex>
-      }
-      {current === 4 &&
-        <Form form={form} layout="horizontal" className="rb:w-[70%]! rb:mx-auto!">
-          <div className="rb:text-[#5B6167] rb:font-medium">{t('application.baseInfo')}</div>
-          <Form.Item name="name" label={t('application.workflowName')} rules={[{ required: true }]}>
-            <Input placeholder={t('common.pleaseEnter')} />
-          </Form.Item>
-          <Form.Item name="source" label={t('application.source')}>
-            source
-          </Form.Item>
-          <Form.Item name="fileName" label={t('application.fileName')}>
-            fileName
-          </Form.Item>
-          <Form.Item name="fileSize" label={t('application.fileSize')}>
-            fileSize
-          </Form.Item>
-          <Form.Item name="desciption" label={t('application.desciption')}>
-            <Input.TextArea placeholder={t('common.pleaseEnter')} />
-          </Form.Item>
-
-          <div className="rb:text-[#5B6167] rb:font-medium">{t('application.importStatistic')}</div>
-          <Row gutter={12}>
-            {['complex', 'nodes', 'task'].map(key => (
-              <Col key={key} span={8}>
-                <Statistic title={key} value={0} className="rb:text-center rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:py-3!" />
-              </Col>
-            ))}
-          </Row>
-        </Form>
-      }
-      {current === 5 &&
-        <Flex justify="center" vertical gap={12} className="rb:w-[70%]! rb:mx-auto! rb:text-center">
-          <div>导入成功</div>
-          <div>您的工作流已成功导入，可以在应用管理中查看和管理</div>
-        </Flex>
       }
     </RbModal>
   );

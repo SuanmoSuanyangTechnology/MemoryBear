@@ -66,7 +66,7 @@ class CycleGraphNode(BaseNode):
                 if config.flatten:
                     outputs['output'] = config.output_type
                 else:
-                    outputs['output'] = VariableType.ARRAY_STRING
+                    outputs['output'] = VariableType.NESTED_ARRAY
             else:
                 outputs['output'] = VariableType(f"array[{config.output_type}]")
             return outputs

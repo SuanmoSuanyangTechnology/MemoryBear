@@ -241,6 +241,7 @@ class SceneResponse(BaseModel):
     created_at: datetime.datetime = Field(..., description="创建时间（毫秒时间戳）")
     updated_at: datetime.datetime = Field(..., description="更新时间（毫秒时间戳）")
     classes_count: int = Field(0, description="类型数量")
+    is_system_default: bool = Field(False, description="是否为系统默认场景")
     
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
@@ -462,6 +463,7 @@ class ClassListResponse(BaseModel):
     scene_id: UUID = Field(..., description="所属场景ID")
     scene_name: str = Field(..., description="场景名称")
     scene_description: Optional[str] = Field(None, description="场景描述")
+    is_system_default: bool = Field(False, description="是否为系统默认场景")
     items: List[ClassResponse] = Field(..., description="类型列表")
 
 

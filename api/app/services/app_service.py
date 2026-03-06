@@ -232,7 +232,7 @@ class AppService:
                 # 检查主 Agent 的模型配置
                 multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
 
-            model_api_key = ModelApiKeyService.get_a_api_key(self.db, multi_agent_config.default_model_config_id)
+            model_api_key = ModelApiKeyService.get_available_api_key(self.db, multi_agent_config.default_model_config_id)
             if not model_api_key:
                 raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
 
@@ -320,6 +320,26 @@ class AppService:
         )
         self.db.add(agent_cfg)
         logger.debug("Agent 配置已创建", extra={"app_id": str(app_id)})
+
+    def _create_workflow_config(
+            self,
+            app_id: uuid.UUID,
+            data: app_schema.WorkflowConfigCreate,
+            now: datetime.datetime
+    ):
+        workflow_cfg = WorkflowConfig(
+            id=uuid.uuid4(),
+            app_id=app_id,
+            nodes=[node.model_dump() for node in data.nodes] if data.nodes else [],
+            edges=[edge.model_dump() for edge in data.edges] if data.edges else [],
+            variables=[var.model_dump() for var in data.variables] if data.variables else [],
+            execution_config=data.execution_config.model_dump() if data.execution_config else {},
+            triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
+            is_active=True,
+            created_at=now,
+            updated_at=now
+        )
+        self.db.add(workflow_cfg)
 
     def _create_multi_agent_config(
             self,
@@ -531,6 +551,9 @@ class AppService:
             # 如果是 multi_agent 类型且提供了配置，创建 MultiAgentConfig
             if app.type == "multi_agent" and data.multi_agent_config:
                 self._create_multi_agent_config(app.id, data.multi_agent_config, now)
+
+            if app.type == "workflow" and data.workflow_config:
+                self._create_workflow_config(app.id, data.workflow_config, now)
 
             self.db.commit()
             self.db.refresh(app)
@@ -968,7 +991,7 @@ class AppService:
         config = self.db.scalars(stmt).first()
 
         try:
-            config_memory=config.memory
+            config_memory = config.memory
             if 'memory_content' in config_memory:
                 config.memory['memory_config_id'] = config.memory.pop('memory_content')
         except:
@@ -1189,9 +1212,9 @@ class AppService:
     # ==================== 记忆配置提取方法 ====================
 
     def _extract_memory_config_id(
-        self,
-        app_type: str,
-        config: Dict[str, Any]
+            self,
+            app_type: str,
+            config: Dict[str, Any]
     ) -> Tuple[Optional[uuid.UUID], bool]:
         """从发布配置中提取 memory_config_id（委托给 MemoryConfigService）
         
@@ -1205,13 +1228,13 @@ class AppService:
                 - is_legacy_int: 是否检测到旧格式 int 数据，需要回退到工作空间默认配置
         """
         from app.services.memory_config_service import MemoryConfigService
-        
+
         service = MemoryConfigService(self.db)
         return service.extract_memory_config_id(app_type, config)
 
     def _get_workspace_default_memory_config_id(
-        self,
-        workspace_id: uuid.UUID
+            self,
+            workspace_id: uuid.UUID
     ) -> Optional[uuid.UUID]:
         """获取工作空间的默认记忆配置ID
         
@@ -1222,22 +1245,22 @@ class AppService:
             Optional[uuid.UUID]: 默认记忆配置ID，如果不存在则返回 None
         """
         from app.services.memory_config_service import MemoryConfigService
-        
+
         service = MemoryConfigService(self.db)
         config = service.get_workspace_default_config(workspace_id)
-        
+
         if not config:
             logger.warning(
                 f"工作空间没有可用的记忆配置: workspace_id={workspace_id}"
             )
             return None
-        
+
         return config.config_id
 
     def _update_endusers_memory_config(
-        self,
-        app_id: uuid.UUID,
-        memory_config_id: uuid.UUID
+            self,
+            app_id: uuid.UUID,
+            memory_config_id: uuid.UUID
     ) -> int:
         """批量更新应用下所有终端用户的 memory_config_id
         
@@ -1249,13 +1272,13 @@ class AppService:
             int: 更新的终端用户数量
         """
         from app.repositories.end_user_repository import EndUserRepository
-        
+
         repo = EndUserRepository(self.db)
         updated_count = repo.batch_update_memory_config_id(
             app_id=app_id,
             memory_config_id=memory_config_id
         )
-        
+
         return updated_count
 
     # ==================== 应用发布管理 ====================
@@ -1403,7 +1426,7 @@ class AppService:
 
         # 提取记忆配置ID并更新终端用户
         memory_config_id, is_legacy_int = self._extract_memory_config_id(app.type, config)
-        
+
         # 如果检测到旧格式 int 数据，回退到工作空间默认配置
         if is_legacy_int and not memory_config_id:
             memory_config_id = self._get_workspace_default_memory_config_id(app.workspace_id)
@@ -1412,7 +1435,7 @@ class AppService:
                     f"发布时使用工作空间默认记忆配置（旧数据兼容）: app_id={app_id}, "
                     f"workspace_id={app.workspace_id}, memory_config_id={memory_config_id}"
                 )
-        
+
         if memory_config_id:
             updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
             logger.info(
@@ -1537,7 +1560,7 @@ class AppService:
 
         # 提取记忆配置ID并更新终端用户
         memory_config_id, is_legacy_int = self._extract_memory_config_id(release.type, release.config)
-        
+
         # 如果检测到旧格式 int 数据，回退到工作空间默认配置
         if is_legacy_int and not memory_config_id:
             memory_config_id = self._get_workspace_default_memory_config_id(app.workspace_id)
@@ -1546,7 +1569,7 @@ class AppService:
                     f"回滚时使用工作空间默认记忆配置（旧数据兼容）: app_id={app_id}, "
                     f"workspace_id={app.workspace_id}, memory_config_id={memory_config_id}"
                 )
-        
+
         if memory_config_id:
             updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
             logger.info(
@@ -1768,372 +1791,6 @@ class AppService:
 
         return shares
 
-    # ==================== 试运行功能 ====================
-
-    async def draft_run(
-            self,
-            *,
-            app_id: uuid.UUID,
-            message: str,
-            conversation_id: Optional[str] = None,
-            user_id: Optional[str] = None,
-            variables: Optional[Dict[str, Any]] = None,
-            workspace_id: Optional[uuid.UUID] = None
-    ) -> Dict[str, Any]:
-        """试运行 Agent（使用当前草稿配置）
-
-        Args:
-            app_id: 应用ID
-            message: 用户消息
-            conversation_id: 会话ID（用于多轮对话）
-            user_id: 用户ID（用于会话管理）
-            variables: 自定义变量参数值
-            workspace_id: 工作空间ID（用于权限验证）
-
-        Returns:
-            Dict: 包含 AI 回复和元数据的字典
-
-        Raises:
-            ResourceNotFoundException: 当应用不存在时
-            BusinessException: 当应用类型不支持或配置缺失时
-        """
-        from app.services.draft_run_service import DraftRunService
-
-        logger.info("试运行 Agent", extra={"app_id": str(app_id), "user_message": message[:50]})
-
-        # 1. 验证应用
-        app = self._get_app_or_404(app_id)
-
-        if app.type != "agent":
-            raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
-
-        # 只读操作，允许访问共享应用
-        self._validate_app_accessible(app, workspace_id)
-
-        # 2. 获取 Agent 配置
-        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
-        agent_cfg = self.db.scalars(stmt).first()
-
-        if not agent_cfg:
-            raise BusinessException("Agent 配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
-
-        # 3. 获取模型配置
-        model_config = None
-        if agent_cfg.default_model_config_id:
-            from app.models import ModelConfig
-            model_config = self.db.get(ModelConfig, agent_cfg.default_model_config_id)
-
-        if not model_config:
-            raise BusinessException("模型配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
-
-        # 4. 调用试运行服务
-        logger.debug(
-            "准备调用试运行服务",
-            extra={
-                "app_id": str(app_id),
-                "model": model_config.name,
-                "has_conversation_id": bool(conversation_id),
-                "has_variables": bool(variables)
-            }
-        )
-
-        draft_service = DraftRunService(self.db)
-        result = await draft_service.run(
-            agent_config=agent_cfg,
-            model_config=model_config,
-            message=message,
-            workspace_id=workspace_id,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            variables=variables
-        )
-
-        logger.debug(
-            "试运行服务返回结果",
-            extra={
-                "result_type": str(type(result)),
-                "result_keys": list(result.keys()) if isinstance(result, dict) else "not_dict",
-                "has_message": "message" in result if isinstance(result, dict) else False,
-                "has_conversation_id": "conversation_id" in result if isinstance(result, dict) else False
-            }
-        )
-
-        logger.info(
-            "试运行完成",
-            extra={
-                "app_id": str(app_id),
-                "elapsed_time": result.get("elapsed_time"),
-                "model": model_config.name
-            }
-        )
-
-        return result
-
-    async def draft_run_stream(
-            self,
-            *,
-            app_id: uuid.UUID,
-            message: str,
-            conversation_id: Optional[str] = None,
-            user_id: Optional[str] = None,
-            variables: Optional[Dict[str, Any]] = None,
-            workspace_id: Optional[uuid.UUID] = None
-    ):
-        """试运行 Agent（流式返回）
-
-        Args:
-            app_id: 应用ID
-            message: 用户消息
-            conversation_id: 会话ID（用于多轮对话）
-            user_id: 用户ID（用于会话管理）
-            variables: 自定义变量参数值
-            workspace_id: 工作空间ID（用于权限验证）
-
-        Yields:
-            str: SSE 格式的事件数据
-
-        Raises:
-            ResourceNotFoundException: 当应用不存在时
-            BusinessException: 当应用类型不支持或配置缺失时
-        """
-        from app.services.draft_run_service import DraftRunService
-
-        logger.info("流式试运行 Agent", extra={"app_id": str(app_id), "user_message": message[:50]})
-
-        # 1. 验证应用
-        app = self._get_app_or_404(app_id)
-
-        if app.type != "agent":
-            raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
-
-        # 只读操作，允许访问共享应用
-        self._validate_app_accessible(app, workspace_id)
-
-        # 2. 获取 Agent 配置
-        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
-        agent_cfg = self.db.scalars(stmt).first()
-
-        if not agent_cfg:
-            raise BusinessException("Agent 配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
-
-        # 3. 获取模型配置
-        model_config = None
-        if agent_cfg.default_model_config_id:
-            from app.models import ModelConfig
-            model_config = self.db.get(ModelConfig, agent_cfg.default_model_config_id)
-
-        if not model_config:
-            raise BusinessException("模型配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
-
-        # 4. 调用流式试运行服务
-        draft_service = DraftRunService(self.db)
-        async for event in draft_service.run_stream(
-                agent_config=agent_cfg,
-                model_config=model_config,
-                message=message,
-                workspace_id=workspace_id,
-                conversation_id=conversation_id,
-                user_id=user_id,
-                variables=variables
-        ):
-            yield event
-
-    # ==================== 多模型对比试运行 ====================
-
-    async def draft_run_compare(
-            self,
-            *,
-            app_id: uuid.UUID,
-            message: str,
-            models: List[app_schema.ModelCompareItem],
-            conversation_id: Optional[str] = None,
-            user_id: Optional[str] = None,
-            variables: Optional[Dict[str, Any]] = None,
-            workspace_id: Optional[uuid.UUID] = None,
-            parallel: bool = True,
-            timeout: int = 60
-    ) -> Dict[str, Any]:
-        """多模型对比试运行
-
-        Args:
-            app_id: 应用ID
-            message: 用户消息
-            models: 要对比的模型列表
-            conversation_id: 会话ID
-            user_id: 用户ID
-            variables: 变量参数
-            workspace_id: 工作空间ID
-            parallel: 是否并行执行
-            timeout: 超时时间（秒）
-
-        Returns:
-            Dict: 对比结果
-        """
-        from app.models import ModelConfig
-        from app.services.draft_run_service import DraftRunService
-
-        logger.info(
-            "多模型对比试运行",
-            extra={
-                "app_id": str(app_id),
-                "model_count": len(models),
-                "parallel": parallel
-            }
-        )
-
-        # 1. 验证应用
-        app = self._get_app_or_404(app_id)
-        if app.type != "agent":
-            raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
-
-        # 只读操作，允许访问共享应用
-        self._validate_app_accessible(app, workspace_id)
-
-        # 2. 获取 Agent 配置
-        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
-        agent_cfg = self.db.scalars(stmt).first()
-        if not agent_cfg:
-            raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
-
-        # 3. 准备所有模型配置
-        model_configs = []
-        for model_item in models:
-            model_config = self.db.get(ModelConfig, model_item.model_config_id)
-            if not model_config:
-                raise ResourceNotFoundException("模型配置", str(model_item.model_config_id))
-
-            # 合并参数：agent配置参数 + 请求覆盖参数
-            merged_parameters = {
-                **(agent_cfg.model_parameters or {}),
-                **(model_item.model_parameters or {})
-            }
-
-            model_configs.append({
-                "model_config": model_config,
-                "parameters": merged_parameters,
-                "label": model_item.label or model_config.name,
-                "model_config_id": model_item.model_config_id
-            })
-
-        # 4. 调用 DraftRunService 的对比方法
-        draft_service = DraftRunService(self.db)
-        result = await draft_service.run_compare(
-            agent_config=agent_cfg,
-            models=model_configs,
-            message=message,
-            workspace_id=workspace_id,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            variables=variables,
-            parallel=parallel,
-            timeout=timeout
-        )
-
-        logger.info(
-            "多模型对比完成",
-            extra={
-                "app_id": str(app_id),
-                "successful": result["successful_count"],
-                "failed": result["failed_count"]
-            }
-        )
-
-        return result
-
-    async def draft_run_compare_stream(
-            self,
-            *,
-            app_id: uuid.UUID,
-            message: str,
-            models: List[app_schema.ModelCompareItem],
-            conversation_id: Optional[str] = None,
-            user_id: Optional[str] = None,
-            variables: Optional[Dict[str, Any]] = None,
-            workspace_id: Optional[uuid.UUID] = None,
-            parallel: bool = True,
-            timeout: int = 60
-    ):
-        """多模型对比试运行（流式返回）
-
-        Args:
-            app_id: 应用ID
-            message: 用户消息
-            models: 要对比的模型列表
-            conversation_id: 会话ID
-            user_id: 用户ID
-            variables: 变量参数
-            workspace_id: 工作空间ID
-            timeout: 超时时间（秒）
-
-        Yields:
-            str: SSE 格式的事件数据
-        """
-        from app.models import ModelConfig
-        from app.services.draft_run_service import DraftRunService
-
-        logger.info(
-            "多模型对比流式试运行",
-            extra={
-                "app_id": str(app_id),
-                "model_count": len(models)
-            }
-        )
-
-        # 1. 验证应用
-        app = self._get_app_or_404(app_id)
-        if app.type != "agent":
-            raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
-
-        # 只读操作，允许访问共享应用
-        self._validate_app_accessible(app, workspace_id)
-
-        # 2. 获取 Agent 配置
-        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
-        agent_cfg = self.db.scalars(stmt).first()
-        if not agent_cfg:
-            raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
-
-        # 3. 准备所有模型配置
-        model_configs = []
-        for model_item in models:
-            model_config = self.db.get(ModelConfig, model_item.model_config_id)
-            if not model_config:
-                raise ResourceNotFoundException("模型配置", str(model_item.model_config_id))
-
-            # 合并参数：agent配置参数 + 请求覆盖参数
-            merged_parameters = {
-                **(agent_cfg.model_parameters or {}),
-                **(model_item.model_parameters or {})
-            }
-
-            model_configs.append({
-                "model_config": model_config,
-                "parameters": merged_parameters,
-                "label": model_item.label or model_config.name,
-                "model_config_id": model_item.model_config_id
-            })
-
-        # 4. 调用 DraftRunService 的流式对比方法
-        draft_service = DraftRunService(self.db)
-        async for event in draft_service.run_compare_stream(
-                agent_config=agent_cfg,
-                models=model_configs,
-                message=message,
-                workspace_id=workspace_id,
-                conversation_id=conversation_id,
-                user_id=user_id,
-                variables=variables,
-                parallel=parallel,
-                timeout=timeout
-        ):
-            yield event
-
-        logger.info(
-            "多模型对比流式完成",
-            extra={"app_id": str(app_id)}
-        )
-
-
 # ==================== 向后兼容的函数接口 ====================
 # 保留函数接口以兼容现有代码，但内部使用服务类
 
@@ -2253,53 +1910,6 @@ def get_apps_by_ids(
     """根据ID列表获取应用（向后兼容接口）"""
     service = AppService(db)
     return service.get_apps_by_ids(app_ids, workspace_id)
-
-
-# ==================== 向后兼容的函数接口 ====================
-
-async def draft_run(
-        db: Session,
-        *,
-        app_id: uuid.UUID,
-        message: str,
-        conversation_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        variables: Optional[Dict[str, Any]] = None,
-        workspace_id: Optional[uuid.UUID] = None
-) -> Dict[str, Any]:
-    """试运行 Agent（向后兼容接口）"""
-    service = AppService(db)
-    return await service.draft_run(
-        app_id=app_id,
-        message=message,
-        conversation_id=conversation_id,
-        user_id=user_id,
-        variables=variables,
-        workspace_id=workspace_id
-    )
-
-
-async def draft_run_stream(
-        db: Session,
-        *,
-        app_id: uuid.UUID,
-        message: str,
-        conversation_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        variables: Optional[Dict[str, Any]] = None,
-        workspace_id: Optional[uuid.UUID] = None
-):
-    """试运行 Agent 流式返回（向后兼容接口）"""
-    service = AppService(db)
-    async for event in service.draft_run_stream(
-            app_id=app_id,
-            message=message,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            variables=variables,
-            workspace_id=workspace_id
-    ):
-        yield event
 
 
 # ==================== 依赖注入函数 ====================

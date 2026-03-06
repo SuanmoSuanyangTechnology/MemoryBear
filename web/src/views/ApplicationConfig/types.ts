@@ -2,13 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 10:31:10
+ * @Last Modified time: 2026-02-28 16:40:30
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
 import type { ToolOption } from './components/ToolList/types'
 import type { ChatItem } from '@/components/Chat/types'
-import type { GraphRef } from '@/views/Workflow/types';
+import type { GraphRef, WorkflowConfig } from '@/views/Workflow/types';
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
 import type { SkillConfigForm } from './components/Skill/types'
 
@@ -155,6 +155,7 @@ export interface WorkflowRef {
   graphRef: GraphRef;
   /** Add variable */
   addVariable: () => void;
+  config: WorkflowConfig | null;
 }
 
 /**

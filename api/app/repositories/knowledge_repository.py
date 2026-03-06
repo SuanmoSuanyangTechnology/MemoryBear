@@ -211,3 +211,46 @@ def get_total_kb_count_by_workspace(db: Session, workspace_id: uuid.UUID) -> int
     except Exception as e:
         db_logger.error(f"Failed to query total knowledge base count: workspace_id={workspace_id} - {str(e)}")
         raise
+
+
+def get_user_kb_chunk_num_by_workspace(db: Session, workspace_id: uuid.UUID) -> int:
+    """
+    根据workspace_id查询knowledges表中permission_id='Memory'（用户知识库）的chunk_num总和
+    """
+    db_logger.debug(f"Query user KB chunk_num by workspace_id: workspace_id={workspace_id}")
+
+    try:
+        from sqlalchemy import func
+        result = db.query(func.sum(Knowledge.chunk_num)).filter(
+            Knowledge.workspace_id == workspace_id,
+            Knowledge.status == 1,
+            Knowledge.permission_id == "Memory"
+        ).scalar()
+
+        total = result if result is not None else 0
+        db_logger.info(f"User KB chunk_num query successful: workspace_id={workspace_id}, total={total}")
+        return total
+    except Exception as e:
+        db_logger.error(f"Failed to query user KB chunk_num: workspace_id={workspace_id} - {str(e)}")
+        raise
+
+
+def get_non_user_kb_count_by_workspace(db: Session, workspace_id: uuid.UUID) -> int:
+    """
+    根据workspace_id查询knowledges表中排除用户知识库（permission_id!='Memory'）的数量
+    """
+    db_logger.debug(f"Query non-user KB count by workspace_id: workspace_id={workspace_id}")
+
+    try:
+        count = db.query(Knowledge).filter(
+            Knowledge.workspace_id == workspace_id,
+            Knowledge.status == 1,
+            Knowledge.permission_id != "Memory"
+        ).count()
+
+        db_logger.info(f"Non-user KB count query successful: workspace_id={workspace_id}, count={count}")
+        return count
+    except Exception as e:
+        db_logger.error(f"Failed to query non-user KB count: workspace_id={workspace_id} - {str(e)}")
+        raise
+

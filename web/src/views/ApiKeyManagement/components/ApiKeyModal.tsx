@@ -12,6 +12,7 @@ import dayjs from 'dayjs'
 import type { ApiKey, ApiKeyModalRef } from '../types';
 import RbModal from '@/components/RbModal'
 import { createApiKey, updateApiKey  } from '@/api/apiKey';
+import { stringRegExp } from '@/utils/validator';
 
 const FormItem = Form.Item;
 
@@ -78,7 +79,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
     form.validateFields()
       .then((values) => {
         const { memory, rag, expires_at, ...rest } = values
-        let scopes = []
+        const scopes = []
 
         if (memory) {
           scopes.push('memory')
@@ -130,7 +131,11 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
         <FormItem
           name="name"
           label={t('apiKey.name')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('common.enter')} />
         </FormItem>
@@ -138,6 +143,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
         <FormItem
           name="description"
           label={t('apiKey.description')}
+          rules={[{ max: 500 }]}
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} rows={3} />
         </FormItem>

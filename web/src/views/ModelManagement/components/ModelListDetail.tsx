@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:49:45 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-04 11:50:47
  */
 /**
  * Model List Detail Drawer
@@ -133,9 +133,10 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
             <RbCard
               key={item.id}
               title={item.name}
-              subTitle={<Space className="rb:mt-1!">
+              subTitle={<Space size={8} className="rb:mt-1!">
                 <Tag>{t(`modelNew.${item.type}`)}</Tag>
                 <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
+                {item.capability?.filter(item => item !=='video').map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
               </Space>}
               avatarUrl={getLogoUrl(item.logo)}
               avatar={

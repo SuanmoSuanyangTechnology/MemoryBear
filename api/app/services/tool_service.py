@@ -8,6 +8,8 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.tools.mcp import MCPToolManager, SimpleMCPClient
 from app.repositories.tool_repository import (
     ToolRepository, BuiltinToolRepository, CustomToolRepository,
@@ -79,6 +81,18 @@ class ToolService:
         config = self.tool_repo.find_by_id_and_tenant(self.db, uuid.UUID(tool_id), tenant_id)
         return self._config_to_info(config) if config else None
 
+    def _check_name_duplicate(self, name: str, tool_type: ToolType, tenant_id: uuid.UUID, exclude_id: Optional[uuid.UUID] = None):
+        """检查工具名称是否重复"""
+        query = self.db.query(ToolConfig).filter(
+            ToolConfig.name == name,
+            ToolConfig.tool_type == tool_type.value,
+            ToolConfig.tenant_id == tenant_id
+        )
+        if exclude_id:
+            query = query.filter(ToolConfig.id != exclude_id)
+        if query.first():
+            raise BusinessException(f"工具名称 '{name}' 已存在", BizCode.DUPLICATE_NAME)
+
     def create_tool(
             self,
             name: str,
@@ -92,6 +106,7 @@ class ToolService:
         """创建工具"""
         if tool_type == ToolType.BUILTIN:
             raise ValueError("内置工具不允许创建")
+        self._check_name_duplicate(name, tool_type, tenant_id)
 
         try:
             # 创建基础配置
@@ -141,6 +156,7 @@ class ToolService:
                 raise ValueError("内置工具不允许修改名称、描述和图标")
         try:
             if name:
+                self._check_name_duplicate(name, config_obj.tool_type, tenant_id, exclude_id=config_obj.id)
                 config_obj.name = name
             if description:
                 config_obj.description = description
@@ -209,7 +225,7 @@ class ToolService:
 
         try:
             # 获取工具实例
-            tool = self._get_tool_instance(tool_id, tenant_id)
+            tool = self.get_tool_instance(tool_id, tenant_id)
             if not tool:
                 return ToolResult.error_result(
                     error=f"工具不存在: {tool_id}",
@@ -335,7 +351,7 @@ class ToolService:
             return []
         
         # 获取工具实例
-        tool_instance = self._get_tool_instance(str(config.id), config.tenant_id)
+        tool_instance = self.get_tool_instance(str(config.id), config.tenant_id)
         if not tool_instance:
             return []
         
@@ -792,7 +808,7 @@ class ToolService:
         """获取工具配置"""
         return self.tool_repo.find_by_id_and_tenant(self.db, uuid.UUID(tool_id), tenant_id)
 
-    def _get_tool_instance(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[BaseTool]:
+    def get_tool_instance(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[BaseTool]:
         """获取工具实例"""
         if tool_id in self._tool_cache:
             return self._tool_cache[tool_id]
@@ -1416,7 +1432,7 @@ class ToolService:
         """测试内置工具连接"""
         try:
             # 获取工具实例
-            tool_instance = self._get_tool_instance(str(config.id), config.tenant_id)
+            tool_instance = self.get_tool_instance(str(config.id), config.tenant_id)
             if not tool_instance:
                 return {"success": False, "message": "无法创建工具实例"}
             

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:35:43 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-09 18:35:43 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-02 17:24:51
  */
 import { type FC, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
@@ -13,7 +13,6 @@ import Editor from '../../Editor'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import AuthConfigModal from './AuthConfigModal'
 import type { AuthConfigModalRef, HttpRequestConfigForm } from './types'
-import VariableSelect from "../VariableSelect";
 import MessageEditor from '../MessageEditor'
 import EditableTable from './EditableTable'
 import { portTextAttrs } from '../../../constant'
@@ -159,7 +158,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             <EditableTable
               size="small"
               parentName={['body', 'data']}
-              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
+              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number' || vo.dataType.includes('file'))}
               typeOptions={[
                 { label: 'text', value: 'text' },
                 { label: 'file', value: 'file' }
@@ -201,10 +200,10 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         }
         {values?.body?.content_type === 'binary' &&
           <Form.Item name={['body', 'data']} noStyle>
-            <VariableSelect
+            <Editor
               placeholder={t('common.pleaseSelect')}
               options={options.filter(vo => vo.dataType.includes('file'))}
-              filterBooleanType={true}
+              type="input"
               size="small"
             />
           </Form.Item>

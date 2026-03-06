@@ -1,10 +1,10 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:27:52 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-28 16:48:52
  */
-import { type FC, useRef } from 'react';
+import { type FC, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Layout, Tabs, Dropdown, Button, Flex } from 'antd';
 import type { MenuProps } from 'antd';
@@ -21,6 +21,7 @@ import ApplicationModal from '@/views/ApplicationManagement/components/Applicati
 import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef } from '../types'
 import { deleteApplication } from '@/api/application'
 import CopyModal from './CopyModal'
+import { exportToYaml } from '@/utils/yamlExport';
 
 const { Header } = Layout;
 
@@ -81,20 +82,6 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     }))
   }
   /**
-   * Format dropdown menu items
-   */
-  const formatMenuItems = () => {
-    const items =  ['edit', 'copy', 'export', 'delete'].map(key => ({
-      key,
-      icon: <img src={menuIcons[key]} className="rb:w-4 rb:h-4 rb:mr-2" />,
-      label: t(`common.${key}`),
-    }))
-    return {
-      items,
-      onClick: handleClick
-    }
-  }
-  /**
    * Handle menu item click
    */
   const handleClick: MenuProps['onClick'] = ({ key }) => {
@@ -106,6 +93,8 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         copyModalRef.current?.handleOpen()
         break;
       case 'export':
+        console.log('export', workflowRef?.current?.config)
+        exportToYaml(workflowRef?.current?.config, application?.name ?`${application?.name}.yml`: undefined)
         break;
       case 'delete':
         handleDelete()
@@ -160,6 +149,19 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   const addvariable = () => {
     workflowRef?.current?.addVariable()
   }
+  /**
+   * Format dropdown menu items
+   */
+  const formatMenuItems = useMemo(() => {
+    const items =  (application?.type === 'workflow' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
+      key,
+      icon: <img src={menuIcons[key]} className="rb:w-4 rb:h-4 rb:mr-2" />,
+      label: t(`common.${key}`),
+    }))
+    return items
+  }, [t, handleClick, application])
+
+  console.log('formatMenuItems', formatMenuItems)
   return (
     <>
       <Header className="rb:w-full rb:h-16 rb:grid rb:grid-cols-3 rb:p-[16px_16px_16px_24px]! rb:border-b rb:border-[#EAECEE] rb:leading-8">
@@ -170,7 +172,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
           
           <div className="rb:max-w-[100%-80px] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{application?.name}</div>
           <Dropdown 
-            menu={formatMenuItems()} 
+            menu={{ items: formatMenuItems, onClick: handleClick }} 
             trigger={['click']}
             placement="bottomRight"
           >

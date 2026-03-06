@@ -156,7 +156,7 @@ class LoopRuntime:
 
     def merge_conv_vars(self, loopstate):
         self.variable_pool.variables["conv"].update(
-            self.child_variable_pool.variables.get("conv", {})
+            self.child_variable_pool.variables["conv"]
         )
         loop_vars = self.child_variable_pool.get_node_output(self.node_id, defalut={}, strict=False)
         loopstate["node_outputs"][self.node_id] = loop_vars

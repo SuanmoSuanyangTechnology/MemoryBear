@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-24 17:57:08 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-24 17:57:08 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-28 16:48:09
  */
 /*
  * Runtime Component
@@ -105,7 +105,7 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
     if (Array.isArray(list)) {
       return <Space size={8} direction="vertical" className="rb:w-full!">
         {list?.map(vo => {
-          const isLoop = vo.node_id.startsWith('loop');
+          const isLoop = vo.node_type === 'loop';
           // Render cycle variables for loop nodes without node_name
           if (typeof vo.cycle_idx === 'number' && isLoop && !vo.node_name) {
             return <div className="rb:bg-[#F0F3F8] rb:rounded-md">
@@ -165,7 +165,7 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
                     }
                     {/* Display navigation to nested cycles if subContent exists */}
                     {vo.subContent?.length > 0 && (
-                      <Flex justify="space-between" className="rb:bg-[#F0F3F8] rb:rounded-md rb:py-2! rb:px-3! rb:cursor-pointer" onClick={() => handleViewDetail(vo, vo.node_id.startsWith('loop'))}>
+                      <Flex justify="space-between" className="rb:bg-[#F0F3F8] rb:rounded-md rb:py-2! rb:px-3! rb:cursor-pointer" onClick={() => handleViewDetail(vo, vo.node_type === 'loop')}>
                         <span>{Math.max(...vo.subContent.map((itemVo: any) => itemVo.cycle_idx + 1))} {t(`workflow.${isLoop ? 'loopNum' : 'iterationNum'}`)}</span>
                         <RightOutlined />
                       </Flex>
@@ -217,14 +217,20 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
           children: (
             detail
               ? (
-              <div className="rb:bg-[#FBFDFF] rb:rounded-md rb:py-2 rb:px-3 rb:mt-2">
-                <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => setDetail(null)} className="rb:px-0! rb:text-[12px]!">
-                  {t('common.return')}
-                </Button>
-                {renderDetailChild(detail.subContent)}
-              </div>
-            )
-              : renderChild(item.subContent)
+                <div className="rb:bg-[#FBFDFF] rb:rounded-md">
+                  <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => setDetail(null)} className="rb:px-0! rb:text-[12px]!">
+                    {t('common.return')}
+                  </Button>
+                  {renderDetailChild(detail.subContent)}
+                </div>
+              )
+              : <>
+                {item.error
+                ? <div className={clsx("rb:bg-[#FBFDFF] rb:rounded-md rb:py-2 rb:px-3 ", getStatus('failed'))}>
+                  <Markdown content={item.error} />
+                  </div> 
+                : renderChild(item.subContent)
+              }</>
           )
         }]}
       />

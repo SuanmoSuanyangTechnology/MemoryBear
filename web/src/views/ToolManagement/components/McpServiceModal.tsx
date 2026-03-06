@@ -9,6 +9,7 @@ import RequestHeaderModal from './RequestHeaderModal';
 import Table from '@/components/Table';
 import { addTool, updateTool, testConnection } from '@/api/tools'
 import type { McpServiceModalRef } from '../types'
+import { stringRegExp } from '@/utils/validator';
 
 const FormItem = Form.Item;
 
@@ -69,7 +70,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         config: { ...config_data }
       })
 
-      if (config_data.connection_config.headers) {
+      if (config_data?.connection_config?.headers) {
         console.log(Object.keys(config_data.connection_config.headers).map(key => ({
           key,
           value: config_data.connection_config.headers[key]
@@ -80,6 +81,12 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         })))
       }
       setEditVo(data)
+    } else if (data) {
+      const { config_data, name, description, icon } = data
+      form.setFieldsValue({
+        name, description, icon,
+        ...(config_data ? { config: { ...config_data } } : {})
+      })
     } else {
       form.resetFields();
     }
@@ -168,14 +175,22 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
           name={['config', "server_url"]}
           label={t('tool.serviceEndpoint')}
           extra={t('tool.serviceEndpointExtra')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 500 },
+            { pattern: /^https?:\/\/\S+$/, message: t('tool.serverUrlInvalid') },
+          ]}
         >
           <Input placeholder={t('tool.serviceEndpointPlaceholder')} />
         </FormItem>
         <Form.Item
           name="name"
           label={t('tool.name')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('tool.namePlaceholder')} />
         </Form.Item>
@@ -201,6 +216,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         <FormItem
           name="description"
           label={t('tool.description')}
+          rules={[{ max: 500 }]}
         >
           <Input.TextArea rows={3} placeholder={t('common.inputPlaceholder', { title: t('tool.description') })}/>
         </FormItem>

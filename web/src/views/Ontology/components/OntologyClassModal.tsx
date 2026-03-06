@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import type { AddClassItem, OntologyClassModalRef } from '../types'
 import RbModal from '@/components/RbModal'
 import { createOntologyClass } from '@/api/ontology'
+import { stringRegExp } from '@/utils/validator';
 
 const FormItem = Form.Item;
 
@@ -105,7 +106,11 @@ const OntologyClassModal = forwardRef<OntologyClassModalRef, OntologyClassModalP
         <FormItem
           name="class_name"
           label={t('ontology.class_name')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('common.enter')} />
         </FormItem>
@@ -113,6 +118,7 @@ const OntologyClassModal = forwardRef<OntologyClassModalRef, OntologyClassModalP
         <FormItem
           name="class_description"
           label={t('ontology.class_description')}
+          rules={[{ max: 500 }]}
         >
           <Input.TextArea placeholder={t('ontology.classDescriptionPlaceholder')} />
         </FormItem>

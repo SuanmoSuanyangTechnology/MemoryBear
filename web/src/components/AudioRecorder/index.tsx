@@ -1,16 +1,21 @@
 import { type FC, useRef, useState } from 'react'
 import RecordRTC from 'recordrtc'
 
-import { fileUpload } from '@/api/fileStorage'
+import { fileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
+import { request } from '@/utils/request'
 
 interface AudioRecorderProps {
-  onRecordingComplete?: (file: { file_id: string; file_key: string; }, blob: Blob) => void
-  className?: string
+  onRecordingComplete?: (file: { file_id: string; file_key: string; url: string; type?: string; }, blob?: Blob) => void
+  className?: string;
+  action?: string;
+  requestConfig?: Record<string, any>;
 }
 
 const AudioRecorder: FC<AudioRecorderProps> = ({
   onRecordingComplete,
   className = '',
+  action = fileUploadUrlWithoutApiPrefix,
+  requestConfig = {}
 }) => {
   const [isRecording, setIsRecording] = useState(false)
   const recorderRef = useRef<RecordRTC | null>(null)
@@ -33,11 +38,17 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
     if (recorderRef.current) {
       recorderRef.current.stopRecording(() => {
         const blob = recorderRef.current!.getBlob()
+        const url = recorderRef.current!.toURL()
         const formData = new FormData()
         formData.append('file', blob, `recording_${Date.now()}.webm`)
-        fileUpload(formData)
+        request
+          .uploadFile(action, formData, requestConfig)
           .then(res => {
-            onRecordingComplete?.(res as { file_id: string; file_key: string; }, blob)
+            onRecordingComplete?.({
+              ...(res as { file_id: string; file_key: string }),
+              type: blob.type,
+              url
+            }, blob)
             recorderRef.current?.destroy()
             recorderRef.current = null
           })

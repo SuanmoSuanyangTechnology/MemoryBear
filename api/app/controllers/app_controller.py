@@ -1,7 +1,8 @@
 import uuid
 from typing import Optional, Annotated
 
-from fastapi import APIRouter, Depends, Path
+import yaml
+from fastapi import APIRouter, Depends, Path, Form, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -17,12 +18,13 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.schemas import app_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.schemas.workflow_schema import WorkflowConfig as WorkflowConfigSchema
-from app.schemas.workflow_schema import WorkflowConfigUpdate
+from app.schemas.workflow_schema import WorkflowConfigUpdate, WorkflowImportSave
 from app.services import app_service, workspace_service
 from app.services.agent_config_helper import enrich_agent_config
 from app.services.app_service import AppService
-from app.services.workflow_service import WorkflowService, get_workflow_service
 from app.services.app_statistics_service import AppStatisticsService
+from app.services.workflow_import_service import WorkflowImportService
+from app.services.workflow_service import WorkflowService, get_workflow_service
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -65,7 +67,7 @@ def list_apps(
 
     # 当 ids 存在且不为 None 时，根据 ids 获取应用
     if ids is not None:
-        app_ids = [id.strip() for id in ids.split(',') if id.strip()]
+        app_ids = [app_id.strip() for app_id in ids.split(',') if app_id.strip()]
         items_orm = app_service.get_apps_by_ids(db, app_ids, workspace_id)
         items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
         return success(data=items)
@@ -394,10 +396,10 @@ async def draft_run(
     from app.models import AgentConfig, ModelConfig
     from sqlalchemy import select
     from app.core.exceptions import BusinessException
-    from app.services.draft_run_service import DraftRunService
+    from app.services.draft_run_service import AgentRunService
 
     service = AppService(db)
-    draft_service = DraftRunService(db)
+    draft_service = AgentRunService(db)
 
     # 1. 验证应用
     app = service._get_app_or_404(app_id)
@@ -482,8 +484,8 @@ async def draft_run(
             }
         )
 
-        from app.services.draft_run_service import DraftRunService
-        draft_service = DraftRunService(db)
+        from app.services.draft_run_service import AgentRunService
+        draft_service = AgentRunService(db)
         result = await draft_service.run(
             agent_config=agent_cfg,
             model_config=model_config,
@@ -787,8 +789,8 @@ async def draft_run_compare(
     # 流式返回
     if payload.stream:
         async def event_generator():
-            from app.services.draft_run_service import DraftRunService
-            draft_service = DraftRunService(db)
+            from app.services.draft_run_service import AgentRunService
+            draft_service = AgentRunService(db)
             async for event in draft_service.run_compare_stream(
                     agent_config=agent_cfg,
                     models=model_configs,
@@ -818,8 +820,8 @@ async def draft_run_compare(
         )
 
     # 非流式返回
-    from app.services.draft_run_service import DraftRunService
-    draft_service = DraftRunService(db)
+    from app.services.draft_run_service import AgentRunService
+    draft_service = AgentRunService(db)
     result = await draft_service.run_compare(
         agent_config=agent_cfg,
         models=model_configs,
@@ -833,7 +835,8 @@ async def draft_run_compare(
         web_search=True,
         memory=True,
         parallel=payload.parallel,
-        timeout=payload.timeout or 60
+        timeout=payload.timeout or 60,
+        files=payload.files
     )
 
     logger.info(
@@ -879,6 +882,60 @@ async def update_workflow_config(
     return success(data=WorkflowConfigSchema.model_validate(cfg))
 
 
+@router.get("/{app_id}/workflow/export")
+@cur_workspace_access_guard()
+async def export_workflow_config(
+        app_id: uuid.UUID,
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)]
+):
+    """导出工作流配置为YAML文件"""
+    workflow_service = WorkflowService(db)
+
+    return success(data={
+        "content": workflow_service.export_workflow_dsl(app_id=app_id),
+    })
+
+
+@router.post("/workflow/import")
+@cur_workspace_access_guard()
+async def import_workflow_config(
+        file: UploadFile = File(...),
+        platform: str = Form(...),
+        app_id: str = Form(None),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+
+):
+    """从YAML内容导入工作流配置"""
+    if not file.filename.lower().endswith((".yaml", ".yml")):
+        return fail(msg="Only yaml file is allowed", code=BizCode.BAD_REQUEST)
+
+    raw_text = (await file.read()).decode("utf-8")
+    import_service = WorkflowImportService(db)
+    config = yaml.safe_load(raw_text)
+    result = await import_service.upload_config(platform, config)
+    return success(data=result)
+
+
+@router.post("/workflow/import/save")
+@cur_workspace_access_guard()
+async def save_workflow_import(
+        data: WorkflowImportSave,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    import_service = WorkflowImportService(db)
+    app = await import_service.save_workflow(
+        user_id=current_user.id,
+        workspace_id=current_user.current_workspace_id,
+        temp_id=data.temp_id,
+        name=data.name,
+        description=data.description,
+    )
+    return success(data=app_schema.App.model_validate(app))
+
+
 @router.get("/{app_id}/statistics", summary="应用统计数据")
 @cur_workspace_access_guard()
 def get_app_statistics(
@@ -889,12 +946,14 @@ def get_app_statistics(
         current_user=Depends(get_current_user),
 ):
     """获取应用统计数据
-    
+
     Args:
         app_id: 应用ID
         start_date: 开始时间戳（毫秒）
         end_date: 结束时间戳（毫秒）
-    
+        db: 数据库连接
+        current_user: 当前用户
+
     Returns:
         - daily_conversations: 每日会话数统计
         - total_conversations: 总会话数
@@ -931,6 +990,8 @@ def get_workspace_api_statistics(
     Args:
         start_date: 开始时间戳（毫秒）
         end_date: 结束时间戳（毫秒）
+        db: 数据库连接
+        current_user: 当前用户
     
     Returns:
         每日统计数据列表，每项包含：
