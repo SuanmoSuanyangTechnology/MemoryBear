@@ -1,6 +1,6 @@
 {#
   对话级抽取与相关性判定模板（用于剪枝加速）
-  输入：pruning_scene, dialog_text
+  输入：pruning_scene, is_builtin_scene, ontology_classes, dialog_text, language
   输出：严格 JSON（不要包含任何多余文本），字段：
     - is_related: bool，是否与所选场景相关
     - times: [string]，从对话中抽取的时间相关文本（日期、时间、时间段、有效期等）
@@ -16,7 +16,8 @@
   - 仅输出上述键；避免多余解释或字段。
 #}
 
-{% set scene_instructions = {
+{# ── 内置场景的固定说明 ── #}
+{% set builtin_scene_instructions = {
   'education': {
     'zh': '教育场景：教学、课程、考试、作业、老师/学生互动、学习资源、学校管理等。',
     'en': 'Education Scenario: Teaching, courses, exams, homework, teacher/student interaction, learning resources, school management, etc.'
@@ -31,16 +32,39 @@
   }
 } %}
 
-{% set scene_key = pruning_scene %}
-{% if scene_key not in scene_instructions %}
-{% set scene_key = 'education' %}
+{# ── 确定最终使用的场景说明 ── #}
+{% if is_builtin_scene %}
+  {# 内置专门场景：使用固定说明 #}
+  {% set scene_key = pruning_scene %}
+  {% if scene_key not in builtin_scene_instructions %}{% set scene_key = 'education' %}{% endif %}
+  {% set instruction = builtin_scene_instructions[scene_key][language] if language in ['zh', 'en'] else builtin_scene_instructions[scene_key]['zh'] %}
+  {% set custom_types_str = '' %}
+{% else %}
+  {# 自定义场景：使用场景名称 + 本体类型列表构建说明 #}
+  {% if ontology_classes and ontology_classes | length > 0 %}
+    {% if language == 'en' %}
+      {% set instruction = 'Custom scene "' ~ pruning_scene ~ '": The dialogue is related to this scene if it involves any of the following entity types: ' ~ ontology_classes | join(', ') ~ '.' %}
+    {% else %}
+      {% set instruction = '自定义场景「' ~ pruning_scene ~ '」：对话涉及以下任意实体类型时视为相关：' ~ ontology_classes | join('、') ~ '。' %}
+    {% endif %}
+    {% set custom_types_str = ontology_classes | join('、') %}
+  {% else %}
+    {# 无本体类型时退化为通用说明 #}
+    {% if language == 'en' %}
+      {% set instruction = 'Custom scene "' ~ pruning_scene ~ '": Determine whether the dialogue content is relevant to this scene based on overall context.' %}
+    {% else %}
+      {% set instruction = '自定义场景「' ~ pruning_scene ~ '」：根据对话整体内容判断是否与该场景相关。' %}
+    {% endif %}
+    {% set custom_types_str = '' %}
+  {% endif %}
 {% endif %}
-
-{% set instruction = scene_instructions[scene_key][language] if language in ['zh', 'en'] else scene_instructions[scene_key]['zh'] %}
 
 {% if language == "zh" %}
 请在下方对话全文基础上，按该场景进行一次性抽取并判定相关性：
 场景说明：{{ instruction }}
+{% if not is_builtin_scene and custom_types_str %}
+重要提示：只要对话中出现与上述实体类型（{{ custom_types_str }}）相关的内容，即判定为相关（is_related=true）。
+{% endif %}
 
 对话全文：
 """
@@ -60,6 +84,9 @@
 {% else %}
 Based on the full dialogue below, perform one-time extraction and relevance determination according to this scenario:
 Scenario Description: {{ instruction }}
+{% if not is_builtin_scene and custom_types_str %}
+Important: If the dialogue contains content related to any of the entity types above ({{ custom_types_str }}), mark it as relevant (is_related=true).
+{% endif %}
 
 Full Dialogue:
 """

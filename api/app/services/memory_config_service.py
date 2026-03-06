@@ -107,6 +107,37 @@ def _validate_config_id(config_id, db: Session = None):
     )
 
 
+# 专门场景的内置 key 列表（与 SceneConfigRegistry 保持一致）
+_BUILTIN_PRUNING_SCENES = {"education", "online_service", "outbound"}
+
+
+def _load_ontology_classes(db: Session, scene_id, pruning_scene: Optional[str]) -> Optional[list]:
+    """当 pruning_scene 不是内置场景时，从 ontology_class 表加载类型名称列表。
+
+    Args:
+        db: 数据库会话
+        scene_id: 本体场景 UUID
+        pruning_scene: 语义剪枝场景名称
+
+    Returns:
+        class_name 字符串列表，或 None（内置场景 / 无数据时）
+    """
+    if not scene_id:
+        return None
+    # 内置场景走 SceneConfigRegistry，不需要注入类型列表
+    if pruning_scene in _BUILTIN_PRUNING_SCENES:
+        return None
+    try:
+        from app.repositories.ontology_class_repository import OntologyClassRepository
+        repo = OntologyClassRepository(db)
+        classes = repo.get_classes_by_scene(scene_id)
+        names = [c.class_name for c in classes if c.class_name]
+        return names if names else None
+    except Exception as e:
+        logger.warning(f"Failed to load ontology classes for scene_id={scene_id}: {e}")
+        return None
+
+
 class MemoryConfigService:
     """
     Centralized service for memory configuration loading and validation.
@@ -359,6 +390,7 @@ class MemoryConfigService:
                 pruning_threshold=float(memory_config.pruning_threshold) if memory_config.pruning_threshold is not None else 0.5,
                 # Ontology scene association
                 scene_id=memory_config.scene_id,
+                ontology_classes=_load_ontology_classes(self.db, memory_config.scene_id, memory_config.pruning_scene),
             )
 
             elapsed_ms = (time.time() - start_time) * 1000

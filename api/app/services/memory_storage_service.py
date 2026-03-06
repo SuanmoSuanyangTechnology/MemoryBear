@@ -146,6 +146,10 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
         if not params.emotion_model_id:
             params.emotion_model_id = params.llm_id
 
+        # 根据关联的本体场景推导 pruning_scene（语义剪枝场景与本体工程场景保持一致）
+        if params.scene_id and not getattr(params, 'pruning_scene', None):
+            params.pruning_scene = self._resolve_pruning_scene_from_scene_id(params.scene_id)
+
         config = MemoryConfigRepository.create(self.db, params)
         self.db.commit()
         return {"affected": 1, "config_id": config.config_id}
@@ -160,6 +164,22 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             return get_workspace_models_configs(db_session, workspace_id)
         finally:
             db_session.close()
+
+    def _resolve_pruning_scene_from_scene_id(self, scene_id) -> Optional[str]:
+        """根据本体场景ID获取对应的 scene_name，作为语义剪枝场景值
+
+        Args:
+            scene_id: 本体场景UUID
+
+        Returns:
+            scene_name 字符串，查询失败时返回 None
+        """
+        try:
+            from app.models.ontology_scene import OntologyScene
+            scene = self.db.query(OntologyScene).filter_by(scene_id=scene_id).first()
+            return scene.scene_name if scene else None
+        except Exception:
+            return None
 
     # --- Delete ---
     def delete(self, key: ConfigParamsDelete) -> Dict[str, Any]: # 删除配置参数（按配置ID）
@@ -195,6 +215,19 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
     # --- Read All ---
     def get_all(self, workspace_id = None) -> List[Dict[str, Any]]: # 获取所有配置参数
         results = MemoryConfigRepository.get_all(self.db, workspace_id)
+
+        # 检查并修正 pruning_scene 与 scene_name 不一致的记录
+        needs_commit = False
+        for config, scene_name in results:
+            if scene_name and config.pruning_scene != scene_name:
+                logger.info(
+                    f"修正 pruning_scene: config_id={config.config_id} "
+                    f"'{config.pruning_scene}' -> '{scene_name}'"
+                )
+                config.pruning_scene = scene_name
+                needs_commit = True
+        if needs_commit:
+            self.db.commit()
 
         # 将 ORM 对象转换为字典列表
         data_list = []
