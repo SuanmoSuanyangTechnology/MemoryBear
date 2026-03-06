@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:10 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-05 16:18:56
+ * @Last Modified time: 2026-03-06 10:55:23
  */
 /**
  * Query parameters for ontology list pagination and filtering
@@ -94,6 +94,7 @@ export interface OntologyClassData {
   scene_description: string;
   /** Array of class items */
   items: OntologyClassItem[];
+  is_system_default: boolean;
 }
 
 /**
