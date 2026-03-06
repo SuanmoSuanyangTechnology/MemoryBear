@@ -263,8 +263,8 @@ def create_agent_invocation_tool(
             
             try:
                 # 9. 调用 Agent
-                from app.services.draft_run_service import DraftRunService
-                draft_service = DraftRunService(db)
+                from app.services.draft_run_service import AgentRunService
+                draft_service = AgentRunService(db)
                 
                 result = await draft_service.run(
                     agent_config=agent_config,

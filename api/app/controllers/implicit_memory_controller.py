@@ -122,6 +122,48 @@ def validate_confidence_threshold(threshold: float) -> None:
         raise ValueError("confidence_threshold must be between 0.0 and 1.0")
 
 
+@router.get("/check-data/{end_user_id}", response_model=ApiResponse)
+@cur_workspace_access_guard()
+async def check_user_data_exists(
+    end_user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> ApiResponse:
+    """
+    检查用户画像数据是否存在
+    
+    Args:
+        end_user_id: 目标用户ID
+        
+    Returns:
+        数据存在状态
+    """
+    api_logger.info(f"检查用户画像数据是否存在: {end_user_id}")
+    
+    try:
+        # Validate inputs
+        validate_user_id(end_user_id)
+        
+        # Create service with user-specific config
+        service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
+        
+        # Get cached profile
+        cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
+        
+        if cached_profile is None:
+            api_logger.info(f"用户 {end_user_id} 的画像数据不存在")
+            return success(
+                data={"exists": False},
+                msg="画像数据不存在，请点击右上角刷新进行初始化"
+            )
+        
+        api_logger.info(f"用户 {end_user_id} 的画像数据存在")
+        return success(data={"exists": True}, msg="画像数据已存在")
+        
+    except Exception as e:
+        return handle_implicit_memory_error(e, "检查画像数据", end_user_id)
+
+
 @router.get("/preferences/{end_user_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def get_preference_tags(
@@ -159,12 +201,8 @@ async def get_preference_tags(
         cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
         if cached_profile is None:
-            api_logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
-            return fail(
-                BizCode.NOT_FOUND,
-                "画像缓存不存在或已过期，请右上角刷新生成新画像",
-                ""
-            )
+            api_logger.info(f"用户 {end_user_id} 的画像数据不存在")
+            return fail(BizCode.NOT_FOUND, "", "")
         
         # Extract preferences from cache
         preferences = cached_profile.get("preferences", [])
@@ -230,12 +268,8 @@ async def get_dimension_portrait(
         cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
         if cached_profile is None:
-            api_logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
-            return fail(
-                BizCode.NOT_FOUND,
-                "画像缓存不存在或已过期，请右上角刷新生成新画像",
-                ""
-            )
+            api_logger.info(f"用户 {end_user_id} 的画像数据不存在")
+            return fail(BizCode.NOT_FOUND, "", "")
         
         # Extract portrait from cache
         portrait = cached_profile.get("portrait", {})
@@ -278,12 +312,8 @@ async def get_interest_area_distribution(
         cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
         if cached_profile is None:
-            api_logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
-            return fail(
-                BizCode.NOT_FOUND,
-                "画像缓存不存在或已过期，请右上角刷新生成新画像",
-                ""
-            )
+            api_logger.info(f"用户 {end_user_id} 的画像数据不存在")
+            return fail(BizCode.NOT_FOUND, "", "")
         
         # Extract interest areas from cache
         interest_areas = cached_profile.get("interest_areas", {})
@@ -330,12 +360,8 @@ async def get_behavior_habits(
         cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
         if cached_profile is None:
-            api_logger.info(f"用户 {end_user_id} 的画像缓存不存在或已过期")
-            return fail(
-                BizCode.NOT_FOUND,
-                "画像缓存不存在或已过期，请右上角刷新生成新画像",
-                ""
-            )
+            api_logger.info(f"用户 {end_user_id} 的画像数据不存在")
+            return fail(BizCode.NOT_FOUND, "", "")
         
         # Extract habits from cache
         habits = cached_profile.get("habits", [])

@@ -21,8 +21,14 @@ class FileType(StrEnum):
     def trans(cls, value: str) -> 'FileType':
         if value.startswith("image"):
             return cls.IMAGE
-        # TODO: other file type support
-        raise RuntimeError("Unsupport file type")
+        elif value.startswith("document"):
+            return cls.DOCUMENT
+        elif value.startswith("audio"):
+            return cls.AUDIO
+        elif value.startswith("video"):
+            return cls.VIDEO
+        else:
+            raise RuntimeError("Unsupport file type")
 
 
 class TransferMethod(str, Enum):
@@ -37,6 +43,12 @@ class FileInput(BaseModel):
     transfer_method: TransferMethod = Field(..., description="传输方式: local_file/remote_url")
     upload_file_id: Optional[uuid.UUID] = Field(None, description="已上传文件ID（local_file时必填）")
     url: Optional[str] = Field(None, description="远程URL（remote_url时必填）")
+    file_type: Optional[str] = Field(None, description="具体文件格式（如image/jpg、audio/wav、document/docx、video/mp4）")
+
+    def __init__(self, **data):
+        if "type" in data:
+            data['file_type'] = data['type']
+        super().__init__(**data)
 
     @field_validator("type", mode="before")
     @classmethod

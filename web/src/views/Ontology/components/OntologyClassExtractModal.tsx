@@ -185,6 +185,7 @@ const OntologyClassExtractModal = forwardRef<OntologyClassExtractModalRef, Ontol
           rules={[
             { required: true, message: t('common.pleaseEnter') },
             { max: 2000 },
+            { pattern: /^(?!\s*$).+$/, message: t('common.notAllSpaces') },
           ]}
         >
           <Input.TextArea placeholder={t('ontology.scenarioPlaceholder')} />

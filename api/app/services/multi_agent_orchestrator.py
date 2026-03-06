@@ -123,11 +123,14 @@ class MultiAgentOrchestrator:
             user_id: 用户 ID
             variables: 变量参数
             use_llm_routing: 是否使用 LLM 路由
+            web_search: 是否启用网络搜索
+            memory: 是否启用记忆功能
+            storage_type: 存储类型
+            user_rag_memory_id: 用户 RAG 记忆 ID
 
         Yields:
             SSE 格式的事件流
         """
-        import json
 
         start_time = time.time()
 
@@ -200,7 +203,8 @@ class MultiAgentOrchestrator:
         except Exception as e:
             logger.error(
                 "多 Agent 任务执行失败（流式）",
-                extra={"error": str(e), "mode": self._normalized_mode}
+                extra={"error": str(e), "mode": self._normalized_mode},
+                exc_info=True
             )
             # 发送错误事件
             yield self._format_sse_event("error", {
@@ -1267,7 +1271,7 @@ class MultiAgentOrchestrator:
         Yields:
             SSE 格式的事件流
         """
-        from app.services.draft_run_service import DraftRunService
+        from app.services.draft_run_service import AgentRunService
 
         # 获取模型配置
         model_config = self.db.get(ModelConfig, agent_config.default_model_config_id)
@@ -1278,7 +1282,7 @@ class MultiAgentOrchestrator:
             )
 
         # 流式执行 Agent
-        draft_service = DraftRunService(self.db)
+        draft_service = AgentRunService(self.db)
         async for event in draft_service.run_stream(
             agent_config=agent_config,
             model_config=model_config,
@@ -1320,7 +1324,7 @@ class MultiAgentOrchestrator:
         Returns:
             执行结果
         """
-        from app.services.draft_run_service import DraftRunService
+        from app.services.draft_run_service import AgentRunService
 
         # 获取模型配置
         model_config = self.db.get(ModelConfig, agent_config.default_model_config_id)
@@ -1331,7 +1335,7 @@ class MultiAgentOrchestrator:
             )
 
         # 执行 Agent
-        draft_service = DraftRunService(self.db)
+        draft_service = AgentRunService(self.db)
         result = await draft_service.run(
             agent_config=agent_config,
             model_config=model_config,
@@ -1633,6 +1637,7 @@ class MultiAgentOrchestrator:
                 self.memory = config_data.get("memory")
                 self.variables = config_data.get("variables", [])
                 self.tools = config_data.get("tools", {})
+                self.skills = config_data.get("skills", {})
                 self.default_model_config_id = release.default_model_config_id
 
         return AgentConfigProxy(release, app, config_data)
@@ -2593,6 +2598,7 @@ class MultiAgentOrchestrator:
                 provider=api_key_config.provider,
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
+                is_omni=api_key_config.is_omni,
                 temperature=0.7,  # 整合任务使用中等温度
                 max_tokens=2000
             )
@@ -2758,6 +2764,7 @@ class MultiAgentOrchestrator:
                 provider=api_key_config.provider,
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
+                is_omni=api_key_config.is_omni,
                 temperature=0.7,
                 max_tokens=2000,
                 extra_params={"streaming": True}  # 启用流式输出

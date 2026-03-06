@@ -396,10 +396,10 @@ async def draft_run(
     from app.models import AgentConfig, ModelConfig
     from sqlalchemy import select
     from app.core.exceptions import BusinessException
-    from app.services.draft_run_service import DraftRunService
+    from app.services.draft_run_service import AgentRunService
 
     service = AppService(db)
-    draft_service = DraftRunService(db)
+    draft_service = AgentRunService(db)
 
     # 1. 验证应用
     app = service._get_app_or_404(app_id)
@@ -484,8 +484,8 @@ async def draft_run(
             }
         )
 
-        from app.services.draft_run_service import DraftRunService
-        draft_service = DraftRunService(db)
+        from app.services.draft_run_service import AgentRunService
+        draft_service = AgentRunService(db)
         result = await draft_service.run(
             agent_config=agent_cfg,
             model_config=model_config,
@@ -789,8 +789,8 @@ async def draft_run_compare(
     # 流式返回
     if payload.stream:
         async def event_generator():
-            from app.services.draft_run_service import DraftRunService
-            draft_service = DraftRunService(db)
+            from app.services.draft_run_service import AgentRunService
+            draft_service = AgentRunService(db)
             async for event in draft_service.run_compare_stream(
                     agent_config=agent_cfg,
                     models=model_configs,
@@ -820,8 +820,8 @@ async def draft_run_compare(
         )
 
     # 非流式返回
-    from app.services.draft_run_service import DraftRunService
-    draft_service = DraftRunService(db)
+    from app.services.draft_run_service import AgentRunService
+    draft_service = AgentRunService(db)
     result = await draft_service.run_compare(
         agent_config=agent_cfg,
         models=model_configs,
@@ -835,7 +835,8 @@ async def draft_run_compare(
         web_search=True,
         memory=True,
         parallel=payload.parallel,
-        timeout=payload.timeout or 60
+        timeout=payload.timeout or 60,
+        files=payload.files
     )
 
     logger.info(

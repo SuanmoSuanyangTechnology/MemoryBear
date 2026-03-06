@@ -3,10 +3,8 @@ Cache 缓存模块
 
 提供各种缓存功能的统一入口
 """
-from .memory import EmotionMemoryCache, ImplicitMemoryCache, InterestMemoryCache
+from .memory import InterestMemoryCache
 
 __all__ = [
-    "EmotionMemoryCache",
-    "ImplicitMemoryCache",
     "InterestMemoryCache",
 ]

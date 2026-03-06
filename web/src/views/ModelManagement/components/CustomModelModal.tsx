@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 17:24:05
+ * @Last Modified time: 2026-03-04 11:31:43
  */
 /**
  * Custom Model Modal
@@ -10,8 +10,8 @@
  * Supports logo upload, type/provider selection, and tagging
  */
 
-import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App } from 'antd';
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { Form, Input, App, Checkbox } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps } from '../types';
@@ -35,6 +35,14 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const [isEdit, setIsEdit] = useState(false);
   const [form] = Form.useForm<CustomModelForm>();
   const [loading, setLoading] = useState(false)
+  const modelType = Form.useWatch(['type'], form);
+  const isOmni = Form.useWatch(['is_omni'], form);
+
+  useEffect(() => {
+    if (isOmni) {
+      form.setFieldsValue({ is_vision: true })
+    }
+  }, [isOmni])
 
   /** Close modal and reset state */
   const handleClose = () => {
@@ -49,9 +57,12 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     if (model) {
       setIsEdit(true);
       setModel(model);
+      const { capability, is_omni, ...rest} = model
       form.setFieldsValue({
-        ...model,
-        logo: model.logo && model.logo.startsWith('http') ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined
+        ...rest,
+        logo: model.logo && model.logo.startsWith('http') ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined,
+        is_omni,
+        is_vision: capability?.includes('vision') || false,
       });
     } else {
       setIsEdit(false);
@@ -79,9 +90,14 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     form
       .validateFields()
       .then((values) => {
-        const { logo, ...rest } = values;
+        const { logo, type, is_vision, is_omni, ...rest } = values;
         const formData: CustomModelForm = {
-          ...rest
+          ...rest,
+          type,
+        }
+        if (!['embedding', 'rerank'].includes(type as string)) {
+          formData.capability = is_omni ? ["vision", "audio"] : is_vision ? ['vision'] : []
+          formData.is_omni = is_omni
         }
 
         if (typeof logo === 'object' && logo?.response?.data.file_id) {
@@ -108,7 +124,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));
-
+  console.log('modelType', modelType)
   return (
     <RbModal
       title={isEdit ? `${model.name} - ${t('modelNew.modelConfiguration')}` : t('modelNew.createCustomModel')}
@@ -180,7 +196,6 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </Form.Item>
 
-
         <Form.Item
           name={["api_keys", 0, "api_key"]}
           label={t('modelNew.api_key')}
@@ -196,6 +211,17 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         >
           <Input placeholder="https://api.example.com/v1" />
         </Form.Item>
+
+        {!['embedding', 'rerank'].includes(modelType as string) &&
+          <>
+            <Form.Item name="is_omni" valuePropName="checked" className="rb:mb-2!">
+              <Checkbox>{t('modelNew.is_omni')}</Checkbox>
+            </Form.Item>
+            <Form.Item name="is_vision" valuePropName="checked" className="rb:mb-0!">
+              <Checkbox disabled={isOmni}>{t('modelNew.is_vision')}</Checkbox>
+            </Form.Item>
+          </>
+        }
       </Form>
     </RbModal>
   );

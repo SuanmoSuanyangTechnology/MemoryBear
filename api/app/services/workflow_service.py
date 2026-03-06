@@ -16,6 +16,7 @@ from app.core.workflow.adapters.registry import PlatformAdapterRegistry
 from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
+from app.core.workflow.variable.base_variable import FileObject
 from app.db import get_db
 from app.models import App
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
@@ -453,11 +454,14 @@ class WorkflowService:
         files_struct = []
         for file in files:
             files_struct.append(
-                {
-                    "type": file.type,
-                    "url": await self.multimodal_service.get_file_url(file),
-                    "__file": True
-                }
+                FileObject(
+                    type=file.type,
+                    url=await self.multimodal_service.get_file_url(file),
+                    transfer_method=file.transfer_method,
+                    file_id=str(file.upload_file_id),
+                    origin_file_type=file.file_type,
+                    is_file=True
+                ).model_dump()
             )
         return files_struct
 

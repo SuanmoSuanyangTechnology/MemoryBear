@@ -90,7 +90,8 @@ class ModelConfigService:
         api_key: str,
         api_base: Optional[str] = None,
         model_type: str = "llm",
-        test_message: str = "Hello"
+        test_message: str = "Hello",
+        is_omni: bool = False
     ) -> Dict[str, Any]:
         """验证模型配置是否有效
 
@@ -102,6 +103,7 @@ class ModelConfigService:
             api_base: API基础URL
             model_type: 模型类型 (llm/chat/embedding/rerank)
             test_message: 测试消息
+            is_omni: 是否为Omni模型
 
         Returns:
             Dict: 验证结果
@@ -119,6 +121,7 @@ class ModelConfigService:
                 provider=provider,
                 api_key=api_key,
                 base_url=api_base,
+                is_omni=is_omni,
                 temperature=0.7,
                 max_tokens=100
             )
@@ -257,8 +260,9 @@ class ModelConfigService:
                     provider=model_data.provider,
                     api_key=api_key_data.api_key,
                     api_base=api_key_data.api_base,
-                    model_type=model_data.type,  # 传递模型类型
-                    test_message="Hello"
+                    model_type=model_data.type,
+                    test_message="Hello",
+                    is_omni=model_data.is_omni
                 )
                 if not validation_result["valid"]:
                     raise BusinessException(
@@ -279,6 +283,9 @@ class ModelConfigService:
             for api_key_data in api_key_datas:
                 api_key_data.model_name = model_data.name
                 api_key_data.provider = model_data.provider
+                # 同步capability和is_omni
+                api_key_data.capability = model_data.capability
+                api_key_data.is_omni = model_data.is_omni
                 api_key_create_schema = ModelApiKeyCreate(
                     model_config_ids=[model.id],
                     **api_key_data.model_dump()
@@ -473,6 +480,9 @@ class ModelApiKeyService:
             model_config = ModelConfigRepository.get_by_id(db, model_config_id)
             if not model_config:
                 continue
+
+            data.is_omni = model_config.is_omni
+            data.capability = model_config.capability
             
             # 从ModelBase获取model_name
             model_name = model_config.model_base.name if model_config.model_base else model_config.name
@@ -497,6 +507,8 @@ class ModelApiKeyService:
                 existing_key.config = data.config
                 existing_key.priority = data.priority
                 existing_key.model_name = model_name
+                existing_key.capability = data.capability
+                existing_key.is_omni = data.is_omni
                 
                 # 检查是否已关联该模型配置
                 if model_config not in existing_key.model_configs:
@@ -513,7 +525,8 @@ class ModelApiKeyService:
                 api_key=data.api_key,
                 api_base=data.api_base,
                 model_type=model_config.type,
-                test_message="Hello"
+                test_message="Hello",
+                is_omni=data.is_omni
             )
             if not validation_result["valid"]:
                 # 记录验证失败的模型，但不抛出异常
@@ -528,6 +541,8 @@ class ModelApiKeyService:
                 provider=data.provider,
                 api_key=data.api_key,
                 api_base=data.api_base,
+                capability=data.capability,
+                is_omni=data.is_omni,
                 config=data.config,
                 is_active=data.is_active,
                 priority=data.priority
@@ -550,6 +565,10 @@ class ModelApiKeyService:
                 model_config = ModelConfigRepository.get_by_id(db, model_config_id)
                 if not model_config:
                     raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+                if api_key_data.is_omni is None:
+                    api_key_data.is_omni = model_config.is_omni
+                if api_key_data.capability is None:
+                    api_key_data.capability = model_config.capability
                 
                 # 检查API Key是否已存在(包括软删除)，需要考虑tenant_id
                 existing_key = db.query(ModelApiKey).join(
@@ -572,6 +591,8 @@ class ModelApiKeyService:
                     existing_key.config = api_key_data.config
                     existing_key.priority = api_key_data.priority
                     existing_key.model_name = api_key_data.model_name
+                    existing_key.capability = api_key_data.capability
+                    existing_key.is_omni = api_key_data.is_omni
                     
                     # 检查是否已关联该模型配置
                     if model_config not in existing_key.model_configs:
@@ -589,7 +610,8 @@ class ModelApiKeyService:
                     api_key=api_key_data.api_key,
                     api_base=api_key_data.api_base,
                     model_type=model_config.type,
-                    test_message="Hello"
+                    test_message="Hello",
+                    is_omni=api_key_data.is_omni
                 )
                 if not validation_result["valid"]:
                     raise BusinessException(
@@ -620,7 +642,8 @@ class ModelApiKeyService:
                 api_key=api_key_data.api_key or existing_api_key.api_key,
                 api_base=api_key_data.api_base or existing_api_key.api_base,
                 model_type=model_config.type,
-                test_message="Hello"
+                test_message="Hello",
+                is_omni=model_config.is_omni
             )
             if not validation_result["valid"]:
                 raise BusinessException(
@@ -755,6 +778,8 @@ class ModelBaseService:
             "type": model_base.type,
             "logo": model_base.logo,
             "description": model_base.description,
+            "capability": model_base.capability,
+            "is_omni": model_base.is_omni,
             "is_composite": False
         }
         model_config = ModelConfigRepository.create(db, model_config_data)

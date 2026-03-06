@@ -453,9 +453,11 @@ export const en = {
       prevStep: 'Previous Step',
       exportSuccess: 'Export successful',
       recommend: 'Recommend',
+      default: 'Default',
       logoTip: `Supported image formats: JPG, PNG \n Suggested size: square ratio \n Maximum size: ≤ 2MB`,
       imageSquareRequired: 'Please upload a square image',
       nameInvalid: 'Name cannot start or end with a space',
+      notAllSpaces: 'Cannot be all spaces',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -603,7 +605,13 @@ export const en = {
       ollama: "Ollama",
       xinference: "Xinference",
       gpustack: "Gpustack",
-      bedrock: "Bedrock"
+      bedrock: "Bedrock",
+
+      is_vision: 'Vision Support',
+      is_omni: 'Omni Support',
+      vision: 'Vision',
+      audio: 'Audio',
+      video: 'Video',
     },
     knowledgeBase: {
       home: 'Home',
@@ -1684,6 +1692,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       uploadFile: 'Upload File',
       fileType: 'File Type',
       image: 'Image',
+      video: 'Video',
+      audio: 'Audio',
       fileUrl: 'File URL',
       addRemoteFile: 'Add Remote File',
       variableConfig: 'Variable Configuration',
@@ -1962,6 +1972,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       marketConnected: '● Connected',
       marketDisconnected: '○ Disconnected',
       marketConnecting: 'Connecting to {{name}}...',
+      serverUrlInvalid: 'Must start with http:// or https://, and cannot have leading or trailing spaces',
+      requestHeaderKeyInvalid: 'Only English letters, numbers, hyphens (-), and underscores (_) are allowed, and cannot start or end with a hyphen or underscore',
     },
     workflow: {
       coreNode: 'Core Nodes',
@@ -2311,6 +2323,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       suggestions: 'Personalized Suggestions',
       suggestionLoading: 'Your personalized suggestions are being generated',
       item: 'item',
+      noData: 'Emotion suggestion data does not exist, please click the refresh button to initialize',
     },
     reflectionEngine: {
       reflectionEngineConfig: 'Reflection Engine Configuration',
@@ -2557,7 +2570,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       context_details: 'Preference Details',
       supporting_evidence: 'Preference Source',
       specific_examples: 'Source',
-      wordEmpty: 'Click on a node in the left chart to view preference details'
+      wordEmpty: 'Click on a node in the left chart to view preference details',
+      noData: 'Portrait data does not exist, please click the refresh button to initialize',
     },
     shortTermDetail: {
       title: 'Short-term memory is the "workbench" of the AI system, connecting instant conversations with long-term knowledge bases. Through real-time capture, deep retrieval, intelligent extraction and filtering transformation, temporary unstructured information is converted into valuable long-term knowledge.',
@@ -2615,6 +2629,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       updated_at: 'Updated At',
       entityTypes: 'Entity Types',
 
+      classSearchPlaceholder: 'Search types',
       addClass: 'Add Type',
       class_name: 'Type Name',
       class_description: 'Type Definition',

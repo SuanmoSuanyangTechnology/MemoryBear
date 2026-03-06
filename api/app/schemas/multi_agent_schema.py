@@ -64,14 +64,14 @@ class ExecutionConfig(BaseModel):
 class MultiAgentConfigCreate(BaseModel):
     """创建多 Agent 配置"""
     master_agent_id: uuid.UUID = Field(..., description="主 Agent ID")
-    master_agent_name: Optional[str] = Field(None, max_length=100, description="主 Agent 名称")
+    master_agent_name: Optional[str] = Field(default=None, max_length=100, description="主 Agent 名称")
     orchestration_mode: str = Field(
         default="collaboration",
         pattern="^(collaboration|supervisor)$",
         description="协作模式：collaboration（协作）| supervisor（监督）"
     )
     sub_agents: List[SubAgentConfig] = Field(..., description="子 Agent 列表")
-    routing_rules: Optional[List[RoutingRule]] = Field(None, description="路由规则")
+    routing_rules: Optional[List[RoutingRule]] = Field(default=None, description="路由规则")
     execution_config: ExecutionConfig = Field(default_factory=ExecutionConfig, description="执行配置")
     aggregation_strategy: str = Field(
         default="merge",
@@ -83,7 +83,7 @@ class MultiAgentConfigCreate(BaseModel):
 class MultiAgentConfigUpdate(BaseModel):
     """更新多 Agent 配置"""
     master_agent_id: Optional[uuid.UUID] = None
-    master_agent_name: Optional[str] = Field(None, max_length=100, description="主 Agent 名称")
+    master_agent_name: Optional[str] = Field(default=None, max_length=100, description="主 Agent 名称")
     default_model_config_id: Optional[uuid.UUID] = Field(None, description="默认模型配置ID")
     model_parameters: Optional[ModelParameters] = Field(
         None,

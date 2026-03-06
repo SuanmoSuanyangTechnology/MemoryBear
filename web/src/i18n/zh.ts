@@ -1033,9 +1033,11 @@ export const zh = {
       prevStep: '上一步',
       exportSuccess: '导出成功',
       recommend: '推荐',
+      default: '默认',
       logoTip: `支持图片格式（JPG、PNG）\n 尺寸：正方形比例 \n 文件大小限制：≤ 2MB`,
       imageSquareRequired: '请上传正方形比例图片',
       nameInvalid: '不能是空格开头或结尾',
+      notAllSpaces: '不能是纯空格',
     },
     model: {
       searchPlaceholder: '搜索模型…',
@@ -1184,6 +1186,12 @@ export const zh = {
       xinference: "Xinference",
       gpustack: "Gpustack",
       bedrock: "Bedrock",
+
+      is_vision: '支持视觉',
+      is_omni: '支持全模态',
+      vision: '视觉',
+      audio: '音频',
+      video: '视频',
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',
@@ -1681,6 +1689,8 @@ export const zh = {
       uploadFile: '上传文件',
       fileType: '文件类型',
       image: '图片',
+      video: '视频',
+      audio: '音频',
       fileUrl: '文件链接',
       addRemoteFile: '添加远程文件',
       variableConfig: '变量配置',
@@ -1959,6 +1969,8 @@ export const zh = {
       marketConnected: '● 已连接',
       marketDisconnected: '○ 未连接',
       marketConnecting: '正在连接 {{name}}...',
+      serverUrlInvalid: '必须以 http:// 或 https:// 开头，且不能有前后空格',
+      requestHeaderKeyInvalid: '只支持英文、数字、连字符(-)、下划线(_)，不能以连字符或下划线开头结尾',
     },
     workflow: {
       coreNode: '核心节点',
@@ -2312,6 +2324,7 @@ export const zh = {
       suggestions: '个性化建议',
       suggestionLoading: '您的个性化建议正在生成中',
       item: '个',
+      noData: '情绪建议数据不存在，请点击刷新按钮进行初始化',
     },
     reflectionEngine: {
       reflectionEngineConfig: '反思引擎配置',
@@ -2558,7 +2571,8 @@ export const zh = {
       context_details: '偏好详情',
       supporting_evidence: '偏好来源',
       specific_examples: '来源',
-      wordEmpty: '点击左侧图表中的节点查看偏好详情'
+      wordEmpty: '点击左侧图表中的节点查看偏好详情',
+      noData: '画像数据不存在，请点击刷新按钮进行初始化',
     },
     shortTermDetail: {
       title: '短期记忆是AI系统的"工作台"，连接即时对话与长期知识库。通过实时捕获、深度检索、智能提取和筛选转化，将临时的非结构化信息转化为有价值的长期知识。',
@@ -2616,6 +2630,7 @@ export const zh = {
       updated_at: '更新时间',
       entityTypes: '实体类型',
 
+      classSearchPlaceholder: '搜索类型',
       addClass: '添加类型',
       class_name: '类型名称',
       class_description: '类型定义',

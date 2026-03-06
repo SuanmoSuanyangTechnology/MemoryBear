@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:35:15 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 16:35:15 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-06 10:39:00
  */
 /**
  * HTTP Request Utility Module
@@ -183,7 +183,9 @@ service.interceptors.response.use(
         msg = msg || i18n.t('common.serverError');
         break;
       default:
-        if (!msg && Array.isArray(error.response?.data?.detail)) {
+        if (['SYSTEM_DEFAULT_SCENE_CANNOT_DELETE', 'SYSTEM_DEFAULT_CLASS_CANNOT_DELETE', 'SYSTEM_DEFAULT_SCENE_CANNOT_UPDATE'].includes(msg)) {
+          msg = i18n.t(`common.${msg}`)
+        } else if (!msg && Array.isArray(error.response?.data?.detail)) {
           msg = error.response?.data?.detail?.map((item: { msg: string }) => item.msg).join(';')
         } else {
           msg = msg || i18n.t('common.unknownError');

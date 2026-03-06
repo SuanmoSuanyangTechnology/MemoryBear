@@ -1,8 +1,13 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-01-07 20:37:34 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-03-04 16:27:14 
+ */
 import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Dropdown, Button } from 'antd'
-import { LoadingOutlined } from '@ant-design/icons';
 
 import PageHeader from '../components/PageHeader'
 import StatementDetail from './StatementDetail'
@@ -19,11 +24,16 @@ import {
 import refreshIcon from '@/assets/images/refresh_hover.svg'
 import GraphDetail from './GraphDetail'
 
+/**
+ * Detail page for user memory - renders different memory type views
+ * based on the `type` route param
+ */
 const Detail: FC = () => {
   const { t } = useTranslation()
   const { id, type } = useParams()
   const navigate = useNavigate()
   const [name, setName] = useState<string>('')
+  // Refs for child components that support imperative refresh
   const forgetDetailRef = useRef<{ handleRefresh: () => void }>(null)
   const statementDetailRef = useRef<{ handleRefresh: () => void }>(null)
   const implicitDetailRef = useRef<{ handleRefresh: () => void }>(null)
@@ -33,6 +43,7 @@ const Detail: FC = () => {
     getData()
   }, [id])
   
+  // Fetch end user profile to display the user's name in the header
   const getData = () => {
     if (!id) return
     getEndUserProfile(id).then((res) => {
@@ -40,15 +51,21 @@ const Detail: FC = () => {
       setName(response.other_name || response.id) 
     })
   }
+
+  // Build dropdown menu items for switching between memory types
   const items = useMemo(() => {
     return ['PERCEPTUAL_MEMORY', 'WORKING_MEMORY', 'EMOTIONAL_MEMORY', 'SHORT_TERM_MEMORY', 'IMPLICIT_MEMORY', 'EPISODIC_MEMORY', 'EXPLICIT_MEMORY', 'FORGET_MEMORY']
       .map(key => ({ key, label: t(`userMemory.${key}`) }))
   }, [t])
+
+  // Navigate to the selected memory type detail page
   const onClick = ({ key }: { key: string }) => {
     navigate(`/user-memory/detail/${id}/${key}`, { replace: true })
   }
 
   const [loading, setLoading] = useState(false)
+
+  // Trigger refresh on the active memory type's child component
   const handleRefresh = () => {
     setLoading(true)
     let response: any = null
@@ -64,6 +81,7 @@ const Detail: FC = () => {
         break
     }
 
+    // If the child returns a Promise, wait for it before clearing loading state
     if (response instanceof Promise) {
       response.finally(() => {
         setLoading(false)
@@ -99,9 +117,9 @@ const Detail: FC = () => {
           </Button>}
       />
       <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:py-3 rb:px-4">
-        {type === 'EMOTIONAL_MEMORY' && <StatementDetail ref={statementDetailRef} />}
+        {type === 'EMOTIONAL_MEMORY' && <StatementDetail ref={statementDetailRef} refresh={handleRefresh} />}
         {type === 'FORGET_MEMORY' && <ForgetDetail ref={forgetDetailRef} />}
-        {type === 'IMPLICIT_MEMORY' && <ImplicitDetail ref={implicitDetailRef} />}
+        {type === 'IMPLICIT_MEMORY' && <ImplicitDetail ref={implicitDetailRef} refresh={handleRefresh} />}
         {type === 'SHORT_TERM_MEMORY' && <ShortTermDetail />}
         {type === 'PERCEPTUAL_MEMORY' && <PerceptualDetail />}
         {type === 'EPISODIC_MEMORY' && <EpisodicDetail />}

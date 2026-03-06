@@ -190,8 +190,10 @@ class Settings:
     LOG_FILE_MAX_SIZE_MB: int = int(os.getenv("LOG_FILE_MAX_SIZE_MB", "10"))  # 10MB
 
     # Celery configuration (internal)
-    CELERY_BROKER: int = int(os.getenv("CELERY_BROKER", "1"))
-    CELERY_BACKEND: int = int(os.getenv("CELERY_BACKEND", "2"))
+    # NOTE: 变量名不以 CELERY_ 开头，避免被 Celery CLI 的前缀匹配机制劫持
+    # 详见 docs/celery-env-bug-report.md
+    REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "1"))
+    REDIS_DB_CELERY_BACKEND: int = int(os.getenv("REDIS_DB_CELERY_BACKEND", "2"))
 
     # SMTP Email Configuration
     SMTP_SERVER: str = os.getenv("SMTP_SERVER", "smtp.gmail.com")
@@ -219,8 +221,12 @@ class Settings:
     FORGETTING_CYCLE_INTERVAL_HOURS: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="forgetting cycle interval in hours, must be >= 1")]
     ).validate_python(int(os.getenv("FORGETTING_CYCLE_INTERVAL_HOURS", "24")))
-
+    
+    IMPLICIT_EMOTIONS_UPDATE_HOUR: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_HOUR", "2"))
+    # implicit_emotions_update: 每天几分执行（分钟，0-59）
+    IMPLICIT_EMOTIONS_UPDATE_MINUTE: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_MINUTE", "0"))  
     # Memory Module Configuration (internal)
+    
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")
     MEMORY_CONFIG_DIR: str = os.getenv("MEMORY_CONFIG_DIR", "app/core/memory")
 

@@ -1,26 +1,54 @@
 import os
 import platform
 from datetime import timedelta
-from celery.schedules import crontab
 from urllib.parse import quote
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # macOS fork() safety - must be set before any Celery initialization
 if platform.system() == 'Darwin':
     os.environ.setdefault('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', 'YES')
 
 # 创建 Celery 应用实例
-# broker: 任务队列（使用 Redis DB 0）
-# backend: 结果存储（使用 Redis DB 10）
+# broker: 任务队列（使用 Redis DB，由 CELERY_BROKER_DB 指定）
+# backend: 结果存储（使用 Redis DB，由 CELERY_BACKEND_DB 指定）
+# NOTE: 不要在 .env 中设置 BROKER_URL / RESULT_BACKEND / CELERY_BROKER / CELERY_BACKEND，
+#       这些名称会被 Celery CLI 的 Click 框架劫持，详见 docs/celery-env-bug-report.md
+
+# Build canonical broker/backend URLs and force them into os.environ so that
+# Celery's Settings.broker_url property (which checks CELERY_BROKER_URL first)
+# cannot be overridden by stray env vars.
+# See: https://github.com/celery/celery/issues/4284
+_broker_url = f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BROKER}"
+_backend_url = f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BACKEND}"
+os.environ["CELERY_BROKER_URL"] = _broker_url
+os.environ["CELERY_RESULT_BACKEND"] = _backend_url
+# Neutralize legacy Celery env vars that can be hijacked by Celery's CLI/Click
+# integration and accidentally override our canonical URLs.
+os.environ.pop("BROKER_URL", None)
+os.environ.pop("RESULT_BACKEND", None)
+os.environ.pop("CELERY_BROKER", None)
+os.environ.pop("CELERY_BACKEND", None)
+
 celery_app = Celery(
     "redbear_tasks",
-    broker=f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.CELERY_BROKER}",
-    backend=f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.CELERY_BACKEND}",
+    broker=_broker_url,
+    backend=_backend_url,
 )
 
+logger.info(
+    "Celery app initialized",
+    extra={
+        "broker": _broker_url.replace(quote(settings.REDIS_PASSWORD), "***"),
+        "backend": _backend_url.replace(quote(settings.REDIS_PASSWORD), "***"),
+    },
+)
 # Default queue for unrouted tasks
 celery_app.conf.task_default_queue = 'memory_tasks'
 
@@ -44,8 +72,8 @@ celery_app.conf.update(
     task_ignore_result=False,
     
     # 超时设置
-    task_time_limit=1800,  # 30分钟硬超时
-    task_soft_time_limit=1500,  # 25分钟软超时
+    task_time_limit=3600,  # 60分钟硬超时
+    task_soft_time_limit=3000,  # 50分钟软超时
     
     # Worker 设置 (per-worker settings are in docker-compose command line)
     worker_prefetch_multiplier=1,  # Don't hoard tasks, fairer distribution
@@ -84,6 +112,7 @@ celery_app.conf.update(
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'periodic_tasks'},
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'periodic_tasks'},
+        'app.tasks.update_implicit_emotions_storage': {'queue': 'periodic_tasks'},
     },
 )
 
@@ -95,6 +124,10 @@ memory_increment_schedule = crontab(hour=settings.MEMORY_INCREMENT_HOUR, minute=
 memory_cache_regeneration_schedule = timedelta(hours=settings.MEMORY_CACHE_REGENERATION_HOURS)
 workspace_reflection_schedule = timedelta(seconds=settings.WORKSPACE_REFLECTION_INTERVAL_SECONDS)
 forgetting_cycle_schedule = timedelta(hours=settings.FORGETTING_CYCLE_INTERVAL_HOURS)
+implicit_emotions_update_schedule = crontab(
+    hour=settings.IMPLICIT_EMOTIONS_UPDATE_HOUR,
+    minute=settings.IMPLICIT_EMOTIONS_UPDATE_MINUTE,
+)
 
 #构建定时任务配置
 beat_schedule_config = {
@@ -118,6 +151,11 @@ beat_schedule_config = {
     "write-all-workspaces-memory": {
         "task": "app.tasks.write_all_workspaces_memory_task",
         "schedule": memory_increment_schedule,
+        "args": (),
+    },
+    "update-implicit-emotions-storage": {
+        "task": "app.tasks.update_implicit_emotions_storage",
+        "schedule": implicit_emotions_update_schedule,
         "args": (),
     },
 }

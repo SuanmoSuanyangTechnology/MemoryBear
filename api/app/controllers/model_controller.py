@@ -469,7 +469,9 @@ async def create_model_api_key_by_provider(
             config=api_key_data.config,
             is_active=api_key_data.is_active,
             priority=api_key_data.priority,
-            model_config_ids=model_config_ids
+            model_config_ids=model_config_ids,
+            capability=api_key_data.capability,
+            is_omni=api_key_data.is_omni
         )
         created_keys, failed_models = await ModelApiKeyService.create_api_key_by_provider(db=db, data=create_data)
         

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from abc import ABC, abstractmethod
 from functools import cached_property
 from typing import Any, AsyncGenerator
@@ -10,8 +11,10 @@ from app.core.config import settings
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.enums import BRANCH_NODES
-from app.core.workflow.variable.base_variable import VariableType
-from app.services.multimodal_service import PROVIDER_STRATEGIES
+from app.core.workflow.variable.base_variable import VariableType, FileObject
+from app.db import get_db_read
+from app.schemas import FileInput
+from app.services.multimodal_service import MultimodalService
 
 logger = logging.getLogger(__name__)
 
@@ -548,9 +551,9 @@ class BaseNode(ABC):
 
         return render_template(
             template=template,
-            conv_vars=variable_pool.get_all_conversation_vars(),
-            node_outputs=variable_pool.get_all_node_outputs(),
-            system_vars=variable_pool.get_all_system_vars(),
+            conv_vars=variable_pool.get_all_conversation_vars(literal=True),
+            node_outputs=variable_pool.get_all_node_outputs(literal=True),
+            system_vars=variable_pool.get_all_system_vars(literal=True),
             strict=strict
         )
 
@@ -614,16 +617,32 @@ class BaseNode(ABC):
         return variable_pool.has(selector)
 
     @staticmethod
-    async def process_message(provider, content, enable_file=False) -> dict | str | None:
+    async def process_message(provider: str, content: str | FileObject, enable_file=False) -> dict | str | None:
         if isinstance(content, str):
             if enable_file:
                 return {"text": content}
             return content
-        elif isinstance(content, dict):
-            trans_tool = PROVIDER_STRATEGIES[provider]()
-            result = await trans_tool.format_image(content["url"])
-            return result
-        raise TypeError('Unexpect input value type')
+
+        elif isinstance(content, FileObject):
+            if content.content_cache.get(provider):
+                return content.content_cache[provider]
+            with get_db_read() as db:
+                multimodel_service = MultimodalService(db, provider)
+                message = await multimodel_service.process_files(
+                    [FileInput.model_construct(
+                        type=content.type,
+                        url=content.url,
+                        transfer_method=content.transfer_method,
+                        file_type=content.origin_file_type,
+                        upload_file_id=content.file_id
+                    )]
+                )
+
+                if message:
+                    content.content_cache[provider] = message[0]
+                    return message[0]
+                return None
+        raise TypeError(f'Unexpect input value type - {type(content)}')
 
     @staticmethod
     def process_model_output(content) -> str:
