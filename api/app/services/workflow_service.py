@@ -637,11 +637,12 @@ class WorkflowService:
                     if message["role"] == "user":
                         if isinstance(message["content"], str):
                             human_message += message["content"]
-                        elif isinstance(message["content"], dict):
-                            if message["content"].get("type") == FileType.IMAGE:
-                                human_message += f"![image]({message['content'].get('url', '')})"
-                            else:
-                                human_message += f"[{FileType}]({message['content'].get('url', '')})"
+                        elif isinstance(message["content"], list):
+                            for file in message["content"]:
+                                if file.get("type") == FileType.IMAGE:
+                                    human_message += f"![image]({file.get('url', '')})"
+                                else:
+                                    human_message += f"[{file.get('type')}]({file.get('url', '')})"
                     if message["role"] == "assistant":
                         assistant_message = message["content"]
                 self.conversation_service.add_message(
@@ -663,8 +664,7 @@ class WorkflowService:
                     output_data=result,
                     token_usage=token_usage.get("total_tokens", None)
                 )
-                logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
-                             f" error: {result.get('error')}")
+
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
             else:
@@ -673,6 +673,8 @@ class WorkflowService:
                     "failed",
                     error_message=result.get("error")
                 )
+                logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
+                             f" error: {result.get('error')}")
 
             # 返回增强的响应结构
             return {
@@ -804,7 +806,7 @@ class WorkflowService:
                                         if file.get("type") == FileType.IMAGE:
                                             human_message += f"![image]({file.get('url', '')})"
                                         else:
-                                            human_message += f"[{file.get("type")}]({file.get('url', '')})"
+                                            human_message += f"[{file.get('type')}]({file.get('url', '')})"
                             if message["role"] == "assistant":
                                 assistant_message = message["content"]
                         self.conversation_service.add_message(
