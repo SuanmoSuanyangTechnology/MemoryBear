@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-28 14:08:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-02 17:39:49
+ * @Last Modified time: 2026-03-06 12:05:46
  */
 /**
  * UploadWorkflowModal Component
@@ -186,14 +186,16 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
    * @param {string} type - Navigation type ('detail' or 'list')
    */
   const handleJump = (type: string) => {
-    switch(type) {
-      case 'detail':
-        // Open application detail page in new tab
-        window.open(`/#/application/config/${appId}`, '_blank');
-        break;
-    }
-    refresh();
     handleClose();
+    refresh();
+    setTimeout(() => {
+      switch (type) {
+        case 'detail':
+          // Open application detail page in new tab
+          window.open(`/#/application/config/${appId}`, '_blank');
+          break;
+      }
+    }, 100)
   };
 
   /**
@@ -350,7 +352,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
           title={t('application.importSuccess')}
           subTitle={t('application.importSuccessDesc')}
           extra={[
-          <Button key="back" onClick={() => handleJump('list')}>
+            <Button key="back" onClick={() => handleJump('list')}>
             {t('application.gotoList')}
           </Button>,
           <Button
