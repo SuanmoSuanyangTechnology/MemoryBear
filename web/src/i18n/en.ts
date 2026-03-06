@@ -441,6 +441,8 @@ export const en = {
       publicApiCannotRefreshToken: 'Public API cannot refresh token',
       refreshTokenNotExist: 'Refresh token does not exist',
       SYSTEM_DEFAULT_SCENE_CANNOT_DELETE: 'This is a system preset scene and cannot be deleted',
+      SYSTEM_DEFAULT_CLASS_CANNOT_DELETE: 'This scene is a system preset scene and cannot be deleted',
+      SYSTEM_DEFAULT_SCENE_CANNOT_UPDATE: 'This scene is a system preset scene and cannot be modified',
       reset: 'Reset',
       refresh: 'Refresh',
       return: 'Return',
