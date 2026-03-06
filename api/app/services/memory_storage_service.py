@@ -178,7 +178,8 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             from app.models.ontology_scene import OntologyScene
             scene = self.db.query(OntologyScene).filter_by(scene_id=scene_id).first()
             return scene.scene_name if scene else None
-        except Exception:
+        except Exception as e:
+            logger.warning(f"_resolve_pruning_scene_from_scene_id failed for scene_id={scene_id}: {e}", exc_info=True)
             return None
 
     # --- Delete ---

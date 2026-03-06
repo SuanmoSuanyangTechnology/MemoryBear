@@ -96,7 +96,7 @@ class SemanticPruner:
         self._is_builtin_scene = SceneConfigRegistry.is_scene_supported(self.config.pruning_scene)
         
         # 自定义场景的本体类型列表（用于注入提示词）
-        self._ontology_classes = config.ontology_classes or []
+        self._ontology_classes = getattr(self.config, "ontology_classes", None) or []
         
         if self._is_builtin_scene:
             self._log(f"[剪枝-初始化] 场景={self.config.pruning_scene} 使用内置专门配置")

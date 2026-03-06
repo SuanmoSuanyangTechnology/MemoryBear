@@ -107,8 +107,11 @@ def _validate_config_id(config_id, db: Session = None):
     )
 
 
-# 专门场景的内置 key 列表（与 SceneConfigRegistry 保持一致）
-_BUILTIN_PRUNING_SCENES = {"education", "online_service", "outbound"}
+# 专门场景的内置 key 集合，直接从 SceneConfigRegistry 派生，避免重复维护
+# 使用懒加载函数避免模块级循环导入
+def _get_builtin_pruning_scenes() -> set:
+    from app.core.memory.storage_services.extraction_engine.data_preprocessing.scene_config import SceneConfigRegistry
+    return set(SceneConfigRegistry.get_all_scenes())
 
 
 def _load_ontology_classes(db: Session, scene_id, pruning_scene: Optional[str]) -> Optional[list]:
@@ -125,7 +128,7 @@ def _load_ontology_classes(db: Session, scene_id, pruning_scene: Optional[str]) 
     if not scene_id:
         return None
     # 内置场景走 SceneConfigRegistry，不需要注入类型列表
-    if pruning_scene in _BUILTIN_PRUNING_SCENES:
+    if pruning_scene in _get_builtin_pruning_scenes():
         return None
     try:
         from app.repositories.ontology_class_repository import OntologyClassRepository

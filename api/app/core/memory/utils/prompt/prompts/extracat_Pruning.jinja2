@@ -43,11 +43,12 @@
   {# 自定义场景：使用场景名称 + 本体类型列表构建说明 #}
   {% if ontology_classes and ontology_classes | length > 0 %}
     {% if language == 'en' %}
-      {% set instruction = 'Custom scene "' ~ pruning_scene ~ '": The dialogue is related to this scene if it involves any of the following entity types: ' ~ ontology_classes | join(', ') ~ '.' %}
+      {% set custom_types_str = ontology_classes | join(', ') %}
+      {% set instruction = 'Custom scene "' ~ pruning_scene ~ '": The dialogue is related to this scene if it involves any of the following entity types: ' ~ custom_types_str ~ '.' %}
     {% else %}
-      {% set instruction = '自定义场景「' ~ pruning_scene ~ '」：对话涉及以下任意实体类型时视为相关：' ~ ontology_classes | join('、') ~ '。' %}
+      {% set custom_types_str = ontology_classes | join('、') %}
+      {% set instruction = '自定义场景「' ~ pruning_scene ~ '」：对话涉及以下任意实体类型时视为相关：' ~ custom_types_str ~ '。' %}
     {% endif %}
-    {% set custom_types_str = ontology_classes | join('、') %}
   {% else %}
     {# 无本体类型时退化为通用说明 #}
     {% if language == 'en' %}
