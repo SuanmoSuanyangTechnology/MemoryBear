@@ -1020,7 +1020,6 @@ export const zh = {
       logoutApiCannotRefreshToken: '退出登录接口不能刷新token',
       publicApiCannotRefreshToken: '公共接口不能刷新token',
       refreshTokenNotExist: '刷新token不存在',
-      SYSTEM_DEFAULT_SCENE_CANNOT_DELETE: '该场景为系统预设场景，不允许删除',
       reset: '重置',
       refresh: '刷新',
       return: '返回',
@@ -1034,6 +1033,7 @@ export const zh = {
       prevStep: '上一步',
       exportSuccess: '导出成功',
       recommend: '推荐',
+      default: '默认',
       logoTip: `支持图片格式（JPG、PNG）\n 尺寸：正方形比例 \n 文件大小限制：≤ 2MB`,
       imageSquareRequired: '请上传正方形比例图片',
       nameInvalid: '不能是空格开头或结尾',
@@ -2617,6 +2617,7 @@ export const zh = {
       updated_at: '更新时间',
       entityTypes: '实体类型',
 
+      classSearchPlaceholder: '搜索类型',
       addClass: '添加类型',
       class_name: '类型名称',
       class_description: '类型定义',

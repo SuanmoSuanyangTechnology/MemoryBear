@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 18:54:47
+ * @Last Modified time: 2026-03-05 15:09:22
  */
 /**
  * File Upload Component
@@ -206,7 +206,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
    */
   const handleChange: UploadProps['onChange'] = ({ fileList: newFileList }) => {
     newFileList.map(file => {
-      const type = (file.type && transform_file_type[file.type as keyof typeof transform_file_type]) || file.type
+      const type = (file.type && transform_file_type[file.type as keyof typeof transform_file_type]) || file.type || 'document'
       file.type = type
     })
     setFileList(newFileList);

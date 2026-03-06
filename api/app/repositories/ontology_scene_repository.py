@@ -374,7 +374,7 @@ class OntologySceneRepository:
             
             count = self.db.query(OntologyScene).filter(
                 OntologyScene.scene_id == scene_id,
-                OntologyScene.workspace_id == workspace_id
+                (OntologyScene.workspace_id == workspace_id) | (OntologyScene.is_system_default == True)
             ).count()
             
             is_owner = count > 0

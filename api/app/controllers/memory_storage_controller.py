@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -85,6 +85,7 @@ def create_config(
     payload: ConfigParamsCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    x_language_type: Optional[str] = Header(None, alias="X-Language-Type"),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
     # 检查用户是否已选择工作空间
@@ -99,7 +100,29 @@ def create_config(
         svc = DataConfigService(db)
         result = svc.create(payload)
         return success(data=result, msg="创建成功")
+    except ValueError as e:
+        err_str = str(e)
+        if err_str.startswith("DUPLICATE_CONFIG_NAME:"):
+            config_name = err_str.split(":", 1)[1]
+            api_logger.warning(f"重复的配置名称 '{config_name}' 在工作空间 {workspace_id}")
+            lang = get_language_from_header(x_language_type)
+            if lang == "en":
+                msg = fail(BizCode.BAD_REQUEST, "Config name already exists", f"A config named \"{config_name}\" already exists in the current workspace. Please use a different name.")
+            else:
+                msg = fail(BizCode.BAD_REQUEST, "配置名称已存在", f"当前工作空间下已存在名为「{config_name}」的记忆配置，请使用其他名称")
+            return JSONResponse(status_code=400, content=msg)
+        api_logger.error(f"Create config failed: {err_str}")
+        return fail(BizCode.INTERNAL_ERROR, "创建配置失败", err_str)
     except Exception as e:
+        from sqlalchemy.exc import IntegrityError
+        if isinstance(e, IntegrityError) and "uq_workspace_config_name" in str(getattr(e, 'orig', '')):
+            api_logger.warning(f"重复的配置名称 '{payload.config_name}' 在工作空间 {workspace_id}")
+            lang = get_language_from_header(x_language_type)
+            if lang == "en":
+                msg = fail(BizCode.BAD_REQUEST, "Config name already exists", f"A config named \"{payload.config_name}\" already exists in the current workspace. Please use a different name.")
+            else:
+                msg = fail(BizCode.BAD_REQUEST, "配置名称已存在", f"当前工作空间下已存在名为「{payload.config_name}」的记忆配置，请使用其他名称")
+            return JSONResponse(status_code=400, content=msg)
         api_logger.error(f"Create config failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "创建配置失败", str(e))
 

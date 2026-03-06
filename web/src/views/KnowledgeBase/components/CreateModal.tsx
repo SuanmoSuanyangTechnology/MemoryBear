@@ -15,6 +15,7 @@ import {
 } from '@/api/knowledgeBase'
 import RbModal from '@/components/RbModal'
 import SliderInput from '@/components/SliderInput'
+import { stringRegExp } from '@/utils/validator'
 const { TextArea } = Input;
 const { confirm } = Modal
 
@@ -519,12 +520,16 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         <Form.Item
           name="name"
           label={t('knowledgeBase.createForm.name')}
-          rules={[{ required: true, message: t('knowledgeBase.createForm.nameRequired') }]}
+          rules={[
+            { required: true, message: t('knowledgeBase.createForm.nameRequired') },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('knowledgeBase.createForm.name')} />
         </Form.Item>
       )}
-      <Form.Item name="description" label={t('knowledgeBase.createForm.description')}>
+      <Form.Item name="description" label={t('knowledgeBase.createForm.description')} rules={[{ max: 500 }]}>
         <TextArea rows={2} placeholder={t('knowledgeBase.createForm.description')} />
       </Form.Item>
 

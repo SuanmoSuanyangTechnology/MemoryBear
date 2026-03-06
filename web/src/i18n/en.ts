@@ -440,7 +440,6 @@ export const en = {
       logoutApiCannotRefreshToken: 'Logout API cannot refresh token',
       publicApiCannotRefreshToken: 'Public API cannot refresh token',
       refreshTokenNotExist: 'Refresh token does not exist',
-      SYSTEM_DEFAULT_SCENE_CANNOT_DELETE: 'This is a system preset scene and cannot be deleted',
       reset: 'Reset',
       refresh: 'Refresh',
       return: 'Return',
@@ -454,6 +453,7 @@ export const en = {
       prevStep: 'Previous Step',
       exportSuccess: 'Export successful',
       recommend: 'Recommend',
+      default: 'Default',
       logoTip: `Supported image formats: JPG, PNG \n Suggested size: square ratio \n Maximum size: ≤ 2MB`,
       imageSquareRequired: 'Please upload a square image',
       nameInvalid: 'Name cannot start or end with a space',
@@ -2616,6 +2616,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       updated_at: 'Updated At',
       entityTypes: 'Entity Types',
 
+      classSearchPlaceholder: 'Search types',
       addClass: 'Add Type',
       class_name: 'Type Name',
       class_description: 'Type Definition',

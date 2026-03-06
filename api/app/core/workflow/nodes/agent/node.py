@@ -14,7 +14,7 @@ from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_db
+from app.db import get_db_context
 from app.models import AppRelease
 from app.services.draft_run_service import AgentRunService
 
@@ -39,7 +39,7 @@ class AgentNode(BaseNode):
     def _output_types(self) -> dict[str, VariableType]:
         return {"output": VariableType.STRING}
 
-    def _prepare_agent(self, variable_pool: VariablePool) -> tuple[AgentRunService, AppRelease, str]:
+    def _prepare_agent(self, variable_pool: VariablePool) -> tuple[AppRelease, str]:
         """准备 Agent（公共逻辑）
         
         Args:
@@ -57,17 +57,17 @@ class AgentNode(BaseNode):
         if not agent_id:
             raise ValueError(f"节点 {self.node_id} 缺少 agent_id 配置")
         
-        db = next(get_db())
-        release = db.query(AppRelease).filter(
-            AppRelease.id == agent_id
-        ).first()
+        with get_db_context() as db:
+            release = db.query(AppRelease).filter(
+                AppRelease.id == agent_id
+            ).first()
         
         if not release:
             raise ValueError(f"Agent 不存在: {agent_id}")
         
-        draft_service = AgentRunService(db)
+
         
-        return draft_service, release, message
+        return release, message
     
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """非流式执行
@@ -79,19 +79,21 @@ class AgentNode(BaseNode):
         Returns:
             状态更新字典
         """
-        draft_service, release, message = self._prepare_agent(variable_pool)
+        release, message = self._prepare_agent(variable_pool)
         
         logger.info(f"节点 {self.node_id} 开始执行 Agent 调用（非流式）")
-        
-        # 执行 Agent（非流式）
-        result = await draft_service.run(
-            agent_config=release.config,
-            model_config=None,
-            message=message,
-            workspace_id=variable_pool.get_value("sys.workspace_id"),
-            user_id=state.get("user_id"),
-            variables=variable_pool.get_all_conversation_vars()
-        )
+        with get_db_context() as db:
+            draft_service = AgentRunService(db)
+
+            # 执行 Agent（非流式）
+            result = await draft_service.run(
+                agent_config=release.config,
+                model_config=None,
+                message=message,
+                workspace_id=variable_pool.get_value("sys.workspace_id"),
+                user_id=state.get("user_id"),
+                variables=variable_pool.get_all_conversation_vars()
+            )
         
         response = result.get("response", "")
         
@@ -118,34 +120,35 @@ class AgentNode(BaseNode):
         Yields:
             流式事件字典
         """
-        draft_service, release, message = self._prepare_agent(variable_pool)
+        release, message = self._prepare_agent(variable_pool)
         
         logger.info(f"节点 {self.node_id} 开始执行 Agent 调用（流式）")
         
         # 累积完整响应
         full_response = ""
-        
+        with get_db_context() as db:
+            draft_service = AgentRunService(db)
         # 执行 Agent（流式）
-        async for chunk in draft_service.run_stream(
-            agent_config=release.config,
-            model_config=None,
-            message=message,
-            workspace_id=variable_pool.get_value("sys.workspace_id"),
-            user_id=state.get("user_id"),
-            variables=variable_pool.get_all_conversation_vars()
-        ):
-            # 提取内容
-            content = chunk.get("content", "")
-            full_response += content
-            
-            # 流式返回每个 chunk
-            yield {
-                "type": "chunk",
-                "node_id": self.node_id,
-                "content": content,
-                "full_content": full_response,
-                "meta_data": chunk.get("meta_data", {})
-            }
+            async for chunk in draft_service.run_stream(
+                agent_config=release.config,
+                model_config=None,
+                message=message,
+                workspace_id=variable_pool.get_value("sys.workspace_id"),
+                user_id=state.get("user_id"),
+                variables=variable_pool.get_all_conversation_vars()
+            ):
+                # 提取内容
+                content = chunk.get("content", "")
+                full_response += content
+
+                # 流式返回每个 chunk
+                yield {
+                    "type": "chunk",
+                    "node_id": self.node_id,
+                    "content": content,
+                    "full_content": full_response,
+                    "meta_data": chunk.get("meta_data", {})
+                }
         
         logger.info(f"节点 {self.node_id} Agent 调用完成，输出长度: {len(full_response)}")
         

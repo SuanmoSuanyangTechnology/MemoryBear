@@ -1,10 +1,10 @@
-import os
 import json
+import os
 import time
-from app.core.logging_config import get_agent_logger
-from app.db import get_db
 
+from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.models.problem_models import ProblemExtensionResponse
+from app.core.memory.agent.services.optimized_llm_service import LLMServiceMixin
 from app.core.memory.agent.utils.llm_tools import (
     PROJECT_ROOT_,
     ReadState,
@@ -12,10 +12,9 @@ from app.core.memory.agent.utils.llm_tools import (
 from app.core.memory.agent.utils.redis_tool import store
 from app.core.memory.agent.utils.session_tools import SessionService
 from app.core.memory.agent.utils.template_tools import TemplateService
-from app.core.memory.agent.services.optimized_llm_service import LLMServiceMixin
+from app.db import get_db_context
 
 template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
-db_session = next(get_db())
 logger = get_agent_logger(__name__)
 
 
@@ -53,13 +52,14 @@ async def Split_The_Problem(state: ReadState) -> ReadState:
 
     try:
         # 使用优化的LLM服务
-        structured = await problem_service.call_llm_structured(
-            state=state,
-            db_session=db_session,
-            system_prompt=system_prompt,
-            response_model=ProblemExtensionResponse,
-            fallback_value=[]
-        )
+        with get_db_context() as db_session:
+            structured = await problem_service.call_llm_structured(
+                state=state,
+                db_session=db_session,
+                system_prompt=system_prompt,
+                response_model=ProblemExtensionResponse,
+                fallback_value=[]
+            )
 
         # 添加更详细的日志记录
         logger.info(f"Split_The_Problem: 开始处理问题分解，内容长度: {len(content)}")
@@ -171,13 +171,14 @@ async def Problem_Extension(state: ReadState) -> ReadState:
 
     try:
         # 使用优化的LLM服务
-        response_content = await problem_service.call_llm_structured(
-            state=state,
-            db_session=db_session,
-            system_prompt=system_prompt,
-            response_model=ProblemExtensionResponse,
-            fallback_value=[]
-        )
+        with get_db_context() as db_session:
+            response_content = await problem_service.call_llm_structured(
+                state=state,
+                db_session=db_session,
+                system_prompt=system_prompt,
+                response_model=ProblemExtensionResponse,
+                fallback_value=[]
+            )
 
         logger.info(f"Problem_Extension: 开始处理问题扩展，问题数量: {len(databasets)}")
 

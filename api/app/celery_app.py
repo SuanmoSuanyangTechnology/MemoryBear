@@ -1,27 +1,54 @@
 import os
 import platform
 from datetime import timedelta
-from celery.schedules import crontab
 from urllib.parse import quote
 
 from celery import Celery
 from celery.schedules import crontab
 
 from app.core.config import settings
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # macOS fork() safety - must be set before any Celery initialization
 if platform.system() == 'Darwin':
     os.environ.setdefault('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', 'YES')
 
 # 创建 Celery 应用实例
-# broker: 任务队列（使用 Redis DB 0）
-# backend: 结果存储（使用 Redis DB 10）
+# broker: 任务队列（使用 Redis DB，由 CELERY_BROKER_DB 指定）
+# backend: 结果存储（使用 Redis DB，由 CELERY_BACKEND_DB 指定）
+# NOTE: 不要在 .env 中设置 BROKER_URL / RESULT_BACKEND / CELERY_BROKER / CELERY_BACKEND，
+#       这些名称会被 Celery CLI 的 Click 框架劫持，详见 docs/celery-env-bug-report.md
+
+# Build canonical broker/backend URLs and force them into os.environ so that
+# Celery's Settings.broker_url property (which checks CELERY_BROKER_URL first)
+# cannot be overridden by stray env vars.
+# See: https://github.com/celery/celery/issues/4284
+_broker_url = f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BROKER}"
+_backend_url = f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BACKEND}"
+os.environ["CELERY_BROKER_URL"] = _broker_url
+os.environ["CELERY_RESULT_BACKEND"] = _backend_url
+# Neutralize legacy Celery env vars that can be hijacked by Celery's CLI/Click
+# integration and accidentally override our canonical URLs.
+os.environ.pop("BROKER_URL", None)
+os.environ.pop("RESULT_BACKEND", None)
+os.environ.pop("CELERY_BROKER", None)
+os.environ.pop("CELERY_BACKEND", None)
+
 celery_app = Celery(
     "redbear_tasks",
-    broker=f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.CELERY_BROKER}",
-    backend=f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.CELERY_BACKEND}",
+    broker=_broker_url,
+    backend=_backend_url,
 )
 
+logger.info(
+    "Celery app initialized",
+    extra={
+        "broker": _broker_url.replace(quote(settings.REDIS_PASSWORD), "***"),
+        "backend": _backend_url.replace(quote(settings.REDIS_PASSWORD), "***"),
+    },
+)
 # Default queue for unrouted tasks
 celery_app.conf.task_default_queue = 'memory_tasks'
 
