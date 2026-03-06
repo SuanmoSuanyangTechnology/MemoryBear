@@ -144,7 +144,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
                   {item.name[0]}
                 </div>
               }
-              extra={<Switch defaultChecked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
+              extra={<Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
               bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
             >
               <Tooltip title={item.description}>
