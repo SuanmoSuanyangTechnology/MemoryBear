@@ -326,6 +326,25 @@ async def run_pilot_extraction(
 
         logger.info("Pilot run completed: Skipping Neo4j save")
 
+        # 将提取统计写入 Redis，按 workspace_id 存储
+        try:
+            from app.cache.memory.activity_stats_cache import ActivityStatsCache
+
+            stats_to_cache = {
+                "chunk_count": len(chunk_nodes) if chunk_nodes else 0,
+                "statements_count": len(statement_nodes) if statement_nodes else 0,
+                "triplet_entities_count": len(entity_nodes) if entity_nodes else 0,
+                "triplet_relations_count": len(entity_edges) if entity_edges else 0,
+                "temporal_count": 0,  # temporal 数据在日志中，此处暂置0
+            }
+            await ActivityStatsCache.set_activity_stats(
+                workspace_id=str(memory_config.workspace_id),
+                stats=stats_to_cache,
+            )
+            logger.info(f"[PILOT_RUN] 活动统计已写入 Redis: workspace_id={memory_config.workspace_id}")
+        except Exception as cache_err:
+            logger.warning(f"[PILOT_RUN] 写入活动统计缓存失败（不影响主流程）: {cache_err}", exc_info=True)
+
     except Exception as e:
         logger.error(f"Pilot run failed: {e}", exc_info=True)
         raise
