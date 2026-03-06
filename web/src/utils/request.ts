@@ -356,12 +356,11 @@ export const request = {
  * Get parent domain for cookie setting
  * @returns Parent domain or IP address
  */
+const isIp = (hostname: string) => /^\d+\.\d+\.\d+\.\d+$/.test(hostname)
+
 const getParentDomain = () => {
   const hostname = window.location.hostname
-  // Check if it's an IP address
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
-    return hostname
-  }
+  if (isIp(hostname)) return hostname
   const parts = hostname.split('.')
   return parts.length > 2 ? `.${parts.slice(-2).join('.')}` : hostname
 }
@@ -371,7 +370,10 @@ const getParentDomain = () => {
  */
 export const cookieUtils = {
   set: (name: string, value: string, domain = getParentDomain()) => {
-    document.cookie = `${name}=${value}; domain=${domain}; path=/; secure; samesite=strict`
+    const ip = isIp(window.location.hostname)
+    const domainPart = ip ? '' : `; domain=${domain}`
+    const securePart = window.location.protocol === 'https:' ? '; secure' : ''
+    document.cookie = `${name}=${value}${domainPart}; path=/${securePart}; samesite=strict`
   },
   get: (name: string) => {
     const value = `; ${document.cookie}`
