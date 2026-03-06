@@ -112,11 +112,12 @@ class LLMNode(BaseNode):
                 raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
 
             # 在 Session 关闭前提取所有需要的数据
-            api_config = config.api_keys[0]
+            api_config = self.model_balance(config)
             model_name = api_config.model_name
             provider = api_config.provider
             api_key = api_config.api_key
             api_base = api_config.api_base
+            is_omni = api_config.is_omni
             model_type = config.type
 
         # 4. 创建 LLM 实例（使用已提取的数据）
@@ -129,7 +130,8 @@ class LLMNode(BaseNode):
                 provider=provider,
                 api_key=api_key,
                 base_url=api_base,
-                extra_params=extra_params
+                extra_params=extra_params,
+                is_omni=is_omni
             ),
             type=ModelType(model_type)
         )

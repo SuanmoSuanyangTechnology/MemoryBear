@@ -1,7 +1,7 @@
 import asyncio
 import logging
-import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime
 from functools import cached_property
 from typing import Any, AsyncGenerator
 
@@ -13,6 +13,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.enums import BRANCH_NODES
 from app.core.workflow.variable.base_variable import VariableType, FileObject
 from app.db import get_db_read
+from app.models import ModelConfig, ModelApiKey, LoadBalanceStrategy
 from app.schemas import FileInput
 from app.services.multimodal_service import MultimodalService
 
@@ -629,7 +630,7 @@ class BaseNode(ABC):
             )
         if isinstance(content, str):
             if enable_file:
-                return [{"text": content}]
+                return [{"type": "text", "text": content}]
             return content
 
         elif isinstance(content, FileObject):
@@ -667,3 +668,12 @@ class BaseNode(ABC):
         elif isinstance(content, str):
             return content
         return result
+
+    def model_balance(self, model_config: ModelConfig) -> ModelApiKey:
+        api_keys = [key for key in model_config.api_keys if key.is_active]
+        if not api_keys:
+            raise ValueError("No active API keys available for model")
+        if model_config.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
+            if model_config.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
+                return min(api_keys, key=lambda x: (int(x.usage_count or "0"), x.last_used_at or datetime.min))
+        return api_keys[0]
