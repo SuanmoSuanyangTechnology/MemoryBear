@@ -29,7 +29,12 @@ _broker_url = f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:
 _backend_url = f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BACKEND}"
 os.environ["CELERY_BROKER_URL"] = _broker_url
 os.environ["CELERY_RESULT_BACKEND"] = _backend_url
+# Neutralize legacy Celery env vars that can be hijacked by Celery's CLI/Click
+# integration and accidentally override our canonical URLs.
 os.environ.pop("BROKER_URL", None)
+os.environ.pop("RESULT_BACKEND", None)
+os.environ.pop("CELERY_BROKER", None)
+os.environ.pop("CELERY_BACKEND", None)
 
 celery_app = Celery(
     "redbear_tasks",
