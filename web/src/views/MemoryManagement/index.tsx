@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-05 16:28:58
+ * @Last Modified time: 2026-03-06 13:53:53
  */
 /**
  * Memory Management Page
@@ -154,10 +154,10 @@ const MemoryManagement: React.FC = () => {
                       className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]" 
                       onClick={() => handleEdit(item)}
                     ></div>
-                    <div 
+                    {!item.is_system_default && <div 
                       className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]" 
                       onClick={() => handleDelete(item)}
-                    ></div>
+                    ></div>}
                   </Space>
                 </div>
               </RbCard>

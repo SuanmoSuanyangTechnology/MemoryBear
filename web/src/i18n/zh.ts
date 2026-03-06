@@ -1571,7 +1571,7 @@ export const zh = {
       intelligentSemanticPruningFunction: '智能语义修剪功能',
       intelligentSemanticPruningFunctionDesc: '是否激活智能语义修剪（true/false）。',
       intelligentSemanticPruningScene: '智能语义修剪场景',
-      intelligentSemanticPruningSceneDesc: '选择智能语义修剪场景（education、online_service、outbound）。',
+      intelligentSemanticPruningSceneDesc: '语义剪枝场景与本体工程场景一致',
       intelligentSemanticPruningThreshold: '智能语义修剪阈值',
       intelligentSemanticPruningThresholdDesc: '设置智能语义修剪阈值（0-0.9）。',
       reflectionEngine: '自我反思引擎',
