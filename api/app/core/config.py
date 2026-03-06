@@ -190,8 +190,10 @@ class Settings:
     LOG_FILE_MAX_SIZE_MB: int = int(os.getenv("LOG_FILE_MAX_SIZE_MB", "10"))  # 10MB
 
     # Celery configuration (internal)
-    CELERY_BROKER: int = int(os.getenv("CELERY_BROKER", "1"))
-    CELERY_BACKEND: int = int(os.getenv("CELERY_BACKEND", "2"))
+    # NOTE: 变量名不以 CELERY_ 开头，避免被 Celery CLI 的前缀匹配机制劫持
+    # 详见 docs/celery-env-bug-report.md
+    REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "1"))
+    REDIS_DB_CELERY_BACKEND: int = int(os.getenv("REDIS_DB_CELERY_BACKEND", "2"))
 
     # SMTP Email Configuration
     SMTP_SERVER: str = os.getenv("SMTP_SERVER", "smtp.gmail.com")
