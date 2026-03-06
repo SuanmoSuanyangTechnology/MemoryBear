@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Column, String, Text, DateTime, JSON, ForeignKey, Integer, Float, Boolean
+from sqlalchemy import Column, String, Text, DateTime, JSON, ForeignKey, Integer, Float, Boolean, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -163,6 +163,17 @@ class CustomToolConfig(Base):
         return f"<CustomToolConfig(id={self.id}, auth_type={self.auth_type})>"
 
 
+class MCPSourceChannel(StrEnum):
+    """MCP来源渠道枚举"""
+    ALIYUN_BAILIAN = "aliyun_bailian"  # 阿里云百炼
+    MODELSCOPE = "modelscope"          # ModelScope
+    TOKENFLUX = "tokenflux"            # TokenFlux
+    LANGENG = "langeng"                # 蓝耕科技
+    AI_302 = "302ai"                   # 302.AI
+    MCP_ROUTER = "mcp_router"          # MCP Router
+    SELF_HOSTED = "self_hosted"        # 自建
+
+
 class MCPToolConfig(Base):
     """MCP工具配置模型"""
     __tablename__ = "mcp_tool_configs"
@@ -170,6 +181,13 @@ class MCPToolConfig(Base):
     id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
     server_url = Column(String(1000), nullable=False)  # MCP服务器URL
     connection_config = Column(JSON, default=dict)  # 连接配置（包含认证信息）
+
+    # 来源渠道
+    source_channel = Column(String(50), default=MCPSourceChannel.SELF_HOSTED,
+                            server_default=text(f"'{MCPSourceChannel.SELF_HOSTED}'"), nullable=False, comment="来源渠道")
+    market_id = Column(UUID(as_uuid=True), nullable=True, comment="渠道市场id")
+    market_config_id = Column(UUID(as_uuid=True), nullable=True, comment="渠道市场配置id")
+    mcp_service_id = Column(String(255), nullable=True, comment="mcp服务id")
     
     # 服务状态
     last_health_check = Column(DateTime)

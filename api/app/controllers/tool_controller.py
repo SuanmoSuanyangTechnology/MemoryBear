@@ -97,6 +97,12 @@ async def create_tool(
 ):
     """创建工具"""
     try:
+        # 将 MCP 来源字段合并进 config
+        if request.tool_type == ToolType.MCP:
+            for key in ("source_channel", "market_id", "market_config_id", "mcp_service_id"):
+                val = getattr(request, key, None)
+                if val is not None:
+                    request.config[key] = val
         tool_id = service.create_tool(
             name=request.name,
             tool_type=request.tool_type,
