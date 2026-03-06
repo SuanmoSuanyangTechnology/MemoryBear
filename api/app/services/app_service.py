@@ -703,7 +703,7 @@ class AppService:
             self.db.flush()
 
             # 如果是 agent 类型，复制 AgentConfig
-            if source_app.type == "agent":
+            if source_app.type == AppType.AGENT:
                 source_config = self.db.query(AgentConfig).filter(
                     AgentConfig.app_id == source_app.id
                 ).first()
@@ -719,6 +719,50 @@ class AppService:
                         memory=source_config.memory.copy() if source_config.memory else None,
                         variables=source_config.variables.copy() if source_config.variables else [],
                         tools=source_config.tools.copy() if source_config.tools else [],
+                        is_active=True,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    self.db.add(new_config)
+
+            elif source_app.type == AppType.WORKFLOW:
+                source_config = self.db.query(WorkflowConfig).filter(
+                    WorkflowConfig.app_id == source_app.id
+                ).first()
+
+                if source_config:
+                    new_config = WorkflowConfig(
+                        id=uuid.uuid4(),
+                        app_id=new_app.id,
+                        nodes=source_config.nodes.copy() if source_config.nodes else [],
+                        edges=source_config.edges.copy() if source_config.edges else [],
+                        variables=source_config.variables.copy() if source_config.variables else [],
+                        execution_config=source_config.execution_config.copy() if source_config.execution_config else {},
+                        triggers=source_config.triggers.copy() if source_config.triggers else [],
+                        is_active=True,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    self.db.add(new_config)
+
+            elif source_app.type == AppType.MULTI_AGENT:
+                source_config = self.db.query(MultiAgentConfig).filter(
+                    MultiAgentConfig.app_id == source_app.id
+                ).first()
+
+                if source_config:
+                    new_config = MultiAgentConfig(
+                        id=uuid.uuid4(),
+                        app_id=new_app.id,
+                        master_agent_id=source_config.master_agent_id,
+                        master_agent_name=source_config.master_agent_name,
+                        default_model_config_id=source_config.default_model_config_id,
+                        model_parameters=source_config.model_parameters,
+                        orchestration_mode=source_config.orchestration_mode,
+                        sub_agents=source_config.sub_agents.copy() if source_config.sub_agents else [],
+                        routing_rules=source_config.routing_rules.copy() if source_config.routing_rules else None,
+                        execution_config=source_config.execution_config.copy() if source_config.execution_config else {},
+                        aggregation_strategy=source_config.aggregation_strategy,
                         is_active=True,
                         created_at=now,
                         updated_at=now,
