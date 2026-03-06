@@ -153,30 +153,30 @@ class LLMNode(BaseNode):
                 if role == "system":
                     messages.append({
                         "role": "system",
-                        "content": await self.process_message(provider, content, self.typed_config.vision)
+                        "content": await self.process_message(provider, is_omni, content, self.typed_config.vision)
                     })
                 elif role in ["user", "human"]:
                     messages.append({
                         "role": "user",
-                        "content": await self.process_message(provider, content, self.typed_config.vision)
+                        "content": await self.process_message(provider, is_omni, content, self.typed_config.vision)
                     })
                 elif role in ["ai", "assistant"]:
                     messages.append({
                         "role": "assistant",
-                        "content": await self.process_message(provider, content, self.typed_config.vision)
+                        "content": await self.process_message(provider, is_omni, content, self.typed_config.vision)
                     })
                 else:
                     logger.warning(f"未知的消息角色: {role}，默认使用 user")
                     messages.append({
                         "role": "user",
-                        "content": await self.process_message(provider, content, self.typed_config.vision)
+                        "content": await self.process_message(provider, is_omni, content, self.typed_config.vision)
                     })
 
             if self.typed_config.vision_input and self.typed_config.vision:
                 file_content = []
                 files = variable_pool.get_instance(self.typed_config.vision_input)
                 for file in files.value:
-                    content = await self.process_message(provider, file.value, self.typed_config.vision)
+                    content = await self.process_message(provider, is_omni, file.value, self.typed_config.vision)
                     if content:
                         file_content.extend(content)
                 if messages and messages[-1]["role"] == 'user':
@@ -190,14 +190,14 @@ class LLMNode(BaseNode):
                     if isinstance(message["content"], list):
                         file_content = []
                         for file in message["content"]:
-                            content = await self.process_message(provider, file, self.typed_config.vision)
+                            content = await self.process_message(provider, is_omni, file, self.typed_config.vision)
                             if content:
                                 file_content.extend(content)
                         history_message.append(
                             {"role": message["role"], "content": file_content}
                         )
                     else:
-                        message["content"] = await self.process_message(provider, message["content"], self.typed_config.vision)
+                        message["content"] = await self.process_message(provider, is_omni, message["content"], self.typed_config.vision)
                         history_message.append(message)
                 messages = messages[:-1] + history_message + messages[-1:]
             self.messages = messages
