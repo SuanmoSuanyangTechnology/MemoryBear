@@ -636,6 +636,7 @@ async def classes_handler(
             scene_id=scene_uuid,
             scene_name=scene.scene_name,
             scene_description=scene.scene_description,
+            is_system_default=scene.is_system_default,
             items=items
         )
         
