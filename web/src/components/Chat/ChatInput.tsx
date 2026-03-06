@@ -50,7 +50,11 @@ const ChatInput: FC<ChatInputProps> = ({
 
 
   const handleDelete = (file: any) => {
-    fileChange?.(fileList?.filter(item => file.url ? item.url !== file.url : item.uid !== file.uid) || [])
+    fileChange?.(fileList?.filter(item => {
+      return item.thumbUrl && file.thumbUrl ? item.thumbUrl !== file.thumbUrl
+        : item.url && file.url ? item.url !== file.url
+        : item.uid !== file.uid
+    }) || [])
   }
   // Convert file object to preview URL
   const previewFileList = useMemo(() => {
