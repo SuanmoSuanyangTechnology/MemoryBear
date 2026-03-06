@@ -105,7 +105,7 @@ const Detail: FC = () => {
           <Tag color="warning">{t('common.default')}</Tag>
         </Space>}
         subTitle={<Tooltip title={data.scene_description}><div className="rb:h-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{data.scene_description}</div></Tooltip>}
-        extra={data.is_system_default ? undefined : (<Space>
+        extra={!data.is_system_default ? undefined : (<Space>
           <Button type="primary" ghost className="rb:h-6! rb:px-2! rb:leading-5.5!" onClick={handleAdd}>+ {t('ontology.addClass')}</Button>
           <Button className="rb:h-6! rb:px-2! rb:leading-5.5!" type="primary" onClick={handleExtract}>+ {t('ontology.extract')}</Button>
         </Space>)}

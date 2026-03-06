@@ -101,6 +101,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
         formData.append('platform', values.platform);
         formData.append('file', values.file[0]);
 
+        setLoading(true)
         // Call import workflow API
         importWorkflow(formData)
           .then(res => {
@@ -114,21 +115,24 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
             } else {
               setCurrent(2);
               // Pre-fill form with file information
+              const fileNameSplit = values.file[0].name.split('.')
               form.setFieldsValue({
-                name: values.file[0].name.split('.')[0],
+                name: fileNameSplit.slice(0, fileNameSplit.length - 1).join('.'),
                 platform: values.platform,
                 fileName: values.file[0].name,
                 fileSize: values.file[0].size,
               });
             }
-          });
+          })
+          .finally(() => setLoading(false));
         break;
       case 1: // Step 2: Error/warning display
         if (firstFormData) {
           const { file, platform } = firstFormData;
+          const fileNameSplit = firstFormData.file[0].name.split('.')
           // Pre-fill form with file information
           form.setFieldsValue({
-            name: file[0].name.split('.')[0],
+            name: fileNameSplit.slice(0, fileNameSplit.length - 1).join('.'),
             platform: platform,
             fileName: file[0].name,
             fileSize: file[0].size,
@@ -175,7 +179,9 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
     }
 
     // Reset form if not going back to error/warning step
-    if (newStep !== 1) {
+    if (newStep === 0) {
+      form.setFieldsValue(firstFormData || {})
+    } else if (newStep !== 1) {
       form.resetFields();
     }
     setCurrent(newStep);
