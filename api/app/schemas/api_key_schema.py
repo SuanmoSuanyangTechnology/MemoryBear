@@ -15,7 +15,7 @@ class ApiKeyCreate(BaseModel):
     type: ApiKeyType = Field(..., description="API Key 类型")
     scopes: List[str] = Field(default_factory=list, description="权限范围列表")
     resource_id: Optional[uuid.UUID] = Field(None, description="关联资源ID")
-    rate_limit: Optional[int] = Field(10, ge=1, le=1000, description="QPS限制（请求/秒）")
+    rate_limit: Optional[int] = Field(100, ge=1, le=1000, description="QPS限制（请求/秒）")
     daily_request_limit: Optional[int] = Field(10000, description="日请求限制", ge=1)
     quota_limit: Optional[int] = Field(None, description="配额限制（总请求数）", ge=1)
     expires_at: Optional[datetime.datetime] = Field(None, description="过期时间")

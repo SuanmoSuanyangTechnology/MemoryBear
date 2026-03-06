@@ -1,3 +1,11 @@
+/*
+ * @Description: 
+ * @Version: 0.0.1
+ * @Author: yujiangping
+ * @Date: 2026-01-05 17:22:23
+ * @LastEditors: yujiangping
+ * @LastEditTime: 2026-03-06 15:08:38
+ */
 import React, { useState } from 'react';
 import { Tabs } from 'antd';
 import { useTranslation } from 'react-i18next';
