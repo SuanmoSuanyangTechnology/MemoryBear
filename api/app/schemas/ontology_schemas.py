@@ -463,6 +463,7 @@ class ClassListResponse(BaseModel):
     scene_id: UUID = Field(..., description="所属场景ID")
     scene_name: str = Field(..., description="场景名称")
     scene_description: Optional[str] = Field(None, description="场景描述")
+    is_system_default: bool = Field(False, description="是否为系统默认场景")
     items: List[ClassResponse] = Field(..., description="类型列表")
 
 
