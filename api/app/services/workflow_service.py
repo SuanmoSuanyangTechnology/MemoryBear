@@ -496,6 +496,7 @@ class WorkflowService:
                     "event": "start",
                     "data": {
                         "conversation_id": payload.get("conversation_id"),
+                        "message_id": payload.get("message_id")
                     }
                 }
             case "workflow_end":
@@ -624,24 +625,28 @@ class WorkflowService:
                 workspace_id=str(workspace_id),
                 user_id=payload.user_id
             )
-
             # 更新执行结果
             if result.get("status") == "completed":
                 token_usage = result.get("token_usage", {}) or {}
+
+                final_messages = result.get("messages", [])[init_message_length:]
+                for message in final_messages:
+                    message_obj = self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role=message["role"],
+                        content=message["content"],
+                        meta_data=None if message["role"] == "user" else {"usage": token_usage}
+                    )
+                    if message["role"] != "user":
+                        result["message_id"] = str(message_obj.id)
                 self.update_execution_status(
                     execution.execution_id,
                     "completed",
                     output_data=result,
                     token_usage=token_usage.get("total_tokens", None)
                 )
-                final_messages = result.get("messages", [])[init_message_length:]
-                for message in final_messages:
-                    self.conversation_service.add_message(
-                        conversation_id=conversation_id_uuid,
-                        role=message["role"],
-                        content=message["content"],
-                        meta_data=None if message["role"] == "user" else {"usage": token_usage}
-                    )
+                logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
+                             f" error: {result.get('error')}")
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
             else:
@@ -659,6 +664,7 @@ class WorkflowService:
                 # "messages": result.get("messages"),
                 "output": result.get("output"),  # 最终输出（字符串）
                 "message": result.get("output"),  # 最终输出（字符串）
+                "message_id": result.get("message_id"),
                 # "output_data": result.get("node_outputs", {}),  # 所有节点输出（详细数据）
                 "conversation_id": result.get("conversation_id"),  # 所有节点输出（详细数据）payload.,  # 会话 ID
                 "error_message": result.get("error"),
@@ -756,7 +762,7 @@ class WorkflowService:
                         input_data["conv_messages"] = last_state.get("messages") or []
                         break
             init_message_length = len(input_data.get("conv_messages", []))
-
+            message_id = uuid.uuid4()
             async for event in execute_workflow_stream(
                     workflow_config=workflow_config_dict,
                     input_data=input_data,
@@ -765,24 +771,24 @@ class WorkflowService:
                     user_id=payload.user_id,
             ):
                 if event.get("event") == "workflow_end":
-
                     status = event.get("data", {}).get("status")
                     token_usage = event.get("data", {}).get("token_usage", {}) or {}
                     if status == "completed":
+                        final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
+                        for message in final_messages:
+                            self.conversation_service.add_message(
+                                message_id=message_id if message["role"] != "user" else uuid.uuid4(),
+                                conversation_id=conversation_id_uuid,
+                                role=message["role"],
+                                content=message["content"],
+                                meta_data=None if message["role"] == "user" else {"usage": token_usage}
+                            )
                         self.update_execution_status(
                             execution.execution_id,
                             "completed",
                             output_data=event.get("data"),
                             token_usage=token_usage.get("total_tokens", None)
                         )
-                        final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
-                        for message in final_messages:
-                            self.conversation_service.add_message(
-                                conversation_id=conversation_id_uuid,
-                                role=message["role"],
-                                content=message["content"],
-                                meta_data=None if message["role"] == "user" else {"usage": token_usage}
-                            )
                         logger.info(f"Workflow Run Success, "
                                     f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
                     elif status == "failed":
@@ -793,6 +799,8 @@ class WorkflowService:
                         )
                     else:
                         logger.error(f"unexpect workflow run status, status: {status}")
+                elif event.get("event") == "workflow_start":
+                    event["data"]["message_id"] = str(message_id)
                 event = self._emit(public, event)
                 if event:
                     yield event
