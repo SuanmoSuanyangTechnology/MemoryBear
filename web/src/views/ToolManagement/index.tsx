@@ -1,11 +1,3 @@
-/*
- * @Description: 
- * @Version: 0.0.1
- * @Author: yujiangping
- * @Date: 2026-01-05 17:22:23
- * @LastEditors: yujiangping
- * @LastEditTime: 2026-03-04 15:12:48
- */
 import React, { useState } from 'react';
 import { Tabs } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -16,7 +8,7 @@ import Custom from './Custom';
 import Market from './Market';
 import Tag from '@/components/Tag'
 
-const tabKeys = ['mcp', 'inner', 'custom', 'market']
+const tabKeys = ['mcp', 'inner', 'custom'] // , 'market'
 const ToolManagement: React.FC = () => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('mcp');

@@ -672,9 +672,17 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       {currentType !== 'Folder' && dynamicTypeList.map((tp) => {
         const fieldKey = typeToFieldKey(tp);
         // When tp is 'llm', merge llm and chat options
-        const options = tp.toLowerCase() === 'llm' || tp.toLowerCase() === 'image2text'
+        let options = tp.toLowerCase() === 'llm' || tp.toLowerCase() === 'image2text'
           ? [...(modelOptionsByType['llm'] || []), ...(modelOptionsByType['chat'] || [])]
           : modelOptionsByType[tp] || [];
+        
+        // When tp is 'image2text', filter to only include models with 'vision' capability
+        if (tp.toLowerCase() === 'image2text') {
+          options = options.filter((opt: any) => {
+            const model = models?.items?.find((m: any) => m.id === opt.value);
+            return model?.capability?.includes('vision');
+          });
+        }
         return (
           <Form.Item
             key={tp}
