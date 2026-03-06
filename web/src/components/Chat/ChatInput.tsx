@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 12:21:19
+ * @Last Modified time: 2026-03-06 13:36:20
  */
 import { type FC, useEffect, useMemo } from 'react'
 import { Flex, Input, Form } from 'antd'
@@ -50,7 +50,7 @@ const ChatInput: FC<ChatInputProps> = ({
 
 
   const handleDelete = (file: any) => {
-    fileChange?.(fileList?.filter(item => item.uid !== file.uid) || [])
+    fileChange?.(fileList?.filter(item => file.url ? item.url !== file.url : item.uid !== file.uid) || [])
   }
   // Convert file object to preview URL
   const previewFileList = useMemo(() => {
