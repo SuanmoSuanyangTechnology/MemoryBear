@@ -151,23 +151,23 @@ class LLMNode(BaseNode):
                 if role == "system":
                     messages.append({
                         "role": "system",
-                        "content": content
+                        "content": await self.process_message(provider, content, self.typed_config.vision)
                     })
                 elif role in ["user", "human"]:
                     messages.append({
                         "role": "user",
-                        "content": content
+                        "content": await self.process_message(provider, content, self.typed_config.vision)
                     })
                 elif role in ["ai", "assistant"]:
                     messages.append({
                         "role": "assistant",
-                        "content": content
+                        "content": await self.process_message(provider, content, self.typed_config.vision)
                     })
                 else:
                     logger.warning(f"未知的消息角色: {role}，默认使用 user")
                     messages.append({
                         "role": "user",
-                        "content": content
+                        "content": await self.process_message(provider, content, self.typed_config.vision)
                     })
 
             if self.typed_config.vision_input and self.typed_config.vision:
@@ -176,14 +176,28 @@ class LLMNode(BaseNode):
                 for file in files.value:
                     content = await self.process_message(provider, file.value, self.typed_config.vision)
                     if content:
-                        file_content.append(content)
+                        file_content.extend(content)
                 if messages and messages[-1]["role"] == 'user':
-                    messages[-1]['content'] = [messages[-1]["content"]] + file_content
+                    messages[-1]['content'] = messages[-1]["content"] + file_content
                 else:
                     messages.append({"role": "user", "content": file_content})
 
             if self.typed_config.memory.enable:
-                messages = messages[:-1] + state["messages"][-self.typed_config.memory.window_size:] + messages[-1:]
+                history_message = []
+                for message in state["messages"][-self.typed_config.memory.window_size:]:
+                    if isinstance(message["content"], list):
+                        file_content = []
+                        for file in message["content"]:
+                            content = await self.process_message(provider, file, self.typed_config.vision)
+                            if content:
+                                file_content.extend(content)
+                        history_message.append(
+                            {"role": message["role"], "content": file_content}
+                        )
+                    else:
+                        message["content"] = await self.process_message(provider, message["content"], self.typed_config.vision)
+                        history_message.append(message)
+                messages = messages[:-1] + history_message + messages[-1:]
             self.messages = messages
         else:
             # 使用简单的 prompt 格式（向后兼容）

@@ -111,7 +111,7 @@ async def Split_The_Problem(state: ReadState) -> ReadState:
             "error_type": type(e).__name__,
             "error_message": str(e),
             "content_length": len(content),
-            "llm_model_id": memory_config.llm_model_id if memory_config else None
+            "llm_model_id": str(memory_config.llm_model_id) if memory_config else None
         }
 
         logger.error(f"Split_The_Problem error details: {error_details}")
@@ -221,7 +221,7 @@ async def Problem_Extension(state: ReadState) -> ReadState:
             "error_type": type(e).__name__,
             "error_message": str(e),
             "questions_count": len(databasets),
-            "llm_model_id": memory_config.llm_model_id if memory_config else None
+            "llm_model_id": str(memory_config.llm_model_id) if memory_config else None
         }
 
         logger.error(f"Problem_Extension error details: {error_details}")

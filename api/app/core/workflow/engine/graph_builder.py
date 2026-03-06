@@ -320,7 +320,7 @@ class GraphBuilder:
                     # Used later to determine which branch to take based on the node's output
                     # Assumes node output `node.<node_id>.output` matches the edge's label
                     # For example, if node.123.output == 'CASE1', take the branch labeled 'CASE1'
-                    related_edge[idx]['condition'] = f"node.{node_id}.output == '{related_edge[idx]['label']}'"
+                    related_edge[idx]['condition'] = f"node['{node_id}']['output'] == '{related_edge[idx]['label']}'"
 
             if node_instance:
                 # Wrap node's run method to avoid closure issues
