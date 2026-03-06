@@ -543,9 +543,9 @@ async def clear_hot_memory_tags_cache(
 
 @router.get("/analytics/recent_activity_stats", response_model=ApiResponse)
 async def get_recent_activity_stats_api(
-    workspace_id: Optional[str] = Query(None, description="工作空间ID，用于从 Redis 读取对应缓存"),
     current_user: User = Depends(get_current_user),
 ) -> dict:
+    workspace_id = str(current_user.current_workspace_id) if current_user.current_workspace_id else None
     api_logger.info(f"Recent activity stats requested: workspace_id={workspace_id}")
     try:
         result = await analytics_recent_activity_stats(workspace_id=workspace_id)
