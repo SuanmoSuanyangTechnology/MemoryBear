@@ -910,7 +910,11 @@ class ToolService:
                 config_data.update({
                     "last_health_check": int(mcp_config.last_health_check.timestamp() * 1000) if mcp_config.last_health_check else None,
                     "health_status": mcp_config.health_status,
-                    "available_tools": available_tools_display
+                    "available_tools": available_tools_display,
+                    "source_channel": mcp_config.source_channel,
+                    "market_id": mcp_config.market_id,
+                    "market_config_id": mcp_config.market_config_id,
+                    "mcp_service_id": mcp_config.mcp_service_id
                 })
         
         return ToolInfo(
