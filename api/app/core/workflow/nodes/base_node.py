@@ -617,10 +617,19 @@ class BaseNode(ABC):
         return variable_pool.has(selector)
 
     @staticmethod
-    async def process_message(provider: str, content: str | FileObject, enable_file=False) -> dict | str | None:
+    async def process_message(provider: str, content: str | dict | FileObject, enable_file=False) -> list | str | None:
+        if isinstance(content, dict):
+            content = FileObject(
+                type=content.get("type"),
+                url=content.get("url"),
+                transfer_method=content.get("transfer_method"),
+                origin_file_type=content.get("origin_file_type"),
+                file_id=content.get("file_id"),
+                is_file=True
+            )
         if isinstance(content, str):
             if enable_file:
-                return {"text": content}
+                return [{"text": content}]
             return content
 
         elif isinstance(content, FileObject):
@@ -639,8 +648,8 @@ class BaseNode(ABC):
                 )
 
                 if message:
-                    content.content_cache[provider] = message[0]
-                    return message[0]
+                    content.content_cache[provider] = message
+                    return message
                 return None
         raise TypeError(f'Unexpect input value type - {type(content)}')
 

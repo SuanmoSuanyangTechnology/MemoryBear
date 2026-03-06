@@ -158,18 +158,36 @@ class WorkflowExecutor:
                 full_content += self.variable_pool.get_value(f"{end_id}.output", default="", strict=False)
 
             # Append messages for user and assistant
-            result["messages"].extend(
-                [
-                    {
-                        "role": "user",
-                        "content": input_data.get("message", '')
-                    },
-                    {
-                        "role": "assistant",
-                        "content": full_content
-                    }
-                ]
-            )
+            if input_data.get("files"):
+                result["messages"].extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": input_data.get("message", '')
+                        },
+                        {
+                            "role": "user",
+                            "content": input_data.get("files")
+                        },
+                        {
+                            "role": "assistant",
+                            "content": full_content
+                        }
+                    ]
+                )
+            else:
+                result["messages"].extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": input_data.get("message", '')
+                        },
+                        {
+                            "role": "assistant",
+                            "content": full_content
+                        }
+                    ]
+                )
             # Calculate elapsed time
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
@@ -308,18 +326,36 @@ class WorkflowExecutor:
             elapsed_time = (end_time - start_time).total_seconds()
 
             # Append messages for user and assistant
-            result["messages"].extend(
-                [
-                    {
-                        "role": "user",
-                        "content": input_data.get("message", '')
-                    },
-                    {
-                        "role": "assistant",
-                        "content": full_content
-                    }
-                ]
-            )
+            if input_data.get("files"):
+                result["messages"].extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": input_data.get("message", '')
+                        },
+                        {
+                            "role": "user",
+                            "content": input_data.get("files")
+                        },
+                        {
+                            "role": "assistant",
+                            "content": full_content
+                        }
+                    ]
+                )
+            else:
+                result["messages"].extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": input_data.get("message", '')
+                        },
+                        {
+                            "role": "assistant",
+                            "content": full_content
+                        }
+                    ]
+                )
             logger.info(
                 f"Workflow execution completed (streaming), "
                 f"elapsed: {elapsed_time:.2f}ms, execution_id: {self.execution_context.execution_id}"

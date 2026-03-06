@@ -25,7 +25,7 @@ from app.repositories.workflow_repository import (
     WorkflowExecutionRepository,
     WorkflowNodeExecutionRepository
 )
-from app.schemas import DraftRunRequest, FileInput
+from app.schemas import DraftRunRequest, FileInput, FileType
 from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
 from app.services.multimodal_service import MultimodalService
@@ -601,6 +601,7 @@ class WorkflowService:
         try:
             files = await self._handle_file_input(payload.files)
             input_data["files"] = files
+            message_id = uuid.uuid4()
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
 
@@ -630,15 +631,32 @@ class WorkflowService:
                 token_usage = result.get("token_usage", {}) or {}
 
                 final_messages = result.get("messages", [])[init_message_length:]
+                human_message = ""
+                assistant_message = ""
                 for message in final_messages:
-                    message_obj = self.conversation_service.add_message(
-                        conversation_id=conversation_id_uuid,
-                        role=message["role"],
-                        content=message["content"],
-                        meta_data=None if message["role"] == "user" else {"usage": token_usage}
-                    )
-                    if message["role"] != "user":
-                        result["message_id"] = str(message_obj.id)
+                    if message["role"] == "user":
+                        if isinstance(message["content"], str):
+                            human_message += message["content"]
+                        elif isinstance(message["content"], dict):
+                            if message["content"].get("type") == FileType.IMAGE:
+                                human_message += f"![image]({message['content'].get('url', '')})"
+                            else:
+                                human_message += f"[{FileType}]({message['content'].get('url', '')})"
+                    if message["role"] == "assistant":
+                        assistant_message = message["content"]
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id_uuid,
+                    role="user",
+                    content=human_message,
+                    meta_data=None
+                )
+                self.conversation_service.add_message(
+                    message_id=message_id,
+                    conversation_id=conversation_id_uuid,
+                    role="assistant",
+                    content=assistant_message,
+                    meta_data={"usage": token_usage}
+                )
                 self.update_execution_status(
                     execution.execution_id,
                     "completed",
@@ -664,7 +682,7 @@ class WorkflowService:
                 # "messages": result.get("messages"),
                 "output": result.get("output"),  # 最终输出（字符串）
                 "message": result.get("output"),  # 最终输出（字符串）
-                "message_id": result.get("message_id"),
+                "message_id": str(message_id),
                 # "output_data": result.get("node_outputs", {}),  # 所有节点输出（详细数据）
                 "conversation_id": result.get("conversation_id"),  # 所有节点输出（详细数据）payload.,  # 会话 ID
                 "error_message": result.get("error"),
@@ -775,14 +793,33 @@ class WorkflowService:
                     token_usage = event.get("data", {}).get("token_usage", {}) or {}
                     if status == "completed":
                         final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
+                        human_message = ""
+                        assistant_message = ""
                         for message in final_messages:
-                            self.conversation_service.add_message(
-                                message_id=message_id if message["role"] != "user" else uuid.uuid4(),
-                                conversation_id=conversation_id_uuid,
-                                role=message["role"],
-                                content=message["content"],
-                                meta_data=None if message["role"] == "user" else {"usage": token_usage}
-                            )
+                            if message["role"] == "user":
+                                if isinstance(message["content"], str):
+                                    human_message += message["content"]
+                                elif isinstance(message["content"], list):
+                                    for file in message["content"]:
+                                        if file.get("type") == FileType.IMAGE:
+                                            human_message += f"![image]({file.get('url', '')})"
+                                        else:
+                                            human_message += f"[{file.get("type")}]({file.get('url', '')})"
+                            if message["role"] == "assistant":
+                                assistant_message = message["content"]
+                        self.conversation_service.add_message(
+                            conversation_id=conversation_id_uuid,
+                            role="user",
+                            content=human_message,
+                            meta_data=None
+                        )
+                        self.conversation_service.add_message(
+                            message_id=message_id,
+                            conversation_id=conversation_id_uuid,
+                            role="assistant",
+                            content=assistant_message,
+                            meta_data={"usage": token_usage}
+                        )
                         self.update_execution_status(
                             execution.execution_id,
                             "completed",
