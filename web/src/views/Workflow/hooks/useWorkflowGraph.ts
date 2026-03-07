@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 17:59:34
+ * @Last Modified time: 2026-03-06 14:49:17
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -12,7 +12,7 @@ import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, defaultPortItems, portItemArgsY, edge_width, conditionNodePortItemArgsY, conditionNodeItemHeight, conditionNodeHeight } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 
@@ -130,8 +130,8 @@ export const useWorkflowGraph = ({
         const { id, type, name, position, config = {} } = node
         let nodeLibraryConfig = [...nodeLibrary, { nodes: [unknownNode] }]
           .flatMap(category => category.nodes)
-          .find(n => n.type === type)
-        nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
+          .find(n => n.type === type) as NodeProperties
+        nodeLibraryConfig = JSON.parse(JSON.stringify({ ...nodeLibraryConfig, config: nodeLibraryConfig.config || {} }))
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
@@ -201,11 +201,10 @@ export const useWorkflowGraph = ({
         // Generate ports dynamically for if-else node based on cases
         if (type === 'if-else' && config.cases && Array.isArray(config.cases)) {
           const totalPorts = config.cases.length + 1; // IF/ELIF + ELSE
-          const baseHeight = 88;
-          const newHeight = baseHeight + (totalPorts - 2) * 30;
+          const newHeight = conditionNodeHeight + (totalPorts - 2) * conditionNodeItemHeight;
           
           const portItems: PortMetadata[] = [
-            { group: 'left' },
+            defaultPortItems[0],
           ];
           // Add IF/ELIF/ELSE ports
           for (let i = 0; i < totalPorts; i++) {
@@ -214,9 +213,8 @@ export const useWorkflowGraph = ({
               id: `CASE${i + 1}`,
               args: {
                 x: nodeWidth,
-                y: 30 * i + 42,
+                y: portItemArgsY * i + conditionNodePortItemArgsY,
               },
-              attrs: { text: { text: i === 0 ? 'IF' : i === totalPorts - 1 ? 'ELSE' : 'ELIF', ...portTextAttrs } }
             });
           }
           
@@ -231,11 +229,10 @@ export const useWorkflowGraph = ({
         // Generate ports dynamically for question-classifier node based on categories
         if (type === 'question-classifier' && config.categories && Array.isArray(config.categories)) {
           const categoryCount = config.categories.length;
-          const baseHeight = 88;
-          const newHeight = baseHeight + (categoryCount - 2) * 30;
+          const newHeight = conditionNodeHeight + (categoryCount - 2) * conditionNodeItemHeight;
           
           const portItems: PortMetadata[] = [
-            { group: 'left' }
+            defaultPortItems[0]
           ];
           
           // Add category ports
@@ -245,9 +242,8 @@ export const useWorkflowGraph = ({
               id: `CASE${index + 1}`,
               args: {
                 x: nodeWidth,
-                y: 30 * index + 42,
+                y: portItemArgsY * index + conditionNodePortItemArgsY,
               },
-              attrs: { text: { text: `分类${index + 1}`, ...portTextAttrs }}
             });
           });
           
@@ -260,16 +256,22 @@ export const useWorkflowGraph = ({
         }
         
         // Check error_handle.method config for http-request node
-        if (type === 'http-request' && (config as any).error_handle?.method === 'branch') {
+        if (type === 'http-request' && (nodeConfig as any).error_handle?.method === 'branch') {
           nodeConfig.ports = {
             groups: {
               right: { position: 'right', markup: portMarkup, attrs: portAttrs },
               left: { position: 'left', markup: portMarkup, attrs: portAttrs },
             },
             items: [
-              { group: 'left' },
-              { group: 'right', id: 'right' },
-              { group: 'right', id: 'ERROR', attrs: { text: { text: t('workflow.config.http-request.errorBranch'), ...portTextAttrs }}}
+              defaultPortItems[0],
+              { ...defaultPortItems[1], id: 'right' },
+              {
+                ...defaultPortItems[1],
+                args: {
+                  x: nodeWidth,
+                  y: portItemArgsY + portItemArgsY,
+                },
+                id: 'ERROR', attrs: { text: { text: t('workflow.config.http-request.errorBranch'), ...portTextAttrs }}}
             ]
           };
         }
@@ -326,6 +328,14 @@ export const useWorkflowGraph = ({
               console.log('newWidth', newHeight, newWidth)
               
               parentNode.prop('size', { width: newWidth, height: newHeight })
+              
+              // Update x position of right group ports
+              const ports = (parentNode as Node).getPorts()
+              ports.forEach(port => {
+                if (port.group === 'right' && port.args) {
+                  (parentNode as Node).portProp(port.id!, 'args/x', newWidth)
+                }
+              })
             }
           }
         })
@@ -482,6 +492,7 @@ export const useWorkflowGraph = ({
       isSelected: true,
     });
     setSelectedNode(node);
+    clearEdgeSelect()
   };
   /**
    * Handle edge click event
@@ -514,7 +525,7 @@ export const useWorkflowGraph = ({
   const clearEdgeSelect = () => {
     graphRef.current?.getEdges().forEach(e => {
       e.setAttrByPath('line/stroke', edge_color);
-      e.setAttrByPath('line/strokeWidth', 1);
+      e.setAttrByPath('line/strokeWidth', edge_width);
     });
   };
   /**
@@ -524,6 +535,7 @@ export const useWorkflowGraph = ({
     clearNodeSelect();
     clearEdgeSelect();
     graphRef.current?.cleanSelection();
+    setSelectedNode(null);
   };
   /**
    * Handle canvas scale/zoom event
@@ -675,6 +687,28 @@ export const useWorkflowGraph = ({
     }
     return false;
   };
+  const nodePortClickEvent = ({ e, node, port }: { e: MouseEvent, node: Node, port: string }) => {
+    e.stopPropagation();
+    const portElement = e.target as HTMLElement;
+    const rect = portElement.getBoundingClientRect();
+
+    // Create temporary popover trigger element
+    const tempDiv = document.createElement('div');
+    tempDiv.style.position = 'fixed';
+    tempDiv.style.left = rect.left + 'px';
+    tempDiv.style.top = rect.top + 'px';
+    tempDiv.style.width = '1px';
+    tempDiv.style.height = '1px';
+    tempDiv.style.zIndex = '9999';
+    document.body.appendChild(tempDiv);
+
+    // Trigger custom event to show node selection popover
+    const customEvent = new CustomEvent('port:click', {
+      detail: { node, port, element: tempDiv, rect }
+    });
+    window.dispatchEvent(customEvent);
+    clearNodeSelect();
+  }
 
   /**
    * Handle window resize event
@@ -808,7 +842,7 @@ export const useWorkflowGraph = ({
     graphRef.current.on('edge:mouseleave', ({ edge }: { edge: Edge }) => {
       if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
         edge.setAttrByPath('line/stroke', edge_color);
-        edge.setAttrByPath('line/strokeWidth', 1);
+        edge.setAttrByPath('line/strokeWidth', edge_width);
       }
     });
     // Listen to node selection event
@@ -816,33 +850,14 @@ export const useWorkflowGraph = ({
     // Listen to edge selection event
     graphRef.current.on('edge:click', edgeClick);
     // Listen to port click event
-    graphRef.current.on('node:port:click', ({ e, node, port }: { e: MouseEvent, node: Node, port: string }) => {
-      e.stopPropagation();
-      const portElement = e.target as HTMLElement;
-      const rect = portElement.getBoundingClientRect();
-      
-      // Create temporary popover trigger element
-      const tempDiv = document.createElement('div');
-      tempDiv.style.position = 'fixed';
-      tempDiv.style.left = rect.left + 'px';
-      tempDiv.style.top = rect.top + 'px';
-      tempDiv.style.width = '1px';
-      tempDiv.style.height = '1px';
-      tempDiv.style.zIndex = '9999';
-      document.body.appendChild(tempDiv);
-      
-      // Trigger custom event to show node selection popover
-      const customEvent = new CustomEvent('port:click', {
-        detail: { node, port, element: tempDiv, rect }
-      });
-      window.dispatchEvent(customEvent);
-    });
+    graphRef.current.on('node:port:click', nodePortClickEvent);
     // Listen to canvas click event, cancel selection
     graphRef.current.on('blank:click', blankClick);
     // Listen to zoom event
     graphRef.current.on('scale', scaleEvent);
     // Listen to node move event
     graphRef.current.on('node:moved', nodeMoved);
+    graphRef.current.on('node:removed', blankClick)
     // Listen to copy keyboard event
     graphRef.current.bindKey(['ctrl+c', 'cmd+c'], copyEvent);
     // Listen to paste keyboard event
@@ -889,7 +904,7 @@ export const useWorkflowGraph = ({
       name: t(`workflow.${dragData.type}`),
       ...nodeLibraryConfig
     };
-    
+
     if (dragData.type === 'loop' || dragData.type === 'iteration') {
       graphRef.current.addNode({
         ...graphNodeLibrary[dragData.type],

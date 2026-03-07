@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-11 12:07:20
+ * @Last Modified time: 2026-03-06 14:52:02
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -13,40 +13,24 @@ import type { PortMetadata, GroupMetadata } from '@antv/x6/lib/model/port';
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 
 // Import workflow icons
-import startIcon from '@/assets/images/workflow/start.png';
-import endIcon from '@/assets/images/workflow/end.png';
-// import answerIcon from '@/assets/images/workflow/answer.png';
-import llmIcon from '@/assets/images/workflow/llm.png';
-// import modelSelectionIcon from '@/assets/images/workflow/model_selection.png';
-// import modelVotingIcon from '@/assets/images/workflow/model_voting.png';
-import ragIcon from '@/assets/images/workflow/rag.png';
-// import classificationIcon from '@/assets/images/workflow/classification.png';
-import parameterExtractionIcon from '@/assets/images/workflow/parameter_extraction.png';
-// import taskPlanningIcon from '@/assets/images/workflow/task_planning.png';
-// import reasoningControlIcon from '@/assets/images/workflow/reasoning_control.png';
-// import selfReflectionIcon from '@/assets/images/workflow/self_reflection.png';
-// import memoryEnhancementIcon from '@/assets/images/workflow/memory_enhancement.png';
-// import agentSchedulingIcon from '@/assets/images/workflow/agent_scheduling.png';
-// import agentCollaborationIcon from '@/assets/images/workflow/agent_collaboration.png';
-// import agentArbitrationIcon from '@/assets/images/workflow/agent_arbitration.png';
-import conditionIcon from '@/assets/images/workflow/condition.png';
-import iterationIcon from '@/assets/images/workflow/iteration.png';
-import loopIcon from '@/assets/images/workflow/loop.png';
-// import parallelIcon from '@/assets/images/workflow/parallel.png';
-import aggregatorIcon from '@/assets/images/workflow/aggregator.png';
-import httpRequestIcon from '@/assets/images/workflow/http_request.png';
-import toolsIcon from '@/assets/images/workflow/tools.png';
-import codeExecutionIcon from '@/assets/images/workflow/code_execution.png';
-import templateRenderingIcon from '@/assets/images/workflow/template_rendering.png';
-// import sensitiveDetectionIcon from '@/assets/images/workflow/sensitive_detection.png';
-// import outputAuditIcon from '@/assets/images/workflow/output_audit.png';
-// import selfOptimizationIcon from '@/assets/images/workflow/self_optimization.png';
-// import processEvolutionIcon from '@/assets/images/workflow/process_evolution.png';
-import questionClassifierIcon from '@/assets/images/workflow/question-classifier.png'
-import breakIcon from '@/assets/images/workflow/break.png'
-import assignerIcon from '@/assets/images/workflow/assigner.png'
-import memoryReadIcon from '@/assets/images/workflow/memory-read.png'
-import memoryWriteIcon from '@/assets/images/workflow/memory-write.png'
+import startIcon from '@/assets/images/workflow/start.svg';
+import endIcon from '@/assets/images/workflow/end.svg';
+import llmIcon from '@/assets/images/workflow/llm.svg';
+import ragIcon from '@/assets/images/workflow/rag.svg';
+import parameterExtractionIcon from '@/assets/images/workflow/parameter_extraction.svg';
+import conditionIcon from '@/assets/images/workflow/condition.svg';
+import iterationIcon from '@/assets/images/workflow/iteration.svg';
+import loopIcon from '@/assets/images/workflow/loop.svg';
+import aggregatorIcon from '@/assets/images/workflow/aggregator.svg';
+import httpRequestIcon from '@/assets/images/workflow/http_request.svg';
+import toolsIcon from '@/assets/images/workflow/tools.svg';
+import codeExecutionIcon from '@/assets/images/workflow/code_execution.svg';
+import templateRenderingIcon from '@/assets/images/workflow/template_rendering.svg';
+import questionClassifierIcon from '@/assets/images/workflow/question-classifier.svg'
+import breakIcon from '@/assets/images/workflow/break.svg'
+import assignerIcon from '@/assets/images/workflow/assigner.svg'
+import memoryReadIcon from '@/assets/images/workflow/memory-read.svg'
+import memoryWriteIcon from '@/assets/images/workflow/memory-write.svg'
 import unknownIcon from '@/assets/images/workflow/unknown.svg'
 
 import { memoryConfigListUrl } from '@/api/memory'
@@ -119,21 +103,21 @@ export const nodeLibrary: NodeLibrary[] = [
       { type: "llm", icon: llmIcon,
         config: {
           model_id: {
-            type: 'customSelect',
+            type: 'define',
             url: getModelListUrl,
             params: { type: 'llm,chat', pagesize: 100, is_active: true }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },
           temperature: {
-            type: 'slider',
+            type: 'define',
             max: 2, 
             min: 0, 
             step: 0.1,
             defaultValue: 0.7
           },
           max_tokens: { 
-            type: 'slider', 
+            type: 'define',
             max: 32000, 
             min: 256, 
             step: 1, 
@@ -171,8 +155,6 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      // { type: "model_selection", icon: modelSelectionIcon },
-      // { type: "model_voting", icon: modelVotingIcon },
       { type: "knowledge-retrieval", icon: ragIcon,
         config: {
           query: {
@@ -183,7 +165,6 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      // { type: "classification", icon: classificationIcon },
       { type: "parameter-extractor", icon: parameterExtractionIcon,
         config: {
           model_id: {
@@ -260,14 +241,6 @@ export const nodeLibrary: NodeLibrary[] = [
       },
     ]
   },
-  // {
-  //   category: "agentCollaborationNode",
-  //   nodes: [
-  //     { type: "agent_scheduling", icon: agentSchedulingIcon },
-  //     { type: "agent_collaboration", icon: agentCollaborationIcon },
-  //     { type: "agent_arbitration", icon: agentArbitrationIcon }
-  //   ]
-  // },
   {
     category: "flowControl",
     nodes: [
@@ -306,7 +279,8 @@ export const nodeLibrary: NodeLibrary[] = [
           user_supplement_prompt: {
             type: 'messageEditor',
             isArray: false,
-            titleVariant: 'borderless'
+            titleVariant: 'borderless',
+            placeholder: 'common.pleaseEnter'
           }
         }
       },
@@ -366,9 +340,8 @@ export const nodeLibrary: NodeLibrary[] = [
           },
         }
       },
-      { type: "cycle-start", icon: loopIcon },
+      { type: "cycle-start", icon: startIcon },
       { type: "break", icon: breakIcon },
-      // { type: "parallel", icon: parallelIcon },
       { type: "var-aggregator", icon: aggregatorIcon,
         config: {
           group: {
@@ -510,20 +483,6 @@ export const nodeLibrary: NodeLibrary[] = [
       },
     ]
   },
-  // {
-  //   category: "safetyAndCompliance",
-  //   nodes: [
-  //     { type: "sensitive_detection", icon: sensitiveDetectionIcon },
-  //     { type: "output_audit", icon: outputAuditIcon }
-  //   ]
-  // },
-  // {
-  //   category: "evolutionAndGovernance",
-  //   nodes: [
-  //     { type: "self_optimization", icon: selfOptimizationIcon },
-  //     { type: "process_evolution", icon: processEvolutionIcon }
-  //   ]
-  // },
 ];
 export const unknownNode = {
   type: 'unknown',
@@ -531,6 +490,10 @@ export const unknownNode = {
 }
 
 export const nodeWidth = 240;
+
+export const conditionNodePortItemArgsY = 60;
+export const conditionNodeItemHeight = 26;
+export const conditionNodeHeight = 110;
 /**
  * Node registration library for X6 graph
  * Maps node shapes to their React components
@@ -557,19 +520,19 @@ export const nodeRegisterLibrary: ReactShapeConfig[] = [
   {
     shape: 'condition-node',
     width: nodeWidth,
-    height: 88,
+    height: conditionNodeHeight,
     component: ConditionNode,
   },
   {
     shape: 'cycle-start',
-    width: 44,
-    height: 44,
+    width: 36,
+    height: 36,
     component: GroupStartNode,
   },
   {
     shape: 'add-node',
-    width: 88,
-    height: 44,
+    width: 100,
+    height: 28,
     component: AddNode,
   },
 ];
@@ -599,10 +562,12 @@ interface NodeConfig {
 }
 
 /** Edge color for normal state */
-export const edge_color = '#155EEF';
+export const edge_color = '#D4D5D9';
 /** Edge color for selected state */
-export const edge_selected_color = '#4DA8FF'
-
+export const edge_selected_color = '#171719'
+export const edge_width = 2;
+/** Port color */
+export const port_color = '#171719'
 /**
  * Unified port markup configuration
  * Defines SVG elements for port rendering
@@ -626,9 +591,9 @@ export const portAttrs = {
   body: {
     r: 6, 
     magnet: true, 
-    stroke: edge_color, 
-    strokeWidth: 2, 
-    fill: edge_color,
+    stroke: port_color, 
+    strokeWidth: edge_width, 
+    fill: port_color,
   },
   label: {
     text: '+',
@@ -641,36 +606,33 @@ export const portAttrs = {
   },
 }
 export const portTextAttrs = { fontSize: 12, fill: '#5B6167' }
+/**
+ * Port position arguments
+ */
+export const portItemArgsY = 26;
+export const portArgs = { x: nodeWidth, y: portItemArgsY }
+
+const defaultPortGroup = {
+  position: { name: 'absolute' },
+  markup: portMarkup,
+  attrs: portAttrs
+}
 
 /**
  * Unified port group configuration
  * Defines port positions and attributes for different sides
  */
-const defaultPortGroups = {
-  // top: { position: 'top', markup: portMarkup, attrs: portAttrs },
-  right: { position: 'right', markup: portMarkup, attrs: portAttrs },
-  // bottom: { position: 'bottom', markup: portMarkup, attrs: portAttrs },
-  left: { position: 'left', markup: portMarkup, attrs: portAttrs },
-}
 export const defaultAbsolutePortGroups = {
-  // top: { position: 'top', markup: portMarkup, attrs: portAttrs },
-  right: { position: { name: 'absolute' }, markup: portMarkup, attrs: portAttrs },
-  // bottom: { position: 'bottom', markup: portMarkup, attrs: portAttrs },
-  left: { position: 'left', markup: portMarkup, attrs: portAttrs },
+  right: defaultPortGroup,
+  left: defaultPortGroup,
 }
 /**
  * Default port items for standard nodes
  */
-const defaultPortItems = [
-  // { group: 'top' },
-  { group: 'right' },
-  // { group: 'bottom' },
-  { group: 'left' }
+export const defaultPortItems = [
+  { group: 'left', args: { x: 0, y: portItemArgsY }, },
+  { group: 'right', args: { x: nodeWidth, y: portItemArgsY }, },
 ];
-/**
- * Port position arguments
- */
-export const portArgs = { x: nodeWidth, y: 42 }
 
 /**
  * Graph node library configuration
@@ -679,125 +641,132 @@ export const portArgs = { x: nodeWidth, y: 42 }
 export const graphNodeLibrary: Record<string, NodeConfig> = {
   iteration: {
     width: nodeWidth,
-    height: 120,
+    height: 140,
     shape: 'iteration-node',
     ports: {
-      groups: defaultPortGroups,
+      groups: defaultAbsolutePortGroups,
       items: defaultPortItems,
     },
   },
   loop: {
     width: nodeWidth,
-    height: 120,
+    height: 140,
     shape: 'loop-node',
     ports: {
-      groups: defaultPortGroups,
+      groups: defaultAbsolutePortGroups,
       items: defaultPortItems,
     },
   },
   'if-else': {
     width: nodeWidth,
-    height: 88,
+    height: conditionNodeHeight,
     shape: 'condition-node',
     ports: {
       groups: defaultAbsolutePortGroups,
       items: [
-        { group: 'left' },
-        ...(['IF', 'ELSE'].map((text, index) => ({
+        defaultPortItems[0],
+        ...(['IF', 'ELSE'].map((_, index) => ({
           group: 'right',
           id: `CASE${index}`,
           args: {
             ...portArgs,
-            y: 30 * index + 42,
+            y: portItemArgsY * index + conditionNodePortItemArgsY,
           },
-          attrs: { text: { text: text, ...portTextAttrs } }
         }))),
       ],
     },
   },
   'question-classifier': {
     width: nodeWidth,
-    height: 88,
+    height: conditionNodeHeight,
     shape: 'condition-node',
     ports: {
       groups: defaultAbsolutePortGroups,
       items: [
-        { group: 'left' },
-        ...(['分类1', '分类2'].map((text, index) => ({
+        defaultPortItems[0],
+        ...(['分类1', '分类2'].map((_text, index) => ({
           group: 'right',
           id: `CASE${index}`,
           args: {
             ...portArgs,
-            y: 30 * index + 42,
+            y: portItemArgsY * index + conditionNodePortItemArgsY,
           },
-          attrs: { text: { text: text, ...portTextAttrs } }
         }))),
       ],
     },
   },
   start: {
     width: nodeWidth,
-    height: 64,
+    height: 76,
     shape: 'normal-node',
     ports: {
-      groups: {right: { position: 'right', markup: portMarkup, attrs: portAttrs }},
-      items: [{ group: 'right' }],
+      groups: { right: defaultPortGroup},
+      items: [defaultPortItems[1]],
     },
   },
   end: {
     width: nodeWidth,
-    height: 64,
+    height: 76,
     shape: 'normal-node',
     ports: {
-      groups: {left: { position: 'left', markup: portMarkup, attrs: portAttrs }},
-      items: [{ group: 'left' }],
+      groups: { left: defaultPortGroup},
+      items: [defaultPortItems[0]],
     },
   },
   'cycle-start': {
-    width: 44,
-    height: 44,
+    width: 36,
+    height: 36,
     shape: 'cycle-start',
     ports: {
-      groups: {right: { position: 'right', markup: portMarkup, attrs: portAttrs }},
-      items: [{ group: 'right' }],
+      groups: { right: defaultPortGroup },
+      items: [{ group: 'right', args: { x: 36, y: 18 } }],
     },
   },
   'add-node': {
-    width: 88,
-    height: 44,
+    width: 100,
+    height: 28,
     shape: 'add-node',
     ports: {
-      groups: {left: { position: 'left', markup: portMarkup, attrs: portAttrs }},
-      items: [{ group: 'left' }],
+      groups: { left: defaultPortGroup },
+      items: [{ group: 'left', args: { x: 0, y: 18 }}],
     },
   },
   default: {
     width: nodeWidth,
-    height: 64,
+    height: 76,
     shape: 'normal-node',
     ports: {
-      groups: defaultPortGroups,
+      groups: defaultAbsolutePortGroups,
       items: defaultPortItems,
     },
   },
   cycleStart: {
-    width: 44,
-    height: 44,
+    width: 36,
+    height: 36,
     shape: 'cycle-start',
     ports: {
-      groups: {right: { position: 'right', markup: portMarkup, attrs: portAttrs }},
-      items: [{ group: 'right' }],
+      groups: { right: defaultPortGroup },
+      items: [{ group: 'right', args: { x: 36, y: 18 }}],
     },
   },
   addStart: {
-    width: 88,
-    height: 44,
+    width: 100,
+    height: 28,
     shape: 'add-node',
     ports: {
-      groups: {left: { position: 'left', markup: portMarkup, attrs: portAttrs }},
-      items: [{ group: 'left' }],
+      groups: { left: defaultPortGroup },
+      items: [{ group: 'left', args: { x: 0, y: 14 } }],
     },
-  }
+  },
+  break: {
+    width: nodeWidth,
+    height: 76,
+    shape: 'normal-node',
+    ports: {
+      groups: { left: defaultPortGroup },
+      items: [defaultPortItems[0]],
+    },
+  },
 }
 
 
@@ -926,7 +895,7 @@ export const edgeAttrs = {
   attrs: {
     line: {
       stroke: edge_color,
-      strokeWidth: 1,
+      strokeWidth: edge_width,
       targetMarker: {
         name: 'block',
         width: 4,

@@ -6,7 +6,8 @@
  */
 import { type FC } from 'react'
 import clsx from 'clsx';
-import { Select, type SelectProps } from 'antd'
+import { Select, type SelectProps, Flex } from 'antd'
+
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 type LabelRender = SelectProps['labelRender'];
 
@@ -62,7 +63,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
     if (filterOption) {
       return (
         <span
-          className={clsx("rb:max-w-full rb:wrap-break-word rb:line-clamp-1 rb:border rb:border-[#DFE4ED] rb:rounded-md rb:bg-white rb:text-[12px] rb:inline-flex rb:items-center rb:px-1.5 rb:cursor-pointer", {
+          className={clsx("rb:max-w-full rb:wrap-break-word rb:line-clamp-1 rb-border rb:rounded-md rb:bg-white rb:text-[12px] rb:inline-flex rb:items-center rb:px-1.5 rb:cursor-pointer", {
             'rb:leading-5.5!': size !== 'small',
             'rb:leading-4! rb:text-[10px]!': size === 'small'
           })}
@@ -79,7 +80,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
               <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>
             </>
           )}
-          <span className="rb:text-[#155EEF]">{filterOption.label}</span>
+          <span className="rb:text-[#171719]">{filterOption.label}</span>
         </span>
       )
     }
@@ -109,7 +110,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   const groupedOptions = Object.entries(groupedSuggestions).map(([_nodeId, suggestions]) => ({
     label: suggestions[0].nodeData.name,
     options: suggestions.map(s => ({ 
-      label: <div className="rb:flex rb:items-center rb:gap-1 rb:justify-between"> { s.label } <span>{s.dataType}</span></div>, 
+      label: <Flex align="center" justify="space-between" gap={4}> {s.label} <span>{s.dataType}</span></Flex>, 
       value: `{{${s.value}}}` 
     }))
   }));

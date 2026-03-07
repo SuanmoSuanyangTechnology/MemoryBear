@@ -28,6 +28,9 @@
   background-color: transparent;
   border-top: none;
 }
+:global(.ant-collapse .ant-collapse-content>.ant-collapse-content-box) {
+  padding-top: 0;
+}
 .collapse-item :global(.ant-collapse) {
   /* background-color: #F0F3F8; */
   background-color: #FBFDFF;
@@ -38,5 +41,5 @@
   border-radius: 0 0 6px 6px;
 }
 .collapse-item :global(.ant-collapse .ant-collapse-content>.ant-collapse-content-box) {
-  padding: 4px;
+  padding: 0 4px 4px 4px;
 }

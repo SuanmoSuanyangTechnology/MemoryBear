@@ -9,7 +9,6 @@ import { useWorkflowGraph } from './hooks/useWorkflowGraph';
 import type { WorkflowRef } from '@/views/ApplicationConfig/types'
 import Chat from './components/Chat/Chat';
 import type { ChatRef, AddChatVariableRef } from './types'
-import arrowIcon from '@/assets/images/workflow/arrow.png'
 import AddChatVariable from './components/AddChatVariable';
 
 const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
@@ -23,14 +22,9 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
     config,
     graphRef,
     selectedNode,
-    setSelectedNode,
     zoomLevel,
-    canUndo,
-    canRedo,
     isHandMode,
     setIsHandMode,
-    onUndo,
-    onRedo,
     onDrop,
     blankClick,
     deleteEvent,
@@ -64,22 +58,11 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
   return (
     <div className="rb:h-[calc(100vh-64px)] rb:relative">
       {/* 左侧节点面板 */}
-      {!collapsed  && <NodeLibrary />}
-      <img 
-        src={arrowIcon} 
-        className={clsx('rb:cursor-pointer rb:w-5 rb:h-10 rb:absolute rb:top-[50%] rb:z-100', {
-          'rb:left-0 rb:rotate-180': collapsed,
-          'rb:left-80': !collapsed
-        })} 
-        onClick={handleToggle}
-      />
+      <NodeLibrary collapsed={collapsed} handleToggle={handleToggle} />
       
       {/* 右侧画布区域 */}
       <div 
-        className={clsx(`rb:fixed rb:top-16 rb:bottom-0 rb:right-75 rb:flex-1 rb:border-x rb:border-[#DFE4ED] rb:transition-all`, {
-          'rb:left-80': !collapsed,
-          'rb:left-0': collapsed
-        })}
+        className={clsx(`rb:fixed rb:top-18.5 rb:bottom-2.5 rb:left-0 rb:right-0 rb:transition-all`)}
         onDrop={onDrop}
         onDragOver={onDragOver}
       >
@@ -91,25 +74,22 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
           isHandMode={isHandMode}
           setIsHandMode={setIsHandMode}
           zoomLevel={zoomLevel}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          onUndo={onUndo}
-          onRedo={onRedo}
         />
       </div>
       
       {/* 右侧属性面板 */}
-      <Properties 
-        selectedNode={selectedNode} 
-        setSelectedNode={setSelectedNode}
-        graphRef={graphRef}
-        blankClick={blankClick}
-        deleteEvent={deleteEvent}
-        copyEvent={copyEvent}
-        parseEvent={parseEvent}
-        config={config}
-        chatVariables={chatVariables}
-      />
+      {selectedNode &&
+        <Properties 
+          selectedNode={selectedNode}
+          graphRef={graphRef}
+          blankClick={blankClick}
+          deleteEvent={deleteEvent}
+          copyEvent={copyEvent}
+          parseEvent={parseEvent}
+          config={config}
+          chatVariables={chatVariables}
+        />
+      }
       <Chat
         ref={chatRef}
         graphRef={graphRef}

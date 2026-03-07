@@ -1,8 +1,10 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next';
-import { Form, Input, Select, InputNumber, Radio, Button, Space } from 'antd'
+import { Form, Input, Select, InputNumber, Button, Flex } from 'antd'
+
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
+import RadioGroupBtn from '../RadioGroupBtn'
 
 interface AssignmentListProps {
   value?: Array<{ variable_selector: string; operation: string[]; value: string;}>;
@@ -40,21 +42,21 @@ const AssignmentList: FC<AssignmentListProps> = ({
     <Form.List name={parentName}>
       {(fields, { add, remove }) => (
         <>
-          <div className="rb:flex rb:items-center rb:justify-between rb:mb-2.5">
+          <Flex align="center" justify="space-between" className="rb:mb-2.5!">
             <div className="rb:text-[12px] rb:leading-4.5 rb:font-medium">
               {t(`workflow.config.assigner.${parentName}`)}
             </div>
 
             <Button
               onClick={() => add({ operation: 'cover' })}
-              className="rb:py-0! rb:px-1! rb:text-[12px]!"
+              className="rb:py-0! rb:px-1! rb:h-4.5! rb:rounded-sm! rb:text-[12px]!"
               size="small"
             >
               + {t('workflow.config.addVariable')}
             </Button>
-          </div>
+          </Flex >
 
-          <Space size={10} direction="vertical" className="rb:w-full!">
+          <Flex gap={10} vertical>
             {fields.map(({ key, name, ...restField }) => {
               const variableSelector = form.getFieldValue([parentName, name, 'variable_selector']);
               const selectedOption = options.find(option => `{{${option.value}}}` === variableSelector);
@@ -62,9 +64,9 @@ const AssignmentList: FC<AssignmentListProps> = ({
               const operationOptions = dataType === 'number' ? operationsObj.number : operationsObj.default;
               
               return (
-                <div key={key} className="rb:flex rb:items-start">
+                <Flex key={key} gap={4} align="start">
                   <div className="rb:flex-1">
-                    <div className="rb:flex rb:gap-1 rb:mb-1">
+                    <Flex gap={4} className="rb:mb-1!">
                       <Form.Item
                         {...restField}
                         name={[name, 'variable_selector']}
@@ -79,7 +81,8 @@ const AssignmentList: FC<AssignmentListProps> = ({
                             form.setFieldValue([parentName, name, 'value'], undefined);
                           }}
                           size={size}
-                          className="rb:w-39!"
+                          className="rb:w-39! rb:bg-[#F6F6F6]!"
+                          variant="borderless"
                         />
                       </Form.Item>
                       <Form.Item
@@ -98,10 +101,11 @@ const AssignmentList: FC<AssignmentListProps> = ({
                             form.setFieldValue([parentName, name, 'value'], undefined);
                           }}
                           size={size}
-                          className="rb:w-24!"
+                          className="rb:w-39! select"
+                          variant="borderless"
                         />
                       </Form.Item>
-                    </div>
+                    </Flex>
                     <Form.Item shouldUpdate noStyle>
                       {(form) => {
                         const operation = form.getFieldValue([parentName, name, 'operation']);
@@ -119,24 +123,30 @@ const AssignmentList: FC<AssignmentListProps> = ({
                                 options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
                                 popupMatchSelectWidth={false}
                                 size={size}
+                                variant="borderless"
+                                className="select"
                               />
                               : dataType === 'number'
                                 ? <InputNumber
                                   placeholder={t('common.pleaseEnter')}
-                                  className="rb:w-full!"
+                                  className="rb:w-full! rb:bg-[#F6F6F6]!"
                                   onChange={(value) => form.setFieldValue([name, 'value'], value)}
                                   size={size}
+                                  variant="borderless"
                                 />
                                 : operation === 'assign'
                                   ? <>
                                     {dataType === 'boolean'
-                                      ? <Radio.Group block size={size}>
-                                        <Radio.Button value={true}>True</Radio.Button>
-                                        <Radio.Button value={false}>False</Radio.Button>
-                                      </Radio.Group>
+                                      ? <RadioGroupBtn
+                                        options={[
+                                          { value: true, label: 'True' },
+                                          { value: false, label: 'False' }]}
+                                      />
                                       : <Input.TextArea
                                         placeholder={t('common.pleaseEnter')}
                                         rows={3}
+                                        variant="borderless"
+                                        className="rb:bg-[#F6F6F6]!"
                                       />
                                     }
                                   </>
@@ -145,6 +155,8 @@ const AssignmentList: FC<AssignmentListProps> = ({
                                     options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
                                     popupMatchSelectWidth={false}
                                     size={size}
+                                    variant="borderless"
+                                    className="select"
                                   />
                             }
                           </Form.Item>
@@ -153,13 +165,13 @@ const AssignmentList: FC<AssignmentListProps> = ({
                     </Form.Item>
                   </div>
                   <div
-                    className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+                    className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
                     onClick={() => remove(name)}
                   ></div>
-                </div>
+                </Flex>
               )
             })}
-          </Space>
+          </Flex>
         </>
       )}
     </Form.List>

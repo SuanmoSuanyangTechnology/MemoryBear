@@ -2,11 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:35:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-02 17:24:51
+ * @Last Modified time: 2026-03-04 15:20:32
  */
 import { type FC, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
-import { Form, Row, Col, Select, Button, Divider, InputNumber, Switch, Input } from 'antd'
+import { Form, Row, Col, Select, Button, Divider, InputNumber, Switch, Input, Flex, Radio } from 'antd'
 import { CaretDownOutlined, CaretRightOutlined, SettingOutlined } from '@ant-design/icons';
 
 import Editor from '../../Editor'
@@ -15,7 +15,7 @@ import AuthConfigModal from './AuthConfigModal'
 import type { AuthConfigModalRef, HttpRequestConfigForm } from './types'
 import MessageEditor from '../MessageEditor'
 import EditableTable from './EditableTable'
-import { portTextAttrs } from '../../../constant'
+import { portTextAttrs, nodeWidth, portItemArgsY } from '../../../constant'
 
 const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: any; }> = ({
   options,
@@ -35,8 +35,9 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
     form.setFieldsValue({ auth })
   }
 
-  const handleChangeBodyContentType = () => {
-    form.setFieldValue(['body', 'data'], undefined)
+  const handleChangeBodyContentType = (e: any) => {
+    const value = e.target.value || e.target.value
+    form.setFieldValue(['body', 'data'], ['form-data', 'x-www-form-urlencoded'].includes(value) ? [{}] : undefined)
   }
 
   // Handle error handling method change and update node ports accordingly
@@ -61,6 +62,10 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         selectedNode.addPort({
           id: 'ERROR',
           group: 'right',
+          args: {
+            x: nodeWidth,
+            y: portItemArgsY + portItemArgsY,
+          },
           attrs: { text: { text: t('workflow.config.http-request.errorBranch'), ...portTextAttrs }}
         });
       } else if (method !== 'branch' && errorPort) {
@@ -81,7 +86,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
 
   return (
     <>
-      <div className="rb:flex rb:items-center rb:justify-between rb:mb-1">
+      <Flex align="center" justify="space-between" className="rb:mb-1!">
         <div className="rb:font-medium rb:text-[12px] rb:leading-4.5">API</div>
         <Button onClick={handleChangeAuth}
           size="small"
@@ -89,7 +94,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           icon={<SettingOutlined />}
           className="rb:mt-1 rb:text-[12px]!"
         >{t('workflow.config.http-request.auth')}: {!values?.auth?.auth_type || values?.auth?.auth_type === 'none' ? t('workflow.config.http-request.none') : t('workflow.config.http-request.apiKey')}</Button>
-      </div>
+      </Flex>
       <Row gutter={4}>
         <Col span={8}>
           <Form.Item name="method">
@@ -113,6 +118,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
               variant="outlined"
               type="input"
               size="small"
+              height={28}
             />
           </Form.Item>
         </Col>
@@ -139,9 +145,9 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
       </Form.Item>
 
       <Form.Item label="BODY" className="rb:mb-0!">
-        <Form.Item name={['body', 'content_type']}>
-          <Select
-            placeholder={t('common.pleaseSelect')}
+        <Form.Item name={['body', 'content_type']} className="rb:mb-3!">
+          <Radio.Group
+            size="small"
             onChange={handleChangeBodyContentType}
             options={[
               { label: 'none', value: 'none' },
@@ -184,6 +190,9 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
               options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
               isArray={false}
               title="JSON"
+              titleVariant="borderless"
+              size="small"
+              className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-[#171719]!"
             />
           </Form.Item>
         }
@@ -195,6 +204,9 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
               options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
               isArray={false}
               title="RAW TEXT"
+              titleVariant="borderless"
+              size="small"
+              className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-[#171719]!"
             />
           </Form.Item>
         }
@@ -221,8 +233,9 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
       </div>
       <Form.Item
         name={['timeouts', 'connect_timeout']}
-        label={t('workflow.config.http-request.connect_timeout')}
+        label={<span className="rb:text-[#5B6167]">{t('workflow.config.http-request.connect_timeout')}</span>}
         hidden={collapsed}
+        className="rb:mb-2!"
       >
         <InputNumber
           placeholder={t('common.pleaseEnter')}
@@ -232,8 +245,9 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
       </Form.Item>
       <Form.Item
         name={['timeouts', 'read_timeout']}
-        label={t('workflow.config.http-request.read_timeout')}
+        label={<span className="rb:text-[#5B6167]">{t('workflow.config.http-request.read_timeout')}</span>}
         hidden={collapsed}
+        className="rb:mb-2!"
       >
         <InputNumber
           placeholder={t('common.pleaseEnter')}
@@ -243,8 +257,9 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
       </Form.Item>
       <Form.Item
         name={['timeouts', 'write_timeout']}
-        label={t('workflow.config.http-request.write_timeout')}
+        label={<span className="rb:text-[#5B6167]">{t('workflow.config.http-request.write_timeout')}</span>}
         hidden={collapsed}
+        className="rb:mb-2!"
       >
         <InputNumber
           placeholder={t('common.pleaseEnter')}
@@ -261,7 +276,8 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         <>
           <Form.Item
             name={['retry', 'max_attempts']}
-            label={t('workflow.config.http-request.max_attempts')}
+            label={<span className="rb:text-[#5B6167]">{t('workflow.config.http-request.max_attempts')}</span>}
+            className="rb:mb-2!"
           >
             <InputNumber
               placeholder={t('common.pleaseEnter')}
@@ -271,7 +287,8 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           </Form.Item>
           <Form.Item
             name={['retry', 'retry_interval']}
-            label={<>{t('workflow.config.http-request.retry_interval')} <span className="rb:text-[#5B6167]">(ms)</span></>}
+            label={<span className="rb:text-[#5B6167]">{t('workflow.config.http-request.retry_interval')}(ms)</span>}
+            className="rb:mb-2!"
           >
             <InputNumber
               placeholder={t('common.pleaseEnter')}
@@ -283,28 +300,40 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
       }
 
       <Divider />
-      <Form.Item layout="horizontal" name={['error_handle', 'method']} label={t('workflow.config.http-request.error_handle')}>
-        <Select
-          placeholder={t('common.pleaseSelect')}
-          onChange={handleChangeErrorHandleMethod}
-          options={[
-            { value: 'none', label: t('workflow.config.http-request.none') },
-            { value: 'default', label: t('workflow.config.http-request.default') },
-            { value: 'branch', label: t('workflow.config.http-request.branch') },
-          ]}
-        />
-      </Form.Item>
+      <Flex justify="space-between" align="center">
+        <div className="rb:text-[12px] rb:font-medium">{t('workflow.config.http-request.error_handle')}</div>
+        <Form.Item layout="horizontal" name={['error_handle', 'method']} noStyle>
+          <Select
+            placeholder={t('common.pleaseSelect')}
+            onChange={handleChangeErrorHandleMethod}
+            options={[
+              { value: 'none', label: t('workflow.config.http-request.none') },
+              { value: 'default', label: t('workflow.config.http-request.default') },
+              { value: 'branch', label: t('workflow.config.http-request.branch') },
+            ]}
+            className="rb:w-30!"
+          />
+        </Form.Item>
+      </Flex>
       {values?.error_handle?.method === 'default' &&
         <>
           <Form.Item
             name={['error_handle', 'body']}
-            label={<>body <span className="rb:text-[#5B6167] rb:ml-1">string</span></>}
+            label={<>
+              <span className="rb:text-[#5B6167] rb:font-medium">body</span>
+              <span className="rb:text-[#5B6167] rb:ml-1" style={{fontWeight: 400}}>string</span>
+            </>}
+            className="rb:my-2!"
           >
             <Input placeholder={t('common.pleaseEnter')} />
           </Form.Item>
           <Form.Item
             name={['error_handle', 'status_code']}
-            label={<>status_code <span className="rb:text-[#5B6167] rb:ml-1">number</span></>}
+            label={<>
+              <span className="rb:text-[#5B6167] rb:font-medium">status_code</span>
+              <span className="rb:text-[#5B6167] rb:ml-1" style={{fontWeight: 400}}>number</span>
+            </>}
+            className="rb:my-2!"
           >
             <InputNumber
               placeholder={t('common.pleaseEnter')}
@@ -314,12 +343,17 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           </Form.Item>
           <Form.Item
             name={['error_handle', 'headers']}
-            label={<>headers <span className="rb:text-[#5B6167] rb:ml-1">object</span></>}
+            label={<>
+              <span className="rb:text-[#5B6167] rb:font-medium">headers</span>
+              <span className="rb:text-[#5B6167] rb:ml-1" style={{fontWeight: 400}}>object</span>
+            </>}
+            className="rb:my-2!"
           >
             <Input.TextArea placeholder={t('common.pleaseEnter')} />
           </Form.Item>
         </>
       }
+      <Divider />
 
       <AuthConfigModal 
         ref={authConfigModalRef}

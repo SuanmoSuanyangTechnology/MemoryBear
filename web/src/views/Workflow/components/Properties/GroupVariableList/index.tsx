@@ -1,12 +1,12 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:39 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 15:17:39 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-03 10:54:15
  */
 import { useEffect, type FC } from 'react'
 import { useTranslation } from 'react-i18next';
-import { Form, Input, Button, Row, Col } from 'antd'
+import { Form, Input, Button, Flex } from 'antd'
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
@@ -126,8 +126,9 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
             {fields.map(({ key, name, ...restField }) => {
               return (
                 <div key={key} className="rb:mb-4">
-                  <Row gutter={12} className="rb:mb-2!">
-                    <Col span={12}>
+                  <Flex justify="space-between" className="rb:mb-0.5!">
+                    <Flex align="center" gap={4}>
+                      <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/workflow/file_fold.svg')]"></div>
                       <Form.Item
                         {...restField}
                         name={isCanAdd ? [name, 'key'] : undefined}
@@ -136,17 +137,25 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
                         ]}
                         noStyle
                       >
-                        {isCanAdd ? <Input placeholder={t('common.pleaseEnter')} size={size} /> : t('workflow.config.var-aggregator.variable')}
+                        {isCanAdd
+                          ? <Input
+                            placeholder={t('common.pleaseEnter')}
+                            size={size}
+                            variant="borderless"
+                            className="rb:border! rb:border-transparent! rb:py-px! rb:px-1! rb:rounded-md! rb:leading-4.25! rb:w-auto! rb:hover:bg-[#EBEBEB]! rb:hover:border-[#EBEBEB]! rb:focus:bg-transparent!"
+                          />
+                          : t('workflow.config.var-aggregator.variable')
+                        }
                       </Form.Item>
-                    </Col>
+                    </Flex>
 
-                    {isCanAdd && <Col span={12} className="rb:flex! rb:items-center rb:justify-end">
+                    {isCanAdd && (
                       <div
-                        className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+                        className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
                         onClick={() => remove(name)}
                       ></div>
-                    </Col>}
-                  </Row>
+                    )}
+                  </Flex>
 
                   <Form.Item
                     {...restField}

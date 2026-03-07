@@ -433,12 +433,12 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
 
   return (
     <RbDrawer
-      title={<div className="rb:flex rb:items-center rb:gap-2.5">
+      title={<Flex align="center" gap={10}>
         {t('workflow.run')}
         {variables.length > 0 && <Space>
           <Button size="small" onClick={handleEditVariables}>{t('application.variable')}</Button>
         </Space>}
-      </div>}
+      </Flex>}
       classNames={{
         body: 'rb:p-0!'
       }}
@@ -458,7 +458,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
           return <Runtime item={item} index={index} />
         }}
       />
-      <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:m-4 rb:mb-1">
+      <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
         <ChatInput
           message={message}
           className="rb:relative!"
@@ -496,7 +496,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
             </Flex>
           </Flex>
         </ChatInput>
-      </div>
+      </Flex>
 
       <VariableConfigModal
         ref={variableConfigModalRef}
