@@ -30,7 +30,7 @@
     "@lexical/list": "^0.39.0",
     "@lexical/react": "^0.39.0",
     "@lexical/rich-text": "^0.39.0",
-    "antd": "^5.27.4",
+    "antd": "^5.29.2",
     "axios": "^1.12.2",
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",

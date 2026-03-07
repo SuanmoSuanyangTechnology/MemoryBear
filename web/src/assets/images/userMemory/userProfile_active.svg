@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>知识库</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="个人记忆" transform="translate(-40, -128)" stroke="#FFFFFF" stroke-width="1.5">
+            <g id="编组" transform="translate(12, 12)">
+                <g id="编组-11" transform="translate(16, 104)">
+                    <g id="知识库" transform="translate(12, 12)">
+                        <g id="编组-3" transform="translate(1.2713, 2.8206)">
+                            <path d="M20.228709,0.92935909 L20.478709,17.1793591 L16.678709,17.4293591 L16.428709,1.17935909 L20.228709,0.92935909 Z" id="矩形"></path>
+                            <path d="M13.7083965,0.92935909 L13.9583965,17.1793591 L10.1583965,17.4293591 L9.90839652,1.17935909 L13.7083965,0.92935909 Z" id="矩形"></path>
+                            <path d="M6.47157835,1.1493195 L6.70897238,17.0056129 L2.90897244,17.2568659 L2.67157842,1.40057249 L6.47157835,1.1493195 Z" id="矩形备份-2" transform="translate(4.6903, 9.2031) rotate(13) translate(-4.6903, -9.2031)"></path>
+                            <line x1="16.7365428" y1="13.6808717" x2="20.4590311" y2="13.6808717" id="路径-2"></line>
+                            <line x1="9.94743216" y1="13.6808717" x2="13.9025553" y2="13.6808717" id="路径-3"></line>
+                            <line x1="3.82750586" y1="4.55917373" x2="7.58633551" y2="5.46182268" id="路径-4"></line>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

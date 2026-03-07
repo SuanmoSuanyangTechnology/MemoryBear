@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>文件夹</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linejoin="round">
+        <g id="应用管理-工作流-配置-变量聚合器" transform="translate(-1842, -290)" stroke="#171719" stroke-width="1.2">
+            <g id="节点属性备份-2" transform="translate(1830, 74)">
+                <g id="文件夹" transform="translate(12, 216)">
+                    <path d="M4,3.5 L6.15219376,3.5 C6.28414839,3.5 6.41075323,3.55216183 6.50441063,3.64511512 L7.88844138,5.01874081 C7.98209879,5.11169411 8.10870362,5.16385594 8.24065825,5.16385594 L12,5.16385594 C12.5522847,5.16385594 13,5.61157119 13,6.16385594 L13,11.6638559 C13,12.2161407 12.5522847,12.6638559 12,12.6638559 L4,12.6638559 C3.44771525,12.6638559 3,12.2161407 3,11.6638559 L3,4.5 C3,3.94771525 3.44771525,3.5 4,3.5 Z" id="矩形"></path>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
