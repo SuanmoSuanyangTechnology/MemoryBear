@@ -15,6 +15,29 @@ from uuid import UUID
 import redis
 import requests
 
+# 模块级同步 Redis 客户端单例，供 Celery 任务共享使用（避免每次任务新建连接）
+# 连接 CELERY_BACKEND DB，与 write_message:last_done 时间戳写入保持一致
+def _build_sync_redis_client():
+    try:
+        return redis.StrictRedis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB_CELERY_BACKEND,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=True,
+        )
+    except Exception:
+        return None
+
+_sync_redis_client: redis.StrictRedis = None
+
+def get_sync_redis_client() -> redis.StrictRedis:
+    """获取模块级同步 Redis 客户端（懒初始化单例）"""
+    global _sync_redis_client
+    if _sync_redis_client is None:
+        _sync_redis_client = _build_sync_redis_client()
+    return _sync_redis_client
+
 # Import a unified Celery instance
 from app.celery_app import celery_app
 from app.core.config import settings
@@ -1089,6 +1112,21 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
 
         logger.info(
             f"[CELERY WRITE] Task completed successfully - elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
+
+        # 记录该用户最后一次 write_message 成功的时间，供时间轴筛选使用
+        try:
+            _r = get_sync_redis_client()
+            if _r is not None:
+                from datetime import timezone as _tz, timedelta as _td
+                _CST = _tz(timedelta(hours=8))
+                _now_cst = datetime.now(_CST).replace(tzinfo=None).isoformat()
+                _r.set(
+                    f"write_message:last_done:{end_user_id}",
+                    _now_cst,
+                    ex=86400 * 30,
+                )
+        except Exception as _e:
+            logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败（不影响主流程）: {_e}")
 
         return {
             "status": "SUCCESS",
@@ -2167,18 +2205,20 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
 
         with get_db_context() as db:
             try:
-                # 获取所有已存储数据的用户ID（分批次处理）
                 repo = ImplicitEmotionsStorageRepository(db)
-                
+
                 # 先统计总数用于日志
                 from sqlalchemy import func
                 total_users = db.execute(
                     select(func.count()).select_from(ImplicitEmotionsStorage)
                 ).scalar() or 0
-                logger.info(f"找到 {total_users} 个需要更新的用户")
+                logger.info(f"表中存量用户总数: {total_users}，开始时间轴筛选")
 
-                # 遍历每个用户并更新数据（分批次，避免一次性加载所有ID）
-                for end_user_id in repo.get_all_user_ids(batch_size=100):
+                # 构建 Redis 同步客户端，用于时间轴筛选
+                _redis_client = get_sync_redis_client()
+
+                # 只处理 last_done > updated_at 的用户（有新记忆写入的用户）
+                for end_user_id in repo.get_users_needing_refresh(_redis_client, batch_size=100):
                     logger.info(f"开始处理用户: {end_user_id}")
                     user_start_time = time.time()
                     
@@ -2264,10 +2304,10 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                         user_results.append(error_info)
                         logger.error(f"处理用户 {end_user_id} 时出错: {str(e)}")
 
-                # ---- 处理增量用户（当天新增、尚未初始化的用户）----
+                # ---- 当天新增用户兜底初始化 ----
                 new_users_initialized = 0
                 new_users_failed = 0
-                logger.info("开始处理当天新增的增量用户初始化")
+                logger.info("开始处理当天新增用户的兜底初始化")
 
                 for end_user_id in repo.get_new_user_ids_today(batch_size=100):
                     logger.info(f"开始初始化新用户: {end_user_id}")
@@ -2281,35 +2321,27 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                             implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
                             profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
                             await implicit_service.save_profile_cache(
-                                end_user_id=end_user_id,
-                                profile_data=profile_data,
-                                db=db
+                                end_user_id=end_user_id, profile_data=profile_data, db=db
                             )
                             implicit_success = True
                             logger.info(f"成功初始化新用户 {end_user_id} 的隐性记忆画像")
                         except Exception as e:
-                            error_msg = f"隐性记忆初始化失败: {str(e)}"
-                            errors.append(error_msg)
-                            logger.error(f"新用户 {end_user_id} {error_msg}")
+                            errors.append(f"隐性记忆初始化失败: {str(e)}")
+                            logger.error(f"新用户 {end_user_id} 隐性记忆初始化失败: {e}")
 
                         try:
                             emotion_service = EmotionAnalyticsService()
                             suggestions_data = await emotion_service.generate_emotion_suggestions(
-                                end_user_id=end_user_id,
-                                db=db,
-                                language="zh"
+                                end_user_id=end_user_id, db=db, language="zh"
                             )
                             await emotion_service.save_suggestions_cache(
-                                end_user_id=end_user_id,
-                                suggestions_data=suggestions_data,
-                                db=db
+                                end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
                             )
                             emotion_success = True
                             logger.info(f"成功初始化新用户 {end_user_id} 的情绪建议")
                         except Exception as e:
-                            error_msg = f"情绪建议初始化失败: {str(e)}"
-                            errors.append(error_msg)
-                            logger.error(f"新用户 {end_user_id} {error_msg}")
+                            errors.append(f"情绪建议初始化失败: {str(e)}")
+                            logger.error(f"新用户 {end_user_id} 情绪建议初始化失败: {e}")
 
                         if implicit_success or emotion_success:
                             new_users_initialized += 1
@@ -2319,7 +2351,7 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                         user_elapsed = time.time() - user_start_time
                         user_results.append({
                             "end_user_id": end_user_id,
-                            "type": "init",
+                            "type": "new_user_init",
                             "implicit_success": implicit_success,
                             "emotion_success": emotion_success,
                             "errors": errors,
@@ -2331,7 +2363,7 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                         user_elapsed = time.time() - user_start_time
                         user_results.append({
                             "end_user_id": end_user_id,
-                            "type": "init",
+                            "type": "new_user_init",
                             "implicit_success": False,
                             "emotion_success": False,
                             "errors": [str(e)],
@@ -2339,27 +2371,24 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                         })
                         logger.error(f"初始化新用户 {end_user_id} 时出错: {str(e)}")
 
-                logger.info(
-                    f"增量用户初始化完成: 成功={new_users_initialized}, 失败={new_users_failed}"
-                )
-                # ---- 增量用户处理结束 ----
+                logger.info(f"当天新增用户兜底初始化完成: 成功={new_users_initialized}, 失败={new_users_failed}")
+                # ---- 新增用户兜底初始化结束 ----
 
-                # 记录总体统计信息
                 logger.info(
                     f"隐性记忆和情绪数据更新定时任务完成: "
                     f"存量用户总数={total_users}, "
                     f"隐性记忆成功={successful_implicit}, "
                     f"情绪建议成功={successful_emotion}, "
                     f"存量失败={failed}, "
-                    f"增量初始化成功={new_users_initialized}, "
-                    f"增量初始化失败={new_users_failed}"
+                    f"新增用户初始化成功={new_users_initialized}, "
+                    f"新增用户初始化失败={new_users_failed}"
                 )
 
                 return {
                     "status": "SUCCESS",
                     "message": (
                         f"存量用户 {total_users} 个，隐性记忆 {successful_implicit} 个成功，情绪建议 {successful_emotion} 个成功；"
-                        f"增量新用户初始化 {new_users_initialized} 个成功，{new_users_failed} 个失败"
+                        f"当天新增用户初始化 {new_users_initialized} 个成功，{new_users_failed} 个失败"
                     ),
                     "total_users": total_users,
                     "successful_implicit": successful_implicit,
@@ -2367,7 +2396,7 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                     "failed": failed,
                     "new_users_initialized": new_users_initialized,
                     "new_users_failed": new_users_failed,
-                    "user_results": user_results[:50]  # 只保留前50个用户的详细结果
+                    "user_results": user_results[:50]
                 }
 
             except Exception as e:
@@ -2415,4 +2444,122 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
             "error": str(e),
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
+        }
+
+
+# =============================================================================
+
+@celery_app.task(
+    name="app.tasks.init_implicit_emotions_for_users",
+    bind=True,
+    ignore_result=True,
+    max_retries=0,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str, Any]:
+    """事件触发任务：对指定用户列表做存在性检查，无记录则执行首次初始化。
+
+    由 /dashboard/end_users 接口触发，已有数据的用户直接跳过。
+    存量用户的数据刷新由定时任务 update_implicit_emotions_storage 负责。
+
+    Args:
+        end_user_ids: 需要检查的用户ID列表
+
+    Returns:
+        包含任务执行结果的字典
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.logging_config import get_logger
+        from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
+        from app.services.implicit_memory_service import ImplicitMemoryService
+        from app.services.emotion_analytics_service import EmotionAnalyticsService
+
+        logger = get_logger(__name__)
+        logger.info(f"开始按需初始化隐性记忆/情绪数据，候选用户数: {len(end_user_ids)}")
+
+        initialized = 0
+        failed = 0
+        skipped = 0
+
+        with get_db_context() as db:
+            repo = ImplicitEmotionsStorageRepository(db)
+
+            for end_user_id in end_user_ids:
+                existing = repo.get_by_end_user_id(end_user_id)
+                if existing is not None:
+                    skipped += 1
+                    continue
+
+                logger.info(f"用户 {end_user_id} 无记录，开始初始化")
+                implicit_ok = False
+                emotion_ok = False
+                try:
+                    try:
+                        implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
+                        profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+                        await implicit_service.save_profile_cache(
+                            end_user_id=end_user_id, profile_data=profile_data, db=db
+                        )
+                        implicit_ok = True
+                    except Exception as e:
+                        logger.error(f"用户 {end_user_id} 隐性记忆初始化失败: {e}")
+
+                    try:
+                        emotion_service = EmotionAnalyticsService()
+                        suggestions_data = await emotion_service.generate_emotion_suggestions(
+                            end_user_id=end_user_id, db=db, language="zh"
+                        )
+                        await emotion_service.save_suggestions_cache(
+                            end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
+                        )
+                        emotion_ok = True
+                    except Exception as e:
+                        logger.error(f"用户 {end_user_id} 情绪建议初始化失败: {e}")
+
+                    if implicit_ok or emotion_ok:
+                        initialized += 1
+                    else:
+                        failed += 1
+                except Exception as e:
+                    failed += 1
+                    logger.error(f"用户 {end_user_id} 初始化异常: {e}")
+
+        logger.info(f"按需初始化完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}")
+        return {
+            "status": "SUCCESS",
+            "initialized": initialized,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
+    try:
+        try:
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError:
+            pass
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(_run())
+        result["elapsed_time"] = time.time() - start_time
+        result["task_id"] = self.request.id
+        return result
+    except Exception as e:
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "elapsed_time": time.time() - start_time,
+            "task_id": self.request.id,
         }
