@@ -111,6 +111,75 @@ class ImplicitEmotionsStorageRepository:
                 logger.error(f"分批获取用户ID失败: offset={offset}, error={e}")
                 break
 
+    def get_users_needing_refresh(self, redis_client, batch_size: int = 100) -> Generator[str, None, None]:
+        """分批次获取需要刷新隐性记忆/情绪数据的存量用户ID。
+
+        筛选逻辑：
+        - 查询 implicit_emotions_storage 中所有用户的 end_user_id 和 updated_at
+        - 从 Redis 读取 write_message:last_done:{end_user_id} 的时间戳
+        - 若 Redis 中无记录（该用户从未写入过记忆），跳过
+        - 若 last_done > updated_at，说明上次刷新后又有新记忆写入，需要刷新
+        - 若 last_done <= updated_at，说明已是最新，跳过
+
+        Args:
+            redis_client: 同步 redis.StrictRedis 实例（连接 CELERY_BACKEND DB），为 None 时抛出 RuntimeError
+            batch_size: 每批次加载的数量
+
+        Raises:
+            RuntimeError: redis_client 为 None 时，调用方可捕获并回退到 get_all_user_ids
+
+        Yields:
+            需要刷新的用户ID字符串
+        """
+        if redis_client is None:
+            raise RuntimeError("get_users_needing_refresh: redis_client 不可用，无法执行时间轴筛选")
+        from datetime import timezone
+        offset = 0
+        while True:
+            try:
+                stmt = (
+                    select(ImplicitEmotionsStorage.end_user_id, ImplicitEmotionsStorage.updated_at)
+                    .order_by(ImplicitEmotionsStorage.end_user_id)
+                    .limit(batch_size)
+                    .offset(offset)
+                )
+                batch = self.db.execute(stmt).all()
+                if not batch:
+                    break
+
+                # 批量获取当前批次所有用户的 last_done 时间戳（一次网络往返）
+                keys = [f"write_message:last_done:{end_user_id}" for end_user_id, _ in batch]
+                raw_values = redis_client.mget(keys)
+
+                for (end_user_id, updated_at), raw in zip(batch, raw_values):
+                    if raw is None:
+                        continue
+                    try:
+                        CST = timezone(timedelta(hours=8))
+                        last_done = datetime.fromisoformat(raw)
+                        # last_done 写入时已是 CST naive，直接使用，无需转换
+                        if last_done.tzinfo is not None:
+                            last_done = last_done.astimezone(CST).replace(tzinfo=None)
+
+                        if updated_at is None:
+                            yield end_user_id
+                            continue
+                        # updated_at 数据库存的是 UTC naive，转为 CST naive 再比较
+                        if updated_at.tzinfo is None:
+                            updated_at_cst = updated_at.replace(tzinfo=timezone.utc).astimezone(CST).replace(tzinfo=None)
+                        else:
+                            updated_at_cst = updated_at.astimezone(CST).replace(tzinfo=None)
+
+                        if last_done > updated_at_cst:
+                            yield end_user_id
+                    except Exception as e:
+                        logger.warning(f"解析 last_done 时间戳失败: end_user_id={end_user_id}, raw={raw}, error={e}")
+
+                offset += batch_size
+            except Exception as e:
+                logger.error(f"get_users_needing_refresh 分批查询失败: offset={offset}, error={e}")
+                break
+
     def get_new_user_ids_today(self, batch_size: int = 100) -> Generator[str, None, None]:
         """分批次获取当天新增的、尚未初始化隐性记忆和情绪建议数据的用户ID
 

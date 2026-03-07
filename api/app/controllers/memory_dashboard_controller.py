@@ -149,6 +149,21 @@ async def get_workspace_end_users(
         
         return {uid: {"total": 0} for uid in end_user_ids}
     
+    # 触发按需初始化：为 implicit_emotions_storage 中没有记录的用户异步生成数据
+    try:
+        from app.celery_app import celery_app as _celery_app
+        _celery_app.send_task(
+            "app.tasks.init_implicit_emotions_for_users",
+            kwargs={"end_user_ids": end_user_ids},
+        )
+        _celery_app.send_task(
+            "app.tasks.init_interest_distribution_for_users",
+            kwargs={"end_user_ids": end_user_ids},
+        )
+        api_logger.info(f"已触发按需初始化任务，候选用户数: {len(end_user_ids)}")
+    except Exception as e:
+        api_logger.warning(f"触发按需初始化任务失败（不影响主流程）: {e}")
+
     # 并发执行配置查询和记忆数量查询
     memory_configs_map, memory_nums_map = await asyncio.gather(
         get_memory_configs(),
