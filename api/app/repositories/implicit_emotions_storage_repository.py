@@ -142,17 +142,32 @@ class ImplicitEmotionsStorageRepository:
                 if not batch:
                     break
 
-                for end_user_id, updated_at in batch:
-                    raw = redis_client.get(f"write_message:last_done:{end_user_id}")
+                # 批量获取当前批次所有用户的 last_done 时间戳（一次网络往返）
+                keys = [f"write_message:last_done:{end_user_id}" for end_user_id, _ in batch]
+                raw_values = redis_client.mget(keys)
+
+                for (end_user_id, updated_at), raw in zip(batch, raw_values):
                     if raw is None:
-                        # 该用户从未有过 write_message 成功记录，跳过
                         continue
                     try:
+                        CST = timezone(timedelta(hours=8))
                         last_done = datetime.fromisoformat(raw)
-                        # 统一去掉时区信息做 naive 比较
-                        if last_done.tzinfo is not None:
-                            last_done = last_done.astimezone(timezone.utc).replace(tzinfo=None)
-                        if updated_at is None or last_done > updated_at:
+                        # 统一转为 CST naive 时间做比较
+                        if last_done.tzinfo is None:
+                            last_done = last_done.replace(tzinfo=timezone.utc).astimezone(CST).replace(tzinfo=None)
+                        else:
+                            last_done = last_done.astimezone(CST).replace(tzinfo=None)
+
+                        if updated_at is None:
+                            yield end_user_id
+                            continue
+                        # updated_at 同样转为 CST naive
+                        if updated_at.tzinfo is None:
+                            updated_at_cst = updated_at.replace(tzinfo=timezone.utc).astimezone(CST).replace(tzinfo=None)
+                        else:
+                            updated_at_cst = updated_at.astimezone(CST).replace(tzinfo=None)
+
+                        if last_done > updated_at_cst:
                             yield end_user_id
                     except Exception as e:
                         logger.warning(f"解析 last_done 时间戳失败: end_user_id={end_user_id}, raw={raw}, error={e}")

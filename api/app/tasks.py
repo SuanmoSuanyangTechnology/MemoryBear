@@ -15,6 +15,29 @@ from uuid import UUID
 import redis
 import requests
 
+# 模块级同步 Redis 客户端单例，供 Celery 任务共享使用（避免每次任务新建连接）
+# 连接 CELERY_BACKEND DB，与 write_message:last_done 时间戳写入保持一致
+def _build_sync_redis_client():
+    try:
+        return redis.StrictRedis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB_CELERY_BACKEND,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=True,
+        )
+    except Exception:
+        return None
+
+_sync_redis_client: redis.StrictRedis = None
+
+def get_sync_redis_client() -> redis.StrictRedis:
+    """获取模块级同步 Redis 客户端（懒初始化单例）"""
+    global _sync_redis_client
+    if _sync_redis_client is None:
+        _sync_redis_client = _build_sync_redis_client()
+    return _sync_redis_client
+
 # Import a unified Celery instance
 from app.celery_app import celery_app
 from app.core.config import settings
@@ -1090,22 +1113,18 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
         logger.info(
             f"[CELERY WRITE] Task completed successfully - elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
 
-        # 记录该用户最后一次 write_message 成功的时间，供 init_implicit_emotions_for_users 做时间轴筛选
+        # 记录该用户最后一次 write_message 成功的时间，供时间轴筛选使用
         try:
-            import redis as _redis
-            from urllib.parse import quote as _quote
-            _r = _redis.StrictRedis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.REDIS_DB_CELERY_BACKEND,
-                password=settings.REDIS_PASSWORD,
-                decode_responses=True,
-            )
-            _r.set(
-                f"write_message:last_done:{end_user_id}",
-                datetime.utcnow().isoformat(),
-                ex=86400 * 30,  # 30天过期
-            )
+            _r = get_sync_redis_client()
+            if _r is not None:
+                from datetime import timezone as _tz, timedelta as _td
+                _CST = _tz(timedelta(hours=8))
+                _now_cst = datetime.now(_CST).replace(tzinfo=None).isoformat()
+                _r.set(
+                    f"write_message:last_done:{end_user_id}",
+                    _now_cst,
+                    ex=86400 * 30,
+                )
         except Exception as _e:
             logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败（不影响主流程）: {_e}")
 
@@ -2196,14 +2215,7 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                 logger.info(f"表中存量用户总数: {total_users}，开始时间轴筛选")
 
                 # 构建 Redis 同步客户端，用于时间轴筛选
-                import redis as _redis
-                _redis_client = _redis.StrictRedis(
-                    host=settings.REDIS_HOST,
-                    port=settings.REDIS_PORT,
-                    db=settings.REDIS_DB_CELERY_BACKEND,
-                    password=settings.REDIS_PASSWORD,
-                    decode_responses=True,
-                )
+                _redis_client = get_sync_redis_client()
 
                 # 只处理 last_done > updated_at 的用户（有新记忆写入的用户）
                 for end_user_id in repo.get_users_needing_refresh(_redis_client, batch_size=100):
