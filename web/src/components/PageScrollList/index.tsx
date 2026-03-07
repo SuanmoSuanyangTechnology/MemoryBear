@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:18:19 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 15:44:42
+ * @Last Modified time: 2026-02-09 13:51:01
  */
 /**
  * PageScrollList Component
@@ -17,7 +17,7 @@
  */
 
 import React, { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
-import { List } from 'antd';
+import { Row, Col } from 'antd';
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 import { request } from '@/utils/request';
@@ -57,6 +57,8 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   className?: string;
   needLoading?: boolean;
 }
+
+const heightClass = 'rb:h-[calc(100vh-124px)]!';
 
 /** Infinite scroll list component with pagination support */
 const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
@@ -136,29 +138,29 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
       <div
         ref={scrollRef}
         id="scrollableDiv"
-        className={`rb:overflow-y-auto rb:overflow-x-hidden rb:h-[calc(100vh-148px)] ${className}`}
+        className={`rb:overflow-y-auto rb:overflow-x-hidden ${heightClass} ${className}`}
       >
         <InfiniteScroll
           dataLength={data.length}
           next={loadMoreData}
           hasMore={hasMore}
-          loader={loading && needLoading ? <PageLoading /> : false}
+          loader={loading && needLoading ? <PageLoading className={heightClass} /> : false}
           // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
           scrollableTarget="scrollableDiv"
           className='rb:h-full!'
         >
           {/* Render grid list or empty state */}
           {data.length > 0 ? (
-            <List
-              grid={{ gutter: 16, column: column }}
-              dataSource={data}
-              renderItem={(item) => (
-                <List.Item>
+            <Row
+              gutter={[16, 16]}
+            >
+              {data.map((item, index) => (
+                <Col key={(item as any).id || index} span={24/column}>
                   {renderItem(item)}
-                </List.Item>
-              )}
-            />
-          ) : !loading ? <PageEmpty /> : null}
+                </Col>
+              ))}
+            </Row>
+          ) : !loading ? <PageEmpty className={heightClass} /> : null}
         </InfiniteScroll>
       </div>
     </>

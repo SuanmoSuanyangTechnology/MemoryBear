@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:19:30 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:19:30 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-04 10:11:37
  */
 /**
  * RadioGroupCard Component
@@ -95,22 +95,23 @@ const RadioGroupCard: FC<RadioCardProps> = ({
     })}>
       {/* Render each option as a selectable card */}
       {options.map(option => (
-        <div key={String(option.value)} className={clsx("rb:relative rb:border rb:rounded-lg rb:w-full rb:p-[20px_12px] rb:text-center rb:cursor-pointer", {
-          'rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF]': option.value === value,
-          'rb:border-[#EBEBEB] rb:bg-[#ffffff]': option.value !== value,
+        <div key={String(option.value)} className={clsx("rb:relative rb:border rb:rounded-lg rb:w-full rb:text-center rb:cursor-pointer", {
+          'rb:border rb:border-[#171719]!': option.value === value,
+          'rb:border-[#EBEBEB] rb:bg-white': option.value !== value,
           'rb:opacity-[0.75]': option.disabled,
-          'rb:flex rb:items-center rb:text-left rb:gap-4': block,
+          'rb:py-5 rb:px-3 rb:leading-5.5': !block,
+          'rb:flex rb:items-center rb:text-left rb:gap-4 rb:py-3 rb:px-4 rb:leading-4': block,
         })} onClick={() => handleChange(option)}>
-          {option.recommend && <div className="rb:absolute rb:right-0 rb:top-0 rb:bg-[#FF5D34] rb:rounded-[0px_7px_0px_8px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-4 rb:p-[4px_8px]">{t('common.recommend')}</div>}
+          {option.recommend && <div className="rb:absolute rb:right-0 rb:top-0 rb:bg-[#FF5D34] rb:rounded-[0px_7px_0px_8px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-4 rb:py-1 rb:px-2">{t('common.recommend')}</div>}
           {/* Use custom render or default card layout */}
           {itemRender ? itemRender(option) : (
             <>
-              {option.icon && <img src={option.icon} className={clsx("rb:w-10 rb:h-10", {
+              {option.icon && <img src={option.icon} className={clsx("rb:size-10", {
                 'rb:m-[0_auto] rb:mb-3': !block,
               })} />}
               <div>
-                <div className="rb:text-[14px] rb:font-medium">{option.label}</div>
-                <div className="rb:mt-1.5 rb:text-[#5B6167] rb:text-[12px] rb:font-regular">{option.labelDesc}</div>
+                <div className="rb:font-medium rb:text-[#212332]">{option.label}</div>
+                <div className="rb:mt-2 rb:text-[#5B6167] rb:text-[12px] rb:font-regular">{option.labelDesc}</div>
               </div>
             </>
           )}

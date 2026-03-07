@@ -107,7 +107,7 @@ const SliderInput: FC<SliderInputProps> = ({
     <div className={`rb:w-full ${className}`}>
       {/* Optional label */}
       {label && (
-        <div className="rb:text-sm rb:font-medium rb:text-gray-700">
+        <div className="rb:text-sm rb:font-medium rb:text-[#475467]">
           {label}
         </div>
       )}

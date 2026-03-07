@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:01:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-02 15:46:05
+ * @Last Modified time: 2026-02-11 10:53:27
  */
 
 /**
@@ -15,7 +15,7 @@
  */
 
 import { type FC, type ReactNode, useEffect } from 'react';
-import { type RadioGroupProps } from 'antd';
+import { type RadioGroupProps, Flex } from 'antd';
 import clsx from 'clsx'
 
 // Button checkbox component props
@@ -57,12 +57,13 @@ const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
   }
   
   return (
-    <div 
-      className={clsx("rb:flex rb:items-center rb:border rb:rounded-lg rb:px-2 rb:text-[12px] rb:h-6 rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
+    <Flex
+      align="center"
+      className={clsx("rb:border rb:rounded-lg rb:px-2! rb:text-[12px] rb:h-6 rb:cursor-pointer", {
         // Checked state: blue background and border
-        "rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF] rb:text-[#155EEF]": checked,
+        "rb:bg-[#FAFAFA] rb:border-[#171719]": checked,
         // Unchecked state: gray border and dark text
-        "rb:border-[#DFE4ED] rb:text-[#212332]": !checked,
+        "rb:border-[#EBEBEB] rb:text-[#212332] rb:hover:bg-[#F0F3F8]": !checked,
       })} 
       onClick={handleChange}
     >
@@ -71,7 +72,7 @@ const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
       {/* Display checked icon when checked */}
       {checkedIcon && checked && <img src={checkedIcon} className="rb:w-4 rb:h-4 rb:mr-1" />}
       {children}
-    </div>
+    </Flex>
   );
 };
 

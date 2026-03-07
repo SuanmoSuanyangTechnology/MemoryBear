@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:30:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-02 15:57:03
+ * @Last Modified time: 2026-02-10 15:01:42
  */
 /**
  * UploadImages Component
@@ -238,7 +238,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
         {...uploadProps}
       >
         {fileList.length < maxCount && (
-          <img src={PlusIcon} className="rb:size-7" />
+          <div className="rb:size-7 rb:bg-cover rb:bg-[url('@/assets/images/plus.svg')]"></div>
         )}  
       </Upload>
       {previewImage && (

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:02:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-02 15:46:29
+ * @Last Modified time: 2026-03-04 14:43:42
  */
 /**
  * CustomSelect - A select component that fetches options from an API
@@ -13,7 +13,7 @@
  * @component
  */
 
-import { useEffect, useState, useMemo, type FC, type Key } from 'react';
+import { useEffect, useState, useMemo, type FC } from 'react';
 import { Select } from 'antd';
 import type { SelectProps, DefaultOptionType } from 'antd/es/select';
 import { useTranslation } from 'react-i18next';
@@ -22,7 +22,7 @@ import { request } from '@/utils/request';
 
 // Generic option type for API response data
 interface OptionType {
-  [key: string]: Key | string | number;
+  [key: string]: any;
 }
 
 // API response structure
@@ -104,7 +104,7 @@ const CustomSelect: FC<CustomSelectProps> = ({
       {/* Render options from API data */}
       {displayOptions.map((option) => (
         <Select.Option key={option[valueKey]} value={option[valueKey]}>
-          {String(option[labelKey])}
+          {option[labelKey]}
         </Select.Option>
       ))}
     </Select>

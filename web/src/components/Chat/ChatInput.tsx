@@ -4,12 +4,10 @@
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-03-06 13:36:20
  */
-import { type FC, useEffect, useMemo } from 'react'
+import { type FC, useEffect, useMemo, useState } from 'react'
 import { Flex, Input, Form } from 'antd'
+import clsx from 'clsx'
 
-import SendIcon from '@/assets/images/conversation/send.svg'
-import SendDisabledIcon from '@/assets/images/conversation/sendDisabled.svg'
-import LoadingIcon from '@/assets/images/conversation/loading.svg'
 import type { ChatInputProps } from './types'
 
 /**
@@ -28,6 +26,7 @@ const ChatInput: FC<ChatInputProps> = ({
 }) => {
   const [form] = Form.useForm()
   const values = Form.useWatch([], form)
+  const [isFocus, setIsFocus] = useState(false)
   // Monitor form value changes to control send button state
 
   // Clear form when external message is empty
@@ -69,9 +68,18 @@ const ChatInput: FC<ChatInputProps> = ({
     onSend(values.message)
   }
 
+  const handleFocus = () => {
+    setIsFocus(true)
+  }
+  const handleBlur = () => {
+    setIsFocus(false)
+  }
+
   return (
     <div className={`rb:absolute rb:bottom-3 rb:left-0 rb:right-0 rb:w-full ${className}`}>
-      <Flex vertical justify="space-between" className="rb:border rb:border-[#DFE4ED] rb:rounded-xl rb:min-h-30">
+      <Flex vertical justify="space-between" className={clsx("rb-border rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.1)] rb:rounded-xl rb:min-h-30", {
+        ' rb:border-[#171719]!': isFocus
+      })}>
         {previewFileList.length > 0 && <div className="rb:overflow-x-auto rb:max-w-full"><Flex gap={14} className="rb:mx-3! rb:mt-3! rb:w-max!">
           {previewFileList.map((file) => {
             if (file.type.includes('image')) {
@@ -108,7 +116,12 @@ const ChatInput: FC<ChatInputProps> = ({
               )
             }
             return (
-              <div key={file.url || file.uid} className="rb:w-45 rb:text-[12px] rb:gap-2.5 rb:flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5">
+              <Flex
+                key={file.url || file.uid}
+                align="center"
+                gap={10}
+                className="rb:w-45 rb:text-[12px] rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2! rb:px-2.5!"
+              >
                 {(file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document')) && <div
                   className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/word_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/word.svg')]"
                 ></div>}
@@ -126,7 +139,7 @@ const ChatInput: FC<ChatInputProps> = ({
                   className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
                   onClick={() => handleDelete(file)}
                 ></div>
-              </div>
+              </Flex>
             )
           })}
         </Flex></div>}
@@ -145,23 +158,25 @@ const ChatInput: FC<ChatInputProps> = ({
                   handleSend();
                 }
               }}
+              onFocus={handleFocus}
+              onBlur={handleBlur}
             />
           </Form.Item>
         </Form>
 
         {/* Bottom action area */}
-        <Flex align="center" justify="space-between" className="rb:m-[0_10px_10px_10px]!">
+        <Flex align="center" justify="space-between" className="rb:mx-2.5! rb:mt-0! rb:mb-2.5!">
           {/* Child component content (such as buttons) */}
           <div className="rb:flex-1">{children}</div>
-          <div className="rb:flex rb:items-center">
+          <Flex align="center">
             {/* Send button - display different icons based on state */}
             {loading
-              ? <img src={LoadingIcon} className="rb:w-5.5 rb:h-5.5 rb:cursor-pointer" />
+              ? <div className="rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/loading.svg')]"></div>
               : !values || !values?.message || values?.message?.trim() === ''
-                ? <img src={SendDisabledIcon} className="rb:w-5.5 rb:h-5.5 rb:cursor-pointer" />
-                : <img src={SendIcon} className="rb:w-5.5 rb:h-5.5 rb:cursor-pointer" onClick={handleSend} />
+                ? <div className="rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/sendDisabled.svg')]"></div>
+                : <div className="rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/send.svg')]" onClick={handleSend}></div>
             }
-          </div>
+          </Flex>
         </Flex>
       </Flex>
     </div>

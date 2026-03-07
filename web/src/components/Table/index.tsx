@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-02 15:32:11
+ * @Last Modified time: 2026-02-25 15:06:40
  */
 /**
  * RbTable Component
@@ -199,7 +199,7 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
     if (scrollY !== undefined) {
       config.y = scrollY;
     } else if (isScroll) {
-      config.y = 'calc(100vh - 280px)';
+      config.y = 'calc(100vh - 240px)';
     }
     
     return Object.keys(config).length > 0 ? config : undefined;
@@ -214,7 +214,6 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
       dataSource={data}
       pagination={paginationConfig}
       rowSelection={rowSelection}
-      rowClassName="rb:text-[#5B6167]"
       locale={{ emptyText: <Empty size={emptySize} subTitle={emptyText} /> }}
       scroll={getScrollConfig()}
       tableLayout="auto"

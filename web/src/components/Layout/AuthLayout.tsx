@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:11:02 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:11:02 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-03 18:43:42
  */
 /**
  * AuthLayout Component
@@ -61,7 +61,7 @@ const AuthLayout: FC = () => {
         {/* Header with breadcrumbs and user menu */}
         <AppHeader />
         {/* Main content area - renders child routes */}
-        <Content style={{ padding: '16px 17px 24px 16px', zIndex: 0 }}>
+        <Content style={{ padding: '0 12px 20px 12px', zIndex: 0 }}>
           <Outlet />
         </Content> 
       </Layout>

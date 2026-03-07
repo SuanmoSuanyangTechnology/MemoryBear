@@ -243,7 +243,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
       <div className="rb:mb-6 rb:w-full">
         <Dragger {...uploadProps} style={{ height: '270px' }}>
           <div className="rb:flex rb:justify-center rb:flex-col rb:items-center">
-            <img className="rb:w-12 rb:h-12" src={CloudUploadOutlined} />
+            <div className="rb:size-12 rb:bg-cover rb:bg-[url('@/assets/images/CloudUploadOutlined.png')]"></div>
             {(!isAutoUpload || !hasProgress && (!fileList || !fileList.length)) &&
               <>
                 <div className="rb:text-base rb:text-[14px] rb:font-medium rb:flex rb:items-center rb:mt-2 rb:leading-5">
