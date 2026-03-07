@@ -25,6 +25,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
         const textContent = root.getTextContent();
         if (textContent !== prevValueRef.current) {
           isUserInputRef.current = true;
+          prevValueRef.current = textContent;
         }
       });
     });
@@ -33,7 +34,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
   }, [editor]);
 
   useEffect(() => {
-    if ((value !== prevValueRef.current || enableLineNumbers !== prevEnableLineNumbersRef.current) && !isUserInputRef.current) {
+    if (value !== prevValueRef.current || enableLineNumbers !== prevEnableLineNumbersRef.current) {
       queueMicrotask(() => {
         editor.update(() => {
         const root = $getRoot();
