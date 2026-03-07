@@ -12,7 +12,7 @@ import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, noteNode } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 
@@ -128,7 +128,7 @@ export const useWorkflowGraph = ({
     if (nodes.length) {
       const nodeList = nodes.map(node => {
         const { id, type, name, position, config = {} } = node
-        let nodeLibraryConfig = [...nodeLibrary, { nodes: [unknownNode] }]
+        let nodeLibraryConfig = [...nodeLibrary, { nodes: [unknownNode, noteNode] }]
           .flatMap(category => category.nodes)
           .find(n => n.type === type)
         nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties

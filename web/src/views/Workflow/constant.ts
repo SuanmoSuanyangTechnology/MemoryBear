@@ -529,6 +529,10 @@ export const unknownNode = {
   type: 'unknown',
   icon: unknownIcon
 }
+export const noteNode = {
+  type: 'notes',
+  icon: unknownIcon
+}
 
 export const nodeWidth = 240;
 /**
