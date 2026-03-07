@@ -44,7 +44,8 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         "parameter-extractor": NodeType.PARAMETER_EXTRACTOR,
         "question-classifier": NodeType.QUESTION_CLASSIFIER,
         "variable-aggregator": NodeType.VAR_AGGREGATOR,
-        "tool": NodeType.TOOL
+        "tool": NodeType.TOOL,
+        "": NodeType.NOTES
     }
 
     def __init__(self, config: dict[str, Any]):
@@ -165,7 +166,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             return NodeDefinition(
                 id=node["id"],
                 type=self.map_node_type(node_data["type"]),
-                name=node_data.get("title"),
+                name=node_data.get("title") or "notes",
                 cycle=node.get("parentId"),
                 description=None,
                 config=self._convert_node_config(node),
@@ -209,16 +210,15 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
 
             source = edge["source"]
             target = edge["target"]
-            edge_id = edge["id"]
             label = None
             if source in self.branch_node_cache:
-                case_id = "-".join(edge_id.split("-")[1:-2])
+                case_id = edge["sourceHandle"]
                 if case_id == "false":
                     label = f'CASE{len(self.branch_node_cache[source])+1}'
                 else:
                     label = f'CASE{self.branch_node_cache[source].index(case_id) + 1}'
             if source in self.error_branch_node_cache:
-                case_id = "-".join(edge_id.split("-")[1:-2])
+                case_id = edge["sourceHandle"]
                 if case_id == "source":
                     label = "SUCCESS"
                 else:
@@ -243,6 +243,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
                 name=variable["name"],
                 default=variable["value"],
                 type=self.variable_type_map(variable["value_type"]),
+                description=variable.get("description")
             )
         except Exception as e:
             self.errors.append(ExceptionDefineition(

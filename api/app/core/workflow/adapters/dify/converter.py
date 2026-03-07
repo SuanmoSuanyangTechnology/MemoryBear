@@ -185,6 +185,9 @@ class DifyConverter(BaseConverter):
             "not empty": ComparisonOperator.NOT_EMPTY,
             "start with": ComparisonOperator.START_WITH,
             "end with": ComparisonOperator.END_WITH,
+            "not contains": ComparisonOperator.NOT_CONTAINS,
+            "exists": ComparisonOperator.NOT_EMPTY,
+            "not exists": ComparisonOperator.EMPTY
         }
         return operator_map.get(operator, operator)
 
@@ -364,7 +367,7 @@ class DifyConverter(BaseConverter):
         node_data = node["data"]
         cases = []
         for case in node_data["cases"]:
-            case_id = case["id"]
+            case_id = case.get("id") or case.get("case_id")
             logical_operator = case["logical_operator"]
             conditions = []
             for condition in case["conditions"]:
@@ -540,7 +543,8 @@ class DifyConverter(BaseConverter):
                 ] = self.trans_variable_format(content["value"])
         else:
             if node_data["body"]["data"]:
-                body_content = node_data["body"]["data"][0]["value"]
+                body_content = (node_data["body"]["data"][0].get("value") or
+                                self._process_list_variable_litearl(node_data["body"]["data"][0].get("file")))
             else:
                 body_content = ""
 
