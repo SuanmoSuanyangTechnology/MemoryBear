@@ -2416,3 +2416,129 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
+
+
+# =============================================================================
+
+@celery_app.task(
+    name="app.tasks.init_implicit_emotions_for_users",
+    bind=True,
+    ignore_result=True,
+    max_retries=0,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str, Any]:
+    """按需初始化：为指定用户列表中尚未生成隐性记忆/情绪数据的用户执行首次生成。
+
+    由 /dashboard/end_users 接口触发，仅处理 implicit_emotions_storage 表中不存在记录的用户。
+
+    Args:
+        end_user_ids: 需要检查并初始化的用户ID列表
+
+    Returns:
+        包含任务执行结果的字典
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.logging_config import get_logger
+        from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
+        from app.services.implicit_memory_service import ImplicitMemoryService
+        from app.services.emotion_analytics_service import EmotionAnalyticsService
+
+        logger = get_logger(__name__)
+        logger.info(f"开始按需初始化隐性记忆/情绪数据，候选用户数: {len(end_user_ids)}")
+
+        initialized = 0
+        failed = 0
+        skipped = 0
+
+        with get_db_context() as db:
+            repo = ImplicitEmotionsStorageRepository(db)
+
+            for end_user_id in end_user_ids:
+                # 幂等检查：已有记录则跳过
+                existing = repo.get_by_end_user_id(end_user_id)
+                if existing is not None:
+                    skipped += 1
+                    continue
+
+                logger.info(f"用户 {end_user_id} 无隐性记忆数据，开始初始化")
+                implicit_ok = False
+                emotion_ok = False
+
+                try:
+                    try:
+                        implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
+                        profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+                        await implicit_service.save_profile_cache(
+                            end_user_id=end_user_id,
+                            profile_data=profile_data,
+                            db=db
+                        )
+                        implicit_ok = True
+                    except Exception as e:
+                        logger.error(f"用户 {end_user_id} 隐性记忆初始化失败: {e}")
+
+                    try:
+                        emotion_service = EmotionAnalyticsService()
+                        suggestions_data = await emotion_service.generate_emotion_suggestions(
+                            end_user_id=end_user_id,
+                            db=db,
+                            language="zh"
+                        )
+                        await emotion_service.save_suggestions_cache(
+                            end_user_id=end_user_id,
+                            suggestions_data=suggestions_data,
+                            db=db
+                        )
+                        emotion_ok = True
+                    except Exception as e:
+                        logger.error(f"用户 {end_user_id} 情绪建议初始化失败: {e}")
+
+                    if implicit_ok or emotion_ok:
+                        initialized += 1
+                    else:
+                        failed += 1
+
+                except Exception as e:
+                    failed += 1
+                    logger.error(f"用户 {end_user_id} 初始化异常: {e}")
+
+        logger.info(f"按需初始化完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}")
+        return {
+            "status": "SUCCESS",
+            "initialized": initialized,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
+    try:
+        try:
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError:
+            pass
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(_run())
+        result["elapsed_time"] = time.time() - start_time
+        result["task_id"] = self.request.id
+        return result
+    except Exception as e:
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "elapsed_time": time.time() - start_time,
+            "task_id": self.request.id,
+        }

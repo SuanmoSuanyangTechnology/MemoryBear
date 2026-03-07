@@ -63,6 +63,20 @@ services:
     networks:
       - celery
 
+  # On-demand worker - API-triggered tasks (e.g. implicit emotions init)
+  worker-ondemand:
+    image: redbear-mem-open:latest
+    container_name: worker-ondemand
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=ondemand_tasks --max-tasks-per-child=50 -n ondemand_worker@%h
+    restart: unless-stopped
+    networks:
+      - celery
+
   # Celery Beat - scheduler
   beat:
     image: redbear-mem-open:latest

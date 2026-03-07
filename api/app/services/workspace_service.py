@@ -130,6 +130,7 @@ def _create_workspace_only(
         business_logger.error(f"创建工作空间失败: {workspace.name} - {str(e)}")
         raise
 
+
 def create_workspace(
         db: Session, workspace: WorkspaceCreate, user: User, language: str = "zh"
 ) -> Workspace:
@@ -966,6 +967,125 @@ def update_workspace_models_configs(
         raise BusinessException(f"更新模型配置失败: {str(e)}", BizCode.INTERNAL_ERROR)
 
 
+def _fill_workspace_configs_model_defaults(
+    db: Session,
+    workspace: Workspace
+) -> None:
+    """Fill empty model fields for all memory configs in a workspace.
+    
+    Updates llm_id, embedding_id, rerank_id, reflection_model_id, and emotion_model_id
+    if they are None, using the corresponding workspace default models.
+    
+    Args:
+        db: Database session
+        workspace: The workspace containing default model settings
+    """
+    from app.models.memory_config_model import MemoryConfig
+    
+    # Get all configs for this workspace
+    configs = db.query(MemoryConfig).filter(
+        MemoryConfig.workspace_id == workspace.id
+    ).all()
+    
+    if not configs:
+        return
+    
+    # Map of memory_config field -> workspace field
+    model_field_mappings = [
+        ("llm_id", "llm"),
+        ("embedding_id", "embedding"),
+        ("rerank_id", "rerank"),
+        ("reflection_model_id", "llm"),  # reflection uses LLM
+        ("emotion_model_id", "llm"),     # emotion uses LLM
+    ]
+    
+    configs_updated = 0
+    
+    for memory_config in configs:
+        updated_fields = []
+        
+        for config_field, workspace_field in model_field_mappings:
+            config_value = getattr(memory_config, config_field, None)
+            workspace_value = getattr(workspace, workspace_field, None)
+            
+            if not config_value and workspace_value:
+                setattr(memory_config, config_field, workspace_value)
+                updated_fields.append(config_field)
+        
+        if updated_fields:
+            configs_updated += 1
+            business_logger.debug(
+                f"Updated memory config {memory_config.config_id} fields: {updated_fields}"
+            )
+    
+    if configs_updated > 0:
+        try:
+            db.commit()
+            business_logger.info(
+                f"Updated {configs_updated} memory configs in workspace {workspace.id} with default models"
+            )
+        except Exception as e:
+            db.rollback()
+            business_logger.error(
+                f"Failed to update memory configs in workspace {workspace.id}: {str(e)}"
+            )
+
+
+def _create_default_memory_config(
+    db: Session,
+    workspace_id: uuid.UUID,
+    workspace_name: str,
+    llm_id: Optional[uuid.UUID] = None,
+    embedding_id: Optional[uuid.UUID] = None,
+    rerank_id: Optional[uuid.UUID] = None,
+    scene_id: Optional[uuid.UUID] = None,
+    pruning_scene_name: Optional[str] = None,
+) -> None:
+    """Create a default memory config for a newly created workspace.
+    
+    Args:
+        db: Database session
+        workspace_id: The workspace ID
+        workspace_name: The workspace name (used for config naming)
+        llm_id: Optional LLM model ID
+        embedding_id: Optional embedding model ID
+        rerank_id: Optional rerank model ID
+        scene_id: Optional ontology scene ID (默认关联教育场景)
+        pruning_scene_name: Optional pruning scene name，取自 ontology_scene.scene_name
+    """
+    from app.models.memory_config_model import MemoryConfig
+    
+    config_id = uuid.uuid4()
+    
+    default_config = MemoryConfig(
+        config_id=config_id,
+        config_name=f"{workspace_name} 默认配置",
+        config_desc="工作空间创建时自动生成的默认记忆配置",
+        workspace_id=workspace_id,
+        llm_id=str(llm_id) if llm_id else None,
+        embedding_id=str(embedding_id) if embedding_id else None,
+        rerank_id=str(rerank_id) if rerank_id else None,
+        scene_id=scene_id,  # 关联本体场景ID（默认为"在线教育"场景）
+        pruning_scene=pruning_scene_name,  # 语义剪枝场景直接使用 scene_name
+        state=True,  # Active by default
+        is_default=True,  # Mark as workspace default
+    )
+    
+    db.add(default_config)
+    db.flush()  # 使用 flush 而不是 commit，让调用者统一提交
+    
+    business_logger.info(
+        "Created default memory config for workspace",
+        extra={
+            "workspace_id": str(workspace_id),
+            "config_id": str(config_id),
+            "config_name": default_config.config_name,
+            "scene_id": str(scene_id) if scene_id else None,
+        }
+    )
+
+# ==================== 检查配置相关服务 ====================
+
 def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
     """Ensure a workspace has a default memory config, creating one if missing.
     
@@ -1045,70 +1165,6 @@ def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
     _fill_workspace_configs_model_defaults(db, workspace)
 
 
-def _fill_workspace_configs_model_defaults(
-    db: Session,
-    workspace: Workspace
-) -> None:
-    """Fill empty model fields for all memory configs in a workspace.
-    
-    Updates llm_id, embedding_id, rerank_id, reflection_model_id, and emotion_model_id
-    if they are None, using the corresponding workspace default models.
-    
-    Args:
-        db: Database session
-        workspace: The workspace containing default model settings
-    """
-    from app.models.memory_config_model import MemoryConfig
-    
-    # Get all configs for this workspace
-    configs = db.query(MemoryConfig).filter(
-        MemoryConfig.workspace_id == workspace.id
-    ).all()
-    
-    if not configs:
-        return
-    
-    # Map of memory_config field -> workspace field
-    model_field_mappings = [
-        ("llm_id", "llm"),
-        ("embedding_id", "embedding"),
-        ("rerank_id", "rerank"),
-        ("reflection_model_id", "llm"),  # reflection uses LLM
-        ("emotion_model_id", "llm"),     # emotion uses LLM
-    ]
-    
-    configs_updated = 0
-    
-    for memory_config in configs:
-        updated_fields = []
-        
-        for config_field, workspace_field in model_field_mappings:
-            config_value = getattr(memory_config, config_field, None)
-            workspace_value = getattr(workspace, workspace_field, None)
-            
-            if not config_value and workspace_value:
-                setattr(memory_config, config_field, workspace_value)
-                updated_fields.append(config_field)
-        
-        if updated_fields:
-            configs_updated += 1
-            business_logger.debug(
-                f"Updated memory config {memory_config.config_id} fields: {updated_fields}"
-            )
-    
-    if configs_updated > 0:
-        try:
-            db.commit()
-            business_logger.info(
-                f"Updated {configs_updated} memory configs in workspace {workspace.id} with default models"
-            )
-        except Exception as e:
-            db.rollback()
-            business_logger.error(
-                f"Failed to update memory configs in workspace {workspace.id}: {str(e)}"
-            )
-
-
 def _ensure_default_ontology_scenes(db: Session, workspace: Workspace) -> None:
     """Ensure a workspace has default ontology scenes, creating them if missing.
 
@@ -1154,56 +1210,3 @@ def _ensure_default_ontology_scenes(db: Session, workspace: Workspace) -> None:
             f"为工作空间 {workspace.id} 补建默认本体场景异常: {str(e)}"
         )
 
-
-def _create_default_memory_config(
-    db: Session,
-    workspace_id: uuid.UUID,
-    workspace_name: str,
-    llm_id: Optional[uuid.UUID] = None,
-    embedding_id: Optional[uuid.UUID] = None,
-    rerank_id: Optional[uuid.UUID] = None,
-    scene_id: Optional[uuid.UUID] = None,
-    pruning_scene_name: Optional[str] = None,
-) -> None:
-    """Create a default memory config for a newly created workspace.
-    
-    Args:
-        db: Database session
-        workspace_id: The workspace ID
-        workspace_name: The workspace name (used for config naming)
-        llm_id: Optional LLM model ID
-        embedding_id: Optional embedding model ID
-        rerank_id: Optional rerank model ID
-        scene_id: Optional ontology scene ID (默认关联教育场景)
-        pruning_scene_name: Optional pruning scene name，取自 ontology_scene.scene_name
-    """
-    from app.models.memory_config_model import MemoryConfig
-    
-    config_id = uuid.uuid4()
-    
-    default_config = MemoryConfig(
-        config_id=config_id,
-        config_name=f"{workspace_name} 默认配置",
-        config_desc="工作空间创建时自动生成的默认记忆配置",
-        workspace_id=workspace_id,
-        llm_id=str(llm_id) if llm_id else None,
-        embedding_id=str(embedding_id) if embedding_id else None,
-        rerank_id=str(rerank_id) if rerank_id else None,
-        scene_id=scene_id,  # 关联本体场景ID（默认为"在线教育"场景）
-        pruning_scene=pruning_scene_name,  # 语义剪枝场景直接使用 scene_name
-        state=True,  # Active by default
-        is_default=True,  # Mark as workspace default
-    )
-    
-    db.add(default_config)
-    db.flush()  # 使用 flush 而不是 commit，让调用者统一提交
-    
-    business_logger.info(
-        "Created default memory config for workspace",
-        extra={
-            "workspace_id": str(workspace_id),
-            "config_id": str(config_id),
-            "config_name": default_config.config_name,
-            "scene_id": str(scene_id) if scene_id else None,
-        }
-    )
