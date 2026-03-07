@@ -86,6 +86,7 @@ class ChatResponse(BaseModel):
     """聊天响应（非流式）"""
     conversation_id: uuid.UUID
     message: str
+    message_id: str
     usage: Optional[Dict[str, Any]] = None
     elapsed_time: Optional[float] = None
 
