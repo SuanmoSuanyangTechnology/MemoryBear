@@ -1117,7 +1117,7 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
         try:
             _r = get_sync_redis_client()
             if _r is not None:
-                from datetime import timezone as _tz, timedelta as _td
+                from datetime import timezone as _tz
                 _CST = _tz(timedelta(hours=8))
                 _now_cst = datetime.now(_CST).replace(tzinfo=None).isoformat()
                 _r.set(
@@ -2218,7 +2218,14 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                 _redis_client = get_sync_redis_client()
 
                 # 只处理 last_done > updated_at 的用户（有新记忆写入的用户）
-                for end_user_id in repo.get_users_needing_refresh(_redis_client, batch_size=100):
+                # Redis 不可用时回退到全量处理
+                try:
+                    refresh_iter = repo.get_users_needing_refresh(_redis_client, batch_size=100)
+                except RuntimeError as e:
+                    logger.warning(f"时间轴筛选不可用，回退到全量刷新: {e}")
+                    refresh_iter = repo.get_all_user_ids(batch_size=100)
+
+                for end_user_id in refresh_iter:
                     logger.info(f"开始处理用户: {end_user_id}")
                     user_start_time = time.time()
                     
