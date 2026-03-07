@@ -2,12 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-05 10:43:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 11:10:01
+ * @Last Modified time: 2026-02-25 15:36:14
  */
 import { type FC, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Space, Button, Form, Flex, Tooltip, Checkbox } from 'antd'
-import { CloseOutlined, CheckCircleFilled } from '@ant-design/icons'
+import { CheckCircleFilled } from '@ant-design/icons'
 
 import type {
   SkillConfigForm,
@@ -15,7 +15,6 @@ import type {
 } from './types'
 import Empty from '@/components/Empty'
 import SkillListModal from './SkillListModal'
-import Card from '../Card'
 import RbAlert from '@/components/RbAlert'
 import type { Skill } from '@/views/Skills/types'
 
@@ -86,20 +85,19 @@ const SkillsItem: FC<SkillsItemProps> = ({
   }, [allSkills])
 
   return (
-    <Card
-      title={title}
-      extra={
-        <Space>
+    <div>
+      <Flex align="center" justify="space-between" className="rb:mb-2!">
+        <div className="rb:text-[#212332] rb:font-medium rb:leading-4.5 rb:px-1">{title}</div>
+
+        <Space size={16}>
           {/* "Allow all skills" checkbox - only shown if supportAll is true */}
           {supportAll && <Form.Item name={[...parentName, 'all_skills']} valuePropName="checked" noStyle>
-            <Checkbox>{t('application.allSkill')}</Checkbox>
+            <Checkbox className="rb:text-[12px]!">{t('application.allSkill')}</Checkbox>
           </Form.Item>}
           {/* Add skill button - disabled when all skills are enabled */}
-          <Button disabled={allSkills} style={{ padding: '0 8px', height: '24px' }} onClick={handleAddSkill}>+ {t('application.addSkill')}</Button>
+          <Button disabled={allSkills} type="link" className="rb:h-4! rb:p-0! rb:font-medium! rb:text-[12px]! rb:text-[#212332]" onClick={handleAddSkill}>+ {t('application.addSkill')}</Button>
         </Space>
-      }
-      variant="borderL"
-    >
+      </Flex>
       {/* Show alert when all skills enabled, otherwise show skill list */}
       {allSkills
         ? <RbAlert color="green" icon={<CheckCircleFilled />}>{t('application.allSkillIntro')}</RbAlert>
@@ -111,39 +109,29 @@ const SkillsItem: FC<SkillsItemProps> = ({
                 <Empty size={88} subTitle={emptyTitle} />
               ) : (
                 /* Render list of configured skills */
-                <Space direction="vertical" size={12} className="rb:w-full">
+                <Flex vertical gap={12}>
                   {fields.map((field) => {
                     const skill = form.getFieldValue([...parentName, 'skill_ids', field.name])
                     return (
                       /* Individual skill card */
-                      <div key={field.key} className="rb:flex rb:items-center rb:justify-between rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
+                      <Flex key={field.key} align="center" justify="space-between" className="rb:p-3! rb:bg-[#FFFFFF] rb-border rb:rounded-lg">
                         <Flex className="rb:flex-1  rb:max-w-[calc(100%-186px)]!">
-                          {/* Skill icon or fallback initial */}
-                          {skill.icon
-                            ? <img src={skill.icon} className="rb:mr-3.25 rb:size-12 rb:rounded-lg" />
-                            : <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
-                              {skill.name?.[0]}
-                            </div>
-                          }
                           {/* Skill name and description */}
                           <div className="rb:flex-1 rb:max-w-[calc(100%-60px)]">
-                            <div className="rb:font-medium rb:wrap-break-word rb:line-clamp-1">{skill.name}</div>
+                            <div className="rb:font-medium rb:text-[#212332] rb:leading-5 rb:wrap-break-word rb:line-clamp-1">{skill.name}</div>
                             <Tooltip title={skill.description}>
-                              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1">{skill.description}</div>
+                              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:mt-1 rb:wrap-break-word rb:line-clamp-1">{skill.description}</div>
                             </Tooltip>
                           </div>
                         </Flex>
-                        <Space size={16} align="center">
-                          {/* Remove skill button */}
-                          <CloseOutlined 
-                            className="rb:cursor-pointer rb:text-[#5B6167] hover:rb:text-[#155EEF]" 
-                            onClick={() => remove(field.name)}
-                          />
-                        </Space>
-                      </div>
+                        <div
+                          className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
+                          onClick={() => remove(field.name)}
+                        ></div>
+                      </Flex>
                     )
                   })}
-                </Space>
+                </Flex>
               )
             )}
           </Form.List>
@@ -155,7 +143,7 @@ const SkillsItem: FC<SkillsItemProps> = ({
         selectedList={form.getFieldValue([...parentName, 'skill_ids']) || []}
         refresh={refresh}
       />
-    </Card>
+    </div>
   )
 }
 export default SkillsItem

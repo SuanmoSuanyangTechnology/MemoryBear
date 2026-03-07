@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:37 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:29:37 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-03 18:57:36
  */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
@@ -88,12 +88,14 @@ const ApplicationConfig: React.FC = () => {
         appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : application?.type === 'workflow' ? workflowRef : undefined}
         workflowRef={workflowRef}
       />
-      {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} />}
-      {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} />}
-      {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} />}
-      {activeTab === 'api' && <Api application={application} />}
-      {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
-      {activeTab === 'statistics' && <Statistics application={application} />}
+      <div className="rb:p-3 rb:max-h-[calc(100vh-65px)] rb:overflow-auto">
+        {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} />}
+        {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} />}
+        {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} />}
+        {activeTab === 'api' && <Api application={application} />}
+        {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
+        {activeTab === 'statistics' && <Statistics application={application} />}
+      </div>
     </>
   );
 };

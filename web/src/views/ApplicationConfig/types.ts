@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 16:40:30
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-03-03 18:55:57 
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -378,6 +378,8 @@ export interface StatisticsItem {
   count: number;
   /** Date string */
   date: string;
+  /** Index signature for compatibility with ChartData */
+  [key: string]: string | number;
 }
 
 /**

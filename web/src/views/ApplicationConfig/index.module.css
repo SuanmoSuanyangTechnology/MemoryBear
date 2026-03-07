@@ -7,8 +7,8 @@
 }
 .tabs :global(.ant-tabs-tab) {
   line-height: 20px;
-  padding-bottom: 18px;
-  padding-top: 10px;
+  padding-bottom: 22px;
+  padding-top: 22px;
 }
 .tabs :global(.ant-tabs-tab-active) {
   font-weight: 500;

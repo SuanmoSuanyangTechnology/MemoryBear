@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:49 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:25:49 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-04 10:39:34
  */
 /**
  * Knowledge List Modal
@@ -10,7 +10,7 @@
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Space, List } from 'antd';
+import { List, Form, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
 
@@ -42,14 +42,16 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   const [visible, setVisible] = useState(false);
   const [list, setList] = useState<KnowledgeBaseListItem[]>([])
   const [filterList, setFilterList] = useState<KnowledgeBaseListItem[]>([])
-  const [query, setQuery] = useState<{keywords?: string}>({})
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedRows, setSelectedRows] = useState<KnowledgeBase[]>([])
+
+  const [form] = Form.useForm()
+  const query = Form.useWatch([], form)
 
   /** Close modal and reset state */
   const handleClose = () => {
     setVisible(false);
-    setQuery({})
+    form.resetFields()
     setSelectedIds([])
     setSelectedRows([])
   };
@@ -57,7 +59,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   /** Open modal */
   const handleOpen = () => {
     setVisible(true);
-    setQuery({})
+    form.resetFields()
     setSelectedIds([])
     setSelectedRows([])
   };
@@ -66,7 +68,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     if (visible) {
       getList()
     }
-  }, [query.keywords, visible])
+  }, [query?.keywords, visible])
   /** Fetch knowledge base list */
   const getList = () => {
     getKnowledgeBaseList(undefined, {
@@ -77,7 +79,9 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     })
       .then(res => {
         const response = res as { items: KnowledgeBaseListItem[] }
-        setList(response.items || [])
+        setList([...(response.items || [])])
+        setSelectedIds([])
+        setSelectedRows([])
       })
   }
   /** Save selected knowledge bases */
@@ -99,12 +103,6 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     handleOpen,
     handleClose
   }));
-  /** Search knowledge bases */
-  const handleSearch = (value?: string) => {
-    setQuery({keywords: value})
-    setSelectedIds([])
-    setSelectedRows([])
-  }
   /** Toggle knowledge base selection */
   const handleSelect = (item: KnowledgeBase) => {
     const index = selectedIds.indexOf(item.id)
@@ -121,7 +119,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     if (list.length && selectedList.length) {
       const unSelectedList = list.filter(item => selectedList.findIndex(vo => vo.id === item.id) < 0)
       setFilterList([...unSelectedList])
-    } else if (list.length) {
+    } else {
       setFilterList([...list])
     }
   }, [list, selectedList])
@@ -136,12 +134,15 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
         onOk={handleSave}
         width={1000}
       >
-        <Space size={24} direction="vertical" className="rb:w-full">
-          <SearchInput
-            placeholder={t('knowledgeBase.searchPlaceholder')}
-            onSearch={handleSearch}
-            style={{ width: '100%' }}
-          />
+        <Flex gap={24} vertical>
+          <Form form={form}>
+            <Form.Item name="keywords" noStyle>
+              <SearchInput
+                placeholder={t('knowledgeBase.searchPlaceholder')}
+                className="rb:w-full!"
+              />
+            </Form.Item>
+          </Form>
           {filterList.length === 0 
             ? <Empty />
             : <List
@@ -149,7 +150,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
               dataSource={filterList}
               renderItem={(item: KnowledgeBase) => (
                 <List.Item>
-                  <div key={item.id} className={clsx("rb:flex rb:items-center rb:justify-between rb:border rb:rounded-lg rb:p-[17px_16px] rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
+                  <Flex key={item.id} align="center" justify="space-between" className={clsx("rb:border rb:rounded-lg rb:py-4.25! rb:px-4! rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
                     "rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF] rb:text-[#155EEF]": selectedIds.includes(item.id),
                     "rb:border-[#DFE4ED] rb:text-[#212332]": !selectedIds.includes(item.id),
                   })} onClick={() => handleSelect(item)}>
@@ -158,12 +159,12 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
                       <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167] rb:mt-2">{t('application.contains', {include_count: item.doc_num})}</div>
                     </div>
                     <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167]">{formatDateTime(item.created_at, 'YYYY-MM-DD HH:mm:ss')}</div>
-                  </div>
+                  </Flex>
                 </List.Item>
               )}
             />
           }
-        </Space>
+        </Flex>
       </RbModal>
     </>
   );

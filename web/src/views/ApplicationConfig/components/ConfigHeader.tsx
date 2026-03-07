@@ -2,16 +2,16 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 16:48:52
+ * @Last Modified time: 2026-03-04 10:31:08
  */
 import { type FC, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Layout, Tabs, Dropdown, Button, Flex } from 'antd';
+import { Tabs, Dropdown, Button, Flex } from 'antd';
 import type { MenuProps } from 'antd';
 import { useTranslation } from 'react-i18next';
+import clsx from 'clsx';
 
 import styles from '../index.module.css'
-import logoutIcon from '@/assets/images/logout.svg'
 import editIcon from '@/assets/images/edit_hover.svg'
 import copyIcon from '@/assets/images/copy_hover.svg'
 import exportIcon from '@/assets/images/export_hover.svg'
@@ -21,9 +21,8 @@ import ApplicationModal from '@/views/ApplicationManagement/components/Applicati
 import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef } from '../types'
 import { deleteApplication } from '@/api/application'
 import CopyModal from './CopyModal'
+import PageHeader from '@/components/Layout/PageHeader'
 import { exportToYaml } from '@/utils/yamlExport';
-
-const { Header } = Layout;
 
 /**
  * Tab keys for application configuration
@@ -93,8 +92,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         copyModalRef.current?.handleOpen()
         break;
       case 'export':
-        console.log('export', workflowRef?.current?.config)
-        exportToYaml(workflowRef?.current?.config, application?.name ?`${application?.name}.yml`: undefined)
+        exportToYaml(workflowRef?.current?.config, application?.name ? `${application?.name}.yml` : undefined)
         break;
       case 'delete':
         handleDelete()
@@ -153,7 +151,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Format dropdown menu items
    */
   const formatMenuItems = useMemo(() => {
-    const items =  (application?.type === 'workflow' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
+    const items = (application?.type === 'workflow' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
       key,
       icon: <img src={menuIcons[key]} className="rb:w-4 rb:h-4 rb:mr-2" />,
       label: t(`common.${key}`),
@@ -164,49 +162,53 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   console.log('formatMenuItems', formatMenuItems)
   return (
     <>
-      <Header className="rb:w-full rb:h-16 rb:grid rb:grid-cols-3 rb:p-[16px_16px_16px_24px]! rb:border-b rb:border-[#EAECEE] rb:leading-8">
-        <div className="rb:h-8 rb:flex rb:items-center rb:font-medium">
-          <div className="rb:w-8 rb:h-8 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[24px] rb:text-[#ffffff]">
-            {application?.name[0]}
-          </div>
-          
-          <div className="rb:max-w-[100%-80px] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{application?.name}</div>
-          <Dropdown 
-            menu={{ items: formatMenuItems, onClick: handleClick }} 
-            trigger={['click']}
-            placement="bottomRight"
-          >
-            <div 
-              className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]" 
-            ></div>
-          </Dropdown>
-        </div>
-        
-        <div className="rb:flex rb:justify-center">
-          <Tabs 
-            activeKey={activeTab} 
-            items={formatTabItems()} 
-            onChange={handleChangeTab} 
+      <PageHeader
+        avatarText={application?.name?.trim()[0]}
+        avatarClassName={clsx({
+          'rb:bg-[#155EEF]': application?.type === 'agent',
+          'rb:bg-[#9C6FFF]!': application?.type === 'multi_agent',
+          'rb:bg-[#171719]': application?.type === 'workflow',
+        })}
+        title={application?.name || ''}
+        operation={<Dropdown
+          menu={{ items: formatMenuItems, onClick: handleClick }} 
+          trigger={['click']}
+          placement="bottomRight"
+        >
+          <div
+            className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit_active.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]"
+          ></div>
+        </Dropdown>}
+        centerContent={<Flex justify="center" className="rb:h-16!">
+          <Tabs
+            activeKey={activeTab}
+            items={formatTabItems()}
+            onChange={handleChangeTab}
             className={styles.tabs}
           />
-        </div>
-        {application?.type === 'workflow'
-        ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
+        </Flex>}
+        extra={application?.type === 'workflow'
+          ? <Flex align="center" justify="end" gap={10} className="rb:h-8">
             <Button onClick={clear}>{t('workflow.clear')}</Button>
             <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>
             <Button onClick={run}>{t('workflow.run')}</Button>
             <Button type="primary" onClick={save}>{t('workflow.save')}</Button>
-            {/* <Button type="primary">{t('workflow.export')}</Button> */}
-            <img src={logoutIcon} className="rb:w-4 rb:h-4 rb:cursor-pointer" onClick={goToApplication} />
-          </div>
+            <div
+              className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
+              onClick={goToApplication}
+            ></div>
+          </Flex>
           : <Flex justify="flex-end">
-            <div className="rb:h-8 rb:flex rb:items-center rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
-              <img src={logoutIcon} className="rb:mr-2 rb:w-4 rb:h-4" />
-              {t('application.returnToApplicationList')}
-            </div>
+            <Flex align="center" className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
+              <div
+                className="rb:mr-2 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
+              ></div>
+              {t('common.return')}
+            </Flex>
           </Flex>
         }
-      </Header>
+      >
+      </PageHeader>
       <ApplicationModal
         ref={applicationModalRef}
         refresh={refresh}

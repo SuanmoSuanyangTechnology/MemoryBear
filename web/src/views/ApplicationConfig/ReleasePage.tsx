@@ -1,13 +1,13 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:29:41 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-03 19:02:43
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
-import { Button, Space, Input, Form, App } from 'antd';
+import { Space, Input, Form, App, Flex } from 'antd';
 
 import Tag, { type TagProps } from './components/Tag'
 import RbCard from '@/components/RbCard/Card'
@@ -19,6 +19,7 @@ import type { Application } from '@/views/ApplicationManagement/types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import Markdown from '@/components/Markdown'
+import RbButton from '@/components/RbButton';
 /**
  * Tag color mapping for release versions
  */
@@ -28,6 +29,7 @@ const tagColors: Record<Release['tagKey'], TagProps['color']> = {
   history: 'default',
 }
 
+const heightClass = 'rb:h-[calc(100vh-88px)]'
 /**
  * Release page component
  * Manages application version releases, rollbacks, and version history
@@ -68,12 +70,12 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
     })
   }
   return (
-    <div className="rb:flex rb:h-[calc(100vh-64px)]">
-      <div className="rb:h-full rb:overflow-y-auto rb:w-108 rb:flex-[0_0_auto] rb:border-r rb:border-[#DFE4ED] rb:p-4">
-        <Space size={16} direction="vertical" style={{ width: '100%' }}>
-          <div className="rb:leading-5.5 rb:px-1">
-            {t('application.versionList')}
-            <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-1 rb:leading-4">{t('application.versionListDesc')}</div>
+    <Flex gap={12}>
+      <div className={`rb:overflow-y-auto rb:w-101 rb:flex-[0_0_auto] ${heightClass}`}>
+        <Flex gap={12} vertical>
+          <div className="rb:px-1">
+            <div className="rb:text-[16px] rb:leading-5.5 rb:font-medium">{t('application.versionList')}</div>
+            <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">{t('application.versionListDesc')}</div>
           </div>
           {releaseList.length === 0
             ? <Empty />
@@ -91,9 +93,9 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                       {tagKey}
                     </Tag>}
                   </>}
-                  className={clsx("rb:hover:border-[#155EEF]! rb:cursor-pointer", {
-                    'rb:bg-[rgba(21,94,239,0.06)]! rb:border-[#155EEF]!': version.id === selectedVersion.id,
-                    'rb:border-[#DFE4ED] rb:bg-[#FBFDFF]': version.id !== selectedVersion.id
+                  className={clsx("rb:hover:shadow-[0px_2px_8px_0px_rgba(0,0,0,0.2)]! rb:cursor-pointer rb:bg-white", {
+                    'rb:border-[#171719]!': version.id === selectedVersion.id,
+                    'rb:border-[#DFE4ED] ': version.id !== selectedVersion.id
                   })}
                   headerType="borderless"
                   onClick={() => setSelectedVersion(version)}
@@ -101,38 +103,41 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                   <div className="rb:leading-5 rb:line-clamp-2 rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
                     <Markdown content={version.release_notes} />
                   </div>
-                  <div className="rb:mt-4 rb:text-[12px] rb:text-[#5B6167] rb:leading-4">
+                  <div className="rb:mt-4 rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">
                     {t('application.publishedOn')} {formatDateTime(version.published_at, 'YYYY-MM-DD HH:mm:ss')}
                   </div>
-                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-1 rb:leading-4">
+                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">
                     {t('application.publisher')}: {version.publisher_name}
                   </div>
                 </RbCard>
               )
             })
           }
-        </Space>
+        </Flex>
       </div>
-      <div className="rb:h-full rb:overflow-y-auto rb:flex-[1_1_auto] rb:p-4">
+      <div className={`rb:overflow-y-auto rb:flex-[1_1_auto] ${heightClass}`}>
         <Form layout="vertical">
-          <div className={clsx("rb:leading-5.5 rb:px-1 rb:flex rb:items-center rb:text-[16px] rb:font-medium rb:mb-5.25", {
+          <Flex align="center" className={clsx("rb:leading-6.5! rb:text-[18px] rb:font-medium rb:mb-4.75!", {
             'rb:justify-between': selectedVersion,
             'rb:justify-end': !selectedVersion
           })}>
-            {selectedVersion && t('application.DetailsOfVersion', { version: selectedVersion.version_name && selectedVersion.version_name[0].toLocaleLowerCase() === 'v' ? selectedVersion.version_name : selectedVersion.version_name ? `v${selectedVersion.version_name}` : `v${selectedVersion.version}` || '-' })}
+            {selectedVersion && t('application.detailsOfVersion', { version: selectedVersion.version_name && selectedVersion.version_name[0].toLocaleLowerCase() === 'v' ? selectedVersion.version_name : selectedVersion.version_name ? `v${selectedVersion.version_name}` : `v${selectedVersion.version}` || '-' })}
 
             <Space size={10}>
               {selectedVersion && <>
-                {/* <Button>{t('application.exportDSLFile')}</Button> */}
-                {data.current_release_id !== selectedVersion.id && <Button onClick={handleRollback}>{t('application.willRollToThisVersion')}</Button>}
-                <Button type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</Button>
+                {/* <RbButton>{t('application.exportDSLFile')}</RbButton> */}
+                {data.current_release_id !== selectedVersion.id && <RbButton onClick={handleRollback}>{t('application.willRollToThisVersion')}</RbButton>}
+                <RbButton onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
               </>}
-              <Button type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</Button>
+              <RbButton type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</RbButton>
             </Space>
-          </div>
+          </Flex>
           {selectedVersion && 
-            <Space size={16} direction="vertical" style={{ width: '100%' }}>
-              <RbCard title={t('application.VersionInformation')} headerType="borderless">
+            <Flex gap={16} vertical>
+              <RbCard
+                title={t('application.VersionInformation')}
+                headerType="borderless"
+              >
                 <div className="rb:grid rb:grid-cols-3 rb:gap-4">
                   <Form.Item label={t('application.releaseTime')} className="rb:mb-0!">
                     <Input value={formatDateTime(selectedVersion.published_at, 'YYYY-MM-DD HH:mm:ss')} disabled />
@@ -147,22 +152,26 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
               </RbCard>
 
               {/* Logs */}
-              <RbCard title={t('application.changeLog')} headerType="borderless">
-                <Space size={16} direction="vertical" style={{ width: '100%' }}>
+              <RbCard
+                title={t('application.changeLog')}
+                headerType="borderless"
+              >
+                <Flex gap={16} vertical>
                 {selectedVersion && (
                   <RbCard
-                    headerType="borderBL"
+                    headerType="borderless"
                     title={<div className="rb:text-[14px]">{formatDateTime(selectedVersion.published_at, 'YYYY-MM-DD HH:mm:ss')}</div>}
                     extra={<span className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4">{selectedVersion.publisher_name}</span>}
+                    bodyClassName="rb:pt-0! rb:pb-3! rb:px-4!"
                   >
-                    <div className="rb:font-medium rb:font-regular rb:text-[12px] rb:text-[#5B6167] rb:leading-4">
+                    <div className="rb:font-regular rb:text-[#5B6167] rb:leading-4">
                       <Markdown content={selectedVersion.release_notes} />
                     </div>
                   </RbCard>
                 )}
-                </Space>
+                </Flex>
               </RbCard>
-            </Space>
+            </Flex>
           }
         </Form>
       </div>
@@ -175,7 +184,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
         ref={releaseShareModalRef}
         version={selectedVersion}
       />
-    </div>
+    </Flex>
   );
 }
 export default ReleasePage;

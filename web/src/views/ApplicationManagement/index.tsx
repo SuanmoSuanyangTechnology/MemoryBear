@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-02 17:48:51
+ * @Last Modified time: 2026-03-04 10:44:29
  */
 /**
  * Application Management Page
@@ -10,21 +10,22 @@
  * Supports creating, editing, and deleting applications
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Row, Col, App, Select, Space, Dropdown } from 'antd';
+import { App, Select, Space, Form, Flex, Dropdown, Button } from 'antd';
 import clsx from 'clsx';
-import { DeleteOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom'
 
 import ApplicationModal, { types } from './components/ApplicationModal';
 import type { Application, ApplicationModalRef, Query, UploadWorkflowModalRef } from './types';
 import SearchInput from '@/components/SearchInput'
-import RbCard from '@/components/RbCard/Card'
 import { getApplicationListUrl, deleteApplication } from '@/api/application'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { formatDateTime } from '@/utils/format';
 import UploadWorkflowModal from './components/UploadWorkflowModal'
+import RbCard from '@/components/RbCard'
+import RbButton from '@/components/RbButton'
+import RbDescriptions from '@/components/RbDescriptions'
 
 /**
  * Application management main component
@@ -33,19 +34,19 @@ const ApplicationManagement: React.FC = () => {
   const { t } = useTranslation();
   const { modal } = App.useApp();
   const [searchParams] = useSearchParams()
-  const [query, setQuery] = useState<Query>({} as Query);
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const scrollListRef = useRef<PageScrollListRef>(null)
   const uploadWorkflowModalRef = useRef<UploadWorkflowModalRef>(null);
+
+  const [form] = Form.useForm()
+  const query = Form.useWatch([], form)
 
   useEffect(() => {
     // Convert URLSearchParams to a plain object for easier access
     const data = Object.fromEntries(searchParams)
     const { type } = data
-    setQuery(prev => ({
-      ...prev,
-      type: type || undefined
-    }))
+
+    form.setFieldValue('type', type || null)
   }, [searchParams])
 
   /** Refresh application list */
@@ -79,14 +80,11 @@ const ApplicationManagement: React.FC = () => {
       }
     })
   }
-  const handleChangeType = (value?: string) => {
-    setQuery(prev => ({...prev, type: value}))
-  }
 
   const handleImport = () => {
     uploadWorkflowModalRef.current?.handleOpen()
   }
-  const handleClick = ({ key }: { key: string } ) => {
+  const handleClick = ({ key }: { key: string }) => {
     switch (key) {
       case 'thirdParty':
         handleImport()
@@ -95,45 +93,48 @@ const ApplicationManagement: React.FC = () => {
   }
   return (
     <>
-      <Row gutter={16} className="rb:mb-4">
-        <Col span={4}>
-          <Select
-            value={query.type}
-            placeholder={t('application.applicationType')}
-            options={types.map((type) => ({
-              value: type,
-              label: t(`application.${type}`),
-            }))}
-            allowClear
-            className="rb:w-full"
-            onChange={handleChangeType}
-          />
-        </Col>
-        <Col span={8}>
-          <SearchInput
-            placeholder={t('application.searchPlaceholder')}
-            onSearch={(value) => setQuery({ search: value })}
-            style={{width: '100%'}}
-          />
-        </Col>
-        <Col span={12} className="rb:text-right">
-          <Space size={12}>
+      <Form form={form} className="rb:mb-4!">
+        <Flex justify="space-between">
+          <Space size={10}>
+            <Form.Item name="type" noStyle>
+              <Select
+                placeholder={t('application.applicationType')}
+                options={[
+                  { value: null, label: t('application.allType') },
+                  ...types.map((type) => ({
+                    value: type,
+                    label: t(`application.${type}`),
+                  }))
+                ]}
+                className="rb:w-30!"
+              />
+            </Form.Item>
+            <Form.Item name="search" noStyle>
+              <SearchInput
+                placeholder={t('application.searchPlaceholder')}
+                className="rb:w-75!"
+              />
+            </Form.Item>
+          </Space>
+          <Space size={10}>
             <Dropdown
-              menu={{ items: [
-                { key: 'thirdParty', label: t('application.importWorkflow') },
-              ], onClick: handleClick }}
+              menu={{
+                items: [
+                  { key: 'thirdParty', label: t('application.importWorkflow') },
+                ], onClick: handleClick
+              }}
               placement="bottomRight"
             >
               <Button>
                 {t('application.import')}
               </Button>
             </Dropdown>
-            <Button type="primary" onClick={handleCreate}>
+            <RbButton type="primary" icon={<div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/plus.svg')]"></div>} onClick={handleCreate}>
               {t('application.createApplication')}
-            </Button>
+            </RbButton>
           </Space>
-        </Col>
-      </Row>
+        </Flex>
+      </Form>
 
       <PageScrollList<Application, Query>
         ref={scrollListRef}
@@ -142,20 +143,23 @@ const ApplicationManagement: React.FC = () => {
         renderItem={(item) => (
           <RbCard 
             title={item.name}
-            avatar={
-              <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
-                {item.name[0]}
-              </div>
-            }
+            avatarText={item.name.trim()[0]}
+            avatarClassName={clsx({
+              'rb:bg-[#155EEF]': item.type === 'agent',
+              'rb:bg-[#9C6FFF]!': item.type === 'multi_agent',
+              'rb:bg-[#171719]': item.type === 'workflow',
+            })}
+            footer={<Flex justify="space-between" gap={12}>
+              <RbButton danger className="rb:w-22.25" onClick={() => handleDelete(item)}>{t('common.delete')}</RbButton>
+              <RbButton type="primary" ghost className="rb:flex-1" onClick={() => handleEdit(item)}>{t('application.configuration')}</RbButton>
+            </Flex>}
           >
-            {['type', 'source', 'created_at'].map((key, index) => (
-              <div key={key} className={clsx("rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px]", {
-                'rb:mt-3': index !== 0
-              })}>
-                <span className="rb:text-[#5B6167]">{t(`application.${key}`)}</span>
-                <span className={clsx({
-                  'rb:text-[#155EEF] rb:font-medium': key === 'type' && item[key] === 'agent',
-                  'rb:text-[#369F21] rb:font-medium': key === 'type' && item[key] === 'multi_agent',
+            <RbDescriptions
+              items={['type', 'source', 'created_at'].map(key => ({
+                key,
+                label: t(`application.${key}`),
+                children: <span className={clsx('rb:font-medium', {
+                  'rb:text-[#155EEF]': key === 'type',
                 })}>
                   {key === 'source' && item.is_shared
                     ? t('application.shared')
@@ -166,13 +170,8 @@ const ApplicationManagement: React.FC = () => {
                     : t(`application.${item[key as keyof Application]}`)
                   }
                 </span>
-              </div>
-            ))}
-
-            <div className="rb:mt-5 rb:flex rb:justify-between rb:gap-2.5">
-              <Button type="primary" ghost className="rb:w-[calc(100%-46px)]" onClick={() => handleEdit(item)}>{t('application.configuration')}</Button>
-              <Button icon={<DeleteOutlined />} onClick={() => handleDelete(item)}></Button>
-            </div>
+              }))}
+            />
           </RbCard>
         )}
       />

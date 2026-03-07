@@ -312,3 +312,6 @@ body {
   color: #212332;
   background: #F6F6F6;
 }
+.ant-checkbox .ant-checkbox-inner {
+  border-radius: 6px !important;
+}

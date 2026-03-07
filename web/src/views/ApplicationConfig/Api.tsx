@@ -1,24 +1,23 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:29 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:29:29 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-03 19:05:23
  */
 import { type FC, useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { Button, Space, App, Statistic, Row, Col } from 'antd';
+import { Button, Space, App, Row, Col, Flex } from 'antd';
 import copy from 'copy-to-clipboard'
 
-import Card from './components/Card';
 import type { Application } from '@/views/ApplicationManagement/types'
 import type { ApiKeyModalRef, ApiKeyConfigModalRef } from './types'
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
 import ApiKeyModal from './components/ApiKeyModal';
 import ApiKeyConfigModal from './components/ApiKeyConfigModal';
-import Tag from '@/components/Tag'
 import { getApiKeyList, getApiKeyStats, deleteApiKey } from '@/api/apiKey';
 import { maskApiKeys } from '@/utils/apiKeyReplacer'
+import RbCard from '@/components/RbCard/Card';
 
 /**
  * API configuration page component
@@ -125,61 +124,69 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
   // Calculate total requests across all API keys
   const totalRequests = apiKeyList.reduce((total, item) => total + item.total_requests, 0);
   return (
-    <div className="rb:w-250 rb:mt-5 rb:pb-5 rb:mx-auto">
-      <Space size={20} direction="vertical" style={{width: '100%'}}>
-        <Card 
-          title={t('application.endpointConfiguration')}
+    <div className="rb:w-250 rb:mx-auto">
+      <Flex gap={20} vertical>
+        <RbCard 
+          title={<Flex align="center">
+            {t('application.endpointConfiguration')}
+            <span className="rb:text-[#5B6167] rb:text-[12px]">({t('application.endpointConfigurationSubTitle')})</span>
+          </Flex>}
+          headerType="borderless"
+          headerClassName="rb:min-h-13.5!"
         >
-          <div className="rb:text-[#5B6167] rb:text-[12px] rb:mb-2">{t('application.endpointConfigurationSubTitle')}</div>
-          <div className="rb:p-[20px_20px_24px_20px] rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
-            <Space size={8}>
-              {['GET', 'POST', 'PUT', 'DELETE'].map((method) => (
-                <div key={method} className={clsx("rb:w-20 rb:h-7 rb:leading-7 rb:text-center rb:rounded-md rb:text-regular", {
-                  'rb:bg-[#155EEF] rb:text-white': activeMethods.includes(method),
-                  'rb:bg-white': !activeMethods.includes(method),
-                })}>
-                  {method}
-                </div>
-              ))}
-            </Space>
+          <Space size={8}>
+            {['GET', 'POST', 'PUT', 'DELETE'].map((method) => (
+              <div key={method} className={clsx("rb:w-20 rb:h-7 rb:leading-7 rb:text-center rb:rounded-md rb:text-regular", {
+                'rb:bg-[#171719] rb:text-white': activeMethods.includes(method),
+                'rb:bg-white rb:border rb:border-[#EBEBEB] rb:text-[#212332]': !activeMethods.includes(method),
+              })}>
+                {method}
+              </div>
+            ))}
+          </Space>
 
-            <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:mt-5 rb:p-[20px_16px] rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:leading-5">
-              {copyContent}
-              
-              <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(copyContent)}>
-                <div 
-                  className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]" 
-                ></div>
-                {t('common.copy')}
-              </Button>
-            </div>
-          </div>
-        </Card>
-        <Card
-          title={t('application.apiKeys')}
+          <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:mt-4! rb:py-5! rb:px-4! rb:bg-white rb-border rb:rounded-lg rb:leading-5">
+            {copyContent}
+            
+            <Button className="rb:px-2! rb:h-7! rb:group rb:-mt-1.75!" onClick={() => handleCopy(copyContent)}>
+              <div 
+                className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]" 
+              ></div>
+              {t('common.copy')}
+            </Button>
+          </Flex>
+        </RbCard>
+        <RbCard
+          title={<Flex align="center">
+            {t('application.apiKeys')}
+            <span className="rb:text-[#5B6167] rb:text-[12px]">({t('application.apiKeySubTitle')})</span>
+          </Flex>}
           extra={
             <Button style={{padding: '0 8px', height: '24px'}} onClick={handleAdd}>+ {t('application.addApiKey')}</Button>
           }
+          headerType="borderless"
+          headerClassName="rb:min-h-13.5!"
         >
-          <div className="rb:text-[#5B6167] rb:text-[12px] rb:mb-2">{t('application.apiKeySubTitle')}</div>
           {/* Overview Data */}
-          <Row>
+          <Row className="rb:pl-1 rb:mb-4">
             <Col span={6}>
-              <Statistic title={t('application.apiKeyTotal')} value={apiKeyList.length} />
+              <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[20px] rb:leading-7">{apiKeyList.length}</div>
+              <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t('application.apiKeyTotal')}</div>
             </Col>
             <Col span={6}>
-              <Statistic title={t('application.apiKeyRequestTotal')} value={totalRequests} />
+              <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[20px] rb:leading-7">{totalRequests}</div>
+              <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t('application.apiKeyRequestTotal')}</div>
             </Col>
           </Row>
           {/* API Key List */}
           {apiKeyList.sort((a, b) => b.created_at - a.created_at).map(item => (
-            <div key={item.id} className="rb:mt-4 rb:p-[10px_12px] rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
-              <div className="rb:flex rb:items-center rb:justify-between">
-                <div className="rb:flex rb:items-center rb:max-w-[calc(100%-92px)]">
-                  <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1">{item.name}</div>
-                  <Tag className="rb:ml-2">ID: {item.id}</Tag>
-                </div>
-                <Space>
+            <div key={item.id} className="rb:p-4 rb-border rb:rounded-xl">
+              <Flex align="center" justify="space-between">
+                <Flex vertical className="rb:max-w-[calc(100%-92px)]" gap={4}>
+                  <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1 rb:leading-5 rb:font-medium">{item.name}</div>
+                  <div className="rb:text-[#5B6167] rb:leading-4.5">ID: {item.id}</div>
+                </Flex>
+                <Space size={12}>
                   <div 
                     className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]" 
                     onClick={() => handleEdit(item)}
@@ -189,30 +196,38 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
                     onClick={() => handleDelete(item)}
                   ></div>
                 </Space>
-              </div>
-              <div className="rb:mb-3 rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:mt-5 rb:p-[8px_16px] rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:leading-5">
-                {maskApiKeys(item.api_key)}
-                
-                <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(item.api_key)}>
-                  <div 
-                    className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]" 
-                  ></div>
-                  {t('common.copy')}
-                </Button>
-              </div>
- 
-              <Row gutter={12}>
+              </Flex>
+
+              <Row className="rb:mt-4">
                 <Col span={8}>
-                  <Statistic valueStyle={{ fontSize: '18px' }} title={t('application.apiKeyRequestTotal')} value={item.total_requests} />
+                  <Row className="rb:px-4 rb:py-2">
+                    <Col span={12}>
+                      <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{item.total_requests}</div>
+                      <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t('application.apiKeyRequestTotal')}</div>
+                    </Col>
+                    <Col span={12}>
+                      <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{item.rate_limit}</div>
+                      <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t('application.qpsLimit')}</div>
+                    </Col>
+                  </Row>
                 </Col>
-                <Col span={8}>
-                  <Statistic valueStyle={{ fontSize: '18px' }} title={t('application.qpsLimit')} value={item.rate_limit} />
+                <Col span={16}>
+                  <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:py-5! rb:px-4! rb:bg-white rb-border rb:rounded-lg rb:leading-5">
+                    {maskApiKeys(item.api_key)}
+
+                    <Button className="rb:px-2! rb:h-7! rb:group rb:-mt-1.75!" onClick={() => handleCopy(item.api_key)}>
+                      <div
+                        className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]"
+                      ></div>
+                      {t('common.copy')}
+                    </Button>
+                  </Flex>
                 </Col>
               </Row>
             </div>
           ))}
-        </Card>
-      </Space>
+        </RbCard>
+      </Flex>
 
       <ApiKeyModal
         ref={apiKeyModalRef}

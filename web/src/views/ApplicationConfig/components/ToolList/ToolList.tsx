@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:03 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:26:03 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-04 10:15:39
  */
 /**
  * Tool List Component
@@ -12,7 +12,7 @@
 
 import { type FC, useRef, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Space, Button, List, Switch } from 'antd'
+import { Space, Button, Switch, Flex } from 'antd'
 
 import Card from '../Card'
 import type {
@@ -131,32 +131,30 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
     <Card 
       title={t('application.toolConfiguration')}
       extra={
-        <Button style={{ padding: '0 8px', height: '24px' }} onClick={handleAddTool}>+ {t('application.addTool')}</Button>
+        <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#21233" onClick={handleAddTool}>+ {t('application.addTool')}</Button>
       }
     >
+      <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2 rb:font-medium">
+        {t('application.toolManagement')}
+      </div>
       {toolList.length === 0
-        ? <Empty size={88} />
-        : 
-          <List
-            grid={{ gutter: 12, column: 1 }}
-            dataSource={toolList}
-            renderItem={(item, index) => (
-              <List.Item>
-                <div key={index} className="rb:flex rb:items-center rb:justify-between rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
-                  <div className="rb:font-medium rb:leading-4">
-                    {item.label}
-                  </div>
-                  <Space size={12}>
-                    <div 
-                      className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
-                      onClick={() => handleDeleteTool(index)}
-                    ></div>
-                    <Switch checked={item.enabled} onChange={() => handleChangeEnabled(index)} />
-                  </Space>
-                </div>
-              </List.Item>
-            )}
-          />
+        ? <div className="rb-border rb:rounded-xl rb:pt-4 rb:pb-6"><Empty size={88} /></div>
+        : <Flex vertical gap={12}>
+          {toolList.map((item, index) => (
+            <Flex key={index} align="center" justify="space-between" className="rb:py-2.5! rb:pl-4! rb:pr-3! rb-border rb:rounded-lg">
+              <div className="rb:font-medium rb:leading-4">
+                {item.label}
+              </div>
+              <Space size={12}>
+                <Switch size="small" checked={item.enabled} onChange={() => handleChangeEnabled(index)} />
+                <div
+                  className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
+                  onClick={() => handleDeleteTool(index)}
+                ></div>
+              </Space>
+            </Flex>
+          ))}
+        </Flex>
       }
       <ToolModal
         ref={toolModalRef}

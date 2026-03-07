@@ -10,7 +10,7 @@
  * Provides real-time streaming responses and conversation history
  */
 
-import { type FC, useEffect, useState, useRef } from 'react';
+import { type FC, useEffect, useState, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
 import { Flex, Dropdown, type MenuProps, App, Divider } from 'antd'
@@ -143,18 +143,16 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
         const modelChatList = [...prev]
         const curModelChat = modelChatList[targetIndex]
         const curChatMsgList = curModelChat.list || []
-        const lastMsg = curChatMsgList[curChatMsgList.length - 1]
-        if (lastMsg.role === 'assistant') {
-          modelChatList[targetIndex] = {
-            ...modelChatList[targetIndex],
-            list: [
-              ...curChatMsgList.slice(0, curChatMsgList.length - 1),
-              {
-                ...lastMsg,
-                content: null
-              }
-            ]
-          }
+        const lastMsg = curChatMsgList[curChatMsgList.length - 2]
+        modelChatList[targetIndex] = {
+          ...modelChatList[targetIndex],
+          list: [
+            ...curChatMsgList.slice(0, curChatMsgList.length - 2),
+            {
+              ...lastMsg,
+              ...(lastMsg.role === 'user' ? { status: 'error' } : { content: null })
+            }
+          ]
         }
         return [...modelChatList]
       }
@@ -434,62 +432,71 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
   const updateFileList = (list?: any[]) => {
     setFileList([...list || []])
   }
+  const isHasLabel = useMemo(() => chatList.some(item => item.label), [chatList])
 
   return (
-    <div className="rb:relative rb:h-full rb:flex rb:flex-col">
+    <Flex vertical className="rb:relative rb:h-full">
       {chatList.length === 0
         ? <Empty
           url={DebuggingEmpty}
           size={[300, 200]}
-          title={t('application.debuggingEmpty')}
-          subTitle={t('application.debuggingEmptyDesc')}
-          className="rb:h-full"
+          title={t('application.debuggingEmpty')} 
+          subTitle={t('application.debuggingEmptyDesc')} 
+          className="rb:h-[calc(100vh-159px)]"
         />
-        : <>
-          <div className={clsx(`rb:relative rb:grid rb:grid-cols-${chatList.length} rb:overflow-hidden rb:w-full rb:flex-1 rb:min-h-0`)}>
-            {chatList.map((chat, index) => (
-              <div key={index} className={clsx('rb:flex rb:flex-col', {
-                "rb:border-r rb:border-[#DFE4ED]": index !== chatList.length - 1 && chatList.length > 1,
-              })}>
-                {chat.label &&
-                  <div className={clsx(
-                    "rb:grid rb:bg-[#F0F3F8] rb:text-center rb:flex-[0_0_auto]",
-                    {
-                      'rb:rounded-tr-xl': index === chatList.length - 1,
-                      'rb:rounded-tl-xl': index === 0,
-                    }
-                  )}>
-                    <div className='rb:relative rb:p-[10px_12px] rb:overflow-hidden'>
-                      <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:w-[calc(100%-24px)]">{chat.label}</div>
-                      <div
-                        className="rb:w-4 rb:h-4 rb:cursor-pointer rb:absolute rb:top-3 rb:right-3 rb:bg-cover rb:bg-[url('@/assets/images/close.svg')] rb:hover:bg-[url('@/assets/images/close_hover.svg')]"
-                        onClick={() => handleDelete(index)}
-                      ></div>
-                    </div>
+      : <>
+        <div className={clsx(`rb:relative rb:grid rb:grid-cols-${chatList.length} rb:overflow-hidden rb:w-full rb:flex-1 rb:min-h-0`)}>
+          {chatList.map((chat, index) => (
+            <Flex key={index} vertical className={clsx({
+              "rb:border-r rb:border-[#DFE4ED]": index !== chatList.length - 1 && chatList.length > 1,
+            })}>
+              {chat.label &&
+                <div className={clsx(
+                  "rb:grid rb:bg-[#F6F6F6] rb:text-center rb:flex-[0_0_auto]"
+                )}>
+                  <div className='rb:relative rb:py-2.5 rb:px-3 rb:overflow-hidden'>
+                    <div className="rb:text-[#212332] rb:font-medium rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:w-[calc(100%-24px)]">{chat.label}</div>
+                    <div 
+                      className="rb:w-4 rb:h-4 rb:cursor-pointer rb:absolute rb:top-3 rb:right-3 rb:bg-cover rb:bg-[url('@/assets/images/close.svg')] rb:hover:bg-[url('@/assets/images/close_hover.svg')]" 
+                      onClick={() => handleDelete(index)}
+                    ></div>
                   </div>
-                }
-                <ChatContent
-                  classNames={{
-                    'rb:mx-[16px] rb:mt-6': true,
-                    'rb:h-[calc(100vh-282px)]': isCluster,
-                    'rb:h-[calc(100vh-380px)]': !isCluster,
-                  }}
-                  contentClassNames={{
-                    'rb:max-w-[400px]!': chatList.length === 1,
-                    'rb:max-w-[260px]!': chatList.length === 2,
-                    'rb:max-w-[150px]!': chatList.length === 3,
-                    'rb:max-w-[108px]!': chatList.length === 4,
-                  }}
-                  empty={<Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
-                  data={chat.list || []}
-                  streamLoading={compareLoading}
-                  labelPosition="top"
-                  labelFormat={(item) => item.role === 'user' ? t('application.you') : chat.label}
-                  errorDesc={t('application.ReplyException')}
-                />
-              </div>
-            ))}
-          </div>
+                </div>
+              }
+              <ChatContent
+                classNames={{
+                  'rb:mb-3 rb:mt-5': isHasLabel,
+                  'rb:mb-3': !isHasLabel,
+                  'rb:h-[calc(100vh-292px)]': isCluster,
+                  'rb:h-[calc(100vh-353px)]': !isCluster,
+                  "rb:pr-4": index !== chatList.length - 1 && chatList.length > 1,
+                  "rb:pl-4": index !== 0 && chatList.length > 1,
+                }} 
+                contentClassNames={{
+                  'rb:max-w-100!': chatList.length === 1,
+                  'rb:max-w-70!': chatList.length === 2,
+                  'rb:max-w-45!': chatList.length === 3,
+                  'rb:max-w-24!': chatList.length === 4,
+                }}
+                empty={<Empty
+                  url={ChatIcon}
+                  title={t('application.chatEmpty')}
+                  isNeedSubTitle={false}
+                  size={[240, 200]}
+                  className={clsx({
+                    "rb:h-[calc(100vh-353px)]": isHasLabel,
+                    "rb:h-[calc(100vh-292px)]": !isHasLabel,
+                  })}
+                />}
+                data={chat.list || []}
+                streamLoading={compareLoading}
+                labelPosition="top"
+                labelFormat={(item) => item.role === 'user' ? t('application.you') : chat.label || t(`application.ai`)}
+                errorDesc={t('application.ReplyException')}
+              />
+            </Flex>
+          ))}
+        </div>
           <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:m-4 rb:mb-1">
             <ChatInput
               message={message}
@@ -527,16 +534,16 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
                   <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
                 </Flex>
               </Flex>
-            </ChatInput>
+          </ChatInput>
           </div>
-        </>
+      </>
       }
 
       <UploadFileListModal
         ref={uploadFileListModalRef}
         refresh={addFileList}
       />
-    </div>
+    </Flex>
   )
 }
 
