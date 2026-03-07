@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:30 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:33:30 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-11 14:51:00
  */
 /**
  * End User Profile Component
@@ -12,8 +12,9 @@
 import { forwardRef, useImperativeHandle, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton } from 'antd';
+import { Skeleton, Flex } from 'antd';
 import dayjs from 'dayjs'
+import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
 import {
@@ -26,10 +27,11 @@ import type { EndUser, EndUserProfileModalRef, EndUserProfileRef } from '../type
  * Component props
  */
 interface EndUserProfileProps {
-  onDataLoaded?: (data: { other_name?: string; id: string }) => void
+  onDataLoaded?: (data: { other_name?: string; id: string }) => void;
+  className?: string;
 }
 
-const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onDataLoaded }, ref) => {
+const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onDataLoaded, className }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const endUserProfileModalRef = useRef<EndUserProfileModalRef>(null)
@@ -85,22 +87,24 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onD
           onClick={handleEdit}
         ></div>
       }
-      headerClassName="rb:min-h-[46px]!"
+      headerClassName="rb:min-h-[46px]!! rb:font-medium!"
+      className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-80 rb:top-29 rb:left-26", className)}
+      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100vh-176px)] rb:overflow-auto"
     >
       {loading
         ? <Skeleton />
-        : <div className="rb:flex rb:flex-col rb:justify-between rb:gap-3 rb:h-full">
+        : <Flex vertical gap={20}>
             {formatItems().map(vo => (
-              <div key={vo.key} className="rb:flex rb:justify-between rb:items-center rb:gap-3 rb:leading-5">
-                <div className="rb:text-[#5B6167]">{vo.label}</div>
-                <div className="">{vo.children}</div>
+              <div key={vo.key} className="rb:leading-5">
+                <div className="rb:text-[#7B8085]">{vo.label}</div>
+                <div className="rb:mt-0.5">{vo.children}</div>
               </div>
             ))}
 
-          <div className="rb:border-t rb:border-t-[#DFE4ED] rb:pt-4 rb:text-[#5B6167] rb:text-[12px] rb:leading-4">
+            <div className="rb:text-[#7B8085] rb:text-[12px] rb:leading-4.5">
               {t('userMemory.updated_at')}: {data?.updatetime_profile ? dayjs(data?.updatetime_profile).format('YYYY/MM/DD HH:mm:ss') : ''}
             </div>
-        </div>
+        </Flex>
       }
       <EndUserProfileModal
         ref={endUserProfileModalRef}

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:53:44 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 17:54:33
+ * @Last Modified time: 2026-02-10 17:52:35
  */
 /**
  * User Memory Page
@@ -12,7 +12,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom'
-import { Row, Col, List, Skeleton } from 'antd';
+import { Row, Col, Skeleton, Form, Flex } from 'antd';
 
 import Empty from '@/components/Empty'
 import type { Data } from './types'
@@ -27,7 +27,9 @@ export default function UserMemory() {
   const { storageType } = useUser()
   const [loading, setLoading] = useState<boolean>(false);
   const [data, setData] = useState<Data[]>([]);
-  const [search, setSearch] = useState<string | undefined>(undefined);
+
+  const [form] = Form.useForm()
+  const search = Form.useWatch(['search'], form)
 
   /** Fetch user memory list */
   useEffect(() => {
@@ -76,26 +78,27 @@ export default function UserMemory() {
 
   return (
     <div>
-      <Row gutter={16} className="rb:mb-4">
-        <Col span={8}>
-          <SearchInput
-            placeholder={t('userMemory.searchPlaceholder')}
-            onSearch={(value) => setSearch(value)}
-            style={{ width: '100%' }}
-          />
-        </Col>
-      </Row>
+      <Form form={form}>
+        <Row gutter={16} className="rb:mb-4">
+          <Col span={8}>
+            <Form.Item name="search" noStyle>
+              <SearchInput
+                placeholder={t('userMemory.searchPlaceholder')}
+                className="rb:w-full!"
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+      </Form>
       {loading ?
         <Skeleton active />
         : filterData.length > 0 ? (
-          <List
-            grid={{ gutter: 16, column: 3 }}
-            dataSource={filterData}
-            renderItem={(item, index) => {
+          <Row gutter={[16, 16]}>
+            {filterData.map((item, index) => {
               const { end_user, memory_num, memory_config } = item as Data;
               const name = end_user?.other_name && end_user?.other_name !== '' ? end_user?.other_name : end_user?.id
               return (
-                <List.Item key={index}>
+                <Col key={index} span={8}>
                   <RbCard
                     avatar={<div className="rb:w-12 rb:h-12 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-12 rb:rounded-lg rb:text-[#FBFDFF] rb:bg-[#155EEF] rb:mr-2">{name[0]}</div>}
                     title={name || '-'}
@@ -105,29 +108,29 @@ export default function UserMemory() {
                     className="rb:cursor-pointer"
                     onClick={() => handleViewDetail(end_user.id)}
                   >
-                    <div className="rb:flex rb:justify-between rb:items-center">
+                    <Flex align="center" justify="space-between">
                       <div>{t('userMemory.capacity')}</div>
                       <div>{memory_num?.total || 0} {t('userMemory.memoryNum')}</div>
-                    </div>
-                    <div className="rb:flex rb:justify-between rb:items-center rb:mt-2.5">
+                    </Flex>
+                    <Flex align="center" justify="space-between" className="rb:mt-2.5!">
                       <div>{t('userMemory.type')}</div>
                       <div>{t(`userMemory.${item.type || 'person'}`)}</div>
-                    </div>
+                    </Flex>
 
-                    <div className="rb:relative rb:z-2 rb:mt-3 rb:bg-[#F6F8FC] rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:py-2 rb:px-3" onClick={handleViewMemoryConfig}>
-                      <div className="rb:text-[#5B6167] rb:leading-5 rb:flex rb:justify-between rb:items-center">
+                    <div className="rb:relative rb:z-2 rb:mt-3 rb:bg-[#F6F8FC] rb:rounded-lg rb-border rb:py-2 rb:px-3" onClick={handleViewMemoryConfig}>
+                      <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:leading-5">
                         {t('userMemory.memory_config_name')}
                         <div
                           className="rb:w-7 rb:h-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/arrow_right.svg')]"
                         ></div>
-                      </div>
+                      </Flex>
                       <div className="rb:font-medium rb:leading-5 rb:mt-1">{memory_config?.memory_config_name || '-'}</div>
                     </div>
                   </RbCard>
-                </List.Item>
+                </Col>
               )
-            }}
-          />
+            })}
+          </Row>
         ) : <Empty />
       }
     </div>
