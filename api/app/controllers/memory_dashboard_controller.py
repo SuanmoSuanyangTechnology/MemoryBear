@@ -156,9 +156,13 @@ async def get_workspace_end_users(
             "app.tasks.init_implicit_emotions_for_users",
             kwargs={"end_user_ids": end_user_ids},
         )
-        api_logger.info(f"已触发隐性记忆按需初始化任务，候选用户数: {len(end_user_ids)}")
+        _celery_app.send_task(
+            "app.tasks.init_interest_distribution_for_users",
+            kwargs={"end_user_ids": end_user_ids},
+        )
+        api_logger.info(f"已触发按需初始化任务，候选用户数: {len(end_user_ids)}")
     except Exception as e:
-        api_logger.warning(f"触发隐性记忆按需初始化任务失败（不影响主流程）: {e}")
+        api_logger.warning(f"触发按需初始化任务失败（不影响主流程）: {e}")
 
     # 并发执行配置查询和记忆数量查询
     memory_configs_map, memory_nums_map = await asyncio.gather(
