@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:12:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 17:26:04
+ * @Last Modified time: 2026-02-10 11:57:58
  */
 /**
  * Home Dashboard Page
@@ -19,6 +19,7 @@ import { getDashboardData, getMemoryIncrement, getKbTypes } from '@/api/memory';
 import RecentActivity from './components/RecentActivity'
 import TagList from './components/TagList'
 import QuickOperation from './components/QuickOperation'
+import ApiLineCard from './components/ApiLineCard'
 
 /**
  * Dashboard statistics data
@@ -120,42 +121,39 @@ const Home = () => {
   }
 
   return (
-    <div className="rb:pb-6">
-      <TopCardList data={dashboardData} />
-
-      <Row className="rb:mt-4" gutter={16}>
-        <Col span={12}>
-          <LineCard
-            chartData={memoryIncrement}
-            limit={limit}
-            onChange={handleRangeChange}
-            type="memoryGrowthTrend"
-            seriesList={['total_num']}
-          />
-        </Col>
-        <Col span={12}>
-          <PieCard
-            loading={loading.knowledgeTypeDistribution}
-            chartData={knowledgeTypeDistribution}
-          />
-        </Col>
-      </Row>
-
-      <Row className="rb:mt-4" gutter={16}>
-        <Col span={12}>
-          <RecentActivity />
-        </Col>
-        <Col span={12}>
-          <TagList />
-        </Col>
-      </Row>
-
-      <Row className="rb:mt-4" gutter={16}>
-        <Col span={24}>
-          <QuickOperation />
-        </Col>
-      </Row>
-    </div>
+    <Row gutter={[12, 12]}>
+      <Col span={8}>
+        <TopCardList data={dashboardData} />
+      </Col>
+      <Col span={8}>
+        <LineCard
+          chartData={memoryIncrement}
+          limit={limit}
+          onChange={handleRangeChange}
+          type="memoryGrowthTrend"
+          seriesList={['total_num']}
+        />
+      </Col>
+      <Col span={8}>
+        <ApiLineCard
+        />
+      </Col>
+      <Col span={8}>
+        <PieCard
+          loading={loading.knowledgeTypeDistribution}
+          chartData={knowledgeTypeDistribution}
+        />
+      </Col>
+      <Col span={8}>
+        <RecentActivity />
+      </Col>
+      <Col span={8}>
+        <QuickOperation />
+      </Col>
+      <Col span={24}>
+        <TagList />
+      </Col>
+    </Row>
   );
 }
 

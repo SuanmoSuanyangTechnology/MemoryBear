@@ -115,6 +115,10 @@ export const zh = {
       ontology: '本体工程',
       prompt: '提示词工程',
       skills: '技能库',
+      workbench: '工作台',
+      memoryRelated: '记忆相关',
+      advancedSettings: '高级设置',
+      promptHistory: '我的历史',
     },
     knowledgeBase: {
       home: '首页',
@@ -427,7 +431,7 @@ export const zh = {
       }
     },
     application: {
-      searchPlaceholder: '搜索应用或集群',
+      searchPlaceholder: '搜索应用',
       createApplication: '创建应用',
       type: '类型',
       source: '来源',
@@ -438,6 +442,7 @@ export const zh = {
       applicationName: '应用名称',
       applicationIcon: '应用图标',
       applicationType: '应用类型',
+      allType: '全部类型',
 
       agent: 'Agent',
       agentDesc: '创建单个智能代理',
@@ -502,6 +507,7 @@ export const zh = {
       dialogueHistoricalMemory: '对话历史记忆',
       dialogueHistoricalMemoryDesc: '激活后，可以选择记忆管理中的记忆内容',
       toolConfiguration: '工具配置',
+      toolManagement: '工具管理',
       webSearch: '网络搜索',
       webSearchDesc: '允许Agent访问互联网进行实时搜索',
       codeExecutor: '代码执行器',
@@ -511,8 +517,8 @@ export const zh = {
       variableConfiguration: '变量配置',
       selectMemoryContent: '选择记忆内容',
       selectMemoryContentDesc: '从记忆管理中选择要在对话中使用的记忆内容',
-      VariableManagement: '变量管理',
-      VariableManagementDesc: '配置Agent可用的变量',
+      variableManagement: '变量管理',
+      variableManagementDesc: '配置Agent可用的变量',
       addVariables: '添加变量',
       variablesEmpty: '目前没有可用的变量',
       debuggingEmpty: '目前没有可用的调试模型',
@@ -557,7 +563,7 @@ export const zh = {
       VersionInformation: '版本信息',
       publishedOn: '发布于',
       publisher: '发布者',
-      DetailsOfVersion: '{{version}}版本详情',
+      detailsOfVersion: '{{version}} 版本详情',
       exportDSLFile: '导出DSL文件',
       willRollToThisVersion: '将回滚到此版本',
       share: '分享',
@@ -755,6 +761,7 @@ export const zh = {
       gotoDetail: '查看详情',
       dify: 'Dify',
       pleaseUploadFile: '请上传工作流文件',
+      promptOptimizationEmpty: '对话优化提示词将显示在这里',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
@@ -828,19 +835,14 @@ export const zh = {
 
       extractMemoryContent: '提取记忆内容',
       createNewMemorySummary: '创建新记忆条目',
-
       createNewApplication: '创建新应用',
-      createNewApplicationDesc: '零代码拖拽3分钟创应用',
-
+      createNewApplicationDesc: '零代码，3 分钟搭建应用',
       createNewKnowledge: '创建知识库',
-      createNewKnowledgeDesc: '秒变可搜索的专属知识库',
-
+      createNewKnowledgeDesc: '秒级生成可搜索知识库',
       memoryConversation: '记忆对话',
-      memoryConversationDesc: '让AI越用越懂你',
+      memoryConversationDesc: '越用越懂你的 AI',
       helpCenter: '帮助中心',
-      helpCenterDesc: '一站式解决疑问快速上手',
-      memorySummary: '查看记忆摘要',
-      memorySummaryDesc: '查看记忆摘要报告',
+      helpCenterDesc: '一站式上手与支持',
 
       activityEmpty: '目前没有记忆活动',
       tagEmpty: '目前没有标签记录～',
@@ -857,7 +859,12 @@ export const zh = {
       dialogue: '对话',
       chunk: '分块',
       statement: '语句',
-      entity: '实体'
+      entity: '实体',
+
+      apiCallTrends: 'Api调用趋势',
+      total_calls: 'Api 总调用量',
+      app_calls: '应用Api调用量',
+      service_calls: '服务Api调用量',
     },
     header: {
       userInfo: '用户信息',
@@ -1966,10 +1973,7 @@ export const zh = {
       answer: '回复（Answer）',
       aiAndCognitiveProcessing: 'AI与认知处理',
       llm: '大语言模型 (LLM)',
-      model_selection: '多模型选择',
-      model_voting: '多模型投票',
       'knowledge-retrieval': '知识检索 (RAG)',
-      classification: '智能分类',
       'parameter-extractor': '参数提取',
       flowControl: '流程控制',
       'if-else': '条件分支',
@@ -1979,7 +1983,6 @@ export const zh = {
       'cycle-start': '',
       break: '退出循环',
       assigner: '变量赋值',
-      parallel: '并行执行',
       'var-aggregator': '变量聚合器',
       externalInteraction: '外部交互',
       "http-request": 'HTTP请求',
@@ -1989,20 +1992,6 @@ export const zh = {
       cognitiveUpgrading: '认知升级（创新）',
       'memory-read': '记忆提取',
       'memory-write': '记忆储存',
-      task_planning: '任务规划',
-      reasoning_control: '推理控制',
-      self_reflection: '自我反思',
-      memory_enhancement: '记忆增强',
-      agentCollaborationNode: 'Agent 协作节点',
-      agent_scheduling: 'Agent 调度',
-      agent_collaboration: 'Agent 协同',
-      agent_arbitration: 'Agent 仲裁',
-      safetyAndCompliance: '安全与合规',
-      sensitive_detection: '敏感识别',
-      output_audit: '输出审计',
-      evolutionAndGovernance: '演化与治理',
-      self_optimization: '自我优化',
-      process_evolution: '流程演化',
       unknown: '未知节点',
 
       clickToConfigure: '点击配置节点参数',
@@ -2025,6 +2014,7 @@ export const zh = {
           inner: '内置',
           messagesPlaceholder: '在此处编写提示，输入“{”插入变量，输入“insert”插入',
           vision: '视觉',
+          parameterSettings: '参数设置',
         },
         start: {
           variables: '输入字段',
@@ -2111,7 +2101,9 @@ export const zh = {
             "eq": '是',
             "ne": '不是',
           },
-          else_desc: '用于定义当 if 条件不满足时应执行的逻辑。'
+          else_desc: '用于定义当 if 条件不满足时应执行的逻辑。',
+          unset: '条件未设置',
+          set: '已设置',
         },
         'http-request': {
           auth: '鉴权',
@@ -2147,7 +2139,9 @@ export const zh = {
           categories: '分类',
           user_supplement_prompt: '指令',
           class_name: '分类',
-          addClassName: '添加分类'
+          addClassName: '添加分类',
+          unset: '分类未设置',
+          set: '已设置',
         },
         loop: {
           cycle_vars: '循环变量',
@@ -2640,8 +2634,10 @@ export const zh = {
       file: '导入文件',
     },
     prompt: {
+      promptDesc: 'Input your original prompt, and AI will help you refine it into a more professional version',
       editor: '提示词生成器',
       history: '我的历史',
+      historyDesc: 'View and manage your prompt optimization history',
       historySearchPlaceholder: '按名称搜索',
       model: '模型',
       you: '你',

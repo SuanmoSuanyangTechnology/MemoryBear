@@ -136,3 +136,7 @@ export const getExperienceConfig = (share_token: string) => {
     }
   })
 }
+// Get workspace API call statistics
+export const getWorkspaceApiStatistics = (data: { start_date: number; end_date: number; }) => {
+  return request.get(`/apps/workspace/api-statistics`, data)
+}

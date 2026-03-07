@@ -1,5 +1,65 @@
 @import "tailwindcss" prefix(rb);
 @plugin "@tailwindcss/typography";
+@import "./common.css";
+
+@font-face {
+  font-family: 'MiSans-Bold';
+  src: url('@/assets/font/MiSans/MiSans-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+}@font-face {
+  font-family: 'MiSans-Demibold';
+  src: url('@/assets/font/MiSans/MiSans-Demibold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+}@font-face {
+  font-family: 'MiSans-ExtraLight';
+  src: url('@/assets/font/MiSans/MiSans-ExtraLight.woff2') format('woff2');
+  font-weight: 200;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'MiSans-Heavy';
+  src: url('@/assets/font/MiSans/MiSans-Heavy.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'MiSans-Light';
+  src: url('@/assets/font/MiSans/MiSans-Light.woff2') format('woff2');
+  font-weight: 300;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'MiSans-Medium';
+  src: url('@/assets/font/MiSans/MiSans-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'MiSans-Normal';
+  src: url('@/assets/font/MiSans/MiSans-Normal.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'MiSans-Regular';
+  src: url('@/assets/font/MiSans/MiSans-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'MiSans-Semibold';
+  src: url('@/assets/font/MiSans/MiSans-Semibold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'MiSans-Thin';
+  src: url('@/assets/font/MiSans/MiSans-Thin.woff2') format('woff2');
+  font-weight: 100;
+  font-style: normal;
+}
 
 html, body, #root {
   height: 100%;
@@ -31,7 +91,7 @@ body {
 .ant-menu-light>.ant-menu .ant-menu-item-selected,
 .ant-menu-light:not(.ant-menu-horizontal) .ant-menu-item:not(.ant-menu-item-selected):hover,
 .ant-menu-light>.ant-menu:not(.ant-menu-horizontal) .ant-menu-item:not(.ant-menu-item-selected):hover {
-  box-shadow: 0px 2px 4px 0px rgba(0, 0, 0, 0.15);
+  box-shadow: none;
 }
 .ant-menu-light .ant-menu-item-selected,
 .ant-menu-light>.ant-menu .ant-menu-item-selected {
@@ -47,14 +107,48 @@ body {
   background: #FFFFFF;
   color: #212332;
 }
+.ant-menu-inline-collapsed>.ant-menu-item,
+.ant-menu-inline-collapsed>.ant-menu-item-group>.ant-menu-item-group-list>.ant-menu-item,
+.ant-menu-inline-collapsed>.ant-menu-item-group>.ant-menu-item-group-list>.ant-menu-submenu>.ant-menu-submenu-title,
+.ant-menu-inline-collapsed>.ant-menu-submenu>.ant-menu-submenu-title {
+  padding-inline: calc(50% - 6px - 14px);
+}
 .ant-slider .ant-slider-handle::after {
-  background-color: #155EEF;
+  background-color: #171719;
   width: 12px;
   height: 12px;
 }
 .ant-slider .ant-slider-handle::before {
   width: 12px;
   height: 12px;
+}
+.ant-slider-horizontal .ant-slider-handle {
+  inset-block-start: 3px;
+}
+.ant-slider.small {
+  margin: 0;
+  padding: 8px;
+}
+.ant-slider-horizontal.small .ant-slider-handle {
+  inset-block-start: 5px;
+}
+.ant-slider.small .ant-slider-handle::after {
+  background-color: #171719;
+  width: 10px;
+  height: 10px;
+}
+.ant-slider.small .ant-slider-handle::before {
+  width: 10px;
+  height: 10px;
+}
+.ant-slider.small .ant-slider-handle:hover::after,
+.ant-slider.small .ant-slider-handle:active::after,
+.ant-slider.small .ant-slider-handle:focus::after { 
+  outline: 2px solid #171719;
+}
+.ant-slider.small .ant-slider-rail,
+.ant-slider.small .ant-slider-track {
+  border-radius: 3px;
 }
 .ant-table-container {
   border: 1px solid #DFE4ED;
@@ -82,6 +176,16 @@ body {
 .ant-table-wrapper .ant-table-thead>tr>th,
 .ant-table-wrapper .ant-table-thead>tr>td {
   font-weight: 500;
+}
+.ant-table-wrapper .ant-table.ant-table-small .ant-table-title,
+.ant-table-wrapper .ant-table.ant-table-small .ant-table-footer,
+.ant-table-wrapper .ant-table.ant-table-small .ant-table-cell,
+.ant-table-wrapper .ant-table.ant-table-small .ant-table-thead>tr>th,
+.ant-table-wrapper .ant-table.ant-table-small .ant-table-tbody>tr>th,
+.ant-table-wrapper .ant-table.ant-table-small .ant-table-tbody>tr>td,
+.ant-table-wrapper .ant-table.ant-table-small tfoot>tr>th,
+.ant-table-wrapper .ant-table.ant-table-small tfoot>tr>td {
+  padding: 12px 16px;
 }
 .ant-table-wrapper .ant-table-pagination.ant-pagination {
   margin: 24px 0 32px 0;
@@ -165,13 +269,7 @@ body {
 .infinite-scroll-component {
   overflow-x: hidden !important;
 }
-.ant-slider-horizontal .ant-slider-handle {
-  inset-block-start: 6px;
-}
 
-::-webkit-scrollbar-track {
-  background: transparent !important;
-}
 .ant-breadcrumb a:hover {
   background-color: transparent;
 }
@@ -183,6 +281,34 @@ body {
 }
 
 .ͼ2 .cm-gutters {
-  background-color: #FFFFFF;
+  background-color: transparent;
   border: none;
+}
+::-webkit-scrollbar {
+  width: 6px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #DFE4ED;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #DFE4ED;
+}
+
+.ant-select-focused.ant-select-outlined:not(.ant-select-disabled):not(.ant-select-customize-input):not(.ant-pagination-size-changer) .ant-select-selector {
+  box-shadow: none;
+}
+.ant-select-dropdown .ant-select-item {
+  color: #212332;
+}
+.ant-select-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  color: #212332;
+  background: #F6F6F6;
 }

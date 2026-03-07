@@ -115,6 +115,10 @@ export const en = {
       ontology: 'Ontology Engineering',
       prompt: 'Prompt Engineering',
       skills: 'Skill Library',
+      workbench: 'Workbench',
+      memoryRelated: 'Memory-Related',
+      advancedSettings: 'Advanced Settings',
+      promptHistory: 'My history',
     },
     dashboard: {
       total_models: 'Available Models',
@@ -185,19 +189,14 @@ export const en = {
 
       extractMemoryContent: 'Extract Memory Content',
       createNewMemorySummary: 'Create New Memory Entry',
-
       createNewApplication: 'Create New Application',
-      createNewApplicationDesc: 'Build an app in just 3 minutes with zero-code drag-and-drop.',
-
+      createNewApplicationDesc: 'Build an app in 3 minutes, no code.',
       createNewKnowledge: 'Create New Knowledge',
-      createNewKnowledgeDesc: 'Transform your data into a fully searchable, dedicated knowledge base in seconds.',
-
+      createNewKnowledgeDesc: 'Create a searchable knowledge base instantly.',
       memoryConversation: 'Memory Conversation',
-      memoryConversationDesc: 'The more you use it, the better AI understands you.',
+      memoryConversationDesc: 'The more you use it, the better AI knows you.',
       helpCenter: 'Help Center',
-      helpCenterDesc: 'One-stop support to answer your questions and get you started fast.',
-      memorySummary: 'View Memory Summary',
-      memorySummaryDesc: 'View Memory Summary Report',
+      helpCenterDesc: 'One place to get help and start fast.',
 
       activityEmpty: 'There is currently no memory activity',
       tagEmpty: 'There are no tag records at the moment～',
@@ -214,7 +213,12 @@ export const en = {
       dialogue: 'Dialogue',
       chunk: 'Chunk',
       statement: 'Statement',
-      entity: 'Entity'
+      entity: 'Entity',
+
+      apiCallTrends: 'Api Call Trends',
+      total_calls: 'Total API Calls',
+      app_calls: 'Application API Calls',
+      service_calls: 'Service API Calls',
     },
     table: {
       totalRecords: 'Total {{total}} Articles'
@@ -1041,7 +1045,7 @@ export const en = {
       forgetting_interval_hours: 'Forgetting Interval Hours'
     },
     application: {
-      searchPlaceholder: 'Search for applications or clusters',
+      searchPlaceholder: 'Search for applications',
       createApplication: 'Create Application',
       type: 'Type',
       source: 'Source',
@@ -1052,6 +1056,7 @@ export const en = {
       applicationName: 'Application Name',
       applicationIcon: 'Application Icon',
       applicationType: 'Application Type',
+      allType: 'All types',
 
       agent: 'Agent',
       agentDesc: 'Create a single intelligent agent',
@@ -1117,6 +1122,7 @@ export const en = {
       dialogueHistoricalMemory: 'Conversation History Memory',
       dialogueHistoricalMemoryDesc: 'Enable this to select memory content from memory management.',
       toolConfiguration: 'Tool Configuration',
+      toolManagement: 'Tool Management',
       webSearch: 'Web Search',
       webSearchDesc: 'Allow the Agent to access the Internet for real-time search',
       codeExecutor: 'Code Executor',
@@ -1126,8 +1132,8 @@ export const en = {
       variableConfiguration: 'Variable Configuration',
       selectMemoryContent: 'Select Memory Content',
       selectMemoryContentDesc: 'From Memory Management Select the memory content to be used in the conversation',
-      VariableManagement: 'Variable Management',
-      VariableManagementDesc: 'Configure the available variables for the Agent',
+      variableManagement: 'Variable Management',
+      variableManagementDesc: 'Configure the available variables for the Agent',
       addVariables: 'Add Variables',
       variablesEmpty: 'There are currently no variables available',
       debuggingEmpty: 'No models available for debugging.',
@@ -1172,7 +1178,7 @@ export const en = {
       VersionInformation: 'Version Information',
       publishedOn: 'Published on',
       publisher: 'Published by',
-      DetailsOfVersion: 'Version Details: {{version}}',
+      detailsOfVersion: 'Version Details: {{version}}',
       exportDSLFile: 'Export DSL file',
       willRollToThisVersion: 'Will roll to this version',
       share: 'Share',
@@ -1370,7 +1376,8 @@ export const en = {
       gotoList: 'Return to Application List',
       gotoDetail: 'View Details',
       dify: 'Dify',
-      pleaseUploadFile: 'Please upload workflow file', 
+      pleaseUploadFile: 'Please upload workflow file',
+      promptOptimizationEmpty: 'The prompt words for conversation optimization will be displayed here',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -1970,10 +1977,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       answer: 'Answer',
       aiAndCognitiveProcessing: 'AI & Cognitive Processing',
       llm: 'Large Language Model (LLM)',
-      model_selection: 'Multi-Model Selection',
-      model_voting: 'Multi-Model Voting',
       'knowledge-retrieval': 'Knowledge Retrieval (RAG)',
-      classification: 'Intelligent Classification',
       'parameter-extractor': 'Parameter Extraction',
       flowControl: 'Flow Control',
       'if-else': 'Conditional Branch',
@@ -1983,7 +1987,6 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       'cycle-start': '',
       break: 'Break Loop',
       assigner: 'Variable Assignment',
-      parallel: 'Parallel Execution',
       'var-aggregator': 'Variable Aggregator',
       externalInteraction: 'External Interaction',
       "http-request": 'HTTP Request',
@@ -1993,20 +1996,6 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       cognitiveUpgrading: 'Cognitive Upgrading (Innovation)',
       'memory-read': 'Memory Retrieval',
       'memory-write': 'Memory Storage',
-      task_planning: 'Task Planning',
-      reasoning_control: 'Reasoning Control',
-      self_reflection: 'Self Reflection',
-      memory_enhancement: 'Memory Enhancement',
-      agentCollaborationNode: 'Agent Collaboration Nodes',
-      agent_scheduling: 'Agent Scheduling',
-      agent_collaboration: 'Agent Collaboration',
-      agent_arbitration: 'Agent Arbitration',
-      safetyAndCompliance: 'Safety & Compliance',
-      sensitive_detection: 'Sensitive Detection',
-      output_audit: 'Output Audit',
-      evolutionAndGovernance: 'Evolution & Governance',
-      self_optimization: 'Self Optimization',
-      process_evolution: 'Process Evolution',
       unknown: 'Unknown Node',
 
       clickToConfigure: 'Click to configure node parameters',
@@ -2029,6 +2018,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           inner: 'Built-in',
           messagesPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
           vision: 'Vision',
+          parameterSettings: 'Parameter Settings',
         },
         start: {
           variables: 'Input Fields',
@@ -2115,7 +2105,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
             "eq": 'Is',
             "ne": 'Is Not',
           },
-          else_desc: 'Used to define the logic that should be executed when the if condition is not met.'
+          else_desc: 'Used to define the logic that should be executed when the if condition is not met.',
+          unset: 'Condition Not Set',
+          set: 'Set',
         },
         'http-request': {
           auth: 'Authentication',
@@ -2151,7 +2143,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           categories: 'Categories',
           user_supplement_prompt: 'Instruction',
           class_name: 'Classification',
-          addClassName: 'Add Classification'
+          addClassName: 'Add Classification',
+          unset: 'Classification Not Set',
+          set: 'Set',
         },
         loop: {
           cycle_vars: 'Loop Variables',
@@ -2640,8 +2634,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       file: 'Import File',
     },
     prompt: {
+      promptDesc: 'Input your original prompt, and AI will help you refine it into a more professional version',
+      chatTitle: 'Multi-turn dialogue',
       editor: 'Prompt Generator',
       history: 'My History',
+      historyDesc: 'View and manage your prompt optimization history',
       historySearchPlaceholder: 'Search by name',
       model: 'Model',
       you: 'You',

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:17:05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 11:59:10
+ * @Last Modified time: 2026-02-10 11:35:52
  */
 /**
  * Line Chart Card Component
@@ -10,26 +10,17 @@
  * Supports multiple series and date range selection
  */
 
-import { type FC } from 'react'
+import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Select } from 'antd'
+import dayjs from 'dayjs'
 
 import Card from './Card'
-import AreaLineChart, { type ChartData } from '@/components/Charts/AreaLineChart';
+import { getWorkspaceApiStatistics } from '@/api/application'
+import LineChart, { type ChartData } from '@/components/Charts/LineChart'
 
-/**
- * Component props
- */
-interface LineCardProps {
-  chartData: ChartData[];
-  limit: number;
-  onChange: (value: string, type: string) => void;
-  type: string;
-  className?: string;
-  seriesList: string[];
-}
-
-const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, className, seriesList }) => {
+const seriesList = ['total_calls', 'app_calls', 'service_calls']
+const ApiLineCard: FC = () => {
   const { t } = useTranslation()
   const options = [
     { label: t('dashboard.lastDays', { days: 7 }), value: 7 },
@@ -38,6 +29,19 @@ const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, classNa
     { label: t('dashboard.lastHalfYear'), value: 180 },
     { label: t('dashboard.lastYear'), value: 365 },
   ]
+  const [chartData, setChartData] = useState<ChartData[]>([])
+  const [query, setQuery] = useState(7)
+
+  useEffect(() => {
+    getWorkspaceApiStatistics({
+      start_date: dayjs().subtract(query - 1, 'd').startOf('d').valueOf(),
+      end_date: dayjs().endOf('d').valueOf(),
+    })
+      .then(res => {
+        setChartData(res as ChartData[])
+      })
+  }, [query])
+
   /** Format series list for legend */
   const formatSeriesList = () => {
     const list: Record<string, string> = {}
@@ -50,19 +54,18 @@ const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, classNa
 
   return (
     <Card
-      title={t(`dashboard.${type}`)}
+      title={t(`dashboard.apiCallTrends`)}
       headerOperate={
         <Select 
-          value={limit}
+          value={query}
           options={options} 
-          onChange={(value) => onChange(String(value), type)}
+          onChange={(value) => setQuery(value)}
           className="rb:w-35!"
         />
       }
-      className={`rb:pb-6 ${className}`}
+      className={`rb:pb-6`}
     >
-      <AreaLineChart
-        xAxisKey="date"
+      <LineChart
         chartData={chartData}
         seriesList={formatSeriesList()}
         height={239}
@@ -71,4 +74,4 @@ const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, classNa
   )
 }
 
-export default LineCard
+export default ApiLineCard
