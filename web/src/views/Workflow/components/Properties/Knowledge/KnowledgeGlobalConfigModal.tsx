@@ -4,8 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { RerankerConfig, KnowledgeGlobalConfigModalRef } from './types'
 import RbModal from '@/components/RbModal'
-import CustomSelect from '@/components/CustomSelect'
-import { getModelListUrl } from '@/api/models'
+import ModelSelect from '@/components/ModelSelect'
 
 const FormItem = Form.Item;
 
@@ -96,12 +95,9 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
             rules={[{ required: true, message: t('common.pleaseSelect') }]}
             extra={t('application.rearrangementModelDesc')}
           >
-            <CustomSelect
-              url={getModelListUrl}
-              params={{ type: 'rerank', pagesize: 100, is_active: true }}
-              valueKey="id"
-              labelKey="name"
-              hasAll={false}
+            <ModelSelect
+              params={{ type: 'rerank' }}
+              className="rb:w-full!"
             />
           </FormItem>
           {/* Top K */}

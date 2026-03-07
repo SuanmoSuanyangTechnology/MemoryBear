@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 14:52:02
+ * @Last Modified time: 2026-03-07 17:10:59
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -34,8 +34,6 @@ import memoryWriteIcon from '@/assets/images/workflow/memory-write.svg'
 import unknownIcon from '@/assets/images/workflow/unknown.svg'
 
 import { memoryConfigListUrl } from '@/api/memory'
-
-import { getModelListUrl } from '@/api/models'
 import type { NodeLibrary } from './types'
 
 /**
@@ -104,8 +102,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           model_id: {
             type: 'define',
-            url: getModelListUrl,
-            params: { type: 'llm,chat', pagesize: 100, is_active: true }, // llm/chat
+            params: { type: 'llm,chat' }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
           },
@@ -168,11 +165,8 @@ export const nodeLibrary: NodeLibrary[] = [
       { type: "parameter-extractor", icon: parameterExtractionIcon,
         config: {
           model_id: {
-            type: 'customSelect',
-            url: getModelListUrl,
-            params: { type: 'llm,chat', pagesize: 100, is_active: true }, // llm/chat
-            valueKey: 'id',
-            labelKey: 'name',
+            type: 'modelSelect',
+            params: { type: 'llm,chat' }, // llm/chat
           },
           text: {
             type: 'variableList',
@@ -260,11 +254,8 @@ export const nodeLibrary: NodeLibrary[] = [
       { type: "question-classifier", icon: questionClassifierIcon,
         config: {
           model_id: {
-            type: 'customSelect',
-            url: getModelListUrl,
-            params: { type: 'llm,chat', pagesize: 100, is_active: true }, // llm/chat
-            valueKey: 'id',
-            labelKey: 'name',
+            type: 'modelSelect',
+            params: { type: 'llm,chat' }, // llm/chat
           },
           input_variable: {
             type: 'variableList',

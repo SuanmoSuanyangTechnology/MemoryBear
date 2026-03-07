@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 12:26:11
+ * @Last Modified time: 2026-03-07 16:14:25
  */
 /**
  * Type definitions for Model Management
@@ -115,6 +115,8 @@ export interface ModelApiKey {
   updated_at: number;
   /** Associated model config IDs */
   model_config_ids: string[];
+  capability: Capability[];
+  is_omni?: boolean;
 }
 
 /**
@@ -324,4 +326,24 @@ export interface BaseRef {
   /** Refresh list data */
   getList: () => void;
   modelListDetailRefresh?: () => void;
+}
+
+export type Capability = 'vision' | 'audio' | 'video';
+export interface Model {
+  name: string;
+  type: string;
+  logo: string;
+  description: string | null;
+  provider: string;
+  config: Record<string, unknown>;
+  is_active: boolean;
+  is_public: boolean;
+  load_balance_strategy: string;
+  capability: Capability[];
+  is_omni: boolean;
+  model_id: string | null;
+  id: string;
+  created_at: number;
+  updated_at: number;
+  api_keys: ModelApiKey[];
 }

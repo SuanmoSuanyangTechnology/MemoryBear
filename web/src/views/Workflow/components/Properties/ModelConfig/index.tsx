@@ -4,8 +4,7 @@ import { Form } from 'antd'
 
 import RbSlider from '@/components/RbSlider'
 import RbCard from '@/components/RbCard/Card'
-import CustomSelect from '@/components/CustomSelect'
-import { getModelListUrl } from '@/api/models'
+import ModelSelect from '@/components/ModelSelect'
 
 const ModelConfig: FC = () => {
   const { t } = useTranslation()
@@ -20,13 +19,10 @@ const ModelConfig: FC = () => {
         label={t('workflow.config.llm.model_id')}
         className={model_id ? 'rb:mb-2!' : 'rb:mb-4!'}
       >
-        <CustomSelect
+        <ModelSelect
           placeholder={t('common.pleaseSelect')}
-          url={getModelListUrl}
-          params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
-          hasAll={false}
-          valueKey="id"
-          labelKey="name"
+          params={{ type: 'llm,chat' }}
+          className="rb:w-full!"
           size="small"
         />
       </Form.Item>

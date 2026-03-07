@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 16:35:47
+ * @Last Modified time: 2026-03-07 17:15:05
  */
 /**
  * Prompt Editor Component
@@ -17,18 +17,16 @@ import copy from 'copy-to-clipboard';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 import { updatePromptMessages, createPromptSessions } from '@/api/prompt'
-import { getModelListUrl } from '@/api/models'
 import type { PromptVariableModalRef, AiPromptForm, HistoryItem, PromptSaveModalRef } from './types'
 import ChatContent from '@/components/Chat/ChatContent'
 import Empty from '@/components/Empty'
 import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpty.svg'
-import type { ChatItem } from '@/components/Chat/types' 
-import CustomSelect from '@/components/CustomSelect'
+import type { ChatItem } from '@/components/Chat/types'
+import ModelSelect from '@/components/ModelSelect'
 import PromptVariableModal from './components/PromptVariableModal'
 import { type SSEMessage } from '@/utils/stream'
 import Editor from '@/views/ApplicationConfig/components/Editor'
 import PromptSaveModal from './components/PromptSaveModal'
-import { getLogoUrl } from '@/views/ModelManagement/utils'
 import analysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.png'
 import Header from './components/Header';
 import RbCard from '@/components/RbCard/Card';
@@ -235,22 +233,8 @@ const Prompt: FC = () => {
                 name="model_id"
                 noStyle
               >
-                <CustomSelect
-                  url={getModelListUrl}
-                  params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
-                  hasAll={false}
-                  optionLabelProp="children"
-                  format={(data) => {
-                    return data.map(option => ({
-                      ...data,
-                      value: option.id,
-                      label: (<div key={option.id} className="rb:flex rb:items-center rb:gap-2">
-                        {getLogoUrl(option.logo as string) && <img src={getLogoUrl(option.logo as string)} className="rb:inline-block rb:size-4 rb:align-middle" alt="" />}
-                        <span>{option.name as string}</span>
-                      </div>
-                      )
-                    }))
-                  }}
+                <ModelSelect
+                  params={{ type: 'llm,chat' }}
                   className={`rb:w-75! ${styles.select}`}
                 />
               </Form.Item>
@@ -275,6 +259,7 @@ const Prompt: FC = () => {
                   >{t('common.copy')}</Button>
                   <Button
                     icon={<div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/plus_dark.svg')]"></div>}
+                    disabled={!values?.current_prompt || loading}
                     onClick={handleAdd}
                   ></Button>
                 </Space>}
@@ -286,7 +271,7 @@ const Prompt: FC = () => {
                     className="rb:h-[calc(100vh-201px)] rb:bg-white! rb:border-none! rb:p-0! rb:text-[#212332] rb:leading-5"
                     onChange={(value) => form.setFieldValue('current_prompt', value)}
                   />
-                  : <Empty url={analysisEmptyIcon} title={t(`prompt.promptPlaceholder`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-119 rb:w-70 rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
+                  : <Empty url={analysisEmptyIcon} title={t(`prompt.promptPlaceholder`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-[calc(100vh-201px)] rb:w-70 rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
                 }
               </Form.Item>
             </RbCard>

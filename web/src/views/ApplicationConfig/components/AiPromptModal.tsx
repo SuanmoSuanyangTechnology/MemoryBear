@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:44 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 14:40:55
+ * @Last Modified time: 2026-03-07 17:12:25
  */
 /**
  * AI Prompt Assistant Modal
@@ -17,19 +17,17 @@ import clsx from 'clsx'
 import copy from 'copy-to-clipboard';
 
 import { updatePromptMessages, createPromptSessions } from '@/api/prompt'
-import { getModelListUrl } from '@/api/models'
 import type { AiPromptModalRef, AiPromptVariableModalRef, AiPromptForm } from '../types'
 import RbModal from '@/components/RbModal'
 import type { ModelListItem } from '@/views/ModelManagement/types'
 import ChatContent from '@/components/Chat/ChatContent'
 import Empty from '@/components/Empty'
 import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpty.svg'
-import type { ChatItem } from '@/components/Chat/types' 
-import CustomSelect from '@/components/CustomSelect'
+import type { ChatItem } from '@/components/Chat/types'
+import ModelSelect from '@/components/ModelSelect'
 import AiPromptVariableModal from './AiPromptVariableModal'
 import { type SSEMessage } from '@/utils/stream'
 import Editor from './Editor'
-import { getLogoUrl } from '@/views/ModelManagement/utils'
 import analysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.png'
 
 /**
@@ -215,23 +213,9 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
               name="model_id"
               rules={[{ required: true, message: t('common.pleaseSelect') }]}
             >
-              <CustomSelect
-                url={getModelListUrl}
-                params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
-                hasAll={false}
-                optionLabelProp="children"
-                format={(data) => {
-                  return data.map(option => ({
-                    ...data,
-                    value: option.id,
-                    label: (<div key={option.id} className="rb:flex rb:items-center rb:gap-2">
-                      {getLogoUrl(option.logo as string) && <img src={getLogoUrl(option.logo as string)} className="rb:inline-block rb:size-4 rb:align-middle" alt="" />}
-                      <span>{option.name as string}</span>
-                    </div>
-                    )
-                  }))
-                }}
-                className="rb:w-full"
+              <ModelSelect
+                params={{ type: 'llm,chat' }}
+                className="rb:w-full!"
               />
             </Form.Item>
 

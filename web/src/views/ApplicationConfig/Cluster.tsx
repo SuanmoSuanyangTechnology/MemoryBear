@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:33 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 10:20:16
+ * @Last Modified time: 2026-03-07 17:11:54
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -11,7 +11,6 @@ import { Form, Space, Row, Col, Button, Flex, App, Select, Spin } from 'antd'
 
 import Card from './components/Card'
 import Tag from './components/Tag'
-import CustomSelect from '@/components/CustomSelect';
 import { getMultiAgentConfig, saveMultiAgentConfig, getApplicationList } from '@/api/application';
 import type { 
   Config,
@@ -26,7 +25,7 @@ import RbCard from '@/components/RbCard/Card'
 import SubAgentModal from './components/SubAgentModal'
 import Empty from '@/components/Empty'
 import RadioGroupCard from '@/components/RadioGroupCard'
-import { getModelListUrl } from '@/api/models'
+import ModelSelect from '@/components/ModelSelect'
 import ModelConfigModal from './components/ModelConfigModal'
 import type { Application } from '@/views/ApplicationManagement/types'
 
@@ -268,13 +267,9 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                 >
                   <Flex align="center" gap={12}>
                     <Form.Item name="default_model_config_id" noStyle>
-                      <CustomSelect
-                        url={getModelListUrl}
-                        params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
-                        valueKey="id"
-                        labelKey="name"
-                        hasAll={false}
-                        style={{ width: '100%' }}
+                      <ModelSelect
+                        params={{ type: 'llm,chat' }}
+                        className="rb:w-full!"
                       />
                     </Form.Item>
                     <Form.Item name="model_parameters" noStyle>

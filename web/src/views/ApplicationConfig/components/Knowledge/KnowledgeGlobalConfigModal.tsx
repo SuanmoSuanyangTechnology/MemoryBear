@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-24 11:47:32
+ * @Last Modified time: 2026-03-07 17:03:22
  */
 /**
  * Knowledge Global Configuration Modal
@@ -15,8 +15,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { RerankerConfig, KnowledgeGlobalConfigModalRef } from './types'
 import RbModal from '@/components/RbModal'
-import CustomSelect from '@/components/CustomSelect'
-import { getModelListUrl } from '@/api/models'
+import ModelSelect from '@/components/ModelSelect'
 
 const FormItem = Form.Item;
 
@@ -115,12 +114,9 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
             rules={[{ required: true, message: t('common.pleaseSelect') }]}
             extra={t('application.rearrangementModelDesc')}
           >
-            <CustomSelect
-              url={getModelListUrl}
-              params={{ type: 'rerank', pagesize: 100, is_active: true }}
-              valueKey="id"
-              labelKey="name"
-              hasAll={false}
+            <ModelSelect
+              params={{ type: 'rerank' }}
+              className="rb:w-full!"
             />
           </FormItem>
           {/* Top K */}
