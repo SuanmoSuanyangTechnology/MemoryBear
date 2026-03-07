@@ -144,7 +144,7 @@ class AppChatService:
         )
 
         # 保存消息
-        self.conversation_service.save_conversation_messages(
+        message_id = self.conversation_service.save_conversation_messages(
             conversation_id=conversation_id,
             user_message=message,
             assistant_message=result["content"],
@@ -163,6 +163,7 @@ class AppChatService:
 
         return {
             "conversation_id": conversation_id,
+            "message_id": str(message_id),
             "message": result["content"],
             "usage": result.get("usage", {
                 "prompt_tokens": 0,
@@ -191,7 +192,11 @@ class AppChatService:
         try:
             start_time = time.time()
             config_id = None
-            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
+            message_id = uuid.uuid4()
+            yield f"event: start\ndata: {json.dumps({
+                'conversation_id': str(conversation_id), 
+                "message_id": str(message_id)
+            }, ensure_ascii=False)}\n\n"
 
             variables = self.agent_service.prepare_variables(variables, config.variables)
             # 获取模型配置ID
@@ -296,6 +301,7 @@ class AppChatService:
             )
 
             self.conversation_service.add_message(
+                message_id=message_id,
                 conversation_id=conversation_id,
                 role="assistant",
                 content=full_content,
@@ -373,7 +379,7 @@ class AppChatService:
             content=message
         )
 
-        self.conversation_service.add_message(
+        ai_message = self.conversation_service.add_message(
             conversation_id=conversation_id,
             role="assistant",
             content=result.get("message", ""),
@@ -391,6 +397,7 @@ class AppChatService:
         return {
             "conversation_id": conversation_id,
             "message": result.get("message", ""),
+            "message_id": str(ai_message.id),
             "usage": {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
@@ -419,15 +426,16 @@ class AppChatService:
             variables = {}
 
         try:
-
+            message_id = uuid.uuid4()
             # 发送开始事件
-            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), "message_id": str(message_id)}, ensure_ascii=False)}\n\n"
 
             full_content = ""
             total_tokens = 0
 
             # 2. 创建编排器
             orchestrator = MultiAgentOrchestrator(self.db, config)
+
 
             # 3. 流式执行任务
             async for event in orchestrator.execute_stream(
@@ -472,6 +480,7 @@ class AppChatService:
             )
 
             self.conversation_service.add_message(
+                message_id=message_id,
                 conversation_id=conversation_id,
                 role="assistant",
                 content=full_content,

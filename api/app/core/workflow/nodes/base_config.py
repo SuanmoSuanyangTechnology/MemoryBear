@@ -85,20 +85,20 @@ class BaseNodeConfig(BaseModel):
     - tags: 节点标签（用于分类和搜索）
     """
 
-    name: str | None = Field(
-        default=None,
-        description="节点名称（显示名称），如果不设置则使用节点 ID"
-    )
-
-    description: str | None = Field(
-        default=None,
-        description="节点描述，说明节点的作用"
-    )
-
-    tags: list[str] = Field(
-        default_factory=list,
-        description="节点标签，用于分类和搜索"
-    )
+    # name: str | None = Field(
+    #     default=None,
+    #     description="节点名称（显示名称），如果不设置则使用节点 ID"
+    # )
+    #
+    # description: str | None = Field(
+    #     default=None,
+    #     description="节点描述，说明节点的作用"
+    # )
+    #
+    # tags: list[str] = Field(
+    #     default_factory=list,
+    #     description="节点标签，用于分类和搜索"
+    # )
 
     class Config:
         """Pydantic 配置"""

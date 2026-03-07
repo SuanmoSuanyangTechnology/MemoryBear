@@ -1361,6 +1361,7 @@ export const en = {
       complex: 'Compatibility Analysis',
       sureInfo: 'Information Confirmation',
       completed: 'Import Completed',
+      baseInfo: 'Basic Information',
       workflowName: 'Workflow Name',
       fileName: 'File Name',
       fileSize: 'File Size',

@@ -544,10 +544,11 @@ async def clear_hot_memory_tags_cache(
 @router.get("/analytics/recent_activity_stats", response_model=ApiResponse)
 async def get_recent_activity_stats_api(
     current_user: User = Depends(get_current_user),
-    ) -> dict:
-    api_logger.info("Recent activity stats requested")
+) -> dict:
+    workspace_id = str(current_user.current_workspace_id) if current_user.current_workspace_id else None
+    api_logger.info(f"Recent activity stats requested: workspace_id={workspace_id}")
     try:
-        result = await analytics_recent_activity_stats()
+        result = await analytics_recent_activity_stats(workspace_id=workspace_id)
         return success(data=result, msg="查询成功")
     except Exception as e:
         api_logger.error(f"Recent activity stats failed: {str(e)}")

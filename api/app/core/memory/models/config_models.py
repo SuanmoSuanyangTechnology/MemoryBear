@@ -10,7 +10,7 @@ Classes:
     TemporalSearchParams: Parameters for temporal search queries
 """
 
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
@@ -55,17 +55,26 @@ class PruningConfig(BaseModel):
 
     Attributes:
         pruning_switch: Enable or disable semantic pruning
-        pruning_scene: Scene type for pruning ('education', 'online_service', 'outbound')
+        pruning_scene: Scene name for pruning, either a built-in key
+            ('education', 'online_service', 'outbound') or a custom scene_name
+            from ontology_scene table
         pruning_threshold: Pruning ratio (0-0.9, max 0.9 to avoid complete removal)
+        scene_id: Optional ontology scene UUID, used to load custom ontology classes
+        ontology_classes: List of class_name strings from ontology_class table,
+            injected into the prompt when pruning_scene is not a built-in scene
     """
     pruning_switch: bool = Field(False, description="Enable semantic pruning when True.")
     pruning_scene: str = Field(
         "education",
-        description="Scene for pruning: one of 'education', 'online_service', 'outbound'.",
+        description="Scene for pruning: built-in key or custom scene_name from ontology_scene.",
     )
     pruning_threshold: float = Field(
         0.5, ge=0.0, le=0.9,
         description="Pruning ratio within 0-0.9 (max 0.9 to avoid termination).")
+    scene_id: Optional[str] = Field(None, description="Ontology scene UUID (optional).")
+    ontology_classes: Optional[List[str]] = Field(
+        None, description="Class names from ontology_class table for custom scenes."
+    )
 
 
 class TemporalSearchParams(BaseModel):

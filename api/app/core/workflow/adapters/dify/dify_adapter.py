@@ -83,6 +83,12 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         require_fields = frozenset({'app', 'kind', 'version', 'workflow'})
         if not all(field in self.config for field in require_fields):
             return False
+        if self.config.get("app",{}).get("mode") == "workflow":
+            self.errors.append(ExceptionDefineition(
+                type=ExceptionType.PLATFORM,
+                detail="workflow mode is not supported"
+            ))
+            return False
 
         for node in self.origin_nodes:
             if not self._valid_nodes(node):
@@ -134,6 +140,8 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         for node in self.origin_nodes:
             if self.map_node_type(node["data"]["type"]) == NodeType.LLM:
                 self.node_output_map[f"{node['id']}.text"] = f"{node['id']}.output"
+            elif self.map_node_type(node["data"]["type"]) == NodeType.KNOWLEDGE_RETRIEVAL:
+                self.node_output_map[f"{node['id']}.result"] = f"{node['id']}.output"
 
     def _convert_cycle_node_position(self, node_id: str, position: dict):
         for node in self.origin_nodes:
@@ -184,7 +192,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
                     type=ExceptionType.NODE,
                     node_id=node["id"],
                     node_name=node["data"]["title"],
-                    detail=f"node type {node_type} is unsupported",
+                    detail=f"node type {node_type if node_type else 'notes'} is unsupported",
                 ))
             return converter(node)
         except Exception as e:

@@ -178,7 +178,8 @@ class ConversationService:
             conversation_id: uuid.UUID,
             role: str,
             content: str,
-            meta_data: Optional[dict] = None
+            meta_data: Optional[dict] = None,
+            message_id: Optional[uuid.UUID] = None,
     ) -> Message:
         """
         Add a message to a conversation using UnitOfWork.
@@ -188,6 +189,7 @@ class ConversationService:
             role (str): Role of the message sender ('user' or 'assistant').
             content (str): Message content.
             meta_data (Optional[dict]): Optional metadata.
+            message_id (Optional[uuid.UUID]): Optional custom message UUID.
 
         Returns:
             Message: Newly created Message instance.
@@ -198,6 +200,7 @@ class ConversationService:
             )
 
             message = Message(
+                id=message_id if message_id else uuid.uuid4(),
                 conversation_id=conversation_id,
                 role=role,
                 content=content,
@@ -317,7 +320,7 @@ class ConversationService:
             content=user_message
         )
 
-        self.add_message(
+        ai_message = self.add_message(
             conversation_id=conversation_id,
             role="assistant",
             content=assistant_message,
@@ -332,6 +335,7 @@ class ConversationService:
                 "assistant_message_length": len(assistant_message)
             }
         )
+        return ai_message.id
 
     def delete_conversation(
             self,

@@ -56,7 +56,7 @@ class WorkflowImportService:
                 success=False,
                 temp_id=None,
                 workflow_id=None,
-                errors=[InvalidConfiguration()]
+                errors=[InvalidConfiguration()] + adapter.errors
             )
 
         workflow_config = adapter.parse_workflow()

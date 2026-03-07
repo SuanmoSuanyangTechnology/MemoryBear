@@ -86,19 +86,26 @@ class SemanticPruner:
         self._detailed_prune_logging = True  # 是否启用详细日志
         self._max_debug_msgs_per_dialog = 20  # 每个对话最多记录前N条消息的详细日志
         
-        # 加载场景特定配置
+        # 加载场景特定配置（内置场景走专门规则，自定义场景 fallback 到通用规则）
         self.scene_config: ScenePatterns = SceneConfigRegistry.get_config(
             self.config.pruning_scene, 
             fallback_to_generic=True
         )
         
-        # 检查场景是否有专门支持
-        is_supported = SceneConfigRegistry.is_scene_supported(self.config.pruning_scene)
-        if is_supported:
-            self._log(f"[剪枝-初始化] 场景={self.config.pruning_scene} 使用专门配置")
+        # 判断是否为内置专门场景
+        self._is_builtin_scene = SceneConfigRegistry.is_scene_supported(self.config.pruning_scene)
+        
+        # 自定义场景的本体类型列表（用于注入提示词）
+        self._ontology_classes = getattr(self.config, "ontology_classes", None) or []
+        
+        if self._is_builtin_scene:
+            self._log(f"[剪枝-初始化] 场景={self.config.pruning_scene} 使用内置专门配置")
         else:
-            self._log(f"[剪枝-初始化] 场景={self.config.pruning_scene} 未预定义，使用通用配置（保守策略）")
-            self._log(f"[剪枝-初始化] 支持的场景: {SceneConfigRegistry.get_all_scenes()}")
+            self._log(f"[剪枝-初始化] 场景={self.config.pruning_scene} 为自定义场景，使用通用规则 + 本体类型提示词注入")
+            if self._ontology_classes:
+                self._log(f"[剪枝-初始化] 注入本体类型: {self._ontology_classes}")
+            else:
+                self._log(f"[剪枝-初始化] 未找到本体类型，将使用通用提示词")
         
         # Load Jinja2 template
         self.template = prompt_env.get_template("extracat_Pruning.jinja2")
@@ -424,12 +431,16 @@ class SemanticPruner:
             self._log(f"[剪枝-缓存] LRU缓存已满，删除最旧条目")
 
         rendered = self.template.render(
-            pruning_scene=self.config.pruning_scene, 
+            pruning_scene=self.config.pruning_scene,
+            is_builtin_scene=self._is_builtin_scene,
+            ontology_classes=self._ontology_classes,
             dialog_text=dialog_text,
             language=self.language
         )
         log_template_rendering("extracat_Pruning.jinja2", {
             "pruning_scene": self.config.pruning_scene,
+            "is_builtin_scene": self._is_builtin_scene,
+            "ontology_classes_count": len(self._ontology_classes),
             "language": self.language
         })
         log_prompt_rendering("pruning-extract", rendered)
