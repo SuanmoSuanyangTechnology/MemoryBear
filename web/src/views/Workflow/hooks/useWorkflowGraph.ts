@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 17:59:34
+ * @Last Modified time: 2026-03-07 15:23:39
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -715,6 +715,8 @@ export const useWorkflowGraph = ({
       panning: isHandMode,
       mousewheel: {
         enabled: true,
+        factor: 0.1,
+        modifiers: null,
       },
       connecting: {
         connector: {
