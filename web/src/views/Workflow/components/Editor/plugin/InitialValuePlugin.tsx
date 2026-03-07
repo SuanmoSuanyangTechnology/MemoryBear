@@ -35,6 +35,12 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
 
   useEffect(() => {
     if (value !== prevValueRef.current || enableLineNumbers !== prevEnableLineNumbersRef.current) {
+      // Skip reset if the change was triggered by user input (avoid cursor jump)
+      if (isUserInputRef.current && enableLineNumbers === prevEnableLineNumbersRef.current) {
+        prevValueRef.current = value;
+        isUserInputRef.current = false;
+        return;
+      }
       queueMicrotask(() => {
         editor.update(() => {
         const root = $getRoot();
