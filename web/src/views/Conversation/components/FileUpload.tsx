@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 12:20:43
+ * @Last Modified time: 2026-03-07 15:03:31
  */
 /**
  * File Upload Component
@@ -21,7 +21,7 @@
  * @component
  */
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Upload, Progress, App } from 'antd';
+import { Upload, Progress, App, Flex } from 'antd';
 import type { UploadProps, UploadFile } from 'antd';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
@@ -194,7 +194,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
       formData.append('file', file);
       
       const response = await request.uploadFile(action, formData, requestConfig);
-
+      
       onSuccess?.({data: response});
     } catch (error) {
       onError?.(error as Error);
@@ -260,10 +260,10 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     itemRender: (_, file, __, actions) => {
       return (
         <div key={file.uid} className="rb:relative rb:w-full rb:pt-2 rb:px-2.5 rb-pb-[10px] rb:border rb:border-[#EBEBEB] rb:rounded rb:p-2 rb:mt-2 rb:bg-white">
-          <div className="rb:text-[12px] rb:flex rb:items-center rb:justify-between rb:mb-0.5">
+          <Flex align="center" justify="space-between" className="rb:text-[12px] rb:mb-0.5!">
             {file.name}
-            <span className="rb:text-[#5B6167] rb:cursor-pointer" onClick={() => actions?.remove()}>Cancel</span>
-          </div>
+            <span className="rb:text-[#5B6167] rb:cursor-pointer" onClick={() => actions?.remove()}>{t('common.cancel')}</span>
+          </Flex>
           <Progress percent={file.percent || 0} strokeColor={file.status === 'error' ? '#FF5D34' : '#155EEF'} size="small" showInfo={false} />
         </div>
       );

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:32 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:26:32 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-25 15:09:09
  */
 /**
  * Variable List Component
@@ -56,12 +56,22 @@ interface VariableListProps {
   }
   return (
     <Card
-      title={<>
-        {t('application.variableConfiguration')}
-        <span className="rb:font-regular rb:text-[12px] rb:text-[#5B6167]"> ({t('application.VariableManagementDesc')})</span>
-      </>}
-      extra={<Button style={{ padding: '0 8px', height: '24px' }} onClick={handleAddVariable}>+ {t('application.addVariables')}</Button>}
+      title={t('application.variableConfiguration')}
+      extra={
+        <Button
+          size="small"
+          className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#21233"
+          onClick={handleAddVariable}
+        >
+          + {t('application.addVariables')}
+        </Button>
+      }
     >
+      <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2">
+        <span className="rb:font-medium">{t('application.variableManagement')}</span>
+        <span className="rb:font-regular rb:text-[#5B6167]"> ({t('application.variableManagementDesc')})</span>
+      </div>
+
       <Form.List name="variables" initialValue={value}>
         {(fields, { remove }) => {
           return (
@@ -69,6 +79,7 @@ interface VariableListProps {
               {fields.length > 0 ? (
                 <div className="rb:mt-3">
                   <Table
+                    size="small"
                     rowKey="index"
                     pagination={false}
                     columns={[
@@ -92,7 +103,7 @@ interface VariableListProps {
                         title: t('application.optional'),
                         dataIndex: 'required',
                         key: 'required',
-                        render: (required) => <Switch checked={!required} disabled />
+                        render: (required) => <Switch size="small" checked={!required} disabled />
                       },
                       {
                         title: t('common.operation'),
@@ -117,7 +128,7 @@ interface VariableListProps {
                   />
                 </div>
               ) : (
-                <Empty url={variablesEmpty} size={88} subTitle={t('application.variablesEmpty')} />
+                <div className="rb-border rb:rounded-xl rb:pt-4 rb:pb-6"><Empty url={variablesEmpty} size={88} subTitle={t('application.variablesEmpty')} /></div>
               )}
             </>
           )
