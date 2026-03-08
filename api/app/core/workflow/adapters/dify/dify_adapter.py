@@ -193,7 +193,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
                     type=ExceptionType.NODE,
                     node_id=node["id"],
                     node_name=node["data"]["title"],
-                    detail=f"node type {node_type if node_type else 'notes'} is unsupported",
+                    detail=f"node type {node_type} is unsupported",
                 ))
             return converter(node)
         except Exception as e:
