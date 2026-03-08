@@ -764,6 +764,10 @@ class DifyConverter(BaseConverter):
         node_data = node["data"]
         result = NoteNodeConfig.model_construct(
             author=node_data.get("author", ""),
-            text=node_data.get("text", "")
+            text=node_data.get("text", ""),
+            width=node_data.get("width", 80),
+            height=node_data.get("height", 80),
+            theme=node_data.get("theme", "blue"),
+            show_author=node_data.get("showAuthor", True)
         ).model_dump()
         return result

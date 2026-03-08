@@ -59,7 +59,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             support_node_types=list(self.NODE_TYPE_MAPPING.keys())
         )
 
-    def map_node_type(self, platform_node_type) -> str:
+    def map_node_type(self, platform_node_type) -> NodeType:
         return self.NODE_TYPE_MAPPING.get(platform_node_type, NodeType.UNKNOWN)
 
     @property
@@ -184,7 +184,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         except Exception as e:
             logger.debug(f"convert node error - {e}", exc_info=True)
 
-    def _convert_node_config(self, node_type: str, node: dict):
+    def _convert_node_config(self, node_type: NodeType, node: dict):
         try:
             node_data = node["data"]
             converter = self.get_node_convert(node_type)
