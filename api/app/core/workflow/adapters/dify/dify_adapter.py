@@ -50,7 +50,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
 
     def __init__(self, config: dict[str, Any]):
         DifyConverter.__init__(self)
-        BasePlatformAdapter.__init__(self,  config)
+        BasePlatformAdapter.__init__(self, config)
 
     def get_metadata(self) -> PlatformMetadata:
         return PlatformMetadata(
@@ -84,7 +84,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         require_fields = frozenset({'app', 'kind', 'version', 'workflow'})
         if not all(field in self.config for field in require_fields):
             return False
-        if self.config.get("app",{}).get("mode") == "workflow":
+        if self.config.get("app", {}).get("mode") == "workflow":
             self.errors.append(ExceptionDefineition(
                 type=ExceptionType.PLATFORM,
                 detail="workflow mode is not supported"
@@ -163,13 +163,14 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
     def _convert_node(self, node: dict[str, Any]) -> NodeDefinition | None:
         node_data = node["data"]
         try:
+            node_type = self.map_node_type(node_data["type"])
             return NodeDefinition(
                 id=node["id"],
-                type=self.map_node_type(node_data["type"]),
+                type=node_type,
                 name=node_data.get("title") or "notes",
                 cycle=node.get("parentId"),
                 description=None,
-                config=self._convert_node_config(node),
+                config=self._convert_node_config(node_type, node),
                 position={
                     "x": node["position"]["x"],
                     "y": node["position"]["y"]
@@ -183,17 +184,16 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         except Exception as e:
             logger.debug(f"convert node error - {e}", exc_info=True)
 
-    def _convert_node_config(self, node: dict):
-        node_data = node["data"]
-        node_type = node_data["type"]
+    def _convert_node_config(self, node_type: str, node: dict):
         try:
+            node_data = node["data"]
             converter = self.get_node_convert(node_type)
-            if node_type not in self.CONFIG_CONVERT_MAP:
+            if node_type == NodeType.UNKNOWN:
                 self.errors.append(ExceptionDefineition(
                     type=ExceptionType.NODE,
                     node_id=node["id"],
                     node_name=node["data"]["title"],
-                    detail=f"node type {node_type} is unsupported",
+                    detail=f"node type {node_data.get('type')} is unsupported",
                 ))
             return converter(node)
         except Exception as e:
@@ -214,7 +214,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             if source in self.branch_node_cache:
                 case_id = edge["sourceHandle"]
                 if case_id == "false":
-                    label = f'CASE{len(self.branch_node_cache[source])+1}'
+                    label = f'CASE{len(self.branch_node_cache[source]) + 1}'
                 else:
                     label = f'CASE{self.branch_node_cache[source].index(case_id) + 1}'
             if source in self.error_branch_node_cache:
@@ -257,5 +257,3 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
 
     def _convert_execution(self, execution: dict[str, Any]) -> ExecutionConfig:
         return ExecutionConfig()
-
-

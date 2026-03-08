@@ -45,7 +45,8 @@ from app.core.workflow.nodes.enums import (
     AssignmentOperator,
     HttpAuthType,
     HttpContentType,
-    HttpErrorHandle
+    HttpErrorHandle,
+    NodeType
 )
 from app.core.workflow.nodes.http_request.config import (
     HttpAuthConfig,
@@ -73,25 +74,24 @@ class DifyConverter(BaseConverter):
 
     def __init__(self):
         self.CONFIG_CONVERT_MAP = {
-            "start": self.convert_start_node_config,
-            "llm": self.convert_llm_node_config,
-            "answer": self.convert_end_node_config,
-            "if-else": self.convert_if_else_node_config,
-            "loop": self.convert_loop_node_config,
-            "iteration": self.convert_iteration_node_config,
-            "assigner": self.convert_assigner_node_config,
-            "code": self.convert_code_node_config,
-            "http-request": self.convert_http_node_config,
-            "template-transform": self.convert_jinja_render_node_config,
-            "knowledge-retrieval": self.convert_knowledge_node_config,
-            "parameter-extractor": self.convert_parameter_extractor_node_config,
-            "question-classifier": self.convert_question_classifier_node_config,
-            "variable-aggregator": self.convert_variable_aggregator_node_config,
-            "tool": self.convert_tool_node_config,
-            "": self.convert_notes_config,
-            "loop-start": lambda x: {},
-            "iteration-start": lambda x: {},
-            "loop-end": lambda x: {},
+            NodeType.START: self.convert_start_node_config,
+            NodeType.LLM: self.convert_llm_node_config,
+            NodeType.END: self.convert_end_node_config,
+            NodeType.IF_ELSE: self.convert_if_else_node_config,
+            NodeType.LOOP: self.convert_loop_node_config,
+            NodeType.ITERATION: self.convert_iteration_node_config,
+            NodeType.ASSIGNER: self.convert_assigner_node_config,
+            NodeType.CODE: self.convert_code_node_config,
+            NodeType.HTTP_REQUEST: self.convert_http_node_config,
+            NodeType.JINJARENDER: self.convert_jinja_render_node_config,
+            NodeType.KNOWLEDGE_RETRIEVAL: self.convert_knowledge_node_config,
+            NodeType.PARAMETER_EXTRACTOR: self.convert_parameter_extractor_node_config,
+            NodeType.QUESTION_CLASSIFIER: self.convert_question_classifier_node_config,
+            NodeType.VAR_AGGREGATOR: self.convert_variable_aggregator_node_config,
+            NodeType.TOOL: self.convert_tool_node_config,
+            NodeType.NOTES: self.convert_notes_config,
+            NodeType.CYCLE_START: lambda x: {},
+            NodeType.BREAK: lambda x: {},
         }
 
     def get_node_convert(self, node_type):
