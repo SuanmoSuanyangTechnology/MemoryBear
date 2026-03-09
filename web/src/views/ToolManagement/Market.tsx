@@ -6,7 +6,10 @@ import InfiniteScroll from 'react-infinite-scroll-component';
 import MarketConfigModal, { type MarketConfigModalRef } from './components/MarketConfigModal';
 import McpServiceModal from './components/McpServiceModal';
 import type { McpServiceModalRef } from './types';
+import pageEmptyIcon from '@/assets/images/empty/pageEmpty.png'
+import Empty from '@/components/Empty/index'
 import { getMarketTools, getMarketConfig, getMarketMCPs, getMarketMCPDetail, getMarketMCPsActivated, getTools } from '@/api/tools';
+import BodyWrapper from '@/components/Empty/BodyWrapper';
 interface MarketSource {
   id: string;
   name: string;
@@ -280,9 +283,14 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     if (!selectedSource) {
       return (
         <div className="rb:flex rb:flex-col rb:items-center rb:justify-center rb:h-full rb:text-center">
-          <div className="rb:text-6xl rb:mb-4">🏪</div>
-          <h3 className="rb:text-lg rb:font-semibold rb:text-gray-900 rb:mb-2">{t('tool.marketSelectTitle')}</h3>
-          <p className="rb:text-sm rb:text-gray-600 rb:max-w-md">{t('tool.marketSelectDesc')}</p>
+             <Empty
+                url={pageEmptyIcon}
+                title={t('tool.marketSelectTitle')}
+                subTitle={t('tool.marketSelectDesc')}
+                size={200}
+                className="rb:h-full"
+              />
+
         </div>
       );
     }
@@ -356,7 +364,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
         </div>
 
         <div className="rb:mt-6">
-          {mcpList.length > 0 ? (
+          <BodyWrapper loading={loading} empty={mcpList.length === 0}>
             <div id="mcpScrollableDiv" className="rb:overflow-y-auto rb:h-[calc(100vh-260px)]">
               <InfiniteScroll
                 dataLength={filteredList.length}
@@ -426,22 +434,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                 </div>
               </InfiniteScroll>
             </div>
-          ) : (
-            <div className="rb:flex rb:flex-col rb:items-center rb:justify-center rb:py-16 rb:text-center">
-              <div className="rb:text-6xl rb:mb-4">{source.connected ? '📭' : '🔌'}</div>
-              <h4 className="rb:text-base rb:font-semibold rb:text-gray-900 rb:mb-2">
-                {source.connected ? t('tool.marketNoServices') : t('tool.marketNotConnected')}
-              </h4>
-              <p className="rb:text-sm rb:text-gray-600 rb:mb-4">
-                {source.connected ? t('tool.marketNoServicesDesc') : t('tool.marketNotConnectedDesc')}
-              </p>
-              {!source.connected && (
-                <Button type="primary" onClick={() => handleOpenConfig(selectedSource)}>
-                  {t('tool.marketConfigConnection')}
-                </Button>
-              )}
-            </div>
-          )}
+          </BodyWrapper>
         </div>
       </>
     );
