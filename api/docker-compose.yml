@@ -49,7 +49,7 @@ services:
     networks:
       - celery
 
-  # Periodic worker - Scheduled/beat tasks (prefork, low concurrency)
+  # Periodic worker - Scheduled/beat tasks + API-triggered tasks (prefork, low concurrency)
   worker-periodic:
     image: redbear-mem-open:latest
     container_name: worker-periodic
@@ -59,20 +59,6 @@ services:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
     command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=2 --queues=periodic_tasks --max-tasks-per-child=50 -n periodic_worker@%h
-    restart: unless-stopped
-    networks:
-      - celery
-
-  # On-demand worker - API-triggered tasks (e.g. implicit emotions init)
-  worker-ondemand:
-    image: redbear-mem-open:latest
-    container_name: worker-ondemand
-    env_file:
-      - .env
-    volumes:
-      - ./files:/files
-      - /etc/localtime:/etc/localtime:ro
-    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=ondemand_tasks --max-tasks-per-child=50 -n ondemand_worker@%h
     restart: unless-stopped
     networks:
       - celery

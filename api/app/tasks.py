@@ -2457,6 +2457,8 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
     acks_late=False,
     time_limit=3600,
     soft_time_limit=3300,
+    # 触发型任务标识，区别于 periodic_tasks 队列中的定时任务
+    triggered=True,
 )
 def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str, Any]:
     """事件触发任务：对指定用户列表做存在性检查，无记录则执行首次初始化。
