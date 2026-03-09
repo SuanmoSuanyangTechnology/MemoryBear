@@ -49,7 +49,7 @@ services:
     networks:
       - celery
 
-  # Periodic worker - Scheduled/beat tasks (prefork, low concurrency)
+  # Periodic worker - Scheduled/beat tasks + API-triggered tasks (prefork, low concurrency)
   worker-periodic:
     image: redbear-mem-open:latest
     container_name: worker-periodic
