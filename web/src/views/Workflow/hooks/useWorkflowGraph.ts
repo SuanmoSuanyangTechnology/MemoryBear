@@ -1152,12 +1152,15 @@ export const useWorkflowGraph = ({
       name: t('workflow.notes'),
       ...nodeConfig,
     };
-    const area = graphRef.current.getGraphArea();
-    const pos = graphRef.current.graphToLocal(area.center.x, area.bottom);
+    const container = graphRef.current.container;
+    const nodeW = graphNodeLibrary.notes?.width || nodeWidth;
+    const nodeH = graphNodeLibrary.notes?.height || 100;
+    const rect = container.getBoundingClientRect();
+    const center = graphRef.current.clientToLocal(rect.left + rect.width / 2, rect.top + rect.height / 2);
     graphRef.current.addNode({
       ...(graphNodeLibrary.notes || graphNodeLibrary.default),
-      x: pos.x - nodeWidth,
-      y: pos.y,
+      x: center.x - nodeW / 2,
+      y: center.y - nodeH / 2,
       id: cleanNodeData.id,
       data: { ...cleanNodeData },
     });
