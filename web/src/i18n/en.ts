@@ -1806,6 +1806,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       error_desc: 'API is configured but connection error',
 
       testConnectionSuccess: 'Test Connection Successful',
+      refreshSuccess: 'Refresh Successful',
+      refreshFailed: 'Refresh Failed',
       serviceEndpoint: 'Service Endpoint URL',
       serviceEndpointPlaceholder: 'URL of the service endpoint',
       serviceEndpointExtra: 'Complete access address of the MCP service',

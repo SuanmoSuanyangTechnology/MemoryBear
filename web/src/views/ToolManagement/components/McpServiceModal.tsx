@@ -87,6 +87,10 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         name, description, icon,
         ...(config_data ? { config: { ...config_data } } : {})
       })
+      // 如果是从 Market 组件传来的数据（包含 market_id），保存完整的 data 用于后续提交
+      if ((data as any).market_id) {
+        setEditVo(data)
+      }
     } else {
       form.resetFields();
     }
@@ -116,6 +120,15 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
             }
           }
         }
+        
+        // 如果是从 Market 组件传来的数据，添加市场相关字段
+        if ((editVo as any)?.market_id) {
+          (newService.config as any).source_channel = (editVo as any).source_channel;
+          (newService.config as any).market_id = (editVo as any).market_id;
+          (newService.config as any).market_config_id = (editVo as any).market_config_id;
+          (newService.config as any).mcp_service_id = (editVo as any).mcp_service_id;
+        }
+        
         const request = editVo?.id ? updateTool(editVo.id, newService) : addTool(newService)
         request.then((res: any) => {
           message.success(t('common.saveSuccess'));

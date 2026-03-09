@@ -75,6 +75,10 @@ export interface ToolItem {
     tool_class: string;
 
     schema_content: string;
+    source_channel?: string;
+    market_id?: string;
+    market_config_id?: string;
+    mcp_service_id?: string;
   };
   status: 'available' | 'unavailable';
   tags: string[];

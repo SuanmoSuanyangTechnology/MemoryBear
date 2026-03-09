@@ -6,7 +6,7 @@ import InfiniteScroll from 'react-infinite-scroll-component';
 import MarketConfigModal, { type MarketConfigModalRef } from './components/MarketConfigModal';
 import McpServiceModal from './components/McpServiceModal';
 import type { McpServiceModalRef } from './types';
-import { getMarketTools, getMarketConfig, getMarketMCPs, getMarketMCPDetail, getMarketMCPsActivated } from '@/api/tools';
+import { getMarketTools, getMarketConfig, getMarketMCPs, getMarketMCPDetail, getMarketMCPsActivated, getTools } from '@/api/tools';
 interface MarketSource {
   id: string;
   name: string;
@@ -32,6 +32,7 @@ interface MarketMcp {
   tags?: string[];
   view_count?: number;
   activated?: boolean;
+  inDatabase?: boolean;
   locales?: {
     [lang: string]: {
       name: string;
@@ -131,13 +132,27 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
         }
       }
 
+      // 获取全量工具列表，用于标记已入库的 MCP
+      const allTools: any = await getTools({ tool_type: 'mcp' });
+      const toolsList = Array.isArray(allTools) ? allTools : [];
+
       const res: any = await getMarketMCPs({ mcp_market_config_id: configId, page, pagesize: pageSize });
       if (res?.items && Array.isArray(res.items)) {
-        // 标记已激活的 MCP
-        const mcpsWithActivated = res.items.map((item: MarketMcp) => ({
-          ...item,
-          activated: activatedIds.includes(item.id)
-        }));
+        // 标记已激活和已入库的 MCP
+        const mcpsWithActivated = res.items.map((item: MarketMcp) => {
+          // 检查是否已入库：market_id = sourceId, market_config_id = configId, mcp_service_id = item.id
+          const isInDatabase = toolsList.some((tool: any) => 
+            tool.config_data?.market_id === sourceId &&
+            tool.config_data?.market_config_id === configId &&
+            tool.config_data?.mcp_service_id === item.id
+          );
+          
+          return {
+            ...item,
+            activated: activatedIds.includes(item.id),
+            inDatabase: isInDatabase
+          };
+        });
         
         setMcpCache(prev => ({
           ...prev,
@@ -212,9 +227,14 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
         mcp_market_config_id: configIdMap[selectedSource],
         server_id: mcp.id,
       });
+      const source = marketSources.find(s => s.id === selectedSource);
       const toolItem = {
         name: detail.name,
         description: detail.description,
+        source_channel: source?.name || '',
+        market_id: selectedSource,
+        market_config_id: configIdMap[selectedSource],
+        mcp_service_id: mcp.id,
         config_data: {
           server_url: detail.servers?.[0]?.url || '',
           connection_config: {
@@ -392,8 +412,11 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                         </span>
                       )}
                     </div>
-                    <div className={`rb:flex rb:items-center ${mcp.activated ? 'rb:justify-between' : 'rb:justify-end'}`}>
-                      {mcp.activated && <Tag color="success">已激活</Tag>}
+                    <div className={`rb:flex rb:items-center ${mcp.activated || mcp.inDatabase ? 'rb:justify-between' : 'rb:justify-end'}`}>
+                      <div className="rb:flex rb:gap-2">
+                        {mcp.activated && <Tag color="success">已激活</Tag>}
+                        {mcp.inDatabase && <Tag color="blue">已入库</Tag>}
+                      </div>
                       <Button type="primary" size="small" onClick={() => handleOpenMcpServiceModal(mcp)}>
                         + 添加
                       </Button>

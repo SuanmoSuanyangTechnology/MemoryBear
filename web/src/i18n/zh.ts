@@ -1803,6 +1803,8 @@ export const zh = {
       error_desc: 'API 已配置但链接异常',
       
       testConnectionSuccess: '测试连接成功',
+      refreshSuccess: '刷新成功',
+      refreshFailed: '刷新失败',
       serviceEndpoint: '服务端点 URL',
       serviceEndpointPlaceholder: '服务端点的 URL',
       serviceEndpointExtra: 'MCP服务的完整访问地址',
