@@ -2228,6 +2228,7 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
         from app.models.implicit_emotions_storage_model import ImplicitEmotionsStorage
         from app.repositories.implicit_emotions_storage_repository import (
             ImplicitEmotionsStorageRepository,
+            TimeFilterUnavailableError,
         )
         from app.services.emotion_analytics_service import EmotionAnalyticsService
         from app.services.implicit_memory_service import ImplicitMemoryService
@@ -2259,7 +2260,7 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                 # Redis 不可用时回退到全量处理
                 try:
                     refresh_iter = repo.get_users_needing_refresh(_redis_client, batch_size=100)
-                except RuntimeError as e:
+                except TimeFilterUnavailableError as e:
                     logger.warning(f"时间轴筛选不可用，回退到全量刷新: {e}")
                     refresh_iter = repo.get_all_user_ids(batch_size=100)
 
