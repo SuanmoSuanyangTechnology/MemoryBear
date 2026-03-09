@@ -5,7 +5,8 @@ This module provides functionality to summarize chunk content using LLM.
 """
 
 import asyncio
-from typing import Any, Dict, List
+import os
+from typing import Any, Dict, List, Optional
 
 from app.core.logging_config import get_business_logger
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -14,12 +15,31 @@ from pydantic import BaseModel, Field
 
 business_logger = get_business_logger()
 
+DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
 
-def _get_llm_client():
-    """Get LLM client using db context."""
+
+def _get_llm_client(end_user_id: Optional[str] = None):
+    """Get LLM client, preferring user-connected config with fallback to default."""
     with get_db_context() as db:
+        try:
+            if end_user_id:
+                from app.services.memory_agent_service import get_end_user_connected_config
+                from app.services.memory_config_service import MemoryConfigService
+                connected_config = get_end_user_connected_config(end_user_id, db)
+                config_id = connected_config.get("memory_config_id")
+                workspace_id = connected_config.get("workspace_id")
+                if config_id or workspace_id:
+                    config_service = MemoryConfigService(db)
+                    memory_config = config_service.load_memory_config(
+                        config_id=config_id,
+                        workspace_id=workspace_id
+                    )
+                    factory = MemoryClientFactory(db)
+                    return factory.get_llm_client(memory_config.llm_model_id)
+        except Exception as e:
+            business_logger.warning(f"Failed to get user connected config, using default LLM: {e}")
         factory = MemoryClientFactory(db)
-        return factory.get_llm_client(None)  # Uses default LLM
+        return factory.get_llm_client(DEFAULT_LLM_ID)
 
 
 class ChunkSummary(BaseModel):
@@ -27,7 +47,7 @@ class ChunkSummary(BaseModel):
     summary: str = Field(..., description="简洁的chunk内容摘要")
 
 
-async def generate_chunk_summary(chunks: List[str], max_chunks: int = 10) -> str:
+async def generate_chunk_summary(chunks: List[str], max_chunks: int = 10, end_user_id: Optional[str] = None) -> str:
     """
     Generate a summary for the given chunks.
     
@@ -67,7 +87,7 @@ async def generate_chunk_summary(chunks: List[str], max_chunks: int = 10) -> str
         ]
         
         # 调用LLM生成摘要
-        llm_client = _get_llm_client()
+        llm_client = _get_llm_client(end_user_id)
         response = await llm_client.chat(messages=messages)
         
         summary = response.content.strip()

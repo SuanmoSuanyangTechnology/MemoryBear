@@ -678,9 +678,9 @@ async def get_chunk_summary_and_tags(
         
         # 3. 并发生成摘要、提取标签和人物形象
         import asyncio
-        summary_task = generate_chunk_summary(chunks, max_chunks=limit)
-        tags_task = extract_chunk_tags(chunks, max_tags=max_tags, max_chunks=limit)
-        personas_task = extract_chunk_persona(chunks, max_personas=5, max_chunks=limit)
+        summary_task = generate_chunk_summary(chunks, max_chunks=limit, end_user_id=end_user_id)
+        tags_task = extract_chunk_tags(chunks, max_tags=max_tags, max_chunks=limit, end_user_id=end_user_id)
+        personas_task = extract_chunk_persona(chunks, max_personas=5, max_chunks=limit, end_user_id=end_user_id)
         
         summary, tags_with_freq, personas = await asyncio.gather(summary_task, tags_task, personas_task)
         
@@ -736,7 +736,7 @@ async def get_chunk_insight(
         from app.core.rag_utils import generate_chunk_insight
         
         # 3. 生成洞察
-        insight = await generate_chunk_insight(chunks, max_chunks=limit)
+        insight = await generate_chunk_insight(chunks, max_chunks=limit, end_user_id=end_user_id)
         
         result = {
             "insight": insight

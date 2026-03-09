@@ -5,8 +5,9 @@ This module provides functionality to analyze chunk content and generate insight
 """
 
 import asyncio
+import os
 from collections import Counter
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.core.logging_config import get_business_logger
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -15,12 +16,31 @@ from pydantic import BaseModel, Field
 
 business_logger = get_business_logger()
 
+DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
 
-def _get_llm_client():
-    """Get LLM client using db context."""
+
+def _get_llm_client(end_user_id: Optional[str] = None):
+    """Get LLM client, preferring user-connected config with fallback to default."""
     with get_db_context() as db:
+        try:
+            if end_user_id:
+                from app.services.memory_agent_service import get_end_user_connected_config
+                from app.services.memory_config_service import MemoryConfigService
+                connected_config = get_end_user_connected_config(end_user_id, db)
+                config_id = connected_config.get("memory_config_id")
+                workspace_id = connected_config.get("workspace_id")
+                if config_id or workspace_id:
+                    config_service = MemoryConfigService(db)
+                    memory_config = config_service.load_memory_config(
+                        config_id=config_id,
+                        workspace_id=workspace_id
+                    )
+                    factory = MemoryClientFactory(db)
+                    return factory.get_llm_client(memory_config.llm_model_id)
+        except Exception as e:
+            business_logger.warning(f"Failed to get user connected config, using default LLM: {e}")
         factory = MemoryClientFactory(db)
-        return factory.get_llm_client(None)  # Uses default LLM
+        return factory.get_llm_client(DEFAULT_LLM_ID)
 
 
 class ChunkInsight(BaseModel):
@@ -37,7 +57,7 @@ class DomainClassification(BaseModel):
     )
 
 
-async def classify_chunk_domain(chunk: str) -> str:
+async def classify_chunk_domain(chunk: str, end_user_id: Optional[str] = None) -> str:
     """
     Classify a chunk into a specific domain.
     
@@ -48,7 +68,7 @@ async def classify_chunk_domain(chunk: str) -> str:
         Domain name
     """
     try:
-        llm_client = _get_llm_client()
+        llm_client = _get_llm_client(end_user_id)
         
         prompt = f"""请将以下文本内容归类到最合适的领域中。
 
@@ -82,7 +102,7 @@ async def classify_chunk_domain(chunk: str) -> str:
         return "其他"
 
 
-async def analyze_domain_distribution(chunks: List[str], max_chunks: int = 20) -> Dict[str, float]:
+async def analyze_domain_distribution(chunks: List[str], max_chunks: int = 20, end_user_id: Optional[str] = None) -> Dict[str, float]:
     """
     Analyze the domain distribution of chunks.
     
@@ -103,7 +123,7 @@ async def analyze_domain_distribution(chunks: List[str], max_chunks: int = 20) -
         # 为每个chunk分类
         domain_counts = Counter()
         for chunk in chunks_to_analyze:
-            domain = await classify_chunk_domain(chunk)
+            domain = await classify_chunk_domain(chunk, end_user_id)
             domain_counts[domain] += 1
         
         # 计算百分比
@@ -121,7 +141,7 @@ async def analyze_domain_distribution(chunks: List[str], max_chunks: int = 20) -
         return {}
 
 
-async def generate_chunk_insight(chunks: List[str], max_chunks: int = 15) -> str:
+async def generate_chunk_insight(chunks: List[str], max_chunks: int = 15, end_user_id: Optional[str] = None) -> str:
     """
     Generate insights from the given chunks.
     
@@ -138,7 +158,7 @@ async def generate_chunk_insight(chunks: List[str], max_chunks: int = 15) -> str
     
     try:
         # 1. 分析领域分布
-        domain_dist = await analyze_domain_distribution(chunks, max_chunks=max_chunks)
+        domain_dist = await analyze_domain_distribution(chunks, max_chunks=max_chunks, end_user_id=end_user_id)
         
         # 2. 统计基本信息
         total_chunks = len(chunks)
@@ -185,7 +205,7 @@ async def generate_chunk_insight(chunks: List[str], max_chunks: int = 15) -> str
         ]
         
         # 调用LLM生成洞察
-        llm_client = _get_llm_client()
+        llm_client = _get_llm_client(end_user_id)
         response = await llm_client.chat(messages=messages)
         
         insight = response.content.strip()
