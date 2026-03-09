@@ -252,6 +252,16 @@ class SemanticPruner:
         if re.fullmatch(r"[。！？,.!?…·\s]+", t):
             return True
         
+        # 安全防线：包含情绪词或兴趣词的消息，无论多短都不视为填充
+        # 避免"我好开心呀"、"好喜欢打羽毛球呀"等被误删
+        _emotion_interest_guard = re.compile(
+            r"开心|高兴|快乐|幸福|感动|难过|悲伤|伤心|委屈|失落|沮丧|郁闷|"
+            r"生气|愤怒|烦躁|焦虑|害怕|担心|压力|兴奋|期待|"
+            r"喜欢|热爱|爱好|兴趣|擅长|享受|沉迷|着迷|讨厌|厌恶"
+        )
+        if _emotion_interest_guard.search(t):
+            return False
+        
         return False
     
     async def _batch_evaluate_importance_with_llm(
