@@ -292,6 +292,8 @@ class GraphBuilder:
         """
         for node in self.nodes:
             node_type = node.get("type")
+            if node_type == NodeType.NOTES:
+                continue
             node_id = node.get("id")
             cycle_node = node.get("cycle")
             if cycle_node:

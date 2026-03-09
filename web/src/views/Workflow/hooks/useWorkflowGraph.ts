@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 17:59:34
+ * @Last Modified time: 2026-03-07 15:23:39
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -12,7 +12,7 @@ import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, noteNode } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 
@@ -128,7 +128,7 @@ export const useWorkflowGraph = ({
     if (nodes.length) {
       const nodeList = nodes.map(node => {
         const { id, type, name, position, config = {} } = node
-        let nodeLibraryConfig = [...nodeLibrary, { nodes: [unknownNode] }]
+        let nodeLibraryConfig = [...nodeLibrary, { nodes: [unknownNode, noteNode] }]
           .flatMap(category => category.nodes)
           .find(n => n.type === type)
         nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
@@ -715,6 +715,8 @@ export const useWorkflowGraph = ({
       panning: isHandMode,
       mousewheel: {
         enabled: true,
+        factor: 0.1,
+        modifiers: null,
       },
       connecting: {
         connector: {
