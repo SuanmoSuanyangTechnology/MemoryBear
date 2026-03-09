@@ -200,7 +200,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     await fetchMcpList(sourceId, 1);
     const source = marketSources.find(s => s.id === sourceId);
     if (source) {
-      message.success(`${source.name} 列表已刷新`);
+      message.success(`${source.name} ${t('tool.marketRefreshSuccess')}`);
     }
   };
 
@@ -281,8 +281,8 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
       return (
         <div className="rb:flex rb:flex-col rb:items-center rb:justify-center rb:h-full rb:text-center">
           <div className="rb:text-6xl rb:mb-4">🏪</div>
-          <h3 className="rb:text-lg rb:font-semibold rb:text-gray-900 rb:mb-2">选择一个 MCP 市场</h3>
-          <p className="rb:text-sm rb:text-gray-600 rb:max-w-md">从左侧选择一个市场源，配置连接后即可浏览该市场的 MCP 服务</p>
+          <h3 className="rb:text-lg rb:font-semibold rb:text-gray-900 rb:mb-2">{t('tool.marketSelectTitle')}</h3>
+          <p className="rb:text-sm rb:text-gray-600 rb:max-w-md">{t('tool.marketSelectDesc')}</p>
         </div>
       );
     }
@@ -333,13 +333,13 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
             <div className="rb:flex rb:gap-3 rb:items-center">
               {source.connected && (
                 <Button size="small" icon={<SyncOutlined />} onClick={() => handleRefresh(selectedSource)}>
-                  刷新
+                  {t('tool.marketRefresh')}
                 </Button>
               )}
               {mcpList.length > 0 && (
                 <Input
                   prefix={<SearchOutlined />}
-                  placeholder="搜索服务..."
+                  placeholder={t('tool.marketSearchPlaceholder')}
                   value={searchKeyword}
                   onChange={(e) => setSearchKeyword(e.target.value)}
                   style={{ width: 200 }}
@@ -347,10 +347,10 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
               )}
             </div>
             <Button icon={<SettingOutlined />} onClick={() => handleOpenConfig(selectedSource)}>
-              配置
+              {t('tool.marketConfig')}
             </Button>
             <Button type="primary" icon={<GlobalOutlined />} onClick={() => window.open(source.url, '_blank')}>
-              前往市场
+              {t('tool.marketVisit')}
             </Button>
           </div>
         </div>
@@ -414,11 +414,11 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                     </div>
                     <div className={`rb:flex rb:items-center ${mcp.activated || mcp.inDatabase ? 'rb:justify-between' : 'rb:justify-end'}`}>
                       <div className="rb:flex rb:gap-2">
-                        {mcp.activated && <Tag color="success">已激活</Tag>}
-                        {mcp.inDatabase && <Tag color="blue">已入库</Tag>}
+                        {mcp.activated && <Tag color="success">{t('tool.marketActivated')}</Tag>}
+                        {mcp.inDatabase && <Tag color="blue">{t('tool.marketInDatabase')}</Tag>}
                       </div>
                       <Button type="primary" size="small" onClick={() => handleOpenMcpServiceModal(mcp)}>
-                        + 添加
+                        + {t('tool.marketAdd')}
                       </Button>
                     </div>
                   </div>
@@ -430,14 +430,14 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
             <div className="rb:flex rb:flex-col rb:items-center rb:justify-center rb:py-16 rb:text-center">
               <div className="rb:text-6xl rb:mb-4">{source.connected ? '📭' : '🔌'}</div>
               <h4 className="rb:text-base rb:font-semibold rb:text-gray-900 rb:mb-2">
-                {source.connected ? '暂无可用的 MCP 服务' : '尚未连接此市场'}
+                {source.connected ? t('tool.marketNoServices') : t('tool.marketNotConnected')}
               </h4>
               <p className="rb:text-sm rb:text-gray-600 rb:mb-4">
-                {source.connected ? '该市场暂时没有可用的服务' : '点击右上角"配置"按钮设置连接信息'}
+                {source.connected ? t('tool.marketNoServicesDesc') : t('tool.marketNotConnectedDesc')}
               </p>
               {!source.connected && (
                 <Button type="primary" onClick={() => handleOpenConfig(selectedSource)}>
-                  配置连接
+                  {t('tool.marketConfigConnection')}
                 </Button>
               )}
             </div>
