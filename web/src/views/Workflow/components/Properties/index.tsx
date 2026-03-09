@@ -95,7 +95,7 @@ const Properties: FC<PropertiesProps> = ({
           initialValue[key] = config[key].defaultValue
         }
       })
-      
+
       form.setFieldsValue({
         type,
         id: selectedNode.id,
@@ -114,16 +114,16 @@ const Properties: FC<PropertiesProps> = ({
    */
   const updateNodeLabel = (newLabel: string) => {
     if (selectedNode && form) {
-      const nodeData = selectedNode.data as NodeProperties;
+      const nodeData = selectedNode.getData() as NodeProperties;
       selectedNode.setAttrByPath('text/text', `${nodeData.icon} ${newLabel}`);
-      selectedNode.setData({ ...selectedNode.data, name: newLabel });
+      selectedNode.setData({ ...selectedNode.getData(), name: newLabel });
     }
   };
 
   useEffect(() => {
     if (values && selectedNode) {
       const { id, knowledge_retrieval, group, group_variables, ...rest } = values
-      const { knowledge_bases = [], ...restKnowledgeConfig } = (knowledge_retrieval as any) || {}
+      const { knowledge_bases = [], name: _name, description: _description, ...restKnowledgeConfig } = (knowledge_retrieval as any) || {}
 
       let allRest = {
         ...rest,
@@ -136,21 +136,23 @@ const Properties: FC<PropertiesProps> = ({
         }))
       }
 
+      const nodeData = selectedNode.getData()
+
       Object.keys(values).forEach(key => {
-        if (selectedNode.data?.config?.[key]) {
+        if (nodeData?.config?.[key]) {
           // Create a deep copy to avoid reference sharing between nodes
-          if (!selectedNode.data.config[key]) {
-            selectedNode.data.config[key] = {};
+          if (!nodeData.config[key]) {
+            nodeData.config[key] = {};
           }
-          selectedNode.data.config[key] = {
-            ...selectedNode.data.config[key],
+          nodeData.config[key] = {
+            ...nodeData.config[key],
             defaultValue: values[key]
           };
         }
       })
 
       selectedNode?.setData({
-        ...selectedNode.data,
+        ...nodeData,
         ...allRest,
       })
     }

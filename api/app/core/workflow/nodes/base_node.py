@@ -1,7 +1,7 @@
 import asyncio
 import logging
-import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime
 from functools import cached_property
 from typing import Any, AsyncGenerator
 
@@ -13,6 +13,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.enums import BRANCH_NODES
 from app.core.workflow.variable.base_variable import VariableType, FileObject
 from app.db import get_db_read
+from app.models import ModelConfig, ModelApiKey, LoadBalanceStrategy
 from app.schemas import FileInput
 from app.services.multimodal_service import MultimodalService
 
@@ -617,17 +618,31 @@ class BaseNode(ABC):
         return variable_pool.has(selector)
 
     @staticmethod
-    async def process_message(provider: str, content: str | FileObject, enable_file=False) -> dict | str | None:
+    async def process_message(
+            provider: str,
+            is_omni: bool,
+            content: str | dict | FileObject,
+            enable_file=False
+    ) -> list | str | None:
+        if isinstance(content, dict):
+            content = FileObject(
+                type=content.get("type"),
+                url=content.get("url"),
+                transfer_method=content.get("transfer_method"),
+                origin_file_type=content.get("origin_file_type"),
+                file_id=content.get("file_id"),
+                is_file=True
+            )
         if isinstance(content, str):
             if enable_file:
-                return {"text": content}
+                return [{"type": "text", "text": content}]
             return content
 
         elif isinstance(content, FileObject):
             if content.content_cache.get(provider):
                 return content.content_cache[provider]
             with get_db_read() as db:
-                multimodel_service = MultimodalService(db, provider)
+                multimodel_service = MultimodalService(db, provider, is_omni=is_omni)
                 message = await multimodel_service.process_files(
                     [FileInput.model_construct(
                         type=content.type,
@@ -637,10 +652,9 @@ class BaseNode(ABC):
                         upload_file_id=content.file_id
                     )]
                 )
-
                 if message:
-                    content.content_cache[provider] = message[0]
-                    return message[0]
+                    content.content_cache[provider] = message
+                    return message
                 return None
         raise TypeError(f'Unexpect input value type - {type(content)}')
 
@@ -658,3 +672,12 @@ class BaseNode(ABC):
         elif isinstance(content, str):
             return content
         return result
+
+    @staticmethod
+    def model_balance(model_config: ModelConfig) -> ModelApiKey:
+        api_keys = [key for key in model_config.api_keys if key.is_active]
+        if not api_keys:
+            raise ValueError("No active API keys available for model")
+        if model_config.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
+            return min(api_keys, key=lambda x: (int(x.usage_count or "0"), x.last_used_at or datetime.min))
+        return api_keys[0]

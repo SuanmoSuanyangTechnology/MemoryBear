@@ -85,7 +85,7 @@ class ToolService:
         """检查工具名称是否重复"""
         query = self.db.query(ToolConfig).filter(
             ToolConfig.name == name,
-            ToolConfig.tool_type == tool_type.value,
+            ToolConfig.tool_type == tool_type,
             ToolConfig.tenant_id == tenant_id
         )
         if exclude_id:
@@ -910,7 +910,11 @@ class ToolService:
                 config_data.update({
                     "last_health_check": int(mcp_config.last_health_check.timestamp() * 1000) if mcp_config.last_health_check else None,
                     "health_status": mcp_config.health_status,
-                    "available_tools": available_tools_display
+                    "available_tools": available_tools_display,
+                    "source_channel": mcp_config.source_channel,
+                    "market_id": mcp_config.market_id,
+                    "market_config_id": mcp_config.market_config_id,
+                    "mcp_service_id": mcp_config.mcp_service_id
                 })
         
         return ToolInfo(
@@ -965,7 +969,11 @@ class ToolService:
                 id=tool_config.id,
                 server_url=config.get("server_url"),
                 connection_config=config.get("connection_config", {}),
-                available_tools=config.get("available_tools", [])
+                available_tools=config.get("available_tools", []),
+                source_channel=config.get("source_channel", "self_hosted"),
+                market_id=config.get("market_id"),
+                market_config_id=config.get("market_config_id"),
+                mcp_service_id=config.get("mcp_service_id"),
             )
             self.db.add(mcp_config)
 
@@ -1018,6 +1026,14 @@ class ToolService:
                 mcp_config.server_url = config.get("server_url")
                 mcp_config.connection_config = config.get("connection_config", {})
                 mcp_config.available_tools = config.get("available_tools", [])
+                if config.get("source_channel") is not None:
+                    mcp_config.source_channel = config.get("source_channel")
+                if config.get("market_id") is not None:
+                    mcp_config.market_id = config.get("market_id")
+                if config.get("market_config_id") is not None:
+                    mcp_config.market_config_id = config.get("market_config_id")
+                if config.get("mcp_service_id") is not None:
+                    mcp_config.mcp_service_id = config.get("mcp_service_id")
 
     @staticmethod
     def _determine_initial_status(tool_info: Dict[str, Any]) -> str:

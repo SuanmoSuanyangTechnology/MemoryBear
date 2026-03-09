@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 11:39:20
+ * @Last Modified time: 2026-03-06 12:26:11
  */
 /**
  * Type definitions for Model Management
@@ -121,6 +121,7 @@ export interface ModelApiKey {
  * Model list item data structure
  */
 export interface ModelListItem {
+  model_id?: string;
   /** Model name */
   model_name?: string;
   /** Associated model config IDs */

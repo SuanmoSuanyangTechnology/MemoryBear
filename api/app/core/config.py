@@ -192,8 +192,10 @@ class Settings:
     # Celery configuration (internal)
     # NOTE: 变量名不以 CELERY_ 开头，避免被 Celery CLI 的前缀匹配机制劫持
     # 详见 docs/celery-env-bug-report.md
-    REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "1"))
-    REDIS_DB_CELERY_BACKEND: int = int(os.getenv("REDIS_DB_CELERY_BACKEND", "2"))
+    # 默认使用 Redis DB 3 (broker) 和 DB 4 (backend)，与业务缓存 (DB 1/2) 隔离
+    # 多人共用同一 Redis 时，每位开发者应在 .env 中配置不同的 DB 编号避免任务互相干扰
+    REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "3"))
+    REDIS_DB_CELERY_BACKEND: int = int(os.getenv("REDIS_DB_CELERY_BACKEND", "4"))
 
     # SMTP Email Configuration
     SMTP_SERVER: str = os.getenv("SMTP_SERVER", "smtp.gmail.com")

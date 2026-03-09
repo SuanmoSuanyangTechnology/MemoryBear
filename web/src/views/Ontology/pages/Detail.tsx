@@ -102,7 +102,7 @@ const Detail: FC = () => {
       <PageHeader
         name={<Space>
           {data.scene_name}
-          <Tag color="warning">{t('common.default')}</Tag>
+          {data.is_system_default ? <Tag color="warning">{t('common.default')}</Tag> : undefined}
         </Space>}
         subTitle={<Tooltip title={data.scene_description}><div className="rb:h-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{data.scene_description}</div></Tooltip>}
         extra={data.is_system_default ? undefined : (<Space>

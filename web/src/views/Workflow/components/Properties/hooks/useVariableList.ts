@@ -35,7 +35,8 @@ const NODE_VARIABLES = {
   ],
   'http-request': [
     { label: 'body', dataType: 'string', field: 'body' },
-    { label: 'status_code', dataType: 'number', field: 'status_code' }
+    { label: 'status_code', dataType: 'number', field: 'status_code' },
+    { label: 'headers', dataType: 'object', field: 'headers' },
   ],
   'question-classifier': [{ label: 'class_name', dataType: 'string', field: 'class_name' }],
   'memory-read': [
@@ -390,11 +391,6 @@ export const useVariableList = (
         addVariable(list, keys, `${pid}_item`, 'item', itemType, `${pid}.item`, pd);
         addVariable(list, keys, `${pid}_index`, 'index', 'number', `${pid}.index`, pd);
       } else if (pd.type === 'iteration' && !pd.config.input.defaultValue) {
-        let itemType = 'object';
-        const iv = list.find(v => `{{${v.value}}}` === pd.config.input.defaultValue);
-        if (iv?.dataType.startsWith('array[')) {
-          itemType = iv.dataType.replace(/^array\[(.+)\]$/, '$1');
-        }
         addVariable(list, keys, `${pid}_item`, 'item', 'string', `${pid}.item`, pd);
         addVariable(list, keys, `${pid}_index`, 'index', 'number', `${pid}.index`, pd);
       }

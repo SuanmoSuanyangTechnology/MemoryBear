@@ -138,7 +138,7 @@ class WorkflowValidator:
                     errors.append("工作流必须至少有一个 end 节点")
 
             # 3. 验证节点 ID 唯一性
-            node_ids = [n.get("id") for n in nodes]
+            node_ids = [n.get("id") for n in nodes if n.get("type") != NodeType.NOTES]
             if len(node_ids) != len(set(node_ids)):
                 duplicates = [nid for nid in node_ids if node_ids.count(nid) > 1]
                 errors.append(f"节点 ID 必须唯一，重复的 ID: {set(duplicates)}")

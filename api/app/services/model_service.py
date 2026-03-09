@@ -780,6 +780,7 @@ class ModelBaseService:
             "description": model_base.description,
             "capability": model_base.capability,
             "is_omni": model_base.is_omni,
+            "is_active": False,
             "is_composite": False
         }
         model_config = ModelConfigRepository.create(db, model_config_data)

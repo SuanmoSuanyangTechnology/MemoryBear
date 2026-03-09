@@ -1,4 +1,36 @@
 {
+  "v0.2.6": {
+    "introduction": {
+      "codeName": "听剑",
+      "releaseDate": "2026-3-6",
+      "upgradePosition": "🐻 多模态交互全面升级，记忆剪枝与工作流迁移双线并进，锋芒初露，兼收并蓄",
+      "coreUpgrades": [
+        "1. 工作流与应用框架<br>* 工作流导入适配（Dify）：支持 Dify 工作流定义无缝迁移<br>* 字段字数限制与校验规则：可配置字符限制与产品级校验<br>* 应用复制（Agent、工作流、集群）：一键复制完整应用配置<br>* 对话变量（调试+分享）：支持有状态多轮交互<br>* Chat 接口流式输出 message_id：流式响应包含消息追踪标识",
+        "2. 多模态与交互 💬<br>* 音频输入与输出：应用支持音频模态<br>* 文件类型输入支持：扩展支持语音、文件、视频上传",
+        "3. 模型与智能 🧠<br>* 模型视觉与 Omni 区分：精确区分视觉与 Omni 模型能力<br>* 教育记忆与陪伴玩具场景预设：垂直领域本体配置开箱即用<br>* 本体配置默认标识：支持基线配置标记<br>* 记忆配置默认标识：自动应用默认记忆设置",
+        "4. 记忆智能 🔬<br>* 记忆剪枝模块：智能裁剪冗余低价值记忆<br>* RAG 快速检索集成记忆：深度思考与正常回复双模式检索",
+        "5. 稳健性与缺陷修复 🔧<br>* 模型管理：修复自定义模型 API Key 批量配置错误<br>* 知识库管理：修复非源文档下载原始内容接口错误，更新分享停用提示文案<br>* 用户记忆：优化档案提取准确性（姓名、职业、兴趣分布）<br>* 长期记忆：修复情景记忆卡片重复和用户归属错误<br>* 工作空间首页：修复知识库数量、应用数量、总记忆容量、API 调用次数、知识库类型分布等数据不一致问题<br>* 基础设施：修正 Celery 环境变量配置，修复数据库连接池 idle-in-transaction 泄漏",
+        "<br>",
+        "v0.2.6 标志着 MemoryBear 在多模态交互、跨平台工作流迁移和智能记忆管理方面的重要突破。下一版本将聚焦 A2A 协议支持实现多智能体协作、多模态记忆能力扩展至语音与视觉领域，以及应用导入导出功能支持跨环境便携部署。",
+        "MemoryBear，让记忆有熊力 🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "TingJian",
+      "releaseDate": "2026-3-6",
+      "upgradePosition": "🐻 Full multimodal interaction upgrade with memory pruning and workflow migration — sharpened edge, broader reach",
+      "coreUpgrades": [
+        "1. Workflow & Application Framework<br>* Workflow Import Adaptation (Dify): Seamless Dify workflow migration<br>* Field Character Limits & Validation: Configurable limits with product-defined rules<br>* Application Cloning (Agent, Workflow, Cluster): One-click full config duplication<br>* Conversation Variables (Debug + Share): Stateful multi-turn interactions<br>* Streaming message_id in Chat API: Message tracking in streaming responses",
+        "2. Multimodal & Interaction 💬<br>* Audio Input & Output: Audio modality support for applications<br>* File Type Input Support: Voice, file, and video upload support",
+        "3. Model & Intelligence 🧠<br>* Model Vision & Omni Differentiation: Precise capability routing<br>* Education Memory & Companion Toy Presets: Domain-specific ontology configs<br>* Ontology Default Identifier: Baseline configuration flagging<br>* Memory Configuration Default Identifier: Auto-apply default settings",
+        "4. Memory Intelligence 🔬<br>* Memory Pruning Module: Intelligent trimming of redundant memories<br>* RAG Quick Retrieval with Memory: Deep think and normal reply dual-mode retrieval",
+        "5. Robustness & Bug Fixes 🔧<br>* Model Management: Fixed custom model API key batch configuration error<br>* Knowledge Base: Fixed download original content API error for non-source documents, updated share disable prompt text<br>* User Memory: Improved profile extraction accuracy (name, occupation, interests)<br>* Long-Term Memory: Fixed duplicate episodic memory cards and wrong user attribution<br>* Dashboard: Fixed data inconsistencies in knowledge count, app count, memory capacity, API calls, and knowledge type distribution<br>* Infrastructure: Corrected Celery environment variables, fixed database connection pool idle-in-transaction leak",
+        "<br>",
+        "v0.2.6 marks a significant milestone for MemoryBear in multimodal interaction, cross-platform workflow migration, and intelligent memory management. The next release will focus on A2A protocol support for multi-agent collaboration, multimodal memory extending extraction to voice and visual domains, and application import/export for portable cross-environment deployment.",
+        "MemoryBear, Memory with Bear Power 🐻✨"
+      ]
+    }
+  },
   "v0.2.5": {
     "introduction": {
       "codeName": "行云",
