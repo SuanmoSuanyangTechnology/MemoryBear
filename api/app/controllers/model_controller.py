@@ -371,6 +371,11 @@ def update_model(
 
     if model_data.type is not None or model_data.provider is not None:
         raise BusinessException("不允许更改模型类型和供应商", BizCode.INVALID_PARAMETER)
+
+    if model_data.is_active:
+        active_keys = ModelApiKeyService.get_api_keys_by_model(db=db, model_config_id=model_id, is_active=model_data.is_active)
+        if not active_keys:
+            raise BusinessException("请先为该模型配置可用的 API Key", BizCode.INVALID_PARAMETER)
     
     try:
         api_logger.debug(f"开始更新模型配置: model_id={model_id}")
@@ -469,7 +474,9 @@ async def create_model_api_key_by_provider(
             config=api_key_data.config,
             is_active=api_key_data.is_active,
             priority=api_key_data.priority,
-            model_config_ids=model_config_ids
+            model_config_ids=model_config_ids,
+            capability=api_key_data.capability,
+            is_omni=api_key_data.is_omni
         )
         created_keys, failed_models = await ModelApiKeyService.create_api_key_by_provider(db=db, data=create_data)
         

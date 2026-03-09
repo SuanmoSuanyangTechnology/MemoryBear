@@ -5,7 +5,6 @@ from langchain_core.messages import HumanMessage
 from langgraph.constants import START, END
 from langgraph.graph import StateGraph
 
-
 from app.db import get_db
 from app.services.memory_config_service import MemoryConfigService
 
@@ -32,7 +31,6 @@ from app.core.memory.agent.langgraph_graph.routing.routers import (
 )
 
 
-
 @asynccontextmanager
 async def make_read_graph():
     """创建并返回 LangGraph 工作流"""
@@ -49,7 +47,7 @@ async def make_read_graph():
         workflow.add_node("Retrieve_Summary", Retrieve_Summary)
         workflow.add_node("Summary", Summary)
         workflow.add_node("Summary_fails", Summary_fails)
-        
+
         # 添加边
         workflow.add_edge(START, "content_input")
         workflow.add_conditional_edges("content_input", Split_continue)
@@ -62,19 +60,19 @@ async def make_read_graph():
         workflow.add_edge("Summary_fails", END)
         workflow.add_edge("Summary", END)
 
-
         '''-----'''
         # workflow.add_edge("Retrieve", END)
-        
+
         # 编译工作流
         graph = workflow.compile()
         yield graph
-        
+
     except Exception as e:
         print(f"创建工作流失败: {e}")
         raise
     finally:
         print("工作流创建完成")
+
 
 async def main():
     """主函数 - 运行工作流"""
@@ -92,17 +90,19 @@ async def main():
         service_name="MemoryAgentService"
     )
     import time
-    start=time.time()
+    start = time.time()
     try:
         async with make_read_graph() as graph:
             config = {"configurable": {"thread_id": end_user_id}}
             # 初始状态 - 包含所有必要字段
-            initial_state = {"messages": [HumanMessage(content=message)] ,"search_switch":search_switch,"end_user_id":end_user_id
-                             ,"storage_type":storage_type,"user_rag_memory_id":user_rag_memory_id,"memory_config":memory_config}
+            initial_state = {"messages": [HumanMessage(content=message)], "search_switch": search_switch,
+                             "end_user_id": end_user_id
+                , "storage_type": storage_type, "user_rag_memory_id": user_rag_memory_id,
+                             "memory_config": memory_config}
             # 获取节点更新信息
             _intermediate_outputs = []
             summary = ''
-            
+
             async for update_event in graph.astream(
                     initial_state,
                     stream_mode="updates",
@@ -110,7 +110,7 @@ async def main():
             ):
                 for node_name, node_data in update_event.items():
                     print(f"处理节点: {node_name}")
-                    
+
                     # 处理不同Summary节点的返回结构
                     if 'Summary' in node_name:
                         if 'InputSummary' in node_data and 'summary_result' in node_data['InputSummary']:
@@ -125,23 +125,22 @@ async def main():
                     spit_data = node_data.get('spit_data', {}).get('_intermediate', None)
                     if spit_data and spit_data != [] and spit_data != {}:
                         _intermediate_outputs.append(spit_data)
-                    
+
                     # Problem_Extension 节点
                     problem_extension = node_data.get('problem_extension', {}).get('_intermediate', None)
                     if problem_extension and problem_extension != [] and problem_extension != {}:
                         _intermediate_outputs.append(problem_extension)
-                    
+
                     # Retrieve 节点
                     retrieve_node = node_data.get('retrieve', {}).get('_intermediate_outputs', None)
                     if retrieve_node and retrieve_node != [] and retrieve_node != {}:
                         _intermediate_outputs.extend(retrieve_node)
-                    
+
                     # Verify 节点
                     verify_n = node_data.get('verify', {}).get('_intermediate', None)
                     if verify_n and verify_n != [] and verify_n != {}:
                         _intermediate_outputs.append(verify_n)
 
-                    
                     # Summary 节点
                     summary_n = node_data.get('summary', {}).get('_intermediate', None)
                     if summary_n and summary_n != [] and summary_n != {}:
@@ -161,17 +160,20 @@ async def main():
             #
             print(f"=== 最终摘要 ===")
             print(summary)
-                
+
     except Exception as e:
         import traceback
         traceback.print_exc()
+    finally:
+        db_session.close()
 
-    end=time.time()
-    print(100*'y')
-    print(f"总耗时: {end-start}s")
-    print(100*'y')
+    end = time.time()
+    print(100 * 'y')
+    print(f"总耗时: {end - start}s")
+    print(100 * 'y')
 
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

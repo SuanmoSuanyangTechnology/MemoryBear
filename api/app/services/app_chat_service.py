@@ -10,25 +10,24 @@ from sqlalchemy.orm import Session
 
 from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.agent.langchain_agent import LangChainAgent
-from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.db import get_db, get_db_context
-from app.models import MultiAgentConfig, AgentConfig, WorkflowConfig
-from app.schemas import DraftRunRequest
-from app.schemas.app_schema import FileInput
-from app.services.tool_service import ToolService
-from app.repositories.tool_repository import ToolRepository
 from app.db import get_db
 from app.models import MultiAgentConfig, AgentConfig
+from app.models import WorkflowConfig
+from app.repositories.tool_repository import ToolRepository
+from app.schemas import DraftRunRequest
+from app.schemas.app_schema import FileInput
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
-from app.services.draft_run_service import create_knowledge_retrieval_tool, create_long_term_memory_tool
+from app.services.draft_run_service import create_knowledge_retrieval_tool, create_long_term_memory_tool, \
+    AgentRunService
 from app.services.draft_run_service import create_web_search_tool
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
-from app.services.workflow_service import WorkflowService
 from app.services.multimodal_service import MultimodalService
+from app.services.tool_service import ToolService
+from app.services.workflow_service import WorkflowService
 
 logger = get_business_logger()
 
@@ -39,6 +38,8 @@ class AppChatService:
     def __init__(self, db: Session):
         self.db = db
         self.conversation_service = ConversationService(db)
+        self.agent_service = AgentRunService(db)
+        self.workflow_service = WorkflowService(db)
 
     async def agnet_chat(
             self,
@@ -55,12 +56,10 @@ class AppChatService:
             files: Optional[List[FileInput]] = None  # 新增：多模态文件
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
-
         start_time = time.time()
         config_id = None
 
-        if variables is None:
-            variables = {}
+        variables = self.agent_service.prepare_variables(variables, config.variables)
 
         # 获取模型配置ID
         model_config_id = config.default_model_config_id
@@ -79,74 +78,20 @@ class AppChatService:
         tools = []
 
         # 获取工具服务
-        tool_service = ToolService(self.db)
         tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
-        # 从配置中获取启用的工具
-        if hasattr(config, 'tools') and config.tools and isinstance(config.tools, list):
-            for tool_config in config.tools:
-                if tool_config.get("enabled", False):
-                    # 根据工具名称查找工具实例
-                    tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
-                    if tool_instance:
-                        if tool_instance.name == "baidu_search_tool" and not web_search:
-                            continue
-                        # 转换为LangChain工具
-                        langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
-                        tools.append(langchain_tool)
-        elif hasattr(config, 'tools') and config.tools and isinstance(config.tools, dict):
-            web_tools = config.tools
-            web_search_choice = web_tools.get("web_search", {})
-            web_search_enable = web_search_choice.get("enabled", False)
-            if web_search:
-                if web_search_enable:
-                    search_tool = create_web_search_tool({})
-                    tools.append(search_tool)
-
-                    logger.debug(
-                        "已添加网络搜索工具",
-                        extra={
-                            "tool_count": len(tools)
-                        }
-                    )
-
-        # 加载技能关联的工具
-        if hasattr(config, 'skills') and config.skills:
-            skills = config.skills
-            skill_enable = skills.get("enabled", False)
-            if skill_enable:
-                middleware = AgentMiddleware(skills=skills)
-                skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
-                tools.extend(skill_tools)
-                logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
-
-                # 应用动态过滤
-                if skill_configs:
-                    tools, activated_skill_ids = middleware.filter_tools(tools, message, skill_configs,
-                                                                         tool_to_skill_map)
-                    logger.debug(f"过滤后剩余 {len(tools)} 个工具")
-                    active_prompts = AgentMiddleware.get_active_prompts(
-                        activated_skill_ids, skill_configs
-                    )
-                    system_prompt = f"{system_prompt}\n\n{active_prompts}"
-
-        # 添加知识库检索工具
-        knowledge_retrieval = config.knowledge_retrieval
-        if knowledge_retrieval:
-            knowledge_bases = knowledge_retrieval.get("knowledge_bases", [])
-            kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
-            if kb_ids:
-                kb_tool = create_knowledge_retrieval_tool(knowledge_retrieval, kb_ids, user_id)
-                tools.append(kb_tool)
-
-        # 添加长期记忆工具
+        tools.extend(self.agent_service.load_tools_config(config.tools, web_search, tenant_id))
+        skill_tools, skill_prompts = self.agent_service.load_skill_config(config.skills, message, tenant_id)
+        tools.extend(skill_tools)
+        if skill_prompts:
+            system_prompt = f"{system_prompt}\n\n{skill_prompts}"
+        tools.extend(self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id))
         memory_flag = False
-        if memory == True:
-            memory_config = config.memory
-            if memory_config.get("enabled") and user_id:
-                memory_flag = True
-                memory_tool = create_long_term_memory_tool(memory_config, user_id)
-                tools.append(memory_tool)
+        if memory:
+            memory_tools, memory_flag = self.agent_service.load_memory_config(
+                config.memory, user_id, storage_type, user_rag_memory_id
+            )
+            tools.extend(memory_tools)
 
         # 获取模型参数
         model_parameters = config.model_parameters
@@ -157,6 +102,7 @@ class AppChatService:
             api_key=api_key_obj.api_key,
             provider=api_key_obj.provider,
             api_base=api_key_obj.api_base,
+            is_omni=api_key_obj.is_omni,
             temperature=model_parameters.get("temperature", 0.7),
             max_tokens=model_parameters.get("max_tokens", 2000),
             system_prompt=system_prompt,
@@ -180,7 +126,7 @@ class AppChatService:
         # 处理多模态文件
         processed_files = None
         if files:
-            multimodal_service = MultimodalService(self.db)
+            multimodal_service = MultimodalService(self.db, api_key_obj.provider, is_omni=api_key_obj.is_omni)
             processed_files = await multimodal_service.process_files(files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
 
@@ -198,7 +144,7 @@ class AppChatService:
         )
 
         # 保存消息
-        self.conversation_service.save_conversation_messages(
+        message_id = self.conversation_service.save_conversation_messages(
             conversation_id=conversation_id,
             user_message=message,
             assistant_message=result["content"],
@@ -217,6 +163,7 @@ class AppChatService:
 
         return {
             "conversation_id": conversation_id,
+            "message_id": str(message_id),
             "message": result["content"],
             "usage": result.get("usage", {
                 "prompt_tokens": 0,
@@ -245,10 +192,13 @@ class AppChatService:
         try:
             start_time = time.time()
             config_id = None
+            message_id = uuid.uuid4()
+            yield f"event: start\ndata: {json.dumps({
+                'conversation_id': str(conversation_id), 
+                "message_id": str(message_id)
+            }, ensure_ascii=False)}\n\n"
 
-            if variables is None:
-                variables = {}
-
+            variables = self.agent_service.prepare_variables(variables, config.variables)
             # 获取模型配置ID
             model_config_id = config.default_model_config_id
             api_key_obj = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
@@ -266,73 +216,22 @@ class AppChatService:
             tools = []
 
             # 获取工具服务
-            tool_service = ToolService(self.db)
             tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
-            if hasattr(config, 'tools') and config.tools and isinstance(config.tools, list):
-                for tool_config in config.tools:
-                    if tool_config.get("enabled", False):
-                        # 根据工具名称查找工具实例
-                        tool_instance = tool_service._get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
-                        if tool_instance:
-                            if tool_instance.name == "baidu_search_tool" and not web_search:
-                                continue
-                            # 转换为LangChain工具
-                            langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
-                            tools.append(langchain_tool)
-            elif hasattr(config, 'tools') and config.tools and isinstance(config.tools, dict):
-                web_tools = config.tools
-                web_search_choice = web_tools.get("web_search", {})
-                web_search_enable = web_search_choice.get("enabled", False)
-                if web_search:
-                    if web_search_enable:
-                        search_tool = create_web_search_tool({})
-                        tools.append(search_tool)
+            tools.extend(self.agent_service.load_tools_config(config.tools, web_search, tenant_id))
 
-                        logger.debug(
-                            "已添加网络搜索工具",
-                            extra={
-                                "tool_count": len(tools)
-                            }
-                        )
-
-            # 加载技能关联的工具
-            if hasattr(config, 'skills') and config.skills:
-                skills = config.skills
-                skill_enable = skills.get("enabled", False)
-                if skill_enable:
-                    middleware = AgentMiddleware(skills=skills)
-                    skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
-                    tools.extend(skill_tools)
-                    logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
-
-                    # 应用动态过滤
-                    if skill_configs:
-                        tools, activated_skill_ids = middleware.filter_tools(tools, message, skill_configs,
-                                                                             tool_to_skill_map)
-                        logger.debug(f"过滤后剩余 {len(tools)} 个工具")
-                        active_prompts = AgentMiddleware.get_active_prompts(
-                            activated_skill_ids, skill_configs
-                        )
-                        system_prompt = f"{system_prompt}\n\n{active_prompts}"
-
-            # 添加知识库检索工具
-            knowledge_retrieval = config.knowledge_retrieval
-            if knowledge_retrieval:
-                knowledge_bases = knowledge_retrieval.get("knowledge_bases", [])
-                kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
-                if kb_ids:
-                    kb_tool = create_knowledge_retrieval_tool(knowledge_retrieval, kb_ids, user_id)
-                    tools.append(kb_tool)
-
+            skill_tools, skill_prompts = self.agent_service.load_skill_config(config.skills, message, tenant_id)
+            tools.extend(skill_tools)
+            if skill_prompts:
+                system_prompt = f"{system_prompt}\n\n{skill_prompts}"
+            tools.extend(self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id))
             # 添加长期记忆工具
             memory_flag = False
             if memory:
-                memory_config = config.memory
-                if memory_config.get("enabled") and user_id:
-                    memory_flag = True
-                    memory_tool = create_long_term_memory_tool(memory_config, user_id)
-                    tools.append(memory_tool)
+                memory_tools, memory_flag = self.agent_service.load_memory_config(
+                    config.memory, user_id, storage_type, user_rag_memory_id
+                )
+                tools.extend(memory_tools)
 
             # 获取模型参数
             model_parameters = config.model_parameters
@@ -343,6 +242,7 @@ class AppChatService:
                 api_key=api_key_obj.api_key,
                 provider=api_key_obj.provider,
                 api_base=api_key_obj.api_base,
+                is_omni=api_key_obj.is_omni,
                 temperature=model_parameters.get("temperature", 0.7),
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -366,12 +266,9 @@ class AppChatService:
             # 处理多模态文件
             processed_files = None
             if files:
-                multimodal_service = MultimodalService(self.db)
+                multimodal_service = MultimodalService(self.db, api_key_obj.provider, is_omni=api_key_obj.is_omni)
                 processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
-
-            # 发送开始事件
-            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
 
             # 流式调用 Agent（支持多模态）
             full_content = ""
@@ -404,6 +301,7 @@ class AppChatService:
             )
 
             self.conversation_service.add_message(
+                message_id=message_id,
                 conversation_id=conversation_id,
                 role="assistant",
                 content=full_content,
@@ -416,7 +314,7 @@ class AppChatService:
             ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
 
             # 发送结束事件
-            end_data = {"elapsed_time": elapsed_time, "message_length": len(full_content)}
+            end_data = {"elapsed_time": elapsed_time, "message_length": len(full_content), "error": None}
             yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
 
             logger.info(
@@ -435,7 +333,7 @@ class AppChatService:
         except Exception as e:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
             # 发送错误事件
-            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"event: end\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
     async def multi_agent_chat(
             self,
@@ -481,7 +379,7 @@ class AppChatService:
             content=message
         )
 
-        self.conversation_service.add_message(
+        ai_message = self.conversation_service.add_message(
             conversation_id=conversation_id,
             role="assistant",
             content=result.get("message", ""),
@@ -489,16 +387,17 @@ class AppChatService:
                 "mode": result.get("mode"),
                 "elapsed_time": result.get("elapsed_time"),
                 "usage": result.get("usage", {
-                            "prompt_tokens": 0,
-                            "completion_tokens": 0,
-                            "total_tokens": 0
-                        })
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                })
             }
         )
 
         return {
             "conversation_id": conversation_id,
             "message": result.get("message", ""),
+            "message_id": str(ai_message.id),
             "usage": {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
@@ -522,22 +421,21 @@ class AppChatService:
         """多 Agent 聊天（流式）"""
 
         start_time = time.time()
-        actual_config_id = None
-        config_id = actual_config_id
 
         if variables is None:
             variables = {}
 
         try:
-
+            message_id = uuid.uuid4()
             # 发送开始事件
-            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), "message_id": str(message_id)}, ensure_ascii=False)}\n\n"
 
             full_content = ""
             total_tokens = 0
 
             # 2. 创建编排器
             orchestrator = MultiAgentOrchestrator(self.db, config)
+
 
             # 3. 流式执行任务
             async for event in orchestrator.execute_stream(
@@ -582,6 +480,7 @@ class AppChatService:
             )
 
             self.conversation_service.add_message(
+                message_id=message_id,
                 conversation_id=conversation_id,
                 role="assistant",
                 content=full_content,
@@ -629,7 +528,6 @@ class AppChatService:
             user_rag_memory_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
-        workflow_service = WorkflowService(self.db)
         payload = DraftRunRequest(
             message=message,
             variables=variables,
@@ -637,7 +535,7 @@ class AppChatService:
             stream=True,
             user_id=user_id
         )
-        return await workflow_service.run(
+        return await self.workflow_service.run(
             app_id=app_id,
             payload=payload,
             config=config,
@@ -664,7 +562,6 @@ class AppChatService:
 
     ) -> AsyncGenerator[dict, None]:
         """聊天（流式）"""
-        workflow_service = WorkflowService(self.db)
         payload = DraftRunRequest(
             message=message,
             variables=variables,
@@ -673,7 +570,7 @@ class AppChatService:
             user_id=user_id,
             files=files
         )
-        async for event in workflow_service.run_stream(
+        async for event in self.workflow_service.run_stream(
                 app_id=app_id,
                 payload=payload,
                 config=config,

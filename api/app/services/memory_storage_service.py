@@ -115,6 +115,17 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
 
     # --- Create ---
     def create(self, params: ConfigParamsCreate) -> Dict[str, Any]: # 创建配置参数（仅名称与描述）
+        # 业务层检查同一工作空间下是否已存在同名配置
+        if params.workspace_id and params.config_name:
+            from app.models.memory_config_model import MemoryConfig
+            existing = (
+                self.db.query(MemoryConfig)
+                .filter_by(workspace_id=params.workspace_id, config_name=params.config_name)
+                .first()
+            )
+            if existing:
+                raise ValueError(f"DUPLICATE_CONFIG_NAME:{params.config_name}")
+
         # 如果workspace_id存在且模型字段未全部指定，则自动获取
         if params.workspace_id and not all([params.llm_id, params.embedding_id, params.rerank_id]):
             configs = self._get_workspace_configs(params.workspace_id)
@@ -135,6 +146,10 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
         if not params.emotion_model_id:
             params.emotion_model_id = params.llm_id
 
+        # 根据关联的本体场景推导 pruning_scene（语义剪枝场景与本体工程场景保持一致）
+        if params.scene_id and not getattr(params, 'pruning_scene', None):
+            params.pruning_scene = self._resolve_pruning_scene_from_scene_id(params.scene_id)
+
         config = MemoryConfigRepository.create(self.db, params)
         self.db.commit()
         return {"affected": 1, "config_id": config.config_id}
@@ -149,6 +164,23 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
             return get_workspace_models_configs(db_session, workspace_id)
         finally:
             db_session.close()
+
+    def _resolve_pruning_scene_from_scene_id(self, scene_id) -> Optional[str]:
+        """根据本体场景ID获取对应的 scene_name，作为语义剪枝场景值
+
+        Args:
+            scene_id: 本体场景UUID
+
+        Returns:
+            scene_name 字符串，查询失败时返回 None
+        """
+        try:
+            from app.models.ontology_scene import OntologyScene
+            scene = self.db.query(OntologyScene).filter_by(scene_id=scene_id).first()
+            return scene.scene_name if scene else None
+        except Exception as e:
+            logger.warning(f"_resolve_pruning_scene_from_scene_id failed for scene_id={scene_id}: {e}", exc_info=True)
+            return None
 
     # --- Delete ---
     def delete(self, key: ConfigParamsDelete) -> Dict[str, Any]: # 删除配置参数（按配置ID）
@@ -185,6 +217,19 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
     def get_all(self, workspace_id = None) -> List[Dict[str, Any]]: # 获取所有配置参数
         results = MemoryConfigRepository.get_all(self.db, workspace_id)
 
+        # 检查并修正 pruning_scene 与 scene_name 不一致的记录
+        needs_commit = False
+        for config, scene_name in results:
+            if scene_name and config.pruning_scene != scene_name:
+                logger.info(
+                    f"修正 pruning_scene: config_id={config.config_id} "
+                    f"'{config.pruning_scene}' -> '{scene_name}'"
+                )
+                config.pruning_scene = scene_name
+                needs_commit = True
+        if needs_commit:
+            self.db.commit()
+
         # 将 ORM 对象转换为字典列表
         data_list = []
         for config, scene_name in results:
@@ -211,6 +256,7 @@ class DataConfigService: # 数据配置服务类（PostgreSQL）
                 "apply_id": config.apply_id,
                 "scene_id": str(config.scene_id) if config.scene_id else None,
                 "scene_name": scene_name,  # 新增：场景名称
+                "is_system_default": config.is_default,  # 是否为系统默认配置
                 "llm_id": config.llm_id,
                 "embedding_id": config.embedding_id,
                 "rerank_id": config.rerank_id,
@@ -737,8 +783,37 @@ async def analytics_hot_memory_tags(
         await connector.close()
 
 
-async def analytics_recent_activity_stats() -> Dict[str, Any]:
-    stats, _msg = get_recent_activity_stats()
+async def analytics_recent_activity_stats(workspace_id: Optional[str] = None) -> Dict[str, Any]:
+    """获取最近记忆提取活动统计。
+
+    优先从 Redis 缓存读取（按 workspace_id），缓存不存在时降级到日志文件解析。
+
+    Args:
+        workspace_id: 工作空间ID，用于从 Redis 读取对应缓存
+
+    Returns:
+        包含 total、stats、latest_relative、source 的统计字典
+    """
+    stats = None
+    source = "log"
+
+    # 优先从 Redis 读取
+    if workspace_id:
+        try:
+            from app.cache.memory.activity_stats_cache import ActivityStatsCache
+            cached = await ActivityStatsCache.get_activity_stats(workspace_id)
+            if cached:
+                stats = cached.get("stats", {})
+                source = "redis"
+                logger.info(f"[ANALYTICS] 从 Redis 读取活动统计: workspace_id={workspace_id}")
+        except Exception as e:
+            logger.warning(f"[ANALYTICS] 读取 Redis 活动统计失败，降级到日志: {e}")
+
+    # 降级：从日志文件解析
+    if stats is None:
+        stats, _msg = get_recent_activity_stats()
+        source = "log"
+
     total = (
         stats.get("chunk_count", 0)
         + stats.get("statements_count", 0)
@@ -746,26 +821,29 @@ async def analytics_recent_activity_stats() -> Dict[str, Any]:
         + stats.get("triplet_relations_count", 0)
         + stats.get("temporal_count", 0)
     )
-    # 精简：仅提供“最新一次活动多久前”
-    latest_relative = None
-    try:
-        info = stats.get("log_path", "")
-        idx = info.rfind("最新：")
-        if idx != -1:
-            latest_path = info[idx + 3 :].strip()
-            if latest_path and os.path.exists(latest_path):
-                import time
-                diff = max(0.0, time.time() - os.path.getmtime(latest_path))
-                m = int(diff // 60)
-                if m < 1:
-                    latest_relative = "刚刚"
-                elif m < 60:
-                    latest_relative = "一会前"
-                else:
-                    latest_relative = "较早前"
-    except Exception:
-        pass
 
-    data = {"total": total, "stats": stats, "latest_relative": latest_relative}
+    # 计算"最新一次活动多久前"（仅日志来源时有效）
+    latest_relative = None
+    if source == "log":
+        try:
+            info = stats.get("log_path", "")
+            idx = info.rfind("最新：")
+            if idx != -1:
+                latest_path = info[idx + 3:].strip()
+                if latest_path and os.path.exists(latest_path):
+                    import time
+                    diff = max(0.0, time.time() - os.path.getmtime(latest_path))
+                    m = int(diff // 60)
+                    if m < 1:
+                        latest_relative = "刚刚"
+                    elif m < 60:
+                        latest_relative = "一会前"
+                    else:
+                        latest_relative = "较早前"
+        except Exception:
+            pass
+
+    data = {"total": total, "stats": stats, "latest_relative": latest_relative, "source": source}
     return data
+
 

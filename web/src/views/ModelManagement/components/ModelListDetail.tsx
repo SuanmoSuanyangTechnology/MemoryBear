@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:49:45 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-06 12:26:12
  */
 /**
  * Model List Detail Drawer
@@ -133,9 +133,10 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
             <RbCard
               key={item.id}
               title={item.name}
-              subTitle={<Space className="rb:mt-1!">
+              subTitle={<Space size={8} className="rb:mt-1!">
                 <Tag>{t(`modelNew.${item.type}`)}</Tag>
                 <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
+                {item.capability?.filter(item => item !=='video').map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
               </Space>}
               avatarUrl={getLogoUrl(item.logo)}
               avatar={
@@ -143,7 +144,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
                   {item.name[0]}
                 </div>
               }
-              extra={<Switch defaultChecked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
+              extra={<Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
               bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
             >
               <Tooltip title={item.description}>
@@ -152,7 +153,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
                 <Row gutter={12}>
                   <Col span={12}>
-                    <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>
+                    {!item.model_id && <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>}
                   </Col>
                   <Col span={12}>
                     <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>

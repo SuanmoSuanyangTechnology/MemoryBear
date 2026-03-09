@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:18 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:50:18 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-06 12:26:11
  */
 /**
  * Type definitions for Model Management
@@ -121,6 +121,7 @@ export interface ModelApiKey {
  * Model list item data structure
  */
 export interface ModelListItem {
+  model_id?: string;
   /** Model name */
   model_name?: string;
   /** Associated model config IDs */
@@ -148,7 +149,9 @@ export interface ModelListItem {
   /** Update timestamp */
   updated_at: number;
   /** Associated API keys */
-  api_keys: ModelApiKey[]
+  api_keys: ModelApiKey[];
+  capability?: string[];
+  is_omni?: boolean;
 }
 
 /**
@@ -261,6 +264,8 @@ export interface ModelPlazaItem {
   add_count: number;
   /** Whether user has added this model */
   is_added: boolean;
+  capability?: string[];
+  is_omni?: boolean;
 }
 
 /**
@@ -291,6 +296,9 @@ export interface CustomModelForm {
     /** API base URL */
     api_base: string;
   }>
+  is_vision?: boolean;
+  is_omni?: boolean;
+  capability?: string[];
 }
 
 /**

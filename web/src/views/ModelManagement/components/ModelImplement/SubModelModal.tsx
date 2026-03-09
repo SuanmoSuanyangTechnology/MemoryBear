@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 16:54:54
+ * @Last Modified time: 2026-03-04 11:51:01
  */
 /**
  * Sub-Model Modal
@@ -10,8 +10,8 @@
  * Uses cascader for hierarchical selection
  */
 
-import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Form, Cascader, App, type CascaderProps } from 'antd';
+import { type ReactNode, forwardRef, useImperativeHandle, useState, useEffect } from 'react';
+import { Form, Cascader, App, type CascaderProps, Space } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { SubModelModalForm, SubModelModalRef, SubModelModalProps } from './types';
@@ -19,6 +19,7 @@ import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect'
 import { modelProviderUrl, getModelNewList } from '@/api/models'
 import type { ProviderModelItem } from '../../types'
+import Tag from '@/components/Tag';
 
 const { SHOW_CHILD } = Cascader;
 
@@ -27,7 +28,7 @@ const { SHOW_CHILD } = Cascader;
  */
 interface Option {
   value: string | number;
-  label: string;
+  label: string | ReactNode;
   children?: Option[];
   [key: string]: any;
 }
@@ -116,7 +117,11 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
             }))
             return {
               ...vo,
-              label: vo.name,
+              label: <Space>
+                {vo.name}
+                <Tag>{t(`modelNew.${vo.type}`)}</Tag>
+                {vo.capability?.filter(item => item !== 'video').map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
+              </Space>,
               value: vo.id,
               children: children
             }

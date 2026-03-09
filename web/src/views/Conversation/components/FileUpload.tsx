@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-11 11:32:48
+ * @Last Modified time: 2026-03-06 12:20:43
  */
 /**
  * File Upload Component
@@ -25,6 +25,7 @@ import { Upload, Progress, App } from 'antd';
 import type { UploadProps, UploadFile } from 'antd';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
+
 import { request } from '@/utils/request'
 import { fileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 
@@ -56,27 +57,36 @@ interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
   /** Custom file removal callback */
   onRemove?: (file: UploadFile) => boolean | void | Promise<boolean | void>;
 }
+
+const transform_file_type = {
+  'text/plain': 'document/text',
+  'text/markdown': 'document/markdown',
+  'text/x-markdown': 'document/x-markdown',
+
+  'application/pdf': 'document/pdf',
+
+  'application/msword': 'document/doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'document/docx',
+
+  'application/vnd.ms-powerpoint': 'document/ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'document/pptx',
+}
 // Mapping of file extensions to MIME types
 const ALL_FILE_TYPE: {
   [key: string]: string;
 } = {
-  // txt: 'text/plain',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  xmd: 'text/x-markdown',
+
   pdf: 'application/pdf',
 
   doc: 'application/msword',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  
-  xls: 'application/vnd.ms-excel',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  csv: 'text/csv',
 
   ppt: 'application/vnd.ms-powerpoint',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  
-  // md: 'text/markdown',
-  // htm: 'text/html',
-  // html: 'text/html',
-  // json: 'application/json',
+
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   png: 'image/png',
@@ -84,6 +94,23 @@ const ALL_FILE_TYPE: {
   bmp: 'image/bmp',
   webp: 'image/webp',
   svg: 'image/svg+xml',
+
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  avi: 'video/x-msvideo',
+  mkv: 'video/x-matroska',
+  webm: 'video/webm',
+  flv: 'video/x-flv',
+  wmv: 'video/x-ms-wmv',
+
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  aac: 'audio/aac',
+  flac: 'audio/flac',
+  m4a: 'audio/mp4',
+  wma: 'audio/x-ms-wma',
+  xm4a: 'audio/x-m4a',
 }
 export interface UploadFilesRef {
   /** Current file list */
@@ -178,6 +205,11 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
    * Handles upload state changes
    */
   const handleChange: UploadProps['onChange'] = ({ fileList: newFileList }) => {
+    newFileList.map(file => {
+      const type = (file.type && transform_file_type[file.type as keyof typeof transform_file_type]) || file.type || 'document'
+      file.type = type
+      file.thumbUrl = file.thumbUrl || URL.createObjectURL(file.originFileObj as Blob)
+    })
     setFileList(newFileList);
     if (onChange) {
       onChange(maxCount === 1 ? newFileList[newFileList.length - 1] : newFileList);

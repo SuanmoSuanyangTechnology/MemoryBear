@@ -2,25 +2,32 @@ import hashlib
 import json
 import uuid
 from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.response_utils import success
+from app.core.response_utils import success, fail
 from app.db import get_db, get_db_read
 from app.dependencies import get_share_user_id, ShareTokenData
+from app.models.app_model import App
+from app.models.app_model import AppType
 from app.repositories import knowledge_repository
+from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import release_share_schema, conversation_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.services import workspace_service
+from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.auth_service import create_access_token
 from app.services.conversation_service import ConversationService
 from app.services.release_share_service import ReleaseShareService
 from app.services.shared_chat_service import SharedChatService
-from app.services.app_chat_service import AppChatService, get_app_chat_service
-from app.utils.app_config_utils import dict_to_multi_agent_config, workflow_config_4_app_release, \
+from app.services.workflow_service import WorkflowService
+from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
 
 router = APIRouter(prefix="/public/share", tags=["Public Share"])
@@ -206,15 +213,13 @@ def list_conversations(
     logger.debug(f"share_data:{share_data.user_id}")
     other_id = share_data.user_id
     service = SharedChatService(db)
-    share, release = service._get_release_by_share_token(share_data.share_token, password)
-    from app.repositories.end_user_repository import EndUserRepository
+    share, release = service.get_release_by_share_token(share_data.share_token, password)
     end_user_repo = EndUserRepository(db)
     new_end_user = end_user_repo.get_or_create_end_user(
         app_id=share.app_id,
         other_id=other_id
     )
     logger.debug(new_end_user.id)
-    service = SharedChatService(db)
     conversations, total = service.list_conversations(
         share_token=share_data.share_token,
         user_id=str(new_end_user.id),
@@ -293,19 +298,15 @@ async def chat(
 
     # 提前验证和准备（在流式响应开始前完成）
     # 这样可以确保错误能正确返回，而不是在流式响应中间出错
-    from app.models.app_model import AppType
+
     try:
-        from app.core.exceptions import BusinessException
-        from app.core.error_codes import BizCode
-        from app.services.app_service import AppService
         # 验证分享链接和密码
-        share, release = service._get_release_by_share_token(share_token, password)
+        share, release = service.get_release_by_share_token(share_token, password)
 
         # # Create end_user_id by concatenating app_id with user_id
         # end_user_id = f"{share.app_id}_{user_id}"
 
         # Store end_user_id in database with original user_id
-        from app.repositories.end_user_repository import EndUserRepository
         end_user_repo = EndUserRepository(db)
         new_end_user = end_user_repo.get_or_create_end_user(
             app_id=share.app_id,
@@ -318,7 +319,6 @@ async def chat(
         """获取存储类型和工作空间的ID"""
 
         # 直接通过 SQLAlchemy 查询 app（仅查询未删除的应用）
-        from app.models.app_model import App
         app = db.query(App).filter(
             App.id == appid,
             App.is_active.is_(True)
@@ -359,12 +359,12 @@ async def chat(
         app_type = release.app.type if release.app else None
 
         # 根据应用类型验证配置
-        if app_type == "agent":
+        if app_type == AppType.AGENT:
             # Agent 类型：验证模型配置
             model_config_id = release.default_model_config_id
             if not model_config_id:
                 raise BusinessException("Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
-        elif app_type == "multi_agent":
+        elif app_type == AppType.MULTI_AGENT:
             # Multi-Agent 类型：验证多 Agent 配置
             config = release.config or {}
             if not config.get("sub_agents"):
@@ -638,6 +638,34 @@ async def chat(
         # return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
 
     else:
-        from app.core.exceptions import BusinessException
-        from app.core.error_codes import BizCode
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+
+@router.get("/config", summary="获取应用启动配置")
+async def config_query(
+        password: str = Query(None, description="访问密码"),
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    share_service = SharedChatService(db)
+    share_token = share_data.share_token
+    share, release = share_service.get_release_by_share_token(share_token, password)
+    if release.app.type == AppType.WORKFLOW:
+        workflow_service = WorkflowService(db)
+        content = {
+            "app_type": release.app.type,
+            "variables": workflow_service.get_start_node_variables(release.config)
+        }
+    elif release.app.type == AppType.AGENT:
+        content = {
+            "app_type": release.app.type,
+            "variables": release.config.get("variables")
+        }
+    elif release.app.type == AppType.MULTI_AGENT:
+        content = {
+            "app_type": release.app.type,
+            "variables": []
+        }
+    else:
+        return fail(msg="Unsupported app type", code=BizCode.APP_TYPE_NOT_SUPPORTED)
+    return success(data=content)

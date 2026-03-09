@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:15 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:33:15 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-06 13:53:53
  */
 /**
  * Memory Management Page
@@ -110,9 +110,15 @@ const MemoryManagement: React.FC = () => {
             <List.Item key={item.config_id}>
               <RbCard 
                 title={item.config_name}
+                className="rb:relative"
               >
+                {item.is_system_default &&
+                  <div className="rb:absolute rb:-right-px rb:-top-px rb:bg-[#FF5D34] rb:rounded-[0px_7px_0px_8px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-4 rb:py-0.5 rb:px-1">
+                    {t('common.default')}
+                  </div>
+                }
                 <Tooltip title={item.config_desc}>
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1 rb:h-[17px]">{item.config_desc}</div>
+                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1 rb:h-4.25">{item.config_desc}</div>
                 </Tooltip>
                 <RbAlert className="rb:mt-3 ">
                   <div className={clsx("rb:flex rb:gap-5 rb:font-regular rb:text-[14px]")}>
@@ -148,10 +154,10 @@ const MemoryManagement: React.FC = () => {
                       className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]" 
                       onClick={() => handleEdit(item)}
                     ></div>
-                    <div 
+                    {!item.is_system_default && <div 
                       className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]" 
                       onClick={() => handleDelete(item)}
-                    ></div>
+                    ></div>}
                   </Space>
                 </div>
               </RbCard>

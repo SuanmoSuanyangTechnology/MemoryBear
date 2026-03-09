@@ -24,6 +24,9 @@ class NodeType(StrEnum):
     MEMORY_READ = "memory-read"
     MEMORY_WRITE = "memory-write"
 
+    UNKNOWN = "unknown"
+    NOTES = "notes"
+
 
 BRANCH_NODES = [NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER]
 
@@ -61,6 +64,7 @@ class AssignmentOperator(StrEnum):
     APPEND = "append"
     REMOVE_LAST = "remove_last"
     REMOVE_FIRST = "remove_first"
+    EXTEND = "extend"
 
 
 class HttpRequestMethod(StrEnum):

@@ -21,6 +21,7 @@ import WorkflowIcon from '@/assets/images/application/workflow.svg'
 import type { ApplicationModalData, ApplicationModalRef, Application } from '../types'
 import RbModal from '@/components/RbModal'
 import { addApplication, updateApplication } from '@/api/application'
+import { stringRegExp } from '@/utils/validator';
 
 const FormItem = Form.Item;
 
@@ -131,13 +132,18 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
         <FormItem
           name="name"
           label={t('application.applicationName')}
-          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('common.enter')} />
         </FormItem>
         <FormItem
           name="description"
           label={t('application.description')}
+          rules={[{ max: 500 }]}
         >
           <Input.TextArea placeholder={t('common.enter')} />
         </FormItem>

@@ -132,24 +132,24 @@ class WorkflowExecutor:
 
         start_time = datetime.datetime.now()
 
-        # Build the workflow graph
-        graph = self.build_graph()
-
-        # Initialize the variable pool with input data
-        await self.variable_initializer.initialize(
-            variable_pool=self.variable_pool,
-            input_data=input_data,
-            execution_context=self.execution_context
-        )
-        initial_state = self.state_manager.create_initial_state(
-            workflow_config=self.workflow_config,
-            input_data=input_data,
-            execution_context=self.execution_context,
-            start_node_id=self.start_node_id
-        )
-
         # Execute the workflow
         try:
+            # Build the workflow graph
+            graph = self.build_graph()
+
+            # Initialize the variable pool with input data
+            await self.variable_initializer.initialize(
+                variable_pool=self.variable_pool,
+                input_data=input_data,
+                execution_context=self.execution_context
+            )
+            initial_state = self.state_manager.create_initial_state(
+                workflow_config=self.workflow_config,
+                input_data=input_data,
+                execution_context=self.execution_context,
+                start_node_id=self.start_node_id
+            )
+
             result = await graph.ainvoke(initial_state, config=self.execution_context.checkpoint_config)
 
             # Aggregate output from all End nodes
@@ -158,24 +158,42 @@ class WorkflowExecutor:
                 full_content += self.variable_pool.get_value(f"{end_id}.output", default="", strict=False)
 
             # Append messages for user and assistant
-            result["messages"].extend(
-                [
-                    {
-                        "role": "user",
-                        "content": input_data.get("message", '')
-                    },
-                    {
-                        "role": "assistant",
-                        "content": full_content
-                    }
-                ]
-            )
+            if input_data.get("files"):
+                result["messages"].extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": input_data.get("message", '')
+                        },
+                        {
+                            "role": "user",
+                            "content": input_data.get("files")
+                        },
+                        {
+                            "role": "assistant",
+                            "content": full_content
+                        }
+                    ]
+                )
+            else:
+                result["messages"].extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": input_data.get("message", '')
+                        },
+                        {
+                            "role": "assistant",
+                            "content": full_content
+                        }
+                    ]
+                )
             # Calculate elapsed time
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
 
             logger.info(
-                f"Workflow execution completed: execution_id={self.execution_context.execution_id}, elapsed_time={elapsed_time:.2f}s")
+                f"Workflow execution completed: execution_id={self.execution_context.execution_id}, elapsed_time={elapsed_time:.2f}ms")
 
             return self.result_builder.build_final_output(result, self.variable_pool, elapsed_time, full_content)
 
@@ -231,23 +249,23 @@ class WorkflowExecutor:
             }
         }
 
-        # Build the workflow graph in streaming mode
-        graph = self.build_graph(stream=True)
-
-        # Initialize the variable pool and system variables
-        await self.variable_initializer.initialize(
-            variable_pool=self.variable_pool,
-            input_data=input_data,
-            execution_context=self.execution_context
-        )
-        initial_state = self.state_manager.create_initial_state(
-            workflow_config=self.workflow_config,
-            input_data=input_data,
-            execution_context=self.execution_context,
-            start_node_id=self.start_node_id
-        )
-
         try:
+            # Build the workflow graph in streaming mode
+            graph = self.build_graph(stream=True)
+
+            # Initialize the variable pool and system variables
+            await self.variable_initializer.initialize(
+                variable_pool=self.variable_pool,
+                input_data=input_data,
+                execution_context=self.execution_context
+            )
+            initial_state = self.state_manager.create_initial_state(
+                workflow_config=self.workflow_config,
+                input_data=input_data,
+                execution_context=self.execution_context,
+                start_node_id=self.start_node_id
+            )
+
             full_content = ''
             self.stream_coordinator.update_scope_activation("sys")
 
@@ -272,7 +290,7 @@ class WorkflowExecutor:
                     event_type = data.get("type", "node_chunk")  # "message" or "node_chunk"
                     if event_type == "node_chunk":
                         async for msg_event in self.event_handler.handle_node_chunk_event(data):
-                            full_content += msg_event["data"]["chunk"]
+                            full_content += msg_event["data"]["content"]
                             yield msg_event
 
                     elif event_type == "node_error":
@@ -295,12 +313,12 @@ class WorkflowExecutor:
                             self.graph,
                             self.execution_context.checkpoint_config
                     ):
-                        full_content += msg_event["data"]['chunk']
+                        full_content += msg_event["data"]['content']
                         yield msg_event
 
             # Flush any remaining chunks
             async for msg_event in self.stream_coordinator.flush_remaining_chunk(self.variable_pool):
-                full_content += msg_event["data"]['chunk']
+                full_content += msg_event["data"]['content']
                 yield msg_event
 
             result = graph.get_state(self.execution_context.checkpoint_config).values
@@ -308,21 +326,39 @@ class WorkflowExecutor:
             elapsed_time = (end_time - start_time).total_seconds()
 
             # Append messages for user and assistant
-            result["messages"].extend(
-                [
-                    {
-                        "role": "user",
-                        "content": input_data.get("message", '')
-                    },
-                    {
-                        "role": "assistant",
-                        "content": full_content
-                    }
-                ]
-            )
+            if input_data.get("files"):
+                result["messages"].extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": input_data.get("message", '')
+                        },
+                        {
+                            "role": "user",
+                            "content": input_data.get("files")
+                        },
+                        {
+                            "role": "assistant",
+                            "content": full_content
+                        }
+                    ]
+                )
+            else:
+                result["messages"].extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": input_data.get("message", '')
+                        },
+                        {
+                            "role": "assistant",
+                            "content": full_content
+                        }
+                    ]
+                )
             logger.info(
                 f"Workflow execution completed (streaming), "
-                f"elapsed: {elapsed_time:.2f}s, execution_id: {self.execution_context.execution_id}"
+                f"elapsed: {elapsed_time:.2f}ms, execution_id: {self.execution_context.execution_id}"
             )
 
             yield {

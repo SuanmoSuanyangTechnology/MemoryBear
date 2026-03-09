@@ -1,9 +1,12 @@
 import asyncio
 import json
+import logging
 import os
 from typing import List, Tuple
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -15,6 +18,10 @@ from pydantic import BaseModel, Field
 class FilteredTags(BaseModel):
     """用于接收LLM筛选后的核心标签列表的模型。"""
     meaningful_tags: List[str] = Field(..., description="从原始列表中筛选出的具有核心代表意义的名词列表。")
+
+class InterestTags(BaseModel):
+    """用于接收LLM筛选后的兴趣活动标签列表的模型。"""
+    interest_tags: List[str] = Field(..., description="从原始列表中筛选出的代表用户兴趣活动的标签列表。")
 
 async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
     """
@@ -85,9 +92,73 @@ async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
         return structured_response.meaningful_tags
 
     except Exception as e:
-        print(f"LLM筛选过程中发生错误: {e}")
+        logger.error(f"LLM筛选过程中发生错误: {e}", exc_info=True)
         # 在LLM失败时返回原始标签，确保流程继续
         return tags
+
+async def filter_interests_with_llm(tags: List[str], end_user_id: str, language: str = "zh") -> List[str]:
+    """
+    使用LLM从标签列表中筛选出代表用户兴趣活动的标签。
+    
+    与 filter_tags_with_llm 不同，此函数专注于识别"活动/行为"类兴趣，
+    过滤掉纯物品、工具、地点等不代表用户主动参与活动的名词。
+    
+    Args:
+        tags: 原始标签列表
+        end_user_id: 用户ID，用于获取LLM配置
+        
+    Returns:
+        筛选后的兴趣活动标签列表
+    """
+    try:
+        with get_db_context() as db:
+            from app.services.memory_agent_service import (
+                get_end_user_connected_config,
+            )
+            connected_config = get_end_user_connected_config(end_user_id, db)
+            config_id = connected_config.get("memory_config_id")
+            workspace_id = connected_config.get("workspace_id")
+
+            if not config_id and not workspace_id:
+                raise ValueError(
+                    f"No memory_config_id found for end_user_id: {end_user_id}."
+                )
+
+            config_service = MemoryConfigService(db)
+            memory_config = config_service.load_memory_config(
+                config_id=config_id,
+                workspace_id=workspace_id
+            )
+
+            if not memory_config.llm_model_id:
+                raise ValueError(
+                    f"No llm_model_id found in memory config {config_id}."
+                )
+
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client(memory_config.llm_model_id)
+
+        tag_list_str = ", ".join(tags)
+        from app.core.memory.utils.prompt.prompt_utils import render_interest_filter_prompt
+        rendered_prompt = render_interest_filter_prompt(tag_list_str, language=language)
+        messages = [
+            {
+                "role": "user",
+                "content": rendered_prompt
+            }
+        ]
+
+        structured_response = await llm_client.response_structured(
+            messages=messages,
+            response_model=InterestTags
+        )
+
+        return structured_response.interest_tags
+
+    except Exception as e:
+        logger.error(f"兴趣标签LLM筛选过程中发生错误: {e}", exc_info=True)
+        return tags
+
 
 async def get_raw_tags_from_db(
     connector: Neo4jConnector,
@@ -139,14 +210,14 @@ async def get_raw_tags_from_db(
     
     return [(record["name"], record["frequency"]) for record in results]
 
-async def get_hot_memory_tags(end_user_id: str, limit: int = 40, by_user: bool = False) -> List[Tuple[str, int]]:
+async def get_hot_memory_tags(end_user_id: str, limit: int = 10, by_user: bool = False) -> List[Tuple[str, int]]:
     """
     获取原始标签，然后使用LLM进行筛选，返回最终的热门标签列表。
-    查询更多的标签(limit=40)给LLM提供更丰富的上下文进行筛选。
+    查询更多的标签(40条)给LLM提供更丰富的上下文进行筛选，但最终返回数量由limit参数控制。
 
     Args:
         end_user_id: 必需参数。如果by_user=False，则为end_user_id；如果by_user=True，则为user_id
-        limit: 返回的标签数量限制
+        limit: 最终返回的标签数量限制（默认10）
         by_user: 是否按user_id查询（默认False，按end_user_id查询）
         
     Raises:
@@ -161,8 +232,9 @@ async def get_hot_memory_tags(end_user_id: str, limit: int = 40, by_user: bool =
     # 使用项目的Neo4jConnector
     connector = Neo4jConnector()
     try:
-        # 1. 从数据库获取原始排名靠前的标签
-        raw_tags_with_freq = await get_raw_tags_from_db(connector, end_user_id, limit, by_user=by_user)
+        # 1. 从数据库获取原始排名靠前的标签（查询40条给LLM提供更丰富的上下文）
+        query_limit = 40
+        raw_tags_with_freq = await get_raw_tags_from_db(connector, end_user_id, query_limit, by_user=by_user)
         if not raw_tags_with_freq:
             return []
 
@@ -177,7 +249,61 @@ async def get_hot_memory_tags(end_user_id: str, limit: int = 40, by_user: bool =
             if tag in meaningful_tag_names:
                 final_tags.append((tag, freq))
 
-        return final_tags
+        # 4. 限制返回的标签数量
+        return final_tags[:limit]
     finally:
         # 确保关闭连接
+        await connector.close()
+
+async def get_interest_distribution(end_user_id: str, limit: int = 10, by_user: bool = False, language: str = "zh") -> List[Tuple[str, int]]:
+    """
+    获取用户的兴趣分布标签。
+    
+    与 get_hot_memory_tags 不同，此函数使用专门针对"活动/行为"的LLM prompt，
+    过滤掉纯物品、工具、地点等，只保留能代表用户兴趣爱好的活动类标签。
+
+    Args:
+        end_user_id: 必需参数。如果by_user=False，则为end_user_id；如果by_user=True，则为user_id
+        limit: 最终返回的标签数量限制（默认10）
+        by_user: 是否按user_id查询（默认False，按end_user_id查询）
+
+    Raises:
+        ValueError: 如果end_user_id未提供或为空
+    """
+    if not end_user_id or not end_user_id.strip():
+        raise ValueError(
+            "end_user_id is required. Please provide a valid end_user_id or user_id."
+        )
+
+    connector = Neo4jConnector()
+    try:
+        # 查询更多原始标签，给LLM提供充足上下文
+        query_limit = 40
+        raw_tags_with_freq = await get_raw_tags_from_db(connector, end_user_id, query_limit, by_user=by_user)
+        if not raw_tags_with_freq:
+            return []
+
+        raw_tag_names = [tag for tag, freq in raw_tags_with_freq]
+        raw_freq_map = {tag: freq for tag, freq in raw_tags_with_freq}
+
+        # 使用兴趣活动专用prompt进行筛选（支持语义推断出新标签）
+        interest_tag_names = await filter_interests_with_llm(raw_tag_names, end_user_id, language=language)
+
+        # 构建最终标签列表：
+        # - 原始标签中存在的，保留原始频率
+        # - LLM推断出的新标签（不在原始列表中），赋予默认频率1
+        final_tags = []
+        seen = set()
+        for tag in interest_tag_names:
+            if tag in seen:
+                continue
+            seen.add(tag)
+            freq = raw_freq_map.get(tag, 1)
+            final_tags.append((tag, freq))
+
+        # 按频率降序排列
+        final_tags.sort(key=lambda x: x[1], reverse=True)
+
+        return final_tags[:limit]
+    finally:
         await connector.close()

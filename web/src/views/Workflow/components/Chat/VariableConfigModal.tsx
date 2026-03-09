@@ -71,20 +71,21 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
                   <Form.Item
                     key={name}
                     name={[name, 'value']}
-                    label={field.type === 'boolean' ? undefined : `${field.name}·${field.description}`}
+                    label={field.type === 'boolean' ? undefined : `${field.name}·${field.display_name || field.description}`}
                     valuePropName={field.type === 'boolean' ? 'checked' : 'value'}
                     rules={[
                       { required: field.required, message: field.type === 'boolean' ? t('common.pleaseSelect') : t('common.pleaseEnter') },
                     ]}
                   >
                     {
-                      field.type === 'string' && <Input placeholder={t('common.pleaseEnter')} />
+                      (field.type === 'string' || field.type === 'text') && <Input placeholder={t('common.pleaseEnter')} />
                     }
+                    { field.type === 'paragraph' && <Input.TextArea placeholder={t('common.pleaseEnter')} /> }
                     {
                       field.type === 'number' && <InputNumber placeholder={t('common.pleaseEnter')} style={{ width: '100%' }} onChange={(value) => form.setFieldValue(['variables', name, 'value'], value)} />
                     }
                     {
-                      field.type === 'boolean' && <Checkbox>{`${field.name}·${field.description}`}</Checkbox>
+                      field.type === 'boolean' && <Checkbox>{`${field.name}·${field.display_name || field.description}`}</Checkbox>
                     }
                   </Form.Item>
                 )

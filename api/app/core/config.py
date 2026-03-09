@@ -1,9 +1,10 @@
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
 from dotenv import load_dotenv
+from pydantic import Field, TypeAdapter
 
 load_dotenv()
 
@@ -16,18 +17,18 @@ class Settings:
     # cloud: SaaS 云服务版（全功能，按量计费）
     # enterprise: 企业私有化版（License 控制）
     DEPLOYMENT_MODE: str = os.getenv("DEPLOYMENT_MODE", "community")
-    
+
     # License 配置（企业版）
     LICENSE_FILE: str = os.getenv("LICENSE_FILE", "/etc/app/license.json")
     LICENSE_SERVER_URL: str = os.getenv("LICENSE_SERVER_URL", "https://license.yourcompany.com")
-    
+
     # 计费服务配置（SaaS 版）
     BILLING_SERVICE_URL: str = os.getenv("BILLING_SERVICE_URL", "")
-    
+
     # 基础 URL（用于 SSO 回调等）
     BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    
+
     ENABLE_SINGLE_WORKSPACE: bool = os.getenv("ENABLE_SINGLE_WORKSPACE", "true").lower() == "true"
     # API Keys Configuration
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
@@ -57,7 +58,6 @@ class Settings:
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "1"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
-    
 
     # ElasticSearch configuration
     ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "https://127.0.0.1")
@@ -91,7 +91,7 @@ class Settings:
 
     # Single Sign-On configuration
     ENABLE_SINGLE_SESSION: bool = os.getenv("ENABLE_SINGLE_SESSION", "false").lower() == "true"
-    
+
     # SSO 免登配置
     SSO_TOKEN_EXPIRE_SECONDS: int = int(os.getenv("SSO_TOKEN_EXPIRE_SECONDS", "300"))
     SSO_TRUSTED_SOURCES_CONFIG: str = os.getenv("SSO_TRUSTED_SOURCES_CONFIG", "{}")
@@ -130,7 +130,7 @@ class Settings:
 
     # Server Configuration
     SERVER_IP: str = os.getenv("SERVER_IP", "127.0.0.1")
-    FILE_LOCAL_SERVER_URL : str = os.getenv("FILE_LOCAL_SERVER_URL", "http://localhost:8000/api")
+    FILE_LOCAL_SERVER_URL: str = os.getenv("FILE_LOCAL_SERVER_URL", "http://localhost:8000/api")
 
     # ========================================================================
     # Internal Configuration (not in .env, used by application code)
@@ -190,8 +190,12 @@ class Settings:
     LOG_FILE_MAX_SIZE_MB: int = int(os.getenv("LOG_FILE_MAX_SIZE_MB", "10"))  # 10MB
 
     # Celery configuration (internal)
-    CELERY_BROKER: int = int(os.getenv("CELERY_BROKER", "1"))
-    CELERY_BACKEND: int = int(os.getenv("CELERY_BACKEND", "2"))
+    # NOTE: 变量名不以 CELERY_ 开头，避免被 Celery CLI 的前缀匹配机制劫持
+    # 详见 docs/celery-env-bug-report.md
+    # 默认使用 Redis DB 3 (broker) 和 DB 4 (backend)，与业务缓存 (DB 1/2) 隔离
+    # 多人共用同一 Redis 时，每位开发者应在 .env 中配置不同的 DB 编号避免任务互相干扰
+    REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "3"))
+    REDIS_DB_CELERY_BACKEND: int = int(os.getenv("REDIS_DB_CELERY_BACKEND", "4"))
 
     # SMTP Email Configuration
     SMTP_SERVER: str = os.getenv("SMTP_SERVER", "smtp.gmail.com")
@@ -201,21 +205,30 @@ class Settings:
 
     REFLECTION_INTERVAL_SECONDS: float = float(os.getenv("REFLECTION_INTERVAL_SECONDS", "300"))
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))
-    MEMORY_INCREMENT_INTERVAL_HOURS: float = float(os.getenv("MEMORY_INCREMENT_INTERVAL_HOURS", "24"))
     REFLECTION_INTERVAL_TIME: Optional[str] = int(os.getenv("REFLECTION_INTERVAL_TIME", 30))
 
     # Memory Cache Regeneration Configuration
     MEMORY_CACHE_REGENERATION_HOURS: int = int(os.getenv("MEMORY_CACHE_REGENERATION_HOURS", "24"))
 
-    # Periodic Task Schedule Configuration
-    # workspace_reflection: 每隔多少秒执行一次
-    WORKSPACE_REFLECTION_INTERVAL_SECONDS: int = int(os.getenv("WORKSPACE_REFLECTION_INTERVAL_SECONDS", "30"))
-    # forgetting_cycle: 每隔多少小时执行一次
-    FORGETTING_CYCLE_INTERVAL_HOURS: int = int(os.getenv("FORGETTING_CYCLE_INTERVAL_HOURS", "24"))
-    # implicit_emotions_update: 每天几点执行（小时，0-23）
+    # Celery Beat Schedule Configuration (定时任务执行频率)
+    MEMORY_INCREMENT_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="cron hour [0, 23]")]
+    ).validate_python(int(os.getenv("MEMORY_INCREMENT_HOUR", "2")))
+    MEMORY_INCREMENT_MINUTE: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=59, description="cron minute [0, 59]")]
+    ).validate_python(int(os.getenv("MEMORY_INCREMENT_MINUTE", "0")))
+    WORKSPACE_REFLECTION_INTERVAL_SECONDS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="reflection interval in seconds, must be >= 1")]
+    ).validate_python(int(os.getenv("WORKSPACE_REFLECTION_INTERVAL_SECONDS", "30")))
+    FORGETTING_CYCLE_INTERVAL_HOURS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="forgetting cycle interval in hours, must be >= 1")]
+    ).validate_python(int(os.getenv("FORGETTING_CYCLE_INTERVAL_HOURS", "24")))
+    
     IMPLICIT_EMOTIONS_UPDATE_HOUR: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_HOUR", "2"))
     # implicit_emotions_update: 每天几分执行（分钟，0-59）
-    IMPLICIT_EMOTIONS_UPDATE_MINUTE: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_MINUTE", "0"))    # Memory Module Configuration (internal)
+    IMPLICIT_EMOTIONS_UPDATE_MINUTE: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_MINUTE", "0"))  
+    # Memory Module Configuration (internal)
+    
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")
     MEMORY_CONFIG_DIR: str = os.getenv("MEMORY_CONFIG_DIR", "app/core/memory")
 
@@ -232,27 +245,28 @@ class Settings:
     LOAD_MODEL: bool = os.getenv("LOAD_MODEL", "false").lower() == "true"
 
     # workflow config
+    WORKFLOW_IMPORT_CACHE_TIMEOUT: int = int(os.getenv("WORKFLOW_IMPORT_CACHE_TIMEOUT", 1800))
     WORKFLOW_NODE_TIMEOUT: int = int(os.getenv("WORKFLOW_NODE_TIMEOUT", 600))
 
     # ========================================================================
     # General Ontology Type Configuration
     # ========================================================================
     # 通用本体文件路径列表（逗号分隔）
-    GENERAL_ONTOLOGY_FILES: str = os.getenv("GENERAL_ONTOLOGY_FILES", "General_purpose_entity.ttl")
-    
+    GENERAL_ONTOLOGY_FILES: str = os.getenv("GENERAL_ONTOLOGY_FILES", "api/app/core/memory/ontology_services/General_purpose_entity.ttl")
+
     # 是否启用通用本体类型功能
     ENABLE_GENERAL_ONTOLOGY_TYPES: bool = os.getenv("ENABLE_GENERAL_ONTOLOGY_TYPES", "true").lower() == "true"
-    
+
     # Prompt 中最大类型数量
     MAX_ONTOLOGY_TYPES_IN_PROMPT: int = int(os.getenv("MAX_ONTOLOGY_TYPES_IN_PROMPT", "50"))
-    
+
     # 核心通用类型列表（逗号分隔）
     CORE_GENERAL_TYPES: str = os.getenv(
         "CORE_GENERAL_TYPES",
         "Person,Organization,Company,GovernmentAgency,Place,Location,City,Country,Building,"
         "Event,SportsEvent,SocialEvent,Work,Book,Film,Software,Concept,TopicalConcept,AcademicSubject"
     )
-    
+
     # 实验模式开关（允许通过 API 动态切换本体配置）
     ONTOLOGY_EXPERIMENT_MODE: bool = os.getenv("ONTOLOGY_EXPERIMENT_MODE", "true").lower() == "true"
 

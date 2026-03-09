@@ -15,6 +15,7 @@ import {
 } from '@/api/knowledgeBase'
 import RbModal from '@/components/RbModal'
 import SliderInput from '@/components/SliderInput'
+import { stringRegExp } from '@/utils/validator'
 const { TextArea } = Input;
 const { confirm } = Modal
 
@@ -519,12 +520,16 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         <Form.Item
           name="name"
           label={t('knowledgeBase.createForm.name')}
-          rules={[{ required: true, message: t('knowledgeBase.createForm.nameRequired') }]}
+          rules={[
+            { required: true, message: t('knowledgeBase.createForm.nameRequired') },
+            { max: 50 },
+            { pattern: stringRegExp, message: t('common.nameInvalid') },
+          ]}
         >
           <Input placeholder={t('knowledgeBase.createForm.name')} />
         </Form.Item>
       )}
-      <Form.Item name="description" label={t('knowledgeBase.createForm.description')}>
+      <Form.Item name="description" label={t('knowledgeBase.createForm.description')} rules={[{ max: 500 }]}>
         <TextArea rows={2} placeholder={t('knowledgeBase.createForm.description')} />
       </Form.Item>
 
@@ -667,9 +672,17 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       {currentType !== 'Folder' && dynamicTypeList.map((tp) => {
         const fieldKey = typeToFieldKey(tp);
         // When tp is 'llm', merge llm and chat options
-        const options = tp.toLowerCase() === 'llm' || tp.toLowerCase() === 'image2text'
+        let options = tp.toLowerCase() === 'llm' || tp.toLowerCase() === 'image2text'
           ? [...(modelOptionsByType['llm'] || []), ...(modelOptionsByType['chat'] || [])]
           : modelOptionsByType[tp] || [];
+        
+        // When tp is 'image2text', filter to only include models with 'vision' capability
+        if (tp.toLowerCase() === 'image2text') {
+          options = options.filter((opt: any) => {
+            const model = models?.items?.find((m: any) => m.id === opt.value);
+            return model?.capability?.includes('vision');
+          });
+        }
         return (
           <Form.Item
             key={tp}

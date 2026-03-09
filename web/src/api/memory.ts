@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 14:58:32
+ * @Last Modified time: 2026-03-04 10:58:41
  */
 import { request } from '@/utils/request'
 import type {
@@ -98,8 +98,8 @@ export const getMemorySearchEdges = (end_user_id: string) => {
   return request.get(`/memory-storage/analytics/graph_data`, { end_user_id })
 }
 // User Memory - User interest distribution
-export const getHotMemoryTagsByUser = (end_user_id: string) => {
-  return request.get(`/memory/analytics/hot_memory_tags/by_user`, { end_user_id })
+export const getInterestDistributionByUser = (end_user_id: string) => {
+  return request.get(`/memory/analytics/interest_distribution/by_user`, { end_user_id })
 }
 // User Memory - Total memory count
 export const getTotalMemoryCountByUser = (end_user_id: string) => {

@@ -5,6 +5,7 @@
 """
 
 import logging
+import re
 from typing import Any
 
 from jinja2 import TemplateSyntaxError, UndefinedError, Environment, StrictUndefined, Undefined
@@ -37,6 +38,16 @@ class TemplateRenderer:
         self.env = Environment(
             undefined=StrictUndefined if strict else SafeUndefined,
             autoescape=False  # 不自动转义，因为我们处理的是文本而非 HTML
+        )
+
+    @staticmethod
+    def normalize_template(template: str) -> str:
+        pattern = re.compile(
+            r"\{\{\s*(\d+)\.(\w+)\s*}}"
+        )
+        return pattern.sub(
+            r'{{ node["\1"].\2 }}',
+            template
         )
 
     def render(
@@ -95,7 +106,7 @@ class TemplateRenderer:
             context.update(conv_vars)
 
         context["nodes"] = node_outputs or {}  # 旧语法兼容
-
+        template = self.normalize_template(template)
         try:
             tmpl = self.env.from_string(template)
             return tmpl.render(**context)

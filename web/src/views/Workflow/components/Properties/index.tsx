@@ -1,14 +1,14 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-11 12:07:06
+ * @Last Modified by: ZhaoYing 
+ * @Last Modified time: 2026-03-02 17:06:41 
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
-import { Form, Input, Select, InputNumber, Switch, Divider, Space } from 'antd'
+import { Form, Input, Select, InputNumber, Switch, Divider, Space, Button } from 'antd'
 import { CaretDownOutlined, CaretRightOutlined } from '@ant-design/icons';
 
 import type { NodeConfig, NodeProperties, ChatVariable } from '../../types'
@@ -36,6 +36,7 @@ import Editor, { type LexicalEditorProps } from "../Editor";
 import RbSlider from './RbSlider'
 import JinjaRender from './JinjaRender'
 import CodeExecution from './CodeExecution'
+import { nodeLibrary } from '../../constant';
 
 /**
  * Props for Properties component
@@ -69,7 +70,8 @@ interface PropertiesProps {
 const Properties: FC<PropertiesProps> = ({
   selectedNode,
   graphRef,
-  chatVariables
+  chatVariables,
+  blankClick
 }) => {
   const { t } = useTranslation()
   const [form] = Form.useForm<NodeConfig>();
@@ -80,9 +82,8 @@ const Properties: FC<PropertiesProps> = ({
   useEffect(() => {
     if (selectedNode?.getData()?.id) {
       setOutputCollapsed(true)
-    } else {
-      form.resetFields()
     }
+    form.resetFields()
   }, [selectedNode?.getData()?.id])
 
   useEffect(() => {
@@ -113,16 +114,16 @@ const Properties: FC<PropertiesProps> = ({
    */
   const updateNodeLabel = (newLabel: string) => {
     if (selectedNode && form) {
-      const nodeData = selectedNode.data as NodeProperties;
+      const nodeData = selectedNode.getData() as NodeProperties;
       selectedNode.setAttrByPath('text/text', `${nodeData.icon} ${newLabel}`);
-      selectedNode.setData({ ...selectedNode.data, name: newLabel });
+      selectedNode.setData({ ...selectedNode.getData(), name: newLabel });
     }
   };
 
   useEffect(() => {
     if (values && selectedNode) {
       const { id, knowledge_retrieval, group, group_variables, ...rest } = values
-      const { knowledge_bases = [], ...restKnowledgeConfig } = (knowledge_retrieval as any) || {}
+      const { knowledge_bases = [], name: _name, description: _description, ...restKnowledgeConfig } = (knowledge_retrieval as any) || {}
 
       let allRest = {
         ...rest,
@@ -135,21 +136,23 @@ const Properties: FC<PropertiesProps> = ({
         }))
       }
 
+      const nodeData = selectedNode.getData()
+
       Object.keys(values).forEach(key => {
-        if (selectedNode.data?.config?.[key]) {
+        if (nodeData?.config?.[key]) {
           // Create a deep copy to avoid reference sharing between nodes
-          if (!selectedNode.data.config[key]) {
-            selectedNode.data.config[key] = {};
+          if (!nodeData.config[key]) {
+            nodeData.config[key] = {};
           }
-          selectedNode.data.config[key] = {
-            ...selectedNode.data.config[key],
+          nodeData.config[key] = {
+            ...nodeData.config[key],
             defaultValue: values[key]
           };
         }
       })
 
       selectedNode?.setData({
-        ...selectedNode.data,
+        ...nodeData,
         ...allRest,
       })
     }
@@ -380,6 +383,41 @@ const Properties: FC<PropertiesProps> = ({
     }
   }
   console.log('variableList', variableList, currentNodeVariables)
+  const handleSureReplace = () => {
+    const { replaceNode } = values;
+    const nodeLibraryConfig = [...nodeLibrary]
+          .flatMap(category => category.nodes)
+          .find(n => n.type === replaceNode)
+
+    if (replaceNode && nodeLibraryConfig) {
+      // Preserve existing config values when switching node types
+      const currentData = selectedNode?.data || {};
+      const currentConfig = currentData.config || {};
+      const newConfig = nodeLibraryConfig.config || {};
+      
+      // Merge configs: keep existing values for matching keys, add new keys from template
+      const mergedConfig: Record<string, any> = {};
+      Object.keys(newConfig).forEach(key => {
+        if (currentConfig[key] && currentConfig[key].defaultValue !== undefined) {
+          // Preserve existing value if it exists
+          mergedConfig[key] = {
+            ...newConfig[key],
+            defaultValue: currentConfig[key].defaultValue
+          };
+        } else {
+          // Use new config template
+          mergedConfig[key] = { ...newConfig[key] };
+        }
+      });
+
+      selectedNode?.setData({
+        ...currentData,
+        ...nodeLibraryConfig,
+        config: mergedConfig
+      })
+      blankClick()
+    }
+  }
 
   return (
     <div className={clsx("rb:w-75 rb:fixed rb:right-0 rb:top-16 rb:bottom-0 rb:p-3 rb:pb-6", styles.properties)}>
@@ -399,8 +437,27 @@ const Properties: FC<PropertiesProps> = ({
           <Form.Item name="id" label="ID">
             <Input disabled />
           </Form.Item>
-          
-          {selectedNode?.data?.type === 'http-request'
+          {selectedNode?.data?.type === 'unknown'
+            ? <>
+              <Form.Item name="replaceNode" label={t('workflow.config.unknown.replaceNodeType')}>
+                <Select
+                  options={nodeLibrary.map(category => ({
+                    label: t(`workflow.${category.category}`),
+                    options: category.nodes.filter(item => !['cycle-start', 'break'].includes(item.type)).map(node => ({
+                      label: <div className="rb:flex rb:items-center rb:gap-2 rb:flex-1">
+                        <img src={node.icon} className="rb:size-3.5" />
+                        <div className="rb:wrap-break-word rb:line-clamp-1">{t(`workflow.${node.type}`)}</div>
+                      </div>,
+                      value: node.type
+                    }))
+                  }))}
+                  placeholder={t('common.pleaseSelect')}
+                  allowClear
+                />
+              </Form.Item>
+              <Button type="primary" size="small" className="rb:text-[12px]!" onClick={handleSureReplace}>{t('workflow.sureReplace')}</Button>
+            </>
+            : selectedNode?.data?.type === 'http-request'
             ? <HttpRequest 
                 options={variableList} 
                 selectedNode={selectedNode}

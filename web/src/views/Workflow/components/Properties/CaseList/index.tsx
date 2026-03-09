@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:24:53 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-09 18:24:53 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-28 17:49:28
  */
 import { type FC } from 'react'
 import clsx from 'clsx'
@@ -292,7 +292,7 @@ const CaseList: FC<CaseListProps> = ({
                           const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue);
                           const leftFieldType = leftFieldOption?.dataType;
                           const operatorList = operatorsObj[leftFieldType || 'default'] || operatorsObj.default || [];
-                          const inputType = leftFieldType === 'number' ? currentExpression.input_type : undefined;
+                          const inputType = leftFieldType === 'number' ? currentExpression.input_type?.toLocaleLowerCase() : undefined;
                           return (
                             <div key={conditionField.key} className="rb:flex rb:items-start rb:ml-9.5 rb:mb-4">
                               <div className="rb:flex-1 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-md">
@@ -330,7 +330,7 @@ const CaseList: FC<CaseListProps> = ({
                                       <Form.Item name={[conditionField.name, 'input_type']} noStyle>
                                         <Select
                                           placeholder={t('common.pleaseSelect')}
-                                          options={[{ value: 'Variable', label: 'Variable' }, { value: 'Constant', label: 'Constant' }]}
+                                          options={[{ value: 'variable', label: 'Variable' }, { value: 'constant', label: 'Constant' }]}
                                           popupMatchSelectWidth={false}
                                           variant="borderless"
                                           onChange={() => handleInputTypeChange(caseIndex, conditionIndex)}
@@ -339,7 +339,7 @@ const CaseList: FC<CaseListProps> = ({
                                       </Form.Item>
                                       <Divider type="vertical" />
                                       <Form.Item name={[conditionField.name, 'right']} noStyle>
-                                        {inputType === 'Variable'
+                                        {inputType === 'variable'
                                           ?
                                           <VariableSelect
                                             placeholder={t('common.pleaseSelect')}

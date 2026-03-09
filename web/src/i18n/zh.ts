@@ -96,7 +96,7 @@ export const zh = {
       createMemorySummary: '创建记忆摘要',
       memoryManagement: '记忆管理',
       spaceManagement: '空间管理',
-      memoryExtractionEngine: '记忆提取引擎',
+      memoryExtractionEngine: '记忆萃取引擎',
       forgettingEngine: '遗忘引擎',
       apiKeyManagement: 'API KEY管理',
       knowledgePrivate: '详情',
@@ -122,6 +122,7 @@ export const zh = {
       preview: '预览',
       pleaseUploadFileFirst: '请先上传文件',
       shareSuccess: '分享成功',
+      stopShareSuccess: '已取消分享，对方将无法访问该知识库',
       shareFailed: '分享失败',
       allModels: '所有模型',
       knowledgeBaseInfo: '知识库信息',
@@ -736,12 +737,24 @@ export const zh = {
       dynamicMatchSkill: '动态匹配技能',
       executeTask: '执行任务',
 
+      import: '导入应用',
+      importWorkflow: '第三方工作流',
+      importThirdParty: '导入工作流',
+      platform: '来源平台',
       upload: '上传与解析',
       complex: '兼容性分析',
-      node: '节点映射',
-      configCheck: '配置校验',
       sureInfo: '信息确认',
       completed: '完成导入',
+      baseInfo: '基本信息',
+      workflowName: '工作流名称',
+      fileName: '文件名称',
+      fileSize: '文件大小',
+      importSuccess: '导入成功',
+      importSuccessDesc: '您的工作流已成功导入，可以在应用管理中查看和管理',
+      gotoList: '返回应用列表',
+      gotoDetail: '查看详情',
+      dify: 'Dify',
+      pleaseUploadFile: '请上传工作流文件',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
@@ -1020,6 +1033,11 @@ export const zh = {
       prevStep: '上一步',
       exportSuccess: '导出成功',
       recommend: '推荐',
+      default: '默认',
+      logoTip: `支持图片格式（JPG、PNG）\n 尺寸：正方形比例 \n 文件大小限制：≤ 2MB`,
+      imageSquareRequired: '请上传正方形比例图片',
+      nameInvalid: '不能是空格开头或结尾',
+      notAllSpaces: '不能是纯空格',
     },
     model: {
       searchPlaceholder: '搜索模型…',
@@ -1167,7 +1185,13 @@ export const zh = {
       ollama: "Ollama",
       xinference: "Xinference",
       gpustack: "Gpustack",
-      bedrock: "Bedrock"
+      bedrock: "Bedrock",
+
+      is_vision: '支持视觉',
+      is_omni: '支持全模态',
+      vision: '视觉',
+      audio: '音频',
+      video: '视频',
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',
@@ -1259,7 +1283,7 @@ export const zh = {
       createConfiguration: '创建配置',
       editConfiguration: '编辑配置',
       desc: '描述',
-      memoryExtractionEngine: '记忆提取引擎',
+      memoryExtractionEngine: '记忆萃取引擎',
       forgottenEngine: '遗忘引擎',
       active: '活跃',
       inactive: '不活跃',
@@ -1547,7 +1571,7 @@ export const zh = {
       intelligentSemanticPruningFunction: '智能语义修剪功能',
       intelligentSemanticPruningFunctionDesc: '是否激活智能语义修剪（true/false）。',
       intelligentSemanticPruningScene: '智能语义修剪场景',
-      intelligentSemanticPruningSceneDesc: '选择智能语义修剪场景（education、online_service、outbound）。',
+      intelligentSemanticPruningSceneDesc: '语义剪枝场景与本体工程场景一致',
       intelligentSemanticPruningThreshold: '智能语义修剪阈值',
       intelligentSemanticPruningThresholdDesc: '设置智能语义修剪阈值（0-0.9）。',
       reflectionEngine: '自我反思引擎',
@@ -1628,6 +1652,10 @@ export const zh = {
       scene_type_distribution: '场景类型',
       general_type_distribution: '通用类型',
       unmatched: '未匹配',
+      disagreementCase: '不一致案例',
+      Pruned: '已剪枝',
+      pruning: '剪枝',
+      pruning_desc: '文本剪枝{{count}}个片段'
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',
@@ -1661,8 +1689,11 @@ export const zh = {
       uploadFile: '上传文件',
       fileType: '文件类型',
       image: '图片',
+      video: '视频',
+      audio: '音频',
       fileUrl: '文件链接',
-      addRemoteFile: '添加远程文件'
+      addRemoteFile: '添加远程文件',
+      variableConfig: '变量配置',
     },
     login: {
       title: '红熊记忆科学',
@@ -1750,6 +1781,7 @@ export const zh = {
       mcp: 'MCP 服务',
       inner: '内置工具',
       custom: '自定义工具',
+      market: '工具市场',
       mcpSearchPlaceholder: '搜索MCP服务...',
       innerSearchPlaceholder: '搜索工具...',
       customSearchPlaceholder: '搜索自定义工具...',
@@ -1923,7 +1955,9 @@ export const zh = {
       path: '路径',
       viewDetail: '查看详情',
       textLink: '测试连接',
-      noResult: '处理结果将显示在这里'
+      noResult: '处理结果将显示在这里',
+      serverUrlInvalid: '必须以 http:// 或 https:// 开头，且不能有前后空格',
+      requestHeaderKeyInvalid: '只支持英文、数字、连字符(-)、下划线(_)，不能以连字符或下划线开头结尾',
     },
     workflow: {
       coreNode: '核心节点',
@@ -1969,6 +2003,7 @@ export const zh = {
       evolutionAndGovernance: '演化与治理',
       self_optimization: '自我优化',
       process_evolution: '流程演化',
+      unknown: '未知节点',
 
       clickToConfigure: '点击配置节点参数',
       nodeProperties: '节点属性',
@@ -2156,6 +2191,9 @@ export const zh = {
           output_variables: '输出变量',
           refreshTip: '同步函数签名至代码',
         },
+        unknown: {
+          replaceNodeType: '替换节点'
+        },
         name: '键',
         type: '类型',
         value: '值',
@@ -2169,7 +2207,7 @@ export const zh = {
       save: '保存',
       export: '导出',
       variableConfig: '变量配置',
-      variableRequired: '必填',
+      variableRequired: '必填，请配置变量值',
       addMessage: '添加消息',
       answerDesc: '回复',
       addNode: '添加节点',
@@ -2187,7 +2225,8 @@ export const zh = {
         iteration: '迭代',
         input_cycle_vars: '初始循环变量',
         output_cycle_vars: '最终循环变量',
-      }
+      },
+      sureReplace: '确认替换',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',
@@ -2578,6 +2617,7 @@ export const zh = {
       updated_at: '更新时间',
       entityTypes: '实体类型',
 
+      classSearchPlaceholder: '搜索类型',
       addClass: '添加类型',
       class_name: '类型名称',
       class_description: '类型定义',

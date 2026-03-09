@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 17:56:35
+ * @Last Modified time: 2026-03-06 11:26:49
  */
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useParams } from 'react-router-dom';
@@ -17,6 +17,7 @@ import OntologyClassModal from '../components/OntologyClassModal'
 import SearchInput from '@/components/SearchInput';
 import OntologyClassExtractModal from '../components/OntologyClassExtractModal'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
+import Tag from '@/components/Tag'
 
 /**
  * Ontology detail page component
@@ -99,19 +100,22 @@ const Detail: FC = () => {
   return (
     <>
       <PageHeader
-        name={data.scene_name}
+        name={<Space>
+          {data.scene_name}
+          {data.is_system_default ? <Tag color="warning">{t('common.default')}</Tag> : undefined}
+        </Space>}
         subTitle={<Tooltip title={data.scene_description}><div className="rb:h-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{data.scene_description}</div></Tooltip>}
-        extra={<Space>
+        extra={data.is_system_default ? undefined : (<Space>
           <Button type="primary" ghost className="rb:h-6! rb:px-2! rb:leading-5.5!" onClick={handleAdd}>+ {t('ontology.addClass')}</Button>
           <Button className="rb:h-6! rb:px-2! rb:leading-5.5!" type="primary" onClick={handleExtract}>+ {t('ontology.extract')}</Button>
-        </Space>}
+        </Space>)}
       />
 
       <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:py-3 rb:px-4">
         <Row gutter={16} className="rb:mb-4">
           <Col span={6} offset={18}>
             <SearchInput
-              placeholder={t('ontology.searchPlaceholder')}
+              placeholder={t('ontology.classSearchPlaceholder')}
               onSearch={(value) => setQuery({ class_name: value })}
               className="rb:w-full!"
             />
@@ -123,10 +127,10 @@ const Detail: FC = () => {
               <Col key={item.class_id} span={6}>
                 <RbCard
                   title={item.class_name}
-                  extra={<div
+                  extra={data.is_system_default ? undefined : (<div
                     className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]"
                     onClick={() => handleDelete(item)}
-                  ></div>}
+                  ></div>)}
                   className="rb:bg-transparent!"
                 >
                   <Tooltip title={item.class_description}>

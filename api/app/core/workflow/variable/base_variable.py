@@ -2,7 +2,7 @@ from enum import StrEnum
 from abc import abstractmethod, ABC
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas import FileType
 
@@ -45,7 +45,7 @@ class VariableType(StrEnum):
             return cls.NUMBER
         elif isinstance(var, bool):
             return cls.BOOLEAN
-        elif isinstance(var, FileObject) or (isinstance(var, dict) and var.get('__file')):
+        elif isinstance(var, FileObject) or (isinstance(var, dict) and var.get('is_file')):
             return cls.FILE
         elif isinstance(var, dict):
             return cls.OBJECT
@@ -109,7 +109,13 @@ def DEFAULT_VALUE(var_type: VariableType) -> Any:
 class FileObject(BaseModel):
     type: FileType
     url: str
-    __file: bool
+    transfer_method: str
+    origin_file_type: str
+    file_id: str | None
+
+    content_cache: dict = Field(default_factory=dict)
+
+    is_file: bool
 
 
 class BaseVariable(ABC):

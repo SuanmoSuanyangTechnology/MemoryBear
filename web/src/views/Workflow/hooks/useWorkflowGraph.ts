@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 18:37:01
+ * @Last Modified time: 2026-03-07 15:23:39
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -12,7 +12,7 @@ import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, noteNode } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 
@@ -128,14 +128,31 @@ export const useWorkflowGraph = ({
     if (nodes.length) {
       const nodeList = nodes.map(node => {
         const { id, type, name, position, config = {} } = node
-        let nodeLibraryConfig = [...nodeLibrary]
+        let nodeLibraryConfig = [...nodeLibrary, { nodes: [unknownNode, noteNode] }]
           .flatMap(category => category.nodes)
           .find(n => n.type === type)
         nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
-            if (type === 'memory-write' && key === 'message' && nodeLibraryConfig.config) {
+            if (type === 'loop' && key === 'condition' && nodeLibraryConfig.config) {
+              const { condition } = config;
+              console.log('condition', condition)
+              nodeLibraryConfig.config[key].defaultValue = condition ? {
+                ...condition,
+                expressions: (condition as any).expressions.map((expr: any) => {
+                  return expr.input_type ? { ...expr, input_type: expr.input_type.toLocaleLowerCase() } : expr
+                })
+              } : {}
+            } else if (type === 'if-else' && key === 'cases' && nodeLibraryConfig.config) {
+              const { cases } = config;
+              nodeLibraryConfig.config[key].defaultValue = cases && Array.isArray(cases) ? cases.map(item => ({
+                ...item,
+                expressions: item.expressions.map((expr: any) => {
+                  return expr.input_type ? { ...expr, input_type: expr.input_type.toLocaleLowerCase() } : expr
+                }),
+              })) : []
+            } else if (type === 'memory-write' && key === 'message' && nodeLibraryConfig.config) {
               nodeLibraryConfig.config['messages'].defaultValue = [{ role: 'USER', content: config[key] }]
               delete nodeLibraryConfig.config[key]
             } else if (key === 'memory' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
@@ -698,6 +715,8 @@ export const useWorkflowGraph = ({
       panning: isHandMode,
       mousewheel: {
         enabled: true,
+        factor: 0.1,
+        modifiers: null,
       },
       connecting: {
         connector: {

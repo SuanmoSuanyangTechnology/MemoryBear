@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:15 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 14:10:15 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-06 10:56:44
  */
 import { type FC, useState, useRef, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -144,8 +144,13 @@ const Ontology: FC = () => {
             title={item.scene_name}
             extra={<Tag>{item.type_num} {t('ontology.typeCount')}</Tag>}
             onClick={() => handleJump(item)}
-            className="rb:cursor-pointer"
+            className="rb:cursor-pointer rb:relative"
           >
+            {item.is_system_default &&
+              <div className="rb:absolute rb:-right-px rb:-top-px rb:bg-[#FF5D34] rb:rounded-[0px_7px_0px_8px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-4 rb:py-0.5 rb:px-1">
+                {t('common.default')}
+              </div>
+            }
             <div
               className="rb:flex rb:gap-2 rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3"
             >
@@ -164,18 +169,20 @@ const Ontology: FC = () => {
               </div>
             ))}
             <Divider size="middle" />
-            <Flex gap={8} wrap>
+            <Flex gap={8} wrap align="center">
               <div className="rb:text-[#5B6167] rb:leading-4.5">{t('ontology.entityTypes')}: </div>
-              {item.entity_type?.map((type, i) => (
-                <Tag key={i} color={i % 2 ? 'processing' : 'success'}>{type}</Tag>
-              ))}
+              <div className="rb:flex-1 rb:overflow-hidden rb:wrap-break-word! rb:line-clamp-1!">
+                {item.entity_type?.map((type, i) => (
+                  <Tag key={i} color={i % 2 ? 'processing' : 'success'} className="rb:ml-2">{type}</Tag>
+                ))}
+              </div>
               {item.type_num > 3 && (
                 <Tag color="default">+{item.type_num - 3}</Tag>
               )}
             </Flex>
 
-            <div className="rb:mt-4 rb:text-[12px] rb:leading-4 rb:font-regular rb:text-[#5B6167] rb:flex rb:items-center rb:justify-end">
-              <Space size={16}>
+            <div className="rb:mt-4 rb:h-5 rb:text-[12px] rb:leading-4 rb:font-regular rb:text-[#5B6167] rb:flex rb:items-center rb:justify-end">
+              {!item.is_system_default && <Space size={16}>
                 <div
                   className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]"
                   onClick={(e) => handleEdit(item, e)}
@@ -184,7 +191,7 @@ const Ontology: FC = () => {
                   className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]"
                   onClick={(e) => handleDelete(item, e)}
                 ></div>
-              </Space>
+              </Space>}
             </div>
           </RbCard>
         )}

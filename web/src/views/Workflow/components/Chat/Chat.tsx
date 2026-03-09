@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-24 17:55:08
+ * @Last Modified time: 2026-03-04 18:51:48
  */
 /**
  * Workflow Chat Component
@@ -23,7 +23,7 @@
  */
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App, Space, Button, Flex, Dropdown, type MenuProps } from 'antd'
+import { App, Space, Button, Flex, Dropdown, type MenuProps, Divider } from 'antd'
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import RbDrawer from '@/components/RbDrawer';
@@ -38,7 +38,7 @@ import { type SSEMessage } from '@/utils/stream'
 import type { Variable } from '../Properties/VariableList/types'
 import ChatInput from '@/components/Chat/ChatInput'
 import UploadFiles from '@/views/Conversation/components/FileUpload'
-// import AudioRecorder from '@/components/AudioRecorder'
+import AudioRecorder from '@/components/AudioRecorder'
 import UploadFileListModal from '@/views/Conversation/components/UploadFileListModal'
 import type { UploadFileListModalRef } from '@/views/Conversation/types'
 import Runtime from './Runtime';
@@ -97,6 +97,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     setConversationId(null)
     setMessage(undefined)
     setFileList([])
+    setLoading(false)
+    setStreamLoading(false)
   }
   /**
    * Opens the variable configuration modal
@@ -172,13 +174,14 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { chunk, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status } = item.data as {
-          chunk: string;
+        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status } = item.data as {
+          content: string;
           conversation_id: string | null;
           cycle_id: string;
           cycle_idx: number;
           node_id: string;
           node_name?: string;
+          node_type?: string;
           input?: any;
           output?: any;
           elapsed_time?: string;
@@ -188,7 +191,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
         };
 
         const node = graphRef.current?.getNodes().find(n => n.id === node_id);
-        const { name, icon } = node?.getData() || {}
+        const { name, icon, type } = node?.getData() || {}
 
         switch(item.event) {
           // Append streaming text chunks to assistant message
@@ -199,7 +202,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
               if (lastIndex >= 0) {
                 newList[lastIndex] = {
                   ...newList[lastIndex],
-                  content: newList[lastIndex].content + chunk
+                  content: newList[lastIndex].content + content
                 }
               }
               return newList
@@ -218,6 +221,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                     ...newSubContent[filterIndex],
                     node_id: node_id,
                     node_name: name,
+                    node_type: type,
                     icon,
                     content: {},
                   }
@@ -226,6 +230,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                     id: node_id,
                     node_id: node_id,
                     node_name: name,
+                    node_type: type,
                     icon,
                     content: {},
                   })
@@ -282,6 +287,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                     cycle_idx,
                     node_id,
                     node_name: name,
+                    node_type: type,
                     icon,
                     content: {
                       cycle_idx,
@@ -314,7 +320,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                 newList[lastIndex] = {
                   ...newList[lastIndex],
                   status,
-                  content: newList[lastIndex].content === '' ? null : newList[lastIndex].content
+                  error,
+                  content: newList[lastIndex].content === '' ? null : newList[lastIndex].content,
                 }
               }
               return newList
@@ -352,6 +359,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     setStreamLoading(true)
     draftRun(appId, data, handleStreamMessage)
       .catch((error) => {
+        console.log('draftRun error', error)
         setChatList(prev => {
           const newList = [...prev]
           const lastIndex = newList.length - 1
@@ -383,9 +391,13 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
   const fileChange = (file?: any) => {
     setFileList([...fileList, file])
   }
-  // const handleRecordingComplete = async (file: any) => {
-  //   console.log('file', file)
-  // }
+  const handleRecordingComplete = async (file: any) => {
+    setFileList([...fileList, {
+      response: { data: file },
+      thumbUrl: file.url,
+      type: file.type
+    }])
+  }
 
   /**
    * Handles dropdown menu actions for file upload
@@ -416,6 +428,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
     handleOpen,
     handleClose
   }));
+
+  console.log('fileList', fileList)
 
   return (
     <RbDrawer
@@ -463,7 +477,6 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                     {
                       key: 'upload', label: (
                         <UploadFiles
-                          fileType={['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']}
                           onChange={fileChange}
                         />
                       )
@@ -477,10 +490,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId
                 ></div>
               </Dropdown>
             </Flex>
-            {/* <Flex align="center">
+            <Flex align="center">
               <AudioRecorder onRecordingComplete={handleRecordingComplete} />
               <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
-            </Flex> */}
+            </Flex>
           </Flex>
         </ChatInput>
       </div>

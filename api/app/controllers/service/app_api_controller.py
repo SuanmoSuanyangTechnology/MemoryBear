@@ -89,7 +89,6 @@ async def chat(
     body = await request.json()
     payload = AppChatRequest(**body)
 
-    other_id = payload.user_id
     app = app_service.get_app(api_key_auth.resource_id, api_key_auth.workspace_id)
     other_id = payload.user_id
     workspace_id = app.workspace_id
@@ -135,7 +134,8 @@ async def chat(
         app_id=app.id,
         workspace_id=workspace_id,
         user_id=end_user_id,
-        is_draft=False
+        is_draft=False,
+        conversation_id=payload.conversation_id
     )
 
     if app_type == AppType.AGENT:
@@ -249,6 +249,7 @@ async def chat(
                         app_id=app.id,
                         workspace_id=workspace_id,
                         release_id=app.current_release.id,
+                        public=True
                 ):
                     event_type = event.get("event", "message")
                     event_data = event.get("data", {})

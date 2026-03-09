@@ -1,0 +1,67 @@
+{% if language == "zh" %}
+You are a user interest analysis expert. Your task is to infer and extract the user's core hobby/interest activities from a tag list. The tags may be specific project names, tool names, or compound nouns — your job is to identify the underlying interest they represent.
+
+**Step 1 - Infer the underlying interest from each tag**:
+Look at each tag and ask: "What hobby or interest does this tag suggest the user has?"
+
+Examples of inference:
+- '攀岩', '室内攀岩馆', '攀岩者数据仪表盘', '路线解锁地图', '指力', '路线等级', '当日攀岩流畅度' → '攀岩'
+- '风光摄影元数据增强器', 'EXIF数据', '.CR2文件', '.NEF文件', '日出拍摄点', '曝光补偿', '光圈', '太阳高度角', '云量预测图层' → '摄影'
+- '晨间冥想坚持天数', '身心协同峰值' → '冥想'
+- '川味可视化', '川菜' → '烹饪'
+- '开源项目命名建议', 'climbviz', '可视化', '力量增长雷达图' → '编程' 或 '数据可视化'
+- '吉他', '指弹', '琴谱' → '吉他'
+- '跑步', '5公里', '跑鞋' → '跑步'
+- '瑜伽垫', '瑜伽课' → '瑜伽'
+
+**Step 2 - Consolidate and deduplicate**:
+- Merge tags that point to the same interest into one representative label
+- Use concise, standard hobby names (e.g., '攀岩', '摄影', '编程', '烹饪', '冥想', '吉他', '跑步')
+- If multiple tags all point to '攀岩', output '攀岩' only once
+
+**Step 3 - Filter out non-interest tags**:
+Remove tags that do NOT suggest any hobby or interest:
+- Generic system/assistant terms (e.g., '助手', '用户', 'AI')
+- Pure abstract metrics with no clear hobby link (e.g., '完成时间', '日期', '自我评分')
+- Location names with no clear hobby link (e.g., '青城山后山' alone — but if combined with photography context, infer '摄影')
+
+**Output format**: Return a list of concise interest activity names in Chinese.
+
+**Example**:
+Input: ['攀岩', '攀岩者数据仪表盘', '路线解锁地图', '指力', '风光摄影元数据增强器', 'EXIF数据', '晨间冥想坚持天数', '川味可视化', '可视化', '助手', '完成时间']
+Output: ['攀岩', '摄影', '冥想', '烹饪', '编程']
+
+Now process the following tag list and return the inferred interest activities in Chinese: {{ tag_list }}
+{% else %}
+You are a user interest analysis expert. Your task is to infer and extract the user's core hobby/interest activities from a tag list. The tags may be specific project names, tool names, or compound nouns — your job is to identify the underlying interest they represent.
+
+**Step 1 - Infer the underlying interest from each tag**:
+Look at each tag and ask: "What hobby or interest does this tag suggest the user has?"
+
+Examples of inference:
+- 'rock climbing', 'indoor climbing gym', 'climber dashboard', 'route map', 'finger strength' → 'rock climbing'
+- 'landscape photography metadata enhancer', 'EXIF data', 'sunrise shooting spot', 'exposure compensation' → 'photography'
+- 'morning meditation streak', 'mind-body peak' → 'meditation'
+- 'Sichuan cuisine visualization', 'Sichuan food' → 'cooking'
+- 'open source project', 'data visualization tool', 'Python' → 'programming'
+- 'guitar', 'fingerpicking', 'sheet music' → 'guitar'
+- 'running', '5km', 'running shoes' → 'running'
+
+**Step 2 - Consolidate and deduplicate**:
+- Merge tags that point to the same interest into one representative label
+- Use concise, standard hobby names (e.g., 'rock climbing', 'photography', 'programming', 'cooking', 'meditation')
+- If multiple tags all point to 'rock climbing', output 'rock climbing' only once
+
+**Step 3 - Filter out non-interest tags**:
+Remove tags that do NOT suggest any hobby or interest:
+- Generic system/assistant terms (e.g., 'assistant', 'user', 'AI')
+- Pure abstract metrics with no clear hobby link (e.g., 'completion time', 'date', 'self-rating')
+
+**Output format**: Return a list of concise interest activity names in English.
+
+**Example**:
+Input: ['rock climbing', 'climber dashboard', 'route map', 'finger strength', 'landscape photography metadata enhancer', 'EXIF data', 'morning meditation streak', 'Sichuan cuisine visualization', 'visualization', 'assistant', 'completion time']
+Output: ['rock climbing', 'photography', 'meditation', 'cooking', 'programming']
+
+Now process the following tag list and return the inferred interest activities in English: {{ tag_list }}
+{% endif %}

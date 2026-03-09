@@ -6,6 +6,8 @@ models:
   description: AI21 Labs大语言模型，completion生成模式，256000上下文窗口
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   logo: bedrock
@@ -15,6 +17,9 @@ models:
   description: Amazon Nova大语言模型，支持智能体思考、工具调用、流式工具调用、视觉能力，300000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -28,6 +33,9 @@ models:
   description: Anthropic Claude大语言模型，支持智能体思考、视觉能力、工具调用、流式工具调用、文档处理，200000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -42,6 +50,8 @@ models:
   description: Cohere大语言模型，支持智能体思考、工具调用、流式工具调用，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -54,6 +64,9 @@ models:
   description: DeepSeek大语言模型，支持智能体思考、视觉能力、工具调用、流式工具调用，32768上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -67,6 +80,8 @@ models:
   description: Meta Llama大语言模型，支持智能体思考、工具调用，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -78,6 +93,8 @@ models:
   description: Mistral AI大语言模型，支持智能体思考、工具调用，32000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -89,6 +106,8 @@ models:
   description: OpenAI大语言模型，支持智能体思考、工具调用、流式工具调用，32768上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -101,6 +120,8 @@ models:
   description: Qwen大语言模型，支持智能体思考、工具调用、流式工具调用，32768上下文窗口，对话模式
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -113,6 +134,8 @@ models:
   description: amazon.rerank-v1:0重排序模型，5120上下文窗口
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 重排序模型
   logo: bedrock
@@ -122,6 +145,8 @@ models:
   description: cohere.rerank-v3-5:0重排序模型，5120上下文窗口
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 重排序模型
   logo: bedrock
@@ -131,6 +156,9 @@ models:
   description: amazon.nova-2-multimodal-embeddings-v1:0文本嵌入模型，支持视觉能力，8192上下文窗口
   is_deprecated: false
   is_official: true
+  capability:
+    - vision
+  is_omni: false
   tags:
   - 文本嵌入模型
   - vision
@@ -141,6 +169,8 @@ models:
   description: amazon.titan-embed-text-v1文本嵌入模型，8192上下文窗口
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 文本嵌入模型
   logo: bedrock
@@ -150,6 +180,8 @@ models:
   description: amazon.titan-embed-text-v2:0文本嵌入模型，8192上下文窗口
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 文本嵌入模型
   logo: bedrock
@@ -159,6 +191,8 @@ models:
   description: Cohere Embed 3 English文本嵌入模型，512上下文窗口
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 文本嵌入模型
   logo: bedrock
@@ -168,6 +202,8 @@ models:
   description: Cohere Embed 3 Multilingual文本嵌入模型，512上下文窗口
   is_deprecated: false
   is_official: true
+  capability: []
+  is_omni: false
   tags:
   - 文本嵌入模型
   logo: bedrock

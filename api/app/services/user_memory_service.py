@@ -10,6 +10,9 @@ from collections import Counter
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
 from app.core.logging_config import get_logger
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
@@ -18,13 +21,10 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.cypher_queries import Graph_Node_query
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
-from app.services.implicit_memory_service import ImplicitMemoryService
-from app.services.memory_base_service import MemoryBaseService, MemoryTransService
+from app.services.memory_base_service import MemoryBaseService
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_perceptual_service import MemoryPerceptualService
 from app.services.memory_short_service import ShortService
-from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)
 
@@ -1035,9 +1035,10 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None, lan
             "growth_trajectory": str         # 成长轨迹
         }
     """
-    from app.core.memory.utils.prompt.prompt_utils import render_memory_insight_prompt
-    from app.core.language_utils import validate_language
     import re
+
+    from app.core.language_utils import validate_language
+    from app.core.memory.utils.prompt.prompt_utils import render_memory_insight_prompt
     
     # 验证语言参数
     language = validate_language(language)
@@ -1161,12 +1162,31 @@ async def analytics_user_summary(end_user_id: Optional[str] = None, language: st
             "one_sentence": str
         }
     """
-    from app.core.memory.utils.prompt.prompt_utils import render_user_summary_prompt
-    from app.core.language_utils import validate_language
     import re
+
+    from app.core.language_utils import validate_language
+    from app.core.memory.utils.prompt.prompt_utils import render_user_summary_prompt
+    from app.repositories.end_user_repository import EndUserRepository
     
     # 验证语言参数
     language = validate_language(language)
+    
+    # 获取用户的 other_name 字段
+    user_display_name = "该用户" if language == "zh" else "the user"
+    if end_user_id:
+        try:
+            # 获取数据库会话并查询用户信息
+            with get_db_context() as db:
+                repo = EndUserRepository(db)
+                end_user = repo.get_by_id(uuid.UUID(end_user_id))
+                if end_user and end_user.other_name:
+                    user_display_name = end_user.other_name
+                    logger.info(f"使用 other_name 作为用户显示名称: {user_display_name}")
+                else:
+                    logger.info(f"用户 {end_user_id} 的 other_name 为空，使用默认称呼: {user_display_name}")
+
+        except Exception as e:
+            logger.warning(f"获取用户 other_name 失败，使用默认称呼: {str(e)}")
     
     # 创建 UserSummaryHelper 实例
     user_summary_tool = UserSummaryHelper(end_user_id or os.getenv("SELECTED_end_user_id", "group_123"))
@@ -1184,7 +1204,8 @@ async def analytics_user_summary(end_user_id: Optional[str] = None, language: st
             user_id=user_summary_tool.user_id,
             entities=", ".join(entity_lines) if entity_lines else "(空)" if language == "zh" else "(empty)",
             statements=" | ".join(statement_samples) if statement_samples else "(空)" if language == "zh" else "(empty)",
-            language=language
+            language=language,
+            user_display_name=user_display_name
         )
 
         messages = [
@@ -1435,7 +1456,7 @@ async def analytics_memory_types(
     short_term_count = 0
     if end_user_id:
         try:
-            short_term_service = ShortService(end_user_id)
+            short_term_service = ShortService(end_user_id, db)
             short_term_data = short_term_service.get_short_databasets()
             # 统计 short_term 数组的长度
             if short_term_data:
@@ -1449,8 +1470,10 @@ async def analytics_memory_types(
     forgetting_threshold = 0.3  # 默认值
     if end_user_id:
         try:
+            from app.core.memory.storage_services.forgetting_engine.config_utils import (
+                load_actr_config_from_db,
+            )
             from app.services.memory_agent_service import get_end_user_connected_config
-            from app.core.memory.storage_services.forgetting_engine.config_utils import load_actr_config_from_db
             
             # 获取用户关联的 config_id
             connected_config = get_end_user_connected_config(end_user_id, db)

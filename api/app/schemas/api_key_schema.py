@@ -15,7 +15,7 @@ class ApiKeyCreate(BaseModel):
     type: ApiKeyType = Field(..., description="API Key 类型")
     scopes: List[str] = Field(default_factory=list, description="权限范围列表")
     resource_id: Optional[uuid.UUID] = Field(None, description="关联资源ID")
-    rate_limit: Optional[int] = Field(10, ge=1, le=1000, description="QPS限制（请求/秒）")
+    rate_limit: Optional[int] = Field(100, ge=1, le=1000, description="QPS限制（请求/秒）")
     daily_request_limit: Optional[int] = Field(10000, description="日请求限制", ge=1)
     quota_limit: Optional[int] = Field(None, description="配额限制（总请求数）", ge=1)
     expires_at: Optional[datetime.datetime] = Field(None, description="过期时间")
@@ -155,8 +155,7 @@ class ApiKey(BaseModel):
         return datetime.datetime.now() > self.expires_at
 
     @field_serializer('expires_at', 'last_used_at', 'created_at', 'updated_at')
-    @classmethod
-    def serialize_datetime(cls, v: Optional[datetime.datetime]) -> Optional[int]:
+    def serialize_datetime(self, v: Optional[datetime.datetime]) -> Optional[int]:
         """将datetime转换为时间戳"""
         return datetime_to_timestamp(v)
 
@@ -171,8 +170,7 @@ class ApiKeyStats(BaseModel):
     avg_response_time: Optional[float] = Field(None, description="平均响应时间（毫秒）")
 
     @field_serializer('last_used_at')
-    @classmethod
-    def serialize_datetime(cls, v: Optional[datetime.datetime]) -> Optional[int]:
+    def serialize_datetime(self, v: Optional[datetime.datetime]) -> Optional[int]:
         """将datetime转换为时间戳"""
         return datetime_to_timestamp(v)
 
@@ -219,7 +217,6 @@ class ApiKeyLog(BaseModel):
     created_at: datetime.datetime
 
     @field_serializer('created_at')
-    @classmethod
-    def serialize_datetime(cls, v: datetime.datetime) -> int:
+    def serialize_datetime(self, v: datetime.datetime) -> int:
         """将datetime转换为时间戳"""
         return datetime_to_timestamp(v)

@@ -1,3 +1,4 @@
+from app.cache.memory.interest_memory import InterestMemoryCache
 from app.core.memory.agent.utils.llm_tools import WriteState
 from app.core.memory.agent.utils.write_tools import write
 from app.core.logging_config import get_agent_logger
@@ -39,6 +40,15 @@ async def write_node(state: WriteState) -> WriteState:
             language=language,
         )
         logger.info(f"Write completed successfully! Config: {memory_config.config_name}")
+
+        # 写入 neo4j 成功后，删除该用户的兴趣分布缓存，确保下次请求重新生成
+        for lang in ["zh", "en"]:
+            deleted = await InterestMemoryCache.delete_interest_distribution(
+                end_user_id=end_user_id,
+                language=lang,
+            )
+            if deleted:
+                logger.info(f"Invalidated interest distribution cache: end_user_id={end_user_id}, language={lang}")
 
         write_result = {
             "status": "success",

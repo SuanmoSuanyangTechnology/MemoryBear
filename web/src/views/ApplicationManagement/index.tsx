@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 13:52:22
+ * @Last Modified time: 2026-03-02 17:48:51
  */
 /**
  * Application Management Page
@@ -12,7 +12,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Row, Col, App, Select, Space } from 'antd';
+import { Button, Row, Col, App, Select, Space, Dropdown } from 'antd';
 import clsx from 'clsx';
 import { DeleteOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom'
@@ -83,9 +83,16 @@ const ApplicationManagement: React.FC = () => {
     setQuery(prev => ({...prev, type: value}))
   }
 
-  // const handleImport = () => {
-  //   uploadWorkflowModalRef.current?.handleOpen()
-  // }
+  const handleImport = () => {
+    uploadWorkflowModalRef.current?.handleOpen()
+  }
+  const handleClick = ({ key }: { key: string } ) => {
+    switch (key) {
+      case 'thirdParty':
+        handleImport()
+        break;
+    }
+  }
   return (
     <>
       <Row gutter={16} className="rb:mb-4">
@@ -111,9 +118,16 @@ const ApplicationManagement: React.FC = () => {
         </Col>
         <Col span={12} className="rb:text-right">
           <Space size={12}>
-            {/* <Button onClick={handleImport}>
-              {t('application.importWorkflow')}
-            </Button> */}
+            <Dropdown
+              menu={{ items: [
+                { key: 'thirdParty', label: t('application.importWorkflow') },
+              ], onClick: handleClick }}
+              placement="bottomRight"
+            >
+              <Button>
+                {t('application.import')}
+              </Button>
+            </Dropdown>
             <Button type="primary" onClick={handleCreate}>
               {t('application.createApplication')}
             </Button>

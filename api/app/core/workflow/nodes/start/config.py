@@ -3,7 +3,6 @@
 from pydantic import Field
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition
-from app.core.workflow.variable.base_variable import VariableType
 
 
 class StartNodeConfig(BaseNodeConfig):
@@ -21,42 +20,42 @@ class StartNodeConfig(BaseNodeConfig):
         description="自定义输入变量列表，这些变量会作为 Start 节点的输出"
     )
     
-    # 输出变量定义
-    output_variables: list[VariableDefinition] = Field(
-        default_factory=lambda: [
-            VariableDefinition(
-                name="message",
-                type=VariableType.STRING,
-                description="用户输入的消息"
-            ),
-            VariableDefinition(
-                name="conversation_vars",
-                type=VariableType.OBJECT,
-                description="会话级变量"
-            ),
-            VariableDefinition(
-                name="execution_id",
-                type=VariableType.STRING,
-                description="执行 ID"
-            ),
-            VariableDefinition(
-                name="conversation_id",
-                type=VariableType.STRING,
-                description="会话 ID"
-            ),
-            VariableDefinition(
-                name="workspace_id",
-                type=VariableType.STRING,
-                description="工作空间 ID"
-            ),
-            VariableDefinition(
-                name="user_id",
-                type=VariableType.STRING,
-                description="用户 ID"
-            )
-        ],
-        description="输出变量定义（自动生成，通常不需要修改）"
-    )
+    # # 输出变量定义
+    # output_variables: list[VariableDefinition] = Field(
+    #     default_factory=lambda: [
+    #         VariableDefinition(
+    #             name="message",
+    #             type=VariableType.STRING,
+    #             description="用户输入的消息"
+    #         ),
+    #         VariableDefinition(
+    #             name="conversation_vars",
+    #             type=VariableType.OBJECT,
+    #             description="会话级变量"
+    #         ),
+    #         VariableDefinition(
+    #             name="execution_id",
+    #             type=VariableType.STRING,
+    #             description="执行 ID"
+    #         ),
+    #         VariableDefinition(
+    #             name="conversation_id",
+    #             type=VariableType.STRING,
+    #             description="会话 ID"
+    #         ),
+    #         VariableDefinition(
+    #             name="workspace_id",
+    #             type=VariableType.STRING,
+    #             description="工作空间 ID"
+    #         ),
+    #         VariableDefinition(
+    #             name="user_id",
+    #             type=VariableType.STRING,
+    #             description="用户 ID"
+    #         )
+    #     ],
+    #     description="输出变量定义（自动生成，通常不需要修改）"
+    # )
     
     class Config:
         json_schema_extra = {

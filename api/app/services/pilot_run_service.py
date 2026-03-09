@@ -101,34 +101,141 @@ async def run_pilot_extraction(
         )
 
         if progress_callback:
-            await progress_callback("text_preprocessing", "开始预处理文本...")
+            await progress_callback("text_preprocessing", "开始预处理文本（语义剪枝 + 语义分块）...")
 
+        # ========== 步骤 2.1: 语义剪枝 ==========
+        pruned_dialogs = [dialog]
+        deleted_messages = []  # 记录被删除的消息
+        pruning_stats = None  # 保存剪枝统计信息，用于最终汇总
+        
+        if memory_config.pruning_enabled:
+            try:
+                from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_pruning import (
+                    SemanticPruner,
+                )
+                from app.core.memory.models.config_models import PruningConfig
+                
+                # 构建剪枝配置
+                pruning_config_dict = {
+                    "pruning_switch": memory_config.pruning_enabled,
+                    "pruning_scene": memory_config.pruning_scene,
+                    "pruning_threshold": memory_config.pruning_threshold,
+                    "llm_model_id": str(memory_config.llm_model_id),
+                }
+                config = PruningConfig(**pruning_config_dict)
+                
+                logger.info(f"[PILOT_RUN] 开始语义剪枝: scene={config.pruning_scene}, threshold={config.pruning_threshold}")
+                
+                # 记录剪枝前的消息（用于对比）
+                original_messages = [{"role": msg.role, "content": msg.msg} for msg in dialog.context.msgs]
+                original_msg_count = len(original_messages)
+                
+                # 执行剪枝
+                pruner = SemanticPruner(config=config, llm_client=llm_client)
+                pruned_dialogs = await pruner.prune_dataset([dialog])
+                
+                # 计算剪枝结果并找出被删除的消息
+                if pruned_dialogs and pruned_dialogs[0].context:
+                    remaining_messages = [{"role": msg.role, "content": msg.msg} for msg in pruned_dialogs[0].context.msgs]
+                    remaining_msg_count = len(remaining_messages)
+                    deleted_msg_count = original_msg_count - remaining_msg_count
+                    
+                    # 找出被删除的消息（基于索引精确匹配）
+                    # 为剩余消息创建带索引的列表，用于精确追踪
+                    remaining_with_index = []
+                    remaining_idx = 0
+                    for orig_idx, orig_msg in enumerate(original_messages):
+                        if remaining_idx < len(remaining_messages) and \
+                           orig_msg["role"] == remaining_messages[remaining_idx]["role"] and \
+                           orig_msg["content"] == remaining_messages[remaining_idx]["content"]:
+                            remaining_with_index.append(orig_idx)
+                            remaining_idx += 1
+                    
+                    # 找出未在保留列表中的消息索引
+                    deleted_messages = [
+                        {"index": idx, "role": msg["role"], "content": msg["content"]}
+                        for idx, msg in enumerate(original_messages)
+                        if idx not in remaining_with_index
+                    ]
+                    
+                    # 保存剪枝统计信息（用于最终汇总，只保留deleted_count）
+                    pruning_stats = {
+                        "enabled": True,
+                        "scene": config.pruning_scene,
+                        "threshold": config.pruning_threshold,
+                        "deleted_count": deleted_msg_count,
+                    }
+                    
+                    # 输出剪枝结果（显示删除的消息详情）
+                    pruning_result = {
+                        "type": "pruning",
+                        "deleted_messages": deleted_messages,
+                    }
+                    
+                    logger.info(
+                        f"[PILOT_RUN] 语义剪枝完成: 原始{original_msg_count}条 -> "
+                        f"保留{remaining_msg_count}条 (删除{deleted_msg_count}条)"
+                    )
+                    
+                    if progress_callback:
+                        await progress_callback("text_preprocessing_result", "语义剪枝完成", pruning_result)
+                else:
+                    logger.warning("[PILOT_RUN] 剪枝后对话为空，使用原始对话")
+                    pruned_dialogs = [dialog]
+                    
+            except Exception as e:
+                logger.error(f"[PILOT_RUN] 语义剪枝失败，使用原始对话: {e}", exc_info=True)
+                pruned_dialogs = [dialog]
+                if progress_callback:
+                    error_result = {
+                        "type": "pruning",
+                        "error": str(e),
+                        "fallback": "使用原始对话"
+                    }
+                    await progress_callback("text_preprocessing_result", "语义剪枝失败", error_result)
+        else:
+            logger.info("[PILOT_RUN] 语义剪枝已关闭，跳过")
+            pruning_stats = {
+                "enabled": False,
+            }
+
+        # ========== 步骤 2.2: 语义分块 ==========
         chunked_dialogs = await get_chunked_dialogs_from_preprocessed(
-            data=[dialog],
+            data=pruned_dialogs,
             chunker_strategy=memory_config.chunker_strategy,
             llm_client=llm_client,
         )
-        logger.info(f"Processed dialogue text: {len(messages)} messages")
+        
+        remaining_msg_count = len(pruned_dialogs[0].context.msgs) if pruned_dialogs and pruned_dialogs[0].context else 0
+        logger.info(f"Processed dialogue text: {remaining_msg_count} messages after pruning")
 
         # 进度回调：输出每个分块的结果
         if progress_callback:
             for dlg in chunked_dialogs:
-                for i, chunk in enumerate(dlg.chunks):
-                    chunk_result = {
-                        "chunk_index": i + 1,
-                        "content": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
-                        "full_length": len(chunk.content),
-                        "dialog_id": dlg.id,
-                        "chunker_strategy": memory_config.chunker_strategy,
-                    }
-                    await progress_callback("text_preprocessing_result", f"分块 {i + 1} 处理完成", chunk_result)
+                if hasattr(dlg, 'chunks') and dlg.chunks:
+                    for i, chunk in enumerate(dlg.chunks):
+                        chunk_result = {
+                            "type": "chunking",
+                            "chunk_index": i + 1,
+                            "content": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
+                            "full_length": len(chunk.content),
+                            "dialog_id": dlg.id,
+                            "chunker_strategy": memory_config.chunker_strategy,
+                        }
+                        await progress_callback("text_preprocessing_result", f"分块 {i + 1} 处理完成", chunk_result)
 
+            # 构建预处理完成总结（包含剪枝统计）
             preprocessing_summary = {
-                "total_chunks": sum(len(dlg.chunks) for dlg in chunked_dialogs),
+                "total_chunks": sum(len(dlg.chunks) for dlg in chunked_dialogs if hasattr(dlg, 'chunks') and dlg.chunks),
                 "total_dialogs": len(chunked_dialogs),
                 "chunker_strategy": memory_config.chunker_strategy,
             }
-            await progress_callback("text_preprocessing_complete", "预处理文本完成", preprocessing_summary)
+            
+            # 添加剪枝统计信息
+            if pruning_stats:
+                preprocessing_summary["pruning"] = pruning_stats
+            
+            await progress_callback("text_preprocessing_complete", "预处理文本完成（剪枝 + 分块）", preprocessing_summary)
 
         log_time("Data Loading & Chunking", time.time() - step_start, log_file)
 
@@ -218,6 +325,25 @@ async def run_pilot_extraction(
             logger.error(f"Memory summary step failed: {e}", exc_info=True)
 
         logger.info("Pilot run completed: Skipping Neo4j save")
+
+        # 将提取统计写入 Redis，按 workspace_id 存储
+        try:
+            from app.cache.memory.activity_stats_cache import ActivityStatsCache
+
+            stats_to_cache = {
+                "chunk_count": len(chunk_nodes) if chunk_nodes else 0,
+                "statements_count": len(statement_nodes) if statement_nodes else 0,
+                "triplet_entities_count": len(entity_nodes) if entity_nodes else 0,
+                "triplet_relations_count": len(entity_edges) if entity_edges else 0,
+                "temporal_count": 0,  # temporal 数据在日志中，此处暂置0
+            }
+            await ActivityStatsCache.set_activity_stats(
+                workspace_id=str(memory_config.workspace_id),
+                stats=stats_to_cache,
+            )
+            logger.info(f"[PILOT_RUN] 活动统计已写入 Redis: workspace_id={memory_config.workspace_id}")
+        except Exception as cache_err:
+            logger.warning(f"[PILOT_RUN] 写入活动统计缓存失败（不影响主流程）: {cache_err}", exc_info=True)
 
     except Exception as e:
         logger.error(f"Pilot run failed: {e}", exc_info=True)

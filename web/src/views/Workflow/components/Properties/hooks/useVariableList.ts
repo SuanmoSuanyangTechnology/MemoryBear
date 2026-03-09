@@ -1,8 +1,29 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-01-19 17:00:26 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-28 16:24:31
+ */
+/**
+ * useVariableList Hook
+ * 
+ * This hook provides functionality for managing and retrieving variables in workflow nodes.
+ * It handles variable extraction from different node types, including:
+ * - Node-specific output variables
+ * - Chat variables
+ * - Loop and iteration variables
+ * - Connected node variables
+ */
 import { useMemo, useEffect, useState } from 'react';
 import { Graph, Node } from '@antv/x6';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
 import type { ChatVariable } from '../../../types';
 
+/**
+ * Node variable definitions
+ * 
+ * Maps node types to their available output variables
+ */
 const NODE_VARIABLES = {
   llm: [{ label: 'output', dataType: 'string', field: 'output' }],
   'jinja-render': [{ label: 'output', dataType: 'string', field: 'output' }],
@@ -14,7 +35,8 @@ const NODE_VARIABLES = {
   ],
   'http-request': [
     { label: 'body', dataType: 'string', field: 'body' },
-    { label: 'status_code', dataType: 'number', field: 'status_code' }
+    { label: 'status_code', dataType: 'number', field: 'status_code' },
+    { label: 'headers', dataType: 'object', field: 'headers' },
   ],
   'question-classifier': [{ label: 'class_name', dataType: 'string', field: 'class_name' }],
   'memory-read': [
@@ -23,6 +45,18 @@ const NODE_VARIABLES = {
   ]
 } as const;
 
+/**
+ * Add variable to list if not already present
+ * 
+ * @param {Suggestion[]} list - List of suggestions to add to
+ * @param {Set<string>} keys - Set of existing keys to check for duplicates
+ * @param {string} key - Unique key for the variable
+ * @param {string} label - Human-readable label for the variable
+ * @param {string} dataType - Data type of the variable
+ * @param {string} value - Variable value/expression
+ * @param {any} nodeData - Node data associated with the variable
+ * @param {Partial<Suggestion>} [extra] - Additional suggestion properties
+ */
 const addVariable = (
   list: Suggestion[],
   keys: Set<string>,
@@ -39,6 +73,14 @@ const addVariable = (
   }
 };
 
+/**
+ * Process node variables based on node type
+ * 
+ * @param {any} nodeData - Node data object
+ * @param {string} dataNodeId - Node ID
+ * @param {Suggestion[]} variableList - List to add variables to
+ * @param {Set<string>} addedKeys - Set of already added keys
+ */
 const processNodeVariables = (
   nodeData: any,
   dataNodeId: string,
@@ -47,29 +89,35 @@ const processNodeVariables = (
 ) => {
   const { type, config } = nodeData;
 
+  // Add node-specific variables
   if (type in NODE_VARIABLES) {
     NODE_VARIABLES[type as keyof typeof NODE_VARIABLES].forEach(({ label, dataType, field }) => {
       addVariable(variableList, addedKeys, `${dataNodeId}_${label}`, label, dataType, `${dataNodeId}.${field}`, nodeData);
     });
   }
 
+  // Process special node types
   switch (type) {
     case 'start':
+      // Add start node variables
       [...(config?.variables?.defaultValue ?? []), ...(config?.variables?.value ?? [])].forEach((v: any) => {
         if (v?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${v.name}`, v.name, v.type, `${dataNodeId}.${v.name}`, nodeData);
       });
+      // Add system variables
       config?.variables?.sys?.forEach((v: any) => {
         if (v?.name) addVariable(variableList, addedKeys, `${dataNodeId}_sys_${v.name}`, `sys.${v.name}`, v.type, `sys.${v.name}`, nodeData);
       });
       break;
 
     case 'parameter-extractor':
+      // Add extracted parameters
       (config?.params?.defaultValue || []).forEach((p: any) => {
         if (p?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${p.name}`, p.name, p.type || 'string', `${dataNodeId}.${p.name}`, nodeData);
       });
       break;
     
     case 'var-aggregator':
+      // Add aggregated variables
       if (config.group.defaultValue) {
         (config.group_variables.defaultValue || []).forEach((gv: any) => {
           if (gv?.key) {
@@ -93,6 +141,7 @@ const processNodeVariables = (
       break;
 
     case 'iteration':
+      // Add iteration output variable
       let dt = 'string';
       if (nodeData.output) {
         const sv = variableList.find(v => v.value === nodeData.output);
@@ -102,11 +151,14 @@ const processNodeVariables = (
       break;
 
     case 'loop':
+      // Add loop cycle variables
       (config.cycle_vars.defaultValue || []).forEach((cv: any) => {
         if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData);
       });
       break;
+      
     case 'code':
+      // Add code node output variables
       (config.output_variables.defaultValue || []).forEach((cv: any) => {
         if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData);
       });
@@ -114,6 +166,9 @@ const processNodeVariables = (
   }
 };
 
+/**
+ * Node types that have output variables
+ */
 const hasOutputNodeTypes = [
   'llm',
   'knowledge-retrieval',
@@ -123,7 +178,15 @@ const hasOutputNodeTypes = [
   'http-request',
   'tool',
   'jinja-render'
-]
+];
+
+/**
+ * Get variables for the current node
+ * 
+ * @param {any} nodeData - Node data object
+ * @param {any} values - Additional values to merge with node config
+ * @returns {Suggestion[]} List of node variables
+ */
 export const getCurrentNodeVariables = (nodeData: any, values: any): Suggestion[] => {
   if (!nodeData || !hasOutputNodeTypes.includes(nodeData.type)) return [];
   const list: Suggestion[] = [];
@@ -137,9 +200,18 @@ export const getCurrentNodeVariables = (nodeData: any, values: any): Suggestion[
       ...values
     }
   }, dataNodeId, list, keys);
+  
+  // Special case: var-aggregator without group enabled returns no variables
   return nodeData.type === 'var-aggregator' && !nodeData.config.group.defaultValue ? [] : list;
 };
 
+/**
+ * Get variables from child nodes in a loop/iteration
+ * 
+ * @param {Node} selectedNode - Selected node
+ * @param {React.MutableRefObject<Graph | undefined>} graphRef - Graph reference
+ * @returns {Suggestion[]} List of child node variables
+ */
 export const getChildNodeVariables = (
   selectedNode: Node,
   graphRef: React.MutableRefObject<Graph | undefined>
@@ -152,8 +224,15 @@ export const getChildNodeVariables = (
   const edges = graph.getEdges();
   const keys = new Set<string>();
 
+  // Find child nodes in the same cycle
   const childNodes = nodes.filter(node => node.getData()?.cycle === selectedNode.id);
 
+  /**
+   * Get all connected nodes recursively
+   * @param {string} nodeId - Node ID to start from
+   * @param {Set<string>} visited - Set of visited node IDs
+   * @returns {string[]} List of connected node IDs
+   */
   const getConnectedNodes = (nodeId: string, visited = new Set<string>()): string[] => {
     if (visited.has(nodeId)) return [];
     visited.add(nodeId);
@@ -161,12 +240,14 @@ export const getChildNodeVariables = (
     return [...prev, ...prev.flatMap(id => getConnectedNodes(id, visited))];
   };
 
+  // Collect all relevant node IDs
   const relevantIds = new Set<string>();
   childNodes.forEach(child => {
     relevantIds.add(child.id);
     getConnectedNodes(child.id).forEach(id => relevantIds.add(id));
   });
 
+  // Process each relevant node
   relevantIds.forEach(id => {
     const node = nodes.find(n => n.id === id);
     if (!node) return;
@@ -175,6 +256,7 @@ export const getChildNodeVariables = (
     const nodeId = nodeData.id;
     const { type } = nodeData;
 
+    // Add node-specific variables
     if (type in NODE_VARIABLES) {
       NODE_VARIABLES[type as keyof typeof NODE_VARIABLES].forEach(({ label, dataType, field }) => {
         const varKey = `${nodeId}_${label}`;
@@ -192,8 +274,26 @@ export const getChildNodeVariables = (
       });
     }
 
+    // Add parameter-extractor variables
     if (type === 'parameter-extractor') {
       (nodeData.config?.params?.defaultValue || []).forEach((p: any) => {
+        if (p?.name && !keys.has(`${nodeId}_${p.name}`)) {
+          keys.add(`${nodeId}_${p.name}`);
+          list.push({
+            key: `${nodeId}_${p.name}`,
+            label: p.name,
+            type: 'variable',
+            dataType: p.type || 'string',
+            value: `${nodeId}.${p.name}`,
+            nodeData,
+          });
+        }
+      });
+    }
+    
+    // Add code node variables
+    if (type === 'code') {
+      (nodeData.config?.output_variables?.defaultValue || []).forEach((p: any) => {
         if (p?.name && !keys.has(`${nodeId}_${p.name}`)) {
           keys.add(`${nodeId}_${p.name}`);
           list.push({
@@ -212,6 +312,14 @@ export const getChildNodeVariables = (
   return list;
 };
 
+/**
+ * Hook for managing workflow variable list
+ * 
+ * @param {Node | null | undefined} selectedNode - Currently selected node
+ * @param {React.MutableRefObject<Graph | undefined>} graphRef - Graph reference
+ * @param {ChatVariable[]} chatVariables - List of chat variables
+ * @returns {Suggestion[]} List of available variables
+ */
 export const useVariableList = (
   selectedNode: Node | null | undefined,
   graphRef: React.MutableRefObject<Graph | undefined>,
@@ -228,6 +336,12 @@ export const useVariableList = (
     const nodes = graph.getNodes();
     const keys = new Set<string>();
 
+    /**
+     * Get all previous connected nodes recursively
+     * @param {string} nodeId - Node ID to start from
+     * @param {Set<string>} visited - Set of visited node IDs
+     * @returns {string[]} List of previous node IDs
+     */
     const getPreviousNodes = (nodeId: string, visited = new Set<string>()): string[] => {
       if (visited.has(nodeId)) return [];
       visited.add(nodeId);
@@ -235,6 +349,11 @@ export const useVariableList = (
       return [...prev, ...prev.flatMap(id => getPreviousNodes(id, visited))];
     };
 
+    /**
+     * Get parent loop/iteration node
+     * @param {string} nodeId - Node ID to check
+     * @returns {Node | null} Parent loop/iteration node or null
+     */
     const getParentLoop = (nodeId: string): Node | null => {
       const node = nodes.find(n => n.id === nodeId);
       const cycle = node?.getData()?.cycle;
@@ -245,17 +364,21 @@ export const useVariableList = (
       return null;
     };
 
+    // Collect relevant node IDs
     const childIds = nodes.filter(n => n.getData()?.cycle === selectedNode.id).map(n => n.id);
     const parentLoop = getParentLoop(selectedNode.id);
     const relevantIds = [...getPreviousNodes(selectedNode.id), ...childIds, ...(parentLoop ? getPreviousNodes(parentLoop.id) : [])];
 
+    // Add chat variables
     chatVariables?.forEach(v => addVariable(list, keys, `CONVERSATION_${v.name}`, v.name, v.type, `conv.${v.name}`, { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' }, { group: 'CONVERSATION' }));
 
+    // Process each relevant node
     relevantIds.forEach(id => {
       const node = nodes.find(n => n.id === id);
       if (node) processNodeVariables(node.getData(), node.getData().id, list, keys);
     });
 
+    // Add parent loop variables
     if (parentLoop) {
       const pd = parentLoop.getData();
       const pid = pd.id;
@@ -268,9 +391,6 @@ export const useVariableList = (
         addVariable(list, keys, `${pid}_item`, 'item', itemType, `${pid}.item`, pd);
         addVariable(list, keys, `${pid}_index`, 'index', 'number', `${pid}.index`, pd);
       } else if (pd.type === 'iteration' && !pd.config.input.defaultValue) {
-        let itemType = 'object';
-        const iv = list.find(v => `{{${v.value}}}` === pd.config.input.defaultValue);
-        if (iv?.dataType.startsWith('array[')) {itemType = iv.dataType.replace(/^array\[(.+)\]$/, '$1');}
         addVariable(list, keys, `${pid}_item`, 'item', 'string', `${pid}.item`, pd);
         addVariable(list, keys, `${pid}_index`, 'index', 'number', `${pid}.index`, pd);
       }
@@ -279,6 +399,7 @@ export const useVariableList = (
     return list;
   }, [selectedNode, graphRef, trigger, chatVariables]);
 
+  // Refresh variable list when graph changes
   useEffect(() => {
     if (!graphRef?.current) return;
     const graph = graphRef.current;

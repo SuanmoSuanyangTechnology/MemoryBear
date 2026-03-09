@@ -154,7 +154,7 @@ export const uploadFile = async (data: FormData, options?: UploadFileOptions) =>
 // 下载文件
 export const downloadFile = async (fileId: string, fileName?: string) => {
   const token = cookieUtils.get('authToken');
-  const url = `${apiPrefix}/files/${fileId}`;
+  const url = `/api/files/${fileId}`;
   
   try {
     const response = await fetch(url, {

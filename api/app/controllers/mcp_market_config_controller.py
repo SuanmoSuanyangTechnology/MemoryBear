@@ -90,7 +90,7 @@ async def get_mcp_servers(
             cookies=cookies)
         raise_for_http_status(r)
     except requests.exceptions.RequestException as e:
-        api_logger.error(f"mFailed to get MCP servers: {str(e)}")
+        api_logger.error(f"Failed to get MCP servers: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get MCP servers: {str(e)}"
@@ -116,6 +116,65 @@ async def get_mcp_servers(
         }
     }
     return success(data=result, msg="Query of mcp servers list successful")
+
+
+@router.get("/operational_mcp_servers", response_model=ApiResponse)
+async def get_operational_mcp_servers(
+        mcp_market_config_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    Query the operational mcp servers list in pages
+    - Support keyword search for name,author,owner
+    - Return paging metadata + operational mcp server list
+    """
+    api_logger.info(
+        f"Query operational mcp server list: tenant_id={current_user.tenant_id}, username: {current_user.username}")
+
+    # 1. Query mcp market config information from the database
+    api_logger.debug(f"Query mcp market config: {mcp_market_config_id}")
+    db_mcp_market_config = mcp_market_config_service.get_mcp_market_config_by_id(db,
+                                                                                 mcp_market_config_id=mcp_market_config_id,
+                                                                                 current_user=current_user)
+    if not db_mcp_market_config:
+        api_logger.warning(
+            f"The mcp market config does not exist or access is denied: mcp_market_config_id={mcp_market_config_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The mcp market config does not exist or access is denied"
+        )
+
+    # 2. Execute paged query
+    api = MCPApi()
+    token = db_mcp_market_config.token
+    api.login(token)
+
+    url = f'{api.mcp_base_url}/operational'
+    headers = api.builder_headers(api.headers)
+
+    try:
+        cookies = api.get_cookies(access_token=token, cookies_required=True)
+        r = api.session.get(url, headers=headers, cookies=cookies)
+        raise_for_http_status(r)
+    except requests.exceptions.RequestException as e:
+        api_logger.error(f"Failed to get operational MCP servers: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get operational MCP servers: {str(e)}"
+        )
+
+    data = api._handle_response(r)
+    total = data.get('total_count', 0)
+    mcp_server_list = data.get('mcp_server_list', [])
+    # items = [{
+    #     'name': item.get('name', ''),
+    #     'id': item.get('id', ''),
+    #     'description': item.get('description', '')
+    # } for item in mcp_server_list]
+
+    # 3. Return structured response
+    return success(data=mcp_server_list, msg="Query of operational mcp servers list successful")
 
 
 @router.get("/mcp_server", response_model=ApiResponse)

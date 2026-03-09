@@ -7,11 +7,11 @@
 from uuid import UUID
 from typing import Optional
 
-from fastapi import Depends
+from fastapi import Depends, Header
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
-from app.core.logging_config import get_api_logger
+from app.core.logging_config import get_api_logger, get_business_logger
 from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -30,9 +30,11 @@ from app.schemas.response_schema import ApiResponse
 from app.services.ontology_service import OntologyService
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.models.base import RedBearModelConfig
+from app.repositories.ontology_class_repository import OntologyClassRepository
 
 
 api_logger = get_api_logger()
+business_logger = get_business_logger()
 
 
 def _get_dummy_ontology_service(db: Session) -> OntologyService:
@@ -56,7 +58,7 @@ async def scenes_handler(
     workspace_id: Optional[str] = None,
     scene_name: Optional[str] = None,
     page: Optional[int] = None,
-    page_size: Optional[int] = None,
+    pagesize: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -69,14 +71,14 @@ async def scenes_handler(
         workspace_id: 工作空间ID（可选，默认当前用户工作空间）
         scene_name: 场景名称关键词（可选，支持模糊匹配）
         page: 页码（可选，从1开始，仅在全量查询时有效）
-        page_size: 每页数量（可选，仅在全量查询时有效）
+        pagesize: 每页数量（可选，仅在全量查询时有效）
         db: 数据库会话
         current_user: 当前用户
     """
     operation = "search" if scene_name else "list"
     api_logger.info(
         f"Scene {operation} requested by user {current_user.id}, "
-        f"workspace_id={workspace_id}, keyword={scene_name}, page={page}, page_size={page_size}"
+        f"workspace_id={workspace_id}, keyword={scene_name}, page={page}, pagesize={pagesize}"
     )
     
     try:
@@ -103,13 +105,13 @@ async def scenes_handler(
                 api_logger.warning(f"Invalid page number: {page}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "页码必须大于0")
             
-            if page_size is not None and page_size < 1:
-                api_logger.warning(f"Invalid page_size: {page_size}")
+            if pagesize is not None and pagesize < 1:
+                api_logger.warning(f"Invalid pagesize: {pagesize}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "每页数量必须大于0")
             
-            # 如果只提供了page或page_size中的一个，返回错误
-            if (page is not None and page_size is None) or (page is None and page_size is not None):
-                api_logger.warning(f"Incomplete pagination params: page={page}, page_size={page_size}")
+            # 如果只提供了page或pagesize中的一个，返回错误
+            if (page is not None and pagesize is None) or (page is None and pagesize is not None):
+                api_logger.warning(f"Incomplete pagination params: page={page}, pagesize={pagesize}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "分页参数page和pagesize必须同时提供")
             
             # 模糊搜索场景（支持分页）
@@ -117,17 +119,15 @@ async def scenes_handler(
             total = len(scenes)
             
             # 如果提供了分页参数，进行分页处理
-            if page is not None and page_size is not None:
-                start_idx = (page - 1) * page_size
-                end_idx = start_idx + page_size
+            if page is not None and pagesize is not None:
+                start_idx = (page - 1) * pagesize
+                end_idx = start_idx + pagesize
                 scenes = scenes[start_idx:end_idx]
             
             # 构建响应
             items = []
             for scene in scenes:
-                # 获取前3个class_name作为entity_type
                 entity_type = [cls.class_name for cls in scene.classes[:3]] if scene.classes else None
-                # 动态计算 type_num
                 type_num = len(scene.classes) if scene.classes else 0
                 
                 items.append(SceneResponse(
@@ -139,17 +139,16 @@ async def scenes_handler(
                     workspace_id=scene.workspace_id,
                     created_at=scene.created_at,
                     updated_at=scene.updated_at,
-                    classes_count=type_num
+                    classes_count=type_num,
+                    is_system_default=scene.is_system_default
                 ))
             
             # 构建响应（包含分页信息）
-            if page is not None and page_size is not None:
-                # 计算是否有下一页
-                hasnext = (page * page_size) < total
-                
+            if page is not None and pagesize is not None:
+                hasnext = (page * pagesize) < total
                 pagination_info = PaginationInfo(
                     page=page,
-                    pagesize=page_size,
+                    pagesize=pagesize,
                     total=total,
                     hasnext=hasnext
                 )
@@ -163,28 +162,25 @@ async def scenes_handler(
             )
         else:
             # 获取所有场景（支持分页）
-            # 验证分页参数
             if page is not None and page < 1:
                 api_logger.warning(f"Invalid page number: {page}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "页码必须大于0")
             
-            if page_size is not None and page_size < 1:
-                api_logger.warning(f"Invalid page_size: {page_size}")
+            if pagesize is not None and pagesize < 1:
+                api_logger.warning(f"Invalid pagesize: {pagesize}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "每页数量必须大于0")
             
-            # 如果只提供了page或page_size中的一个，返回错误
-            if (page is not None and page_size is None) or (page is None and page_size is not None):
-                api_logger.warning(f"Incomplete pagination params: page={page}, page_size={page_size}")
+            # 如果只提供了page或pagesize中的一个，返回错误
+            if (page is not None and pagesize is None) or (page is None and pagesize is not None):
+                api_logger.warning(f"Incomplete pagination params: page={page}, pagesize={pagesize}")
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "分页参数page和pagesize必须同时提供")
             
-            scenes, total = service.list_scenes(ws_uuid, page, page_size)
+            scenes, total = service.list_scenes(ws_uuid, page, pagesize)
             
             # 构建响应
             items = []
             for scene in scenes:
-                # 获取前3个class_name作为entity_type
                 entity_type = [cls.class_name for cls in scene.classes[:3]] if scene.classes else None
-                # 动态计算 type_num
                 type_num = len(scene.classes) if scene.classes else 0
                 
                 items.append(SceneResponse(
@@ -196,17 +192,16 @@ async def scenes_handler(
                     workspace_id=scene.workspace_id,
                     created_at=scene.created_at,
                     updated_at=scene.updated_at,
-                    classes_count=type_num
+                    classes_count=type_num,
+                    is_system_default=scene.is_system_default
                 ))
             
             # 构建响应（包含分页信息）
-            if page is not None and page_size is not None:
-                # 计算是否有下一页
-                hasnext = (page * page_size) < total
-                
+            if page is not None and pagesize is not None:
+                hasnext = (page * pagesize) < total
                 pagination_info = PaginationInfo(
                     page=page,
-                    pagesize=page_size,
+                    pagesize=pagesize,
                     total=total,
                     hasnext=hasnext
                 )
@@ -236,7 +231,8 @@ async def scenes_handler(
 async def create_class_handler(
     request: ClassCreateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    x_language_type: Optional[str] = None
 ):
     """创建本体类型（统一使用列表形式，支持单个或批量）"""
     
@@ -269,8 +265,11 @@ async def create_class_handler(
         ]
         
         if count == 1:
-            # 单个创建
+            # 单个创建 - 先检查重名
             class_data = classes_data[0]
+            existing = OntologyClassRepository(db).get_by_name(class_data["class_name"], request.scene_id)
+            if existing:
+                raise ValueError(f"DUPLICATE_CLASS_NAME:{class_data['class_name']}")
             ontology_class = service.create_class(
                 scene_id=request.scene_id,
                 class_name=class_data["class_name"],
@@ -328,12 +327,36 @@ async def create_class_handler(
             return success(data=response.model_dump(mode='json'), msg="批量创建完成")
         
     except ValueError as e:
-        api_logger.warning(f"Validation error in class creation: {str(e)}")
-        return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
-        
+        err_str = str(e)
+        if err_str.startswith("DUPLICATE_CLASS_NAME:"):
+            class_name = err_str.split(":", 1)[1]
+            api_logger.warning(f"Duplicate class name '{class_name}' in scene {request.scene_id}")
+            from app.core.language_utils import get_language_from_header
+            from fastapi.responses import JSONResponse
+            lang = get_language_from_header(x_language_type)
+            if lang == "en":
+                msg = fail(BizCode.BAD_REQUEST, "Class name already exists", f"A class named \"{class_name}\" already exists in this scene. Please use a different name.")
+            else:
+                msg = fail(BizCode.BAD_REQUEST, "类型名称已存在", f"当前场景下已存在名为「{class_name}」的类型，请使用其他名称")
+            return JSONResponse(status_code=400, content=msg)
+        api_logger.warning(f"Validation error in class creation: {err_str}")
+        return fail(BizCode.BAD_REQUEST, "请求参数无效", err_str)
+
     except RuntimeError as e:
-        api_logger.error(f"Runtime error in class creation: {str(e)}", exc_info=True)
-        return fail(BizCode.INTERNAL_ERROR, "类型创建失败", str(e))
+        err_str = str(e)
+        if "UniqueViolation" in err_str or "uq_scene_class_name" in err_str:
+            api_logger.warning(f"Duplicate class name in scene {request.scene_id}")
+            from app.core.language_utils import get_language_from_header
+            from fastapi.responses import JSONResponse
+            lang = get_language_from_header(x_language_type)
+            class_name = request.classes[0].class_name if request.classes else ""
+            if lang == "en":
+                msg = fail(BizCode.BAD_REQUEST, "Class name already exists", f"A class named \"{class_name}\" already exists in this scene. Please use a different name.")
+            else:
+                msg = fail(BizCode.BAD_REQUEST, "类型名称已存在", f"当前场景下已存在名为「{class_name}」的类型，请使用其他名称")
+            return JSONResponse(status_code=400, content=msg)
+        api_logger.error(f"Runtime error in class creation: {err_str}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "类型创建失败", err_str)
         
     except Exception as e:
         api_logger.error(f"Unexpected error in class creation: {str(e)}", exc_info=True)
@@ -365,6 +388,20 @@ async def update_class_handler(
         if not workspace_id:
             api_logger.warning(f"User {current_user.id} has no current workspace")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        # 检查是否为系统默认类型
+        class_repo = OntologyClassRepository(db)
+        ontology_class = class_repo.get_by_id(class_uuid)
+        if ontology_class and ontology_class.is_system_default:
+            business_logger.warning(
+                f"尝试修改系统默认类型: user_id={current_user.id}, "
+                f"class_id={class_id}, class_name={ontology_class.class_name}"
+            )
+            return fail(
+                BizCode.BAD_REQUEST,
+                "系统默认类型不可修改",
+                "该类型为系统预设类型，不允许修改"
+            )
         
         # 创建Service
         service = _get_dummy_ontology_service(db)
@@ -428,6 +465,20 @@ async def delete_class_handler(
         if not workspace_id:
             api_logger.warning(f"User {current_user.id} has no current workspace")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        
+        # 检查是否为系统默认类型
+        class_repo = OntologyClassRepository(db)
+        ontology_class = class_repo.get_by_id(class_uuid)
+        if ontology_class and ontology_class.is_system_default:
+            business_logger.warning(
+                f"尝试删除系统默认类型: user_id={current_user.id}, "
+                f"class_id={class_id}, class_name={ontology_class.class_name}"
+            )
+            return fail(
+                BizCode.BAD_REQUEST,
+                "系统默认类型不可删除",
+                "该类型为系统预设类型，不允许删除"
+            )
         
         # 创建Service
         service = _get_dummy_ontology_service(db)
@@ -585,6 +636,7 @@ async def classes_handler(
             scene_id=scene_uuid,
             scene_name=scene.scene_name,
             scene_description=scene.scene_description,
+            is_system_default=scene.is_system_default,
             items=items
         )
         

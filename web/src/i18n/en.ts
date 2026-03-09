@@ -453,6 +453,11 @@ export const en = {
       prevStep: 'Previous Step',
       exportSuccess: 'Export successful',
       recommend: 'Recommend',
+      default: 'Default',
+      logoTip: `Supported image formats: JPG, PNG \n Suggested size: square ratio \n Maximum size: ≤ 2MB`,
+      imageSquareRequired: 'Please upload a square image',
+      nameInvalid: 'Name cannot start or end with a space',
+      notAllSpaces: 'Cannot be all spaces',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -542,7 +547,7 @@ export const en = {
       ollama: "Ollama",
       xinference: "Xinference",
       gpustack: "Gpustack",
-      bedrock: "Bedrock"
+      bedrock: "Bedrock",
     },
     modelNew: {
       group: 'Model Group',
@@ -600,7 +605,13 @@ export const en = {
       ollama: "Ollama",
       xinference: "Xinference",
       gpustack: "Gpustack",
-      bedrock: "Bedrock"
+      bedrock: "Bedrock",
+
+      is_vision: 'Vision Support',
+      is_omni: 'Omni Support',
+      vision: 'Vision',
+      audio: 'Audio',
+      video: 'Video',
     },
     knowledgeBase: {
       home: 'Home',
@@ -608,6 +619,7 @@ export const en = {
       preview: 'Preview',
       pleaseUploadFileFirst: 'Please upload file first',
       shareSuccess: 'Share successfully',
+      stopShareSuccess: 'Sharing is off. Access denied. ',
       shareFailed: 'Share failed',
       allModels: 'All Models',
       knowledgeBaseInfo: 'Knowledge base information',
@@ -1341,12 +1353,24 @@ export const en = {
       dynamicMatchSkill: 'Dynamic Match Skill',
       executeTask: 'Execute Task',
 
+      import: 'Import Application',
+      importWorkflow: 'Third-Party Workflow',
+      importThirdParty: 'Import Workflow',
+      platform: 'Source Platform',
       upload: 'Upload & Parse',
       complex: 'Compatibility Analysis',
-      node: 'Node Mapping',
-      configCheck: 'Configuration Validation',
       sureInfo: 'Information Confirmation',
       completed: 'Import Completed',
+      baseInfo: 'Basic Information',
+      workflowName: 'Workflow Name',
+      fileName: 'File Name',
+      fileSize: 'File Size',
+      importSuccess: 'Import Success',
+      importSuccessDesc: 'Workflow imported successfully, you can view and manage it in the application management',
+      gotoList: 'Return to Application List',
+      gotoDetail: 'View Details',
+      dify: 'Dify',
+      pleaseUploadFile: 'Please upload workflow file', 
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -1549,7 +1573,7 @@ export const en = {
       intelligentSemanticPruningFunction: 'Intelligent Semantic Pruning Function',
       intelligentSemanticPruningFunctionDesc: 'Whether to activate intelligent semantic pruning (true/false).',
       intelligentSemanticPruningScene: 'Intelligent Semantic Pruning Scene',
-      intelligentSemanticPruningSceneDesc: 'Select intelligent semantic pruning scene (education, online_service, outbound).',
+      intelligentSemanticPruningSceneDesc: 'Semantic pruning scenarios are consistent with ontology engineering scenarios',
       intelligentSemanticPruningThreshold: 'Intelligent Semantic Pruning Threshold',
       intelligentSemanticPruningThresholdDesc: 'Set intelligent semantic pruning threshold (0-0.9).',
       reflectionEngine: 'Self-Reflexion Engine',
@@ -1632,6 +1656,10 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       scene_type_distribution: 'Scene Type Distribution',
       general_type_distribution: 'General Type Distribution',
       unmatched: 'Unmatched',
+      disagreementCase: 'Disagreement Case',
+      Pruned: 'Pruned',
+      pruning: 'Pruning',
+      pruning_desc: 'Text pruning {{count}} fragments'
     },
     memoryConversation: {
       searchPlaceholder: 'Enter user ID...',
@@ -1665,8 +1693,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       uploadFile: 'Upload File',
       fileType: 'File Type',
       image: 'Image',
+      video: 'Video',
+      audio: 'Audio',
       fileUrl: 'File URL',
-      addRemoteFile: 'Add Remote File'
+      addRemoteFile: 'Add Remote File',
+      variableConfig: 'Variable Configuration',
     },
     login: {
       title: 'Red Bear Memory Science',
@@ -1754,6 +1785,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       mcp: 'MCP Services',
       inner: 'Built-in Tools',
       custom: 'Custom Tools',
+      market: 'Tool Market',
       mcpSearchPlaceholder: 'Search MCP Services...',
       innerSearchPlaceholder: 'Search Tools...',
       customSearchPlaceholder: 'Search Custom Tools...',
@@ -1927,7 +1959,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       path: 'Path',
       viewDetail: 'View Details',
       textLink: 'Test Connection',
-      noResult: 'Processing results will be displayed here'
+      noResult: 'Processing results will be displayed here',
+      serverUrlInvalid: 'Must start with http:// or https://, and cannot have leading or trailing spaces',
+      requestHeaderKeyInvalid: 'Only English letters, numbers, hyphens (-), and underscores (_) are allowed, and cannot start or end with a hyphen or underscore',
     },
     workflow: {
       coreNode: 'Core Nodes',
@@ -1973,6 +2007,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       evolutionAndGovernance: 'Evolution & Governance',
       self_optimization: 'Self Optimization',
       process_evolution: 'Process Evolution',
+      unknown: 'Unknown Node',
 
       clickToConfigure: 'Click to configure node parameters',
       nodeProperties: 'Node Properties',
@@ -2173,7 +2208,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       save: 'Save',
       export: 'Export',
       variableConfig: 'Variable Configuration',
-      variableRequired: 'Required',
+      variableRequired: 'Required, please configure variable values',
       addMessage: 'Add Message',
       answerDesc: 'Reply',
       addNode: 'Add Node',
@@ -2582,6 +2617,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       updated_at: 'Updated At',
       entityTypes: 'Entity Types',
 
+      classSearchPlaceholder: 'Search types',
       addClass: 'Add Type',
       class_name: 'Type Name',
       class_description: 'Type Definition',
