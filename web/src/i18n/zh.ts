@@ -2036,6 +2036,7 @@ export const zh = {
       self_optimization: '自我优化',
       process_evolution: '流程演化',
       unknown: '未知节点',
+      notes: '便签',
 
       clickToConfigure: '点击配置节点参数',
       nodeProperties: '节点属性',
@@ -2225,6 +2226,12 @@ export const zh = {
         },
         unknown: {
           replaceNodeType: '替换节点'
+        },
+        notes: {
+          showAuth: '显示作者',
+          enterLink: '输入链接 URL',
+          placeholder: '输入注释...',
+          removeLink: '取消链接',
         },
         name: '键',
         type: '类型',
