@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import re
 import shutil
@@ -14,29 +15,62 @@ from uuid import UUID
 
 import redis
 import requests
+from redis.exceptions import RedisError
 
-# 模块级同步 Redis 客户端单例，供 Celery 任务共享使用（避免每次任务新建连接）
+logger = logging.getLogger(__name__)
+
+# 模块级同步 Redis 连接池，供 Celery 任务共享使用
 # 连接 CELERY_BACKEND DB，与 write_message:last_done 时间戳写入保持一致
-def _build_sync_redis_client():
+# 使用连接池而非单例客户端，提供更好的并发性能和自动重连
+_sync_redis_pool: redis.ConnectionPool = None
+
+def _get_or_create_redis_pool() -> redis.ConnectionPool:
+    """获取或创建 Redis 连接池（懒初始化）"""
+    global _sync_redis_pool
+    if _sync_redis_pool is None:
+        try:
+            _sync_redis_pool = redis.ConnectionPool(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=settings.REDIS_DB_CELERY_BACKEND,
+                password=settings.REDIS_PASSWORD,
+                decode_responses=True,
+                max_connections=10,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+                retry_on_timeout=True,
+                health_check_interval=30,
+            )
+            logger.info("Redis connection pool created for Celery tasks")
+        except Exception as e:
+            logger.error(f"Failed to create Redis connection pool: {e}", exc_info=True)
+            return None
+    return _sync_redis_pool
+
+def get_sync_redis_client() -> Optional[redis.StrictRedis]:
+    """获取同步 Redis 客户端（使用连接池）
+    
+    使用连接池提供的客户端，支持自动重连和健康检查。
+    如果 Redis 不可用，返回 None，调用方应优雅降级。
+    
+    Returns:
+        redis.StrictRedis: Redis 客户端实例，如果连接失败则返回 None
+    """
     try:
-        return redis.StrictRedis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            db=settings.REDIS_DB_CELERY_BACKEND,
-            password=settings.REDIS_PASSWORD,
-            decode_responses=True,
-        )
-    except Exception:
+        pool = _get_or_create_redis_pool()
+        if pool is None:
+            return None
+            
+        client = redis.StrictRedis(connection_pool=pool)
+        # 验证连接可用性
+        client.ping()
+        return client
+    except RedisError as e:
+        logger.error(f"Redis connection failed: {e}", exc_info=True)
         return None
-
-_sync_redis_client: redis.StrictRedis = None
-
-def get_sync_redis_client() -> redis.StrictRedis:
-    """获取模块级同步 Redis 客户端（懒初始化单例）"""
-    global _sync_redis_client
-    if _sync_redis_client is None:
-        _sync_redis_client = _build_sync_redis_client()
-    return _sync_redis_client
+    except Exception as e:
+        logger.error(f"Unexpected error getting Redis client: {e}", exc_info=True)
+        return None
 
 # Import a unified Celery instance
 from app.celery_app import celery_app
@@ -1117,8 +1151,9 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
         try:
             _r = get_sync_redis_client()
             if _r is not None:
-                from datetime import timezone as _tz, timedelta as _td
-                _CST = _tz(timedelta(hours=8))
+                from datetime import timedelta as _td
+                from datetime import timezone as _tz
+                _CST = _tz(_td(hours=8))
                 _now_cst = datetime.now(_CST).replace(tzinfo=None).isoformat()
                 _r.set(
                     f"write_message:last_done:{end_user_id}",
@@ -2187,12 +2222,15 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
     start_time = time.time()
 
     async def _run() -> Dict[str, Any]:
+        from sqlalchemy import func, select
+
         from app.core.logging_config import get_logger
-        from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
         from app.models.implicit_emotions_storage_model import ImplicitEmotionsStorage
-        from sqlalchemy import select, func
-        from app.services.implicit_memory_service import ImplicitMemoryService
+        from app.repositories.implicit_emotions_storage_repository import (
+            ImplicitEmotionsStorageRepository,
+        )
         from app.services.emotion_analytics_service import EmotionAnalyticsService
+        from app.services.implicit_memory_service import ImplicitMemoryService
 
         logger = get_logger(__name__)
         logger.info("开始执行隐性记忆和情绪数据更新定时任务")
@@ -2476,9 +2514,11 @@ def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str,
 
     async def _run() -> Dict[str, Any]:
         from app.core.logging_config import get_logger
-        from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
-        from app.services.implicit_memory_service import ImplicitMemoryService
+        from app.repositories.implicit_emotions_storage_repository import (
+            ImplicitEmotionsStorageRepository,
+        )
         from app.services.emotion_analytics_service import EmotionAnalyticsService
+        from app.services.implicit_memory_service import ImplicitMemoryService
 
         logger = get_logger(__name__)
         logger.info(f"开始按需初始化隐性记忆/情绪数据，候选用户数: {len(end_user_ids)}")

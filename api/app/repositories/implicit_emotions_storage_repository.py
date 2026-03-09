@@ -5,13 +5,15 @@ Implicit Emotions Storage Repository
 事务由调用方控制，仓储层只使用 flush/refresh
 """
 import logging
-from datetime import datetime, date, timezone, timedelta
-from typing import Optional, Generator
-from sqlalchemy.orm import Session
-from sqlalchemy import select, not_, exists
+from datetime import date, datetime, timedelta, timezone
+from typing import Generator, Optional
 
-from app.models.implicit_emotions_storage_model import ImplicitEmotionsStorage
+import redis
+from sqlalchemy import exists, not_, select
+from sqlalchemy.orm import Session
+
 from app.models.end_user_model import EndUser
+from app.models.implicit_emotions_storage_model import ImplicitEmotionsStorage
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +113,7 @@ class ImplicitEmotionsStorageRepository:
                 logger.error(f"分批获取用户ID失败: offset={offset}, error={e}")
                 break
 
-    def get_users_needing_refresh(self, redis_client, batch_size: int = 100) -> Generator[str, None, None]:
+    def get_users_needing_refresh(self, redis_client: Optional[redis.StrictRedis], batch_size: int = 100) -> Generator[str, None, None]:
         """分批次获取需要刷新隐性记忆/情绪数据的存量用户ID。
 
         筛选逻辑：
@@ -120,15 +122,28 @@ class ImplicitEmotionsStorageRepository:
         - 若 Redis 中无记录（该用户从未写入过记忆），跳过
         - 若 last_done > updated_at，说明上次刷新后又有新记忆写入，需要刷新
         - 若 last_done <= updated_at，说明已是最新，跳过
+        
+        如果 redis_client 为 None，则降级为返回所有用户（禁用时间过滤）。
 
         Args:
-            redis_client: 同步 redis.StrictRedis 实例（连接 CELERY_BACKEND DB）
+            redis_client: 同步 redis.StrictRedis 实例（连接 CELERY_BACKEND DB），如果为 None 则禁用时间过滤
             batch_size: 每批次加载的数量
 
         Yields:
             需要刷新的用户ID字符串
         """
         from datetime import timezone
+
+        from redis.exceptions import RedisError
+        
+        # 如果 Redis 不可用，降级为处理所有用户
+        if redis_client is None:
+            logger.warning(
+                "Redis 客户端不可用，时间过滤已禁用，将处理所有存量用户"
+            )
+            yield from self.get_all_user_ids(batch_size)
+            return
+        
         offset = 0
         while True:
             try:
@@ -144,7 +159,18 @@ class ImplicitEmotionsStorageRepository:
 
                 # 批量获取当前批次所有用户的 last_done 时间戳（一次网络往返）
                 keys = [f"write_message:last_done:{end_user_id}" for end_user_id, _ in batch]
-                raw_values = redis_client.mget(keys)
+                
+                try:
+                    raw_values = redis_client.mget(keys)
+                except RedisError as e:
+                    logger.error(
+                        f"Redis mget 操作失败: {e}，当前批次降级为处理所有用户",
+                        extra={"offset": offset, "batch_size": len(batch)}
+                    )
+                    # Redis 操作失败，降级为返回当前批次所有用户
+                    yield from (end_user_id for end_user_id, _ in batch)
+                    offset += batch_size
+                    continue
 
                 for (end_user_id, updated_at), raw in zip(batch, raw_values):
                     if raw is None:
@@ -190,7 +216,8 @@ class ImplicitEmotionsStorageRepository:
         Yields:
             用户ID字符串
         """
-        from sqlalchemy import cast, String as SAString
+        from sqlalchemy import String as SAString
+        from sqlalchemy import cast
         CST = timezone(timedelta(hours=8))
         now_cst = datetime.now(CST)
         today_start = now_cst.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
