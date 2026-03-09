@@ -2008,6 +2008,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       self_optimization: 'Self Optimization',
       process_evolution: 'Process Evolution',
       unknown: 'Unknown Node',
+      notes: 'Sticky Note',
 
       clickToConfigure: 'Click to configure node parameters',
       nodeProperties: 'Node Properties',
@@ -2194,6 +2195,12 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           input_variables: 'Input Variables',
           output_variables: 'Output Variables',
           refreshTip: 'Sync function signature to code',
+        },
+        notes: {
+          showAuth: 'Show Author',
+          enterLink: 'Enter Link URL',
+          placeholder: 'Enter note...',
+          removeLink: 'Remove Link',
         },
         name: 'Key',
         type: 'Type',

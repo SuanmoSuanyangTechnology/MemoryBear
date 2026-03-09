@@ -1,8 +1,8 @@
 import type { FC } from 'react';
-import { Select } from 'antd';
+import { Select, Divider } from 'antd';
 // import { Node } from '@antv/x6';
 import type { GraphRef } from '../types'
-import { PlusOutlined, MinusOutlined } from '@ant-design/icons'
+import { PlusOutlined, MinusOutlined, FileAddOutlined } from '@ant-design/icons'
 
 interface CanvasToolbarProps {
   miniMapRef: React.RefObject<HTMLDivElement>;
@@ -14,6 +14,7 @@ interface CanvasToolbarProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  addNotes: () => void;
 }
 
 const CanvasToolbar: FC<CanvasToolbarProps> = ({
@@ -26,6 +27,7 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
   // canRedo,
   // onUndo,
   // onRedo,
+  addNotes,
 }) => {
   // 整理布局函数
   /*
@@ -152,7 +154,7 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
       {/* 小地图 */}
       <div ref={miniMapRef} className="rb:absolute rb:bottom-15  rb:right-8 rb:z-1000 rb:rounded-lg rb:overflow-hidden"></div>
       {/* 缩放控制按钮 */}
-      <div className="rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3 rb:py-2 rb:absolute rb:bottom-5 rb:right-8 rb:flex rb:flex-row rb:gap-4 rb:z-1000">
+      <div className="rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3 rb:py-2 rb:absolute rb:bottom-5 rb:right-8 rb:flex rb:flex-row rb:items-center rb:gap-4 rb:z-1000">
         <MinusOutlined className="rb:text-[16px] rb:cursor-pointer" onClick={() => graphRef.current?.zoom(-0.1)} />
         <Select
           value={Math.round(zoomLevel * 100)}
@@ -182,6 +184,8 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
           size="small"
         />
         <PlusOutlined className="rb:text-[16px] rb:cursor-pointer" onClick={() => graphRef.current?.zoom(0.1)} />
+        <Divider type="vertical" className="rb:h-4" />
+        <FileAddOutlined onClick={addNotes} />
       </div>
     </>
   );
