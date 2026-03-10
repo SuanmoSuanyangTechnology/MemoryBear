@@ -88,26 +88,17 @@ class SemanticPruner:
         self._detailed_prune_logging = True  # 是否启用详细日志
         self._max_debug_msgs_per_dialog = 20  # 每个对话最多记录前N条消息的详细日志
         
-        # 加载场景特定配置（内置场景走专门规则，自定义场景 fallback 到通用规则）
-        self.scene_config: ScenePatterns = SceneConfigRegistry.get_config(
-            self.config.pruning_scene, 
-            fallback_to_generic=True
-        )
+        # 加载统一填充词库
+        self.scene_config: ScenePatterns = SceneConfigRegistry.get_config(self.config.pruning_scene)
         
-        # 判断是否为内置专门场景
-        self._is_builtin_scene = SceneConfigRegistry.is_scene_supported(self.config.pruning_scene)
-        
-        # 自定义场景的本体类型列表（用于注入提示词）
+        # 本体类型列表（用于注入提示词，所有场景均支持）
         self._ontology_classes = getattr(self.config, "ontology_classes", None) or []
         
-        if self._is_builtin_scene:
-            self._log(f"[剪枝-初始化] 场景={self.config.pruning_scene} 使用内置专门配置")
+        self._log(f"[剪枝-初始化] 场景={self.config.pruning_scene}")
+        if self._ontology_classes:
+            self._log(f"[剪枝-初始化] 注入本体类型: {self._ontology_classes}")
         else:
-            self._log(f"[剪枝-初始化] 场景={self.config.pruning_scene} 为自定义场景，使用通用规则 + 本体类型提示词注入")
-            if self._ontology_classes:
-                self._log(f"[剪枝-初始化] 注入本体类型: {self._ontology_classes}")
-            else:
-                self._log(f"[剪枝-初始化] 未找到本体类型，将使用通用提示词")
+            self._log(f"[剪枝-初始化] 未找到本体类型，将使用通用提示词")
         
         # Load Jinja2 template
         self.template = prompt_env.get_template("extracat_Pruning.jinja2")
@@ -119,88 +110,9 @@ class SemanticPruner:
         # 运行日志：收集关键终端输出，便于写入 JSON
         self.run_logs: List[str] = []
 
-    def _is_important_message(self, message: ConversationMessage) -> bool:
-        """基于启发式规则识别重要信息消息，优先保留。
-
-        改进版：使用场景特定的模式进行识别
-        - 根据 pruning_scene 动态加载对应的识别规则
-        - 支持教育、在线服务、外呼三个场景的特定模式
-        """
-        text = message.msg.strip()
-        if not text:
-            return False
-        
-        # 使用场景特定的模式
-        all_patterns = (
-            self.scene_config.high_priority_patterns +
-            self.scene_config.medium_priority_patterns +
-            self.scene_config.low_priority_patterns
-        )
-        
-        for pattern, _ in all_patterns:
-            if re.search(pattern, text, flags=re.IGNORECASE):
-                return True
-        
-        # 检查是否为问句（以问号结尾或包含疑问词）
-        if text.endswith("？") or text.endswith("?"):
-            return True
-        
-        # 检查是否包含问句关键词
-        if any(keyword in text for keyword in self.scene_config.question_keywords):
-            return True
-        
-        # 检查是否包含决策性关键词
-        if any(keyword in text for keyword in self.scene_config.decision_keywords):
-            return True
-            
-        return False
-    
-    def _importance_score(self, message: ConversationMessage) -> int:
-        """为重要消息打分，用于在保留比例内优先保留更关键的内容。
-
-        改进版：使用场景特定的权重体系（0-10分）
-        - 根据场景动态调整不同信息类型的权重
-        - 高优先级模式：4-6分
-        - 中优先级模式：2-3分
-        - 低优先级模式：1分
-        """
-        text = message.msg.strip()
-        score = 0
-        
-        # 使用场景特定的权重
-        for pattern, weight in self.scene_config.high_priority_patterns:
-            if re.search(pattern, text, flags=re.IGNORECASE):
-                score += weight
-        
-        for pattern, weight in self.scene_config.medium_priority_patterns:
-            if re.search(pattern, text, flags=re.IGNORECASE):
-                score += weight
-        
-        for pattern, weight in self.scene_config.low_priority_patterns:
-            if re.search(pattern, text, flags=re.IGNORECASE):
-                score += weight
-        
-        # 问句加分
-        if text.endswith("？") or text.endswith("?"):
-            score += 2
-        
-        # 包含问句关键词加分
-        if any(keyword in text for keyword in self.scene_config.question_keywords):
-            score += 1
-        
-        # 包含决策性关键词加分
-        if any(keyword in text for keyword in self.scene_config.decision_keywords):
-            score += 2
-        
-        # 长度加分（较长的消息通常包含更多信息）
-        if len(text) > 50:
-            score += 1
-        if len(text) > 100:
-            score += 1
-            
-        return min(score, 10)  # 最高10分
-
-    # 情绪/兴趣/爱好安全防线正则已移除，改由 extracat_Pruning.jinja2 提示词中的 preserve_keywords 机制处理
+    # _is_important_message 和 _importance_score 已移除：
+    # 重要性判断完全由 extracat_Pruning.jinja2 提示词 + LLM 的 preserve_tokens 机制承担。
+    # LLM 根据注入的本体工程类型语义识别需要保护的内容，无需硬编码正则规则。
 
     def _is_filler_message(self, message: ConversationMessage) -> bool:
         """检测典型寒暄/口头禅/确认类短消息。
@@ -419,14 +331,12 @@ class SemanticPruner:
 
         rendered = self.template.render(
             pruning_scene=self.config.pruning_scene,
-            is_builtin_scene=self._is_builtin_scene,
             ontology_classes=self._ontology_classes,
             dialog_text=dialog_text,
             language=self.language
         )
         log_template_rendering("extracat_Pruning.jinja2", {
             "pruning_scene": self.config.pruning_scene,
-            "is_builtin_scene": self._is_builtin_scene,
             "ontology_classes_count": len(self._ontology_classes),
             "language": self.language
         })
@@ -491,62 +401,56 @@ class SemanticPruner:
             # 相关对话不剪枝
             return dialog
 
-        # 在不相关对话中，识别重要/不重要消息
-        tokens = extraction.times + extraction.ids + extraction.amounts + extraction.contacts + extraction.addresses + extraction.keywords
+        # 在不相关对话中，LLM 已通过 preserve_tokens 标记需要保护的内容
+        preserve_tokens = (
+            extraction.times + extraction.ids + extraction.amounts +
+            extraction.contacts + extraction.addresses + extraction.keywords +
+            extraction.preserve_keywords
+        )
         msgs = dialog.context.msgs
-        imp_unrel_msgs: List[ConversationMessage] = []
-        unimp_unrel_msgs: List[ConversationMessage] = []
+
+        # 分类：填充 / 其他可删（LLM保护消息通过不加入任何桶来隐式保护）
+        filler_ids: set = set()
+        deletable: List[ConversationMessage] = []
+
         for m in msgs:
-            if self._msg_matches_tokens(m, tokens) or self._is_important_message(m):
-                imp_unrel_msgs.append(m)
+            if self._msg_matches_tokens(m, preserve_tokens):
+                pass  # 保护消息：不加入任何桶，不会被删除
+            elif self._is_filler_message(m):
+                filler_ids.add(id(m))
             else:
-                unimp_unrel_msgs.append(m)
-        # 计算总删除目标数量
+                deletable.append(m)
+
+        # 计算删除目标
         total_unrel = len(msgs)
         delete_target = int(total_unrel * proportion)
         if proportion > 0 and total_unrel > 0 and delete_target == 0:
             delete_target = 1
-        imp_del_cap = min(int(len(imp_unrel_msgs) * proportion), len(imp_unrel_msgs))
-        unimp_del_cap = len(unimp_unrel_msgs)
-        max_capacity = max(0, len(msgs) - 1)
-        max_deletable = min(imp_del_cap + unimp_del_cap, max_capacity)
+        max_deletable = min(len(filler_ids) + len(deletable), max(0, total_unrel - 1))
         delete_target = min(delete_target, max_deletable)
-        # 删除配额分配
-        del_unimp = min(delete_target, unimp_del_cap)
-        rem = delete_target - del_unimp
-        del_imp = min(rem, imp_del_cap)
 
-        # 选取删除集合
-        unimp_delete_ids = []
-        imp_delete_ids = []
-        if del_unimp > 0:
-            # 按出现顺序选取前 del_unimp 条不重要消息进行删除（确定性、可复现）
-            unimp_delete_ids = [id(m) for m in unimp_unrel_msgs[:del_unimp]]
-        if del_imp > 0:
-            imp_sorted = sorted(imp_unrel_msgs, key=lambda m: self._importance_score(m))
-            imp_delete_ids = [id(m) for m in imp_sorted[:del_imp]]
-
-        # 统计实际删除数量（重要/不重要）
-        actual_unimp_deleted = 0
-        actual_imp_deleted = 0
-        kept_msgs = []
-        delete_targets = set(unimp_delete_ids) | set(imp_delete_ids)
+        # 优先删填充，再删其他可删消息（按出现顺序）
+        to_delete_ids: set = set()
         for m in msgs:
-            mid = id(m)
-            if mid in delete_targets:
-                if mid in set(unimp_delete_ids) and actual_unimp_deleted < del_unimp:
-                    actual_unimp_deleted += 1
-                    continue
-                if mid in set(imp_delete_ids) and actual_imp_deleted < del_imp:
-                    actual_imp_deleted += 1
-                    continue
-            kept_msgs.append(m)
+            if len(to_delete_ids) >= delete_target:
+                break
+            if id(m) in filler_ids:
+                to_delete_ids.add(id(m))
+        for m in deletable:
+            if len(to_delete_ids) >= delete_target:
+                break
+            to_delete_ids.add(id(m))
+
+        kept_msgs = [m for m in msgs if id(m) not in to_delete_ids]
         if not kept_msgs and msgs:
             kept_msgs = [msgs[0]]
 
-        deleted_total = actual_unimp_deleted + actual_imp_deleted
+        deleted_total = len(msgs) - len(kept_msgs)
+        protected_count = len(msgs) - len(filler_ids) - len(deletable)
         self._log(
-            f"[剪枝-对话] 对话ID={dialog.id} 总消息={len(msgs)} 删除目标={delete_target} 实删={deleted_total} 保留={len(kept_msgs)}"
+            f"[剪枝-对话] 对话ID={dialog.id} 总消息={len(msgs)} "
+            f"(保护={protected_count} 填充={len(filler_ids)} 可删={len(deletable)}) "
+            f"删除目标={delete_target} 实删={deleted_total} 保留={len(kept_msgs)}"
         )
 
         dialog.context = ConversationContext(msgs=kept_msgs)
@@ -616,38 +520,29 @@ class SemanticPruner:
             if extraction.preserve_keywords:
                 self._log(f"  对话[{d_idx}] LLM抽取到情绪/兴趣保护词: {extraction.preserve_keywords}")
 
-            # 消息级分类：每条消息独立判断
-            llm_protected_msgs = []  # LLM 保护消息（情绪/兴趣/重要token）：绝对不可删除
-            rule_important_msgs = [] # 规则层重要消息（场景规则）：配额不足时可少量删除
-            unimportant_msgs = []    # 不重要消息（可删除）
+            # 消息级分类：LLM保护 / 填充 / 其他可删
+            llm_protected_msgs = []  # LLM 保护消息（preserve_tokens 命中）：绝对不可删除
             filler_msgs = []         # 填充消息（优先删除）
+            deletable_msgs = []      # 其余消息（按比例删除）
 
             for idx, m in enumerate(msgs):
                 msg_text = m.msg.strip()
 
-                # LLM 保护：消息包含 preserve_keywords（情绪/兴趣词）或其他重要 token → 绝对不可删除
                 if self._msg_matches_tokens(m, preserve_tokens):
                     llm_protected_msgs.append((idx, m))
                     if should_log_details or idx < self._max_debug_msgs_per_dialog:
-                        self._log(f"  [{idx}] '{msg_text[:30]}...' → 重要（LLM保护，不可删）")
-                # 填充消息（寒暄、表情等）
+                        self._log(f"  [{idx}] '{msg_text[:30]}...' → 保护（LLM，不可删）")
                 elif self._is_filler_message(m):
                     filler_msgs.append((idx, m))
                     if should_log_details or idx < self._max_debug_msgs_per_dialog:
                         self._log(f"  [{idx}] '{msg_text[:30]}...' → 填充")
-                # 规则层重要信息（学号、成绩、时间、金额等）
-                elif self._is_important_message(m):
-                    rule_important_msgs.append((idx, m))
-                    if should_log_details or idx < self._max_debug_msgs_per_dialog:
-                        self._log(f"  [{idx}] '{msg_text[:30]}...' → 重要（场景规则）")
-                # 其他消息
                 else:
-                    unimportant_msgs.append((idx, m))
+                    deletable_msgs.append((idx, m))
                     if should_log_details or idx < self._max_debug_msgs_per_dialog:
-                        self._log(f"  [{idx}] '{msg_text[:30]}...' → 不重要")
+                        self._log(f"  [{idx}] '{msg_text[:30]}...' → 可删")
 
-            # important_msgs 仅用于日志统计（兼容下方日志输出）
-            important_msgs = llm_protected_msgs + rule_important_msgs
+            # important_msgs 仅用于日志统计
+            important_msgs = llm_protected_msgs
             
             # 计算删除配额
             delete_target = int(original_count * proportion)
@@ -658,37 +553,23 @@ class SemanticPruner:
             max_deletable = max(0, original_count - 1)
             delete_target = min(delete_target, max_deletable)
             
-            # 删除策略：优先删除填充消息，再删除不重要消息
+            # 删除策略：优先删填充消息，再按出现顺序删其余可删消息
             to_delete_indices = set()
-            deleted_details = []  # 记录删除的消息详情
-            
+            deleted_details = []
+
             # 第一步：删除填充消息
-            filler_to_delete = min(len(filler_msgs), delete_target)
-            for i in range(filler_to_delete):
-                idx, msg = filler_msgs[i]
+            for idx, msg in filler_msgs:
+                if len(to_delete_indices) >= delete_target:
+                    break
                 to_delete_indices.add(idx)
                 deleted_details.append(f"[{idx}] 填充: '{msg.msg[:50]}'")
-            
-            # 第二步：如果还需要删除，删除不重要消息
-            remaining_quota = delete_target - len(to_delete_indices)
-            if remaining_quota > 0:
-                unimp_to_delete = min(len(unimportant_msgs), remaining_quota)
-                for i in range(unimp_to_delete):
-                    idx, msg = unimportant_msgs[i]
-                    to_delete_indices.add(idx)
-                    deleted_details.append(f"[{idx}] 不重要: '{msg.msg[:50]}'")
-            
-            # 第三步：如果还需要删除，按重要性分数删除规则层重要消息（LLM保护消息绝对不删）
-            remaining_quota = delete_target - len(to_delete_indices)
-            if remaining_quota > 0 and rule_important_msgs:
-                # 按重要性分数排序（分数低的优先删除）
-                imp_sorted = sorted(rule_important_msgs, key=lambda x: self._importance_score(x[1]))
-                imp_to_delete = min(len(imp_sorted), remaining_quota)
-                for i in range(imp_to_delete):
-                    idx, msg = imp_sorted[i]
-                    to_delete_indices.add(idx)
-                    score = self._importance_score(msg)
-                    deleted_details.append(f"[{idx}] 规则重要(分数{score}): '{msg.msg[:50]}'")
+
+            # 第二步：如果还需要删除，按出现顺序删可删消息
+            for idx, msg in deletable_msgs:
+                if len(to_delete_indices) >= delete_target:
+                    break
+                to_delete_indices.add(idx)
+                deleted_details.append(f"[{idx}] 可删: '{msg.msg[:50]}'")
             
             # 执行删除
             kept_msgs = []
@@ -716,7 +597,7 @@ class SemanticPruner:
             
             self._log(
                 f"[剪枝-对话] 对话 {d_idx+1} 总消息={original_count} "
-                f"(重要={len(important_msgs)} 不重要={len(unimportant_msgs)} 填充={len(filler_msgs)}) "
+                f"(保护={len(important_msgs)} 填充={len(filler_msgs)} 可删={len(deletable_msgs)}) "
                 f"删除={deleted_count} 保留={len(kept_msgs)}"
             )
             
