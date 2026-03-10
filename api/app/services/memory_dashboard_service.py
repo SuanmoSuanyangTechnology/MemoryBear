@@ -646,59 +646,26 @@ async def get_chunk_summary_and_tags(
     current_user: User
 ) -> dict:
     """
-    获取chunk的总结、标签和人物形象
-    
-    Args:
-        end_user_id: 宿主ID
-        limit: 返回的chunk数量限制
-        max_tags: 最大标签数量
-        db: 数据库会话
-        current_user: 当前用户
-    
-    Returns:
-        包含summary、tags和personas的字典
+    纯读库：从end_user表返回RAG摘要、标签和人物形象缓存。
+    无数据时返回空结构，不触发LLM生成。
     """
-    business_logger.info(f"获取chunk摘要、标签和人物形象: end_user_id={end_user_id}, limit={limit}, 操作者: {current_user.username}")
-    
-    try:
-        # 1. 获取chunk内容
-        rag_content = get_rag_content(end_user_id, limit, db, current_user)
-        chunks = rag_content.get("contents", [])
-        
-        if not chunks:
-            business_logger.warning(f"未找到chunk内容: end_user_id={end_user_id}")
-            return {
-                "summary": "暂无内容",
-                "tags": [],
-                "personas": []
-            }
-        
-        # 2. 导入RAG工具函数
-        from app.core.rag_utils import generate_chunk_summary, extract_chunk_tags, extract_chunk_persona
-        
-        # 3. 并发生成摘要、提取标签和人物形象
-        import asyncio
-        summary_task = generate_chunk_summary(chunks, max_chunks=limit)
-        tags_task = extract_chunk_tags(chunks, max_tags=max_tags, max_chunks=limit)
-        personas_task = extract_chunk_persona(chunks, max_personas=5, max_chunks=limit)
-        
-        summary, tags_with_freq, personas = await asyncio.gather(summary_task, tags_task, personas_task)
-        
-        # 4. 格式化标签数据
-        tags = [{"tag": tag, "frequency": freq} for tag, freq in tags_with_freq]
-        
-        result = {
-            "summary": summary,
-            "tags": tags,
-            "personas": personas
-        }
-        
-        business_logger.info(f"成功获取chunk摘要、{len(tags)} 个标签和 {len(personas)} 个人物形象")
-        return result
-        
-    except Exception as e:
-        business_logger.error(f"获取chunk摘要、标签和人物形象失败: end_user_id={end_user_id} - {str(e)}")
-        raise
+    import json
+    from app.repositories.end_user_repository import EndUserRepository
+
+    business_logger.info(f"读取chunk摘要/标签/人物形象缓存: end_user_id={end_user_id}")
+
+    repo = EndUserRepository(db)
+    end_user = repo.get_by_id(uuid.UUID(end_user_id))
+
+    if not end_user:
+        return {"summary": "", "tags": [], "personas": [], "generated": False}
+
+    return {
+        "summary": end_user.user_summary or "",
+        "tags": json.loads(end_user.rag_tags) if end_user.rag_tags else [],
+        "personas": json.loads(end_user.rag_personas) if end_user.rag_personas else [],
+        "generated": bool(end_user.user_summary),
+    }
 
 
 async def get_chunk_insight(
@@ -708,43 +675,98 @@ async def get_chunk_insight(
     current_user: User
 ) -> dict:
     """
-    获取chunk的洞察分析
-    
-    Args:
-        end_user_id: 宿主ID
-        limit: 返回的chunk数量限制
-        db: 数据库会话
-        current_user: 当前用户
-    
-    Returns:
-        包含insight的字典
+    纯读库：从end_user表返回RAG洞察缓存。
+    无数据时返回空结构，不触发LLM生成。
     """
-    business_logger.info(f"获取chunk洞察: end_user_id={end_user_id}, limit={limit}, 操作者: {current_user.username}")
-    
-    try:
-        # 1. 获取chunk内容
-        rag_content = get_rag_content(end_user_id, limit, db, current_user)
-        chunks = rag_content.get("contents", [])
-        
-        if not chunks:
-            business_logger.warning(f"未找到chunk内容: end_user_id={end_user_id}")
-            return {
-                "insight": "暂无足够数据生成洞察报告"
-            }
-        
-        # 2. 导入RAG工具函数
-        from app.core.rag_utils import generate_chunk_insight
-        
-        # 3. 生成洞察
-        insight = await generate_chunk_insight(chunks, max_chunks=limit)
-        
-        result = {
-            "insight": insight
-        }
-        
-        business_logger.info("成功获取chunk洞察")
-        return result
-        
-    except Exception as e:
-        business_logger.error(f"获取chunk洞察失败: end_user_id={end_user_id} - {str(e)}")
-        raise
+    from app.repositories.end_user_repository import EndUserRepository
+
+    business_logger.info(f"读取chunk洞察缓存: end_user_id={end_user_id}")
+
+    repo = EndUserRepository(db)
+    end_user = repo.get_by_id(uuid.UUID(end_user_id))
+
+    if not end_user:
+        return {"insight": "", "behavior_pattern": "", "key_findings": "", "growth_trajectory": "", "generated": False}
+
+    return {
+        "insight": end_user.memory_insight or "",
+        "behavior_pattern": end_user.behavior_pattern or "",
+        "key_findings": end_user.key_findings or "",
+        "growth_trajectory": end_user.growth_trajectory or "",
+        "generated": bool(end_user.memory_insight),
+    }
+
+
+async def generate_rag_profile(
+    end_user_id: str,
+    limit: int,
+    max_tags: int,
+    db: Session,
+    current_user: User,
+) -> dict:
+    """
+    生产接口：为RAG存储模式的end_user全量重新生成并持久化完整画像数据。
+    每次调用都会重新生成，覆盖已有数据。
+
+    生成内容：
+      - user_summary / rag_tags / rag_personas
+      - memory_insight / behavior_pattern / key_findings / growth_trajectory
+    """
+    import json
+    import asyncio
+    from app.repositories.end_user_repository import EndUserRepository
+    from app.core.rag_utils import (
+        generate_chunk_summary,
+        extract_chunk_tags,
+        extract_chunk_persona,
+        generate_chunk_insight_sections,
+    )
+
+    business_logger.info(f"开始生产RAG画像: end_user_id={end_user_id}, 操作者: {current_user.username}")
+
+    repo = EndUserRepository(db)
+    end_user = repo.get_by_id(uuid.UUID(end_user_id))
+
+    if not end_user:
+        raise ValueError(f"end_user {end_user_id} 不存在")
+
+    rag_content = get_rag_content(end_user_id, limit, db, current_user)
+    chunks = rag_content.get("contents", [])
+
+    if not chunks:
+        business_logger.warning(f"未找到chunk内容，无法生产RAG画像: end_user_id={end_user_id}")
+        raise ValueError("暂无chunk内容，无法生成画像")
+
+    summary, tags_with_freq, personas, insight_sections = await asyncio.gather(
+        generate_chunk_summary(chunks, max_chunks=limit, end_user_id=end_user_id),
+        extract_chunk_tags(chunks, max_tags=max_tags, max_chunks=limit, end_user_id=end_user_id),
+        extract_chunk_persona(chunks, max_personas=5, max_chunks=limit, end_user_id=end_user_id),
+        generate_chunk_insight_sections(chunks, max_chunks=limit, end_user_id=end_user_id),
+    )
+
+    tags = [{"tag": tag, "frequency": freq} for tag, freq in tags_with_freq]
+
+    repo.update_rag_summary_tags(
+        end_user_id=end_user.id,
+        user_summary=summary,
+        rag_tags=json.dumps(tags, ensure_ascii=False),
+        rag_personas=json.dumps(personas, ensure_ascii=False),
+    )
+
+    repo.update_memory_insight(
+        end_user_id=end_user.id,
+        memory_insight=insight_sections.get("memory_insight", ""),
+        behavior_pattern=insight_sections.get("behavior_pattern", ""),
+        key_findings=insight_sections.get("key_findings", ""),
+        growth_trajectory=insight_sections.get("growth_trajectory", ""),
+    )
+
+    business_logger.info(f"RAG画像生产完成: end_user_id={end_user_id}, tags={len(tags)}, personas={len(personas)}")
+
+    return {
+        "end_user_id": end_user_id,
+        "summary_length": len(summary),
+        "tags_count": len(tags),
+        "personas_count": len(personas),
+        "insight_generated": bool(insight_sections.get("memory_insight")),
+    }

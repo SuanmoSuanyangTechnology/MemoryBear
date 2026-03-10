@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.core.response_utils import success
@@ -422,26 +423,18 @@ async def get_chunk_summary_tag(
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取chunk总结、提取的标签和人物形象
-    
+    读取RAG摘要、标签和人物形象（纯读库，不触发生成）。
+
     返回格式：
     {
-        "summary": "chunk内容的总结",
-        "tags": [
-            {"tag": "标签1", "frequency": 5},
-            {"tag": "标签2", "frequency": 3},
-            ...
-        ],
-        "personas": [
-            "产品设计师",
-            "旅行爱好者",
-            "摄影发烧友",
-            ...
-        ]
+        "summary": "用户摘要",
+        "tags": [{"tag": "标签1", "frequency": 5}, ...],
+        "personas": ["产品设计师", ...],
+        "generated": true/false  // false表示尚未生产，请调用 /generate_rag_profile
     }
     """
-    api_logger.info(f"用户 {current_user.username} 请求获取宿主 {end_user_id} 的chunk摘要、标签和人物形象")
-    
+    api_logger.info(f"用户 {current_user.username} 读取宿主 {end_user_id} 的RAG摘要/标签/人物形象")
+
     data = await memory_dashboard_service.get_chunk_summary_and_tags(
         end_user_id=end_user_id,
         limit=limit,
@@ -449,9 +442,8 @@ async def get_chunk_summary_tag(
         db=db,
         current_user=current_user
     )
-    
-    api_logger.info(f"成功获取chunk摘要、{len(data.get('tags', []))} 个标签和 {len(data.get('personas', []))} 个人物形象")
-    return success(data=data, msg="chunk摘要、标签和人物形象获取成功")
+
+    return success(data=data, msg="获取成功")
 
 
 @router.get("/chunk_insight", response_model=ApiResponse)
@@ -462,24 +454,57 @@ async def get_chunk_insight(
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取chunk的洞察内容
-    
+    读取RAG洞察报告（纯读库，不触发生成）。
+
     返回格式：
     {
-        "insight": "对chunk内容的深度洞察分析"
+        "insight": "总体概述",
+        "behavior_pattern": "行为模式",
+        "key_findings": "关键发现",
+        "growth_trajectory": "成长轨迹",
+        "generated": true/false  // false表示尚未生产，请调用 /generate_rag_profile
     }
     """
-    api_logger.info(f"用户 {current_user.username} 请求获取宿主 {end_user_id} 的chunk洞察")
-    
+    api_logger.info(f"用户 {current_user.username} 读取宿主 {end_user_id} 的RAG洞察")
+
     data = await memory_dashboard_service.get_chunk_insight(
         end_user_id=end_user_id,
         limit=limit,
         db=db,
         current_user=current_user
     )
-    
-    api_logger.info("成功获取chunk洞察")
-    return success(data=data, msg="chunk洞察获取成功")
+
+    return success(data=data, msg="获取成功")
+
+
+class GenerateRagProfileRequest(BaseModel):
+    end_user_id: str = Field(..., description="宿主ID")
+    limit: int = Field(15, description="参与生成的chunk数量上限")
+    max_tags: int = Field(10, description="最大标签数量")
+
+
+@router.post("/generate_rag_profile", response_model=ApiResponse)
+async def generate_rag_profile(
+    body: GenerateRagProfileRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    生产接口：为RAG存储模式的宿主全量重新生成完整画像并持久化到end_user表。
+    每次请求都会重新生成，覆盖已有数据。
+    """
+    api_logger.info(f"用户 {current_user.username} 触发RAG画像生产: end_user_id={body.end_user_id}")
+
+    data = await memory_dashboard_service.generate_rag_profile(
+        end_user_id=body.end_user_id,
+        limit=body.limit,
+        max_tags=body.max_tags,
+        db=db,
+        current_user=current_user,
+    )
+
+    api_logger.info(f"RAG画像生产完成: {data}")
+    return success(data=data, msg="RAG画像生产完成")
 
 
 @router.get("/dashboard_data", response_model=ApiResponse)
