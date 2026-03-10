@@ -114,8 +114,15 @@ class FileObject(BaseModel):
     file_id: str | None
 
     content_cache: dict = Field(default_factory=dict)
-
     is_file: bool
+
+    _byte_content: bytes | None = None
+
+    def get_content(self):
+        return self._byte_content
+
+    def set_content(self, byte_content):
+        self._byte_content = byte_content
 
 
 class BaseVariable(ABC):
