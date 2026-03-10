@@ -111,7 +111,9 @@ async def generate_chunk_summary(
 
         llm_client = _get_llm_client(end_user_id)
 
-        # Try structured output first; fall back to plain chat if unsupported
+        # Try structured output; fall back to plain chat only for LLMClientException
+        # (indicates the model/provider doesn't support structured output).
+        # All other exceptions are re-raised so config/schema errors stay visible.
         try:
             response: MemorySummaryResponse = await llm_client.response_structured(
                 messages=messages,
@@ -123,9 +125,17 @@ async def generate_chunk_summary(
                 summary = "；".join(s.statement for s in response.statements)
             else:
                 summary = "暂无内容"
-        except Exception:
-            raw = await llm_client.chat(messages=messages)
-            summary = raw.content.strip() if raw and raw.content else "暂无内容"
+        except Exception as e:
+            from app.core.memory.llm_tools.llm_client import LLMClientException
+            if isinstance(e, LLMClientException):
+                business_logger.warning(
+                    f"结构化输出不可用，降级为普通对话: end_user_id={end_user_id}, reason={e}"
+                )
+                raw = await llm_client.chat(messages=messages)
+                summary = raw.content.strip() if raw and raw.content else "暂无内容"
+            else:
+                business_logger.error(f"生成摘要时发生非预期异常: {e}")
+                raise
 
         business_logger.info(
             f"成功生成chunk摘要，处理了 {len(chunks_to_process)} 个片段"

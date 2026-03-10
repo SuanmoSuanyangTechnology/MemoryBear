@@ -79,7 +79,7 @@ async def _build_insight_inputs(
     chunks: List[str],
     max_chunks: int,
     end_user_id: Optional[str],
-) -> Dict[str, str]:
+) -> Dict[str, Optional[str]]:
     """
     Derive domain_distribution, active_periods, social_connections strings
     to feed into the memory_insight.jinja2 template.
