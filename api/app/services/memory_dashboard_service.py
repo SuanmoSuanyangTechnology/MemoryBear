@@ -647,55 +647,63 @@ async def get_chunk_summary_and_tags(
 ) -> dict:
     """
     获取chunk的总结、标签和人物形象
-    
-    Args:
-        end_user_id: 宿主ID
-        limit: 返回的chunk数量限制
-        max_tags: 最大标签数量
-        db: 数据库会话
-        current_user: 当前用户
-    
-    Returns:
-        包含summary、tags和personas的字典
+    优先返回end_user表中的缓存，若无缓存则实时生成并写库
     """
+    import json
+    from app.repositories.end_user_repository import EndUserRepository
+
     business_logger.info(f"获取chunk摘要、标签和人物形象: end_user_id={end_user_id}, limit={limit}, 操作者: {current_user.username}")
-    
+
     try:
-        # 1. 获取chunk内容
+        repo = EndUserRepository(db)
+        end_user = repo.get_by_id(uuid.UUID(end_user_id))
+
+        # 读缓存：user_summary / rag_tags / rag_personas 均有值时直接返回
+        if (
+            end_user
+            and end_user.user_summary
+            and end_user.rag_tags
+            and end_user.rag_personas
+        ):
+            business_logger.info(f"命中缓存，直接返回end_user {end_user_id} 的摘要/标签/人物形象")
+            return {
+                "summary": end_user.user_summary,
+                "tags": json.loads(end_user.rag_tags),
+                "personas": json.loads(end_user.rag_personas),
+            }
+
+        # 无缓存：实时生成
         rag_content = get_rag_content(end_user_id, limit, db, current_user)
         chunks = rag_content.get("contents", [])
-        
+
         if not chunks:
             business_logger.warning(f"未找到chunk内容: end_user_id={end_user_id}")
-            return {
-                "summary": "暂无内容",
-                "tags": [],
-                "personas": []
-            }
-        
-        # 2. 导入RAG工具函数
+            return {"summary": "暂无内容", "tags": [], "personas": []}
+
         from app.core.rag_utils import generate_chunk_summary, extract_chunk_tags, extract_chunk_persona
-        
-        # 3. 并发生成摘要、提取标签和人物形象
         import asyncio
-        summary_task = generate_chunk_summary(chunks, max_chunks=limit, end_user_id=end_user_id)
-        tags_task = extract_chunk_tags(chunks, max_tags=max_tags, max_chunks=limit, end_user_id=end_user_id)
-        personas_task = extract_chunk_persona(chunks, max_personas=5, max_chunks=limit, end_user_id=end_user_id)
-        
-        summary, tags_with_freq, personas = await asyncio.gather(summary_task, tags_task, personas_task)
-        
-        # 4. 格式化标签数据
+
+        summary, tags_with_freq, personas = await asyncio.gather(
+            generate_chunk_summary(chunks, max_chunks=limit, end_user_id=end_user_id),
+            extract_chunk_tags(chunks, max_tags=max_tags, max_chunks=limit, end_user_id=end_user_id),
+            extract_chunk_persona(chunks, max_personas=5, max_chunks=limit, end_user_id=end_user_id),
+        )
+
         tags = [{"tag": tag, "frequency": freq} for tag, freq in tags_with_freq]
-        
-        result = {
-            "summary": summary,
-            "tags": tags,
-            "personas": personas
-        }
-        
+
+        # 写库缓存
+        if end_user:
+            repo.update_rag_summary_tags(
+                end_user_id=end_user.id,
+                user_summary=summary,
+                rag_tags=json.dumps(tags, ensure_ascii=False),
+                rag_personas=json.dumps(personas, ensure_ascii=False),
+            )
+
+        result = {"summary": summary, "tags": tags, "personas": personas}
         business_logger.info(f"成功获取chunk摘要、{len(tags)} 个标签和 {len(personas)} 个人物形象")
         return result
-        
+
     except Exception as e:
         business_logger.error(f"获取chunk摘要、标签和人物形象失败: end_user_id={end_user_id} - {str(e)}")
         raise
@@ -709,42 +717,40 @@ async def get_chunk_insight(
 ) -> dict:
     """
     获取chunk的洞察分析
-    
-    Args:
-        end_user_id: 宿主ID
-        limit: 返回的chunk数量限制
-        db: 数据库会话
-        current_user: 当前用户
-    
-    Returns:
-        包含insight的字典
+    优先返回end_user表中的缓存，若无缓存则实时生成并写库
     """
+    from app.repositories.end_user_repository import EndUserRepository
+
     business_logger.info(f"获取chunk洞察: end_user_id={end_user_id}, limit={limit}, 操作者: {current_user.username}")
-    
+
     try:
-        # 1. 获取chunk内容
+        repo = EndUserRepository(db)
+        end_user = repo.get_by_id(uuid.UUID(end_user_id))
+
+        # 读缓存
+        if end_user and end_user.memory_insight:
+            business_logger.info(f"命中缓存，直接返回end_user {end_user_id} 的洞察")
+            return {"insight": end_user.memory_insight}
+
+        # 无缓存：实时生成
         rag_content = get_rag_content(end_user_id, limit, db, current_user)
         chunks = rag_content.get("contents", [])
-        
+
         if not chunks:
             business_logger.warning(f"未找到chunk内容: end_user_id={end_user_id}")
-            return {
-                "insight": "暂无足够数据生成洞察报告"
-            }
-        
-        # 2. 导入RAG工具函数
+            return {"insight": "暂无足够数据生成洞察报告"}
+
         from app.core.rag_utils import generate_chunk_insight
-        
-        # 3. 生成洞察
+
         insight = await generate_chunk_insight(chunks, max_chunks=limit, end_user_id=end_user_id)
-        
-        result = {
-            "insight": insight
-        }
-        
+
+        # 写库缓存
+        if end_user:
+            repo.update_rag_insight(end_user_id=end_user.id, memory_insight=insight)
+
         business_logger.info("成功获取chunk洞察")
-        return result
-        
+        return {"insight": insight}
+
     except Exception as e:
         business_logger.error(f"获取chunk洞察失败: end_user_id={end_user_id} - {str(e)}")
         raise

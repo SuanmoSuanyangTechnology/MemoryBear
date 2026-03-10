@@ -51,6 +51,12 @@ class EndUser(Base):
     growth_trajectory = Column(Text, nullable=True, comment="成长轨迹")
     memory_insight_updated_at = Column(DateTime, nullable=True, comment="洞察报告最后更新时间")
 
+    # RAG存储模式专用字段 - RAG Storage Mode Fields
+    storage_type = Column(String, nullable=True, default="neo4j", comment="存储模式类型: neo4j / rag")
+    rag_tags = Column(Text, nullable=True, comment="RAG模式下提取的标签列表（JSON格式）")
+    rag_personas = Column(Text, nullable=True, comment="RAG模式下提取的人物形象列表（JSON格式）")
+    rag_summary_updated_at = Column(DateTime, nullable=True, comment="RAG摘要/标签/人物形象最后更新时间")
+
     # 与 App 的反向关系
     app = relationship(
         "App",

@@ -220,6 +220,90 @@ class EndUserRepository:
             db_logger.error(f"更新终端用户 {end_user_id} 的用户摘要缓存时出错: {str(e)}")
             raise
 
+    def update_rag_summary_tags(
+        self,
+        end_user_id: uuid.UUID,
+        user_summary: str,
+        rag_tags: str,
+        rag_personas: str,
+    ) -> bool:
+        """更新RAG模式下的用户摘要、标签和人物形象缓存
+        
+        Args:
+            end_user_id: 终端用户ID
+            user_summary: 用户摘要文本
+            rag_tags: 标签列表（JSON字符串）
+            rag_personas: 人物形象列表（JSON字符串）
+            
+        Returns:
+            bool: 更新成功返回True，否则返回False
+        """
+        try:
+            updated_count = (
+                self.db.query(EndUser)
+                .filter(EndUser.id == end_user_id)
+                .update(
+                    {
+                        EndUser.user_summary: user_summary,
+                        EndUser.rag_tags: rag_tags,
+                        EndUser.rag_personas: rag_personas,
+                        EndUser.storage_type: "rag",
+                        EndUser.rag_summary_updated_at: datetime.datetime.now(),
+                    },
+                    synchronize_session=False
+                )
+            )
+            self.db.commit()
+            if updated_count > 0:
+                db_logger.info(f"成功更新终端用户 {end_user_id} 的RAG摘要/标签/人物形象缓存")
+                return True
+            else:
+                db_logger.warning(f"未找到终端用户 {end_user_id}，无法更新RAG摘要缓存")
+                return False
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"更新终端用户 {end_user_id} 的RAG摘要缓存时出错: {str(e)}")
+            raise
+
+    def update_rag_insight(
+        self,
+        end_user_id: uuid.UUID,
+        memory_insight: str,
+    ) -> bool:
+        """更新RAG模式下的记忆洞察缓存
+        
+        Args:
+            end_user_id: 终端用户ID
+            memory_insight: 洞察文本
+            
+        Returns:
+            bool: 更新成功返回True，否则返回False
+        """
+        try:
+            updated_count = (
+                self.db.query(EndUser)
+                .filter(EndUser.id == end_user_id)
+                .update(
+                    {
+                        EndUser.memory_insight: memory_insight,
+                        EndUser.storage_type: "rag",
+                        EndUser.memory_insight_updated_at: datetime.datetime.now(),
+                    },
+                    synchronize_session=False
+                )
+            )
+            self.db.commit()
+            if updated_count > 0:
+                db_logger.info(f"成功更新终端用户 {end_user_id} 的RAG洞察缓存")
+                return True
+            else:
+                db_logger.warning(f"未找到终端用户 {end_user_id}，无法更新RAG洞察缓存")
+                return False
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"更新终端用户 {end_user_id} 的RAG洞察缓存时出错: {str(e)}")
+            raise
+
     def get_all_by_workspace(self, workspace_id: uuid.UUID) -> List[EndUser]:
         """获取工作空间的所有终端用户
         
