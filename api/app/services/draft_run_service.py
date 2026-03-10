@@ -22,6 +22,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.rag.nlp.search import knowledge_retrieval
+from app.db import get_db_context
 from app.models import AgentConfig, ModelConfig
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput
@@ -103,9 +104,7 @@ def create_long_term_memory_tool(
         """
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
-            from app.db import get_db
-            db = next(get_db())
-            try:
+            with get_db_context() as db:
                 memory_content = asyncio.run(
                     MemoryAgentService().read_memory(
                         end_user_id=end_user_id,
@@ -127,9 +126,6 @@ def create_long_term_memory_tool(
                 logger.info(f"读取任务状态：{status}")
                 if memory_content:
                     memory_content = memory_content['answer']
-
-            finally:
-                db.close()
             logger.info(f'用户ID：Agent:{end_user_id}')
             logger.debug("调用长期记忆 API", extra={"question": question, "end_user_id": end_user_id})
 

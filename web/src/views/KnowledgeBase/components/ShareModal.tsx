@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2025-11-10 18:52:55
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-03-03 14:46:08
+ * @LastEditTime: 2026-03-09 16:39:07
  */
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Switch } from 'antd';
@@ -58,16 +58,21 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
   }
 
   const handleShare = async() => {
-    const workspaceIds = spaceList
-      .map(item => item.target_kb?.workspace_id)
-      .filter(Boolean)
-      .join(',');
-    
-    console.log('Workspace IDs:', workspaceIds);
-    shareSpaceModalRef?.current?.handleOpen(kbId,knowledgeBase,workspaceIds);
-    
-    // Close modal after sharing
-    handleClose();
+    setLoading(true);
+    try {
+      const workspaceIds = spaceList
+        .map(item => item.target_kb?.workspace_id)
+        .filter(Boolean)
+        .join(',');
+      
+      console.log('Workspace IDs:', workspaceIds);
+      shareSpaceModalRef?.current?.handleOpen(kbId,knowledgeBase,workspaceIds);
+      
+      // Close modal after sharing
+      handleClose();
+    } finally {
+      setLoading(false);
+    }
   }
   const handleChange = (checked: boolean, item: any) => {
     // Toggle shared knowledge base status

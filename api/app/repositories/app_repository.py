@@ -1,10 +1,11 @@
-from sqlalchemy.orm import Session
-from typing import List, Optional
 import uuid
+from typing import List
 
-from app.models.app_model import App
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_db_logger
+from app.models.app_model import App
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
@@ -35,10 +36,26 @@ class AppRepository:
         except Exception as e:
             raise
 
+    def get_apps_by_name(self, app_name: str, app_type: str, workspace_id: uuid.UUID) -> List[App]:
+        try:
+            stmt = select(App).where(
+                App.name == app_name,
+                App.workspace_id == workspace_id,
+                App.type == app_type,
+                App.is_active.is_(True),
+            )
+            apps = self.db.execute(stmt).scalars().all()
+            return list(apps)
+        except Exception as e:
+            db_logger.error(f"查询名称 {app_name} 应用异常: {str(e)}")
+            raise
+
+
 def get_apps_by_workspace_id(db: Session, workspace_id: uuid.UUID) -> List[App]:
     """根据工作空间ID查询应用"""
     repo = AppRepository(db)
     return repo.get_apps_by_workspace_id(workspace_id)
+
 
 def get_apps_by_id(db: Session, app_id: uuid.UUID) -> App:
     """根据工作空间ID查询应用"""

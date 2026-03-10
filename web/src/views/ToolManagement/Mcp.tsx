@@ -61,7 +61,6 @@ const Mcp: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getSta
         getData()
       })
   };
-
   // 删除服务
   const handleDeleteService = (item: ToolItem) => {
     if (!item.id) {

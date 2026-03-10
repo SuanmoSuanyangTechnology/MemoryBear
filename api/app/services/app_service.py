@@ -33,7 +33,7 @@ from app.models import (
     Workspace,
 )
 from app.models.app_model import AppStatus, AppType
-from app.repositories.app_repository import get_apps_by_id
+from app.repositories.app_repository import get_apps_by_id, AppRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
 from app.schemas.workflow_schema import WorkflowConfigUpdate
@@ -59,6 +59,7 @@ class AppService:
             db: 数据库会话
         """
         self.db = db
+        self.app_repo = AppRepository(self.db)
 
     # ==================== 私有辅助方法 ====================
 
@@ -521,6 +522,9 @@ class AppService:
             "创建应用",
             extra={"app_name": data.name, "type": data.type, "workspace_id": str(workspace_id)}
         )
+        apps = self.app_repo.get_apps_by_name(data.name, data.type, workspace_id)
+        if apps:
+            raise BusinessException(message="已存在同名应用", code=BizCode.RESOURCE_ALREADY_EXISTS)
 
         try:
             now = datetime.datetime.now()
@@ -703,7 +707,7 @@ class AppService:
             self.db.flush()
 
             # 如果是 agent 类型，复制 AgentConfig
-            if source_app.type == "agent":
+            if source_app.type == AppType.AGENT:
                 source_config = self.db.query(AgentConfig).filter(
                     AgentConfig.app_id == source_app.id
                 ).first()
@@ -719,6 +723,50 @@ class AppService:
                         memory=source_config.memory.copy() if source_config.memory else None,
                         variables=source_config.variables.copy() if source_config.variables else [],
                         tools=source_config.tools.copy() if source_config.tools else [],
+                        is_active=True,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    self.db.add(new_config)
+
+            elif source_app.type == AppType.WORKFLOW:
+                source_config = self.db.query(WorkflowConfig).filter(
+                    WorkflowConfig.app_id == source_app.id
+                ).first()
+
+                if source_config:
+                    new_config = WorkflowConfig(
+                        id=uuid.uuid4(),
+                        app_id=new_app.id,
+                        nodes=source_config.nodes.copy() if source_config.nodes else [],
+                        edges=source_config.edges.copy() if source_config.edges else [],
+                        variables=source_config.variables.copy() if source_config.variables else [],
+                        execution_config=source_config.execution_config.copy() if source_config.execution_config else {},
+                        triggers=source_config.triggers.copy() if source_config.triggers else [],
+                        is_active=True,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    self.db.add(new_config)
+
+            elif source_app.type == AppType.MULTI_AGENT:
+                source_config = self.db.query(MultiAgentConfig).filter(
+                    MultiAgentConfig.app_id == source_app.id
+                ).first()
+
+                if source_config:
+                    new_config = MultiAgentConfig(
+                        id=uuid.uuid4(),
+                        app_id=new_app.id,
+                        master_agent_id=source_config.master_agent_id,
+                        master_agent_name=source_config.master_agent_name,
+                        default_model_config_id=source_config.default_model_config_id,
+                        model_parameters=source_config.model_parameters,
+                        orchestration_mode=source_config.orchestration_mode,
+                        sub_agents=source_config.sub_agents.copy() if source_config.sub_agents else [],
+                        routing_rules=source_config.routing_rules.copy() if source_config.routing_rules else None,
+                        execution_config=source_config.execution_config.copy() if source_config.execution_config else {},
+                        aggregation_strategy=source_config.aggregation_strategy,
                         is_active=True,
                         created_at=now,
                         updated_at=now,
@@ -1323,6 +1371,15 @@ class AppService:
             agent_cfg = self.db.scalars(stmt).first()
             if not agent_cfg:
                 raise BusinessException("Agent 应用缺少配置，无法发布", BizCode.AGENT_CONFIG_MISSING)
+
+            miss_params = []
+            if agent_cfg.default_model_config_id is None:
+                miss_params.append("model config")
+
+            if agent_cfg.memory.get("enabled") and not agent_cfg.memory.get("memory_config_id"):
+                miss_params.append("memory config")
+            if miss_params:
+                raise BusinessException(f"{', '.join(miss_params)} is required")
 
             config = {
                 "system_prompt": agent_cfg.system_prompt,

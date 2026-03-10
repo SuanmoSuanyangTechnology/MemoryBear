@@ -38,7 +38,8 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
     parseEvent,
     handleSave,
     chatVariables,
-    setChatVariables
+    setChatVariables,
+    handleAddNotes
   } = useWorkflowGraph({ containerRef, miniMapRef });
 
   const onDragOver = (event: React.DragEvent) => {
@@ -95,6 +96,7 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
           canRedo={canRedo}
           onUndo={onUndo}
           onRedo={onRedo}
+          addNotes={handleAddNotes}
         />
       </div>
       

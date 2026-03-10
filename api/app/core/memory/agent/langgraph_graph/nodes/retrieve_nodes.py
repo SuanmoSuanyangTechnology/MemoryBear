@@ -6,31 +6,26 @@ import os
 # ===== 第三方库 =====
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
+
 from app.core.logging_config import get_agent_logger
-from app.db import get_db, get_db_context
-
-from app.schemas import model_schema
-from app.services.memory_config_service import MemoryConfigService
-from app.services.model_service import ModelConfigService
-
-from app.core.memory.agent.services.search_service import SearchService
-from app.core.memory.agent.utils.llm_tools import (
-    COUNTState,
-    ReadState,
-    deduplicate_entries,
-    merge_to_key_value_pairs,
-)
 from app.core.memory.agent.langgraph_graph.tools.tool import (
     create_hybrid_retrieval_tool_sync,
     create_time_retrieval_tool,
     extract_tool_message_content,
 )
-
+from app.core.memory.agent.services.search_service import SearchService
+from app.core.memory.agent.utils.llm_tools import (
+    ReadState,
+    deduplicate_entries,
+    merge_to_key_value_pairs,
+)
 from app.core.rag.nlp.search import knowledge_retrieval
+from app.db import get_db_context
+from app.schemas import model_schema
+from app.services.memory_config_service import MemoryConfigService
+from app.services.model_service import ModelConfigService
 
 logger = get_agent_logger(__name__)
-db = next(get_db())
-
 
 
 async def rag_config(state):
@@ -50,10 +45,12 @@ async def rag_config(state):
         "reranker_top_k": 10
     }
     return kb_config
-async def rag_knowledge(state,question):
+
+
+async def rag_knowledge(state, question):
     kb_config = await rag_config(state)
     end_user_id = state.get('end_user_id', '')
-    user_rag_memory_id=state.get("user_rag_memory_id",'')
+    user_rag_memory_id = state.get("user_rag_memory_id", '')
     retrieve_chunks_result = knowledge_retrieval(question, kb_config, [str(end_user_id)])
     try:
         retrieval_knowledge = [i.page_content for i in retrieve_chunks_result]
@@ -61,13 +58,13 @@ async def rag_knowledge(state,question):
         cleaned_query = question
         raw_results = clean_content
         logger.info(f" Using RAG storage with memory_id={user_rag_memory_id}")
-    except  Exception :
-        retrieval_knowledge=[]
+    except Exception:
+        retrieval_knowledge = []
         clean_content = ''
         raw_results = ''
         cleaned_query = question
         logger.info(f"No content retrieved from knowledge base: {user_rag_memory_id}")
-    return retrieval_knowledge,clean_content,cleaned_query,raw_results
+    return retrieval_knowledge, clean_content, cleaned_query, raw_results
 
 
 async def llm_infomation(state: ReadState) -> ReadState:
@@ -113,7 +110,7 @@ async def clean_databases(data) -> str:
 
         # 收集所有内容
         content_list = []
-        
+
         # 处理重排序结果
         reranked = results.get('reranked_results', {})
         if reranked:
@@ -141,7 +138,6 @@ async def clean_databases(data) -> str:
             elif isinstance(item, str):
                 text_parts.append(item)
 
-
         return '\n'.join(text_parts).strip()
 
     except Exception as e:
@@ -150,23 +146,23 @@ async def clean_databases(data) -> str:
 
 
 async def retrieve_nodes(state: ReadState) -> ReadState:
-
     '''
 
     模型信息
     '''
 
-    problem_extension=state.get('problem_extension', '')['context']
-    storage_type=state.get('storage_type', '')
-    user_rag_memory_id=state.get('user_rag_memory_id', '')
-    end_user_id=state.get('end_user_id', '')
+    problem_extension = state.get('problem_extension', '')['context']
+    storage_type = state.get('storage_type', '')
+    user_rag_memory_id = state.get('user_rag_memory_id', '')
+    end_user_id = state.get('end_user_id', '')
     memory_config = state.get('memory_config', None)
-    original=state.get('data', '')
-    problem_list=[]
-    for key,values in problem_extension.items():
+    original = state.get('data', '')
+    problem_list = []
+    for key, values in problem_extension.items():
         for data in values:
             problem_list.append(data)
     logger.info(f"Retrieve: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
+
     # 创建异步任务处理单个问题
     async def process_question_nodes(idx, question):
         try:
@@ -244,7 +240,7 @@ async def retrieve_nodes(state: ReadState) -> ReadState:
 
     send_verify = []
     for i, j in zip(keys, val, strict=False):
-        if j!=['']:
+        if j != ['']:
             send_verify.append({
                 "Query_small": i,
                 "Answer_Small": j
@@ -257,15 +253,13 @@ async def retrieve_nodes(state: ReadState) -> ReadState:
     }
 
     logger.info(f"Collected {len(intermediate_outputs)} intermediate outputs from search results")
-    return {'retrieve':dup_databases}
-
-
+    return {'retrieve': dup_databases}
 
 
 async def retrieve(state: ReadState) -> ReadState:
     # 从state中获取end_user_id
     import time
-    start=time.time()
+    start = time.time()
     problem_extension = state.get('problem_extension', '')['context']
     storage_type = state.get('storage_type', '')
     user_rag_memory_id = state.get('user_rag_memory_id', '')
@@ -283,6 +277,7 @@ async def retrieve(state: ReadState) -> ReadState:
         with get_db_context() as db:  # 使用同步数据库上下文管理器
             config_service = MemoryConfigService(db)
             return await llm_infomation(state)
+
     llm_config = await get_llm_info()
     api_key_obj = llm_config.api_keys[0]
     api_key = api_key_obj.api_key
@@ -296,11 +291,11 @@ async def retrieve(state: ReadState) -> ReadState:
     )
 
     time_retrieval_tool = create_time_retrieval_tool(end_user_id)
-    search_params = { "end_user_id": end_user_id, "return_raw_results": True }
-    hybrid_retrieval=create_hybrid_retrieval_tool_sync(memory_config, **search_params)
+    search_params = {"end_user_id": end_user_id, "return_raw_results": True}
+    hybrid_retrieval = create_hybrid_retrieval_tool_sync(memory_config, **search_params)
     agent = create_agent(
         llm,
-        tools=[time_retrieval_tool,hybrid_retrieval],
+        tools=[time_retrieval_tool, hybrid_retrieval],
         system_prompt=f"我是检索专家，可以根据适合的工具进行检索。当前使用的end_user_id是: {end_user_id}"
     )
 
@@ -314,7 +309,8 @@ async def retrieve(state: ReadState) -> ReadState:
         async with SEMAPHORE:  # 限制并发
             try:
                 if storage_type == "rag" and user_rag_memory_id:
-                    retrieval_knowledge, clean_content, cleaned_query, raw_results = await rag_knowledge(state, question)
+                    retrieval_knowledge, clean_content, cleaned_query, raw_results = await rag_knowledge(state,
+                                                                                                         question)
                 else:
                     cleaned_query = question
                     # 使用 asyncio 在线程池中运行同步的 agent.invoke
@@ -413,5 +409,3 @@ async def retrieve(state: ReadState) -> ReadState:
     #     json.dump(dup_databases, f, indent=4)
     logger.info(f"Collected {len(intermediate_outputs)} intermediate outputs from search results")
     return {'retrieve': dup_databases}
-
-

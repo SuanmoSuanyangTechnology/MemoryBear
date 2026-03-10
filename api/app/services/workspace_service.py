@@ -2,11 +2,11 @@ import datetime
 import hashlib
 import secrets
 import uuid
-from os import getenv
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.config.default_ontology_initializer import DefaultOntologyInitializer
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, PermissionDeniedException
@@ -30,17 +30,15 @@ from app.schemas.workspace_schema import (
     WorkspaceModelsUpdate,
     WorkspaceUpdate,
 )
-from app.config.default_ontology_initializer import DefaultOntologyInitializer
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
-from dotenv import load_dotenv
 
-load_dotenv()
+
 def switch_workspace(
-    db: Session,
-    workspace_id: uuid.UUID,
-    user: User,
+        db: Session,
+        workspace_id: uuid.UUID,
+        user: User,
 ):
     """切换工作空间"""
     business_logger.debug(f"用户 {user.username} 请求切换工作空间为 {workspace_id}")
@@ -60,31 +58,32 @@ def switch_workspace(
         raise BusinessException(f"切换工作空间失败: {str(e)}", BizCode.INTERNAL_ERROR)
 
 
-def  delete_workspace_member(
-            db: Session,
-            workspace_id: uuid.UUID,
-            member_id: uuid.UUID,
-            user: User,
-        ):
-        """删除工作空间成员"""
-        business_logger.debug(f"用户 {user.username} 请求删除工作空间 {workspace_id} 的成员 {member_id}")
-        _check_workspace_admin_permission(db, workspace_id, user)
-        workspace_member = workspace_repository.get_member_by_id(db=db, member_id=member_id)
-        if not workspace_member:
-                raise BusinessException(f"工作空间成员 {member_id} 不存在", BizCode.WORKSPACE_NOT_FOUND)
+def delete_workspace_member(
+        db: Session,
+        workspace_id: uuid.UUID,
+        member_id: uuid.UUID,
+        user: User,
+):
+    """删除工作空间成员"""
+    business_logger.debug(f"用户 {user.username} 请求删除工作空间 {workspace_id} 的成员 {member_id}")
+    _check_workspace_admin_permission(db, workspace_id, user)
+    workspace_member = workspace_repository.get_member_by_id(db=db, member_id=member_id)
+    if not workspace_member:
+        raise BusinessException(f"工作空间成员 {member_id} 不存在", BizCode.WORKSPACE_NOT_FOUND)
 
-        if workspace_member.workspace_id != workspace_id:
-                raise BusinessException(f"工作空间成员 {member_id} 不存在于工作空间 {workspace_id}", BizCode.WORKSPACE_NOT_FOUND)
+    if workspace_member.workspace_id != workspace_id:
+        raise BusinessException(f"工作空间成员 {member_id} 不存在于工作空间 {workspace_id}",
+                                BizCode.WORKSPACE_NOT_FOUND)
 
-        try:
-            workspace_member.is_active = False
-            workspace_member.user.current_workspace_id = None
-            db.commit()
-            business_logger.info(f"用户 {user.username} 成功删除工作空间 {workspace_id} 的成员 {member_id}")
-        except Exception as e:
-            db.rollback()
-            business_logger.error(f"删除工作空间成员失败 - 工作空间: {workspace_id}, 成员: {member_id}, 错误: {str(e)}")
-            raise BusinessException(f"删除工作空间成员失败: {str(e)}", BizCode.INTERNAL_ERROR)
+    try:
+        workspace_member.is_active = False
+        workspace_member.user.current_workspace_id = None
+        db.commit()
+        business_logger.info(f"用户 {user.username} 成功删除工作空间 {workspace_id} 的成员 {member_id}")
+    except Exception as e:
+        db.rollback()
+        business_logger.error(f"删除工作空间成员失败 - 工作空间: {workspace_id}, 成员: {member_id}, 错误: {str(e)}")
+        raise BusinessException(f"删除工作空间成员失败: {str(e)}", BizCode.INTERNAL_ERROR)
 
 
 def get_user_workspaces(db: Session, user: User) -> List[Workspace]:
@@ -102,18 +101,19 @@ def get_user_workspaces(db: Session, user: User) -> List[Workspace]:
     """
     business_logger.debug(f"获取用户工作空间列表: {user.username} (ID: {user.id})")
     workspaces = workspace_repository.get_workspaces_by_user(db=db, user_id=user.id)
-    
+
     # Ensure each neo4j workspace has a default memory config
     for workspace in workspaces:
         if workspace.storage_type == 'neo4j':
             _ensure_default_memory_config(db, workspace)
-    
+            _ensure_default_ontology_scenes(db, workspace)
+
     business_logger.info(f"用户 {user.username} 的工作空间数量: {len(workspaces)}")
     return workspaces
 
 
 def _create_workspace_only(
-    db: Session, workspace: WorkspaceCreate, owner: User
+        db: Session, workspace: WorkspaceCreate, owner: User
 ) -> Workspace:
     business_logger.debug(f"创建工作空间: {workspace.name}, 创建者: {owner.username}")
 
@@ -129,6 +129,7 @@ def _create_workspace_only(
         business_logger.error(f"创建工作空间失败: {workspace.name} - {str(e)}")
         raise
 
+
 def create_workspace(
         db: Session, workspace: WorkspaceCreate, user: User, language: str = "zh"
 ) -> Workspace:
@@ -136,9 +137,14 @@ def create_workspace(
         f"创建工作空间: {workspace.name}, 创建者: {user.username}, "
         f"storage_type: {workspace.storage_type}"
     )
-    llm=workspace.llm
-    embedding=workspace.embedding
-    rerank=workspace.rerank
+    if workspace_repository.get_workspaces_by_name(db=db, name=workspace.name, tenant_id=user.tenant_id):
+        raise BusinessException(
+            message="同名工作空间已存在",
+            code=BizCode.RESOURCE_ALREADY_EXISTS
+        )
+    llm = workspace.llm
+    embedding = workspace.embedding
+    rerank = workspace.rerank
     try:
         # Create the workspace without adding any members
         business_logger.debug(f"创建工作空间: {workspace.name}")
@@ -151,33 +157,35 @@ def create_workspace(
 
         # Initialize default ontology scenes for the workspace (先创建本体场景)
         default_scene_id = None
+        default_scene_name = None
         try:
             initializer = DefaultOntologyInitializer(db)
             success, error_msg = initializer.initialize_default_scenes(
                 db_workspace.id, language=language
             )
-            
+
             if success:
                 business_logger.info(
                     f"为工作空间 {db_workspace.id} 创建默认本体场景成功 (language={language})"
                 )
-                
+
                 # 获取默认场景ID，优先使用"在线教育"场景，如果不存在则使用"情感陪伴"场景
                 from app.repositories.ontology_scene_repository import OntologySceneRepository
                 from app.config.default_ontology_config import (
-                    ONLINE_EDUCATION_SCENE, 
+                    ONLINE_EDUCATION_SCENE,
                     EMOTIONAL_COMPANION_SCENE,
                     get_scene_name
                 )
-                
+
                 scene_repo = OntologySceneRepository(db)
-                
+
                 # 优先尝试获取教育场景
                 education_scene_name = get_scene_name(ONLINE_EDUCATION_SCENE, language)
                 education_scene = scene_repo.get_by_name(education_scene_name, db_workspace.id)
-                
+
                 if education_scene:
                     default_scene_id = education_scene.scene_id
+                    default_scene_name = education_scene.scene_name
                     business_logger.info(
                         f"获取到教育场景ID用于默认记忆配置: {default_scene_id} (scene_name={education_scene_name})"
                     )
@@ -185,9 +193,10 @@ def create_workspace(
                     # 如果教育场景不存在，尝试获取情感陪伴场景
                     companion_scene_name = get_scene_name(EMOTIONAL_COMPANION_SCENE, language)
                     companion_scene = scene_repo.get_by_name(companion_scene_name, db_workspace.id)
-                    
+
                     if companion_scene:
                         default_scene_id = companion_scene.scene_id
+                        default_scene_name = companion_scene.scene_name
                         business_logger.info(
                             f"教育场景不存在，使用情感陪伴场景ID用于默认记忆配置: {default_scene_id} (scene_name={companion_scene_name})"
                         )
@@ -218,6 +227,7 @@ def create_workspace(
                     embedding_id=embedding,
                     rerank_id=rerank,
                     scene_id=default_scene_id,  # 传入默认场景ID（优先教育场景，其次情感陪伴场景）
+                    pruning_scene_name=default_scene_name,  # 传入场景名称作为语义剪枝场景值
                 )
                 business_logger.info(
                     f"为工作空间 {db_workspace.id} 创建默认记忆配置成功 (scene_id={default_scene_id})"
@@ -250,10 +260,10 @@ def create_workspace(
                     avatar='',
                     type=KnowledgeType.General,
                     permission_id=PermissionType.Memory,
-                    embedding_id=uuid.UUID(getenv('KB_embedding_id')) if None else embedding,
-                    reranker_id=uuid.UUID(getenv('KB_reranker_id')) if None else rerank,
-                    llm_id=uuid.UUID(getenv('KB_llm_id')) if None else llm,
-                    image2text_id=uuid.UUID(getenv('KB_llm_id')) if None else llm,
+                    embedding_id=embedding,
+                    reranker_id=rerank,
+                    llm_id=llm,
+                    image2text_id=llm,
                     parser_config={
                         "layout_recognize": "DeepDOC",
                         "chunk_token_num": 256,
@@ -288,7 +298,7 @@ def create_workspace(
         business_logger.info(
             f"工作空间 {db_workspace.id} 及相关资源创建完成并已提交"
         )
-        
+
         return db_workspace
 
     except Exception as e:
@@ -298,11 +308,11 @@ def create_workspace(
 
 
 def update_workspace(
-    db: Session, workspace_id: uuid.UUID, workspace_in: WorkspaceUpdate, user: User
+        db: Session, workspace_id: uuid.UUID, workspace_in: WorkspaceUpdate, user: User
 ) -> Workspace:
     business_logger.info(f"更新工作空间: workspace_id={workspace_id}, 操作者: {user.username}")
 
-    db_workspace = _check_workspace_admin_permission(db,workspace_id,user)
+    db_workspace = _check_workspace_admin_permission(db, workspace_id, user)
     try:
         # 更新工作空间
         business_logger.debug(f"执行工作空间更新: {db_workspace.name} (ID: {workspace_id})")
@@ -322,7 +332,7 @@ def update_workspace(
 
 
 def get_workspace_members(
-    db: Session, workspace_id: uuid.UUID, user: User
+        db: Session, workspace_id: uuid.UUID, user: User
 ) -> List[WorkspaceMember]:
     """获取某工作空间的成员列表（关系序列化由模型关系支持）"""
     business_logger.info(f"获取工作空间成员: workspace_id={workspace_id}, 操作者: {user.username}")
@@ -364,7 +374,6 @@ def get_workspace_members(
     members = workspace_repository.get_members_by_workspace(db=db, workspace_id=workspace_id)
     business_logger.info(f"工作空间成员数量: {len(members)} - workspace_id={workspace_id}")
     return members
-
 
 
 # ==================== 邀请相关服务方法 ====================
@@ -459,13 +468,14 @@ def _check_workspace_admin_permission(db: Session, workspace_id: uuid.UUID, user
 
 
 def create_workspace_invite(
-    db: Session,
-    workspace_id: uuid.UUID,
-    invite_data: WorkspaceInviteCreate,
-    user: User
+        db: Session,
+        workspace_id: uuid.UUID,
+        invite_data: WorkspaceInviteCreate,
+        user: User
 ) -> WorkspaceInviteResponse:
     """创建工作空间邀请"""
-    business_logger.info(f"创建工作空间邀请: workspace_id={workspace_id}, email={invite_data.email}, 创建者: {user.username}")
+    business_logger.info(
+        f"创建工作空间邀请: workspace_id={workspace_id}, email={invite_data.email}, 创建者: {user.username}")
 
     try:
         # 检查权限
@@ -528,17 +538,18 @@ def create_workspace_invite(
 
     except Exception as e:
         db.rollback()
-        business_logger.error(f"创建工作空间邀请失败: workspace_id={workspace_id}, email={invite_data.email} - {str(e)}")
+        business_logger.error(
+            f"创建工作空间邀请失败: workspace_id={workspace_id}, email={invite_data.email} - {str(e)}")
         raise
 
 
 def get_workspace_invites(
-    db: Session,
-    workspace_id: uuid.UUID,
-    user: User,
-    status: Optional[InviteStatus] = None,
-    limit: int = 50,
-    offset: int = 0
+        db: Session,
+        workspace_id: uuid.UUID,
+        user: User,
+        status: Optional[InviteStatus] = None,
+        limit: int = 50,
+        offset: int = 0
 ) -> List[WorkspaceInviteResponse]:
     """获取工作空间邀请列表"""
     business_logger.info(f"获取工作空间邀请列表: workspace_id={workspace_id}, 操作者: {user.username}")
@@ -599,9 +610,9 @@ def validate_invite_token(db: Session, token: str) -> InviteValidateResponse:
 
 
 def accept_workspace_invite(
-    db: Session,
-    accept_request: InviteAcceptRequest,
-    user: User
+        db: Session,
+        accept_request: InviteAcceptRequest,
+        user: User
 ) -> dict:
     """接受工作空间邀请"""
     business_logger.info(f"接受工作空间邀请: 用户 {user.username}")
@@ -689,7 +700,8 @@ def accept_workspace_invite(
         # 获取工作空间信息
         workspace = workspace_repository.get_workspace_by_id(db=db, workspace_id=invite.workspace_id)
 
-        business_logger.info(f"用户成功加入工作空间: user={user.username}, workspace={workspace.name}, role={workspace_role}")
+        business_logger.info(
+            f"用户成功加入工作空间: user={user.username}, workspace={workspace.name}, role={workspace_role}")
 
         return {
             "message": "Successfully joined the workspace",
@@ -704,13 +716,14 @@ def accept_workspace_invite(
 
 
 def revoke_workspace_invite(
-    db: Session,
-    workspace_id: uuid.UUID,
-    invite_id: uuid.UUID,
-    user: User
+        db: Session,
+        workspace_id: uuid.UUID,
+        invite_id: uuid.UUID,
+        user: User
 ) -> dict:
     """撤销工作空间邀请"""
-    business_logger.info(f"撤销工作空间邀请: workspace_id={workspace_id}, invite_id={invite_id}, 操作者: {user.username}")
+    business_logger.info(
+        f"撤销工作空间邀请: workspace_id={workspace_id}, invite_id={invite_id}, 操作者: {user.username}")
 
     try:
         # 检查权限
@@ -739,13 +752,14 @@ def revoke_workspace_invite(
 
 
 def update_workspace_member_roles(
-    db: Session,
-    workspace_id: uuid.UUID,
-    updates: List[WorkspaceMemberUpdate],
-    user: User,
+        db: Session,
+        workspace_id: uuid.UUID,
+        updates: List[WorkspaceMemberUpdate],
+        user: User,
 ) -> List[WorkspaceMember]:
     """更新工作空间成员角色"""
-    business_logger.info(f"更新工作空间成员角色: workspace_id={workspace_id}, 操作者: {user.username}, 更新数量: {len(updates)}")
+    business_logger.info(
+        f"更新工作空间成员角色: workspace_id={workspace_id}, 操作者: {user.username}, 更新数量: {len(updates)}")
 
     # 检查管理员权限
     _check_workspace_admin_permission(db, workspace_id, user)
@@ -759,7 +773,8 @@ def update_workspace_member_roles(
     for upd in updates:
         # 检查成员是否存在
         if upd.id not in member_map:
-            raise BusinessException(f"成员 {upd.id} 不存在于工作空间 {workspace_id}", BizCode.WORKSPACE_MEMBER_NOT_FOUND)
+            raise BusinessException(f"成员 {upd.id} 不存在于工作空间 {workspace_id}",
+                                    BizCode.WORKSPACE_MEMBER_NOT_FOUND)
 
         member = member_map[upd.id]
 
@@ -911,10 +926,10 @@ def get_workspace_models_configs(
 
 
 def update_workspace_models_configs(
-    db: Session,
-    workspace_id: uuid.UUID,
-    models_update: WorkspaceModelsUpdate,
-    user: User,
+        db: Session,
+        workspace_id: uuid.UUID,
+        models_update: WorkspaceModelsUpdate,
+        user: User,
 ) -> Workspace:
     """更新工作空间的模型配置（llm, embedding, rerank）
 
@@ -961,88 +976,9 @@ def update_workspace_models_configs(
         raise BusinessException(f"更新模型配置失败: {str(e)}", BizCode.INTERNAL_ERROR)
 
 
-def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
-    """Ensure a workspace has a default memory config, creating one if missing.
-    
-    Also fills empty model fields for all configs in this workspace.
-    
-    Args:
-        db: Database session
-        workspace: The workspace to check
-    """
-    from app.models.memory_config_model import MemoryConfig
-    
-    # Check if default config exists for this workspace
-    existing_default = db.query(MemoryConfig).filter(
-        MemoryConfig.workspace_id == workspace.id,
-        MemoryConfig.is_default == True
-    ).first()
-    
-    if not existing_default:
-        # No default config exists, create one
-        business_logger.info(
-            f"Workspace {workspace.id} missing default memory config, creating one"
-        )
-        
-        # 尝试获取默认场景ID，优先教育场景，其次情感陪伴场景
-        default_scene_id = None
-        try:
-            from app.repositories.ontology_scene_repository import OntologySceneRepository
-            from app.config.default_ontology_config import (
-                ONLINE_EDUCATION_SCENE,
-                EMOTIONAL_COMPANION_SCENE,
-                get_scene_name
-            )
-            
-            scene_repo = OntologySceneRepository(db)
-            # 尝试中文和英文场景名称
-            for language in ["zh", "en"]:
-                # 优先尝试教育场景
-                education_scene_name = get_scene_name(ONLINE_EDUCATION_SCENE, language)
-                education_scene = scene_repo.get_by_name(education_scene_name, workspace.id)
-                if education_scene:
-                    default_scene_id = education_scene.scene_id
-                    business_logger.info(
-                        f"找到教育场景用于默认记忆配置: scene_id={default_scene_id}, scene_name={education_scene_name}"
-                    )
-                    break
-                
-                # 如果教育场景不存在，尝试情感陪伴场景
-                companion_scene_name = get_scene_name(EMOTIONAL_COMPANION_SCENE, language)
-                companion_scene = scene_repo.get_by_name(companion_scene_name, workspace.id)
-                if companion_scene:
-                    default_scene_id = companion_scene.scene_id
-                    business_logger.info(
-                        f"教育场景不存在，找到情感陪伴场景用于默认记忆配置: scene_id={default_scene_id}, scene_name={companion_scene_name}"
-                    )
-                    break
-        except Exception as scene_error:
-            business_logger.warning(
-                f"获取默认场景失败，将创建不关联场景的记忆配置: {str(scene_error)}"
-            )
-        
-        try:
-            _create_default_memory_config(
-                db=db,
-                workspace_id=workspace.id,
-                workspace_name=workspace.name,
-                llm_id=uuid.UUID(workspace.llm) if workspace.llm else None,
-                embedding_id=uuid.UUID(workspace.embedding) if workspace.embedding else None,
-                rerank_id=uuid.UUID(workspace.rerank) if workspace.rerank else None,
-                scene_id=default_scene_id,  # 传入默认场景ID（优先教育场景，其次情感陪伴场景）
-            )
-        except Exception as e:
-            business_logger.error(
-                f"Failed to create default memory config for workspace {workspace.id}: {str(e)}"
-            )
-    
-    # Fill empty model fields for ALL configs in this workspace
-    _fill_workspace_configs_model_defaults(db, workspace)
-
-
 def _fill_workspace_configs_model_defaults(
-    db: Session,
-    workspace: Workspace
+        db: Session,
+        workspace: Workspace
 ) -> None:
     """Fill empty model fields for all memory configs in a workspace.
     
@@ -1054,43 +990,43 @@ def _fill_workspace_configs_model_defaults(
         workspace: The workspace containing default model settings
     """
     from app.models.memory_config_model import MemoryConfig
-    
+
     # Get all configs for this workspace
     configs = db.query(MemoryConfig).filter(
         MemoryConfig.workspace_id == workspace.id
     ).all()
-    
+
     if not configs:
         return
-    
+
     # Map of memory_config field -> workspace field
     model_field_mappings = [
         ("llm_id", "llm"),
         ("embedding_id", "embedding"),
         ("rerank_id", "rerank"),
         ("reflection_model_id", "llm"),  # reflection uses LLM
-        ("emotion_model_id", "llm"),     # emotion uses LLM
+        ("emotion_model_id", "llm"),  # emotion uses LLM
     ]
-    
+
     configs_updated = 0
-    
+
     for memory_config in configs:
         updated_fields = []
-        
+
         for config_field, workspace_field in model_field_mappings:
             config_value = getattr(memory_config, config_field, None)
             workspace_value = getattr(workspace, workspace_field, None)
-            
+
             if not config_value and workspace_value:
                 setattr(memory_config, config_field, workspace_value)
                 updated_fields.append(config_field)
-        
+
         if updated_fields:
             configs_updated += 1
             business_logger.debug(
                 f"Updated memory config {memory_config.config_id} fields: {updated_fields}"
             )
-    
+
     if configs_updated > 0:
         try:
             db.commit()
@@ -1105,13 +1041,14 @@ def _fill_workspace_configs_model_defaults(
 
 
 def _create_default_memory_config(
-    db: Session,
-    workspace_id: uuid.UUID,
-    workspace_name: str,
-    llm_id: Optional[uuid.UUID] = None,
-    embedding_id: Optional[uuid.UUID] = None,
-    rerank_id: Optional[uuid.UUID] = None,
-    scene_id: Optional[uuid.UUID] = None,
+        db: Session,
+        workspace_id: uuid.UUID,
+        workspace_name: str,
+        llm_id: Optional[uuid.UUID] = None,
+        embedding_id: Optional[uuid.UUID] = None,
+        rerank_id: Optional[uuid.UUID] = None,
+        scene_id: Optional[uuid.UUID] = None,
+        pruning_scene_name: Optional[str] = None,
 ) -> None:
     """Create a default memory config for a newly created workspace.
     
@@ -1123,11 +1060,12 @@ def _create_default_memory_config(
         embedding_id: Optional embedding model ID
         rerank_id: Optional rerank model ID
         scene_id: Optional ontology scene ID (默认关联教育场景)
+        pruning_scene_name: Optional pruning scene name，取自 ontology_scene.scene_name
     """
     from app.models.memory_config_model import MemoryConfig
-    
+
     config_id = uuid.uuid4()
-    
+
     default_config = MemoryConfig(
         config_id=config_id,
         config_name=f"{workspace_name} 默认配置",
@@ -1136,14 +1074,15 @@ def _create_default_memory_config(
         llm_id=str(llm_id) if llm_id else None,
         embedding_id=str(embedding_id) if embedding_id else None,
         rerank_id=str(rerank_id) if rerank_id else None,
-        scene_id=scene_id,  # 关联本体场景ID
+        scene_id=scene_id,  # 关联本体场景ID（默认为"在线教育"场景）
+        pruning_scene=pruning_scene_name,  # 语义剪枝场景直接使用 scene_name
         state=True,  # Active by default
         is_default=True,  # Mark as workspace default
     )
-    
+
     db.add(default_config)
     db.flush()  # 使用 flush 而不是 commit，让调用者统一提交
-    
+
     business_logger.info(
         "Created default memory config for workspace",
         extra={
@@ -1153,3 +1092,130 @@ def _create_default_memory_config(
             "scene_id": str(scene_id) if scene_id else None,
         }
     )
+
+
+# ==================== 检查配置相关服务 ====================
+
+def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
+    """Ensure a workspace has a default memory config, creating one if missing.
+    
+    Also fills empty model fields for all configs in this workspace.
+    
+    Args:
+        db: Database session
+        workspace: The workspace to check
+    """
+    from app.models.memory_config_model import MemoryConfig
+
+    # Check if default config exists for this workspace
+    existing_default = db.query(MemoryConfig).filter(
+        MemoryConfig.workspace_id == workspace.id,
+        MemoryConfig.is_default == True
+    ).first()
+
+    if not existing_default:
+        # No default config exists, create one
+        business_logger.info(
+            f"Workspace {workspace.id} missing default memory config, creating one"
+        )
+
+        # 尝试获取默认场景ID，优先教育场景，其次情感陪伴场景
+        default_scene_id = None
+        try:
+            from app.repositories.ontology_scene_repository import OntologySceneRepository
+            from app.config.default_ontology_config import (
+                ONLINE_EDUCATION_SCENE,
+                EMOTIONAL_COMPANION_SCENE,
+                get_scene_name
+            )
+
+            scene_repo = OntologySceneRepository(db)
+            # 尝试中文和英文场景名称
+            for language in ["zh", "en"]:
+                # 优先尝试教育场景
+                education_scene_name = get_scene_name(ONLINE_EDUCATION_SCENE, language)
+                education_scene = scene_repo.get_by_name(education_scene_name, workspace.id)
+                if education_scene:
+                    default_scene_id = education_scene.scene_id
+                    business_logger.info(
+                        f"找到教育场景用于默认记忆配置: scene_id={default_scene_id}, scene_name={education_scene_name}"
+                    )
+                    break
+
+                # 如果教育场景不存在，尝试情感陪伴场景
+                companion_scene_name = get_scene_name(EMOTIONAL_COMPANION_SCENE, language)
+                companion_scene = scene_repo.get_by_name(companion_scene_name, workspace.id)
+                if companion_scene:
+                    default_scene_id = companion_scene.scene_id
+                    business_logger.info(
+                        f"教育场景不存在，找到情感陪伴场景用于默认记忆配置: scene_id={default_scene_id}, scene_name={companion_scene_name}"
+                    )
+                    break
+        except Exception as scene_error:
+            business_logger.warning(
+                f"获取默认场景失败，将创建不关联场景的记忆配置: {str(scene_error)}"
+            )
+
+        try:
+            _create_default_memory_config(
+                db=db,
+                workspace_id=workspace.id,
+                workspace_name=workspace.name,
+                llm_id=uuid.UUID(workspace.llm) if workspace.llm else None,
+                embedding_id=uuid.UUID(workspace.embedding) if workspace.embedding else None,
+                rerank_id=uuid.UUID(workspace.rerank) if workspace.rerank else None,
+                scene_id=default_scene_id,  # 传入默认场景ID（优先教育场景，其次情感陪伴场景）
+            )
+        except Exception as e:
+            business_logger.error(
+                f"Failed to create default memory config for workspace {workspace.id}: {str(e)}"
+            )
+
+    # Fill empty model fields for ALL configs in this workspace
+    _fill_workspace_configs_model_defaults(db, workspace)
+
+
+def _ensure_default_ontology_scenes(db: Session, workspace: Workspace) -> None:
+    """Ensure a workspace has default ontology scenes, creating them if missing.
+
+    Checks whether any is_system_default scene exists for the workspace.
+    If not, runs the DefaultOntologyInitializer to create them.
+
+    Args:
+        db: Database session
+        workspace: The workspace to check
+    """
+    from app.models.ontology_scene import OntologyScene
+
+    # 幂等检查：是否已存在系统默认场景
+    existing = db.query(OntologyScene).filter(
+        OntologyScene.workspace_id == workspace.id,
+        OntologyScene.is_system_default.is_(True)
+    ).first()
+
+    if existing:
+        return
+
+    business_logger.info(
+        f"Workspace {workspace.id} missing default ontology scenes, creating them"
+    )
+
+    try:
+        initializer = DefaultOntologyInitializer(db)
+        success, error_msg = initializer.initialize_default_scenes(
+            workspace.id, language="zh"
+        )
+        if success:
+            db.commit()
+            business_logger.info(
+                f"为工作空间 {workspace.id} 补建默认本体场景成功"
+            )
+        else:
+            business_logger.warning(
+                f"为工作空间 {workspace.id} 补建默认本体场景失败: {error_msg}"
+            )
+    except Exception as e:
+        db.rollback()
+        business_logger.error(
+            f"为工作空间 {workspace.id} 补建默认本体场景异常: {str(e)}"
+        )

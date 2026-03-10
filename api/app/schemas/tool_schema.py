@@ -155,6 +155,10 @@ class MCPToolConfigSchema(BaseModel):
     health_status: str = "unknown"
     error_message: Optional[str] = None
     available_tools: List[Dict[str, Dict[str, Any]]] = Field(default_factory=list, description="工具列表，格式: [{'tool_name': str, 'arguments': dict}]")
+    source_channel: Optional[str] = Field(None, description="来源渠道")
+    market_id: Optional[str] = Field(None, description="渠道市场id")
+    market_config_id: Optional[str] = Field(None, description="渠道市场配置id")
+    mcp_service_id: Optional[str] = Field(None, description="mcp服务id")
 
     class Config:
         from_attributes = True
@@ -192,6 +196,10 @@ class ToolCreateRequest(BaseModel):
     tool_type: ToolType
     config: Dict[str, Any] = Field(default_factory=dict)
     tags: List[str] = Field(default_factory=list)
+    source_channel: Optional[str] = Field(None, description="来源渠道（仅MCP工具）")
+    market_id: Optional[str] = Field(None, description="渠道市场id（仅MCP工具）")
+    market_config_id: Optional[str] = Field(None, description="渠道市场配置id（仅MCP工具）")
+    mcp_service_id: Optional[str] = Field(None, description="mcp服务id（仅MCP工具）")
 
 
 class ToolUpdateRequest(BaseModel):

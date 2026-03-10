@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 11:50:47
+ * @Last Modified time: 2026-03-06 12:26:12
  */
 /**
  * Model List Detail Drawer
@@ -144,7 +144,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
                   {item.name[0]}
                 </div>
               }
-              extra={<Switch defaultChecked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
+              extra={<Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
               bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
             >
               <Tooltip title={item.description}>
@@ -153,7 +153,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
                 <Row gutter={12}>
                   <Col span={12}>
-                    <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>
+                    {!item.model_id && <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>}
                   </Col>
                   <Col span={12}>
                     <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>

@@ -23,6 +23,7 @@ class ModelConfigBase(BaseModel):
     load_balance_strategy: Optional[str] = Field(LoadBalanceStrategy.NONE.value, description="负载均衡策略")
     capability: List[str] = Field(default_factory=list, description="模型能力列表")
     is_omni: bool = Field(False, description="是否为Omni模型")
+    model_id: Optional[uuid.UUID] = Field(None, description="基础模型ID")
 
 
 class ApiKeyCreateNested(BaseModel):
@@ -116,8 +117,8 @@ class ModelApiKeyBase(BaseModel):
     provider: ModelProvider = Field(..., description="API Key提供商")
     api_key: str = Field(..., description="API密钥", max_length=500)
     api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
-    capability: List[str] = Field(default_factory=list, description="模型能力列表")
-    is_omni: bool = Field(False, description="是否为Omni模型")
+    capability: Optional[List[str]] = Field(None, description="模型能力列表")
+    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
     config: Optional[Dict[str, Any]] = Field({}, description="API Key特定配置")
     is_active: bool = Field(True, description="是否激活")
     priority: str = Field("1", description="优先级", max_length=10)

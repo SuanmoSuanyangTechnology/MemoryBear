@@ -82,6 +82,7 @@ const CreateDataset = () => {
   const [form] = Form.useForm<ContentFormData>();
   const [data, setData] = useState<KnowledgeBaseDocumentData[]>([]);
   const [rechunkFileIds, setRechunkFileIds] = useState<string[]>(initialFileIds);
+  const [textFormValid, setTextFormValid] = useState<boolean>(false);
 
   const [pollingLoading, setPollingLoading] = useState<boolean>(false);
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -624,7 +625,16 @@ const CreateDataset = () => {
             )}
             {source && source === 'text' && (
                 <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
-                    <Form form={form} layout="vertical">
+                    <Form 
+                      form={form} 
+                      layout="vertical"
+                      onValuesChange={() => {
+                        // 检查表单字段是否都已填写
+                        const values = form.getFieldsValue();
+                        const isValid = !!(values.title?.trim() && values.content?.trim());
+                        setTextFormValid(isValid);
+                      }}
+                    >
                         <Form.Item
                           name="title"
                           label={t('knowledgeBase.title')}
@@ -845,7 +855,11 @@ const CreateDataset = () => {
         <Button 
           type='primary' 
           onClick={current === 2 ? handleStartUpload : handleNext}
-          disabled={pollingLoading || (current === 0 && rechunkFileIds.length === 0)}
+          disabled={
+            pollingLoading || 
+            (current === 0 && source === 'local' && rechunkFileIds.length === 0) ||
+            (current === 0 && source === 'text' && !textFormValid)
+          }
         >
           {current === 2 ? t('knowledgeBase.startUploading') || 'Start Upload' : t('common.next') || 'Next'}
         </Button>

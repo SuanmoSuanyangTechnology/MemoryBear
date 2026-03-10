@@ -226,8 +226,8 @@ REDIS_PORT=6379
 REDIS_DB=1 
 
 # Celery (Using Redis as broker)
-BROKER_URL=redis://127.0.0.1:6379/0
-RESULT_BACKEND=redis://127.0.0.1:6379/0
+REDIS_DB_CELERY_BROKER=1
+REDIS_DB_CELERY_BACKEND=2
 
 # JWT Secret Key (Formation method: openssl rand -hex 32)
 SECRET_KEY=your-secret-key-here

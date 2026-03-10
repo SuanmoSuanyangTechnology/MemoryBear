@@ -116,27 +116,15 @@ class ModelConfigService:
         try:
             start_time = time.time()
 
-            # dashscope 的 omni 模型需要使用 compatible-mode
-            if provider.lower() == ModelProvider.DASHSCOPE and is_omni:
-                if not api_base:
-                    api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-                model_config = RedBearModelConfig(
-                    model_name=model_name,
-                    provider=ModelProvider.OPENAI,
-                    api_key=api_key,
-                    base_url=api_base,
-                    temperature=0.7,
-                    max_tokens=100
-                )
-            else:
-                model_config = RedBearModelConfig(
-                    model_name=model_name,
-                    provider=provider,
-                    api_key=api_key,
-                    base_url=api_base,
-                    temperature=0.7,
-                    max_tokens=100
-                )
+            model_config = RedBearModelConfig(
+                model_name=model_name,
+                provider=provider,
+                api_key=api_key,
+                base_url=api_base,
+                is_omni=is_omni,
+                temperature=0.7,
+                max_tokens=100
+            )
 
             # 根据模型类型选择不同的验证方式
             model_type_lower = model_type.lower()
@@ -492,6 +480,9 @@ class ModelApiKeyService:
             model_config = ModelConfigRepository.get_by_id(db, model_config_id)
             if not model_config:
                 continue
+
+            data.is_omni = model_config.is_omni
+            data.capability = model_config.capability
             
             # 从ModelBase获取model_name
             model_name = model_config.model_base.name if model_config.model_base else model_config.name
@@ -550,8 +541,8 @@ class ModelApiKeyService:
                 provider=data.provider,
                 api_key=data.api_key,
                 api_base=data.api_base,
-                capability=data.capability if data.capability is not None else model_config.capability,
-                is_omni=data.is_omni if data.is_omni is not None else model_config.is_omni,
+                capability=data.capability,
+                is_omni=data.is_omni,
                 config=data.config,
                 is_active=data.is_active,
                 priority=data.priority
@@ -574,6 +565,10 @@ class ModelApiKeyService:
                 model_config = ModelConfigRepository.get_by_id(db, model_config_id)
                 if not model_config:
                     raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+                if api_key_data.is_omni is None:
+                    api_key_data.is_omni = model_config.is_omni
+                if api_key_data.capability is None:
+                    api_key_data.capability = model_config.capability
                 
                 # 检查API Key是否已存在(包括软删除)，需要考虑tenant_id
                 existing_key = db.query(ModelApiKey).join(
@@ -616,7 +611,7 @@ class ModelApiKeyService:
                     api_base=api_key_data.api_base,
                     model_type=model_config.type,
                     test_message="Hello",
-                    is_omni=model_config.is_omni
+                    is_omni=api_key_data.is_omni
                 )
                 if not validation_result["valid"]:
                     raise BusinessException(
@@ -785,6 +780,7 @@ class ModelBaseService:
             "description": model_base.description,
             "capability": model_base.capability,
             "is_omni": model_base.is_omni,
+            "is_active": False,
             "is_composite": False
         }
         model_config = ModelConfigRepository.create(db, model_config_data)

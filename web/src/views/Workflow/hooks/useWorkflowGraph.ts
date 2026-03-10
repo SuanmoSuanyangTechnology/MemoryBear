@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 17:59:34
+ * @Last Modified time: 2026-03-07 15:23:39
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -12,9 +12,10 @@ import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, noteNode, notesConfig } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
+import { useUser } from '@/store/user';
 
 /**
  * Props for useWorkflowGraph hook
@@ -64,6 +65,8 @@ export interface UseWorkflowGraphReturn {
   chatVariables: ChatVariable[];
   /** Function to update chat variables */
   setChatVariables: React.Dispatch<React.SetStateAction<ChatVariable[]>>;
+
+  handleAddNotes: () => void;
 }
 
 /**
@@ -80,6 +83,7 @@ export const useWorkflowGraph = ({
   const { id } = useParams();
   const { message } = App.useApp();
   const { t } = useTranslation()
+  const { user } = useUser();
   
   // Refs
   const graphRef = useRef<Graph>();
@@ -128,7 +132,7 @@ export const useWorkflowGraph = ({
     if (nodes.length) {
       const nodeList = nodes.map(node => {
         const { id, type, name, position, config = {} } = node
-        let nodeLibraryConfig = [...nodeLibrary, { nodes: [unknownNode] }]
+        let nodeLibraryConfig = [...nodeLibrary, { nodes: [unknownNode, notesConfig] }]
           .flatMap(category => category.nodes)
           .find(n => n.type === type)
         nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
@@ -196,6 +200,13 @@ export const useWorkflowGraph = ({
           name,
           data: { ...node, ...nodeLibraryConfig},
           ...position,
+        }
+
+        if (type === 'notes') {
+          const w = config.width;
+          const h = config.height;
+          if (w) nodeConfig.width = w as number;
+          if (h) nodeConfig.height = h as number;
         }
         
         // Generate ports dynamically for if-else node based on cases
@@ -461,11 +472,12 @@ export const useWorkflowGraph = ({
    */
   const nodeClick = ({ node }: { node: Node }) => {
     // Ignore add-node type node clicks
-    if (node.getData()?.type === 'add-node' || node.getData().type === 'break' || node.getData().type === 'cycle-start') {
+    const nodeData = node.getData()
+    if (nodeData?.type === 'add-node' || nodeData.type === 'break' || nodeData.type === 'cycle-start') {
       setSelectedNode(null)
       return;
     }
-    
+
     const nodes = graphRef.current?.getNodes();
 
     nodes?.forEach(vo => {
@@ -478,10 +490,12 @@ export const useWorkflowGraph = ({
       }
     });
     node.setData({
-      ...node.getData(),
+      ...nodeData,
       isSelected: true,
     });
-    setSelectedNode(node);
+    if (nodeData.type !== 'notes') {
+      setSelectedNode(node);
+    }
   };
   /**
    * Handle edge click event
@@ -715,6 +729,8 @@ export const useWorkflowGraph = ({
       panning: isHandMode,
       mousewheel: {
         enabled: true,
+        factor: 0.1,
+        modifiers: null,
       },
       connecting: {
         connector: {
@@ -857,8 +873,31 @@ export const useWorkflowGraph = ({
     init();
 
     window.addEventListener('resize', handleResize);
+
+    const handleNoteKeydown = (e: KeyboardEvent) => {
+      if (!graphRef.current) return;
+      const selectedNote = graphRef.current.getNodes().find(n => n.getData()?.isSelected && n.getData()?.type === 'notes');
+      if (!selectedNote) return;
+      const isMeta = e.ctrlKey || e.metaKey;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Only delete node when editor is not focused on text
+        const active = document.activeElement;
+        if (active && (active as HTMLElement).isContentEditable) return;
+        deleteEvent();
+      } else if (isMeta && e.key === 'c') {
+        copyEvent();
+      } else if (isMeta && e.key === 'v') {
+        parseEvent();
+      } else if (isMeta && e.key === 'd') {
+        e.preventDefault();
+        deleteEvent();
+      }
+    };
+    window.addEventListener('keydown', handleNoteKeydown);
+
     return () => {
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('keydown', handleNoteKeydown);
       graphRef.current?.dispose();
     };
   }, []);
@@ -882,7 +921,7 @@ export const useWorkflowGraph = ({
       .flatMap(category => category.nodes)
       .find(n => n.type === dragData.type);
     nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
-    
+
     // Create clean node data, only keep necessary fields
     const cleanNodeData = {
       id: `${dragData.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -1101,6 +1140,32 @@ export const useWorkflowGraph = ({
     })
   }
 
+  const handleAddNotes = () => {
+    if (!graphRef.current) return;
+    const nodeConfig: NodeProperties = JSON.parse(JSON.stringify(notesConfig));
+    nodeConfig.config = {
+      ...nodeConfig.config,
+      author: { type: 'define', defaultValue: user?.username || '' },
+    };
+    const cleanNodeData = {
+      id: `notes_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: t('workflow.notes'),
+      ...nodeConfig,
+    };
+    const container = graphRef.current.container;
+    const nodeW = graphNodeLibrary.notes?.width || nodeWidth;
+    const nodeH = graphNodeLibrary.notes?.height || 100;
+    const rect = container.getBoundingClientRect();
+    const center = graphRef.current.clientToLocal(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    graphRef.current.addNode({
+      ...(graphNodeLibrary.notes || graphNodeLibrary.default),
+      x: center.x - nodeW / 2,
+      y: center.y - nodeH / 2,
+      id: cleanNodeData.id,
+      data: { ...cleanNodeData },
+    });
+  }
+
   return {
     config,
     setConfig,
@@ -1118,6 +1183,7 @@ export const useWorkflowGraph = ({
     parseEvent,
     handleSave,
     chatVariables,
-    setChatVariables
+    setChatVariables,
+    handleAddNotes
   };
 };

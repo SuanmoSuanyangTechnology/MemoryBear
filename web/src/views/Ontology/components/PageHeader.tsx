@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:24 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 18:02:13
+ * @Last Modified time: 2026-03-06 11:25:59
  */
 import { type FC, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -17,7 +17,7 @@ const { Header } = Layout;
  */
 interface ConfigHeaderProps {
   /** Page title/name */
-  name?: string;
+  name?: string | ReactNode;
   /** Subtitle content displayed below the title */
   subTitle?: ReactNode | string;
   /** Extra content displayed on the right side */

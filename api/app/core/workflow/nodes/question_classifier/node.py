@@ -56,11 +56,12 @@ class QuestionClassifierNode(BaseNode):
             if not config.api_keys or len(config.api_keys) == 0:
                 raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
 
-            api_config = config.api_keys[0]
+            api_config = self.model_balance(config)
             model_name = api_config.model_name
             provider = api_config.provider
             api_key = api_config.api_key
             base_url = api_config.api_base
+            is_omni = api_config.is_omni
             model_type = config.type
 
         return RedBearLLM(
@@ -69,6 +70,7 @@ class QuestionClassifierNode(BaseNode):
                 provider=provider,
                 api_key=api_key,
                 base_url=base_url,
+                is_omni=is_omni
             ),
             type=ModelType(model_type)
         )

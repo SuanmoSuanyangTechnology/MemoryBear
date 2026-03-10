@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 18:51:20
+ * @Last Modified time: 2026-03-05 17:03:46
  */
 /**
  * Chat debugging component for application testing
@@ -171,6 +171,29 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
       .then(() => {
         const message = msg
         if (!message?.trim()) return
+        // Validate required variables before sending
+        let isCanSend = true
+        const params: Record<string, any> = {}
+        if (chatVariables && chatVariables.length > 0) {
+          const needRequired: string[] = []
+          chatVariables.forEach(vo => {
+            params[vo.name] = vo.value
+
+            if (vo.required && (params[vo.name] === null || params[vo.name] === undefined || params[vo.name] === '')) {
+              isCanSend = false
+              needRequired.push(vo.name)
+            }
+          })
+
+          if (needRequired.length) {
+            messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
+          }
+        }
+        if (!isCanSend) {
+          setLoading(false)
+          setCompareLoading(false)
+          return
+        }
 
         addUserMessage(message, fileList)
         setMessage(message)
@@ -198,29 +221,6 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
         };
 
         setTimeout(() => {
-          // Validate required variables before sending
-          let isCanSend = true
-          const params: Record<string, any> = {}
-          if (chatVariables && chatVariables.length > 0) {
-            const needRequired: string[] = []
-            chatVariables.forEach(vo => {
-              params[vo.name] = vo.value
-
-              if (vo.required && (params[vo.name] === null || params[vo.name] === undefined || params[vo.name] === '')) {
-                isCanSend = false
-                needRequired.push(vo.name)
-              }
-            })
-
-            if (needRequired.length) {
-              messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
-            }
-          }
-          if (!isCanSend) {
-            setLoading(false)
-            setCompareLoading(false)
-            return
-          }
           runCompare(data.app_id, {
             message,
             files: fileList.map(file => {

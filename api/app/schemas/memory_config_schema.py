@@ -417,6 +417,7 @@ class MemoryConfig:
     
     # Ontology scene association
     scene_id: Optional[UUID] = None
+    ontology_classes: Optional[list] = field(default=None)
     
     def __post_init__(self):
         """Validate configuration after initialization."""
