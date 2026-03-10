@@ -33,6 +33,7 @@ class DialogExtractionResponse(BaseModel):
 
     - is_related：对话与场景的相关性判定。
     - times / ids / amounts / contacts / addresses / keywords：重要信息片段，用来在不相关对话中保留关键消息。
+    - preserve_keywords：情绪/兴趣/爱好/个人观点相关词，包含这些词的消息必须强制保留。
     """
     is_related: bool = Field(...)
     times: List[str] = Field(default_factory=list)
@@ -41,6 +42,7 @@ class DialogExtractionResponse(BaseModel):
     contacts: List[str] = Field(default_factory=list)
     addresses: List[str] = Field(default_factory=list)
     keywords: List[str] = Field(default_factory=list)
+    preserve_keywords: List[str] = Field(default_factory=list, description="情绪/兴趣/爱好/个人观点相关词，包含这些词的消息强制保留")
 
 
 class MessageImportanceResponse(BaseModel):
@@ -198,26 +200,37 @@ class SemanticPruner:
             
         return min(score, 10)  # 最高10分
 
+    # 情绪/兴趣/爱好安全防线正则（类级别，避免重复编译）
+    _EMOTION_INTEREST_GUARD = re.compile(
+        r"开心|高兴|快乐|幸福|感动|难过|悲伤|伤心|委屈|失落|沮丧|郁闷|"
+        r"生气|愤怒|烦躁|焦虑|害怕|担心|压力|兴奋|期待|惊喜|惊讶|"
+        r"喜欢|热爱|爱好|兴趣|擅长|享受|沉迷|着迷|讨厌|厌恶|"
+        r"happy|sad|angry|excited|anxious|love|hate|enjoy|like|dislike"
+    )
+
     def _is_filler_message(self, message: ConversationMessage) -> bool:
         """检测典型寒暄/口头禅/确认类短消息。
 
-        改进版：更严格的填充消息判断，避免误删场景相关内容
-        满足以下之一视为填充消息：
-        - 纯标点或空白
-        - 在场景特定填充词库中（精确匹配）
-        - 纯表情符号
-        - 常见寒暄（精确匹配短语）
-        
-        注意：不再使用长度判断，避免误删短但重要的消息
+        判断顺序：
+        1. 情绪/兴趣安全防线（最高优先级）：包含情绪词或兴趣词的消息，无论多短都不视为填充
+        2. 空消息
+        3. 场景特定填充词库精确匹配
+        4. 常见寒暄精确匹配
+        5. 纯表情/标点
         """
         t = message.msg.strip()
         if not t:
             return True
-        
+
+        # ── 最高优先级：情绪/兴趣安全防线 ──
+        # "我好开心呀"、"好喜欢打羽毛球呀"、"我好难过" 等一律不视为填充
+        if self._EMOTION_INTEREST_GUARD.search(t):
+            return False
+
         # 检查是否在场景特定填充词库中（精确匹配）
         if t in self.scene_config.filler_phrases:
             return True
-        
+
         # 常见寒暄和问候（精确匹配，避免误删）
         common_greetings = {
             "在吗", "在不在", "在呢", "在的",
@@ -229,39 +242,29 @@ class SemanticPruner:
         }
         if t in common_greetings:
             return True
-        
+
         # 检查是否为纯表情符号（方括号包裹）
         if re.fullmatch(r"(\[[^\]]+\])+", t):
             return True
-        
+
         # 检查是否为纯emoji（Unicode表情）
         emoji_pattern = re.compile(
             "["
-            "\U0001F600-\U0001F64F"  # 表情符号
-            "\U0001F300-\U0001F5FF"  # 符号和象形文字
-            "\U0001F680-\U0001F6FF"  # 交通和地图符号
-            "\U0001F1E0-\U0001F1FF"  # 旗帜
+            "\U0001F600-\U0001F64F"
+            "\U0001F300-\U0001F5FF"
+            "\U0001F680-\U0001F6FF"
+            "\U0001F1E0-\U0001F1FF"
             "\U00002702-\U000027B0"
             "\U000024C2-\U0001F251"
             "]+", flags=re.UNICODE
         )
         if emoji_pattern.fullmatch(t):
             return True
-        
+
         # 纯标点符号
         if re.fullmatch(r"[。！？,.!?…·\s]+", t):
             return True
-        
-        # 安全防线：包含情绪词或兴趣词的消息，无论多短都不视为填充
-        # 避免"我好开心呀"、"好喜欢打羽毛球呀"等被误删
-        _emotion_interest_guard = re.compile(
-            r"开心|高兴|快乐|幸福|感动|难过|悲伤|伤心|委屈|失落|沮丧|郁闷|"
-            r"生气|愤怒|烦躁|焦虑|害怕|担心|压力|兴奋|期待|"
-            r"喜欢|热爱|爱好|兴趣|擅长|享受|沉迷|着迷|讨厌|厌恶"
-        )
-        if _emotion_interest_guard.search(t):
-            return False
-        
+
         return False
     
     async def _batch_evaluate_importance_with_llm(
@@ -604,44 +607,63 @@ class SemanticPruner:
         result: List[DialogData] = []
         total_original_msgs = 0
         total_deleted_msgs = 0
-        
-        for d_idx, dd in enumerate(dialogs):
+
+        # 并发执行所有对话的 LLM 抽取（获取 preserve_keywords 等保护信息）
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+
+        async def extract_with_semaphore(dd: DialogData) -> DialogExtractionResponse:
+            async with semaphore:
+                try:
+                    return await self._extract_dialog_important(dd.content)
+                except Exception as e:
+                    self._log(f"[剪枝-LLM] 对话抽取失败，使用降级策略: {str(e)[:100]}")
+                    return DialogExtractionResponse(is_related=True)
+
+        extraction_tasks = [extract_with_semaphore(dd) for dd in dialogs]
+        extraction_results: List[DialogExtractionResponse] = await asyncio.gather(*extraction_tasks)
+
+        for d_idx, (dd, extraction) in enumerate(zip(dialogs, extraction_results)):
             msgs = dd.context.msgs
             original_count = len(msgs)
             total_original_msgs += original_count
-            
-            # ========== 问答对保护（已注释，暂不启用，留作观察） ==========
-            # qa_pairs = self._identify_qa_pairs(msgs)
-            # protected_indices = self._get_protected_indices(msgs, qa_pairs, window_size=0)
-            # ========================================================
-            
-            # 消息级分类：每条消息独立判断
-            important_msgs = []  # 重要消息（保留）
-            unimportant_msgs = []  # 不重要消息（可删除）
-            filler_msgs = []  # 填充消息（优先删除）
-            
-            # 判断是否需要详细日志（仅对前N条消息记录）
+
+            # 从 LLM 抽取结果中获取所有需要保留的 token
+            preserve_tokens = (
+                extraction.times + extraction.ids + extraction.amounts +
+                extraction.contacts + extraction.addresses + extraction.keywords +
+                extraction.preserve_keywords  # 情绪/兴趣/爱好关键词
+            )
+
+            # 判断是否需要详细日志
             should_log_details = self._detailed_prune_logging and original_count <= self._max_debug_msgs_per_dialog
             if self._detailed_prune_logging and original_count > self._max_debug_msgs_per_dialog:
                 self._log(f"  对话[{d_idx}]消息数={original_count}，仅采样前{self._max_debug_msgs_per_dialog}条进行详细日志")
-            
+
+            if extraction.preserve_keywords:
+                self._log(f"  对话[{d_idx}] LLM抽取到情绪/兴趣保护词: {extraction.preserve_keywords}")
+
+            # 消息级分类：每条消息独立判断
+            llm_protected_msgs = []  # LLM 保护消息（情绪/兴趣/重要token）：绝对不可删除
+            rule_important_msgs = [] # 规则层重要消息（场景规则）：配额不足时可少量删除
+            unimportant_msgs = []    # 不重要消息（可删除）
+            filler_msgs = []         # 填充消息（优先删除）
+
             for idx, m in enumerate(msgs):
                 msg_text = m.msg.strip()
-                
-                # ========== 问答对保护判断（已注释） ==========
-                # if idx in protected_indices:
-                #     important_msgs.append((idx, m))
-                #     self._log(f"  [{idx}] '{msg_text[:30]}...' → 重要（问答对保护）")
-                # ==========================================
-                
+
+                # LLM 保护：消息包含 preserve_keywords（情绪/兴趣词）或其他重要 token → 绝对不可删除
+                if self._msg_matches_tokens(m, preserve_tokens):
+                    llm_protected_msgs.append((idx, m))
+                    if should_log_details or idx < self._max_debug_msgs_per_dialog:
+                        self._log(f"  [{idx}] '{msg_text[:30]}...' → 重要（LLM保护，不可删）")
                 # 填充消息（寒暄、表情等）
-                if self._is_filler_message(m):
+                elif self._is_filler_message(m):
                     filler_msgs.append((idx, m))
                     if should_log_details or idx < self._max_debug_msgs_per_dialog:
                         self._log(f"  [{idx}] '{msg_text[:30]}...' → 填充")
-                # 重要信息（学号、成绩、时间、金额等）
+                # 规则层重要信息（学号、成绩、时间、金额等）
                 elif self._is_important_message(m):
-                    important_msgs.append((idx, m))
+                    rule_important_msgs.append((idx, m))
                     if should_log_details or idx < self._max_debug_msgs_per_dialog:
                         self._log(f"  [{idx}] '{msg_text[:30]}...' → 重要（场景规则）")
                 # 其他消息
@@ -649,6 +671,9 @@ class SemanticPruner:
                     unimportant_msgs.append((idx, m))
                     if should_log_details or idx < self._max_debug_msgs_per_dialog:
                         self._log(f"  [{idx}] '{msg_text[:30]}...' → 不重要")
+
+            # important_msgs 仅用于日志统计（兼容下方日志输出）
+            important_msgs = llm_protected_msgs + rule_important_msgs
             
             # 计算删除配额
             delete_target = int(original_count * proportion)
@@ -679,17 +704,17 @@ class SemanticPruner:
                     to_delete_indices.add(idx)
                     deleted_details.append(f"[{idx}] 不重要: '{msg.msg[:50]}'")
             
-            # 第三步：如果还需要删除，按重要性分数删除重要消息
+            # 第三步：如果还需要删除，按重要性分数删除规则层重要消息（LLM保护消息绝对不删）
             remaining_quota = delete_target - len(to_delete_indices)
-            if remaining_quota > 0 and important_msgs:
+            if remaining_quota > 0 and rule_important_msgs:
                 # 按重要性分数排序（分数低的优先删除）
-                imp_sorted = sorted(important_msgs, key=lambda x: self._importance_score(x[1]))
+                imp_sorted = sorted(rule_important_msgs, key=lambda x: self._importance_score(x[1]))
                 imp_to_delete = min(len(imp_sorted), remaining_quota)
                 for i in range(imp_to_delete):
                     idx, msg = imp_sorted[i]
                     to_delete_indices.add(idx)
                     score = self._importance_score(msg)
-                    deleted_details.append(f"[{idx}] 重要(分数{score}): '{msg.msg[:50]}'")
+                    deleted_details.append(f"[{idx}] 规则重要(分数{score}): '{msg.msg[:50]}'")
             
             # 执行删除
             kept_msgs = []
