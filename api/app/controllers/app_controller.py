@@ -1,10 +1,12 @@
 import uuid
+import io
 from typing import Optional, Annotated
 
 import yaml
 from fastapi import APIRouter, Depends, Path, Form, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from urllib.parse import quote
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
@@ -25,6 +27,7 @@ from app.services.app_service import AppService
 from app.services.app_statistics_service import AppStatisticsService
 from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
+from app.services.app_dsl_service import AppDslService
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -1010,3 +1013,57 @@ def get_workspace_api_statistics(
     )
 
     return success(data=result)
+
+
+@router.get("/{app_id}/export", summary="导出应用配置为 YAML 文件")
+@cur_workspace_access_guard()
+async def export_app(
+        app_id: uuid.UUID,
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        release_id: Optional[uuid.UUID] = None
+):
+    """导出 agent / multi_agent / workflow 应用配置为 YAML 文件流。
+    release_id: 指定发布版本id，不传则导出当前草稿配置。
+    """
+    yaml_str, filename = AppDslService(db).export_dsl(app_id, release_id)
+    encoded = quote(filename, safe=".")
+    yaml_bytes = yaml_str.encode("utf-8")
+    file_stream = io.BytesIO(yaml_bytes)
+    file_stream.seek(0)
+    return StreamingResponse(
+        file_stream,
+        media_type="application/octet-stream; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={encoded}",
+                 "Content-Length": str(len(yaml_bytes))}
+    )
+
+
+@router.post("/import", summary="从 YAML 文件导入应用")
+@cur_workspace_access_guard()
+async def import_app(
+        file: UploadFile = File(...),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """从 YAML 文件导入 agent / multi_agent / workflow 应用。
+    跨空间/跨租户导入时，模型/工具/知识库会按名称匹配，匹配不到则置空并返回 warnings。
+    """
+    if not file.filename.lower().endswith((".yaml", ".yml")):
+        return fail(msg="仅支持 YAML 文件", code=BizCode.BAD_REQUEST)
+
+    raw = (await file.read()).decode("utf-8")
+    dsl = yaml.safe_load(raw)
+    if not dsl or "app" not in dsl:
+        return fail(msg="YAML 格式无效，缺少 app 字段", code=BizCode.BAD_REQUEST)
+
+    new_app, warnings = AppDslService(db).import_dsl(
+        dsl=dsl,
+        workspace_id=current_user.current_workspace_id,
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+    )
+    return success(
+        data={"app": app_schema.App.model_validate(new_app), "warnings": warnings},
+        msg="应用导入成功" + ("，但部分资源需手动配置" if warnings else "")
+    )
