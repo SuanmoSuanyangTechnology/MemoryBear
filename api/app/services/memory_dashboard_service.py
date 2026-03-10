@@ -740,13 +740,27 @@ async def get_chunk_insight(
             business_logger.warning(f"未找到chunk内容: end_user_id={end_user_id}")
             return {"insight": "暂无足够数据生成洞察报告"}
 
-        from app.core.rag_utils import generate_chunk_insight
+        from app.core.rag_utils import generate_chunk_insight_sections
 
-        insight = await generate_chunk_insight(chunks, max_chunks=limit, end_user_id=end_user_id)
+        sections = await generate_chunk_insight_sections(chunks, max_chunks=limit, end_user_id=end_user_id)
+        insight = sections.get("memory_insight") or sections.get("_raw", "")
 
-        # 写库缓存
+        # 写库缓存（四维度全部入库）
         if end_user:
-            repo.update_rag_insight(end_user_id=end_user.id, memory_insight=insight)
+            from app.repositories.end_user_repository import EndUserRepository as _Repo
+            _repo = _Repo(db)
+            _repo.update_memory_insight(
+                end_user_id=end_user.id,
+                memory_insight=insight,
+                behavior_pattern=sections.get("behavior_pattern", ""),
+                key_findings=sections.get("key_findings", ""),
+                growth_trajectory=sections.get("growth_trajectory", ""),
+            )
+            # 同时标记 storage_type 为 rag
+            db.query(end_user.__class__).filter(
+                end_user.__class__.id == end_user.id
+            ).update({"storage_type": "rag"}, synchronize_session=False)
+            db.commit()
 
         business_logger.info("成功获取chunk洞察")
         return {"insight": insight}

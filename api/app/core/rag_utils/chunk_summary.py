@@ -1,12 +1,10 @@
 """
-Generate summary for RAG chunks.
-
-This module provides functionality to summarize chunk content using LLM.
+Generate summary for RAG chunks using memory_summary.jinja2 prompt template.
 """
 
 import asyncio
 import os
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from app.core.logging_config import get_business_logger
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -17,6 +15,29 @@ business_logger = get_business_logger()
 
 DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
 
+
+# ── Schema ──────────────────────────────────────────────────────────────────
+
+class MemorySummaryStatement(BaseModel):
+    """Single labelled statement extracted by memory_summary.jinja2."""
+    statement: str = Field(..., description="提取的陈述内容")
+    label: Optional[str] = Field(None, description="陈述标签")
+
+
+class MemorySummaryResponse(BaseModel):
+    """
+    Structured output expected from memory_summary.jinja2.
+    The template asks for a JSON array of labelled statements;
+    we wrap it in an object so response_structured can parse it.
+    """
+    statements: List[MemorySummaryStatement] = Field(
+        default_factory=list,
+        description="从chunk中提取的陈述列表"
+    )
+    summary: Optional[str] = Field(None, description="整体摘要文本（可选）")
+
+
+# ── LLM client helper ────────────────────────────────────────────────────────
 
 def _get_llm_client(end_user_id: Optional[str] = None):
     """Get LLM client, preferring user-connected config with fallback to default."""
@@ -42,86 +63,75 @@ def _get_llm_client(end_user_id: Optional[str] = None):
         return factory.get_llm_client(DEFAULT_LLM_ID)
 
 
-class ChunkSummary(BaseModel):
-    """Pydantic model for chunk summary."""
-    summary: str = Field(..., description="简洁的chunk内容摘要")
+# ── Core function ─────────────────────────────────────────────────────────────
 
-
-async def generate_chunk_summary(chunks: List[str], max_chunks: int = 10, end_user_id: Optional[str] = None) -> str:
+async def generate_chunk_summary(
+    chunks: List[str],
+    max_chunks: int = 10,
+    end_user_id: Optional[str] = None,
+    language: str = "zh",
+) -> str:
     """
-    Generate a summary for the given chunks.
-    
+    Generate a user summary from RAG chunks using the memory_summary.jinja2 template.
+
+    The template extracts labelled statements from the chunks; we then join them
+    into a coherent summary string that can be stored in end_user.user_summary.
+
     Args:
         chunks: List of chunk content strings
-        max_chunks: Maximum number of chunks to process (default: 10)
-    
+        max_chunks: Maximum number of chunks to process
+        end_user_id: Optional end-user ID for model selection
+        language: Output language ("zh" or "en")
+
     Returns:
-        A concise summary of the chunks
+        Summary string (joined statements or fallback text)
     """
     if not chunks:
         business_logger.warning("没有提供chunk内容用于生成摘要")
         return "暂无内容"
-    
+
     try:
-        # 限制处理的chunk数量，避免token过多
+        from app.core.memory.utils.prompt.prompt_utils import render_memory_summary_prompt
+
         chunks_to_process = chunks[:max_chunks]
-        
-        # 合并chunk内容
-        combined_content = "\n\n".join([f"片段{i+1}: {chunk}" for i, chunk in enumerate(chunks_to_process)])
-        
-        # 构建prompt
-        system_prompt = (
-            "你是一位专业的文本摘要助手。请基于提供的文本片段，生成简洁的摘要。要求：\n"
-            "- 摘要长度控制在100-150字；\n"
-            "- 提取核心信息和关键要点；\n"
-            "- 使用客观、清晰的语言；\n"
-            "- 避免冗余和重复；\n"
-            "- 如果内容涉及多个主题，按重要性排序呈现。"
+        chunk_texts = "\n\n".join(
+            [f"片段{i + 1}: {chunk}" for i, chunk in enumerate(chunks_to_process)]
         )
-        
-        user_prompt = f"请为以下文本片段生成摘要：\n\n{combined_content}"
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-        
-        # 调用LLM生成摘要
+
+        json_schema = MemorySummaryResponse.model_json_schema()
+
+        rendered_prompt = await render_memory_summary_prompt(
+            chunk_texts=chunk_texts,
+            json_schema=json_schema,
+            max_words=200,
+            language=language,
+        )
+
+        messages = [{"role": "user", "content": rendered_prompt}]
+
         llm_client = _get_llm_client(end_user_id)
-        response = await llm_client.chat(messages=messages)
-        
-        summary = response.content.strip()
-        business_logger.info(f"成功生成chunk摘要，处理了 {len(chunks_to_process)} 个片段")
-        
+
+        # Try structured output first; fall back to plain chat if unsupported
+        try:
+            response: MemorySummaryResponse = await llm_client.response_structured(
+                messages=messages,
+                response_model=MemorySummaryResponse,
+            )
+            if response.summary:
+                summary = response.summary.strip()
+            elif response.statements:
+                summary = "；".join(s.statement for s in response.statements)
+            else:
+                summary = "暂无内容"
+        except Exception:
+            raw = await llm_client.chat(messages=messages)
+            summary = raw.content.strip() if raw and raw.content else "暂无内容"
+
+        business_logger.info(
+            f"成功生成chunk摘要，处理了 {len(chunks_to_process)} 个片段"
+        )
         return summary
-        
+
     except Exception as e:
         business_logger.error(f"生成chunk摘要失败: {str(e)}")
         return "摘要生成失败"
-
-
-async def generate_chunk_summary_batch(chunks_list: List[List[str]]) -> List[str]:
-    """
-    Generate summaries for multiple chunk lists in batch.
-    
-    Args:
-        chunks_list: List of chunk lists
-    
-    Returns:
-        List of summaries
-    """
-    tasks = [generate_chunk_summary(chunks) for chunks in chunks_list]
-    return await asyncio.gather(*tasks)
-
-
-if __name__ == "__main__":
-    # 测试代码
-    test_chunks = [
-        "这是第一段测试内容，讲述了关于机器学习的基础知识。",
-        "第二段内容介绍了深度学习的应用场景和发展历史。",
-        "第三段讨论了自然语言处理技术的最新进展。"
-    ]
-    
-    print("开始生成chunk摘要...")
-    summary = asyncio.run(generate_chunk_summary(test_chunks))
-    print(f"\n生成的摘要：\n{summary}")
