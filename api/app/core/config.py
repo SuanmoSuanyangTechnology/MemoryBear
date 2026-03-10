@@ -114,6 +114,7 @@ class Settings:
     S3_ACCESS_KEY_ID: str = os.getenv("S3_ACCESS_KEY_ID", "")
     S3_SECRET_ACCESS_KEY: str = os.getenv("S3_SECRET_ACCESS_KEY", "")
     S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "")
+    S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "")
 
     # VOLC ASR settings
     VOLC_APP_KEY: str = os.getenv("VOLC_APP_KEY", "")
