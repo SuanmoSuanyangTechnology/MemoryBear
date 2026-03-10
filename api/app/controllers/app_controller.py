@@ -1021,12 +1021,12 @@ async def export_app(
         app_id: uuid.UUID,
         db: Annotated[Session, Depends(get_db)],
         current_user: Annotated[User, Depends(get_current_user)],
-        release_version: Optional[str] = None
+        release_id: Optional[uuid.UUID] = None
 ):
     """导出 agent / multi_agent / workflow 应用配置为 YAML 文件流。
     release_version: 指定发布版本号，不传则导出当前草稿配置。
     """
-    yaml_str, filename = AppDslService(db).export_dsl(app_id, release_version)
+    yaml_str, filename = AppDslService(db).export_dsl(app_id, release_id)
     encoded = quote(filename, safe=".")
     yaml_bytes = yaml_str.encode("utf-8")
     file_stream = io.BytesIO(yaml_bytes)

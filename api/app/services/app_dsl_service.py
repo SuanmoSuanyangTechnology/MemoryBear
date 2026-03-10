@@ -26,7 +26,7 @@ class AppDslService:
 
     # ==================== 导出 ====================
 
-    def export_dsl(self, app_id: uuid.UUID, release_version: Optional[str] = None) -> tuple[str, str]:
+    def export_dsl(self, app_id: uuid.UUID, release_id: Optional[uuid.UUID] = None) -> tuple[str, str]:
         """构建应用 DSL yaml 字符串，返回 (yaml_str, filename)"""
         app = self.db.query(App).filter(App.id == app_id, App.is_active.is_(True)).first()
         if not app:
@@ -46,19 +46,19 @@ class AppDslService:
             "tags": app.tags or [],
         }
 
-        if release_version is not None:
-            return self._export_release(app, release_version, meta, app_meta)
+        if release_id is not None:
+            return self._export_release(app, release_id, meta, app_meta)
 
         return self._export_draft(app, meta, app_meta)
 
-    def _export_release(self, app: App, release_version: str, meta: dict, app_meta: dict) -> tuple[str, str]:
+    def _export_release(self, app: App, release_id: uuid.UUID, meta: dict, app_meta: dict) -> tuple[str, str]:
         release = self.db.query(AppRelease).filter(
             AppRelease.app_id == app.id,
-            AppRelease.id == release_version,
+            AppRelease.id == release_id,
             AppRelease.is_active.is_(True)
         ).first()
         if not release:
-            raise ResourceNotFoundException("版本", str(release_version))
+            raise ResourceNotFoundException("版本", str(release_id))
 
         meta["release_version"] = release.version
         meta["release_name"] = release.version_name
