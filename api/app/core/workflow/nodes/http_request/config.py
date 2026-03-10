@@ -4,6 +4,7 @@ from pydantic import Field, BaseModel, field_validator
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
 from app.core.workflow.nodes.enums import HttpRequestMethod, HttpAuthType, HttpContentType, HttpErrorHandle
+from app.core.workflow.variable.base_variable import FileObject
 
 
 class HttpAuthConfig(BaseModel):
@@ -258,6 +259,11 @@ class HttpRequestNodeOutput(BaseModel):
     headers: dict = Field(
         ...,
         description="Http response headers"
+    )
+
+    files: list[FileObject] = Field(
+        default_factory=list,
+        description="List of files",
     )
 
     output: str = Field(

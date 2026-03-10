@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 from functools import cached_property
@@ -643,15 +644,18 @@ class BaseNode(ABC):
                 return content.content_cache[provider]
             with get_db_read() as db:
                 multimodel_service = MultimodalService(db, provider, is_omni=is_omni)
-                message = await multimodel_service.process_files(
-                    [FileInput.model_construct(
-                        type=content.type,
-                        url=content.url,
-                        transfer_method=content.transfer_method,
-                        file_type=content.origin_file_type,
-                        upload_file_id=content.file_id
-                    )]
+                file_obj = FileInput(
+                    type=content.type,
+                    url=content.url,
+                    transfer_method=content.transfer_method,
+                    origin_file_type=content.origin_file_type,
+                    upload_file_id=uuid.UUID(content.file_id) if content.file_id else None,
                 )
+                file_obj.set_content(content.get_content())
+                message = await multimodel_service.process_files(
+                    [file_obj]
+                )
+                content.set_content(file_obj.get_content())
                 if message:
                     content.content_cache[provider] = message
                     return message
