@@ -17,6 +17,7 @@ from app.models.models_model import ModelConfig
 from app.models.tool_model import ToolConfig as ToolConfigModel
 from app.models.workflow_model import WorkflowConfig
 from app.services.workflow_service import WorkflowService
+from app.core.workflow.adapters.memory_bear.memory_bear_adapter import MemoryBearAdapter
 
 
 class AppDslService:
@@ -243,7 +244,7 @@ class AppDslService:
                 model_parameters=cfg.get("model_parameters"),
                 default_model_config_id=self._resolve_model(cfg.get("default_model_config_ref"), tenant_id, warnings),
                 knowledge_retrieval=self._resolve_knowledge_retrieval(cfg.get("knowledge_retrieval"), workspace_id, warnings),
-                memory=cfg.get("memory"),
+                memory=self._resolve_memory(cfg.get("memory"), workspace_id, warnings),
                 variables=cfg.get("variables", []),
                 tools=self._resolve_tools(cfg.get("tools", []), tenant_id, warnings),
                 skills=cfg.get("skills", {}),
@@ -272,12 +273,20 @@ class AppDslService:
             ))
 
         elif app_type == AppType.WORKFLOW:
+            adapter = MemoryBearAdapter(dsl)
+            if not adapter.validate_config():
+                raise BusinessException("工作流配置格式无效", BizCode.BAD_REQUEST)
+            result = adapter.parse_workflow()
+            for e in result.errors:
+                warnings.append(f"[节点错误] {e.node_name or e.node_id}: {e.detail}")
+            for w in result.warnings:
+                warnings.append(f"[节点警告] {w.node_name or w.node_id}: {w.detail}")
             wf = dsl.get("workflow") or {}
             WorkflowService(self.db).create_workflow_config(
                 app_id=new_app.id,
-                nodes=wf.get("nodes", []),
-                edges=wf.get("edges", []),
-                variables=wf.get("variables", []),
+                nodes=[n.model_dump() for n in result.nodes],
+                edges=[e.model_dump() for e in result.edges],
+                variables=[v.model_dump() for v in result.variables],
                 execution_config=wf.get("execution_config", {}),
                 triggers=wf.get("triggers", []),
                 validate=False,
@@ -376,15 +385,37 @@ class AppDslService:
         for kb in kr.get("knowledge_bases", []):
             ref = kb.get("_ref") or ({"name": kb.get("kb_id")} if kb.get("kb_id") else None)
             entry = {k: v for k, v in kb.items() if k != "_ref"}
-            entry["kb_id"] = self._resolve_kb(ref, workspace_id, warnings)
+            resolved_id = self._resolve_kb(ref, workspace_id, warnings)
+            if resolved_id is None:
+                continue
+            entry["kb_id"] = resolved_id
             resolved_kbs.append(entry)
         return {k: v for k, v in kr.items() if k != "knowledge_bases"} | {"knowledge_bases": resolved_kbs}
+
+    def _resolve_memory(self, memory: Optional[dict], workspace_id: uuid.UUID, warnings: list) -> Optional[dict]:
+        if not memory:
+            return memory
+        config_id = memory.get("memory_config_id") or memory.get("memory_content")
+        if not config_id:
+            return memory
+        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+        exists = self.db.query(MemoryConfigModel).filter(
+            MemoryConfigModel.config_id == config_id,
+            MemoryConfigModel.workspace_id == workspace_id
+        ).first()
+        if not exists:
+            warnings.append(f"记忆配置 '{config_id}' 未匹配，已置空，请导入后手动配置")
+            return {**memory, "memory_config_id": None, "enabled": False}
+        return memory
 
     def _resolve_tools(self, tools: list, tenant_id: uuid.UUID, warnings: list) -> list:
         result = []
         for t in (tools or []):
             ref = t.get("_ref") or ({"name": t.get("tool_id")} if t.get("tool_id") else None)
             entry = {k: v for k, v in t.items() if k != "_ref"}
-            entry["tool_id"] = self._resolve_tool(ref, tenant_id, warnings)
+            resolved_id = self._resolve_tool(ref, tenant_id, warnings)
+            if resolved_id is None:
+                continue
+            entry["tool_id"] = resolved_id
             result.append(entry)
         return result
