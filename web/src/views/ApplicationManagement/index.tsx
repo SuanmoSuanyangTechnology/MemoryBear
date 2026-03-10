@@ -25,6 +25,7 @@ import { getApplicationListUrl, deleteApplication } from '@/api/application'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { formatDateTime } from '@/utils/format';
 import UploadWorkflowModal from './components/UploadWorkflowModal'
+import UploadModal from './components/UploadModal'
 
 /**
  * Application management main component
@@ -37,6 +38,7 @@ const ApplicationManagement: React.FC = () => {
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const scrollListRef = useRef<PageScrollListRef>(null)
   const uploadWorkflowModalRef = useRef<UploadWorkflowModalRef>(null);
+  const uploadModalRef = useRef<UploadWorkflowModalRef>(null);
 
   useEffect(() => {
     // Convert URLSearchParams to a plain object for easier access
@@ -91,6 +93,8 @@ const ApplicationManagement: React.FC = () => {
       case 'thirdParty':
         handleImport()
         break;
+      case 'import':
+        uploadModalRef.current?.handleOpen()
     }
   }
   return (
@@ -121,6 +125,7 @@ const ApplicationManagement: React.FC = () => {
             <Dropdown
               menu={{ items: [
                 { key: 'thirdParty', label: t('application.importWorkflow') },
+                { key: 'import', label: t('application.import') },
               ], onClick: handleClick }}
               placement="bottomRight"
             >
@@ -184,6 +189,10 @@ const ApplicationManagement: React.FC = () => {
 
       <UploadWorkflowModal
         ref={uploadWorkflowModalRef}
+        refresh={refresh}
+      />
+      <UploadModal
+        ref={uploadModalRef}
         refresh={refresh}
       />
     </>
