@@ -107,28 +107,18 @@ def _validate_config_id(config_id, db: Session = None):
     )
 
 
-# 专门场景的内置 key 集合，直接从 SceneConfigRegistry 派生，避免重复维护
-# 使用懒加载函数避免模块级循环导入
-def _get_builtin_pruning_scenes() -> set:
-    from app.core.memory.storage_services.extraction_engine.data_preprocessing.scene_config import SceneConfigRegistry
-    return set(SceneConfigRegistry.get_all_scenes())
-
-
 def _load_ontology_classes(db: Session, scene_id, pruning_scene: Optional[str]) -> Optional[list]:
-    """当 pruning_scene 不是内置场景时，从 ontology_class 表加载类型名称列表。
+    """从 ontology_class 表加载场景类型名称列表，用于注入提示词。
 
     Args:
         db: 数据库会话
         scene_id: 本体场景 UUID
-        pruning_scene: 语义剪枝场景名称
+        pruning_scene: 语义剪枝场景名称（保留参数，暂未使用）
 
     Returns:
-        class_name 字符串列表，或 None（内置场景 / 无数据时）
+        class_name 字符串列表，或 None（无数据时）
     """
     if not scene_id:
-        return None
-    # 内置场景走 SceneConfigRegistry，不需要注入类型列表
-    if pruning_scene in _get_builtin_pruning_scenes():
         return None
     try:
         from app.repositories.ontology_class_repository import OntologyClassRepository
