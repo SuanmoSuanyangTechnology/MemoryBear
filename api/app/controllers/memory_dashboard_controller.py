@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.core.response_utils import success
@@ -476,11 +477,15 @@ async def get_chunk_insight(
     return success(data=data, msg="获取成功")
 
 
+class GenerateRagProfileRequest(BaseModel):
+    end_user_id: str = Field(..., description="宿主ID")
+    limit: int = Field(15, description="参与生成的chunk数量上限")
+    max_tags: int = Field(10, description="最大标签数量")
+
+
 @router.post("/generate_rag_profile", response_model=ApiResponse)
 async def generate_rag_profile(
-    end_user_id: str = Query(..., description="宿主ID"),
-    limit: int = Query(15, description="参与生成的chunk数量上限"),
-    max_tags: int = Query(10, description="最大标签数量"),
+    body: GenerateRagProfileRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -488,12 +493,12 @@ async def generate_rag_profile(
     生产接口：为RAG存储模式的宿主全量重新生成完整画像并持久化到end_user表。
     每次请求都会重新生成，覆盖已有数据。
     """
-    api_logger.info(f"用户 {current_user.username} 触发RAG画像生产: end_user_id={end_user_id}")
+    api_logger.info(f"用户 {current_user.username} 触发RAG画像生产: end_user_id={body.end_user_id}")
 
     data = await memory_dashboard_service.generate_rag_profile(
-        end_user_id=end_user_id,
-        limit=limit,
-        max_tags=max_tags,
+        end_user_id=body.end_user_id,
+        limit=body.limit,
+        max_tags=body.max_tags,
         db=db,
         current_user=current_user,
     )
