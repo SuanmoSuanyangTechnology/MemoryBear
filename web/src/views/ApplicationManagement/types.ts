@@ -234,3 +234,11 @@ export interface UploadWorkflowModalRef {
   /** Open the upload workflow modal */
   handleOpen: () => void;
 }
+
+/**
+ * Upload app modal ref interface
+ */
+export interface UploadModalRef {
+  /** Open the upload workflow modal */
+  handleOpen: () => void;
+}

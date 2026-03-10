@@ -19,9 +19,8 @@ import deleteIcon from '@/assets/images/delete_hover.svg'
 import type { Application, ApplicationModalRef } from '@/views/ApplicationManagement/types';
 import ApplicationModal from '@/views/ApplicationManagement/components/ApplicationModal'
 import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef } from '../types'
-import { deleteApplication } from '@/api/application'
+import { deleteApplication, appExport } from '@/api/application'
 import CopyModal from './CopyModal'
-import { exportToYaml } from '@/utils/yamlExport';
 
 const { Header } = Layout;
 
@@ -85,16 +84,16 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Handle menu item click
    */
   const handleClick: MenuProps['onClick'] = ({ key }) => {
+    if (!application) return
     switch (key) {
       case 'edit':
-        applicationModalRef.current?.handleOpen(application as Application)
+        applicationModalRef.current?.handleOpen(application)
         break;
       case 'copy':
         copyModalRef.current?.handleOpen()
         break;
       case 'export':
-        console.log('export', workflowRef?.current?.config)
-        exportToYaml(workflowRef?.current?.config, application?.name ?`${application?.name}.yml`: undefined)
+        appExport(application.id, application.name)
         break;
       case 'delete':
         handleDelete()
@@ -153,7 +152,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Format dropdown menu items
    */
   const formatMenuItems = useMemo(() => {
-    const items =  (application?.type === 'workflow' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
+    const items = (application?.type !== 'multi_agent' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
       key,
       icon: <img src={menuIcons[key]} className="rb:w-4 rb:h-4 rb:mr-2" />,
       label: t(`common.${key}`),
